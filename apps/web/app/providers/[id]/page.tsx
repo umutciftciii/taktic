@@ -21,6 +21,9 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
       {provider.status === 'APPROVED' ? (
         <>
           <p>
+            <Link href={`/providers/${provider.id}/credits`}>Kredi bakiyesini görüntüle</Link>
+          </p>
+          <p>
             <Link href={`/providers/${provider.id}/requests`}>Eşleşen talepleri görüntüle</Link>
           </p>
           <p>

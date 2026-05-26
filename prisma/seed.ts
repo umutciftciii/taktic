@@ -143,6 +143,33 @@ const categories = [
   },
 ];
 
+const creditPackages = [
+  {
+    slug: 'starter-20',
+    name: 'Başlangıç Paketi',
+    creditAmount: 20,
+    priceAmount: 49900,
+    currency: 'TRY',
+    sortOrder: 10,
+  },
+  {
+    slug: 'pro-50',
+    name: 'Pro Paket',
+    creditAmount: 50,
+    priceAmount: 99900,
+    currency: 'TRY',
+    sortOrder: 20,
+  },
+  {
+    slug: 'business-100',
+    name: 'Business Paket',
+    creditAmount: 100,
+    priceAmount: 179900,
+    currency: 'TRY',
+    sortOrder: 30,
+  },
+];
+
 async function main() {
   if (!allowedSeedEnvironments.has(process.env.NODE_ENV)) {
     throw new Error(
@@ -196,6 +223,23 @@ async function main() {
         },
       });
     }
+  }
+
+  for (const creditPackage of creditPackages) {
+    await prisma.offerCreditPackage.upsert({
+      where: { slug: creditPackage.slug },
+      update: {
+        creditAmount: creditPackage.creditAmount,
+        priceAmount: creditPackage.priceAmount,
+        currency: creditPackage.currency,
+        sortOrder: creditPackage.sortOrder,
+        isActive: true,
+      },
+      create: {
+        ...creditPackage,
+        isActive: true,
+      },
+    });
   }
 }
 

@@ -189,6 +189,44 @@ export type RequestOfferPreview = {
   submittedAt: string;
 };
 
+export type CreditTransactionType =
+  | 'ADMIN_GRANT'
+  | 'ADMIN_DEDUCT'
+  | 'PACKAGE_PURCHASE'
+  | 'OFFER_SPEND'
+  | 'OFFER_REFUND'
+  | 'ADJUSTMENT';
+
+export type OfferCreditPackage = {
+  id: string;
+  name: string;
+  slug: string;
+  creditAmount: number;
+  priceAmount: number;
+  currency: string;
+  description: string | null;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+export type ProviderCreditTransaction = {
+  id: string;
+  providerId: string;
+  type: CreditTransactionType;
+  amount: number;
+  balanceAfter: number;
+  reason: string | null;
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+};
+
+export type ProviderCredits = {
+  providerId: string;
+  balance: number;
+  transactions: ProviderCreditTransaction[];
+};
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,

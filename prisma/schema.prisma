@@ -52,6 +52,15 @@ enum OfferStatus {
   CANCELLED
 }
 
+enum CreditTransactionType {
+  ADMIN_GRANT
+  ADMIN_DEDUCT
+  PACKAGE_PURCHASE
+  OFFER_SPEND
+  OFFER_REFUND
+  ADJUSTMENT
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String?  @unique
@@ -62,8 +71,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  serviceRequests  ServiceRequest[]
-  providerProfiles ProviderProfile[]
+  serviceRequests    ServiceRequest[]
+  providerProfiles   ProviderProfile[]
+  creditTransactions ProviderCreditTransaction[]
 
   @@index([role])
   @@index([isActive])
@@ -188,10 +198,11 @@ model ProviderProfile {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user              User?                     @relation(fields: [userId], references: [id])
-  serviceCategories ProviderServiceCategory[]
-  serviceAreas      ProviderServiceArea[]
-  offers            Offer[]
+  user               User?                       @relation(fields: [userId], references: [id])
+  serviceCategories  ProviderServiceCategory[]
+  serviceAreas       ProviderServiceArea[]
+  offers             Offer[]
+  creditTransactions ProviderCreditTransaction[]
 
   @@index([status])
   @@index([city])
@@ -257,4 +268,41 @@ model Offer {
   @@index([providerId])
   @@index([status])
   @@index([submittedAt])
+}
+
+model OfferCreditPackage {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  creditAmount Int
+  priceAmount  Int
+  currency     String   @default("TRY")
+  description  String?
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+model ProviderCreditTransaction {
+  id            String                @id @default(cuid())
+  providerId    String
+  type          CreditTransactionType
+  amount        Int
+  balanceAfter  Int
+  reason        String?
+  referenceType String?
+  referenceId   String?
+  createdById   String?
+  createdAt     DateTime              @default(now())
+
+  provider  ProviderProfile @relation(fields: [providerId], references: [id])
+  createdBy User?           @relation(fields: [createdById], references: [id])
+
+  @@index([providerId])
+  @@index([type])
+  @@index([referenceType, referenceId])
+  @@index([createdAt])
 }

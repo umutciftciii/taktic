@@ -34,6 +34,9 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
         <p>Approved at: {provider.approvedAt ? formatDate(provider.approvedAt) : '-'}</p>
         <p>Rejected at: {provider.rejectedAt ? formatDate(provider.rejectedAt) : '-'}</p>
         <p>Suspended at: {provider.suspendedAt ? formatDate(provider.suspendedAt) : '-'}</p>
+        <p>
+          <Link href={`/providers/${provider.id}/credits`}>Provider credits</Link>
+        </p>
       </section>
 
       <section>
