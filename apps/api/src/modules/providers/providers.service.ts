@@ -8,8 +8,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CreditTransactionType, Prisma, ProviderStatus, ServiceRequestStatus } from '@prisma/client';
+import {
+  CreditTransactionType,
+  OfferStatus,
+  Prisma,
+  ProviderStatus,
+  ServiceRequestStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { calculateRefundEligibility } from '../offers/refund-policy';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
@@ -233,8 +240,12 @@ export class ProvidersService {
             status: true,
             priceAmount: true,
             creditCost: true,
+            creditSpentTransactionId: true,
+            creditRefundedTransactionId: true,
             creditRefundedAt: true,
             creditRefundReason: true,
+            viewedAt: true,
+            acceptedAt: true,
             submittedAt: true,
           },
           take: 1,
@@ -309,11 +320,13 @@ export class ProvidersService {
             },
           });
 
-          return tx.offer.update({
+          const updatedOffer = await tx.offer.update({
             where: { id: offer.id },
             data: { creditSpentTransactionId: spendTransaction.id },
             include: providerOfferInclude,
           });
+
+          return withRefundEligibility(updatedOffer);
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -329,11 +342,13 @@ export class ProvidersService {
   async listProviderOffers(providerId: string) {
     await this.ensureProviderExists(providerId);
 
-    return this.prisma.offer.findMany({
+    const offers = await this.prisma.offer.findMany({
       where: { providerId },
       orderBy: { submittedAt: 'desc' },
       include: providerOfferInclude,
     });
+
+    return offers.map(withRefundEligibility);
   }
 
   async getProviderOffer(providerId: string, offerId: string) {
@@ -347,7 +362,7 @@ export class ProvidersService {
       throw new NotFoundException('Offer not found');
     }
 
-    return offer;
+    return withRefundEligibility(offer);
   }
 
   private async normalizeAndValidatePayload(
@@ -645,8 +660,12 @@ function toProviderRequestDetail(
           status: true;
           priceAmount: true;
           creditCost: true;
+          creditSpentTransactionId: true;
+          creditRefundedTransactionId: true;
           creditRefundedAt: true;
           creditRefundReason: true;
+          viewedAt: true;
+          acceptedAt: true;
           submittedAt: true;
         };
         take: 1;
@@ -672,7 +691,7 @@ function toProviderRequestDetail(
     qualityScoreBreakdown: request.qualityScoreBreakdown,
     submittedAt: request.submittedAt,
     createdAt: request.createdAt,
-    existingOffer: request.offers[0] ?? null,
+    existingOffer: request.offers[0] ? withRefundEligibility(request.offers[0]) : null,
     providerCreditBalance,
     answers: request.answers.map((answer) => ({
       id: answer.id,
@@ -684,6 +703,24 @@ function toProviderRequestDetail(
     })),
   };
 }
+
+function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
+  return {
+    ...offer,
+    refundEligibility: calculateRefundEligibility(offer),
+  };
+}
+
+type RefundPolicyOfferShape = {
+  status: OfferStatus;
+  submittedAt: Date | string | null;
+  viewedAt: Date | string | null;
+  acceptedAt: Date | string | null;
+  creditCost: number;
+  creditSpentTransactionId: string | null;
+  creditRefundedTransactionId: string | null;
+  creditRefundedAt: Date | string | null;
+};
 
 async function getProviderCreditBalanceInTransaction(
   tx: Prisma.TransactionClient,

@@ -1,6 +1,14 @@
-import { IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 export class RefundOfferCreditDto {
   @IsString()
-  reason!: string;
+  reasonCode!: string;
+
+  @IsOptional()
+  @IsString()
+  reason?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  override?: boolean;
 }

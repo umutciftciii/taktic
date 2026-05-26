@@ -8,6 +8,11 @@ import {
 import { CreditTransactionType, OfferStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
+import {
+  calculateRefundEligibility,
+  isManualRefundReasonCode,
+  refundReasonLabel,
+} from './refund-policy';
 
 type OfferListFilters = {
   status?: string;
@@ -19,12 +24,12 @@ type OfferListFilters = {
 export class OffersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  listOffers(filters: OfferListFilters) {
+  async listOffers(filters: OfferListFilters) {
     const status = normalizeOptionalOfferStatus(filters.status);
     const providerId = normalizeNullableString(filters.providerId);
     const requestId = normalizeNullableString(filters.requestId);
 
-    return this.prisma.offer.findMany({
+    const offers = await this.prisma.offer.findMany({
       where: {
         ...(status ? { status } : {}),
         ...(providerId ? { providerId } : {}),
@@ -33,6 +38,8 @@ export class OffersService {
       orderBy: { submittedAt: 'desc' },
       include: offerInclude,
     });
+
+    return offers.map(withRefundEligibility);
   }
 
   async getOffer(id: string) {
@@ -45,14 +52,14 @@ export class OffersService {
       throw new NotFoundException('Offer not found');
     }
 
-    return offer;
+    return withRefundEligibility(offer);
   }
 
   async updateOfferStatus(id: string, status: OfferStatus) {
     const existingOffer = await this.ensureOfferExists(id);
     const now = new Date();
 
-    return this.prisma.offer.update({
+    const updatedOffer = await this.prisma.offer.update({
       where: { id },
       data: {
         status,
@@ -63,10 +70,13 @@ export class OffersService {
       },
       include: offerInclude,
     });
+
+    return withRefundEligibility(updatedOffer);
   }
 
   async refundOfferCredit(id: string, dto: RefundOfferCreditDto) {
-    const reason = normalizeRequiredString(dto.reason, 'Refund reason');
+    const reasonCode = normalizeRefundReasonCode(dto.reasonCode);
+    const reasonNote = normalizeOptionalReason(dto.reason);
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -78,6 +88,11 @@ export class OffersService {
             creditCost: true,
             creditSpentTransactionId: true,
             creditRefundedTransactionId: true,
+            creditRefundedAt: true,
+            status: true,
+            submittedAt: true,
+            viewedAt: true,
+            acceptedAt: true,
           },
         });
 
@@ -93,6 +108,16 @@ export class OffersService {
           throw new ConflictException('Offer credit already refunded');
         }
 
+        const refundEligibility = calculateRefundEligibility(offer);
+        if (refundEligibility.recommendedAction === 'NO_REFUND' && dto.override !== true) {
+          throw new BadRequestException('Refund is not recommended for this offer without override');
+        }
+
+        const storedReason =
+          dto.override === true
+            ? `${reasonCode}: ${reasonNote ?? 'Manual override'}`
+            : `${reasonCode}: ${reasonNote ?? refundReasonLabel(reasonCode)}`;
+
         const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
         const refundTransaction = await tx.providerCreditTransaction.create({
           data: {
@@ -100,7 +125,7 @@ export class OffersService {
             type: CreditTransactionType.OFFER_REFUND,
             amount: offer.creditCost,
             balanceAfter: currentBalance + offer.creditCost,
-            reason,
+            reason: storedReason,
             referenceType: 'Offer',
             referenceId: offer.id,
           },
@@ -111,13 +136,13 @@ export class OffersService {
           data: {
             creditRefundedTransactionId: refundTransaction.id,
             creditRefundedAt: new Date(),
-            creditRefundReason: reason,
+            creditRefundReason: storedReason,
           },
           include: offerInclude,
         });
 
         return {
-          offer: updatedOffer,
+          offer: withRefundEligibility(updatedOffer),
           balance: refundTransaction.balanceAfter,
           refundTransaction,
         };
@@ -163,6 +188,7 @@ export class OffersService {
       creditCost: offer.creditCost,
       creditRefundedAt: offer.creditRefundedAt,
       creditRefundReason: offer.creditRefundReason,
+      refundEligibility: calculateRefundEligibility(offer),
       submittedAt: offer.submittedAt,
     }));
   }
@@ -180,6 +206,24 @@ export class OffersService {
     return offer;
   }
 }
+
+function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
+  return {
+    ...offer,
+    refundEligibility: calculateRefundEligibility(offer),
+  };
+}
+
+type RefundPolicyOfferShape = {
+  status: OfferStatus;
+  submittedAt: Date | string | null;
+  viewedAt: Date | string | null;
+  acceptedAt: Date | string | null;
+  creditCost: number;
+  creditSpentTransactionId: string | null;
+  creditRefundedTransactionId: string | null;
+  creditRefundedAt: Date | string | null;
+};
 
 async function getProviderCreditBalanceInTransaction(
   tx: Prisma.TransactionClient,
@@ -255,4 +299,31 @@ function normalizeRequiredString(value: unknown, fieldName: string) {
   }
 
   return trimmed;
+}
+
+function normalizeOptionalReason(value: string | null | undefined) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new BadRequestException('Refund reason must be a string');
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new BadRequestException('Refund reason cannot be empty when provided');
+  }
+
+  return trimmed;
+}
+
+function normalizeRefundReasonCode(value: unknown) {
+  const reasonCode = normalizeRequiredString(value, 'Refund reason code');
+
+  if (!isManualRefundReasonCode(reasonCode)) {
+    throw new BadRequestException('Invalid refund reason code');
+  }
+
+  return reasonCode;
 }

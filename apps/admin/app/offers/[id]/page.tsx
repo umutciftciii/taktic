@@ -13,6 +13,16 @@ const statuses: OfferStatus[] = [
   'CANCELLED',
 ];
 
+const refundReasonCodes = [
+  'NOT_VIEWED_48H',
+  'VIEWED_MANUAL_REVIEW',
+  'INVALID_REQUEST',
+  'CUSTOMER_UNREACHABLE',
+  'DUPLICATE_REQUEST',
+  'ADMIN_OVERRIDE',
+  'OTHER',
+];
+
 type OfferDetailPageProps = {
   params: Promise<{ id: string }>;
 };
@@ -79,6 +89,15 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
       </section>
       <section>
         <h2>Credit refund</h2>
+        <div>
+          <h3>Refund eligibility</h3>
+          <p>Eligible: {offer.refundEligibility.eligible ? 'Yes' : 'No'}</p>
+          <p>Recommended action: {offer.refundEligibility.recommendedAction}</p>
+          <p>Reason code: {offer.refundEligibility.reasonCode}</p>
+          <p>Reason label: {offer.refundEligibility.reasonLabel}</p>
+          <p>Details: {offer.refundEligibility.details}</p>
+          <p>Hours since submitted: {offer.refundEligibility.hoursSinceSubmitted ?? '-'}</p>
+        </div>
         {offer.creditRefundedAt ? (
           <p>This offer credit was already refunded.</p>
         ) : offer.creditSpentTransactionId ? (
@@ -86,10 +105,29 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
             <input type="hidden" name="id" value={offer.id} />
             <p>
               <label>
-                Reason *
-                <textarea name="reason" required />
+                Reason code *
+                <select name="reasonCode" defaultValue={offer.refundEligibility.reasonCode}>
+                  {refundReasonCodes.map((reasonCode) => (
+                    <option key={reasonCode} value={reasonCode}>
+                      {reasonCode}
+                    </option>
+                  ))}
+                </select>
               </label>
             </p>
+            <p>
+              <label>
+                Admin note
+                <textarea name="reason" />
+              </label>
+            </p>
+            {offer.refundEligibility.recommendedAction === 'NO_REFUND' ? (
+              <p>
+                <label>
+                  <input type="checkbox" name="override" value="true" /> Override no-refund recommendation
+                </label>
+              </p>
+            ) : null}
             <button type="submit">Refund credit</button>
           </form>
         ) : (

@@ -153,6 +153,17 @@ export type OfferStatus =
   | 'EXPIRED'
   | 'CANCELLED';
 
+export type RefundRecommendedAction = 'FULL_REFUND' | 'MANUAL_REVIEW' | 'NO_REFUND';
+
+export type RefundEligibility = {
+  eligible: boolean;
+  recommendedAction: RefundRecommendedAction;
+  reasonCode: string;
+  reasonLabel: string;
+  details: string;
+  hoursSinceSubmitted: number | null;
+};
+
 export type Offer = {
   id: string;
   requestId: string;
@@ -170,6 +181,7 @@ export type Offer = {
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
   creditRefundReason: string | null;
+  refundEligibility: RefundEligibility;
   submittedAt: string;
   viewedAt: string | null;
   acceptedAt: string | null;

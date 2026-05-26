@@ -31,6 +31,12 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
           ? `${formatDate(offer.creditRefundedAt)} - ${offer.creditRefundReason ?? '-'}`
           : 'Yok'}
       </p>
+      <section>
+        <h2>İade durumu</h2>
+        <p>Önerilen aksiyon: {offer.refundEligibility.recommendedAction}</p>
+        <p>Neden: {offer.refundEligibility.reasonLabel}</p>
+        <p>Detay: {offer.refundEligibility.details}</p>
+      </section>
       <p>Mesaj: {offer.message}</p>
       <p>Garanti notu: {offer.warrantyNote ?? '-'}</p>
       <p>İç not: {offer.internalNote ?? '-'}</p>

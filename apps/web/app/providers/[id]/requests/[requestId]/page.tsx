@@ -37,6 +37,7 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
                   }`
                 : 'Yok'}
             </p>
+            <p>İade politikası: {request.existingOffer.refundEligibility.recommendedAction}</p>
           </div>
         ) : (
           <form action={createOfferAction}>
