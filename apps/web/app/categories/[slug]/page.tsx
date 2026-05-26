@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { apiFetch, Category, Question } from '../../../lib/api';
+import { submitServiceRequestAction } from '../actions';
 
 type CategoryPageProps = {
   params: Promise<{ slug: string }>;
@@ -17,17 +18,112 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
       </p>
       <h1>{category.name}</h1>
       {category.description ? <p>{category.description}</p> : null}
-      <p>Bu fazda talep gönderimi aktif değildir. Bu ekran dinamik form önizlemesidir.</p>
-      <form>
+      <form action={submitServiceRequestAction}>
+        <input type="hidden" name="categorySlug" value={category.slug} />
+        <input
+          type="hidden"
+          name="questionMeta"
+          value={JSON.stringify(questions.map((question) => ({ key: question.key, type: question.type })))}
+        />
+        <section>
+          <h2>Talep Detaylari</h2>
         {questions.map((question) => (
-          <FieldPreview key={question.id} question={question} />
+          <RequestField key={question.id} question={question} />
         ))}
+        </section>
+
+        <section>
+          <h2>Iletisim ve Konum</h2>
+          <p>
+            <label>
+              Ad soyad *
+              <input name="customerName" required />
+            </label>
+          </p>
+          <p>
+            <label>
+              Telefon *
+              <input name="customerPhone" required />
+            </label>
+          </p>
+          <p>
+            <label>
+              E-posta
+              <input name="customerEmail" type="email" />
+            </label>
+          </p>
+          <p>
+            <label>
+              Il *
+              <input name="city" required />
+            </label>
+          </p>
+          <p>
+            <label>
+              Ilce *
+              <input name="district" required />
+            </label>
+          </p>
+          <p>
+            <label>
+              Mahalle
+              <input name="neighborhood" />
+            </label>
+          </p>
+          <p>
+            <label>
+              Adres notu
+              <textarea name="addressNote" />
+            </label>
+          </p>
+        </section>
+
+        <section>
+          <h2>Ek Bilgiler</h2>
+          <p>
+            <label>
+              Minimum butce
+              <input name="budgetMin" type="number" min="0" />
+            </label>
+          </p>
+          <p>
+            <label>
+              Maksimum butce
+              <input name="budgetMax" type="number" min="0" />
+            </label>
+          </p>
+          <p>
+            <label>
+              Tercih edilen tarih
+              <input name="preferredDate" type="date" />
+            </label>
+          </p>
+          <p>
+            <label>
+              Aciliyet
+              <select name="urgency">
+                <option value="">Seciniz</option>
+                <option value="TODAY">Bugun</option>
+                <option value="THIS_WEEK">Bu hafta</option>
+                <option value="FLEXIBLE">Esnek</option>
+              </select>
+            </label>
+          </p>
+          <p>
+            <label>
+              Aciklama
+              <textarea name="description" />
+            </label>
+          </p>
+        </section>
+
+        <button type="submit">Talep Gonder</button>
       </form>
     </main>
   );
 }
 
-function FieldPreview({ question }: { question: Question }) {
+function RequestField({ question }: { question: Question }) {
   return (
     <p>
       <label>
@@ -41,14 +137,16 @@ function FieldPreview({ question }: { question: Question }) {
 }
 
 function renderInput(question: Question) {
+  const name = `answer_${question.key}`;
+
   switch (question.type) {
     case 'TEXT':
-      return <input name={question.key} disabled />;
+      return <input name={name} required={question.isRequired} />;
     case 'TEXTAREA':
-      return <textarea name={question.key} disabled />;
+      return <textarea name={name} required={question.isRequired} />;
     case 'SELECT':
       return (
-        <select name={question.key} disabled>
+        <select name={name} required={question.isRequired}>
           <option value="">Seciniz</option>
           {(question.options ?? []).map((option) => (
             <option key={option.key} value={option.key}>
@@ -59,7 +157,7 @@ function renderInput(question: Question) {
       );
     case 'MULTI_SELECT':
       return (
-        <select name={question.key} multiple disabled>
+        <select name={name} multiple required={question.isRequired}>
           {(question.options ?? []).map((option) => (
             <option key={option.key} value={option.key}>
               {option.label}
@@ -68,12 +166,12 @@ function renderInput(question: Question) {
         </select>
       );
     case 'NUMBER':
-      return <input name={question.key} type="number" disabled />;
+      return <input name={name} type="number" required={question.isRequired} />;
     case 'BOOLEAN':
-      return <input name={question.key} type="checkbox" disabled />;
+      return <input name={name} type="checkbox" value="true" />;
     case 'DATE':
-      return <input name={question.key} type="date" disabled />;
+      return <input name={name} type="date" required={question.isRequired} />;
     case 'IMAGE':
-      return <input name={question.key} type="file" disabled />;
+      return <input name={name} placeholder="Dosya yukleme sonraki fazda" required={question.isRequired} />;
   }
 }

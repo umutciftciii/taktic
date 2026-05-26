@@ -24,6 +24,15 @@ enum ServiceRequestQuestionType {
   IMAGE
 }
 
+enum ServiceRequestStatus {
+  DRAFT
+  SUBMITTED
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String?  @unique
@@ -33,6 +42,8 @@ model User {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  serviceRequests ServiceRequest[]
 
   @@index([role])
   @@index([isActive])
@@ -52,6 +63,7 @@ model ServiceCategory {
   parent    ServiceCategory?  @relation("ServiceCategoryTree", fields: [parentId], references: [id])
   children  ServiceCategory[] @relation("ServiceCategoryTree")
   questions ServiceRequestQuestion[]
+  requests  ServiceRequest[]
 
   @@index([parentId])
   @@index([isActive, sortOrder])
@@ -72,7 +84,57 @@ model ServiceRequestQuestion {
   updatedAt  DateTime                   @updatedAt
 
   category ServiceCategory @relation(fields: [categoryId], references: [id])
+  answers  ServiceRequestAnswer[]
 
   @@unique([categoryId, key])
   @@index([categoryId, isActive, sortOrder])
+}
+
+model ServiceRequest {
+  id             String               @id @default(cuid())
+  categoryId     String
+  customerId     String?
+  status         ServiceRequestStatus @default(SUBMITTED)
+  customerName   String
+  customerPhone  String
+  customerEmail  String?
+  city           String
+  district       String
+  neighborhood   String?
+  addressNote    String?
+  budgetMin      Int?
+  budgetMax      Int?
+  preferredDate  DateTime?
+  urgency        String?
+  description    String?
+  submittedAt    DateTime             @default(now())
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  category ServiceCategory        @relation(fields: [categoryId], references: [id])
+  customer User?                  @relation(fields: [customerId], references: [id])
+  answers  ServiceRequestAnswer[]
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([city, district])
+  @@index([submittedAt])
+}
+
+model ServiceRequestAnswer {
+  id            String   @id @default(cuid())
+  requestId     String
+  questionId    String
+  questionKey   String
+  questionLabel String
+  questionType  String
+  value         Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  request  ServiceRequest         @relation(fields: [requestId], references: [id])
+  question ServiceRequestQuestion @relation(fields: [questionId], references: [id])
+
+  @@unique([requestId, questionId])
+  @@index([questionId])
 }

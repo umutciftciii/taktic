@@ -8,6 +8,9 @@ export default function AdminHomePage() {
       <p>
         <Link href="/categories">Manage categories</Link>
       </p>
+      <p>
+        <Link href="/requests">Review service requests</Link>
+      </p>
     </main>
   );
 }

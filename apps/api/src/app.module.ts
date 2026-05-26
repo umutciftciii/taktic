@@ -2,9 +2,10 @@ import { Module } from '@nestjs/common';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { HealthModule } from './modules/health/health.module';
 import { QuestionsModule } from './modules/questions/questions.module';
+import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [HealthModule, PrismaModule, CategoriesModule, QuestionsModule],
+  imports: [HealthModule, PrismaModule, CategoriesModule, QuestionsModule, ServiceRequestsModule],
 })
 export class AppModule {}

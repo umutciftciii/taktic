@@ -35,13 +35,24 @@ export type Category = {
   questions?: Question[];
 };
 
-export async function apiFetch<T>(path: string): Promise<T> {
+export type ServiceRequest = {
+  id: string;
+  status: string;
+};
+
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
+    ...init,
     cache: 'no-store',
+    headers: {
+      'content-type': 'application/json',
+      ...init?.headers,
+    },
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}`);
+    const body = await response.text();
+    throw new Error(body || `API request failed with status ${response.status}`);
   }
 
   return response.json() as Promise<T>;

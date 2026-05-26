@@ -42,6 +42,49 @@ export type Question = {
   isActive: boolean;
 };
 
+export type ServiceRequestStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'IN_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CANCELLED';
+
+export type ServiceRequestAnswer = {
+  id: string;
+  questionKey: string;
+  questionLabel: string;
+  questionType: string;
+  value: unknown;
+  createdAt: string;
+};
+
+export type ServiceRequest = {
+  id: string;
+  status: ServiceRequestStatus;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string | null;
+  city: string;
+  district: string;
+  neighborhood: string | null;
+  addressNote: string | null;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  preferredDate: string | null;
+  urgency: string | null;
+  description: string | null;
+  submittedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  category: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  answers?: ServiceRequestAnswer[];
+};
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
