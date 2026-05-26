@@ -14,8 +14,8 @@ export class CategoriesController {
   }
 
   @Get(':slug')
-  getCategoryBySlug(@Param('slug') slug: string) {
-    return this.categoriesService.getCategoryBySlug(slug);
+  getCategoryBySlug(@Param('slug') slug: string, @Query('includeInactive') includeInactive?: string) {
+    return this.categoriesService.getCategoryBySlug(slug, includeInactive === 'true');
   }
 
   @Post()

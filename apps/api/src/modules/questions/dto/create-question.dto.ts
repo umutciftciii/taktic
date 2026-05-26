@@ -1,12 +1,24 @@
 import { ServiceRequestQuestionType } from '@prisma/client';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+} from 'class-validator';
 
 export class CreateQuestionDto {
   @IsString()
+  @IsNotEmpty()
   @Matches(/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/)
   key!: string;
 
   @IsString()
+  @IsNotEmpty()
   label!: string;
 
   @IsOptional()

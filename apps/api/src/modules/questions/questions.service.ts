@@ -41,8 +41,8 @@ export class QuestionsService {
       return await this.prisma.serviceRequestQuestion.create({
         data: {
           categoryId,
-          key: dto.key,
-          label: dto.label.trim(),
+          key: normalizeQuestionKey(dto.key),
+          label: normalizeRequiredString(dto.label, 'Question label'),
           helpText: normalizeNullableString(dto.helpText),
           type: dto.type,
           isRequired: dto.isRequired,
@@ -66,8 +66,8 @@ export class QuestionsService {
       return await this.prisma.serviceRequestQuestion.update({
         where: { id },
         data: {
-          ...(dto.key !== undefined ? { key: dto.key } : {}),
-          ...(dto.label !== undefined ? { label: dto.label.trim() } : {}),
+          ...(dto.key !== undefined ? { key: normalizeQuestionKey(dto.key) } : {}),
+          ...(dto.label !== undefined ? { label: normalizeRequiredString(dto.label, 'Question label') } : {}),
           ...(dto.helpText !== undefined ? { helpText: normalizeNullableString(dto.helpText) } : {}),
           ...(dto.type !== undefined ? { type: dto.type } : {}),
           ...(dto.isRequired !== undefined ? { isRequired: dto.isRequired } : {}),
@@ -121,6 +121,26 @@ function normalizeNullableString(value: string | null | undefined) {
 
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeRequiredString(value: string, fieldName: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    throw new BadRequestException(`${fieldName} cannot be empty`);
+  }
+
+  return trimmed;
+}
+
+function normalizeQuestionKey(value: string) {
+  const key = normalizeRequiredString(value, 'Question key');
+
+  if (!/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(key)) {
+    throw new BadRequestException('Question key must be lowercase and stable');
+  }
+
+  return key;
 }
 
 function normalizeQuestionOptions(

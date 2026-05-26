@@ -26,7 +26,7 @@ export class CategoriesService {
     });
   }
 
-  async getCategoryBySlug(slug: string) {
+  async getCategoryBySlug(slug: string, includeInactive: boolean) {
     const category = await this.prisma.serviceCategory.findUnique({
       where: { slug },
       include: {
@@ -41,6 +41,10 @@ export class CategoriesService {
       throw new NotFoundException('Category not found');
     }
 
+    if (!includeInactive && !category.isActive) {
+      throw new NotFoundException('Category not found');
+    }
+
     return category;
   }
 
@@ -48,8 +52,8 @@ export class CategoriesService {
     try {
       return await this.prisma.serviceCategory.create({
         data: {
-          name: dto.name.trim(),
-          slug: dto.slug,
+          name: normalizeRequiredString(dto.name, 'Category name'),
+          slug: normalizeSlug(dto.slug),
           description: normalizeNullableString(dto.description),
           parentId: normalizeNullableString(dto.parentId),
           isActive: dto.isActive ?? true,
@@ -68,8 +72,8 @@ export class CategoriesService {
       return await this.prisma.serviceCategory.update({
         where: { id },
         data: {
-          ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-          ...(dto.slug !== undefined ? { slug: dto.slug } : {}),
+          ...(dto.name !== undefined ? { name: normalizeRequiredString(dto.name, 'Category name') } : {}),
+          ...(dto.slug !== undefined ? { slug: normalizeSlug(dto.slug) } : {}),
           ...(dto.description !== undefined
             ? { description: normalizeNullableString(dto.description) }
             : {}),
@@ -111,6 +115,26 @@ function normalizeNullableString(value: string | null | undefined) {
 
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeRequiredString(value: string, fieldName: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    throw new BadRequestException(`${fieldName} cannot be empty`);
+  }
+
+  return trimmed;
+}
+
+function normalizeSlug(value: string) {
+  const slug = normalizeRequiredString(value, 'Category slug');
+
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new BadRequestException('Category slug must be lowercase and URL-safe');
+  }
+
+  return slug;
 }
 
 function handleCategoryWriteError(error: unknown): never {

@@ -25,7 +25,7 @@ type CategoryDetailPageProps = {
 
 export default async function CategoryDetailPage({ params }: CategoryDetailPageProps) {
   const { slug } = await params;
-  const category = await apiFetch<Category>(`/categories/${slug}`);
+  const category = await apiFetch<Category>(`/categories/${slug}?includeInactive=true`);
   const questions = await apiFetch<Question[]>(`/categories/${category.id}/questions`);
 
   return (
