@@ -25,6 +25,8 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
           <p>
             Fiyat: {offer.priceAmount} {offer.currency}
           </p>
+          <p>Kredi maliyeti: {offer.creditCost}</p>
+          <p>Kredi iadesi: {offer.creditRefundedAt ? formatDate(offer.creditRefundedAt) : 'Yok'}</p>
           <p>Durum: {offer.status}</p>
           <p>Gönderim: {formatDate(offer.submittedAt)}</p>
           <p>

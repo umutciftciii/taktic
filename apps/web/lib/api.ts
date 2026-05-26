@@ -94,6 +94,9 @@ export type ExistingOfferSummary = {
   id: string;
   status: OfferStatus;
   priceAmount: number;
+  creditCost: number;
+  creditRefundedAt: string | null;
+  creditRefundReason: string | null;
   submittedAt: string;
 };
 
@@ -123,6 +126,7 @@ export type ProviderRequestDetail = Omit<ProviderRequestListItem, 'answersCount'
   description: string | null;
   qualityScoreBreakdown: Record<string, RequestQualityBreakdownComponent> | null;
   existingOffer: ExistingOfferSummary | null;
+  providerCreditBalance?: number;
   answers: ProviderRequestAnswer[];
 };
 
@@ -148,6 +152,11 @@ export type ProviderOffer = {
   message: string;
   warrantyNote: string | null;
   internalNote: string | null;
+  creditCost: number;
+  creditSpentTransactionId: string | null;
+  creditRefundedTransactionId: string | null;
+  creditRefundedAt: string | null;
+  creditRefundReason: string | null;
   submittedAt: string;
   viewedAt: string | null;
   acceptedAt: string | null;
@@ -186,6 +195,9 @@ export type RequestOfferPreview = {
   estimatedCompletionDate: string | null;
   message: string;
   warrantyNote: string | null;
+  creditCost: number;
+  creditRefundedAt: string | null;
+  creditRefundReason: string | null;
   submittedAt: string;
 };
 

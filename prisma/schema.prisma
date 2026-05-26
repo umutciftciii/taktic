@@ -241,24 +241,29 @@ model ProviderServiceArea {
 }
 
 model Offer {
-  id                      String      @id @default(cuid())
-  requestId               String
-  providerId              String
-  status                  OfferStatus @default(SUBMITTED)
-  priceAmount             Int
-  currency                String      @default("TRY")
-  estimatedStartDate      DateTime?
-  estimatedCompletionDate DateTime?
-  message                 String
-  warrantyNote            String?
-  internalNote            String?
-  submittedAt             DateTime    @default(now())
-  viewedAt                DateTime?
-  acceptedAt              DateTime?
-  rejectedAt              DateTime?
-  withdrawnAt             DateTime?
-  createdAt               DateTime    @default(now())
-  updatedAt               DateTime    @updatedAt
+  id                          String      @id @default(cuid())
+  requestId                   String
+  providerId                  String
+  status                      OfferStatus @default(SUBMITTED)
+  priceAmount                 Int
+  currency                    String      @default("TRY")
+  estimatedStartDate          DateTime?
+  estimatedCompletionDate     DateTime?
+  message                     String
+  warrantyNote                String?
+  internalNote                String?
+  creditCost                  Int         @default(1)
+  creditSpentTransactionId    String?
+  creditRefundedTransactionId String?
+  creditRefundedAt            DateTime?
+  creditRefundReason          String?
+  submittedAt                 DateTime    @default(now())
+  viewedAt                    DateTime?
+  acceptedAt                  DateTime?
+  rejectedAt                  DateTime?
+  withdrawnAt                 DateTime?
+  createdAt                   DateTime    @default(now())
+  updatedAt                   DateTime    @updatedAt
 
   request  ServiceRequest  @relation(fields: [requestId], references: [id])
   provider ProviderProfile @relation(fields: [providerId], references: [id])
@@ -268,6 +273,8 @@ model Offer {
   @@index([providerId])
   @@index([status])
   @@index([submittedAt])
+  @@index([creditSpentTransactionId])
+  @@index([creditRefundedTransactionId])
 }
 
 model OfferCreditPackage {

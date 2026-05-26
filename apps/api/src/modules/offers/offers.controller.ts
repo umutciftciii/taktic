@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Inject, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { UpdateOfferStatusDto } from './dto/update-offer-status.dto';
 import { OffersService } from './offers.service';
 
@@ -23,5 +24,10 @@ export class OffersController {
   @Patch(':id/status')
   updateOfferStatus(@Param('id') id: string, @Body() dto: UpdateOfferStatusDto) {
     return this.offersService.updateOfferStatus(id, dto.status);
+  }
+
+  @Post(':id/refund-credit')
+  refundOfferCredit(@Param('id') id: string, @Body() dto: RefundOfferCreditDto) {
+    return this.offersService.refundOfferCredit(id, dto);
   }
 }

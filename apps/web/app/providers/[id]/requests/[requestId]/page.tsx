@@ -17,15 +17,27 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
       </p>
       <h1>{request.category.name}</h1>
       <p>Bu fazda teklif verme ve müşteri iletişim bilgileri aktif değildir.</p>
-      <p>Bu fazda teklif kredisi kullanılmaz. Kredi sistemi sonraki fazda bağlanacaktır.</p>
 
       <section>
         <h2>Teklif</h2>
+        <p>Mevcut kredi bakiyesi: {request.providerCreditBalance ?? 0}</p>
+        <p>Bu teklif 1 kredi kullanır.</p>
         {request.existingOffer ? (
-          <p>
-            Mevcut teklif: {request.existingOffer.priceAmount} TRY - {request.existingOffer.status} (
-            {formatDate(request.existingOffer.submittedAt)})
-          </p>
+          <div>
+            <p>
+              Mevcut teklif: {request.existingOffer.priceAmount} TRY - {request.existingOffer.status} (
+              {formatDate(request.existingOffer.submittedAt)})
+            </p>
+            <p>Kullanılan kredi: {request.existingOffer.creditCost}</p>
+            <p>
+              Kredi iadesi:{' '}
+              {request.existingOffer.creditRefundedAt
+                ? `${formatDate(request.existingOffer.creditRefundedAt)} - ${
+                    request.existingOffer.creditRefundReason ?? '-'
+                  }`
+                : 'Yok'}
+            </p>
+          </div>
         ) : (
           <form action={createOfferAction}>
             <input type="hidden" name="providerId" value={id} />
@@ -72,7 +84,12 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
                 <textarea name="internalNote" />
               </label>
             </p>
-            <button type="submit">Teklif Gönder</button>
+            {(request.providerCreditBalance ?? 0) < 1 ? (
+              <p>Teklif göndermek için en az 1 kredi gerekir.</p>
+            ) : null}
+            <button type="submit" disabled={(request.providerCreditBalance ?? 0) < 1}>
+              Teklif Gönder
+            </button>
           </form>
         )}
       </section>

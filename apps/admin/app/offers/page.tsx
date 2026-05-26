@@ -18,6 +18,8 @@ export default async function AdminOffersPage() {
             <th>Request category</th>
             <th>Location</th>
             <th>Price</th>
+            <th>Credit</th>
+            <th>Refund</th>
             <th>Status</th>
             <th>Detail</th>
           </tr>
@@ -34,6 +36,8 @@ export default async function AdminOffersPage() {
               <td>
                 {offer.priceAmount} {offer.currency}
               </td>
+              <td>{offer.creditCost}</td>
+              <td>{offer.creditRefundedAt ? 'Refunded' : 'Not refunded'}</td>
               <td>{offer.status}</td>
               <td>
                 <Link href={`/offers/${offer.id}`}>Open</Link>

@@ -16,6 +16,19 @@ export async function updateOfferStatusAction(formData: FormData) {
   revalidatePath(`/offers/${id}`);
 }
 
+export async function refundOfferCreditAction(formData: FormData) {
+  const id = readFormString(formData, 'id');
+  const reason = readFormString(formData, 'reason');
+
+  await apiFetch<{ offer: Offer; balance: number }>(`/offers/${id}/refund-credit`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+
+  revalidatePath('/offers');
+  revalidatePath(`/offers/${id}`);
+}
+
 function readFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === 'string' ? value : '';

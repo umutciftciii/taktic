@@ -23,6 +23,14 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
         Fiyat: {offer.priceAmount} {offer.currency}
       </p>
       <p>Durum: {offer.status}</p>
+      <p>Kredi maliyeti: {offer.creditCost}</p>
+      <p>Harcama işlem ID: {offer.creditSpentTransactionId ?? '-'}</p>
+      <p>
+        Kredi iadesi:{' '}
+        {offer.creditRefundedAt
+          ? `${formatDate(offer.creditRefundedAt)} - ${offer.creditRefundReason ?? '-'}`
+          : 'Yok'}
+      </p>
       <p>Mesaj: {offer.message}</p>
       <p>Garanti notu: {offer.warrantyNote ?? '-'}</p>
       <p>İç not: {offer.internalNote ?? '-'}</p>

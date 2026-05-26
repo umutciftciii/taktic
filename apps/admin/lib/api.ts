@@ -165,6 +165,11 @@ export type Offer = {
   message: string;
   warrantyNote: string | null;
   internalNote: string | null;
+  creditCost: number;
+  creditSpentTransactionId: string | null;
+  creditRefundedTransactionId: string | null;
+  creditRefundedAt: string | null;
+  creditRefundReason: string | null;
   submittedAt: string;
   viewedAt: string | null;
   acceptedAt: string | null;

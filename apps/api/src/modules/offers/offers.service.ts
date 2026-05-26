@@ -1,6 +1,13 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { OfferStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { CreditTransactionType, OfferStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 
 type OfferListFilters = {
   status?: string;
@@ -58,6 +65,67 @@ export class OffersService {
     });
   }
 
+  async refundOfferCredit(id: string, dto: RefundOfferCreditDto) {
+    const reason = normalizeRequiredString(dto.reason, 'Refund reason');
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const offer = await tx.offer.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            providerId: true,
+            creditCost: true,
+            creditSpentTransactionId: true,
+            creditRefundedTransactionId: true,
+          },
+        });
+
+        if (!offer) {
+          throw new NotFoundException('Offer not found');
+        }
+
+        if (!offer.creditSpentTransactionId || offer.creditCost <= 0) {
+          throw new BadRequestException('Offer has no credit spend to refund');
+        }
+
+        if (offer.creditRefundedTransactionId) {
+          throw new ConflictException('Offer credit already refunded');
+        }
+
+        const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
+        const refundTransaction = await tx.providerCreditTransaction.create({
+          data: {
+            providerId: offer.providerId,
+            type: CreditTransactionType.OFFER_REFUND,
+            amount: offer.creditCost,
+            balanceAfter: currentBalance + offer.creditCost,
+            reason,
+            referenceType: 'Offer',
+            referenceId: offer.id,
+          },
+        });
+
+        const updatedOffer = await tx.offer.update({
+          where: { id: offer.id },
+          data: {
+            creditRefundedTransactionId: refundTransaction.id,
+            creditRefundedAt: new Date(),
+            creditRefundReason: reason,
+          },
+          include: offerInclude,
+        });
+
+        return {
+          offer: updatedOffer,
+          balance: refundTransaction.balanceAfter,
+          refundTransaction,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
   async listRequestOffers(requestId: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
@@ -92,6 +160,9 @@ export class OffersService {
       estimatedCompletionDate: offer.estimatedCompletionDate,
       message: offer.message,
       warrantyNote: offer.warrantyNote,
+      creditCost: offer.creditCost,
+      creditRefundedAt: offer.creditRefundedAt,
+      creditRefundReason: offer.creditRefundReason,
       submittedAt: offer.submittedAt,
     }));
   }
@@ -108,6 +179,19 @@ export class OffersService {
 
     return offer;
   }
+}
+
+async function getProviderCreditBalanceInTransaction(
+  tx: Prisma.TransactionClient,
+  providerId: string,
+) {
+  const latestTransaction = await tx.providerCreditTransaction.findFirst({
+    where: { providerId },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { balanceAfter: true },
+  });
+
+  return latestTransaction?.balanceAfter ?? 0;
 }
 
 const offerInclude = {
@@ -158,4 +242,17 @@ function normalizeNullableString(value: string | null | undefined) {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeRequiredString(value: unknown, fieldName: string) {
+  if (typeof value !== 'string') {
+    throw new BadRequestException(`${fieldName} is required`);
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new BadRequestException(`${fieldName} cannot be empty`);
+  }
+
+  return trimmed;
 }

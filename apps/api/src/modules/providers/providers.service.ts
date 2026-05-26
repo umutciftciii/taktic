@@ -2,11 +2,13 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ProviderStatus, ServiceRequestStatus } from '@prisma/client';
+import { CreditTransactionType, Prisma, ProviderStatus, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -48,6 +50,7 @@ type NormalizedProviderPayload = {
 };
 
 type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
+const OFFER_CREDIT_COST = 1;
 
 @Injectable()
 export class ProvidersService {
@@ -229,6 +232,9 @@ export class ProvidersService {
             id: true,
             status: true,
             priceAmount: true,
+            creditCost: true,
+            creditRefundedAt: true,
+            creditRefundReason: true,
             submittedAt: true,
           },
           take: 1,
@@ -245,7 +251,9 @@ export class ProvidersService {
       throw new NotFoundException('Request not found');
     }
 
-    return toProviderRequestDetail(request);
+    const providerCreditBalance = await this.getProviderCreditBalance(providerId);
+
+    return toProviderRequestDetail(request, providerCreditBalance);
   }
 
   async createOffer(providerId: string, requestId: string, dto: CreateOfferDto) {
@@ -266,20 +274,56 @@ export class ProvidersService {
       throw new ConflictException('Provider already submitted an offer for this request');
     }
 
-    return this.prisma.offer.create({
-      data: {
-        providerId,
-        requestId,
-        priceAmount: payload.priceAmount,
-        currency: payload.currency,
-        estimatedStartDate: payload.estimatedStartDate,
-        estimatedCompletionDate: payload.estimatedCompletionDate,
-        message: payload.message,
-        warrantyNote: payload.warrantyNote,
-        internalNote: payload.internalNote,
-      },
-      include: providerOfferInclude,
-    });
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const currentBalance = await getProviderCreditBalanceInTransaction(tx, providerId);
+          if (currentBalance < OFFER_CREDIT_COST) {
+            throw new HttpException('Yetersiz teklif kredisi.', HttpStatus.PAYMENT_REQUIRED);
+          }
+
+          const offer = await tx.offer.create({
+            data: {
+              providerId,
+              requestId,
+              priceAmount: payload.priceAmount,
+              currency: payload.currency,
+              estimatedStartDate: payload.estimatedStartDate,
+              estimatedCompletionDate: payload.estimatedCompletionDate,
+              message: payload.message,
+              warrantyNote: payload.warrantyNote,
+              internalNote: payload.internalNote,
+              creditCost: OFFER_CREDIT_COST,
+            },
+          });
+
+          const spendTransaction = await tx.providerCreditTransaction.create({
+            data: {
+              providerId,
+              type: CreditTransactionType.OFFER_SPEND,
+              amount: -OFFER_CREDIT_COST,
+              balanceAfter: currentBalance - OFFER_CREDIT_COST,
+              reason: 'Offer submitted',
+              referenceType: 'Offer',
+              referenceId: offer.id,
+            },
+          });
+
+          return tx.offer.update({
+            where: { id: offer.id },
+            data: { creditSpentTransactionId: spendTransaction.id },
+            include: providerOfferInclude,
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Provider already submitted an offer for this request');
+      }
+
+      throw error;
+    }
   }
 
   async listProviderOffers(providerId: string) {
@@ -401,6 +445,16 @@ export class ProvidersService {
     ) {
       throw new NotFoundException('Request not found');
     }
+  }
+
+  private async getProviderCreditBalance(providerId: string) {
+    const latestTransaction = await this.prisma.providerCreditTransaction.findFirst({
+      where: { providerId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { balanceAfter: true },
+    });
+
+    return latestTransaction?.balanceAfter ?? 0;
   }
 }
 
@@ -586,11 +640,20 @@ function toProviderRequestDetail(
       answers: true;
       offers: {
         where: { providerId: string };
-        select: { id: true; status: true; priceAmount: true; submittedAt: true };
+        select: {
+          id: true;
+          status: true;
+          priceAmount: true;
+          creditCost: true;
+          creditRefundedAt: true;
+          creditRefundReason: true;
+          submittedAt: true;
+        };
         take: 1;
       };
     };
   }>,
+  providerCreditBalance: number,
 ) {
   return {
     id: request.id,
@@ -610,6 +673,7 @@ function toProviderRequestDetail(
     submittedAt: request.submittedAt,
     createdAt: request.createdAt,
     existingOffer: request.offers[0] ?? null,
+    providerCreditBalance,
     answers: request.answers.map((answer) => ({
       id: answer.id,
       questionKey: answer.questionKey,
@@ -619,6 +683,19 @@ function toProviderRequestDetail(
       createdAt: answer.createdAt,
     })),
   };
+}
+
+async function getProviderCreditBalanceInTransaction(
+  tx: Prisma.TransactionClient,
+  providerId: string,
+) {
+  const latestTransaction = await tx.providerCreditTransaction.findFirst({
+    where: { providerId },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { balanceAfter: true },
+  });
+
+  return latestTransaction?.balanceAfter ?? 0;
 }
 
 function normalizeOfferPayload(dto: CreateOfferDto) {
