@@ -60,6 +60,9 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
 
       <section>
         <h2>Moderation</h2>
+        <p>
+          <a href={`http://localhost:3000/providers/${provider.id}/requests`}>Eşleşen talepleri görüntüle</a>
+        </p>
         <form action={updateProviderStatusAction}>
           <input type="hidden" name="id" value={provider.id} />
           <p>

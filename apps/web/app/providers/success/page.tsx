@@ -12,6 +12,12 @@ export default async function ProviderSuccessPage({ searchParams }: ProviderSucc
       <h1>Başvurunuz alındı ve ön incelemeye gönderildi.</h1>
       {id ? <p>Başvuru referansı: {id}</p> : null}
       <p>Bu fazda hizmet veren paneli ve teklif akışı henüz aktif değildir.</p>
+      {id ? (
+        <p>
+          Başvurunuz onaylandığında geliştirme akışında <Link href={`/providers/${id}/requests`}>eşleşen talepler</Link>{' '}
+          sayfasını kullanabilirsiniz.
+        </p>
+      ) : null}
       <p>
         <Link href="/">Ana sayfaya dön</Link>
       </p>

@@ -73,6 +73,51 @@ export type ProviderProfile = {
   serviceAreas: ProviderServiceArea[];
 };
 
+export type RequestQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export type RequestQualityBreakdownComponent = {
+  points: number;
+  max: number;
+  passed: boolean;
+};
+
+export type ProviderRequestAnswer = {
+  id: string;
+  questionKey: string;
+  questionLabel: string;
+  questionType: string;
+  value: unknown;
+  createdAt: string;
+};
+
+export type ProviderRequestListItem = {
+  id: string;
+  category: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  city: string;
+  district: string;
+  neighborhood: string | null;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  preferredDate: string | null;
+  urgency: string | null;
+  qualityScore: number;
+  qualityLabel: RequestQualityLabel;
+  submittedAt: string;
+  createdAt: string;
+  answersCount: number;
+};
+
+export type ProviderRequestDetail = ProviderRequestListItem & {
+  addressNote: string | null;
+  description: string | null;
+  qualityScoreBreakdown: Record<string, RequestQualityBreakdownComponent> | null;
+  answers: ProviderRequestAnswer[];
+};
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,

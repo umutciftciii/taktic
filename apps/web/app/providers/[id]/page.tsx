@@ -18,6 +18,11 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
       <p>
         <Link href={`/providers/${provider.id}/edit`}>Profili düzenle</Link>
       </p>
+      {provider.status === 'APPROVED' ? (
+        <p>
+          <Link href={`/providers/${provider.id}/requests`}>Eşleşen talepleri görüntüle</Link>
+        </p>
+      ) : null}
       <p>Durum: {provider.status}</p>
       <p>Yetkili: {provider.contactName}</p>
       <p>Telefon: {provider.phone}</p>

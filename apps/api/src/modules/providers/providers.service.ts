@@ -1,5 +1,5 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ProviderStatus } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, ProviderStatus, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
@@ -9,6 +9,15 @@ type ProviderListFilters = {
   status?: string;
   city?: string;
   categoryId?: string;
+};
+
+type RequestDiscoveryFilters = {
+  categoryId?: string;
+  city?: string;
+  district?: string;
+  minQualityScore?: string;
+  qualityLabel?: string;
+  urgency?: string;
 };
 
 type NormalizedProviderPayload = {
@@ -29,6 +38,8 @@ type NormalizedProviderPayload = {
     neighborhood: string | null;
   }>;
 };
+
+type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
 @Injectable()
 export class ProvidersService {
@@ -157,6 +168,68 @@ export class ProvidersService {
     });
   }
 
+  async listMatchingRequests(providerId: string, filters: RequestDiscoveryFilters) {
+    const provider = await this.getApprovedProviderForDiscovery(providerId);
+    const normalizedFilters = normalizeDiscoveryFilters(filters);
+    const requests = await this.prisma.serviceRequest.findMany({
+      where: {
+        status: ServiceRequestStatus.APPROVED,
+        categoryId: { in: provider.serviceCategories.map((item) => item.categoryId) },
+        ...(normalizedFilters.categoryId ? { categoryId: normalizedFilters.categoryId } : {}),
+        ...(normalizedFilters.city ? { city: { equals: normalizedFilters.city, mode: 'insensitive' } } : {}),
+        ...(normalizedFilters.district
+          ? { district: { equals: normalizedFilters.district, mode: 'insensitive' } }
+          : {}),
+        ...(normalizedFilters.minQualityScore !== null
+          ? { qualityScore: { gte: normalizedFilters.minQualityScore } }
+          : {}),
+        ...(normalizedFilters.urgency ? { urgency: normalizedFilters.urgency } : {}),
+      },
+      orderBy: [{ qualityScore: 'desc' }, { submittedAt: 'desc' }],
+      include: {
+        category: {
+          select: { id: true, name: true, slug: true },
+        },
+        _count: {
+          select: { answers: true },
+        },
+      },
+    });
+
+    return requests
+      .filter((request) => matchesProviderArea(provider.serviceAreas, request))
+      .map(toProviderRequestListItem)
+      .filter((request) =>
+        normalizedFilters.qualityLabel ? request.qualityLabel === normalizedFilters.qualityLabel : true,
+      );
+  }
+
+  async getMatchingRequest(providerId: string, requestId: string) {
+    const provider = await this.getApprovedProviderForDiscovery(providerId);
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        category: {
+          select: { id: true, name: true, slug: true },
+        },
+        answers: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (
+      !request ||
+      request.status !== ServiceRequestStatus.APPROVED ||
+      !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
+      !matchesProviderArea(provider.serviceAreas, request)
+    ) {
+      throw new NotFoundException('Request not found');
+    }
+
+    return toProviderRequestDetail(request);
+  }
+
   private async normalizeAndValidatePayload(
     dto: CreateProviderDto | UpdateProviderDto,
   ): Promise<NormalizedProviderPayload> {
@@ -204,6 +277,30 @@ export class ProvidersService {
     if (!provider) {
       throw new NotFoundException('Provider not found');
     }
+  }
+
+  private async getApprovedProviderForDiscovery(providerId: string) {
+    const provider = await this.prisma.providerProfile.findUnique({
+      where: { id: providerId },
+      include: {
+        serviceCategories: {
+          select: { categoryId: true },
+        },
+        serviceAreas: {
+          select: { city: true, district: true, neighborhood: true },
+        },
+      },
+    });
+
+    if (!provider) {
+      throw new NotFoundException('Provider not found');
+    }
+
+    if (provider.status !== ProviderStatus.APPROVED) {
+      throw new ForbiddenException('Provider must be approved to view matching requests');
+    }
+
+    return provider;
   }
 }
 
@@ -268,6 +365,146 @@ function normalizeOptionalStatus(value: string | undefined) {
   }
 
   return normalized as ProviderStatus;
+}
+
+function normalizeDiscoveryFilters(filters: RequestDiscoveryFilters) {
+  const minQualityScore = normalizeOptionalScore(filters.minQualityScore);
+
+  return {
+    categoryId: normalizeNullableString(filters.categoryId),
+    city: normalizeNullableString(filters.city),
+    district: normalizeNullableString(filters.district),
+    minQualityScore,
+    qualityLabel: normalizeOptionalQualityLabel(filters.qualityLabel),
+    urgency: normalizeNullableString(filters.urgency),
+  };
+}
+
+function normalizeOptionalScore(value: string | undefined) {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const score = Number(normalized);
+  if (!Number.isInteger(score) || score < 0 || score > 100) {
+    throw new BadRequestException('minQualityScore must be an integer between 0 and 100');
+  }
+
+  return score;
+}
+
+function normalizeOptionalQualityLabel(value: string | undefined): QualityLabel | null {
+  const normalized = normalizeNullableString(value)?.toUpperCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized !== 'LOW' && normalized !== 'MEDIUM' && normalized !== 'HIGH') {
+    throw new BadRequestException('qualityLabel must be LOW, MEDIUM, or HIGH');
+  }
+
+  return normalized;
+}
+
+function matchesProviderArea(
+  areas: Array<{ city: string; district: string | null; neighborhood: string | null }>,
+  request: { city: string; district: string; neighborhood: string | null },
+) {
+  return areas.some((area) => {
+    if (!sameText(area.city, request.city)) {
+      return false;
+    }
+
+    if (area.district && !sameText(area.district, request.district)) {
+      return false;
+    }
+
+    if (area.neighborhood && !sameText(area.neighborhood, request.neighborhood)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function sameText(left: string | null, right: string | null) {
+  return (left ?? '').toLocaleLowerCase('tr-TR') === (right ?? '').toLocaleLowerCase('tr-TR');
+}
+
+function toProviderRequestListItem(
+  request: Prisma.ServiceRequestGetPayload<{
+    include: {
+      category: { select: { id: true; name: true; slug: true } };
+      _count: { select: { answers: true } };
+    };
+  }>,
+) {
+  return {
+    id: request.id,
+    category: request.category,
+    city: request.city,
+    district: request.district,
+    neighborhood: request.neighborhood,
+    budgetMin: request.budgetMin,
+    budgetMax: request.budgetMax,
+    preferredDate: request.preferredDate,
+    urgency: request.urgency,
+    qualityScore: request.qualityScore,
+    qualityLabel: qualityLabel(request.qualityScore),
+    submittedAt: request.submittedAt,
+    createdAt: request.createdAt,
+    answersCount: request._count.answers,
+  };
+}
+
+function toProviderRequestDetail(
+  request: Prisma.ServiceRequestGetPayload<{
+    include: {
+      category: { select: { id: true; name: true; slug: true } };
+      answers: true;
+    };
+  }>,
+) {
+  return {
+    id: request.id,
+    category: request.category,
+    city: request.city,
+    district: request.district,
+    neighborhood: request.neighborhood,
+    addressNote: request.addressNote,
+    budgetMin: request.budgetMin,
+    budgetMax: request.budgetMax,
+    preferredDate: request.preferredDate,
+    urgency: request.urgency,
+    description: request.description,
+    qualityScore: request.qualityScore,
+    qualityLabel: qualityLabel(request.qualityScore),
+    qualityScoreBreakdown: request.qualityScoreBreakdown,
+    submittedAt: request.submittedAt,
+    createdAt: request.createdAt,
+    answers: request.answers.map((answer) => ({
+      id: answer.id,
+      questionKey: answer.questionKey,
+      questionLabel: answer.questionLabel,
+      questionType: answer.questionType,
+      value: answer.value,
+      createdAt: answer.createdAt,
+    })),
+  };
+}
+
+function qualityLabel(score: number): QualityLabel {
+  if (score >= 80) {
+    return 'HIGH';
+  }
+
+  if (score >= 50) {
+    return 'MEDIUM';
+  }
+
+  return 'LOW';
 }
 
 function normalizeNullableString(value: string | null | undefined) {

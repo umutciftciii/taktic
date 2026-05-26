@@ -22,6 +22,31 @@ export class ProvidersController {
     return this.providersService.listProviders({ status, city, categoryId });
   }
 
+  @Get(':providerId/requests')
+  listMatchingRequests(
+    @Param('providerId') providerId: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('city') city?: string,
+    @Query('district') district?: string,
+    @Query('minQualityScore') minQualityScore?: string,
+    @Query('qualityLabel') qualityLabel?: string,
+    @Query('urgency') urgency?: string,
+  ) {
+    return this.providersService.listMatchingRequests(providerId, {
+      categoryId,
+      city,
+      district,
+      minQualityScore,
+      qualityLabel,
+      urgency,
+    });
+  }
+
+  @Get(':providerId/requests/:requestId')
+  getMatchingRequest(@Param('providerId') providerId: string, @Param('requestId') requestId: string) {
+    return this.providersService.getMatchingRequest(providerId, requestId);
+  }
+
   @Get(':id')
   getProvider(@Param('id') id: string) {
     return this.providersService.getProvider(id);
