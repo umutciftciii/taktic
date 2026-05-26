@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    container_name: taktic-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-taktic}
+      POSTGRES_USER: ${POSTGRES_USER:-taktic_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taktic_password}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - taktic-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  taktic-postgres-data:

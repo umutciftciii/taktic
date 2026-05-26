@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  CUSTOMER
+  PROVIDER
+}
+
+enum ServiceRequestQuestionType {
+  TEXT
+  TEXTAREA
+  SELECT
+  MULTI_SELECT
+  NUMBER
+  BOOLEAN
+  DATE
+  IMAGE
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  phone     String?  @unique
+  name      String?
+  role      UserRole
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model ServiceCategory {
+  id          String   @id @default(cuid())
+  parentId    String?
+  name        String
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent    ServiceCategory?  @relation("ServiceCategoryTree", fields: [parentId], references: [id])
+  children  ServiceCategory[] @relation("ServiceCategoryTree")
+  questions ServiceRequestQuestion[]
+
+  @@index([parentId])
+  @@index([isActive, sortOrder])
+}
+
+model ServiceRequestQuestion {
+  id         String                     @id @default(cuid())
+  categoryId String
+  key        String
+  label      String
+  helpText   String?
+  type       ServiceRequestQuestionType
+  isRequired Boolean                    @default(false)
+  options    Json?
+  sortOrder  Int                        @default(0)
+  isActive   Boolean                    @default(true)
+  createdAt  DateTime                   @default(now())
+  updatedAt  DateTime                   @updatedAt
+
+  category ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([categoryId, key])
+  @@index([categoryId, isActive, sortOrder])
+}
