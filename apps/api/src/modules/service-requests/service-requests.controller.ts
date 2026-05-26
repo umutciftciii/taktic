@@ -26,6 +26,11 @@ export class ServiceRequestsController {
 
   @Patch(':id/status')
   updateServiceRequestStatus(@Param('id') id: string, @Body() dto: UpdateServiceRequestStatusDto) {
-    return this.serviceRequestsService.updateServiceRequestStatus(id, dto.status);
+    return this.serviceRequestsService.updateServiceRequestStatus(id, dto);
+  }
+
+  @Post(':id/recalculate-quality')
+  recalculateQuality(@Param('id') id: string) {
+    return this.serviceRequestsService.recalculateQuality(id);
   }
 }

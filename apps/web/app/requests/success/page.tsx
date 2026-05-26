@@ -9,7 +9,7 @@ export default async function RequestSuccessPage({ searchParams }: RequestSucces
 
   return (
     <main>
-      <h1>Talebiniz alındı.</h1>
+      <h1>Talebiniz alındı ve ön incelemeye gönderildi.</h1>
       {id ? <p>Talep referansi: {id}</p> : null}
       <p>Bu fazda hizmet veren teklif akışı henüz aktif değildir.</p>
       <p>

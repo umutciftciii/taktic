@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { apiFetch, ServiceRequest, ServiceRequestStatus } from '../../../lib/api';
-import { updateRequestStatusAction } from '../actions';
+import { apiFetch, QualityScoreBreakdown, ServiceRequest, ServiceRequestStatus } from '../../../lib/api';
+import { recalculateRequestQualityAction, updateRequestStatusAction } from '../actions';
 
 const statuses: ServiceRequestStatus[] = [
   'DRAFT',
@@ -32,20 +32,59 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         <p>Category: {request.category.name}</p>
         <p>Submitted: {formatDate(request.submittedAt)}</p>
         <p>Status: {request.status}</p>
+        <p>
+          <strong>
+            Talep Kalite Skoru: {request.qualityScore}/100 - {request.qualityLabel}
+          </strong>
+        </p>
+        <p>Moderated at: {request.moderatedAt ? formatDate(request.moderatedAt) : '-'}</p>
         <form action={updateRequestStatusAction}>
           <input type="hidden" name="id" value={request.id} />
-          <label>
-            Change status
-            <select name="status" defaultValue={request.status}>
-              {statuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
+          <p>
+            <label>
+              Change status
+              <select name="status" defaultValue={request.status}>
+                {statuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </p>
+          <p>
+            <label>
+              Moderation note
+              <textarea name="moderationNote" defaultValue={request.moderationNote ?? ''} />
+            </label>
+          </p>
+          <p>
+            <label>
+              Rejection reason
+              <textarea name="rejectionReason" defaultValue={request.rejectionReason ?? ''} />
+            </label>
+          </p>
           <button type="submit">Save status</button>
         </form>
+        <form action={recalculateRequestQualityAction}>
+          <input type="hidden" name="id" value={request.id} />
+          <button type="submit">Recalculate quality score</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Quality Breakdown</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Points</th>
+              <th>Max</th>
+              <th>Passed</th>
+            </tr>
+          </thead>
+          <tbody>{renderBreakdownRows(request.qualityScoreBreakdown)}</tbody>
+        </table>
       </section>
 
       <section>
@@ -98,6 +137,25 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
       </section>
     </main>
   );
+}
+
+function renderBreakdownRows(breakdown: QualityScoreBreakdown | null) {
+  if (!breakdown) {
+    return (
+      <tr>
+        <td colSpan={4}>No breakdown stored.</td>
+      </tr>
+    );
+  }
+
+  return Object.entries(breakdown).map(([key, component]) => (
+    <tr key={key}>
+      <td>{key}</td>
+      <td>{component.points}</td>
+      <td>{component.max}</td>
+      <td>{component.passed ? 'Yes' : 'No'}</td>
+    </tr>
+  ));
 }
 
 function formatDate(value: string) {

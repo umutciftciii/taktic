@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
+import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
 type QuestionOption = {
   key: string;
@@ -15,6 +16,38 @@ type ValidatedAnswer = {
   questionType: string;
   value: Prisma.InputJsonValue;
 };
+
+type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+type QualityComponent = {
+  points: number;
+  max: number;
+  passed: boolean;
+};
+
+type QualityBreakdown = Record<string, QualityComponent>;
+
+type QualityScoringInput = {
+  customerName: string;
+  customerPhone: string;
+  city: string;
+  district: string;
+  neighborhood: string | null;
+  addressNote: string | null;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  preferredDate: Date | string | null;
+  urgency: string | null;
+  description: string | null;
+  questions: Pick<ServiceRequestQuestion, 'id' | 'isRequired'>[];
+  answers: { questionId: string; value: unknown }[];
+};
+
+const moderatedStatuses = new Set<ServiceRequestStatus>([
+  ServiceRequestStatus.IN_REVIEW,
+  ServiceRequestStatus.APPROVED,
+  ServiceRequestStatus.REJECTED,
+]);
 
 @Injectable()
 export class ServiceRequestsService {
@@ -38,22 +71,32 @@ export class ServiceRequestsService {
 
     const answers = validateAnswers(category.questions, dto.answers ?? []);
     const preferredDate = normalizeOptionalDate(dto.preferredDate, 'Preferred date');
+    const requestData = {
+      customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
+      customerPhone: normalizePhone(dto.customerPhone),
+      customerEmail: normalizeNullableString(dto.customerEmail),
+      city: normalizeRequiredString(dto.city, 'City'),
+      district: normalizeRequiredString(dto.district, 'District'),
+      neighborhood: normalizeNullableString(dto.neighborhood),
+      addressNote: normalizeNullableString(dto.addressNote),
+      budgetMin: normalizeOptionalInteger(dto.budgetMin, 'Budget minimum'),
+      budgetMax: normalizeOptionalInteger(dto.budgetMax, 'Budget maximum'),
+      preferredDate,
+      urgency: normalizeNullableString(dto.urgency),
+      description: normalizeNullableString(dto.description),
+    };
+    const quality = calculateQualityScore({
+      ...requestData,
+      questions: category.questions,
+      answers,
+    });
 
-    return this.prisma.serviceRequest.create({
+    const request = await this.prisma.serviceRequest.create({
       data: {
         categoryId: category.id,
-        customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
-        customerPhone: normalizePhone(dto.customerPhone),
-        customerEmail: normalizeNullableString(dto.customerEmail),
-        city: normalizeRequiredString(dto.city, 'City'),
-        district: normalizeRequiredString(dto.district, 'District'),
-        neighborhood: normalizeNullableString(dto.neighborhood),
-        addressNote: normalizeNullableString(dto.addressNote),
-        budgetMin: normalizeOptionalInteger(dto.budgetMin, 'Budget minimum'),
-        budgetMax: normalizeOptionalInteger(dto.budgetMax, 'Budget maximum'),
-        preferredDate,
-        urgency: normalizeNullableString(dto.urgency),
-        description: normalizeNullableString(dto.description),
+        ...requestData,
+        qualityScore: quality.score,
+        qualityScoreBreakdown: quality.breakdown,
         answers: {
           create: answers,
         },
@@ -67,10 +110,12 @@ export class ServiceRequestsService {
         },
       },
     });
+
+    return withQualityLabel(request);
   }
 
-  listServiceRequests() {
-    return this.prisma.serviceRequest.findMany({
+  async listServiceRequests() {
+    const requests = await this.prisma.serviceRequest.findMany({
       orderBy: { submittedAt: 'desc' },
       include: {
         category: {
@@ -78,6 +123,8 @@ export class ServiceRequestsService {
         },
       },
     });
+
+    return requests.map(withQualityLabel);
   }
 
   async getServiceRequest(id: string) {
@@ -97,15 +144,28 @@ export class ServiceRequestsService {
       throw new NotFoundException('Service request not found');
     }
 
-    return request;
+    return withQualityLabel(request);
   }
 
-  async updateServiceRequestStatus(id: string, status: ServiceRequestStatus) {
+  async updateServiceRequestStatus(id: string, dto: UpdateServiceRequestStatusDto) {
     await this.ensureRequestExists(id);
+    const moderationNote = normalizeNullableString(dto.moderationNote);
+    const rejectionReason = normalizeNullableString(dto.rejectionReason);
 
-    return this.prisma.serviceRequest.update({
+    if (dto.status === ServiceRequestStatus.REJECTED && !rejectionReason) {
+      throw new BadRequestException('Rejection reason is required when status is REJECTED');
+    }
+
+    const shouldModerate = moderatedStatuses.has(dto.status);
+
+    const request = await this.prisma.serviceRequest.update({
       where: { id },
-      data: { status },
+      data: {
+        status: dto.status,
+        moderationNote,
+        rejectionReason: dto.status === ServiceRequestStatus.REJECTED ? rejectionReason : null,
+        ...(shouldModerate ? { moderatedAt: new Date() } : {}),
+      },
       include: {
         category: {
           select: { id: true, name: true, slug: true },
@@ -115,6 +175,65 @@ export class ServiceRequestsService {
         },
       },
     });
+
+    return withQualityLabel(request);
+  }
+
+  async recalculateQuality(id: string) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id },
+      include: {
+        category: {
+          include: {
+            questions: {
+              where: { isActive: true },
+              orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+            },
+          },
+        },
+        answers: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    const quality = calculateQualityScore({
+      customerName: request.customerName,
+      customerPhone: request.customerPhone,
+      city: request.city,
+      district: request.district,
+      neighborhood: request.neighborhood,
+      addressNote: request.addressNote,
+      budgetMin: request.budgetMin,
+      budgetMax: request.budgetMax,
+      preferredDate: request.preferredDate,
+      urgency: request.urgency,
+      description: request.description,
+      questions: request.category.questions,
+      answers: request.answers,
+    });
+
+    const updated = await this.prisma.serviceRequest.update({
+      where: { id },
+      data: {
+        qualityScore: quality.score,
+        qualityScoreBreakdown: quality.breakdown,
+      },
+      include: {
+        category: {
+          select: { id: true, name: true, slug: true },
+        },
+        answers: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    return withQualityLabel(updated);
   }
 
   private async ensureRequestExists(id: string) {
@@ -127,6 +246,90 @@ export class ServiceRequestsService {
       throw new NotFoundException('Service request not found');
     }
   }
+}
+
+function calculateQualityScore(input: QualityScoringInput) {
+  const requiredQuestions = input.questions.filter((question) => question.isRequired);
+  const optionalQuestions = input.questions.filter((question) => !question.isRequired);
+  const answeredQuestionIds = new Set(
+    input.answers
+      .filter((answer) => hasAnswerValue(answer.value))
+      .map((answer) => answer.questionId),
+  );
+  const requiredComplete =
+    requiredQuestions.length === 0 ||
+    requiredQuestions.every((question) => answeredQuestionIds.has(question.id));
+  const optionalAnsweredCount = optionalQuestions.filter((question) =>
+    answeredQuestionIds.has(question.id),
+  ).length;
+  const optionalRatio = optionalQuestions.length === 0 ? 0 : optionalAnsweredCount / optionalQuestions.length;
+  const optionalPoints = Math.round(optionalRatio * 10);
+
+  const breakdown: QualityBreakdown = {
+    phonePresent: scoreFixed(Boolean(input.customerPhone?.trim()), 20),
+    namePresent: scoreFixed(Boolean(input.customerName?.trim()), 10),
+    cityDistrictPresent: scoreFixed(Boolean(input.city?.trim() && input.district?.trim()), 15),
+    locationDetailPresent: scoreFixed(Boolean(input.neighborhood?.trim() || input.addressNote?.trim()), 10),
+    budgetPresent: scoreFixed(input.budgetMin !== null || input.budgetMax !== null, 10),
+    preferredDatePresent: scoreFixed(Boolean(input.preferredDate), 10),
+    urgencyPresent: scoreFixed(Boolean(input.urgency?.trim()), 5),
+    descriptionDetailed: scoreFixed((input.description?.trim().length ?? 0) >= 20, 10),
+    requiredAnswersComplete: scoreFixed(requiredComplete, 10),
+    optionalAnswersCompleted: {
+      points: optionalPoints,
+      max: 10,
+      passed: optionalPoints > 0,
+    },
+  };
+  const score = Math.min(
+    100,
+    Object.values(breakdown).reduce((total, component) => total + component.points, 0),
+  );
+
+  return { score, breakdown };
+}
+
+function scoreFixed(passed: boolean, max: number): QualityComponent {
+  return {
+    points: passed ? max : 0,
+    max,
+    passed,
+  };
+}
+
+function hasAnswerValue(value: unknown) {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  return true;
+}
+
+function qualityLabel(score: number): QualityLabel {
+  if (score >= 80) {
+    return 'HIGH';
+  }
+
+  if (score >= 50) {
+    return 'MEDIUM';
+  }
+
+  return 'LOW';
+}
+
+function withQualityLabel<T extends { qualityScore: number }>(request: T): T & { qualityLabel: QualityLabel } {
+  return {
+    ...request,
+    qualityLabel: qualityLabel(request.qualityScore),
+  };
 }
 
 function validateAnswers(

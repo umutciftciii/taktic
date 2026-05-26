@@ -50,6 +50,16 @@ export type ServiceRequestStatus =
   | 'REJECTED'
   | 'CANCELLED';
 
+export type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export type QualityBreakdownComponent = {
+  points: number;
+  max: number;
+  passed: boolean;
+};
+
+export type QualityScoreBreakdown = Record<string, QualityBreakdownComponent>;
+
 export type ServiceRequestAnswer = {
   id: string;
   questionKey: string;
@@ -62,6 +72,9 @@ export type ServiceRequestAnswer = {
 export type ServiceRequest = {
   id: string;
   status: ServiceRequestStatus;
+  qualityScore: number;
+  qualityLabel: QualityLabel;
+  qualityScoreBreakdown: QualityScoreBreakdown | null;
   customerName: string;
   customerPhone: string;
   customerEmail: string | null;
@@ -74,6 +87,9 @@ export type ServiceRequest = {
   preferredDate: string | null;
   urgency: string | null;
   description: string | null;
+  moderatedAt: string | null;
+  moderationNote: string | null;
+  rejectionReason: string | null;
   submittedAt: string;
   createdAt: string;
   updatedAt: string;

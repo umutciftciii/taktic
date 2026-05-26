@@ -60,8 +60,8 @@ model ServiceCategory {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  parent    ServiceCategory?  @relation("ServiceCategoryTree", fields: [parentId], references: [id])
-  children  ServiceCategory[] @relation("ServiceCategoryTree")
+  parent    ServiceCategory?         @relation("ServiceCategoryTree", fields: [parentId], references: [id])
+  children  ServiceCategory[]        @relation("ServiceCategoryTree")
   questions ServiceRequestQuestion[]
   requests  ServiceRequest[]
 
@@ -83,7 +83,7 @@ model ServiceRequestQuestion {
   createdAt  DateTime                   @default(now())
   updatedAt  DateTime                   @updatedAt
 
-  category ServiceCategory @relation(fields: [categoryId], references: [id])
+  category ServiceCategory        @relation(fields: [categoryId], references: [id])
   answers  ServiceRequestAnswer[]
 
   @@unique([categoryId, key])
@@ -91,25 +91,30 @@ model ServiceRequestQuestion {
 }
 
 model ServiceRequest {
-  id             String               @id @default(cuid())
-  categoryId     String
-  customerId     String?
-  status         ServiceRequestStatus @default(SUBMITTED)
-  customerName   String
-  customerPhone  String
-  customerEmail  String?
-  city           String
-  district       String
-  neighborhood   String?
-  addressNote    String?
-  budgetMin      Int?
-  budgetMax      Int?
-  preferredDate  DateTime?
-  urgency        String?
-  description    String?
-  submittedAt    DateTime             @default(now())
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  id                    String               @id @default(cuid())
+  categoryId            String
+  customerId            String?
+  status                ServiceRequestStatus @default(SUBMITTED)
+  customerName          String
+  customerPhone         String
+  customerEmail         String?
+  city                  String
+  district              String
+  neighborhood          String?
+  addressNote           String?
+  budgetMin             Int?
+  budgetMax             Int?
+  preferredDate         DateTime?
+  urgency               String?
+  description           String?
+  qualityScore          Int                  @default(0)
+  qualityScoreBreakdown Json?
+  moderatedAt           DateTime?
+  moderationNote        String?
+  rejectionReason       String?
+  submittedAt           DateTime             @default(now())
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   category ServiceCategory        @relation(fields: [categoryId], references: [id])
   customer User?                  @relation(fields: [customerId], references: [id])
