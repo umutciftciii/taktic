@@ -8,6 +8,9 @@ export default function HomePage() {
       <p>
         <Link href="/categories">Hizmet kategorilerini gor</Link>
       </p>
+      <p>
+        <Link href="/providers/register">Hizmet veren başvurusu yap</Link>
+      </p>
     </main>
   );
 }

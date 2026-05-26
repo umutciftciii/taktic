@@ -33,6 +33,14 @@ enum ServiceRequestStatus {
   CANCELLED
 }
 
+enum ProviderStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String?  @unique
@@ -43,7 +51,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  serviceRequests ServiceRequest[]
+  serviceRequests  ServiceRequest[]
+  providerProfiles ProviderProfile[]
 
   @@index([role])
   @@index([isActive])
@@ -60,10 +69,11 @@ model ServiceCategory {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  parent    ServiceCategory?         @relation("ServiceCategoryTree", fields: [parentId], references: [id])
-  children  ServiceCategory[]        @relation("ServiceCategoryTree")
+  parent    ServiceCategory?          @relation("ServiceCategoryTree", fields: [parentId], references: [id])
+  children  ServiceCategory[]         @relation("ServiceCategoryTree")
   questions ServiceRequestQuestion[]
   requests  ServiceRequest[]
+  providers ProviderServiceCategory[]
 
   @@index([parentId])
   @@index([isActive, sortOrder])
@@ -142,4 +152,66 @@ model ServiceRequestAnswer {
 
   @@unique([requestId, questionId])
   @@index([questionId])
+}
+
+model ProviderProfile {
+  id              String         @id @default(cuid())
+  userId          String?
+  businessName    String
+  contactName     String
+  phone           String
+  email           String?
+  taxType         String?
+  taxNumber       String?
+  city            String
+  district        String
+  addressNote     String?
+  description     String?
+  status          ProviderStatus @default(PENDING_REVIEW)
+  moderationNote  String?
+  rejectionReason String?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  suspendedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  user              User?                     @relation(fields: [userId], references: [id])
+  serviceCategories ProviderServiceCategory[]
+  serviceAreas      ProviderServiceArea[]
+
+  @@index([status])
+  @@index([city])
+  @@index([district])
+  @@index([phone])
+  @@index([email])
+}
+
+model ProviderServiceCategory {
+  id         String   @id @default(cuid())
+  providerId String
+  categoryId String
+  createdAt  DateTime @default(now())
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id])
+  category ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([providerId, categoryId])
+  @@index([categoryId])
+}
+
+model ProviderServiceArea {
+  id           String   @id @default(cuid())
+  providerId   String
+  city         String
+  district     String?
+  neighborhood String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id])
+
+  @@unique([providerId, city, district, neighborhood])
+  @@index([city])
+  @@index([district])
 }

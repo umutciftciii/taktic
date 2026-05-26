@@ -3,9 +3,10 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { HealthModule } from './modules/health/health.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
+import { ProvidersModule } from './modules/providers/providers.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [HealthModule, PrismaModule, CategoriesModule, QuestionsModule, ServiceRequestsModule],
+  imports: [HealthModule, PrismaModule, CategoriesModule, QuestionsModule, ServiceRequestsModule, ProvidersModule],
 })
 export class AppModule {}

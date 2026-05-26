@@ -101,6 +101,48 @@ export type ServiceRequest = {
   answers?: ServiceRequestAnswer[];
 };
 
+export type ProviderStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
+
+export type ProviderServiceCategory = {
+  id: string;
+  category: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+};
+
+export type ProviderServiceArea = {
+  id: string;
+  city: string;
+  district: string | null;
+  neighborhood: string | null;
+};
+
+export type ProviderProfile = {
+  id: string;
+  businessName: string;
+  contactName: string;
+  phone: string;
+  email: string | null;
+  taxType: string | null;
+  taxNumber: string | null;
+  city: string;
+  district: string;
+  addressNote: string | null;
+  description: string | null;
+  status: ProviderStatus;
+  moderationNote: string | null;
+  rejectionReason: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  suspendedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  serviceCategories: ProviderServiceCategory[];
+  serviceAreas: ProviderServiceArea[];
+};
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
