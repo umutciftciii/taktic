@@ -2,11 +2,13 @@ import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/commo
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { ServiceRequestsService } from './service-requests.service';
+import { OffersService } from '../offers/offers.service';
 
 @Controller('service-requests')
 export class ServiceRequestsController {
   constructor(
     @Inject(ServiceRequestsService) private readonly serviceRequestsService: ServiceRequestsService,
+    @Inject(OffersService) private readonly offersService: OffersService,
   ) {}
 
   @Post()
@@ -22,6 +24,11 @@ export class ServiceRequestsController {
   @Get(':id')
   getServiceRequest(@Param('id') id: string) {
     return this.serviceRequestsService.getServiceRequest(id);
+  }
+
+  @Get(':id/offers')
+  listRequestOffers(@Param('id') id: string) {
+    return this.offersService.listRequestOffers(id);
   }
 
   @Patch(':id/status')

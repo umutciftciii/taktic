@@ -14,6 +14,9 @@ export default function AdminHomePage() {
       <p>
         <Link href="/providers">Review providers</Link>
       </p>
+      <p>
+        <Link href="/offers">Review offers</Link>
+      </p>
     </main>
   );
 }

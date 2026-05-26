@@ -143,6 +143,58 @@ export type ProviderProfile = {
   serviceAreas: ProviderServiceArea[];
 };
 
+export type OfferStatus =
+  | 'SUBMITTED'
+  | 'VIEWED'
+  | 'SHORTLISTED'
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'WITHDRAWN'
+  | 'EXPIRED'
+  | 'CANCELLED';
+
+export type Offer = {
+  id: string;
+  requestId: string;
+  providerId: string;
+  status: OfferStatus;
+  priceAmount: number;
+  currency: string;
+  estimatedStartDate: string | null;
+  estimatedCompletionDate: string | null;
+  message: string;
+  warrantyNote: string | null;
+  internalNote: string | null;
+  submittedAt: string;
+  viewedAt: string | null;
+  acceptedAt: string | null;
+  rejectedAt: string | null;
+  withdrawnAt: string | null;
+  provider: {
+    id: string;
+    businessName: string;
+    contactName: string;
+    phone: string;
+    email: string | null;
+    city: string;
+    district: string;
+    status: ProviderStatus;
+  };
+  request: {
+    id: string;
+    city: string;
+    district: string;
+    neighborhood: string | null;
+    status: ServiceRequestStatus;
+    qualityScore: number;
+    category: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+  };
+};
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,

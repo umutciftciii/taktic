@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { apiFetch, ProviderRequestDetail, RequestQualityBreakdownComponent } from '../../../../../lib/api';
+import { createOfferAction } from './actions';
 
 type ProviderRequestDetailPageProps = {
   params: Promise<{ id: string; requestId: string }>;
@@ -16,6 +17,65 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
       </p>
       <h1>{request.category.name}</h1>
       <p>Bu fazda teklif verme ve müşteri iletişim bilgileri aktif değildir.</p>
+      <p>Bu fazda teklif kredisi kullanılmaz. Kredi sistemi sonraki fazda bağlanacaktır.</p>
+
+      <section>
+        <h2>Teklif</h2>
+        {request.existingOffer ? (
+          <p>
+            Mevcut teklif: {request.existingOffer.priceAmount} TRY - {request.existingOffer.status} (
+            {formatDate(request.existingOffer.submittedAt)})
+          </p>
+        ) : (
+          <form action={createOfferAction}>
+            <input type="hidden" name="providerId" value={id} />
+            <input type="hidden" name="requestId" value={requestId} />
+            <p>
+              <label>
+                Fiyat *
+                <input name="priceAmount" type="number" min="1" required />
+              </label>
+            </p>
+            <p>
+              <label>
+                Para birimi
+                <input name="currency" defaultValue="TRY" />
+              </label>
+            </p>
+            <p>
+              <label>
+                Tahmini başlangıç
+                <input name="estimatedStartDate" type="date" />
+              </label>
+            </p>
+            <p>
+              <label>
+                Tahmini bitiş
+                <input name="estimatedCompletionDate" type="date" />
+              </label>
+            </p>
+            <p>
+              <label>
+                Mesaj *
+                <textarea name="message" required />
+              </label>
+            </p>
+            <p>
+              <label>
+                Garanti notu
+                <textarea name="warrantyNote" />
+              </label>
+            </p>
+            <p>
+              <label>
+                İç not
+                <textarea name="internalNote" />
+              </label>
+            </p>
+            <button type="submit">Teklif Gönder</button>
+          </form>
+        )}
+      </section>
 
       <section>
         <h2>Özet</h2>

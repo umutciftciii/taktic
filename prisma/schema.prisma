@@ -41,6 +41,17 @@ enum ProviderStatus {
   SUSPENDED
 }
 
+enum OfferStatus {
+  SUBMITTED
+  VIEWED
+  SHORTLISTED
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+  CANCELLED
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String?  @unique
@@ -129,6 +140,7 @@ model ServiceRequest {
   category ServiceCategory        @relation(fields: [categoryId], references: [id])
   customer User?                  @relation(fields: [customerId], references: [id])
   answers  ServiceRequestAnswer[]
+  offers   Offer[]
 
   @@index([categoryId])
   @@index([status])
@@ -179,6 +191,7 @@ model ProviderProfile {
   user              User?                     @relation(fields: [userId], references: [id])
   serviceCategories ProviderServiceCategory[]
   serviceAreas      ProviderServiceArea[]
+  offers            Offer[]
 
   @@index([status])
   @@index([city])
@@ -214,4 +227,34 @@ model ProviderServiceArea {
   @@unique([providerId, city, district, neighborhood])
   @@index([city])
   @@index([district])
+}
+
+model Offer {
+  id                      String      @id @default(cuid())
+  requestId               String
+  providerId              String
+  status                  OfferStatus @default(SUBMITTED)
+  priceAmount             Int
+  currency                String      @default("TRY")
+  estimatedStartDate      DateTime?
+  estimatedCompletionDate DateTime?
+  message                 String
+  warrantyNote            String?
+  internalNote            String?
+  submittedAt             DateTime    @default(now())
+  viewedAt                DateTime?
+  acceptedAt              DateTime?
+  rejectedAt              DateTime?
+  withdrawnAt             DateTime?
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  request  ServiceRequest  @relation(fields: [requestId], references: [id])
+  provider ProviderProfile @relation(fields: [providerId], references: [id])
+
+  @@unique([providerId, requestId])
+  @@index([requestId])
+  @@index([providerId])
+  @@index([status])
+  @@index([submittedAt])
 }

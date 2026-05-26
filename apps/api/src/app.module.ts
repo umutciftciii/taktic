@@ -4,9 +4,18 @@ import { HealthModule } from './modules/health/health.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { ProvidersModule } from './modules/providers/providers.module';
+import { OffersModule } from './modules/offers/offers.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [HealthModule, PrismaModule, CategoriesModule, QuestionsModule, ServiceRequestsModule, ProvidersModule],
+  imports: [
+    HealthModule,
+    PrismaModule,
+    CategoriesModule,
+    QuestionsModule,
+    ServiceRequestsModule,
+    ProvidersModule,
+    OffersModule,
+  ],
 })
 export class AppModule {}

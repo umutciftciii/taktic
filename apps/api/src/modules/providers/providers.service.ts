@@ -1,6 +1,14 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, ProviderStatus, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
@@ -215,6 +223,16 @@ export class ProvidersService {
         answers: {
           orderBy: { createdAt: 'asc' },
         },
+        offers: {
+          where: { providerId },
+          select: {
+            id: true,
+            status: true,
+            priceAmount: true,
+            submittedAt: true,
+          },
+          take: 1,
+        },
       },
     });
 
@@ -228,6 +246,64 @@ export class ProvidersService {
     }
 
     return toProviderRequestDetail(request);
+  }
+
+  async createOffer(providerId: string, requestId: string, dto: CreateOfferDto) {
+    await this.ensureProviderCanSeeRequest(providerId, requestId);
+    const payload = normalizeOfferPayload(dto);
+
+    const existingOffer = await this.prisma.offer.findUnique({
+      where: {
+        providerId_requestId: {
+          providerId,
+          requestId,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (existingOffer) {
+      throw new ConflictException('Provider already submitted an offer for this request');
+    }
+
+    return this.prisma.offer.create({
+      data: {
+        providerId,
+        requestId,
+        priceAmount: payload.priceAmount,
+        currency: payload.currency,
+        estimatedStartDate: payload.estimatedStartDate,
+        estimatedCompletionDate: payload.estimatedCompletionDate,
+        message: payload.message,
+        warrantyNote: payload.warrantyNote,
+        internalNote: payload.internalNote,
+      },
+      include: providerOfferInclude,
+    });
+  }
+
+  async listProviderOffers(providerId: string) {
+    await this.ensureProviderExists(providerId);
+
+    return this.prisma.offer.findMany({
+      where: { providerId },
+      orderBy: { submittedAt: 'desc' },
+      include: providerOfferInclude,
+    });
+  }
+
+  async getProviderOffer(providerId: string, offerId: string) {
+    await this.ensureProviderExists(providerId);
+    const offer = await this.prisma.offer.findFirst({
+      where: { id: offerId, providerId },
+      include: providerOfferInclude,
+    });
+
+    if (!offer) {
+      throw new NotFoundException('Offer not found');
+    }
+
+    return offer;
   }
 
   private async normalizeAndValidatePayload(
@@ -302,6 +378,30 @@ export class ProvidersService {
 
     return provider;
   }
+
+  private async ensureProviderCanSeeRequest(providerId: string, requestId: string) {
+    const provider = await this.getApprovedProviderForDiscovery(providerId);
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        status: true,
+        categoryId: true,
+        city: true,
+        district: true,
+        neighborhood: true,
+      },
+    });
+
+    if (
+      !request ||
+      request.status !== ServiceRequestStatus.APPROVED ||
+      !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
+      !matchesProviderArea(provider.serviceAreas, request)
+    ) {
+      throw new NotFoundException('Request not found');
+    }
+  }
 }
 
 const providerInclude = {
@@ -317,6 +417,26 @@ const providerInclude = {
     orderBy: [{ city: 'asc' }, { district: 'asc' }, { neighborhood: 'asc' }],
   },
 } satisfies Prisma.ProviderProfileInclude;
+
+const providerOfferInclude = {
+  request: {
+    select: {
+      id: true,
+      city: true,
+      district: true,
+      neighborhood: true,
+      budgetMin: true,
+      budgetMax: true,
+      preferredDate: true,
+      urgency: true,
+      qualityScore: true,
+      status: true,
+      category: {
+        select: { id: true, name: true, slug: true },
+      },
+    },
+  },
+} satisfies Prisma.OfferInclude;
 
 function normalizeCategoryIds(categoryIds: string[]) {
   if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
@@ -464,6 +584,11 @@ function toProviderRequestDetail(
     include: {
       category: { select: { id: true; name: true; slug: true } };
       answers: true;
+      offers: {
+        where: { providerId: string };
+        select: { id: true; status: true; priceAmount: true; submittedAt: true };
+        take: 1;
+      };
     };
   }>,
 ) {
@@ -484,6 +609,7 @@ function toProviderRequestDetail(
     qualityScoreBreakdown: request.qualityScoreBreakdown,
     submittedAt: request.submittedAt,
     createdAt: request.createdAt,
+    existingOffer: request.offers[0] ?? null,
     answers: request.answers.map((answer) => ({
       id: answer.id,
       questionKey: answer.questionKey,
@@ -493,6 +619,52 @@ function toProviderRequestDetail(
       createdAt: answer.createdAt,
     })),
   };
+}
+
+function normalizeOfferPayload(dto: CreateOfferDto) {
+  const priceAmount = dto.priceAmount;
+  if (!Number.isInteger(priceAmount) || priceAmount <= 0) {
+    throw new BadRequestException('priceAmount must be a positive integer');
+  }
+
+  const message = normalizeRequiredString(dto.message, 'Message');
+  const estimatedStartDate = normalizeOptionalDate(dto.estimatedStartDate, 'Estimated start date');
+  const estimatedCompletionDate = normalizeOptionalDate(
+    dto.estimatedCompletionDate,
+    'Estimated completion date',
+  );
+
+  if (
+    estimatedStartDate &&
+    estimatedCompletionDate &&
+    estimatedCompletionDate.getTime() < estimatedStartDate.getTime()
+  ) {
+    throw new BadRequestException('Estimated completion date must be after estimated start date');
+  }
+
+  return {
+    priceAmount,
+    currency: normalizeNullableString(dto.currency) ?? 'TRY',
+    estimatedStartDate,
+    estimatedCompletionDate,
+    message,
+    warrantyNote: normalizeNullableString(dto.warrantyNote),
+    internalNote: normalizeNullableString(dto.internalNote),
+  };
+}
+
+function normalizeOptionalDate(value: string | null | undefined, fieldName: string) {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException(`${fieldName} must be a valid date`);
+  }
+
+  return date;
 }
 
 function qualityLabel(score: number): QualityLabel {

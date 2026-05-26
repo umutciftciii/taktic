@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import { CreateProviderDto } from './dto/create-provider.dto';
+import { CreateOfferDto } from './dto/create-offer.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
 import { ProvidersService } from './providers.service';
@@ -45,6 +46,25 @@ export class ProvidersController {
   @Get(':providerId/requests/:requestId')
   getMatchingRequest(@Param('providerId') providerId: string, @Param('requestId') requestId: string) {
     return this.providersService.getMatchingRequest(providerId, requestId);
+  }
+
+  @Post(':providerId/requests/:requestId/offers')
+  createOffer(
+    @Param('providerId') providerId: string,
+    @Param('requestId') requestId: string,
+    @Body() dto: CreateOfferDto,
+  ) {
+    return this.providersService.createOffer(providerId, requestId, dto);
+  }
+
+  @Get(':providerId/offers')
+  listProviderOffers(@Param('providerId') providerId: string) {
+    return this.providersService.listProviderOffers(providerId);
+  }
+
+  @Get(':providerId/offers/:offerId')
+  getProviderOffer(@Param('providerId') providerId: string, @Param('offerId') offerId: string) {
+    return this.providersService.getProviderOffer(providerId, offerId);
   }
 
   @Get(':id')

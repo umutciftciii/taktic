@@ -90,6 +90,13 @@ export type ProviderRequestAnswer = {
   createdAt: string;
 };
 
+export type ExistingOfferSummary = {
+  id: string;
+  status: OfferStatus;
+  priceAmount: number;
+  submittedAt: string;
+};
+
 export type ProviderRequestListItem = {
   id: string;
   category: {
@@ -111,11 +118,75 @@ export type ProviderRequestListItem = {
   answersCount: number;
 };
 
-export type ProviderRequestDetail = ProviderRequestListItem & {
+export type ProviderRequestDetail = Omit<ProviderRequestListItem, 'answersCount'> & {
   addressNote: string | null;
   description: string | null;
   qualityScoreBreakdown: Record<string, RequestQualityBreakdownComponent> | null;
+  existingOffer: ExistingOfferSummary | null;
   answers: ProviderRequestAnswer[];
+};
+
+export type OfferStatus =
+  | 'SUBMITTED'
+  | 'VIEWED'
+  | 'SHORTLISTED'
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'WITHDRAWN'
+  | 'EXPIRED'
+  | 'CANCELLED';
+
+export type ProviderOffer = {
+  id: string;
+  requestId: string;
+  providerId: string;
+  status: OfferStatus;
+  priceAmount: number;
+  currency: string;
+  estimatedStartDate: string | null;
+  estimatedCompletionDate: string | null;
+  message: string;
+  warrantyNote: string | null;
+  internalNote: string | null;
+  submittedAt: string;
+  viewedAt: string | null;
+  acceptedAt: string | null;
+  rejectedAt: string | null;
+  withdrawnAt: string | null;
+  request: {
+    id: string;
+    city: string;
+    district: string;
+    neighborhood: string | null;
+    budgetMin: number | null;
+    budgetMax: number | null;
+    preferredDate: string | null;
+    urgency: string | null;
+    qualityScore: number;
+    status: string;
+    category: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+  };
+};
+
+export type RequestOfferPreview = {
+  id: string;
+  provider: {
+    businessName: string;
+    city: string;
+    district: string;
+  };
+  status: OfferStatus;
+  priceAmount: number;
+  currency: string;
+  estimatedStartDate: string | null;
+  estimatedCompletionDate: string | null;
+  message: string;
+  warrantyNote: string | null;
+  submittedAt: string;
 };
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
