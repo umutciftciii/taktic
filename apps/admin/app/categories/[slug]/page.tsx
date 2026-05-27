@@ -6,7 +6,7 @@ import {
   updateQuestionAction,
   updateQuestionStatusAction,
 } from '../actions';
-import { apiFetch, Category, Question, QuestionOption, QuestionType } from '../../../lib/api';
+import { apiFetch, Category, Question, QuestionOption, QuestionType, requireAdmin } from '../../../lib/api';
 
 const questionTypes: QuestionType[] = [
   'TEXT',
@@ -24,6 +24,7 @@ type CategoryDetailPageProps = {
 };
 
 export default async function CategoryDetailPage({ params }: CategoryDetailPageProps) {
+  await requireAdmin();
   const { slug } = await params;
   const category = await apiFetch<Category>(`/categories/${slug}?includeInactive=true`);
   const questions = await apiFetch<Question[]>(`/categories/${category.id}/questions`);

@@ -1,4 +1,9 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
+import { AuthUser } from '../auth/auth.types';
+import { RolesGuard } from '../auth/roles.guard';
 import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
@@ -18,11 +23,15 @@ export class ServiceRequestsController {
   }
 
   @Get()
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   listServiceRequests() {
     return this.serviceRequestsService.listServiceRequests();
   }
 
   @Get(':id')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   getServiceRequest(@Param('id') id: string) {
     return this.serviceRequestsService.getServiceRequest(id);
   }
@@ -33,30 +42,46 @@ export class ServiceRequestsController {
   }
 
   @Get(':requestId/offers/:offerId')
-  getRequestOffer(@Param('requestId') requestId: string, @Param('offerId') offerId: string) {
-    return this.offersService.getRequestOffer(requestId, offerId);
+  @UseGuards(OptionalAuthGuard)
+  getRequestOffer(
+    @Param('requestId') requestId: string,
+    @Param('offerId') offerId: string,
+    @CurrentUser() user: AuthUser | null,
+  ) {
+    return this.offersService.getRequestOffer(requestId, offerId, user);
   }
 
   @Post(':requestId/offers/:offerId/view')
-  markRequestOfferViewed(@Param('requestId') requestId: string, @Param('offerId') offerId: string) {
-    return this.offersService.markRequestOfferViewed(requestId, offerId);
+  @UseGuards(OptionalAuthGuard)
+  markRequestOfferViewed(
+    @Param('requestId') requestId: string,
+    @Param('offerId') offerId: string,
+    @CurrentUser() user: AuthUser | null,
+  ) {
+    return this.offersService.markRequestOfferViewed(requestId, offerId, user);
   }
 
   @Post(':requestId/offers/:offerId/action')
+  @UseGuards(OptionalAuthGuard)
   updateRequestOfferAction(
     @Param('requestId') requestId: string,
     @Param('offerId') offerId: string,
     @Body() dto: CustomerOfferActionDto,
+    @CurrentUser() user: AuthUser | null,
   ) {
-    return this.offersService.updateRequestOfferAction(requestId, offerId, dto);
+    return this.offersService.updateRequestOfferAction(requestId, offerId, dto, user);
   }
 
   @Patch(':id/status')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   updateServiceRequestStatus(@Param('id') id: string, @Body() dto: UpdateServiceRequestStatusDto) {
     return this.serviceRequestsService.updateServiceRequestStatus(id, dto);
   }
 
   @Post(':id/recalculate-quality')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   recalculateQuality(@Param('id') id: string) {
     return this.serviceRequestsService.recalculateQuality(id);
   }

@@ -35,8 +35,8 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
       </p>
       <h1>Eşleşen Talepler</h1>
       <p>
-        Bu geliştirme akışında provider kimliği URL üzerinden taşınır; production için güvenli auth ile
-        değiştirilmelidir.
+        Bu geliştirme akışında provider id URL içinde kalır, fakat hassas provider işlemleri oturum ve sahiplik
+        kontrolünden geçer.
       </p>
       <p>
         Provider: {provider.businessName} ({provider.status})

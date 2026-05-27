@@ -62,21 +62,41 @@ enum CreditTransactionType {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String?  @unique
-  phone     String?  @unique
-  name      String?
-  role      UserRole
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String    @id @default(cuid())
+  email        String?   @unique
+  phone        String?   @unique
+  name         String?
+  role         UserRole
+  isActive     Boolean   @default(true)
+  passwordHash String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   serviceRequests    ServiceRequest[]
   providerProfiles   ProviderProfile[]
   creditTransactions ProviderCreditTransaction[]
+  sessions           Session[]
 
   @@index([role])
   @@index([isActive])
+}
+
+model Session {
+  id         String    @id
+  userId     String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 model ServiceCategory {

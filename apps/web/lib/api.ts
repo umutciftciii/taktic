@@ -1,3 +1,5 @@
+import { cookies } from 'next/headers';
+
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export type QuestionType =
@@ -263,11 +265,13 @@ export type ProviderCredits = {
 };
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
     cache: 'no-store',
     headers: {
       'content-type': 'application/json',
+      ...(cookieHeader ? { cookie: cookieHeader } : {}),
       ...init?.headers,
     },
   });

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, OfferCreditPackage } from '../../lib/api';
+import { apiFetch, OfferCreditPackage, requireAdmin } from '../../lib/api';
 import {
   createCreditPackageAction,
   updateCreditPackageAction,
@@ -7,6 +7,7 @@ import {
 } from './actions';
 
 export default async function CreditPackagesPage() {
+  await requireAdmin();
   const packages = await apiFetch<OfferCreditPackage[]>('/credit-packages?includeInactive=true');
 
   return (

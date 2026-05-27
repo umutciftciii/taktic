@@ -5,8 +5,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CreditTransactionType, OfferStatus, Prisma } from '@prisma/client';
+import { CreditTransactionType, OfferStatus, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../auth/auth.types';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import {
@@ -194,13 +195,13 @@ export class OffersService {
     }));
   }
 
-  async getRequestOffer(requestId: string, offerId: string) {
-    const offer = await this.getRequestOfferOrThrow(requestId, offerId);
+  async getRequestOffer(requestId: string, offerId: string, user: AuthUser | null = null) {
+    const offer = await this.getRequestOfferOrThrow(requestId, offerId, user);
     return toCustomerOfferDetail(offer);
   }
 
-  async markRequestOfferViewed(requestId: string, offerId: string) {
-    const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId);
+  async markRequestOfferViewed(requestId: string, offerId: string, user: AuthUser | null = null) {
+    const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId, user);
     const now = new Date();
 
     const offer = await this.prisma.offer.update({
@@ -219,8 +220,9 @@ export class OffersService {
     requestId: string,
     offerId: string,
     dto: CustomerOfferActionDto,
+    user: AuthUser | null = null,
   ) {
-    const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId);
+    const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId, user);
 
     if (
       existingOffer.status === OfferStatus.WITHDRAWN ||
@@ -259,7 +261,7 @@ export class OffersService {
     return offer;
   }
 
-  private async getRequestOfferOrThrow(requestId: string, offerId: string) {
+  private async getRequestOfferOrThrow(requestId: string, offerId: string, user: AuthUser | null = null) {
     const offer = await this.prisma.offer.findFirst({
       where: { id: offerId, requestId },
       include: customerOfferInclude,
@@ -267,6 +269,16 @@ export class OffersService {
 
     if (!offer) {
       throw new NotFoundException('Offer not found');
+    }
+
+    if (offer.request.customerId) {
+      if (!user) {
+        throw new NotFoundException('Offer not found');
+      }
+
+      if (user.role !== UserRole.SUPER_ADMIN && user.id !== offer.request.customerId) {
+        throw new NotFoundException('Offer not found');
+      }
     }
 
     return offer;
@@ -338,6 +350,11 @@ const customerOfferInclude = {
       businessName: true,
       city: true,
       district: true,
+    },
+  },
+  request: {
+    select: {
+      customerId: true,
     },
   },
 } satisfies Prisma.OfferInclude;

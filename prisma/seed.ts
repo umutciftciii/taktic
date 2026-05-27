@@ -1,4 +1,5 @@
-import { PrismaClient, ServiceRequestQuestionType } from '@prisma/client';
+import { PrismaClient, ServiceRequestQuestionType, UserRole } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -170,6 +171,12 @@ const creditPackages = [
   },
 ];
 
+const localAdmin = {
+  email: 'admin@taktic.local',
+  password: 'ChangeMe123!',
+  name: 'Local Admin',
+};
+
 async function main() {
   if (!allowedSeedEnvironments.has(process.env.NODE_ENV)) {
     throw new Error(
@@ -237,6 +244,31 @@ async function main() {
       },
       create: {
         ...creditPackage,
+        isActive: true,
+      },
+    });
+  }
+
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: localAdmin.email },
+    select: { id: true },
+  });
+
+  if (!existingAdmin) {
+    await prisma.user.create({
+      data: {
+        email: localAdmin.email,
+        name: localAdmin.name,
+        role: UserRole.SUPER_ADMIN,
+        isActive: true,
+        passwordHash: await bcrypt.hash(localAdmin.password, 12),
+      },
+    });
+  } else {
+    await prisma.user.update({
+      where: { email: localAdmin.email },
+      data: {
+        role: UserRole.SUPER_ADMIN,
         isActive: true,
       },
     });

@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import { createCategoryAction } from '../actions';
+import { requireAdmin } from '../../../lib/api';
 
-export default function NewCategoryPage() {
+export default async function NewCategoryPage() {
+  await requireAdmin();
+
   return (
     <main>
       <p>

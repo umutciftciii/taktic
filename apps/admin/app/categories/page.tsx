@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import { apiFetch, Category } from '../../lib/api';
+import { apiFetch, Category, requireAdmin } from '../../lib/api';
 
 export default async function AdminCategoriesPage() {
+  await requireAdmin();
   const categories = await apiFetch<Category[]>('/categories?includeInactive=true');
 
   return (

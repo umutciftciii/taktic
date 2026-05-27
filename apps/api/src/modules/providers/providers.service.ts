@@ -14,8 +14,10 @@ import {
   Prisma,
   ProviderStatus,
   ServiceRequestStatus,
+  UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../auth/auth.types';
 import { calculateRefundEligibility } from '../offers/refund-policy';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -63,11 +65,12 @@ const OFFER_CREDIT_COST = 1;
 export class ProvidersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async createProvider(dto: CreateProviderDto) {
+  async createProvider(dto: CreateProviderDto, user: AuthUser | null = null) {
     const payload = await this.normalizeAndValidatePayload(dto);
 
     return this.prisma.providerProfile.create({
       data: {
+        userId: user?.role === UserRole.PROVIDER ? user.id : undefined,
         businessName: payload.businessName,
         contactName: payload.contactName,
         phone: payload.phone,

@@ -69,6 +69,16 @@ pnpm db:studio
 
 There are intentionally no destructive database scripts. Do not use `prisma migrate reset`, forced resets, or database drops for normal development.
 
+## Local Auth
+
+Seeding creates a local development admin if it does not already exist:
+
+- Email: `admin@taktic.local`
+- Password: `ChangeMe123!`
+- Role: `SUPER_ADMIN`
+
+Authentication uses an HTTP-only cookie session named `taktic_session` by default. The seed does not overwrite an existing admin password.
+
 ## Phase 0 Scope
 
 Included:

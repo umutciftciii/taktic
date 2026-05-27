@@ -1,3 +1,6 @@
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export type Category = {
@@ -252,20 +255,44 @@ export type ProviderCredits = {
   transactions: ProviderCreditTransaction[];
 };
 
+export type AuthUser = {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  name: string | null;
+  role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+  isActive: boolean;
+};
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
     cache: 'no-store',
     headers: {
       'content-type': 'application/json',
+      ...(cookieHeader ? { cookie: cookieHeader } : {}),
       ...init?.headers,
     },
   });
 
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      redirect('/login');
+    }
+
     const body = await response.text();
     throw new Error(body || `API request failed with status ${response.status}`);
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function requireAdmin() {
+  const user = await apiFetch<AuthUser>('/auth/me');
+  if (user.role !== 'SUPER_ADMIN') {
+    redirect('/login');
+  }
+
+  return user;
 }

@@ -6,12 +6,14 @@ import { ServiceRequestsModule } from './modules/service-requests/service-reques
 import { ProvidersModule } from './modules/providers/providers.module';
 import { OffersModule } from './modules/offers/offers.module';
 import { CreditsModule } from './modules/credits/credits.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
     HealthModule,
     PrismaModule,
+    AuthModule,
     CategoriesModule,
     QuestionsModule,
     ServiceRequestsModule,
