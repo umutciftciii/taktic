@@ -25,6 +25,7 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
         <p>Contact: {provider.contactName}</p>
         <p>Phone: {provider.phone}</p>
         <p>Email: {provider.email ?? '-'}</p>
+        <p>Linked user email: {provider.user?.email ?? '-'}</p>
         <p>
           Location: {provider.city}/{provider.district}
         </p>

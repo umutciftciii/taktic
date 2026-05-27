@@ -18,8 +18,9 @@ export class ServiceRequestsController {
   ) {}
 
   @Post()
-  createServiceRequest(@Body() dto: CreateServiceRequestDto) {
-    return this.serviceRequestsService.createServiceRequest(dto);
+  @UseGuards(OptionalAuthGuard)
+  createServiceRequest(@Body() dto: CreateServiceRequestDto, @CurrentUser() user: AuthUser | null) {
+    return this.serviceRequestsService.createServiceRequest(dto, user);
   }
 
   @Get()
@@ -27,6 +28,13 @@ export class ServiceRequestsController {
   @Roles(UserRole.SUPER_ADMIN)
   listServiceRequests() {
     return this.serviceRequestsService.listServiceRequests();
+  }
+
+  @Get('my')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  listMyServiceRequests(@CurrentUser() user: AuthUser) {
+    return this.serviceRequestsService.listCustomerServiceRequests(user.id);
   }
 
   @Get(':id')
@@ -37,8 +45,9 @@ export class ServiceRequestsController {
   }
 
   @Get(':id/offers')
-  listRequestOffers(@Param('id') id: string) {
-    return this.offersService.listRequestOffers(id);
+  @UseGuards(OptionalAuthGuard)
+  listRequestOffers(@Param('id') id: string, @CurrentUser() user: AuthUser | null) {
+    return this.offersService.listRequestOffers(id, user);
   }
 
   @Get(':requestId/offers/:offerId')

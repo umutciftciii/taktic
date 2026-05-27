@@ -92,6 +92,7 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         <p>Name: {request.customerName}</p>
         <p>Phone: {request.customerPhone}</p>
         <p>Email: {request.customerEmail ?? '-'}</p>
+        <p>Linked account email: {request.customer?.email ?? '-'}</p>
       </section>
 
       <section>

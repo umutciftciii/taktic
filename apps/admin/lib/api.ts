@@ -74,6 +74,7 @@ export type ServiceRequestAnswer = {
 
 export type ServiceRequest = {
   id: string;
+  customerId: string | null;
   status: ServiceRequestStatus;
   qualityScore: number;
   qualityLabel: QualityLabel;
@@ -101,6 +102,12 @@ export type ServiceRequest = {
     name: string;
     slug: string;
   };
+  customer?: {
+    id: string;
+    email: string | null;
+    phone: string | null;
+    name: string | null;
+  } | null;
   answers?: ServiceRequestAnswer[];
 };
 
@@ -124,6 +131,7 @@ export type ProviderServiceArea = {
 
 export type ProviderProfile = {
   id: string;
+  userId: string | null;
   businessName: string;
   contactName: string;
   phone: string;
@@ -142,6 +150,13 @@ export type ProviderProfile = {
   suspendedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  user?: {
+    id: string;
+    email: string | null;
+    phone: string | null;
+    name: string | null;
+    role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+  } | null;
   serviceCategories: ProviderServiceCategory[];
   serviceAreas: ProviderServiceArea[];
 };

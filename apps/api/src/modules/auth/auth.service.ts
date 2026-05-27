@@ -1,19 +1,31 @@
 import {
+  BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SESSION_TTL_DAYS } from './auth.constants';
 import { AuthUser } from './auth.types';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  registerCustomer(dto: RegisterDto, meta: { ipAddress?: string | null; userAgent?: string | null }) {
+    return this.register(dto, UserRole.CUSTOMER, meta);
+  }
+
+  registerProvider(dto: RegisterDto, meta: { ipAddress?: string | null; userAgent?: string | null }) {
+    return this.register(dto, UserRole.PROVIDER, meta);
+  }
 
   async login(dto: LoginDto, meta: { ipAddress?: string | null; userAgent?: string | null }) {
     const email = dto.email.trim().toLowerCase();
@@ -111,6 +123,73 @@ export class AuthService {
 
     return session.user;
   }
+
+  private async register(
+    dto: RegisterDto,
+    role: UserRole,
+    meta: { ipAddress?: string | null; userAgent?: string | null },
+  ) {
+    const name = normalizeRequiredString(dto.name, 'Name');
+    const email = dto.email.trim().toLowerCase();
+    const phone = normalizeOptionalPhone(dto.phone);
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          name,
+          email,
+          phone,
+          role,
+          isActive: true,
+          passwordHash,
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          name: true,
+          role: true,
+          isActive: true,
+        },
+      });
+
+      const expiresAt = sessionExpiry();
+      const session = await this.prisma.session.create({
+        data: {
+          id: randomBytes(32).toString('hex'),
+          userId: user.id,
+          expiresAt,
+          ipAddress: meta.ipAddress ?? null,
+          userAgent: meta.userAgent ?? null,
+        },
+      });
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+      });
+
+      return {
+        sessionId: session.id,
+        expiresAt,
+        user,
+      };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = Array.isArray(error.meta?.target)
+          ? error.meta.target.join(',')
+          : String(error.meta?.target ?? '');
+        if (target.includes('phone')) {
+          throw new ConflictException('Phone already registered');
+        }
+
+        throw new ConflictException('Email already registered');
+      }
+
+      throw error;
+    }
+  }
 }
 
 function sessionExpiry() {
@@ -133,4 +212,34 @@ function toSafeUser(user: {
     role: user.role,
     isActive: user.isActive,
   };
+}
+
+function normalizeRequiredString(value: unknown, fieldName: string) {
+  if (typeof value !== 'string') {
+    throw new BadRequestException(`${fieldName} is required`);
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new BadRequestException(`${fieldName} cannot be empty`);
+  }
+
+  return trimmed;
+}
+
+function normalizeOptionalPhone(value: string | null | undefined) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new BadRequestException('Phone must be a string');
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new BadRequestException('Phone cannot be empty when provided');
+  }
+
+  return trimmed;
 }

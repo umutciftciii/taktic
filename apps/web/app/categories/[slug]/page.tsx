@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, Category, Question } from '../../../lib/api';
+import { apiFetch, Category, getCurrentUser, Question } from '../../../lib/api';
 import { submitServiceRequestAction } from '../actions';
 
 type CategoryPageProps = {
@@ -8,7 +8,10 @@ type CategoryPageProps = {
 
 export default async function CategoryPage({ params }: CategoryPageProps) {
   const { slug } = await params;
-  const category = await apiFetch<Category>(`/categories/${slug}`);
+  const [category, user] = await Promise.all([
+    apiFetch<Category>(`/categories/${slug}`),
+    getCurrentUser(),
+  ]);
   const questions = category.questions ?? [];
 
   return (
@@ -18,6 +21,11 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
       </p>
       <h1>{category.name}</h1>
       {category.description ? <p>{category.description}</p> : null}
+      {user?.role === 'CUSTOMER' ? (
+        <p>Bu talep müşteri hesabınıza bağlanacak.</p>
+      ) : (
+        <p>Misafir talep oluşturuyorsunuz. Hesap oluşturursanız taleplerinizi daha sonra takip edebilirsiniz.</p>
+      )}
       <form action={submitServiceRequestAction}>
         <input type="hidden" name="categorySlug" value={category.slug} />
         <input

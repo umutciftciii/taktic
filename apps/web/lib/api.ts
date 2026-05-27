@@ -42,6 +42,34 @@ export type ServiceRequest = {
   status: string;
 };
 
+export type AuthUser = {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  name: string | null;
+  role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+  isActive: boolean;
+};
+
+export type CustomerServiceRequest = {
+  id: string;
+  status: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string | null;
+  city: string;
+  district: string;
+  qualityScore: number;
+  qualityLabel: RequestQualityLabel;
+  submittedAt: string;
+  offersCount: number;
+  category: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+};
+
 export type ProviderStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
 
 export type ProviderServiceCategory = {
@@ -62,6 +90,7 @@ export type ProviderServiceArea = {
 
 export type ProviderProfile = {
   id: string;
+  userId?: string | null;
   businessName: string;
   contactName: string;
   phone: string;
@@ -282,4 +311,12 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function getCurrentUser() {
+  try {
+    return await apiFetch<AuthUser>('/auth/me');
+  } catch {
+    return null;
+  }
 }

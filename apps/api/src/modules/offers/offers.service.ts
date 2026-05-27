@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -153,15 +154,17 @@ export class OffersService {
     );
   }
 
-  async listRequestOffers(requestId: string) {
+  async listRequestOffers(requestId: string, user: AuthUser | null = null) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
-      select: { id: true },
+      select: { id: true, customerId: true },
     });
 
     if (!request) {
       throw new NotFoundException('Service request not found');
     }
+
+    ensureCustomerCanAccessRequest(request.customerId, user);
 
     const offers = await this.prisma.offer.findMany({
       where: { requestId },
@@ -271,17 +274,27 @@ export class OffersService {
       throw new NotFoundException('Offer not found');
     }
 
-    if (offer.request.customerId) {
-      if (!user) {
-        throw new NotFoundException('Offer not found');
-      }
-
-      if (user.role !== UserRole.SUPER_ADMIN && user.id !== offer.request.customerId) {
-        throw new NotFoundException('Offer not found');
-      }
-    }
+    ensureCustomerCanAccessRequest(offer.request.customerId, user);
 
     return offer;
+  }
+}
+
+function ensureCustomerCanAccessRequest(customerId: string | null, user: AuthUser | null) {
+  if (!customerId) {
+    return;
+  }
+
+  if (!user) {
+    throw new ForbiddenException('Customer-owned request requires authentication');
+  }
+
+  if (user.role === UserRole.SUPER_ADMIN) {
+    return;
+  }
+
+  if (user.role !== UserRole.CUSTOMER || user.id !== customerId) {
+    throw new ForbiddenException('Customer request access denied');
   }
 }
 

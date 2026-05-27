@@ -32,6 +32,13 @@ export class ProvidersController {
     return this.providersService.listProviders({ status, city, categoryId });
   }
 
+  @Get('me')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.PROVIDER)
+  getMyProvider(@CurrentUser() user: AuthUser) {
+    return this.providersService.getProviderForUser(user.id);
+  }
+
   @Get(':providerId/requests')
   @UseGuards(AuthGuard, ProviderAccessGuard)
   listMatchingRequests(
@@ -87,9 +94,9 @@ export class ProvidersController {
   }
 
   @Patch(':id')
-  @UseGuards(AuthGuard, ProviderAccessGuard)
-  updateProvider(@Param('id') id: string, @Body() dto: UpdateProviderDto) {
-    return this.providersService.updateProvider(id, dto);
+  @UseGuards(OptionalAuthGuard)
+  updateProvider(@Param('id') id: string, @Body() dto: UpdateProviderDto, @CurrentUser() user: AuthUser | null) {
+    return this.providersService.updateProvider(id, dto, user);
   }
 
   @Patch(':id/status')

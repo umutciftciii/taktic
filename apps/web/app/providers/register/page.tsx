@@ -1,9 +1,12 @@
 import Link from 'next/link';
-import { apiFetch, Category } from '../../../lib/api';
+import { apiFetch, Category, getCurrentUser } from '../../../lib/api';
 import { createProviderAction } from '../actions';
 
 export default async function ProviderRegisterPage() {
-  const categories = await apiFetch<Category[]>('/categories');
+  const [categories, user] = await Promise.all([
+    apiFetch<Category[]>('/categories'),
+    getCurrentUser(),
+  ]);
 
   return (
     <main>
@@ -11,6 +14,14 @@ export default async function ProviderRegisterPage() {
         <Link href="/">Ana sayfa</Link>
       </p>
       <h1>Hizmet Veren Başvurusu</h1>
+      {!user ? (
+        <p>
+          Bu geliştirme aşamasında misafir başvuru hâlâ açık. Hesabınıza bağlamak için önce{' '}
+          <Link href="/register/provider">hizmet veren hesabı oluşturun</Link>.
+        </p>
+      ) : null}
+      {user?.role === 'PROVIDER' ? <p>Bu başvuru hizmet veren hesabınıza bağlanacak.</p> : null}
+      {user?.role === 'CUSTOMER' ? <p>Müşteri hesabıyla hizmet veren profili oluşturulamaz.</p> : null}
       <form action={createProviderAction}>
         <section>
           <h2>İşletme Bilgileri</h2>

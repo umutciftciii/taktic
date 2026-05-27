@@ -1,6 +1,7 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../auth/auth.types';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
@@ -53,7 +54,8 @@ const moderatedStatuses = new Set<ServiceRequestStatus>([
 export class ServiceRequestsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async createServiceRequest(dto: CreateServiceRequestDto) {
+  async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
+    const customerId = resolveCustomerIdForCreate(user);
     const categorySlug = normalizeRequiredString(dto.categorySlug, 'Category slug');
     const category = await this.prisma.serviceCategory.findUnique({
       where: { slug: categorySlug },
@@ -94,6 +96,7 @@ export class ServiceRequestsService {
     const request = await this.prisma.serviceRequest.create({
       data: {
         categoryId: category.id,
+        customerId,
         ...requestData,
         qualityScore: quality.score,
         qualityScoreBreakdown: quality.breakdown,
@@ -121,10 +124,33 @@ export class ServiceRequestsService {
         category: {
           select: { id: true, name: true, slug: true },
         },
+        customer: {
+          select: { id: true, email: true, phone: true, name: true },
+        },
       },
     });
 
     return requests.map(withQualityLabel);
+  }
+
+  async listCustomerServiceRequests(customerId: string) {
+    const requests = await this.prisma.serviceRequest.findMany({
+      where: { customerId },
+      orderBy: { submittedAt: 'desc' },
+      include: {
+        category: {
+          select: { id: true, name: true, slug: true },
+        },
+        _count: {
+          select: { offers: true },
+        },
+      },
+    });
+
+    return requests.map((request) => ({
+      ...withQualityLabel(request),
+      offersCount: request._count.offers,
+    }));
   }
 
   async getServiceRequest(id: string) {
@@ -133,6 +159,9 @@ export class ServiceRequestsService {
       include: {
         category: {
           select: { id: true, name: true, slug: true },
+        },
+        customer: {
+          select: { id: true, email: true, phone: true, name: true },
         },
         answers: {
           orderBy: { createdAt: 'asc' },
@@ -246,6 +275,22 @@ export class ServiceRequestsService {
       throw new NotFoundException('Service request not found');
     }
   }
+}
+
+function resolveCustomerIdForCreate(user: AuthUser | null) {
+  if (!user) {
+    return null;
+  }
+
+  if (user.role === UserRole.CUSTOMER) {
+    return user.id;
+  }
+
+  if (user.role === UserRole.SUPER_ADMIN) {
+    return null;
+  }
+
+  throw new ForbiddenException('Providers cannot create customer service requests');
 }
 
 function calculateQualityScore(input: QualityScoringInput) {

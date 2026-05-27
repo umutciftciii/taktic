@@ -2,6 +2,7 @@ import { Body, Controller, Get, Inject, Post, Req, Res, UnauthorizedException } 
 import { AuthService } from './auth.service';
 import { clearSessionCookie, getSessionIdFromRequest, sessionCookie } from './cookie';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -10,6 +11,36 @@ export class AuthController {
   @Post('login')
   async login(@Body() dto: LoginDto, @Req() request: any, @Res({ passthrough: true }) response: any) {
     const result = await this.authService.login(dto, {
+      ipAddress: request.ip ?? null,
+      userAgent: request.headers?.['user-agent'] ?? null,
+    });
+
+    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+    return result.user;
+  }
+
+  @Post('register-customer')
+  async registerCustomer(
+    @Body() dto: RegisterDto,
+    @Req() request: any,
+    @Res({ passthrough: true }) response: any,
+  ) {
+    const result = await this.authService.registerCustomer(dto, {
+      ipAddress: request.ip ?? null,
+      userAgent: request.headers?.['user-agent'] ?? null,
+    });
+
+    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+    return result.user;
+  }
+
+  @Post('register-provider')
+  async registerProvider(
+    @Body() dto: RegisterDto,
+    @Req() request: any,
+    @Res({ passthrough: true }) response: any,
+  ) {
+    const result = await this.authService.registerProvider(dto, {
       ipAddress: request.ip ?? null,
       userAgent: request.headers?.['user-agent'] ?? null,
     });

@@ -66,6 +66,10 @@ export class ProvidersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async createProvider(dto: CreateProviderDto, user: AuthUser | null = null) {
+    if (user?.role === UserRole.CUSTOMER) {
+      throw new ForbiddenException('Customers cannot create provider profiles');
+    }
+
     const payload = await this.normalizeAndValidatePayload(dto);
 
     return this.prisma.providerProfile.create({
@@ -129,8 +133,23 @@ export class ProvidersService {
     return provider;
   }
 
-  async updateProvider(id: string, dto: UpdateProviderDto) {
-    await this.ensureProviderExists(id);
+  async getProviderForUser(userId: string) {
+    const provider = await this.prisma.providerProfile.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: providerInclude,
+    });
+
+    if (!provider) {
+      throw new NotFoundException('Provider profile not found');
+    }
+
+    return provider;
+  }
+
+  async updateProvider(id: string, dto: UpdateProviderDto, user: AuthUser | null = null) {
+    const existingProvider = await this.getProviderForUpdate(id);
+    ensureProviderUpdateAccess(existingProvider, user);
     const payload = await this.normalizeAndValidatePayload(dto);
 
     return this.prisma.$transaction(async (tx) => {
@@ -417,6 +436,19 @@ export class ProvidersService {
     }
   }
 
+  private async getProviderForUpdate(id: string) {
+    const provider = await this.prisma.providerProfile.findUnique({
+      where: { id },
+      select: { id: true, userId: true },
+    });
+
+    if (!provider) {
+      throw new NotFoundException('Provider not found');
+    }
+
+    return provider;
+  }
+
   private async getApprovedProviderForDiscovery(providerId: string) {
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id: providerId },
@@ -477,6 +509,9 @@ export class ProvidersService {
 }
 
 const providerInclude = {
+  user: {
+    select: { id: true, email: true, phone: true, name: true, role: true },
+  },
   serviceCategories: {
     include: {
       category: {
@@ -489,6 +524,31 @@ const providerInclude = {
     orderBy: [{ city: 'asc' }, { district: 'asc' }, { neighborhood: 'asc' }],
   },
 } satisfies Prisma.ProviderProfileInclude;
+
+function ensureProviderUpdateAccess(
+  provider: { userId: string | null },
+  user: AuthUser | null,
+) {
+  if (user?.role === UserRole.CUSTOMER) {
+    throw new ForbiddenException('Customers cannot update provider profiles');
+  }
+
+  if (!provider.userId) {
+    return;
+  }
+
+  if (!user) {
+    throw new ForbiddenException('Provider profile requires authentication');
+  }
+
+  if (user.role === UserRole.SUPER_ADMIN) {
+    return;
+  }
+
+  if (user.role !== UserRole.PROVIDER || user.id !== provider.userId) {
+    throw new ForbiddenException('Provider access denied');
+  }
+}
 
 const providerOfferInclude = {
   request: {
