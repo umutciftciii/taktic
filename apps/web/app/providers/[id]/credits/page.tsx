@@ -15,16 +15,19 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
   return (
     <main>
       <p>
-        <Link href={`/providers/${id}`}>Provider profile</Link>
+        <Link href="/providers/me">Panelim</Link> <Link href={`/providers/${id}`}>Profil</Link>
       </p>
       <h1>Teklif Kredileri</h1>
-      <p>Mevcut bakiye: {credits.balance}</p>
-      <p>Bu fazda paket satın alma ve teklif kredisi harcama aktif değildir.</p>
+      <section className="summary-card">
+        <p className="muted">Kredi Bakiyesi</p>
+        <p className="metric">{credits.balance}</p>
+      </section>
+      <p className="notice">Yakında satın alma aktif olacak. Bu fazda ödeme veya paket satın alma akışı yoktur.</p>
 
       <section>
         <h2>Paketler</h2>
         {packages.map((creditPackage) => (
-          <article key={creditPackage.id}>
+          <article className="card" key={creditPackage.id}>
             <h3>{creditPackage.name}</h3>
             <p>Kredi: {creditPackage.creditAmount}</p>
             <p>
@@ -52,7 +55,7 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
             {credits.transactions.map((transaction) => (
               <tr key={transaction.id}>
                 <td>{formatDate(transaction.createdAt)}</td>
-                  <td>{formatTransactionType(transaction.type)}</td>
+                <td>{formatTransactionType(transaction.type)}</td>
                 <td>{transaction.amount}</td>
                 <td>{transaction.balanceAfter}</td>
                 <td>{transaction.reason ?? '-'}</td>
@@ -72,6 +75,18 @@ function formatTransactionType(type: string) {
 
   if (type === 'OFFER_REFUND') {
     return 'Teklif iadesi';
+  }
+
+  if (type === 'ADMIN_GRANT') {
+    return 'Admin kredi yükleme';
+  }
+
+  if (type === 'ADMIN_DEDUCT') {
+    return 'Admin kredi düşme';
+  }
+
+  if (type === 'PACKAGE_PURCHASE') {
+    return 'Paket satın alma';
   }
 
   return type;

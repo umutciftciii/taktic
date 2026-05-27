@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, Offer, OfferStatus } from '../../../lib/api';
+import { apiFetch, Offer, OfferStatus, statusLabel } from '../../../lib/api';
 import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
 
 const statuses: OfferStatus[] = [
@@ -34,13 +34,15 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
   return (
     <main>
       <p>
-        <Link href="/offers">Back to offers</Link>
+        <Link href="/offers">Tekliflere dön</Link>{' '}
+        <Link href={`/requests/${offer.request.id}`}>Talebi Aç</Link>{' '}
+        <Link href={`/providers/${offer.provider.id}`}>Sağlayıcıyı Aç</Link>
       </p>
       <h1>Offer Detail</h1>
       <section>
         <h2>Summary</h2>
         <p>ID: {offer.id}</p>
-        <p>Status: {offer.status}</p>
+        <p>Status: <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span></p>
         <p>
           Price: {offer.priceAmount} {offer.currency}
         </p>
@@ -64,6 +66,7 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
         <p>{offer.provider.contactName}</p>
         <p>{offer.provider.phone}</p>
         <p>{offer.provider.email ?? '-'}</p>
+        <p><Link href={`/providers/${offer.provider.id}/credits`}>Sağlayıcı Kredileri</Link></p>
       </section>
       <section>
         <h2>Request</h2>
@@ -72,6 +75,7 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
           {offer.request.city}/{offer.request.district}
         </p>
         <p>Quality: {offer.request.qualityScore}</p>
+        <p><Link href={`/offers?requestId=${offer.request.id}`}>Talebin Tüm Teklifleri</Link></p>
       </section>
       <section>
         <h2>Status</h2>
@@ -136,6 +140,12 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
       </section>
     </main>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'ACCEPTED' || status === 'SHORTLISTED') return 'badge badge-good';
+  if (status === 'REJECTED' || status === 'WITHDRAWN' || status === 'CANCELLED' || status === 'EXPIRED') return 'badge badge-bad';
+  return 'badge badge-warn';
 }
 
 function formatDate(value: string) {

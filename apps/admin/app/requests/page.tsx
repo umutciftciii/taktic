@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, QualityLabel, ServiceRequest } from '../../lib/api';
+import { apiFetch, QualityLabel, ServiceRequest, statusLabel } from '../../lib/api';
 
 type AdminRequestsPageProps = {
   searchParams: Promise<{ quality?: string }>;
@@ -24,7 +24,7 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
   return (
     <main>
       <p>
-        <Link href="/categories">Categories</Link>
+        <Link href="/">Admin home</Link> <Link href="/categories">Categories</Link>
       </p>
       <h1>Service Requests</h1>
       <p>
@@ -60,20 +60,35 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
               <td>
                 {request.city}/{request.district}
               </td>
-              <td>{request.status}</td>
+              <td><span className={statusBadgeClass(request.status)}>{statusLabel(request.status)}</span></td>
               <td>
-                {request.qualityScore}/100 - {request.qualityLabel}
+                <span className={qualityBadgeClass(request.qualityLabel)}>
+                  {request.qualityScore}/100 - {request.qualityLabel}
+                </span>
               </td>
               <td>
-                <Link href={`/requests/${request.id}`}>Open</Link>
+                <Link href={`/requests/${request.id}`}>Open</Link>{' '}
+                <Link href={`/offers?requestId=${request.id}`}>Offers</Link>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      {filteredRequests.length === 0 ? <p>No service requests found.</p> : null}
+      {filteredRequests.length === 0 ? <div className="empty-state">No service requests found.</div> : null}
     </main>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'APPROVED') return 'badge badge-good';
+  if (status === 'REJECTED' || status === 'CANCELLED') return 'badge badge-bad';
+  return 'badge badge-warn';
+}
+
+function qualityBadgeClass(label: string) {
+  if (label === 'HIGH') return 'badge badge-good';
+  if (label === 'MEDIUM') return 'badge badge-warn';
+  return 'badge badge-bad';
 }
 
 function formatDate(value: string) {

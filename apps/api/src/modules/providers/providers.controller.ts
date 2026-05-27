@@ -39,6 +39,13 @@ export class ProvidersController {
     return this.providersService.getProviderForUser(user.id);
   }
 
+  @Get('me/dashboard')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.PROVIDER)
+  getMyProviderDashboard(@CurrentUser() user: AuthUser) {
+    return this.providersService.getProviderDashboardForUser(user.id);
+  }
+
   @Get(':providerId/requests')
   @UseGuards(AuthGuard, ProviderAccessGuard)
   listMatchingRequests(

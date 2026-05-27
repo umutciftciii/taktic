@@ -1,8 +1,19 @@
 import Link from 'next/link';
-import { apiFetch, Offer } from '../../lib/api';
+import { apiFetch, Offer, statusLabel } from '../../lib/api';
 
-export default async function AdminOffersPage() {
-  const offers = await apiFetch<Offer[]>('/offers');
+type AdminOffersPageProps = {
+  searchParams?: Promise<{
+    providerId?: string;
+    requestId?: string;
+  }>;
+};
+
+export default async function AdminOffersPage({ searchParams }: AdminOffersPageProps) {
+  const params = (await searchParams) ?? {};
+  const query = new URLSearchParams();
+  if (params.providerId) query.set('providerId', params.providerId);
+  if (params.requestId) query.set('requestId', params.requestId);
+  const offers = await apiFetch<Offer[]>(`/offers${query.toString() ? `?${query.toString()}` : ''}`);
 
   return (
     <main>
@@ -10,6 +21,11 @@ export default async function AdminOffersPage() {
         <Link href="/">Admin home</Link>
       </p>
       <h1>Offers</h1>
+      {params.providerId || params.requestId ? (
+        <p className="notice">
+          Filtre aktif. <Link href="/offers">Filtreleri temizle</Link>
+        </p>
+      ) : null}
       <table>
         <thead>
           <tr>
@@ -38,19 +54,27 @@ export default async function AdminOffersPage() {
                 {offer.priceAmount} {offer.currency}
               </td>
               <td>{offer.creditCost}</td>
-              <td>{offer.creditRefundedAt ? 'Refunded' : 'Not refunded'}</td>
-              <td>{offer.refundEligibility.recommendedAction}</td>
-              <td>{offer.status}</td>
+              <td><span className={offer.creditRefundedAt ? 'badge badge-good' : 'badge'}>{offer.creditRefundedAt ? 'Refunded' : 'Not refunded'}</span></td>
+              <td><span className="badge">{offer.refundEligibility.recommendedAction}</span></td>
+              <td><span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span></td>
               <td>
-                <Link href={`/offers/${offer.id}`}>Open</Link>
+                <Link href={`/offers/${offer.id}`}>Open</Link>{' '}
+                <Link href={`/requests/${offer.request.id}`}>Request</Link>{' '}
+                <Link href={`/providers/${offer.provider.id}`}>Provider</Link>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      {offers.length === 0 ? <p>No offers yet.</p> : null}
+      {offers.length === 0 ? <div className="empty-state">No offers yet.</div> : null}
     </main>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'ACCEPTED' || status === 'SHORTLISTED') return 'badge badge-good';
+  if (status === 'REJECTED' || status === 'WITHDRAWN' || status === 'CANCELLED' || status === 'EXPIRED') return 'badge badge-bad';
+  return 'badge badge-warn';
 }
 
 function formatDate(value: string) {

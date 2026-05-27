@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, ProviderProfile, ProviderStatus } from '../../../lib/api';
+import { apiFetch, ProviderProfile, ProviderStatus, statusLabel } from '../../../lib/api';
 import { updateProviderStatusAction } from '../actions';
 
 const statuses: ProviderStatus[] = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'];
@@ -15,7 +15,9 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
   return (
     <main>
       <p>
-        <Link href="/providers">Back to providers</Link>
+        <Link href="/providers">Sağlayıcılara dön</Link>{' '}
+        <Link href={`/offers?providerId=${provider.id}`}>Teklifleri Gör</Link>{' '}
+        <Link href={`/providers/${provider.id}/credits`}>Kredileri Gör</Link>
       </p>
       <h1>{provider.businessName}</h1>
 
@@ -31,13 +33,10 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
         </p>
         <p>Address note: {provider.addressNote ?? '-'}</p>
         <p>Description: {provider.description ?? '-'}</p>
-        <p>Status: {provider.status}</p>
+        <p>Status: <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span></p>
         <p>Approved at: {provider.approvedAt ? formatDate(provider.approvedAt) : '-'}</p>
         <p>Rejected at: {provider.rejectedAt ? formatDate(provider.rejectedAt) : '-'}</p>
         <p>Suspended at: {provider.suspendedAt ? formatDate(provider.suspendedAt) : '-'}</p>
-        <p>
-          <Link href={`/providers/${provider.id}/credits`}>Provider credits</Link>
-        </p>
       </section>
 
       <section>
@@ -98,6 +97,12 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
       </section>
     </main>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'APPROVED') return 'badge badge-good';
+  if (status === 'REJECTED' || status === 'SUSPENDED') return 'badge badge-bad';
+  return 'badge badge-warn';
 }
 
 function formatDate(value: string) {

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { apiFetch, CustomerServiceRequest, getCurrentUser } from '../../../lib/api';
+import { apiFetch, CustomerServiceRequest, getCurrentUser, statusLabel } from '../../../lib/api';
 
 export default async function MyRequestsPage() {
   const user = await getCurrentUser();
@@ -16,19 +16,44 @@ export default async function MyRequestsPage() {
         <Link href="/">Ana sayfa</Link>
       </p>
       <h1>Taleplerim</h1>
-      {requests.length === 0 ? <p>Henüz hesabınıza bağlı talep yok.</p> : null}
-      <ul>
+      {requests.length === 0 ? <div className="empty-state">Henüz talep oluşturmadınız.</div> : null}
+      <section className="card-grid">
         {requests.map((request) => (
-          <li key={request.id}>
-            <Link href={`/requests/${request.id}/offers`}>
-              {request.category.name} - {request.city}/{request.district}
-            </Link>{' '}
-            ({request.status}, {request.offersCount} teklif, {formatDate(request.submittedAt)})
-          </li>
+          <article className="card" key={request.id}>
+            <h2>{request.category.name}</h2>
+            <p>
+              <span className={statusBadgeClass(request.status)}>{statusLabel(request.status)}</span>
+              <span className={qualityBadgeClass(request.qualityLabel)}>
+                Kalite {request.qualityScore}/100
+              </span>
+              <span className="badge">{request.offersCount} teklif</span>
+            </p>
+            <p>
+              Konum: {request.city}/{request.district}
+            </p>
+            <p>Gönderim: {formatDate(request.submittedAt)}</p>
+            <p className="actions">
+              <Link className="button" href={`/requests/${request.id}/offers`}>
+                Teklifleri görüntüle
+              </Link>
+            </p>
+          </article>
         ))}
-      </ul>
+      </section>
     </main>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'APPROVED') return 'badge badge-good';
+  if (status === 'REJECTED' || status === 'CANCELLED') return 'badge badge-bad';
+  return 'badge badge-warn';
+}
+
+function qualityBadgeClass(label: string) {
+  if (label === 'HIGH') return 'badge badge-good';
+  if (label === 'MEDIUM') return 'badge badge-warn';
+  return 'badge badge-bad';
 }
 
 function formatDate(value: string) {

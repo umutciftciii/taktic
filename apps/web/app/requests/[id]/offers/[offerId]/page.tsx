@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, RequestOfferDetail } from '../../../../../lib/api';
+import { apiFetch, RequestOfferDetail, statusLabel } from '../../../../../lib/api';
 import { customerOfferAction } from './actions';
 
 type RequestOfferDetailPageProps = {
@@ -18,9 +18,9 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
         <Link href={`/requests/${id}/offers`}>Tekliflere dön</Link>
       </p>
       <h1>Teklif Detayı</h1>
-      <p>Bu fazda ödeme ve iletişim akışı aktif değildir.</p>
+      <p>Bu fazda ödeme ve iletişim akışı henüz aktif değildir.</p>
       {offer.status === 'ACCEPTED' ? (
-        <p>Teklif kabul edildi. Bu fazda ödeme/iletişim açma akışı henüz aktif değildir.</p>
+        <p className="notice">Bu fazda ödeme ve iletişim akışı henüz aktif değildir.</p>
       ) : null}
 
       <section>
@@ -33,10 +33,10 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
 
       <section>
         <h2>Teklif</h2>
+        <p><span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span></p>
         <p>
           Fiyat: {offer.priceAmount} {offer.currency}
         </p>
-        <p>Durum: {offer.status}</p>
         <p>Başlangıç: {offer.estimatedStartDate ? formatDate(offer.estimatedStartDate) : '-'}</p>
         <p>Bitiş: {offer.estimatedCompletionDate ? formatDate(offer.estimatedCompletionDate) : '-'}</p>
         <p>Mesaj: {offer.message}</p>
@@ -47,12 +47,20 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
 
       <section>
         <h2>Aksiyonlar</h2>
-        <ActionButton requestId={id} offerId={offerId} action="SHORTLIST" label="Kısa Listeye Al" />
-        <ActionButton requestId={id} offerId={offerId} action="REJECT" label="Reddet" />
-        <ActionButton requestId={id} offerId={offerId} action="ACCEPT" label="Kabul Et" />
+        <div className="actions">
+          <ActionButton requestId={id} offerId={offerId} action="SHORTLIST" label="Kısa Listeye Al" />
+          <ActionButton requestId={id} offerId={offerId} action="REJECT" label="Reddet" />
+          <ActionButton requestId={id} offerId={offerId} action="ACCEPT" label="Kabul Et" />
+        </div>
       </section>
     </main>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'ACCEPTED' || status === 'SHORTLISTED') return 'badge badge-good';
+  if (status === 'REJECTED') return 'badge badge-bad';
+  return 'badge badge-warn';
 }
 
 function ActionButton({

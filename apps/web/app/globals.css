@@ -1,0 +1,131 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #17202a;
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.5;
+}
+
+a {
+  color: #0f5fbd;
+  font-weight: 600;
+}
+
+main {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 48px;
+}
+
+section {
+  margin-top: 24px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  padding: 10px;
+  border-bottom: 1px solid #e2e6ea;
+  text-align: left;
+  vertical-align: top;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+button,
+.button {
+  display: inline-block;
+  border: 1px solid #0f5fbd;
+  border-radius: 6px;
+  background: #0f5fbd;
+  color: #fff;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.nav-links,
+.actions,
+.card-grid,
+.summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.card-grid,
+.summary-grid {
+  align-items: stretch;
+}
+
+.card,
+.summary-card,
+.notice,
+.empty-state {
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  background: #fff;
+  padding: 16px;
+}
+
+.card {
+  margin: 14px 0;
+}
+
+.summary-card {
+  display: block;
+  min-width: 180px;
+  flex: 1;
+  text-decoration: none;
+}
+
+.metric {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.badge {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e8eef7;
+  color: #26384f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.badge-good {
+  background: #dff5e8;
+  color: #176034;
+}
+
+.badge-warn {
+  background: #fff1cf;
+  color: #6f4b00;
+}
+
+.badge-bad {
+  background: #ffe1df;
+  color: #8a1f16;
+}
+
+.muted {
+  color: #667085;
+}

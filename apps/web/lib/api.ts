@@ -95,13 +95,30 @@ export type ProviderProfile = {
   contactName: string;
   phone: string;
   email: string | null;
+  rejectionReason?: string | null;
+  suspendedAt?: string | null;
   city: string;
   district: string;
   addressNote: string | null;
   description: string | null;
   status: ProviderStatus;
+  user?: {
+    id: string;
+    email: string | null;
+    phone: string | null;
+    name: string | null;
+    role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+  } | null;
   serviceCategories: ProviderServiceCategory[];
   serviceAreas: ProviderServiceArea[];
+};
+
+export type ProviderDashboard = {
+  provider: ProviderProfile | null;
+  creditBalance?: number;
+  activeOffersCount?: number;
+  recentOffersCount?: number;
+  matchingApprovedRequestsCount?: number;
 };
 
 export type RequestQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -292,6 +309,26 @@ export type ProviderCredits = {
   balance: number;
   transactions: ProviderCreditTransaction[];
 };
+
+export function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    SUBMITTED: 'Gönderildi',
+    IN_REVIEW: 'İncelemede',
+    APPROVED: 'Onaylandı',
+    REJECTED: 'Reddedildi',
+    CANCELLED: 'İptal',
+    VIEWED: 'Görüntülendi',
+    SHORTLISTED: 'Kısa listede',
+    ACCEPTED: 'Kabul edildi',
+    WITHDRAWN: 'Geri çekildi',
+    EXPIRED: 'Süresi doldu',
+    PENDING_REVIEW: 'İnceleme bekliyor',
+    SUSPENDED: 'Askıya alındı',
+    DRAFT: 'Taslak',
+  };
+
+  return labels[status] ?? status;
+}
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();

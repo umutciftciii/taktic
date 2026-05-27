@@ -147,6 +147,41 @@ export class ProvidersService {
     return provider;
   }
 
+  async getProviderDashboardForUser(userId: string) {
+    const provider = await this.prisma.providerProfile.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: providerInclude,
+    });
+
+    if (!provider) {
+      return { provider: null };
+    }
+
+    const [creditBalance, activeOffersCount, recentOffersCount, matchingApprovedRequestsCount] =
+      await Promise.all([
+        this.getProviderCreditBalance(provider.id),
+        this.prisma.offer.count({
+          where: {
+            providerId: provider.id,
+            status: { in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED] },
+          },
+        }),
+        this.prisma.offer.count({ where: { providerId: provider.id } }),
+        provider.status === ProviderStatus.APPROVED
+          ? this.countMatchingApprovedRequests(provider.id)
+          : Promise.resolve(0),
+      ]);
+
+    return {
+      provider,
+      creditBalance,
+      activeOffersCount,
+      recentOffersCount,
+      matchingApprovedRequestsCount,
+    };
+  }
+
   async updateProvider(id: string, dto: UpdateProviderDto, user: AuthUser | null = null) {
     const existingProvider = await this.getProviderForUpdate(id);
     ensureProviderUpdateAccess(existingProvider, user);
@@ -505,6 +540,11 @@ export class ProvidersService {
     });
 
     return latestTransaction?.balanceAfter ?? 0;
+  }
+
+  private async countMatchingApprovedRequests(providerId: string) {
+    const requests = await this.listMatchingRequests(providerId, {});
+    return requests.length;
   }
 }
 

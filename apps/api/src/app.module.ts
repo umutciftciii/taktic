@@ -9,6 +9,7 @@ import { OffersModule } from './modules/offers/offers.module';
 import { RefundSchedulerModule } from './modules/refund-scheduler/refund-scheduler.module';
 import { CreditsModule } from './modules/credits/credits.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { PrismaModule } from './prisma/prisma.module';
     OffersModule,
     RefundSchedulerModule,
     CreditsModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

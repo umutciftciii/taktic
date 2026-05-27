@@ -318,6 +318,36 @@ export type AuthUser = {
   isActive: boolean;
 };
 
+export type AdminSummary = {
+  totalRequests: number;
+  pendingRequests: number;
+  inReviewRequests: number;
+  approvedProviders: number;
+  pendingProviders: number;
+  totalOffers: number;
+  refundableOffers: number;
+};
+
+export function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    SUBMITTED: 'Submitted',
+    IN_REVIEW: 'In review',
+    APPROVED: 'Approved',
+    REJECTED: 'Rejected',
+    CANCELLED: 'Cancelled',
+    VIEWED: 'Viewed',
+    SHORTLISTED: 'Shortlisted',
+    ACCEPTED: 'Accepted',
+    WITHDRAWN: 'Withdrawn',
+    EXPIRED: 'Expired',
+    PENDING_REVIEW: 'Pending review',
+    SUSPENDED: 'Suspended',
+    DRAFT: 'Draft',
+  };
+
+  return labels[status] ?? status;
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {

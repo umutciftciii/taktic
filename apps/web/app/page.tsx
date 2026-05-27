@@ -5,23 +5,15 @@ export default function HomePage() {
     <main>
       <h1>TakTic</h1>
       <p>Local services marketplace foundation.</p>
-      <p>
-        <Link href="/categories">Hizmet kategorilerini gor</Link>
-      </p>
-      <p>
-        <Link href="/register/customer">Müşteri hesabı oluştur</Link>
-      </p>
-      <p>
+      <p className="nav-links">
+        <Link href="/categories">Hizmet kategorilerini gör</Link>
         <Link href="/requests/my">Taleplerim</Link>
+        <Link href="/providers/me">Hizmet veren panelim</Link>
       </p>
-      <p>
+      <p className="nav-links">
+        <Link href="/register/customer">Müşteri hesabı oluştur</Link>
         <Link href="/register/provider">Hizmet veren hesabı oluştur</Link>
-      </p>
-      <p>
         <Link href="/providers/register">Hizmet veren başvurusu yap</Link>
-      </p>
-      <p>
-        <Link href="/providers/me">Hizmet veren profilim</Link>
       </p>
     </main>
   );

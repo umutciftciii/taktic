@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, QualityScoreBreakdown, ServiceRequest, ServiceRequestStatus } from '../../../lib/api';
+import { apiFetch, QualityScoreBreakdown, ServiceRequest, ServiceRequestStatus, statusLabel } from '../../../lib/api';
 import { recalculateRequestQualityAction, updateRequestStatusAction } from '../actions';
 
 const statuses: ServiceRequestStatus[] = [
@@ -22,7 +22,8 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
   return (
     <main>
       <p>
-        <Link href="/requests">Back to requests</Link>
+        <Link href="/requests">Taleplere dön</Link>{' '}
+        <Link href={`/offers?requestId=${request.id}`}>Teklifleri Gör</Link>
       </p>
       <h1>Service Request</h1>
 
@@ -31,9 +32,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         <p>ID: {request.id}</p>
         <p>Category: {request.category.name}</p>
         <p>Submitted: {formatDate(request.submittedAt)}</p>
-        <p>Status: {request.status}</p>
+        <p>Status: <span className={statusBadgeClass(request.status)}>{statusLabel(request.status)}</span></p>
         <p>
-          <strong>
+          <strong className={qualityBadgeClass(request.qualityLabel)}>
             Talep Kalite Skoru: {request.qualityScore}/100 - {request.qualityLabel}
           </strong>
         </p>
@@ -138,6 +139,18 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
       </section>
     </main>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'APPROVED') return 'badge badge-good';
+  if (status === 'REJECTED' || status === 'CANCELLED') return 'badge badge-bad';
+  return 'badge badge-warn';
+}
+
+function qualityBadgeClass(label: string) {
+  if (label === 'HIGH') return 'badge badge-good';
+  if (label === 'MEDIUM') return 'badge badge-warn';
+  return 'badge badge-bad';
 }
 
 function renderBreakdownRows(breakdown: QualityScoreBreakdown | null) {

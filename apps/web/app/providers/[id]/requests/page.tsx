@@ -31,15 +31,11 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
   return (
     <main>
       <p>
-        <Link href={`/providers/${id}`}>Provider profile</Link>
+        <Link href="/providers/me">Panelim</Link> <Link href={`/providers/${id}`}>Profil</Link>
       </p>
       <h1>Eşleşen Talepler</h1>
       <p>
-        Bu geliştirme akışında provider id URL içinde kalır, fakat hassas provider işlemleri oturum ve sahiplik
-        kontrolünden geçer.
-      </p>
-      <p>
-        Provider: {provider.businessName} ({provider.status})
+        Provider: {provider.businessName} <span className="badge badge-good">{provider.status}</span>
       </p>
 
       <form>
@@ -78,28 +74,45 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
       </form>
 
       {errorMessage ? <p>{errorMessage}</p> : null}
-      {!errorMessage && requests.length === 0 ? <p>Eşleşen onaylı talep bulunamadı.</p> : null}
+      {!errorMessage && requests.length === 0 ? (
+        <div className="empty-state">Şu anda hizmet verdiğiniz kategori ve bölgelerle eşleşen onaylı talep yok.</div>
+      ) : null}
       {requests.map((request) => (
-        <article key={request.id}>
+        <article className="card" key={request.id}>
           <h2>{request.category.name}</h2>
+          <p>
+            <span className={qualityBadgeClass(request.qualityLabel)}>
+              Kalite {request.qualityScore}/100 - {request.qualityLabel}
+            </span>
+            <span className="badge">Teklif maliyeti: 1 kredi</span>
+          </p>
           <p>
             Konum: {request.city}/{request.district}
             {request.neighborhood ? `/${request.neighborhood}` : ''}
           </p>
           <p>Bütçe: {formatBudget(request.budgetMin, request.budgetMax)}</p>
           <p>Aciliyet: {request.urgency ?? '-'}</p>
-          <p>
-            Kalite: {request.qualityScore}/100 - {request.qualityLabel}
-          </p>
           <p>Yanıt sayısı: {request.answersCount}</p>
           <p>Gönderim: {formatDate(request.submittedAt)}</p>
           <p>
-            <Link href={`/providers/${id}/requests/${request.id}`}>Detay</Link>
+            <Link className="button" href={`/providers/${id}/requests/${request.id}`}>Detay ve teklif ver</Link>
           </p>
         </article>
       ))}
     </main>
   );
+}
+
+function qualityBadgeClass(label: string) {
+  if (label === 'HIGH') {
+    return 'badge badge-good';
+  }
+
+  if (label === 'MEDIUM') {
+    return 'badge badge-warn';
+  }
+
+  return 'badge badge-bad';
 }
 
 function toQueryString(filters: Record<string, string | undefined>) {
