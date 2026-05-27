@@ -1,6 +1,12 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { apiFetch, getCurrentUser, ProviderDashboard, statusLabel } from '../../../lib/api';
+import {
+  apiFetch,
+  getCurrentUser,
+  ProviderDashboard,
+  statusLabel,
+  statusBadgeClass,
+} from '../../../lib/api';
 
 export default async function MyProviderPage() {
   const user = await getCurrentUser();
@@ -14,14 +20,20 @@ export default async function MyProviderPage() {
   if (!provider) {
     return (
       <main>
-        <p className="nav-links">
+        <p className="breadcrumbs">
           <Link href="/">Ana sayfa</Link>
+          <span aria-hidden="true">/</span>
+          <span>Panelim</span>
         </p>
-        <h1>Hizmet Veren Paneli</h1>
+        <header className="page-header">
+          <h1 className="page-title">Hizmet Veren Paneli</h1>
+        </header>
         <div className="empty-state">
           <h2>Henüz hizmet veren profiliniz yok</h2>
-          <p>Talep eşleşmelerini ve teklif akışını kullanmak için önce profil oluşturun.</p>
-          <Link className="button" href="/providers/register">
+          <p className="muted">
+            Talep eşleşmelerini ve teklif akışını kullanmak için önce profil oluşturun.
+          </p>
+          <Link className="btn btn-primary" href="/providers/register" style={{ marginTop: 8 }}>
             Hizmet veren profili oluştur
           </Link>
         </div>
@@ -33,64 +45,65 @@ export default async function MyProviderPage() {
 
   return (
     <main>
-      <p className="nav-links">
+      <p className="breadcrumbs">
         <Link href="/">Ana sayfa</Link>
-        <Link href={`/providers/${provider.id}`}>Profil önizleme</Link>
+        <span aria-hidden="true">/</span>
+        <span>Panelim</span>
       </p>
-      <h1>Hizmet Veren Paneli</h1>
 
-      <section className="notice">
-        <h2>{provider.businessName}</h2>
-        <p>
-          Durum: <span className={badgeClass(provider.status)}>{statusLabel(provider.status)}</span>
+      <header className="page-header">
+        <h1 className="page-title">{provider.businessName}</h1>
+        <p className="page-subtitle">
+          <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>{' '}
+          <span className="muted">· {provider.city}/{provider.district}</span>
         </p>
-        <p>Bağlı hesap: {provider.user?.email ?? user.email ?? '-'}</p>
-        <p>
-          Hizmet bölgesi: {provider.city}/{provider.district}
-        </p>
-        <ProviderStatusNotice provider={provider} />
-      </section>
+      </header>
 
-      <section className="summary-grid">
-        <div className="summary-card">
-          <p className="muted">Kredi bakiyesi</p>
-          <p className="metric">{dashboard.creditBalance ?? 0}</p>
+      <ProviderStatusNotice provider={provider} />
+
+      <section className="stat-grid">
+        <div className="stat-card">
+          <span className="muted">Kredi bakiyesi</span>
+          <span className="metric">{dashboard.creditBalance ?? 0}</span>
         </div>
-        <div className="summary-card">
-          <p className="muted">Aktif teklifler</p>
-          <p className="metric">{dashboard.activeOffersCount ?? 0}</p>
+        <div className="stat-card">
+          <span className="muted">Aktif teklifler</span>
+          <span className="metric">{dashboard.activeOffersCount ?? 0}</span>
         </div>
-        <div className="summary-card">
-          <p className="muted">Toplam teklif</p>
-          <p className="metric">{dashboard.recentOffersCount ?? 0}</p>
+        <div className="stat-card">
+          <span className="muted">Toplam teklif</span>
+          <span className="metric">{dashboard.recentOffersCount ?? 0}</span>
         </div>
-        <div className="summary-card">
-          <p className="muted">Uygun onaylı talep</p>
-          <p className="metric">{dashboard.matchingApprovedRequestsCount ?? 0}</p>
+        <div className="stat-card">
+          <span className="muted">Uygun onaylı talep</span>
+          <span className="metric">{dashboard.matchingApprovedRequestsCount ?? 0}</span>
         </div>
       </section>
 
-      <section>
-        <h2>Hızlı işlemler</h2>
-        <p className="actions">
+      <section style={{ marginTop: 20 }}>
+        <h2 style={{ fontSize: 18 }}>Hızlı işlemler</h2>
+        <div className="inline-actions">
           {canUseOfferFlow ? (
-            <Link className="button" href={`/providers/${provider.id}/requests`}>
+            <Link className="btn btn-primary" href={`/providers/${provider.id}/requests`}>
               Uygun Talepler
             </Link>
           ) : null}
-          <Link className="button" href={`/providers/${provider.id}/offers`}>
+          <Link className="btn btn-secondary" href={`/providers/${provider.id}/offers`}>
             Tekliflerim
           </Link>
-          <Link className="button" href={`/providers/${provider.id}/credits`}>
+          <Link className="btn btn-secondary" href={`/providers/${provider.id}/credits`}>
             Kredilerim
           </Link>
-          <Link className="button" href={`/providers/${provider.id}/package-purchases`}>
+          <Link className="btn btn-secondary" href={`/providers/${provider.id}/package-purchases`}>
             Paket Geçmişim
           </Link>
-          <Link className="button" href={`/providers/${provider.id}/edit`}>
-            Profilimi Düzenle
+          <Link className="btn btn-ghost" href={`/providers/${provider.id}/edit`}>
+            Profili Düzenle
           </Link>
-        </p>
+          <Link className="btn btn-ghost" href={`/providers/${provider.id}`}>
+            Profil önizleme
+          </Link>
+        </div>
       </section>
     </main>
   );
@@ -98,32 +111,28 @@ export default async function MyProviderPage() {
 
 function ProviderStatusNotice({ provider }: { provider: NonNullable<ProviderDashboard['provider']> }) {
   if (provider.status === 'PENDING_REVIEW') {
-    return <p className="notice">Başvurunuz inceleniyor. Onaylandıktan sonra uygun taleplere teklif verebilirsiniz.</p>;
+    return (
+      <div className="notice" style={{ marginBottom: 18 }}>
+        Başvurunuz inceleniyor. Onaylandıktan sonra uygun taleplere teklif verebilirsiniz.
+      </div>
+    );
   }
 
   if (provider.status === 'REJECTED') {
-    return <p className="notice">Başvurunuz reddedildi. Sebep: {provider.rejectionReason ?? '-'}</p>;
+    return (
+      <div className="notice-error" style={{ marginBottom: 18 }}>
+        Başvurunuz reddedildi. Sebep: {provider.rejectionReason ?? '-'}
+      </div>
+    );
   }
 
   if (provider.status === 'SUSPENDED') {
-    return <p className="notice">Profiliniz askıya alındı. Bu durumda teklif akışı kullanılamaz.</p>;
+    return (
+      <div className="notice-warning" style={{ marginBottom: 18 }}>
+        Profiliniz askıya alındı. Bu durumda teklif akışı kullanılamaz.
+      </div>
+    );
   }
 
   return null;
-}
-
-function badgeClass(status: string) {
-  if (status === 'APPROVED') {
-    return 'badge badge-good';
-  }
-
-  if (status === 'PENDING_REVIEW') {
-    return 'badge badge-warn';
-  }
-
-  if (status === 'REJECTED' || status === 'SUSPENDED') {
-    return 'badge badge-bad';
-  }
-
-  return 'badge';
 }

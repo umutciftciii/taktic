@@ -17,97 +17,111 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
 
   return (
     <main>
-      <p>
-        <Link href={`/providers/${provider.id}`}>Profile dön</Link>
+      <p className="breadcrumbs">
+        <Link href="/providers/me">Panelim</Link>
+        <span aria-hidden="true">/</span>
+        <Link href={`/providers/${provider.id}`}>Profil</Link>
+        <span aria-hidden="true">/</span>
+        <span>Düzenle</span>
       </p>
-      <h1>Profil Düzenle</h1>
-      <form action={updateProviderAction}>
+
+      <header className="page-header page-narrow">
+        <h1 className="page-title">Profil Düzenle</h1>
+        <p className="page-subtitle">İşletme bilgilerinizi ve hizmet kapsamınızı güncelleyin.</p>
+      </header>
+
+      <form action={updateProviderAction} className="form-card">
         <input type="hidden" name="id" value={provider.id} />
-        <p>
-          <label>
-            İşletme adı *
-            <input name="businessName" required defaultValue={provider.businessName} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Yetkili kişi *
-            <input name="contactName" required defaultValue={provider.contactName} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Telefon *
-            <input name="phone" required defaultValue={provider.phone} />
-          </label>
-        </p>
-        <p>
-          <label>
-            E-posta
-            <input name="email" type="email" defaultValue={provider.email ?? ''} />
-          </label>
-        </p>
-        <p>
-          <label>
-            İl *
-            <input name="city" required defaultValue={provider.city} />
-          </label>
-        </p>
-        <p>
-          <label>
-            İlçe *
-            <input name="district" required defaultValue={provider.district} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Adres notu
-            <textarea name="addressNote" defaultValue={provider.addressNote ?? ''} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Açıklama
+
+        <section className="form-section">
+          <h2>İşletme Bilgileri</h2>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>İşletme adı *</span>
+              <input name="businessName" required defaultValue={provider.businessName} />
+            </label>
+            <label className="form-row">
+              <span>Yetkili kişi *</span>
+              <input name="contactName" required defaultValue={provider.contactName} />
+            </label>
+          </div>
+          <label className="form-row">
+            <span>Açıklama</span>
             <textarea name="description" defaultValue={provider.description ?? ''} />
           </label>
-        </p>
+        </section>
 
-        <h2>Kategoriler</h2>
-        {categories.map((category) => (
-          <p key={category.id}>
-            <label>
-              <input
-                name="categoryIds"
-                type="checkbox"
-                value={category.id}
-                defaultChecked={selectedCategoryIds.has(category.id)}
-              />{' '}
-              {category.name}
+        <section className="form-section">
+          <h2>İletişim</h2>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>Telefon *</span>
+              <input name="phone" required defaultValue={provider.phone} />
             </label>
-          </p>
-        ))}
+            <label className="form-row">
+              <span>E-posta</span>
+              <input name="email" type="email" defaultValue={provider.email ?? ''} />
+            </label>
+          </div>
+        </section>
 
-        <h2>Hizmet Bölgesi</h2>
-        <p>
-          <label>
-            İl *
-            <input name="serviceAreaCity" required defaultValue={firstArea?.city ?? provider.city} />
+        <section className="form-section">
+          <h2>Adres</h2>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>İl *</span>
+              <input name="city" required defaultValue={provider.city} />
+            </label>
+            <label className="form-row">
+              <span>İlçe *</span>
+              <input name="district" required defaultValue={provider.district} />
+            </label>
+          </div>
+          <label className="form-row">
+            <span>Adres notu</span>
+            <textarea name="addressNote" defaultValue={provider.addressNote ?? ''} />
           </label>
-        </p>
-        <p>
-          <label>
-            İlçe
-            <input name="serviceAreaDistrict" defaultValue={firstArea?.district ?? provider.district} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Mahalle
-            <input name="serviceAreaNeighborhood" defaultValue={firstArea?.neighborhood ?? ''} />
-          </label>
-        </p>
+        </section>
 
-        <button type="submit">Profili Kaydet</button>
+        <section className="form-section">
+          <h2>Kategoriler</h2>
+          <div className="checkbox-group">
+            {categories.map((category) => (
+              <label className="checkbox-row" key={category.id}>
+                <input
+                  name="categoryIds"
+                  type="checkbox"
+                  value={category.id}
+                  defaultChecked={selectedCategoryIds.has(category.id)}
+                />
+                <span>{category.name}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="form-section">
+          <h2>Hizmet Bölgesi</h2>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>İl *</span>
+              <input name="serviceAreaCity" required defaultValue={firstArea?.city ?? provider.city} />
+            </label>
+            <label className="form-row">
+              <span>İlçe</span>
+              <input name="serviceAreaDistrict" defaultValue={firstArea?.district ?? provider.district} />
+            </label>
+            <label className="form-row">
+              <span>Mahalle</span>
+              <input name="serviceAreaNeighborhood" defaultValue={firstArea?.neighborhood ?? ''} />
+            </label>
+          </div>
+        </section>
+
+        <div className="form-actions">
+          <button className="btn btn-primary" type="submit">Profili Kaydet</button>
+          <Link className="btn btn-secondary" href={`/providers/${provider.id}`}>Vazgeç</Link>
+        </div>
       </form>
     </main>
   );

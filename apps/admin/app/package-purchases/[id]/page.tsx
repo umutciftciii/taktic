@@ -1,5 +1,12 @@
 import Link from 'next/link';
-import { apiFetch, PackagePurchase, statusLabel } from '../../../lib/api';
+import {
+  apiFetch,
+  PackagePurchase,
+  statusLabel,
+  statusBadgeClass,
+  formatPrice,
+  formatDateTime,
+} from '../../../lib/api';
 import { updatePackagePurchaseStatusAction } from '../actions';
 
 type AdminPackagePurchaseDetailPageProps = {
@@ -12,76 +19,117 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
 
   return (
     <main>
-      <p>
-        <Link href="/package-purchases">Back to package purchases</Link>{' '}
-        <Link href={`/providers/${purchase.providerId}`}>Provider</Link>{' '}
-        <Link href={`/providers/${purchase.providerId}/credits`}>Provider credits</Link>
+      <p className="breadcrumbs">
+        <Link href="/">Dashboard</Link>
+        <span aria-hidden="true">/</span>
+        <Link href="/package-purchases">Paket talepleri</Link>
+        <span aria-hidden="true">/</span>
+        <span>Detay</span>
       </p>
-      <h1>Package Purchase Detail</h1>
-      <section>
-        <h2>Summary</h2>
-        <p>ID: {purchase.id}</p>
-        <p>Status: <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span></p>
-        <p>Provider: {purchase.provider.businessName}</p>
-        <p>Provider email: {purchase.provider.email ?? '-'}</p>
-        <p>Package snapshot: {purchase.packageNameSnapshot}</p>
-        <p>Credits: {purchase.creditAmountSnapshot}</p>
-        <p>
-          Price: {purchase.priceAmountSnapshot} {purchase.currencySnapshot}
-        </p>
-        <p>Created: {formatDate(purchase.createdAt)}</p>
-        <p>Paid: {purchase.paidAt ? formatDate(purchase.paidAt) : '-'}</p>
-        <p>Failed: {purchase.failedAt ? formatDate(purchase.failedAt) : '-'}</p>
-        <p>Cancelled: {purchase.cancelledAt ? formatDate(purchase.cancelledAt) : '-'}</p>
-        <p>Expired: {purchase.expiredAt ? formatDate(purchase.expiredAt) : '-'}</p>
-        <p>Mock payment reference: {purchase.mockPaymentReference ?? '-'}</p>
-        <p>Failure reason: {purchase.mockPaymentFailureReason ?? '-'}</p>
-        <p>Credit transaction: {purchase.creditTransactionId ?? '-'}</p>
-        <p>Provider note: {purchase.providerNote ?? '-'}</p>
-        <p>Admin note: {purchase.adminNote ?? '-'}</p>
-      </section>
 
-      {purchase.status === 'PENDING' ? (
-        <section>
-          <h2>Manual correction</h2>
-          <p className="notice">Admin correction only supports CANCELLED or EXPIRED and does not grant credits.</p>
-          <form action={updatePackagePurchaseStatusAction}>
-            <input type="hidden" name="id" value={purchase.id} />
-            <p>
-              <label>
-                Status
-                <select name="status" defaultValue="CANCELLED">
-                  <option value="CANCELLED">CANCELLED</option>
-                  <option value="EXPIRED">EXPIRED</option>
-                </select>
-              </label>
-            </p>
-            <p>
-              <label>
-                Admin note
-                <textarea name="adminNote" />
-              </label>
-            </p>
-            <button type="submit">Update status</button>
-          </form>
-        </section>
-      ) : null}
+      <header className="page-header">
+        <h1 className="page-title">{purchase.packageNameSnapshot}</h1>
+        <p className="page-subtitle">
+          <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>{' '}
+          <span className="muted">· {purchase.provider.businessName}</span>
+        </p>
+      </header>
+
+      <div className="inline-actions" style={{ marginBottom: 18 }}>
+        <Link className="btn btn-secondary btn-sm" href={`/providers/${purchase.providerId}`}>
+          Hizmet vereni aç
+        </Link>
+        <Link className="btn btn-ghost btn-sm" href={`/providers/${purchase.providerId}/credits`}>
+          Kredi geçmişi
+        </Link>
+      </div>
+
+      <div className="detail-grid">
+        <div className="stack">
+          <section className="card" style={{ margin: 0 }}>
+            <h2>Özet</h2>
+            <dl className="meta-row">
+              <dt>Talep ID</dt>
+              <dd><code style={{ fontSize: 12 }}>{purchase.id}</code></dd>
+              <dt>Hizmet Veren</dt>
+              <dd>{purchase.provider.businessName}</dd>
+              <dt>HV e-posta</dt>
+              <dd>{purchase.provider.email ?? '-'}</dd>
+              <dt>Paket</dt>
+              <dd>{purchase.packageNameSnapshot}</dd>
+              <dt>Kredi</dt>
+              <dd>{purchase.creditAmountSnapshot}</dd>
+              <dt>Tutar</dt>
+              <dd><strong>{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</strong></dd>
+            </dl>
+          </section>
+
+          <section className="card" style={{ margin: 0 }}>
+            <h2>Zaman çizgisi</h2>
+            <dl className="meta-row">
+              <dt>Oluşturulma</dt>
+              <dd>{formatDateTime(purchase.createdAt)}</dd>
+              <dt>Ödendi</dt>
+              <dd>{purchase.paidAt ? formatDateTime(purchase.paidAt) : '-'}</dd>
+              <dt>Başarısız</dt>
+              <dd>{purchase.failedAt ? formatDateTime(purchase.failedAt) : '-'}</dd>
+              <dt>İptal</dt>
+              <dd>{purchase.cancelledAt ? formatDateTime(purchase.cancelledAt) : '-'}</dd>
+              <dt>Süre dolumu</dt>
+              <dd>{purchase.expiredAt ? formatDateTime(purchase.expiredAt) : '-'}</dd>
+            </dl>
+          </section>
+
+          <section className="card" style={{ margin: 0 }}>
+            <h2>Notlar ve referanslar</h2>
+            <dl className="meta-row">
+              <dt>Mock ref.</dt>
+              <dd>{purchase.mockPaymentReference ?? '-'}</dd>
+              <dt>Başarısızlık sebebi</dt>
+              <dd className="muted">{purchase.mockPaymentFailureReason ?? '-'}</dd>
+              <dt>Kredi işlemi</dt>
+              <dd>{purchase.creditTransactionId ?? '-'}</dd>
+              <dt>HV notu</dt>
+              <dd className="muted">{purchase.providerNote ?? '-'}</dd>
+              <dt>Yönetici notu</dt>
+              <dd className="muted">{purchase.adminNote ?? '-'}</dd>
+            </dl>
+          </section>
+        </div>
+
+        <div className="stack">
+          {purchase.status === 'PENDING' ? (
+            <section className="card" style={{ margin: 0 }}>
+              <h2>Manuel düzeltme</h2>
+              <div className="notice-warning">
+                Yönetici düzeltmesi sadece <strong>İptal</strong> veya <strong>Süresi doldu</strong>'yu
+                destekler ve kredi kazandırmaz.
+              </div>
+              <form action={updatePackagePurchaseStatusAction} style={{ display: 'grid', gap: 12 }}>
+                <input type="hidden" name="id" value={purchase.id} />
+                <label className="form-row">
+                  <span>Durum</span>
+                  <select name="status" defaultValue="CANCELLED">
+                    <option value="CANCELLED">İptal</option>
+                    <option value="EXPIRED">Süresi doldu</option>
+                  </select>
+                </label>
+                <label className="form-row">
+                  <span>Yönetici notu</span>
+                  <textarea name="adminNote" />
+                </label>
+                <div>
+                  <button className="btn btn-primary btn-block" type="submit">Durumu güncelle</button>
+                </div>
+              </form>
+            </section>
+          ) : (
+            <div className="notice">
+              Bu talep <strong>{statusLabel(purchase.status)}</strong> durumunda. Manuel düzeltme yapılamaz.
+            </div>
+          )}
+        </div>
+      </div>
     </main>
   );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'PAID') return 'badge badge-good';
-  if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED' || status === 'REFUNDED') {
-    return 'badge badge-bad';
-  }
-
-  return 'badge badge-warn';
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }

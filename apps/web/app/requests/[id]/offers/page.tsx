@@ -1,5 +1,13 @@
 import Link from 'next/link';
-import { apiFetch, RequestOfferPreview, statusLabel } from '../../../../lib/api';
+import {
+  apiFetch,
+  RequestOfferPreview,
+  statusLabel,
+  statusBadgeClass,
+  formatPrice,
+  formatDate,
+  formatDateTime,
+} from '../../../../lib/api';
 
 type RequestOffersPageProps = {
   params: Promise<{ id: string }>;
@@ -11,47 +19,58 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
 
   return (
     <main>
-      <p>
-        <Link href="/categories">Kategoriler</Link>
+      <p className="breadcrumbs">
+        <Link href="/requests/my">Taleplerim</Link>
+        <span aria-hidden="true">/</span>
+        <span>Talep Teklifleri</span>
       </p>
-      <h1>Talep Teklifleri</h1>
-      <p>Bu fazda ödeme ve iletişim akışı aktif değildir.</p>
-      {offers.length === 0 ? <div className="empty-state">Bu talep için henüz teklif yok.</div> : null}
-      {offers.map((offer) => (
-        <article className="card" key={offer.id}>
-          <h2>{offer.provider.businessName}</h2>
-          <p>
-            <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
-            <span className="badge">
-              {offer.priceAmount} {offer.currency}
-            </span>
-          </p>
-          <p>
-            Provider konumu: {offer.provider.city}/{offer.provider.district}
-          </p>
-          <p>Başlangıç: {offer.estimatedStartDate ? formatDate(offer.estimatedStartDate) : '-'}</p>
-          <p>Bitiş: {offer.estimatedCompletionDate ? formatDate(offer.estimatedCompletionDate) : '-'}</p>
-          <p>Mesaj: {offer.message}</p>
-          <p>Garanti notu: {offer.warrantyNote ?? '-'}</p>
-          <p>Gönderim: {formatDate(offer.submittedAt)}</p>
-          <p>
-            <Link className="button" href={`/requests/${id}/offers/${offer.id}`}>Teklifi İncele</Link>
-          </p>
-        </article>
-      ))}
+
+      <header className="page-header">
+        <h1 className="page-title">Talep Teklifleri</h1>
+        <p className="page-subtitle">
+          Hizmet verenlerin gönderdiği teklifler. Ödeme ve doğrudan iletişim sonraki fazda devreye girecektir.
+        </p>
+      </header>
+
+      {offers.length === 0 ? (
+        <div className="empty-state">
+          <h2>Henüz teklif yok</h2>
+          <p className="muted">Talebiniz için henüz hizmet veren teklif vermemiş. Birazdan tekrar bakın.</p>
+        </div>
+      ) : null}
+
+      <div className="list-stack">
+        {offers.map((offer) => (
+          <article className="list-card" key={offer.id}>
+            <div className="list-card-header">
+              <div>
+                <h2 className="list-card-title">{offer.provider.businessName}</h2>
+                <p className="list-card-meta">
+                  <span>{offer.provider.city}/{offer.provider.district}</span>
+                  <span>Başlangıç: {offer.estimatedStartDate ? formatDate(offer.estimatedStartDate) : '-'}</span>
+                  <span>Bitiş: {offer.estimatedCompletionDate ? formatDate(offer.estimatedCompletionDate) : '-'}</span>
+                  <span>Gönderim: {formatDateTime(offer.submittedAt)}</span>
+                </p>
+              </div>
+              <div className="inline-actions">
+                <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
+                <span className="badge">{formatPrice(offer.priceAmount, offer.currency)}</span>
+              </div>
+            </div>
+            <p style={{ margin: 0 }}>{offer.message}</p>
+            {offer.warrantyNote ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                Garanti notu: {offer.warrantyNote}
+              </p>
+            ) : null}
+            <div className="inline-actions">
+              <Link className="btn btn-primary btn-sm" href={`/requests/${id}/offers/${offer.id}`}>
+                Teklifi İncele
+              </Link>
+            </div>
+          </article>
+        ))}
+      </div>
     </main>
   );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'ACCEPTED' || status === 'SHORTLISTED') return 'badge badge-good';
-  if (status === 'REJECTED') return 'badge badge-bad';
-  return 'badge badge-warn';
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }

@@ -376,6 +376,146 @@ export function statusLabel(status: string) {
   return labels[status] ?? status;
 }
 
+export function qualityLabel(label: string) {
+  const labels: Record<string, string> = {
+    HIGH: 'Yüksek',
+    MEDIUM: 'Orta',
+    LOW: 'Düşük',
+  };
+
+  return labels[label] ?? label;
+}
+
+export function qualityBadgeClass(label: string) {
+  switch (label) {
+    case 'HIGH':
+      return 'badge badge-good';
+    case 'MEDIUM':
+      return 'badge badge-warn';
+    case 'LOW':
+      return 'badge badge-bad';
+    default:
+      return 'badge';
+  }
+}
+
+export function statusBadgeClass(status: string) {
+  switch (status) {
+    case 'APPROVED':
+    case 'ACCEPTED':
+    case 'PAID':
+      return 'badge badge-good';
+    case 'PENDING':
+    case 'PENDING_REVIEW':
+    case 'IN_REVIEW':
+    case 'SUBMITTED':
+    case 'VIEWED':
+    case 'SHORTLISTED':
+    case 'DRAFT':
+      return 'badge badge-warn';
+    case 'REJECTED':
+    case 'FAILED':
+    case 'CANCELLED':
+    case 'SUSPENDED':
+    case 'EXPIRED':
+    case 'WITHDRAWN':
+    case 'REFUNDED':
+      return 'badge badge-bad';
+    default:
+      return 'badge';
+  }
+}
+
+export function refundActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    FULL_REFUND: 'Tam iade önerilir',
+    MANUAL_REVIEW: 'Manuel inceleme',
+    NO_REFUND: 'İade yok',
+  };
+
+  return labels[action] ?? action;
+}
+
+export function refundActionBadgeClass(action: string) {
+  switch (action) {
+    case 'FULL_REFUND':
+      return 'badge badge-good';
+    case 'MANUAL_REVIEW':
+      return 'badge badge-warn';
+    case 'NO_REFUND':
+      return 'badge badge-muted';
+    default:
+      return 'badge';
+  }
+}
+
+export function urgencyLabel(urgency: string | null) {
+  if (!urgency) return '-';
+  const labels: Record<string, string> = {
+    ASAP: 'En kısa zamanda',
+    WITHIN_DAYS: 'Birkaç gün içinde',
+    WITHIN_WEEKS: 'Birkaç hafta içinde',
+    FLEXIBLE: 'Esnek',
+    THIS_WEEK: 'Bu hafta',
+    THIS_MONTH: 'Bu ay',
+  };
+
+  return labels[urgency] ?? urgency;
+}
+
+export function creditTxnTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    ADMIN_GRANT: 'Yönetici eklemesi',
+    ADMIN_DEDUCT: 'Yönetici düşüşü',
+    PACKAGE_PURCHASE: 'Paket alımı',
+    OFFER_SPEND: 'Teklif harcaması',
+    OFFER_REFUND: 'Teklif iadesi',
+    ADJUSTMENT: 'Düzeltme',
+  };
+
+  return labels[type] ?? type;
+}
+
+export function formatPrice(amount: number, currency: string = 'TRY') {
+  try {
+    return new Intl.NumberFormat('tr-TR', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${amount} ${currency}`;
+  }
+}
+
+export function formatDate(value: string | null | undefined) {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleDateString('tr-TR', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return value;
+  }
+}
+
+export function formatDateTime(value: string | null | undefined) {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleString('tr-TR', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return value;
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {

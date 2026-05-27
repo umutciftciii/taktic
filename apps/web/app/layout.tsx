@@ -5,7 +5,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'TakTic',
-  description: 'Local services marketplace foundation.',
+  description: 'Yerel hizmet pazaryeri',
 };
 
 type RootLayoutProps = {
@@ -24,7 +24,6 @@ export default function RootLayout({ children }: RootLayoutProps) {
                 <span>TakTic</span>
               </Link>
               <nav className="app-nav" aria-label="Site navigation">
-                <Link href="/categories">Kategoriler</Link>
                 <Link href="/categories">Hizmet Al</Link>
                 <Link href="/providers/register">Hizmet Ver</Link>
                 <Link href="/requests/my">Taleplerim</Link>

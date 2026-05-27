@@ -1,5 +1,17 @@
 import Link from 'next/link';
-import { apiFetch, Category, ProviderProfile, ProviderRequestListItem } from '../../../../lib/api';
+import {
+  apiFetch,
+  Category,
+  ProviderProfile,
+  ProviderRequestListItem,
+  formatPrice,
+  formatDateTime,
+  qualityLabel,
+  qualityBadgeClass,
+  statusLabel,
+  statusBadgeClass,
+  urgencyLabel,
+} from '../../../../lib/api';
 
 type ProviderRequestsPageProps = {
   params: Promise<{ id: string }>;
@@ -30,18 +42,27 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
 
   return (
     <main>
-      <p>
-        <Link href="/providers/me">Panelim</Link> <Link href={`/providers/${id}`}>Profil</Link>
-      </p>
-      <h1>Eşleşen Talepler</h1>
-      <p>
-        Provider: {provider.businessName} <span className="badge badge-good">{provider.status}</span>
+      <p className="breadcrumbs">
+        <Link href="/providers/me">Panelim</Link>
+        <span aria-hidden="true">/</span>
+        <Link href={`/providers/${id}`}>Profil</Link>
+        <span aria-hidden="true">/</span>
+        <span>Eşleşen Talepler</span>
       </p>
 
-      <form>
-        <p>
-          <label>
-            Kategori
+      <header className="page-header">
+        <h1 className="page-title">Eşleşen Talepler</h1>
+        <p className="page-subtitle">
+          Hizmet Veren: <strong>{provider.businessName}</strong>{' '}
+          <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>
+        </p>
+      </header>
+
+      <form className="filters-card">
+        <h2 style={{ margin: 0, fontSize: 15 }}>Filtrele</h2>
+        <div className="filters-grid">
+          <label className="form-row">
+            <span>Kategori</span>
             <select name="categoryId" defaultValue={filters.categoryId ?? ''}>
               <option value="">Tümü</option>
               {categories.map((category) => (
@@ -51,68 +72,73 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
               ))}
             </select>
           </label>
-        </p>
-        <p>
-          <label>
-            İl
+          <label className="form-row">
+            <span>İl</span>
             <input name="city" defaultValue={filters.city ?? ''} />
           </label>
-        </p>
-        <p>
-          <label>
-            İlçe
+          <label className="form-row">
+            <span>İlçe</span>
             <input name="district" defaultValue={filters.district ?? ''} />
           </label>
-        </p>
-        <p>
-          <label>
-            Minimum kalite skoru
-            <input name="minQualityScore" type="number" min="0" max="100" defaultValue={filters.minQualityScore ?? ''} />
+          <label className="form-row">
+            <span>Min. kalite</span>
+            <input
+              name="minQualityScore"
+              type="number"
+              min="0"
+              max="100"
+              defaultValue={filters.minQualityScore ?? ''}
+            />
           </label>
-        </p>
-        <button type="submit">Filtrele</button>
+        </div>
+        <div className="inline-actions">
+          <button className="btn btn-primary btn-sm" type="submit">Filtrele</button>
+          <Link className="btn btn-secondary btn-sm" href={`/providers/${id}/requests`}>Temizle</Link>
+        </div>
       </form>
 
-      {errorMessage ? <p>{errorMessage}</p> : null}
+      {errorMessage ? <div className="notice-error" style={{ marginTop: 18 }}>{errorMessage}</div> : null}
       {!errorMessage && requests.length === 0 ? (
-        <div className="empty-state">Şu anda hizmet verdiğiniz kategori ve bölgelerle eşleşen onaylı talep yok.</div>
+        <div className="empty-state" style={{ marginTop: 18 }}>
+          <h2>Eşleşen talep yok</h2>
+          <p className="muted">
+            Şu anda hizmet verdiğiniz kategori ve bölgelerle eşleşen onaylı talep bulunmuyor. Filtreleri
+            genişletmeyi deneyin.
+          </p>
+        </div>
       ) : null}
-      {requests.map((request) => (
-        <article className="card" key={request.id}>
-          <h2>{request.category.name}</h2>
-          <p>
-            <span className={qualityBadgeClass(request.qualityLabel)}>
-              Kalite {request.qualityScore}/100 - {request.qualityLabel}
-            </span>
-            <span className="badge">Teklif maliyeti: 1 kredi</span>
-          </p>
-          <p>
-            Konum: {request.city}/{request.district}
-            {request.neighborhood ? `/${request.neighborhood}` : ''}
-          </p>
-          <p>Bütçe: {formatBudget(request.budgetMin, request.budgetMax)}</p>
-          <p>Aciliyet: {request.urgency ?? '-'}</p>
-          <p>Yanıt sayısı: {request.answersCount}</p>
-          <p>Gönderim: {formatDate(request.submittedAt)}</p>
-          <p>
-            <Link className="button" href={`/providers/${id}/requests/${request.id}`}>Detay ve teklif ver</Link>
-          </p>
-        </article>
-      ))}
+
+      <div className="list-stack" style={{ marginTop: 18 }}>
+        {requests.map((request) => (
+          <article className="list-card" key={request.id}>
+            <div className="list-card-header">
+              <div>
+                <h2 className="list-card-title">{request.category.name}</h2>
+                <p className="list-card-meta">
+                  <span>{request.city}/{request.district}{request.neighborhood ? `/${request.neighborhood}` : ''}</span>
+                  <span>Bütçe: {formatBudget(request.budgetMin, request.budgetMax)}</span>
+                  <span>Aciliyet: {urgencyLabel(request.urgency)}</span>
+                  <span>{request.answersCount} yanıt</span>
+                  <span>{formatDateTime(request.submittedAt)}</span>
+                </p>
+              </div>
+              <div className="inline-actions">
+                <span className={qualityBadgeClass(request.qualityLabel)}>
+                  Kalite {request.qualityScore}/100 · {qualityLabel(request.qualityLabel)}
+                </span>
+                <span className="badge badge-info">Teklif: 1 kredi</span>
+              </div>
+            </div>
+            <div className="inline-actions">
+              <Link className="btn btn-primary btn-sm" href={`/providers/${id}/requests/${request.id}`}>
+                Detay ve teklif ver
+              </Link>
+            </div>
+          </article>
+        ))}
+      </div>
     </main>
   );
-}
-
-function qualityBadgeClass(label: string) {
-  if (label === 'HIGH') {
-    return 'badge badge-good';
-  }
-
-  if (label === 'MEDIUM') {
-    return 'badge badge-warn';
-  }
-
-  return 'badge badge-bad';
 }
 
 function toQueryString(filters: Record<string, string | undefined>) {
@@ -130,15 +156,9 @@ function toQueryString(filters: Record<string, string | undefined>) {
 
 function formatBudget(min: number | null, max: number | null) {
   if (min !== null && max !== null) {
-    return `${min} - ${max}`;
+    return `${formatPrice(min)} - ${formatPrice(max)}`;
   }
-
-  return String(min ?? max ?? '-');
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
+  if (min !== null) return `${formatPrice(min)}+`;
+  if (max !== null) return `≤ ${formatPrice(max)}`;
+  return '-';
 }

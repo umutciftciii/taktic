@@ -37,7 +37,7 @@ export function RefundScanClient({
         });
         setScan(await readApiResponse<RefundScanResponse>(response));
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Dry-run failed');
+        setError(err instanceof Error ? err.message : 'Dry-run başarısız');
       }
     });
   }
@@ -56,118 +56,173 @@ export function RefundScanClient({
         setExecuteResult(result);
         refreshDryRun();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Execute failed');
+        setError(err instanceof Error ? err.message : 'Çalıştırma başarısız');
       }
     });
   }
 
   return (
     <>
-      <section>
-        <h2>Scan controls</h2>
-        <label>
-          Older than hours
-          <input
-            min="1"
-            name="olderThanHours"
-            type="number"
-            value={olderThanHours}
-            onChange={(event) => setOlderThanHours(Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Limit
-          <input
-            max="500"
-            min="1"
-            name="limit"
-            type="number"
-            value={limit}
-            onChange={(event) => setLimit(Number(event.target.value))}
-          />
-        </label>
-        <p>
-          <button disabled={isPending} type="button" onClick={refreshDryRun}>
-            Refresh dry-run
-          </button>{' '}
-          <button disabled={isPending || scan.eligibleCount === 0} type="button" onClick={executeScan}>
-            Execute scan
+      <section className="filters-card">
+        <h2 style={{ margin: 0, fontSize: 15 }}>Tarama parametreleri</h2>
+        <div className="filters-grid">
+          <label className="form-row">
+            <span>Saatten eski</span>
+            <input
+              min="1"
+              name="olderThanHours"
+              type="number"
+              value={olderThanHours}
+              onChange={(event) => setOlderThanHours(Number(event.target.value))}
+            />
+          </label>
+          <label className="form-row">
+            <span>Limit</span>
+            <input
+              max="500"
+              min="1"
+              name="limit"
+              type="number"
+              value={limit}
+              onChange={(event) => setLimit(Number(event.target.value))}
+            />
+          </label>
+        </div>
+        <div className="inline-actions">
+          <button className="btn btn-secondary btn-sm" disabled={isPending} type="button" onClick={refreshDryRun}>
+            Dry-run yenile
           </button>
-        </p>
-        {error ? <p role="alert">{error}</p> : null}
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={isPending || scan.eligibleCount === 0}
+            type="button"
+            onClick={executeScan}
+          >
+            Taramayı çalıştır
+          </button>
+        </div>
+        {error ? <div className="notice-error" role="alert">{error}</div> : null}
       </section>
 
-      <section>
-        <h2>Dry-run result</h2>
-        <p>
-          Eligible: {scan.eligibleCount} | Skipped: {scan.skippedCount}
-        </p>
-        <ul>
-          <li>Already refunded: {scan.skippedSummary.alreadyRefunded}</li>
-          <li>Viewed: {scan.skippedSummary.viewed}</li>
-          <li>Not old enough: {scan.skippedSummary.notOldEnough}</li>
-          <li>No credit spend: {scan.skippedSummary.noCreditSpend}</li>
-          <li>Status not eligible: {scan.skippedSummary.statusNotEligible}</li>
-        </ul>
-        <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Offer</th>
-              <th>Provider</th>
-              <th>Request</th>
-              <th>Credit</th>
-              <th>Submitted</th>
-              <th>Hours</th>
-              <th>Policy</th>
-            </tr>
-          </thead>
-          <tbody>
-            {scan.items.map((item) => (
-              <tr key={item.offerId}>
-                <td>{item.offerId}</td>
-                <td>{item.providerId}</td>
-                <td>{item.requestId}</td>
-                <td>{item.creditCost}</td>
-                <td>{formatDate(item.submittedAt)}</td>
-                <td>{item.hoursSinceSubmitted ?? '-'}</td>
-                <td>
-                  {item.recommendedAction}/{item.reasonCode}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <section style={{ marginTop: 18 }}>
+        <div className="stat-grid">
+          <div className="stat-card">
+            <span className="muted">Uygun</span>
+            <span className="metric">{scan.eligibleCount}</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">Atlanan</span>
+            <span className="metric">{scan.skippedCount}</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">Zaten iade</span>
+            <span className="metric">{scan.skippedSummary.alreadyRefunded}</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">Görüntülenmiş</span>
+            <span className="metric">{scan.skippedSummary.viewed}</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">Yeterince eski değil</span>
+            <span className="metric">{scan.skippedSummary.notOldEnough}</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">Kredi harcaması yok</span>
+            <span className="metric">{scan.skippedSummary.noCreditSpend}</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">Durum uygun değil</span>
+            <span className="metric">{scan.skippedSummary.statusNotEligible}</span>
+          </div>
         </div>
-        {scan.items.length === 0 ? <p>No eligible offers in this dry-run.</p> : null}
+      </section>
+
+      <section style={{ marginTop: 18 }}>
+        <div className="table-card">
+          <div className="table-header">
+            <h2>Dry-run sonuçları</h2>
+            <span className="muted" style={{ fontSize: 13 }}>{scan.items.length} kayıt</span>
+          </div>
+          {scan.items.length === 0 ? (
+            <div style={{ padding: 18 }} className="empty-state">Bu taramada uygun teklif yok.</div>
+          ) : (
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Teklif</th>
+                    <th>Hizmet Veren</th>
+                    <th>Talep</th>
+                    <th>Kredi</th>
+                    <th>Gönderim</th>
+                    <th>Saat</th>
+                    <th>Politika</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scan.items.map((item) => (
+                    <tr key={item.offerId}>
+                      <td><code style={{ fontSize: 12 }}>{item.offerId}</code></td>
+                      <td><code style={{ fontSize: 12 }}>{item.providerId}</code></td>
+                      <td><code style={{ fontSize: 12 }}>{item.requestId}</code></td>
+                      <td>{item.creditCost}</td>
+                      <td>{formatDate(item.submittedAt)}</td>
+                      <td>{item.hoursSinceSubmitted ?? '-'}</td>
+                      <td>
+                        <span className="badge badge-good">{item.recommendedAction}</span>{' '}
+                        <span className="muted" style={{ fontSize: 12 }}>{item.reasonCode}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </section>
 
       {executeResult ? (
-        <section>
-          <h2>Execute result</h2>
-          <p>
-            Processed: {executeResult.processed} | Refunded: {executeResult.refunded} | Skipped:{' '}
-            {executeResult.skipped}
-          </p>
-          <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Offer</th>
-                <th>Status</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {executeResult.results.map((result) => (
-                <tr key={result.offerId}>
-                  <td>{result.offerId}</td>
-                  <td>{result.status}</td>
-                  <td>{result.reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <section style={{ marginTop: 18 }}>
+          <div className="table-card">
+            <div className="table-header">
+              <h2>Çalıştırma sonucu</h2>
+              <span className="muted" style={{ fontSize: 13 }}>
+                İşlendi {executeResult.processed} · İade {executeResult.refunded} · Atlandı{' '}
+                {executeResult.skipped}
+              </span>
+            </div>
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Teklif</th>
+                    <th>Durum</th>
+                    <th>Sebep</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {executeResult.results.map((result) => (
+                    <tr key={result.offerId}>
+                      <td><code style={{ fontSize: 12 }}>{result.offerId}</code></td>
+                      <td>
+                        <span
+                          className={
+                            result.status === 'REFUNDED'
+                              ? 'badge badge-good'
+                              : result.status === 'FAILED'
+                                ? 'badge badge-bad'
+                                : 'badge badge-muted'
+                          }
+                        >
+                          {result.status}
+                        </span>
+                      </td>
+                      <td className="muted">{result.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       ) : null}
@@ -178,7 +233,7 @@ export function RefundScanClient({
 async function readApiResponse<T>(response: Response) {
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || `API request failed with status ${response.status}`);
+    throw new Error(body || `API isteği ${response.status} ile başarısız`);
   }
 
   return response.json() as Promise<T>;

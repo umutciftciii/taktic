@@ -1,5 +1,13 @@
 import Link from 'next/link';
-import { apiFetch, PackagePurchase, PackagePurchaseStatus, statusLabel } from '../../lib/api';
+import {
+  apiFetch,
+  PackagePurchase,
+  PackagePurchaseStatus,
+  statusLabel,
+  statusBadgeClass,
+  formatPrice,
+  formatDateTime,
+} from '../../lib/api';
 
 type AdminPackagePurchasesPageProps = {
   searchParams?: Promise<{
@@ -21,67 +29,68 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
 
   return (
     <main>
-      <p>
-        <Link href="/">Admin home</Link>
-      </p>
-      <h1>Package Purchases</h1>
+      <header className="page-header">
+        <h1 className="page-title">Paket Talepleri</h1>
+        <p className="page-subtitle">Hizmet verenlerin paket satın alma kayıtları.</p>
+      </header>
+
       {query.toString() ? (
-        <p className="notice">
-          Filtered list. <Link href="/package-purchases">Clear filters</Link>
-        </p>
+        <div className="notice" style={{ marginBottom: 18 }}>
+          Filtre aktif. <Link href="/package-purchases">Filtreleri temizle</Link>
+        </div>
       ) : null}
-      <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Created</th>
-            <th>Provider</th>
-            <th>Package</th>
-            <th>Credits</th>
-            <th>Price</th>
-            <th>Status</th>
-            <th>Mock reference</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {purchases.map((purchase) => (
-            <tr key={purchase.id}>
-              <td>{formatDate(purchase.createdAt)}</td>
-              <td>{purchase.provider.businessName}</td>
-              <td>{purchase.packageNameSnapshot}</td>
-              <td>{purchase.creditAmountSnapshot}</td>
-              <td>
-                {purchase.priceAmountSnapshot} {purchase.currencySnapshot}
-              </td>
-              <td><span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span></td>
-              <td>{purchase.mockPaymentReference ?? '-'}</td>
-              <td>
-                <Link href={`/package-purchases/${purchase.id}`}>Open</Link>{' '}
-                <Link href={`/providers/${purchase.providerId}`}>Provider</Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+      <div className="table-card">
+        <div className="table-header">
+          <h2>Paket talep listesi</h2>
+          <span className="muted" style={{ fontSize: 13 }}>{purchases.length} kayıt</span>
+        </div>
+        {purchases.length === 0 ? (
+          <div style={{ padding: 18 }} className="empty-state">Henüz paket talebi yok.</div>
+        ) : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Oluşturulma</th>
+                  <th>Hizmet Veren</th>
+                  <th>Paket</th>
+                  <th>Kredi</th>
+                  <th>Tutar</th>
+                  <th>Durum</th>
+                  <th>Mock referans</th>
+                  <th>İşlem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {purchases.map((purchase) => (
+                  <tr key={purchase.id}>
+                    <td>{formatDateTime(purchase.createdAt)}</td>
+                    <td><strong>{purchase.provider.businessName}</strong></td>
+                    <td>{purchase.packageNameSnapshot}</td>
+                    <td>{purchase.creditAmountSnapshot}</td>
+                    <td>{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</td>
+                    <td>
+                      <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
+                    </td>
+                    <td className="muted" style={{ fontSize: 12 }}>{purchase.mockPaymentReference ?? '-'}</td>
+                    <td>
+                      <div className="inline-actions">
+                        <Link className="btn btn-secondary btn-sm" href={`/package-purchases/${purchase.id}`}>
+                          Detay
+                        </Link>
+                        <Link className="btn btn-ghost btn-sm" href={`/providers/${purchase.providerId}`}>
+                          HV
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-      {purchases.length === 0 ? <div className="empty-state">No package purchases yet.</div> : null}
     </main>
   );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'PAID') return 'badge badge-good';
-  if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED' || status === 'REFUNDED') {
-    return 'badge badge-bad';
-  }
-
-  return 'badge badge-warn';
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }

@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { apiFetch, RefundScanResponse, requireAdmin } from '../../lib/api';
 import { RefundScanClient } from './refund-scan-client';
 
@@ -23,16 +22,15 @@ export default async function RefundScanPage({ searchParams }: RefundScanPagePro
 
   return (
     <main>
-      <p>
-        <Link href="/">Admin home</Link>
-      </p>
-      <h1>Refund Scan</h1>
-      <p>Preview and execute admin-triggered refunds for not-viewed offers.</p>
-      <RefundScanClient
-        initialLimit={limit}
-        initialOlderThanHours={olderThanHours}
-        initialScan={scan}
-      />
+      <header className="page-header">
+        <h1 className="page-title">İade Taraması</h1>
+        <p className="page-subtitle">
+          Görüntülenmemiş ve yeterince eski teklifler için yönetici tarafından tetiklenen iadeleri önizleyin
+          ve çalıştırın.
+        </p>
+      </header>
+
+      <RefundScanClient initialLimit={limit} initialOlderThanHours={olderThanHours} initialScan={scan} />
     </main>
   );
 }

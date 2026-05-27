@@ -11,16 +11,35 @@ export default async function RequestSuccessPage({ searchParams }: RequestSucces
 
   return (
     <main>
-      <h1>Talebiniz alındı ve ön incelemeye gönderildi.</h1>
-      {id ? <p>Talep referansi: {id}</p> : null}
-      <p>Talebiniz onaylandıktan sonra uygun hizmet verenler teklif verebilir.</p>
-      <p className="actions">
-        {id ? <Link className="button" href={`/requests/${id}/offers`}>Teklifleri görüntüle</Link> : null}
-        {user?.role === 'CUSTOMER' ? (
-          <Link className="button" href="/requests/my">Taleplerime git</Link>
-        ) : null}
-        <Link href="/categories">Kategorilere dön</Link>
-      </p>
+      <div className="page-narrow">
+        <section className="card" style={{ margin: 0, textAlign: 'center', padding: 32 }}>
+          <span className="badge badge-good" style={{ fontSize: 13, padding: '8px 14px' }}>Talep alındı</span>
+          <h1 className="page-title" style={{ marginTop: 14 }}>Talebiniz ön incelemeye gönderildi</h1>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Onay sonrasında uygun hizmet verenler teklif gönderebilir.
+          </p>
+          {id ? (
+            <p style={{ marginTop: 14 }}>
+              Talep referansı: <code>{id}</code>
+            </p>
+          ) : null}
+          <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 18 }}>
+            {id ? (
+              <Link className="btn btn-primary" href={`/requests/${id}/offers`}>
+                Teklifleri görüntüle
+              </Link>
+            ) : null}
+            {user?.role === 'CUSTOMER' ? (
+              <Link className="btn btn-secondary" href="/requests/my">
+                Taleplerim
+              </Link>
+            ) : null}
+            <Link className="btn btn-ghost" href="/categories">
+              Kategorilere dön
+            </Link>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

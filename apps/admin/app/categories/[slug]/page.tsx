@@ -31,23 +31,35 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
 
   return (
     <main>
-      <p>
-        <Link href="/categories">Back to categories</Link>
+      <p className="breadcrumbs">
+        <Link href="/">Dashboard</Link>
+        <span aria-hidden="true">/</span>
+        <Link href="/categories">Kategoriler</Link>
+        <span aria-hidden="true">/</span>
+        <span>{category.name}</span>
       </p>
-      <h1>{category.name}</h1>
-      <section>
-        <h2>Category</h2>
-        <form action={updateCategoryAction}>
+
+      <header className="page-header">
+        <h1 className="page-title">{category.name}</h1>
+        <p className="page-subtitle">
+          <span className={category.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+            {category.isActive ? 'Aktif' : 'Pasif'}
+          </span>{' '}
+          <span className="muted">· /{category.slug}</span>
+        </p>
+      </header>
+
+      <section className="card">
+        <h2>Kategori Bilgileri</h2>
+        <form action={updateCategoryAction} className="form-card" style={{ maxWidth: 'none' }}>
           <input type="hidden" name="id" value={category.id} />
-          <p>
-            <label>
-              Name
+          <div className="form-grid">
+            <label className="form-row">
+              <span>İsim *</span>
               <input name="name" required defaultValue={category.name} />
             </label>
-          </p>
-          <p>
-            <label>
-              Slug
+            <label className="form-row">
+              <span>Slug *</span>
               <input
                 name="slug"
                 required
@@ -55,62 +67,87 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 defaultValue={category.slug}
               />
             </label>
-          </p>
-          <p>
-            <label>
-              Description
-              <textarea name="description" defaultValue={category.description ?? ''} />
-            </label>
-          </p>
-          <p>
-            <label>
-              Sort order
+            <label className="form-row">
+              <span>Sıralama</span>
               <input name="sortOrder" type="number" min="0" defaultValue={category.sortOrder} />
             </label>
-          </p>
+          </div>
+          <label className="form-row">
+            <span>Açıklama</span>
+            <textarea name="description" defaultValue={category.description ?? ''} />
+          </label>
           <input type="hidden" name="isActive" value={String(category.isActive)} />
-          <button type="submit">Save category</button>
-        </form>
-        <form action={updateCategoryStatusAction}>
-          <input type="hidden" name="id" value={category.id} />
-          <input type="hidden" name="slug" value={category.slug} />
-          <input type="hidden" name="isActive" value={String(!category.isActive)} />
-          <button type="submit">{category.isActive ? 'Deactivate' : 'Activate'} category</button>
+          <div className="form-actions" style={{ borderTop: 0, paddingTop: 0 }}>
+            <button className="btn btn-primary" type="submit">Kategoriyi kaydet</button>
+            <form action={updateCategoryStatusAction} style={{ display: 'inline' }}>
+              <input type="hidden" name="id" value={category.id} />
+              <input type="hidden" name="slug" value={category.slug} />
+              <input type="hidden" name="isActive" value={String(!category.isActive)} />
+              <button
+                className={category.isActive ? 'btn btn-danger' : 'btn btn-secondary'}
+                type="submit"
+              >
+                {category.isActive ? 'Pasifleştir' : 'Aktifleştir'}
+              </button>
+            </form>
+          </div>
         </form>
       </section>
 
       <section>
-        <h2>Questions</h2>
-        {questions.map((question) => (
-          <form key={question.id} action={updateQuestionAction}>
-            <fieldset>
-              <legend>
-                {question.label} ({question.isActive ? 'active' : 'inactive'})
-              </legend>
-              <input type="hidden" name="id" value={question.id} />
-              <input type="hidden" name="categorySlug" value={category.slug} />
-              <QuestionFields question={question} />
-              <button type="submit">Save question</button>
-            </fieldset>
-          </form>
-        ))}
-        {questions.map((question) => (
-          <form key={`${question.id}-status`} action={updateQuestionStatusAction}>
-            <input type="hidden" name="id" value={question.id} />
+        <h2 style={{ fontSize: 18 }}>Sorular</h2>
+        <div className="list-stack">
+          {questions.map((question) => (
+            <article className="list-card" key={question.id}>
+              <div className="list-card-header">
+                <div>
+                  <h3 className="list-card-title">{question.label}</h3>
+                  <p className="list-card-meta">
+                    <span>Key: <code style={{ fontSize: 12 }}>{question.key}</code></span>
+                    <span>Tip: {question.type}</span>
+                    <span>{question.isRequired ? 'Zorunlu' : 'Opsiyonel'}</span>
+                  </p>
+                </div>
+                <span className={question.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+                  {question.isActive ? 'Aktif' : 'Pasif'}
+                </span>
+              </div>
+              <form action={updateQuestionAction} className="form-card" style={{ maxWidth: 'none' }}>
+                <input type="hidden" name="id" value={question.id} />
+                <input type="hidden" name="categorySlug" value={category.slug} />
+                <QuestionFields question={question} />
+                <div className="form-actions" style={{ borderTop: 0, paddingTop: 0 }}>
+                  <button className="btn btn-primary btn-sm" type="submit">Soruyu kaydet</button>
+                </div>
+              </form>
+              <form action={updateQuestionStatusAction}>
+                <input type="hidden" name="id" value={question.id} />
+                <input type="hidden" name="categorySlug" value={category.slug} />
+                <input type="hidden" name="isActive" value={String(!question.isActive)} />
+                <button
+                  className={question.isActive ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'}
+                  type="submit"
+                >
+                  {question.isActive ? 'Pasifleştir' : 'Aktifleştir'}
+                </button>
+              </form>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 18 }}>Yeni Soru Ekle</h2>
+        <form action={createQuestionAction} className="form-card">
+          <section className="form-section">
+            <h2>Soru Bilgileri</h2>
+            <input type="hidden" name="categoryId" value={category.id} />
             <input type="hidden" name="categorySlug" value={category.slug} />
-            <input type="hidden" name="isActive" value={String(!question.isActive)} />
-            <button type="submit">{question.isActive ? 'Deactivate' : 'Activate'} {question.key}</button>
-          </form>
-        ))}
-      </section>
-
-      <section>
-        <h2>Create Question</h2>
-        <form action={createQuestionAction}>
-          <input type="hidden" name="categoryId" value={category.id} />
-          <input type="hidden" name="categorySlug" value={category.slug} />
-          <QuestionFields />
-          <button type="submit">Create question</button>
+            <QuestionFields />
+          </section>
+          <div className="form-actions">
+            <button className="btn btn-primary" type="submit">Soruyu oluştur</button>
+          </div>
         </form>
       </section>
     </main>
@@ -120,9 +157,9 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
 function QuestionFields({ question }: { question?: Question }) {
   return (
     <>
-      <p>
-        <label>
-          Key
+      <div className="form-grid">
+        <label className="form-row">
+          <span>Anahtar</span>
           <input
             name="key"
             required
@@ -130,22 +167,12 @@ function QuestionFields({ question }: { question?: Question }) {
             defaultValue={question?.key ?? ''}
           />
         </label>
-      </p>
-      <p>
-        <label>
-          Label
+        <label className="form-row">
+          <span>Etiket</span>
           <input name="label" required defaultValue={question?.label ?? ''} />
         </label>
-      </p>
-      <p>
-        <label>
-          Help text
-          <input name="helpText" defaultValue={question?.helpText ?? ''} />
-        </label>
-      </p>
-      <p>
-        <label>
-          Type
+        <label className="form-row">
+          <span>Tip</span>
           <select name="type" defaultValue={question?.type ?? 'TEXT'}>
             {questionTypes.map((type) => (
               <option key={type} value={type}>
@@ -154,28 +181,27 @@ function QuestionFields({ question }: { question?: Question }) {
             ))}
           </select>
         </label>
-      </p>
-      <p>
-        <label>
-          Required
+        <label className="form-row">
+          <span>Zorunlu</span>
           <select name="isRequired" defaultValue={String(question?.isRequired ?? false)}>
-            <option value="false">No</option>
-            <option value="true">Yes</option>
+            <option value="false">Hayır</option>
+            <option value="true">Evet</option>
           </select>
         </label>
-      </p>
-      <p>
-        <label>
-          Sort order
+        <label className="form-row">
+          <span>Sıralama</span>
           <input name="sortOrder" type="number" min="0" defaultValue={question?.sortOrder ?? 0} />
         </label>
-      </p>
-      <p>
-        <label>
-          Options JSON
-          <textarea name="options" defaultValue={formatOptions(question?.options)} />
-        </label>
-      </p>
+      </div>
+      <label className="form-row">
+        <span>Yardım metni</span>
+        <input name="helpText" defaultValue={question?.helpText ?? ''} />
+      </label>
+      <label className="form-row">
+        <span>Seçenekler (JSON)</span>
+        <textarea name="options" defaultValue={formatOptions(question?.options)} />
+        <span className="help-text">SELECT / MULTI_SELECT tipleri için anahtar/etiket çiftleri JSON.</span>
+      </label>
       <input type="hidden" name="isActive" value={String(question?.isActive ?? true)} />
     </>
   );

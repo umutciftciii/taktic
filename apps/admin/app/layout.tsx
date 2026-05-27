@@ -5,7 +5,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'TakTic Admin',
-  description: 'TakTic admin foundation.',
+  description: 'TakTic yönetim paneli',
 };
 
 type RootLayoutProps = {

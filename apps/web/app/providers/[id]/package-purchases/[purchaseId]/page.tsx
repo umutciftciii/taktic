@@ -1,5 +1,12 @@
 import Link from 'next/link';
-import { apiFetch, PackagePurchase, statusLabel } from '../../../../../lib/api';
+import {
+  apiFetch,
+  PackagePurchase,
+  statusLabel,
+  statusBadgeClass,
+  formatPrice,
+  formatDateTime,
+} from '../../../../../lib/api';
 
 type ProviderPackagePurchaseDetailPageProps = {
   params: Promise<{ id: string; purchaseId: string }>;
@@ -13,51 +20,56 @@ export default async function ProviderPackagePurchaseDetailPage({
 
   return (
     <main>
-      <p>
-        <Link href={`/providers/${id}/package-purchases`}>Satın alma geçmişi</Link>{' '}
-        <Link href={`/providers/${id}/credits`}>Kredilerim</Link>
+      <p className="breadcrumbs">
+        <Link href={`/providers/${id}/package-purchases`}>Satın alma geçmişi</Link>
+        <span aria-hidden="true">/</span>
+        <span>Detay</span>
       </p>
-      <h1>Paket Satın Alma Detayı</h1>
-      <section className="card">
-        <h2>{purchase.packageNameSnapshot}</h2>
-        <p>
-          Durum: <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
+
+      <header className="page-header">
+        <h1 className="page-title">{purchase.packageNameSnapshot}</h1>
+        <p className="page-subtitle">
+          <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>{' '}
+          <span className="muted">· {formatDateTime(purchase.createdAt)}</span>
         </p>
-        <p>Kredi: {purchase.creditAmountSnapshot}</p>
-        <p>
-          Tutar: {purchase.priceAmountSnapshot} {purchase.currencySnapshot}
-        </p>
-        <p>Oluşturulma: {formatDate(purchase.createdAt)}</p>
-        <p>Ödendi: {purchase.paidAt ? formatDate(purchase.paidAt) : '-'}</p>
-        <p>Başarısız: {purchase.failedAt ? formatDate(purchase.failedAt) : '-'}</p>
-        <p>Mock ödeme referansı: {purchase.mockPaymentReference ?? '-'}</p>
-        <p>Başarısızlık nedeni: {purchase.mockPaymentFailureReason ?? '-'}</p>
-        <p>Kredi işlem kaydı: {purchase.creditTransactionId ?? '-'}</p>
-        <p>Not: {purchase.providerNote ?? '-'}</p>
-        {purchase.status === 'PENDING' ? (
-          <p>
-            <Link className="button" href={`/providers/${id}/package-purchases/${purchase.id}/checkout`}>
-              Ödeme ekranına git
-            </Link>
-          </p>
-        ) : null}
-      </section>
+      </header>
+
+      <div className="page-narrow">
+        <section className="card" style={{ margin: 0 }}>
+          <h2>Detaylar</h2>
+          <dl className="meta-row">
+            <dt>Kredi</dt>
+            <dd>{purchase.creditAmountSnapshot}</dd>
+            <dt>Tutar</dt>
+            <dd>{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</dd>
+            <dt>Oluşturulma</dt>
+            <dd>{formatDateTime(purchase.createdAt)}</dd>
+            <dt>Ödendi</dt>
+            <dd>{purchase.paidAt ? formatDateTime(purchase.paidAt) : '-'}</dd>
+            <dt>Başarısız</dt>
+            <dd>{purchase.failedAt ? formatDateTime(purchase.failedAt) : '-'}</dd>
+            <dt>Mock ödeme ref.</dt>
+            <dd>{purchase.mockPaymentReference ?? '-'}</dd>
+            <dt>Başarısızlık nedeni</dt>
+            <dd>{purchase.mockPaymentFailureReason ?? '-'}</dd>
+            <dt>Kredi işlem kaydı</dt>
+            <dd>{purchase.creditTransactionId ?? '-'}</dd>
+            <dt>Not</dt>
+            <dd className="muted">{purchase.providerNote ?? '-'}</dd>
+          </dl>
+
+          {purchase.status === 'PENDING' ? (
+            <div className="form-actions" style={{ borderTop: 0, paddingTop: 14 }}>
+              <Link className="btn btn-primary" href={`/providers/${id}/package-purchases/${purchase.id}/checkout`}>
+                Ödeme ekranına git
+              </Link>
+              <Link className="btn btn-secondary" href={`/providers/${id}/credits`}>
+                Kredilerim
+              </Link>
+            </div>
+          ) : null}
+        </section>
+      </div>
     </main>
   );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'PAID') return 'badge badge-good';
-  if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED' || status === 'REFUNDED') {
-    return 'badge badge-bad';
-  }
-
-  return 'badge badge-warn';
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }

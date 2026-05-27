@@ -10,105 +10,129 @@ export default async function ProviderRegisterPage() {
 
   return (
     <main>
-      <p>
+      <p className="breadcrumbs">
         <Link href="/">Ana sayfa</Link>
+        <span aria-hidden="true">/</span>
+        <span>Hizmet Veren Başvurusu</span>
       </p>
-      <h1>Hizmet Veren Başvurusu</h1>
-      {!user ? (
-        <p>
-          Bu geliştirme aşamasında misafir başvuru hâlâ açık. Hesabınıza bağlamak için önce{' '}
-          <Link href="/register/provider">hizmet veren hesabı oluşturun</Link>.
+
+      <header className="page-header page-narrow">
+        <h1 className="page-title">Hizmet Veren Başvurusu</h1>
+        <p className="page-subtitle">
+          İşletme bilgilerinizi paylaşın, hizmet kategorilerinizi seçin. Onay sonrası teklif vermeye başlayabilirsiniz.
         </p>
+      </header>
+
+      {!user ? (
+        <div className="page-narrow" style={{ marginBottom: 18 }}>
+          <div className="notice">
+            Misafir başvuru hâlâ açık. Başvurunuzu hesabınıza bağlamak için önce{' '}
+            <Link href="/register/provider">hizmet veren hesabı oluşturabilirsiniz</Link>.
+          </div>
+        </div>
       ) : null}
-      {user?.role === 'PROVIDER' ? <p>Bu başvuru hizmet veren hesabınıza bağlanacak.</p> : null}
-      {user?.role === 'CUSTOMER' ? <p>Müşteri hesabıyla hizmet veren profili oluşturulamaz.</p> : null}
-      <form action={createProviderAction}>
-        <section>
+      {user?.role === 'PROVIDER' ? (
+        <div className="page-narrow" style={{ marginBottom: 18 }}>
+          <div className="notice">Bu başvuru hizmet veren hesabınıza bağlanacak.</div>
+        </div>
+      ) : null}
+      {user?.role === 'CUSTOMER' ? (
+        <div className="page-narrow" style={{ marginBottom: 18 }}>
+          <div className="notice-warning">
+            Müşteri hesabıyla hizmet veren profili oluşturulamaz.
+          </div>
+        </div>
+      ) : null}
+
+      <form action={createProviderAction} className="form-card">
+        <section className="form-section">
           <h2>İşletme Bilgileri</h2>
-          <p>
-            <label>
-              İşletme adı *
+          <p className="form-section-subtitle">İşletmenizi tanıtacak temel bilgiler.</p>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>İşletme adı *</span>
               <input name="businessName" required />
             </label>
-          </p>
-          <p>
-            <label>
-              Yetkili kişi *
+            <label className="form-row">
+              <span>Yetkili kişi *</span>
               <input name="contactName" required />
             </label>
-          </p>
-          <p>
-            <label>
-              Telefon *
-              <input name="phone" required />
+          </div>
+          <label className="form-row">
+            <span>Açıklama</span>
+            <textarea name="description" placeholder="Müşterilerinize işletmenizden kısaca bahsedin." />
+          </label>
+        </section>
+
+        <section className="form-section">
+          <h2>İletişim</h2>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>Telefon *</span>
+              <input name="phone" required placeholder="05XX XXX XX XX" />
             </label>
-          </p>
-          <p>
-            <label>
-              E-posta
-              <input name="email" type="email" />
+            <label className="form-row">
+              <span>E-posta</span>
+              <input name="email" type="email" placeholder="ornek@firma.com" />
             </label>
-          </p>
-          <p>
-            <label>
-              İl *
+          </div>
+        </section>
+
+        <section className="form-section">
+          <h2>Adres</h2>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>İl *</span>
               <input name="city" required />
             </label>
-          </p>
-          <p>
-            <label>
-              İlçe *
+            <label className="form-row">
+              <span>İlçe *</span>
               <input name="district" required />
             </label>
-          </p>
-          <p>
-            <label>
-              Adres notu
-              <textarea name="addressNote" />
-            </label>
-          </p>
-          <p>
-            <label>
-              Açıklama
-              <textarea name="description" />
-            </label>
-          </p>
+          </div>
+          <label className="form-row">
+            <span>Adres notu</span>
+            <textarea name="addressNote" placeholder="Müşterilerin sizi bulması için ek bilgi" />
+          </label>
         </section>
 
-        <section>
+        <section className="form-section">
           <h2>Hizmet Kategorileri</h2>
-          {categories.map((category) => (
-            <p key={category.id}>
-              <label>
-                <input name="categoryIds" type="checkbox" value={category.id} /> {category.name}
+          <p className="form-section-subtitle">Teklif verebileceğiniz kategorileri seçin.</p>
+          <div className="checkbox-group">
+            {categories.map((category) => (
+              <label className="checkbox-row" key={category.id}>
+                <input name="categoryIds" type="checkbox" value={category.id} />
+                <span>{category.name}</span>
               </label>
-            </p>
-          ))}
+            ))}
+          </div>
         </section>
 
-        <section>
+        <section className="form-section">
           <h2>Hizmet Bölgesi</h2>
-          <p>
-            <label>
-              İl *
+          <p className="form-section-subtitle">İlk hizmet vermek istediğiniz bölgeyi belirtin. Onay sonrası genişletebilirsiniz.</p>
+          <div className="form-grid">
+            <label className="form-row">
+              <span>İl *</span>
               <input name="serviceAreaCity" required />
             </label>
-          </p>
-          <p>
-            <label>
-              İlçe
+            <label className="form-row">
+              <span>İlçe</span>
               <input name="serviceAreaDistrict" />
             </label>
-          </p>
-          <p>
-            <label>
-              Mahalle
+            <label className="form-row">
+              <span>Mahalle</span>
               <input name="serviceAreaNeighborhood" />
             </label>
-          </p>
+          </div>
         </section>
 
-        <button type="submit">Başvuruyu Gönder</button>
+        <div className="form-actions page-narrow" style={{ borderTop: 0, paddingTop: 0 }}>
+          <button className="btn btn-primary" type="submit">Başvuruyu Gönder</button>
+          <Link className="btn btn-secondary" href="/">Vazgeç</Link>
+          <span className="muted">* zorunlu alanlar</span>
+        </div>
       </form>
     </main>
   );

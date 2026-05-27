@@ -1,5 +1,14 @@
 import Link from 'next/link';
-import { apiFetch, Offer, statusLabel } from '../../lib/api';
+import {
+  apiFetch,
+  Offer,
+  statusLabel,
+  statusBadgeClass,
+  refundActionLabel,
+  refundActionBadgeClass,
+  formatPrice,
+  formatDateTime,
+} from '../../lib/api';
 
 type AdminOffersPageProps = {
   searchParams?: Promise<{
@@ -15,73 +24,82 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
   if (params.requestId) query.set('requestId', params.requestId);
   const offers = await apiFetch<Offer[]>(`/offers${query.toString() ? `?${query.toString()}` : ''}`);
 
+  const hasFilter = Boolean(params.providerId || params.requestId);
+
   return (
     <main>
-      <p>
-        <Link href="/">Admin home</Link>
-      </p>
-      <h1>Offers</h1>
-      {params.providerId || params.requestId ? (
-        <p className="notice">
-          Filtre aktif. <Link href="/offers">Filtreleri temizle</Link>
-        </p>
+      <header className="page-header">
+        <h1 className="page-title">Teklifler</h1>
+        <p className="page-subtitle">Tüm hizmet verenler tarafından gönderilen teklifler.</p>
+      </header>
+
+      {hasFilter ? (
+        <div className="notice" style={{ marginBottom: 18 }}>
+          Filtre aktif.{' '}
+          <Link href="/offers">Filtreleri temizle</Link>
+        </div>
       ) : null}
-      <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Submitted</th>
-            <th>Provider</th>
-            <th>Request category</th>
-            <th>Location</th>
-            <th>Price</th>
-            <th>Credit</th>
-            <th>Refund</th>
-            <th>Refund policy</th>
-            <th>Status</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {offers.map((offer) => (
-            <tr key={offer.id}>
-              <td>{formatDate(offer.submittedAt)}</td>
-              <td>{offer.provider.businessName}</td>
-              <td>{offer.request.category.name}</td>
-              <td>
-                {offer.request.city}/{offer.request.district}
-              </td>
-              <td>
-                {offer.priceAmount} {offer.currency}
-              </td>
-              <td>{offer.creditCost}</td>
-              <td><span className={offer.creditRefundedAt ? 'badge badge-good' : 'badge'}>{offer.creditRefundedAt ? 'Refunded' : 'Not refunded'}</span></td>
-              <td><span className="badge">{offer.refundEligibility.recommendedAction}</span></td>
-              <td><span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span></td>
-              <td>
-                <Link href={`/offers/${offer.id}`}>Open</Link>{' '}
-                <Link href={`/requests/${offer.request.id}`}>Request</Link>{' '}
-                <Link href={`/providers/${offer.provider.id}`}>Provider</Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+      <div className="table-card">
+        <div className="table-header">
+          <h2>Teklif listesi</h2>
+          <span className="muted" style={{ fontSize: 13 }}>{offers.length} kayıt</span>
+        </div>
+        {offers.length === 0 ? (
+          <div style={{ padding: 18 }} className="empty-state">Henüz teklif yok.</div>
+        ) : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Gönderim</th>
+                  <th>Hizmet Veren</th>
+                  <th>Kategori</th>
+                  <th>Konum</th>
+                  <th>Fiyat</th>
+                  <th>Kredi</th>
+                  <th>İade</th>
+                  <th>İade önerisi</th>
+                  <th>Durum</th>
+                  <th>İşlem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {offers.map((offer) => (
+                  <tr key={offer.id}>
+                    <td>{formatDateTime(offer.submittedAt)}</td>
+                    <td><strong>{offer.provider.businessName}</strong></td>
+                    <td>{offer.request.category.name}</td>
+                    <td>{offer.request.city}/{offer.request.district}</td>
+                    <td>{formatPrice(offer.priceAmount, offer.currency)}</td>
+                    <td>{offer.creditCost}</td>
+                    <td>
+                      <span className={offer.creditRefundedAt ? 'badge badge-good' : 'badge badge-muted'}>
+                        {offer.creditRefundedAt ? 'İade edildi' : 'İade yok'}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={refundActionBadgeClass(offer.refundEligibility.recommendedAction)}>
+                        {refundActionLabel(offer.refundEligibility.recommendedAction)}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
+                    </td>
+                    <td>
+                      <div className="inline-actions">
+                        <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>Detay</Link>
+                        <Link className="btn btn-ghost btn-sm" href={`/requests/${offer.request.id}`}>Talep</Link>
+                        <Link className="btn btn-ghost btn-sm" href={`/providers/${offer.provider.id}`}>HV</Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-      {offers.length === 0 ? <div className="empty-state">No offers yet.</div> : null}
     </main>
   );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'ACCEPTED' || status === 'SHORTLISTED') return 'badge badge-good';
-  if (status === 'REJECTED' || status === 'WITHDRAWN' || status === 'CANCELLED' || status === 'EXPIRED') return 'badge badge-bad';
-  return 'badge badge-warn';
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }

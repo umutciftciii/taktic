@@ -11,41 +11,37 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
   return (
     <main className="auth-page">
       <form className="auth-card" action={registerCustomerAction}>
-        <p>
-          <Link href="/">Ana sayfa</Link>
-        </p>
         <h1 className="auth-title">Müşteri Hesabı Oluştur</h1>
         <p className="muted">Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.</p>
         {error ? (
-          <p className="error-message">
+          <div className="error-message" style={{ marginTop: 8 }}>
             {error === 'duplicate' ? 'Bu e-posta veya telefon zaten kayıtlı.' : 'Bilgileri kontrol edin.'}
-          </p>
+          </div>
         ) : null}
-        <p>
-          <label>
-            Ad soyad *
-            <input name="name" required />
+        <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
+          <label className="form-row">
+            <span>Ad soyad *</span>
+            <input name="name" required autoComplete="name" />
           </label>
-        </p>
-        <p>
-          <label>
-            E-posta *
-            <input name="email" type="email" required />
+          <label className="form-row">
+            <span>E-posta *</span>
+            <input name="email" type="email" required autoComplete="email" />
           </label>
-        </p>
-        <p>
-          <label>
-            Şifre *
-            <input name="password" type="password" minLength={8} required />
+          <label className="form-row">
+            <span>Şifre *</span>
+            <input name="password" type="password" minLength={8} required autoComplete="new-password" />
+            <span className="help-text">En az 8 karakter.</span>
           </label>
-        </p>
-        <p>
-          <label>
-            Telefon
-            <input name="phone" />
+          <label className="form-row">
+            <span>Telefon</span>
+            <input name="phone" autoComplete="tel" placeholder="05XX XXX XX XX" />
           </label>
-        </p>
-        <button className="button-full" type="submit">Hesap Oluştur</button>
+          <button className="btn btn-primary btn-block" type="submit">Hesap Oluştur</button>
+        </div>
+        <div className="inline-actions" style={{ marginTop: 14, justifyContent: 'center' }}>
+          <span className="muted">Zaten hesabınız var mı?</span>
+          <Link href="/login">Giriş yapın</Link>
+        </div>
       </form>
     </main>
   );

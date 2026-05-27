@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { AdminSummary, apiFetch, requireAdmin } from '../lib/api';
-import { logoutAction } from './login/actions';
 
 export default async function AdminHomePage() {
   const user = await requireAdmin();
@@ -8,44 +7,58 @@ export default async function AdminHomePage() {
 
   return (
     <main>
-      <h1>TakTic Admin</h1>
-      <p className="muted">Yönetim paneli. Giriş yapan hesap: {user.email}.</p>
-      <form action={logoutAction}>
-        <button className="button-secondary" type="submit">Logout</button>
-      </form>
+      <header className="page-header">
+        <h1 className="page-title">TakTic Admin</h1>
+        <p className="page-subtitle">Yönetim paneli · giriş yapan: <strong>{user.email}</strong></p>
+      </header>
 
-      <section className="summary-grid">
-        <SummaryCard label="Toplam Talepler" value={summary.totalRequests} href="/requests" />
-        <SummaryCard label="Bekleyen Talepler" value={summary.pendingRequests} href="/requests" />
-        <SummaryCard label="İncelemedeki Talepler" value={summary.inReviewRequests} href="/requests" />
-        <SummaryCard label="Onaylı Sağlayıcılar" value={summary.approvedProviders} href="/providers" />
-        <SummaryCard label="Bekleyen Sağlayıcılar" value={summary.pendingProviders} href="/providers" />
-        <SummaryCard label="Toplam Teklifler" value={summary.totalOffers} href="/offers" />
-        <SummaryCard label="İade Adayları" value={summary.refundableOffers} href="/refund-scan" />
-        <SummaryCard label="Paket Satın Almaları" value={summary.packagePurchases} href="/package-purchases" />
+      <section className="stat-grid">
+        <SummaryCard label="Toplam talep" value={summary.totalRequests} href="/requests" />
+        <SummaryCard label="Bekleyen talepler" value={summary.pendingRequests} href="/requests" tone="warning" />
+        <SummaryCard label="İncelemedeki talepler" value={summary.inReviewRequests} href="/requests" tone="warning" />
+        <SummaryCard label="Onaylı hizmet verenler" value={summary.approvedProviders} href="/providers" tone="success" />
+        <SummaryCard label="Bekleyen hizmet verenler" value={summary.pendingProviders} href="/providers" tone="warning" />
+        <SummaryCard label="Toplam teklif" value={summary.totalOffers} href="/offers" />
+        <SummaryCard label="İade adayı" value={summary.refundableOffers} href="/refund-scan" tone="warning" />
+        <SummaryCard label="Paket talebi" value={summary.packagePurchases} href="/package-purchases" />
       </section>
 
-      <section>
-        <h2>Navigation</h2>
-        <p className="nav-links">
-          <Link href="/categories">Manage categories</Link>
-          <Link href="/requests">Review service requests</Link>
-          <Link href="/providers">Review providers</Link>
-          <Link href="/offers">Review offers</Link>
-          <Link href="/credit-packages">Manage credit packages</Link>
-          <Link href="/package-purchases">Package purchases</Link>
-          <Link href="/refund-scan">Refund Scan</Link>
-        </p>
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 18 }}>Hızlı işlemler</h2>
+        <div className="inline-actions">
+          <Link className="btn btn-primary btn-sm" href="/requests">Talepleri incele</Link>
+          <Link className="btn btn-secondary btn-sm" href="/providers">Hizmet verenleri incele</Link>
+          <Link className="btn btn-secondary btn-sm" href="/offers">Teklifleri incele</Link>
+          <Link className="btn btn-secondary btn-sm" href="/categories">Kategorileri yönet</Link>
+          <Link className="btn btn-secondary btn-sm" href="/credit-packages">Kredi paketleri</Link>
+          <Link className="btn btn-secondary btn-sm" href="/package-purchases">Paket talepleri</Link>
+          <Link className="btn btn-ghost btn-sm" href="/refund-scan">İade taraması</Link>
+        </div>
       </section>
     </main>
   );
 }
 
-function SummaryCard({ label, value, href }: { label: string; value: number; href: string }) {
+function SummaryCard({
+  label,
+  value,
+  href,
+  tone,
+}: {
+  label: string;
+  value: number;
+  href: string;
+  tone?: 'success' | 'warning' | 'error';
+}) {
   return (
     <Link className="summary-card" href={href}>
       <span className="muted">{label}</span>
       <span className="metric">{value}</span>
+      {tone ? (
+        <span className={`badge badge-${tone === 'success' ? 'good' : tone === 'warning' ? 'warn' : 'bad'}`}>
+          {tone === 'success' ? 'iyi' : tone === 'warning' ? 'dikkat' : 'uyarı'}
+        </span>
+      ) : null}
     </Link>
   );
 }

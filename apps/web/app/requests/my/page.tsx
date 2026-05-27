@@ -1,6 +1,15 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { apiFetch, CustomerServiceRequest, getCurrentUser, statusLabel } from '../../../lib/api';
+import {
+  apiFetch,
+  CustomerServiceRequest,
+  getCurrentUser,
+  statusLabel,
+  statusBadgeClass,
+  qualityBadgeClass,
+  qualityLabel,
+  formatDateTime,
+} from '../../../lib/api';
 
 export default async function MyRequestsPage() {
   const user = await getCurrentUser();
@@ -12,53 +21,54 @@ export default async function MyRequestsPage() {
 
   return (
     <main>
-      <p>
+      <p className="breadcrumbs">
         <Link href="/">Ana sayfa</Link>
+        <span aria-hidden="true">/</span>
+        <span>Taleplerim</span>
       </p>
-      <h1>Taleplerim</h1>
-      {requests.length === 0 ? <div className="empty-state">Henüz talep oluşturmadınız.</div> : null}
-      <section className="card-grid">
+
+      <header className="page-header">
+        <h1 className="page-title">Taleplerim</h1>
+        <p className="page-subtitle">Oluşturduğunuz talepler ve aldığınız teklifler.</p>
+      </header>
+
+      {requests.length === 0 ? (
+        <div className="empty-state">
+          <h2>Henüz talep oluşturmadınız</h2>
+          <p className="muted">Bir kategori seçerek ilk talebinizi oluşturabilirsiniz.</p>
+          <Link className="btn btn-primary" href="/categories" style={{ marginTop: 8 }}>
+            Hizmet kategorilerine git
+          </Link>
+        </div>
+      ) : null}
+
+      <div className="list-stack">
         {requests.map((request) => (
-          <article className="card" key={request.id}>
-            <h2>{request.category.name}</h2>
-            <p>
-              <span className={statusBadgeClass(request.status)}>{statusLabel(request.status)}</span>
-              <span className={qualityBadgeClass(request.qualityLabel)}>
-                Kalite {request.qualityScore}/100
-              </span>
-              <span className="badge">{request.offersCount} teklif</span>
-            </p>
-            <p>
-              Konum: {request.city}/{request.district}
-            </p>
-            <p>Gönderim: {formatDate(request.submittedAt)}</p>
-            <p className="actions">
-              <Link className="button" href={`/requests/${request.id}/offers`}>
+          <article className="list-card" key={request.id}>
+            <div className="list-card-header">
+              <div>
+                <h2 className="list-card-title">{request.category.name}</h2>
+                <p className="list-card-meta">
+                  <span>{request.city}/{request.district}</span>
+                  <span>{formatDateTime(request.submittedAt)}</span>
+                  <span>{request.offersCount} teklif</span>
+                </p>
+              </div>
+              <div className="inline-actions">
+                <span className={statusBadgeClass(request.status)}>{statusLabel(request.status)}</span>
+                <span className={qualityBadgeClass(request.qualityLabel)}>
+                  Kalite {request.qualityScore} · {qualityLabel(request.qualityLabel)}
+                </span>
+              </div>
+            </div>
+            <div className="inline-actions">
+              <Link className="btn btn-primary btn-sm" href={`/requests/${request.id}/offers`}>
                 Teklifleri görüntüle
               </Link>
-            </p>
+            </div>
           </article>
         ))}
-      </section>
+      </div>
     </main>
   );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'APPROVED') return 'badge badge-good';
-  if (status === 'REJECTED' || status === 'CANCELLED') return 'badge badge-bad';
-  return 'badge badge-warn';
-}
-
-function qualityBadgeClass(label: string) {
-  if (label === 'HIGH') return 'badge badge-good';
-  if (label === 'MEDIUM') return 'badge badge-warn';
-  return 'badge badge-bad';
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }

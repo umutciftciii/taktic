@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, ProviderProfile, statusLabel } from '../../../lib/api';
+import { apiFetch, ProviderProfile, statusLabel, statusBadgeClass } from '../../../lib/api';
 
 type ProviderPreviewPageProps = {
   params: Promise<{ id: string }>;
@@ -11,51 +11,90 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
 
   return (
     <main>
-      <p>
-        <Link href="/providers/me">Panelim</Link> <Link href="/">Ana sayfa</Link>
+      <p className="breadcrumbs">
+        <Link href="/">Ana sayfa</Link>
+        <span aria-hidden="true">/</span>
+        <Link href="/providers/me">Panelim</Link>
+        <span aria-hidden="true">/</span>
+        <span>Profil</span>
       </p>
-      <h1>{provider.businessName}</h1>
-      <p><span className={badgeClass(provider.status)}>{statusLabel(provider.status)}</span></p>
-      {provider.status === 'APPROVED' ? (
-        <p className="actions">
-          <Link className="button" href={`/providers/${provider.id}/requests`}>Uygun Talepler</Link>
-          <Link className="button" href={`/providers/${provider.id}/offers`}>Tekliflerim</Link>
-          <Link className="button" href={`/providers/${provider.id}/credits`}>Kredilerim</Link>
-          <Link className="button" href={`/providers/${provider.id}/edit`}>Profili düzenle</Link>
+
+      <header className="page-header">
+        <h1 className="page-title">{provider.businessName}</h1>
+        <p className="page-subtitle">
+          <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>{' '}
+          <span className="muted">· {provider.city}/{provider.district}</span>
         </p>
-      ) : null}
-      {provider.status !== 'APPROVED' ? (
-        <p className="actions">
-          <Link className="button" href={`/providers/${provider.id}/edit`}>Profili düzenle</Link>
-        </p>
-      ) : null}
-      <p>Yetkili: {provider.contactName}</p>
-      <p>
-        Konum: {provider.city}/{provider.district}
-      </p>
-      <h2>Kategoriler</h2>
-      <ul>
-        {provider.serviceCategories.map((item) => (
-          <li key={item.id}>{item.category.name}</li>
-        ))}
-      </ul>
-      <h2>Hizmet Bölgeleri</h2>
-      <ul>
-        {provider.serviceAreas.map((area) => (
-          <li key={area.id}>
-            {area.city}
-            {area.district ? `/${area.district}` : ''}
-            {area.neighborhood ? `/${area.neighborhood}` : ''}
-          </li>
-        ))}
-      </ul>
+      </header>
+
+      <div className="inline-actions" style={{ marginBottom: 18 }}>
+        {provider.status === 'APPROVED' ? (
+          <>
+            <Link className="btn btn-primary" href={`/providers/${provider.id}/requests`}>Uygun Talepler</Link>
+            <Link className="btn btn-secondary" href={`/providers/${provider.id}/offers`}>Tekliflerim</Link>
+            <Link className="btn btn-secondary" href={`/providers/${provider.id}/credits`}>Kredilerim</Link>
+          </>
+        ) : null}
+        <Link className="btn btn-ghost" href={`/providers/${provider.id}/edit`}>Profili düzenle</Link>
+      </div>
+
+      <div className="detail-grid">
+        <div className="stack">
+          <section className="card" style={{ margin: 0 }}>
+            <h2>Hakkında</h2>
+            <dl className="meta-row">
+              <dt>Yetkili</dt>
+              <dd>{provider.contactName}</dd>
+              <dt>Konum</dt>
+              <dd>{provider.city}/{provider.district}</dd>
+              <dt>Açıklama</dt>
+              <dd>{provider.description ?? '-'}</dd>
+            </dl>
+          </section>
+
+          <section className="card" style={{ margin: 0 }}>
+            <h2>Kategoriler</h2>
+            <div className="inline-actions">
+              {provider.serviceCategories.length === 0 ? (
+                <span className="muted">Kategori seçilmemiş.</span>
+              ) : (
+                provider.serviceCategories.map((item) => (
+                  <span className="badge badge-info" key={item.id}>{item.category.name}</span>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="card" style={{ margin: 0 }}>
+            <h2>Hizmet Bölgeleri</h2>
+            <div className="inline-actions">
+              {provider.serviceAreas.length === 0 ? (
+                <span className="muted">Bölge tanımlı değil.</span>
+              ) : (
+                provider.serviceAreas.map((area) => (
+                  <span className="badge badge-muted" key={area.id}>
+                    {area.city}
+                    {area.district ? `/${area.district}` : ''}
+                    {area.neighborhood ? `/${area.neighborhood}` : ''}
+                  </span>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+
+        <div className="stack">
+          <section className="card" style={{ margin: 0 }}>
+            <h2>İletişim</h2>
+            <dl className="meta-row">
+              <dt>Telefon</dt>
+              <dd>{provider.phone}</dd>
+              <dt>E-posta</dt>
+              <dd>{provider.email ?? '-'}</dd>
+            </dl>
+          </section>
+        </div>
+      </div>
     </main>
   );
-}
-
-function badgeClass(status: string) {
-  if (status === 'APPROVED') return 'badge badge-good';
-  if (status === 'PENDING_REVIEW') return 'badge badge-warn';
-  if (status === 'REJECTED' || status === 'SUSPENDED') return 'badge badge-bad';
-  return 'badge';
 }

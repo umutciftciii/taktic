@@ -1,5 +1,11 @@
 import Link from 'next/link';
-import { apiFetch, PackagePurchase, statusLabel } from '../../../../../../lib/api';
+import {
+  apiFetch,
+  PackagePurchase,
+  statusLabel,
+  statusBadgeClass,
+  formatPrice,
+} from '../../../../../../lib/api';
 import { mockPayPackagePurchaseAction } from './actions';
 
 type ProviderPackagePurchaseCheckoutPageProps = {
@@ -14,72 +20,81 @@ export default async function ProviderPackagePurchaseCheckoutPage({
 
   return (
     <main>
-      <p>
-        <Link href={`/providers/${id}/package-purchases/${purchase.id}`}>Satın alma detayı</Link>{' '}
-        <Link href={`/providers/${id}/credits`}>Kredilerim</Link>
+      <p className="breadcrumbs">
+        <Link href={`/providers/${id}/package-purchases`}>Satın almalar</Link>
+        <span aria-hidden="true">/</span>
+        <Link href={`/providers/${id}/package-purchases/${purchase.id}`}>Detay</Link>
+        <span aria-hidden="true">/</span>
+        <span>Ödeme</span>
       </p>
-      <h1>Mock Paket Ödeme</h1>
-      <p className="notice">Bu ödeme ekranı test amaçlıdır. Gerçek kart bilgisi girmeyin.</p>
 
-      <section className="summary-card">
-        <p className="muted">Paket</p>
-        <h2>{purchase.packageNameSnapshot}</h2>
-        <p>{purchase.creditAmountSnapshot} kredi</p>
-        <p>
-          {purchase.priceAmountSnapshot} {purchase.currencySnapshot}
-        </p>
-        <p>
-          Durum: <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
-        </p>
-      </section>
+      <header className="page-header page-narrow">
+        <h1 className="page-title">Mock Paket Ödeme</h1>
+        <p className="page-subtitle">Bu ödeme ekranı test amaçlıdır. Gerçek kart bilgisi girmeyin.</p>
+      </header>
 
-      {purchase.status === 'PENDING' ? (
-        <form action={mockPayPackagePurchaseAction}>
-          <input type="hidden" name="providerId" value={id} />
-          <input type="hidden" name="purchaseId" value={purchase.id} />
-          <p>
-            <label>
-              Kart üzerindeki isim
+      <div className="form-card" style={{ maxWidth: 560 }}>
+        <section className="form-section">
+          <h2>{purchase.packageNameSnapshot}</h2>
+          <dl className="meta-row">
+            <dt>Kredi</dt>
+            <dd>{purchase.creditAmountSnapshot}</dd>
+            <dt>Tutar</dt>
+            <dd><strong>{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</strong></dd>
+            <dt>Durum</dt>
+            <dd><span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span></dd>
+          </dl>
+        </section>
+
+        {purchase.status === 'PENDING' ? (
+          <form action={mockPayPackagePurchaseAction} className="form-section">
+            <h2>Kart Bilgileri</h2>
+            <p className="form-section-subtitle">Mock — gerçek kart işlemi yapılmaz.</p>
+            <input type="hidden" name="providerId" value={id} />
+            <input type="hidden" name="purchaseId" value={purchase.id} />
+            <label className="form-row">
+              <span>Kart üzerindeki isim</span>
               <input name="cardholderName" required placeholder="Test User" />
             </label>
-          </p>
-          <p>
-            <label>
-              Kart numarası
-              <input name="cardNumber" required inputMode="numeric" placeholder="4242424242424242" />
+            <label className="form-row">
+              <span>Kart numarası</span>
+              <input name="cardNumber" required inputMode="numeric" placeholder="4242 4242 4242 4242" />
             </label>
-          </p>
-          <p className="actions">
-            <label>
-              Ay
-              <input name="expiryMonth" required type="number" min="1" max="12" defaultValue={12} />
-            </label>
-            <label>
-              Yıl
-              <input name="expiryYear" required type="number" min={new Date().getFullYear()} defaultValue={2030} />
-            </label>
-            <label>
-              CVV
-              <input name="cvv" required inputMode="numeric" placeholder="123" />
-            </label>
-          </p>
-          <p className="muted">Kart numarası 0000 ile biterse mock ödeme deterministik olarak başarısız olur.</p>
-          <button type="submit">Mock Ödemeyi Tamamla</button>
-        </form>
-      ) : (
-        <p className="notice">
-          Bu satın alma artık ödeme alamaz. Durum: {statusLabel(purchase.status)}
-        </p>
-      )}
+            <div className="form-grid">
+              <label className="form-row">
+                <span>Ay</span>
+                <input name="expiryMonth" required type="number" min="1" max="12" defaultValue={12} />
+              </label>
+              <label className="form-row">
+                <span>Yıl</span>
+                <input
+                  name="expiryYear"
+                  required
+                  type="number"
+                  min={new Date().getFullYear()}
+                  defaultValue={2030}
+                />
+              </label>
+              <label className="form-row">
+                <span>CVV</span>
+                <input name="cvv" required inputMode="numeric" placeholder="123" />
+              </label>
+            </div>
+            <p className="help-text">
+              İpucu: Kart numarası 0000 ile biterse mock ödeme deterministik olarak başarısız olur.
+            </p>
+            <div>
+              <button className="btn btn-primary btn-block" type="submit">
+                Mock Ödemeyi Tamamla
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="notice-warning">
+            Bu satın alma artık ödeme alamaz. Durum: {statusLabel(purchase.status)}
+          </div>
+        )}
+      </div>
     </main>
   );
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'PAID') return 'badge badge-good';
-  if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED' || status === 'REFUNDED') {
-    return 'badge badge-bad';
-  }
-
-  return 'badge badge-warn';
 }
