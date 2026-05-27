@@ -121,28 +121,15 @@ export class OffersService {
             ? `${reasonCode}: ${reasonNote ?? 'Manual override'}`
             : `${reasonCode}: ${reasonNote ?? refundReasonLabel(reasonCode)}`;
 
-        const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
-        const refundTransaction = await tx.providerCreditTransaction.create({
-          data: {
-            providerId: offer.providerId,
-            type: CreditTransactionType.OFFER_REFUND,
-            amount: offer.creditCost,
-            balanceAfter: currentBalance + offer.creditCost,
-            reason: storedReason,
-            referenceType: 'Offer',
-            referenceId: offer.id,
-          },
-        });
-
-        const updatedOffer = await tx.offer.update({
+        const { refundTransaction } = await refundOfferCreditInTransaction(tx, offer, storedReason);
+        const updatedOffer = await tx.offer.findUnique({
           where: { id: offer.id },
-          data: {
-            creditRefundedTransactionId: refundTransaction.id,
-            creditRefundedAt: new Date(),
-            creditRefundReason: storedReason,
-          },
           include: offerInclude,
         });
+
+        if (!updatedOffer) {
+          throw new NotFoundException('Offer not found');
+        }
 
         return {
           offer: withRefundEligibility(updatedOffer),
@@ -315,6 +302,65 @@ type RefundPolicyOfferShape = {
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
 };
+
+export async function refundOfferCreditInTransaction(
+  tx: Prisma.TransactionClient,
+  offer: {
+    id: string;
+    providerId: string;
+    creditCost: number;
+  },
+  storedReason: string,
+  options: { enforceAutomaticEligibility?: boolean } = {},
+) {
+  const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
+  const refundTransaction = await tx.providerCreditTransaction.create({
+    data: {
+      providerId: offer.providerId,
+      type: CreditTransactionType.OFFER_REFUND,
+      amount: offer.creditCost,
+      balanceAfter: currentBalance + offer.creditCost,
+      reason: storedReason,
+      referenceType: 'Offer',
+      referenceId: offer.id,
+    },
+  });
+
+  const updated = await tx.offer.updateMany({
+    where: {
+      id: offer.id,
+      creditRefundedTransactionId: null,
+      creditRefundedAt: null,
+      creditSpentTransactionId: { not: null },
+      creditCost: { gt: 0 },
+      ...(options.enforceAutomaticEligibility
+        ? {
+            viewedAt: null,
+            status: {
+              notIn: [
+                OfferStatus.VIEWED,
+                OfferStatus.ACCEPTED,
+                OfferStatus.WITHDRAWN,
+                OfferStatus.CANCELLED,
+                OfferStatus.EXPIRED,
+              ],
+            },
+          }
+        : {}),
+    },
+    data: {
+      creditRefundedTransactionId: refundTransaction.id,
+      creditRefundedAt: new Date(),
+      creditRefundReason: storedReason,
+    },
+  });
+
+  if (updated.count !== 1) {
+    throw new ConflictException('Offer credit is no longer eligible for refund');
+  }
+
+  return { refundTransaction };
+}
 
 async function getProviderCreditBalanceInTransaction(
   tx: Prisma.TransactionClient,

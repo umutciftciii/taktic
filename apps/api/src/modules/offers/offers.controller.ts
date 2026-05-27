@@ -4,12 +4,17 @@ import { Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
+import { ExecuteRefundScanDto, RefundScanQueryDto } from './dto/refund-scan.dto';
 import { UpdateOfferStatusDto } from './dto/update-offer-status.dto';
+import { RefundScanService } from './refund-scan.service';
 import { OffersService } from './offers.service';
 
 @Controller('offers')
 export class OffersController {
-  constructor(@Inject(OffersService) private readonly offersService: OffersService) {}
+  constructor(
+    @Inject(OffersService) private readonly offersService: OffersService,
+    @Inject(RefundScanService) private readonly refundScanService: RefundScanService,
+  ) {}
 
   @Get()
   @UseGuards(AuthGuard, RolesGuard)
@@ -20,6 +25,23 @@ export class OffersController {
     @Query('requestId') requestId?: string,
   ) {
     return this.offersService.listOffers({ status, providerId, requestId });
+  }
+
+  @Get('refund-scan')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  refundScan(@Query() query: RefundScanQueryDto) {
+    return this.refundScanService.dryRun({
+      olderThanHours: query.olderThanHours,
+      limit: query.limit,
+    });
+  }
+
+  @Post('refund-scan/execute')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  executeRefundScan(@Body() dto: ExecuteRefundScanDto) {
+    return this.refundScanService.execute(dto);
   }
 
   @Get(':id')

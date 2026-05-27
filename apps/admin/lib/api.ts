@@ -230,6 +230,45 @@ export type Offer = {
   };
 };
 
+export type RefundScanItem = {
+  offerId: string;
+  providerId: string;
+  requestId: string;
+  creditCost: number;
+  submittedAt: string;
+  hoursSinceSubmitted: number | null;
+  reasonCode: 'NOT_VIEWED_48H';
+  recommendedAction: 'FULL_REFUND';
+};
+
+export type RefundScanSkippedSummary = {
+  alreadyRefunded: number;
+  viewed: number;
+  notOldEnough: number;
+  noCreditSpend: number;
+  statusNotEligible: number;
+};
+
+export type RefundScanResponse = {
+  eligibleCount: number;
+  skippedCount: number;
+  items: RefundScanItem[];
+  skippedSummary: RefundScanSkippedSummary;
+};
+
+export type RefundScanExecuteResult = {
+  offerId: string;
+  status: 'REFUNDED' | 'SKIPPED' | 'FAILED';
+  reason: string;
+};
+
+export type RefundScanExecuteResponse = {
+  processed: number;
+  refunded: number;
+  skipped: number;
+  results: RefundScanExecuteResult[];
+};
+
 export type CreditTransactionType =
   | 'ADMIN_GRANT'
   | 'ADMIN_DEDUCT'

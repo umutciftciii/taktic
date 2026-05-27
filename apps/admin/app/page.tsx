@@ -27,6 +27,9 @@ export default async function AdminHomePage() {
       <p>
         <Link href="/credit-packages">Manage credit packages</Link>
       </p>
+      <p>
+        <Link href="/refund-scan">Refund Scan</Link>
+      </p>
     </main>
   );
 }
