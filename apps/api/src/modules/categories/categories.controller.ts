@@ -13,8 +13,15 @@ export class CategoriesController {
   constructor(@Inject(CategoriesService) private readonly categoriesService: CategoriesService) {}
 
   @Get()
-  listCategories(@Query('includeInactive') includeInactive?: string) {
-    return this.categoriesService.listCategories(includeInactive === 'true');
+  listCategories(
+    @Query('includeInactive') includeInactive?: string,
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.categoriesService.listCategories(includeInactive === 'true', {
+      q,
+      limit: limit ? Number(limit) : undefined,
+    });
   }
 
   @Get(':slug')

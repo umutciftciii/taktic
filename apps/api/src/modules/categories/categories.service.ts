@@ -14,10 +14,30 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 export class CategoriesService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  listCategories(includeInactive: boolean) {
+  listCategories(includeInactive: boolean, options?: { q?: string; limit?: number }) {
+    const q = options?.q?.trim();
+    const limit =
+      options?.limit !== undefined && Number.isFinite(options.limit) && options.limit > 0
+        ? Math.min(Math.floor(options.limit), 100)
+        : undefined;
+
+    const where: Prisma.ServiceCategoryWhereInput = {
+      ...(includeInactive ? {} : { isActive: true }),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { slug: { contains: q.toLowerCase(), mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
     return this.prisma.serviceCategory.findMany({
-      where: includeInactive ? undefined : { isActive: true },
+      where,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      take: limit,
       include: {
         _count: {
           select: { questions: true },

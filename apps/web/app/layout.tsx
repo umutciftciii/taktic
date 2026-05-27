@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import './globals.css';
+import { CategorySearch } from './category-search';
 
 export const metadata: Metadata = {
   title: 'TakTic',
@@ -23,8 +24,11 @@ export default function RootLayout({ children }: RootLayoutProps) {
                 <span className="brand-mark">T</span>
                 <span>TakTic</span>
               </Link>
+              <div className="app-header-search">
+                <CategorySearch />
+              </div>
               <nav className="app-nav" aria-label="Site navigation">
-                <Link href="/categories">Hizmet Al</Link>
+                <Link href="/categories">Kategoriler</Link>
                 <Link href="/providers/register">Hizmet Ver</Link>
                 <Link href="/requests/my">Taleplerim</Link>
                 <Link href="/providers/me">Panelim</Link>
