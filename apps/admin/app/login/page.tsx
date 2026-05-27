@@ -8,10 +8,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const { error } = await searchParams;
 
   return (
-    <main>
-      <h1>TakTic Admin Login</h1>
-      {error ? <p>Login failed. Check your email and password.</p> : null}
-      <form action={loginAction}>
+    <main className="auth-page">
+      <form className="auth-card" action={loginAction}>
+        <h1 className="auth-title">TakTic Admin</h1>
+        <p className="muted">Yönetim paneline giriş yapın</p>
+        {error ? <p className="error-message">Login failed. Check your email and password.</p> : null}
         <p>
           <label>
             Email
@@ -24,7 +25,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             <input name="password" type="password" required />
           </label>
         </p>
-        <button type="submit">Login</button>
+        <button className="button-full" type="submit">Login</button>
+        <p className="muted">Local admin: admin@taktic.local / ChangeMe123!</p>
       </form>
     </main>
   );

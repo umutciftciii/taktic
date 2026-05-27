@@ -9,9 +9,9 @@ export default async function AdminHomePage() {
   return (
     <main>
       <h1>TakTic Admin</h1>
-      <p>Admin foundation. Logged in as {user.email}.</p>
+      <p className="muted">Yönetim paneli. Giriş yapan hesap: {user.email}.</p>
       <form action={logoutAction}>
-        <button type="submit">Logout</button>
+        <button className="button-secondary" type="submit">Logout</button>
       </form>
 
       <section className="summary-grid">

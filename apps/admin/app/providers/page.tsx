@@ -10,6 +10,7 @@ export default async function AdminProvidersPage() {
         <Link href="/">Admin home</Link>
       </p>
       <h1>Providers</h1>
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -44,6 +45,7 @@ export default async function AdminProvidersPage() {
           ))}
         </tbody>
       </table>
+      </div>
       {providers.length === 0 ? <div className="empty-state">No providers yet.</div> : null}
     </main>
   );

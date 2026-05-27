@@ -3,18 +3,29 @@ import Link from 'next/link';
 export default function HomePage() {
   return (
     <main>
-      <h1>TakTic</h1>
-      <p>Local services marketplace foundation.</p>
-      <p className="nav-links">
-        <Link href="/categories">Hizmet kategorilerini gör</Link>
-        <Link href="/requests/my">Taleplerim</Link>
-        <Link href="/providers/me">Hizmet veren panelim</Link>
-      </p>
-      <p className="nav-links">
-        <Link href="/register/customer">Müşteri hesabı oluştur</Link>
-        <Link href="/register/provider">Hizmet veren hesabı oluştur</Link>
-        <Link href="/providers/register">Hizmet veren başvurusu yap</Link>
-      </p>
+      <section className="hero">
+        <h1>TakTic</h1>
+        <p className="muted">Yerel hizmet taleplerini doğru hizmet verenlerle buluşturan adil pazar yeri.</p>
+        <p className="actions">
+          <Link className="button" href="/categories">Hizmet Al</Link>
+          <Link className="button button-secondary" href="/providers/register">Hizmet Ver</Link>
+          <Link href="/login">Giriş yap</Link>
+        </p>
+      </section>
+      <section className="summary-grid">
+        <Link className="summary-card" href="/categories">
+          <span className="muted">Müşteri</span>
+          <span className="metric">Talep oluştur</span>
+        </Link>
+        <Link className="summary-card" href="/requests/my">
+          <span className="muted">Takip</span>
+          <span className="metric">Taleplerim</span>
+        </Link>
+        <Link className="summary-card" href="/providers/me">
+          <span className="muted">Hizmet veren</span>
+          <span className="metric">Panelim</span>
+        </Link>
+      </section>
     </main>
   );
 }

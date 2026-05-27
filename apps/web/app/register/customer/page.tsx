@@ -9,13 +9,18 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
   const { error } = await searchParams;
 
   return (
-    <main>
-      <p>
-        <Link href="/">Ana sayfa</Link>
-      </p>
-      <h1>Müşteri Hesabı Oluştur</h1>
-      {error ? <p>{error === 'duplicate' ? 'Bu e-posta veya telefon zaten kayıtlı.' : 'Bilgileri kontrol edin.'}</p> : null}
-      <form action={registerCustomerAction}>
+    <main className="auth-page">
+      <form className="auth-card" action={registerCustomerAction}>
+        <p>
+          <Link href="/">Ana sayfa</Link>
+        </p>
+        <h1 className="auth-title">Müşteri Hesabı Oluştur</h1>
+        <p className="muted">Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.</p>
+        {error ? (
+          <p className="error-message">
+            {error === 'duplicate' ? 'Bu e-posta veya telefon zaten kayıtlı.' : 'Bilgileri kontrol edin.'}
+          </p>
+        ) : null}
         <p>
           <label>
             Ad soyad *
@@ -40,7 +45,7 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
             <input name="phone" />
           </label>
         </p>
-        <button type="submit">Hesap Oluştur</button>
+        <button className="button-full" type="submit">Hesap Oluştur</button>
       </form>
     </main>
   );

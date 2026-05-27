@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { AdminShell } from './admin-shell';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -14,7 +15,9 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="tr">
-      <body>{children}</body>
+      <body>
+        <AdminShell>{children}</AdminShell>
+      </body>
     </html>
   );
 }

@@ -18,5 +18,93 @@ services:
       retries: 5
       start_period: 10s
 
+  api:
+    image: node:22-alpine
+    container_name: taktic-api
+    working_dir: /app
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @taktic/api dev"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      API_PORT: ${API_PORT:-3001}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-taktic_user}:${POSTGRES_PASSWORD:-taktic_password}@postgres:5432/${POSTGRES_DB:-taktic}?schema=public
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-7}
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:3002}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      REFUND_SCHEDULER_ENABLED: ${REFUND_SCHEDULER_ENABLED:-false}
+      REFUND_SCHEDULER_CRON: ${REFUND_SCHEDULER_CRON:-0 * * * *}
+      REFUND_SCAN_OLDER_THAN_HOURS: ${REFUND_SCAN_OLDER_THAN_HOURS:-48}
+      REFUND_SCAN_LIMIT: ${REFUND_SCAN_LIMIT:-100}
+    ports:
+      - "${API_PORT:-3001}:3001"
+    volumes:
+      - .:/app
+      - taktic-api-root-node-modules:/app/node_modules
+      - taktic-api-node-modules:/app/apps/api/node_modules
+      - taktic-shared-node-modules:/app/packages/shared/node_modules
+      - taktic-api-pnpm-store:/root/.local/share/pnpm/store
+
+  web:
+    image: node:22-alpine
+    container_name: taktic-web
+    working_dir: /app
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @taktic/web dev"
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      API_INTERNAL_URL: http://api:3001
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - taktic-web-root-node-modules:/app/node_modules
+      - taktic-web-node-modules:/app/apps/web/node_modules
+      - taktic-web-next:/app/apps/web/.next
+      - taktic-shared-node-modules:/app/packages/shared/node_modules
+      - taktic-web-pnpm-store:/root/.local/share/pnpm/store
+
+  admin:
+    image: node:22-alpine
+    container_name: taktic-admin
+    working_dir: /app
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @taktic/admin dev"
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      API_INTERNAL_URL: http://api:3001
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
+    ports:
+      - "${ADMIN_PORT:-3002}:3002"
+    volumes:
+      - .:/app
+      - taktic-admin-root-node-modules:/app/node_modules
+      - taktic-admin-node-modules:/app/apps/admin/node_modules
+      - taktic-admin-next:/app/apps/admin/.next
+      - taktic-shared-node-modules:/app/packages/shared/node_modules
+      - taktic-admin-pnpm-store:/root/.local/share/pnpm/store
+
 volumes:
   taktic-postgres-data:
+  taktic-api-pnpm-store:
+  taktic-web-pnpm-store:
+  taktic-admin-pnpm-store:
+  taktic-api-root-node-modules:
+  taktic-web-root-node-modules:
+  taktic-admin-root-node-modules:
+  taktic-api-node-modules:
+  taktic-web-node-modules:
+  taktic-admin-node-modules:
+  taktic-web-next:
+  taktic-admin-next:
+  taktic-shared-node-modules:

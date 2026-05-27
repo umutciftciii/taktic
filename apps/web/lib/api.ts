@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export type QuestionType =
   | 'TEXT'

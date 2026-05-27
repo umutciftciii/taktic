@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const authCookieName = process.env.AUTH_COOKIE_NAME ?? 'taktic_session';
 
 export async function loginAction(formData: FormData) {

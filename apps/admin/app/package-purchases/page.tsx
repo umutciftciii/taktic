@@ -30,6 +30,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
           Filtered list. <Link href="/package-purchases">Clear filters</Link>
         </p>
       ) : null}
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -63,6 +64,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
           ))}
         </tbody>
       </table>
+      </div>
       {purchases.length === 0 ? <div className="empty-state">No package purchases yet.</div> : null}
     </main>
   );

@@ -37,6 +37,7 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
           </Link>
         ))}
       </p>
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -74,6 +75,7 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
           ))}
         </tbody>
       </table>
+      </div>
       {filteredRequests.length === 0 ? <div className="empty-state">No service requests found.</div> : null}
     </main>
   );

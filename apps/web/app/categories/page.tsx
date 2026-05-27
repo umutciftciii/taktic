@@ -7,14 +7,15 @@ export default async function CategoriesPage() {
   return (
     <main>
       <h1>Hizmet Kategorileri</h1>
-      <ul>
+      <section className="card-grid">
         {categories.map((category) => (
-          <li key={category.id}>
-            <Link href={`/categories/${category.slug}`}>{category.name}</Link>
+          <article className="card" key={category.id}>
+            <h2><Link href={`/categories/${category.slug}`}>{category.name}</Link></h2>
             {category.description ? <p>{category.description}</p> : null}
-          </li>
+            <Link className="button" href={`/categories/${category.slug}`}>Talep oluştur</Link>
+          </article>
         ))}
-      </ul>
+      </section>
     </main>
   );
 }

@@ -26,6 +26,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
           Filtre aktif. <Link href="/offers">Filtreleri temizle</Link>
         </p>
       ) : null}
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -66,6 +67,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
           ))}
         </tbody>
       </table>
+      </div>
       {offers.length === 0 ? <div className="empty-state">No offers yet.</div> : null}
     </main>
   );

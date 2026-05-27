@@ -109,6 +109,7 @@ export function RefundScanClient({
           <li>No credit spend: {scan.skippedSummary.noCreditSpend}</li>
           <li>Status not eligible: {scan.skippedSummary.statusNotEligible}</li>
         </ul>
+        <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -137,6 +138,7 @@ export function RefundScanClient({
             ))}
           </tbody>
         </table>
+        </div>
         {scan.items.length === 0 ? <p>No eligible offers in this dry-run.</p> : null}
       </section>
 
@@ -147,6 +149,7 @@ export function RefundScanClient({
             Processed: {executeResult.processed} | Refunded: {executeResult.refunded} | Skipped:{' '}
             {executeResult.skipped}
           </p>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -165,6 +168,7 @@ export function RefundScanClient({
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       ) : null}
     </>

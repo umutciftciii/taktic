@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export async function registerCustomerAction(formData: FormData) {
   await register('/auth/register-customer', formData, '/requests/my');

@@ -9,13 +9,18 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
   const { error } = await searchParams;
 
   return (
-    <main>
-      <p>
-        <Link href="/">Ana sayfa</Link>
-      </p>
-      <h1>Hizmet Veren Hesabı Oluştur</h1>
-      {error ? <p>{error === 'duplicate' ? 'Bu e-posta veya telefon zaten kayıtlı.' : 'Bilgileri kontrol edin.'}</p> : null}
-      <form action={registerProviderAction}>
+    <main className="auth-page">
+      <form className="auth-card" action={registerProviderAction}>
+        <p>
+          <Link href="/">Ana sayfa</Link>
+        </p>
+        <h1 className="auth-title">Hizmet Veren Hesabı Oluştur</h1>
+        <p className="muted">Profilinizi bağlamak ve teklif akışını yönetmek için hesap açın.</p>
+        {error ? (
+          <p className="error-message">
+            {error === 'duplicate' ? 'Bu e-posta veya telefon zaten kayıtlı.' : 'Bilgileri kontrol edin.'}
+          </p>
+        ) : null}
         <p>
           <label>
             Yetkili adı *
@@ -40,11 +45,11 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
             <input name="phone" />
           </label>
         </p>
-        <button type="submit">Hesap Oluştur</button>
+        <button className="button-full" type="submit">Hesap Oluştur</button>
+        <p className="muted">
+          Hesap oluşturduktan sonra <Link href="/providers/register">hizmet veren başvurusunu</Link> tamamlayın.
+        </p>
       </form>
-      <p>
-        Hesap oluşturduktan sonra <Link href="/providers/register">hizmet veren başvurusunu</Link> tamamlayın.
-      </p>
     </main>
   );
 }
