@@ -79,6 +79,25 @@ Seeding creates a local development admin if it does not already exist:
 
 Authentication uses an HTTP-only cookie session named `taktic_session` by default. The seed does not overwrite an existing admin password.
 
+## Local Ops
+
+Refund scan automation is disabled by default. The scheduled worker is optional and uses the same execution logic as the admin refund scan endpoint, so it preserves the same eligibility checks, transactions, and idempotency behavior.
+
+To enable it locally:
+
+```bash
+REFUND_SCHEDULER_ENABLED=true
+```
+
+Relevant environment variables:
+
+- `REFUND_SCHEDULER_ENABLED=false`
+- `REFUND_SCHEDULER_CRON=0 * * * *`
+- `REFUND_SCAN_OLDER_THAN_HOURS=48`
+- `REFUND_SCAN_LIMIT=100`
+
+The scheduler only runs full refunds for the existing not-viewed offer policy. It does not perform partial refunds.
+
 ## Phase 0 Scope
 
 Included:
