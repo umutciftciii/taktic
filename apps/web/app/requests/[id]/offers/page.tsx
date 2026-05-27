@@ -15,7 +15,7 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
         <Link href="/categories">Kategoriler</Link>
       </p>
       <h1>Talep Teklifleri</h1>
-      <p>Bu fazda teklif kabul/ödeme akışı aktif değildir.</p>
+      <p>Bu fazda ödeme ve iletişim akışı aktif değildir.</p>
       {offers.length === 0 ? <p>Bu talep için henüz teklif yok.</p> : null}
       {offers.map((offer) => (
         <article key={offer.id}>
@@ -30,6 +30,9 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
           <p>Mesaj: {offer.message}</p>
           <p>Garanti notu: {offer.warrantyNote ?? '-'}</p>
           <p>Gönderim: {formatDate(offer.submittedAt)}</p>
+          <p>
+            <Link href={`/requests/${id}/offers/${offer.id}`}>Teklifi İncele</Link>
+          </p>
         </article>
       ))}
     </main>

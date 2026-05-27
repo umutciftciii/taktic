@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { CreditTransactionType, OfferStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import {
   calculateRefundEligibility,
@@ -193,10 +194,75 @@ export class OffersService {
     }));
   }
 
+  async getRequestOffer(requestId: string, offerId: string) {
+    const offer = await this.getRequestOfferOrThrow(requestId, offerId);
+    return toCustomerOfferDetail(offer);
+  }
+
+  async markRequestOfferViewed(requestId: string, offerId: string) {
+    const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId);
+    const now = new Date();
+
+    const offer = await this.prisma.offer.update({
+      where: { id: offerId },
+      data: {
+        ...(existingOffer.viewedAt ? {} : { viewedAt: now }),
+        ...(existingOffer.status === OfferStatus.SUBMITTED ? { status: OfferStatus.VIEWED } : {}),
+      },
+      include: customerOfferInclude,
+    });
+
+    return toCustomerOfferDetail(offer);
+  }
+
+  async updateRequestOfferAction(
+    requestId: string,
+    offerId: string,
+    dto: CustomerOfferActionDto,
+  ) {
+    const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId);
+
+    if (
+      existingOffer.status === OfferStatus.WITHDRAWN ||
+      existingOffer.status === OfferStatus.CANCELLED ||
+      existingOffer.status === OfferStatus.EXPIRED
+    ) {
+      throw new BadRequestException('This offer cannot be acted on');
+    }
+
+    const status = customerActionToStatus(dto.action);
+    const now = new Date();
+    const offer = await this.prisma.offer.update({
+      where: { id: offerId },
+      data: {
+        status,
+        ...(existingOffer.viewedAt ? {} : { viewedAt: now }),
+        ...(status === OfferStatus.ACCEPTED ? { acceptedAt: now } : {}),
+        ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
+      },
+      include: customerOfferInclude,
+    });
+
+    return toCustomerOfferDetail(offer);
+  }
+
   private async ensureOfferExists(id: string) {
     const offer = await this.prisma.offer.findUnique({
       where: { id },
       select: { id: true, viewedAt: true },
+    });
+
+    if (!offer) {
+      throw new NotFoundException('Offer not found');
+    }
+
+    return offer;
+  }
+
+  private async getRequestOfferOrThrow(requestId: string, offerId: string) {
+    const offer = await this.prisma.offer.findFirst({
+      where: { id: offerId, requestId },
+      include: customerOfferInclude,
     });
 
     if (!offer) {
@@ -265,6 +331,57 @@ const offerInclude = {
     },
   },
 };
+
+const customerOfferInclude = {
+  provider: {
+    select: {
+      businessName: true,
+      city: true,
+      district: true,
+    },
+  },
+} satisfies Prisma.OfferInclude;
+
+function toCustomerOfferDetail(
+  offer: Prisma.OfferGetPayload<{ include: typeof customerOfferInclude }>,
+) {
+  return {
+    id: offer.id,
+    requestId: offer.requestId,
+    provider: offer.provider,
+    status: offer.status,
+    priceAmount: offer.priceAmount,
+    currency: offer.currency,
+    estimatedStartDate: offer.estimatedStartDate,
+    estimatedCompletionDate: offer.estimatedCompletionDate,
+    message: offer.message,
+    warrantyNote: offer.warrantyNote,
+    creditCost: offer.creditCost,
+    creditRefundedAt: offer.creditRefundedAt,
+    creditRefundReason: offer.creditRefundReason,
+    refundEligibility: calculateRefundEligibility(offer),
+    submittedAt: offer.submittedAt,
+    viewedAt: offer.viewedAt,
+    acceptedAt: offer.acceptedAt,
+    rejectedAt: offer.rejectedAt,
+  };
+}
+
+function customerActionToStatus(action: CustomerOfferActionDto['action']) {
+  if (action === 'SHORTLIST') {
+    return OfferStatus.SHORTLISTED;
+  }
+
+  if (action === 'REJECT') {
+    return OfferStatus.REJECTED;
+  }
+
+  if (action === 'ACCEPT') {
+    return OfferStatus.ACCEPTED;
+  }
+
+  throw new BadRequestException('Invalid offer action');
+}
 
 function normalizeOptionalOfferStatus(value: string | undefined) {
   const normalized = normalizeNullableString(value);

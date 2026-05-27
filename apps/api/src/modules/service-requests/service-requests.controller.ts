@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
+import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { ServiceRequestsService } from './service-requests.service';
@@ -29,6 +30,25 @@ export class ServiceRequestsController {
   @Get(':id/offers')
   listRequestOffers(@Param('id') id: string) {
     return this.offersService.listRequestOffers(id);
+  }
+
+  @Get(':requestId/offers/:offerId')
+  getRequestOffer(@Param('requestId') requestId: string, @Param('offerId') offerId: string) {
+    return this.offersService.getRequestOffer(requestId, offerId);
+  }
+
+  @Post(':requestId/offers/:offerId/view')
+  markRequestOfferViewed(@Param('requestId') requestId: string, @Param('offerId') offerId: string) {
+    return this.offersService.markRequestOfferViewed(requestId, offerId);
+  }
+
+  @Post(':requestId/offers/:offerId/action')
+  updateRequestOfferAction(
+    @Param('requestId') requestId: string,
+    @Param('offerId') offerId: string,
+    @Body() dto: CustomerOfferActionDto,
+  ) {
+    return this.offersService.updateRequestOfferAction(requestId, offerId, dto);
   }
 
   @Patch(':id/status')

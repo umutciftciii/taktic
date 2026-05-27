@@ -217,6 +217,13 @@ export type RequestOfferPreview = {
   submittedAt: string;
 };
 
+export type RequestOfferDetail = RequestOfferPreview & {
+  requestId: string;
+  viewedAt: string | null;
+  acceptedAt: string | null;
+  rejectedAt: string | null;
+};
+
 export type CreditTransactionType =
   | 'ADMIN_GRANT'
   | 'ADMIN_DEDUCT'
