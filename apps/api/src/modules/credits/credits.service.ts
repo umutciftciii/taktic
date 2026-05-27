@@ -21,6 +21,8 @@ type CreditTransactionInput = {
   createdById?: string | null;
 };
 
+type CreditTransactionTx = Prisma.TransactionClient;
+
 @Injectable()
 export class CreditsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -126,43 +128,45 @@ export class CreditsService {
 
   async createProviderCreditTransaction(input: CreditTransactionInput) {
     return this.prisma.$transaction(
-      async (tx) => {
-        const provider = await tx.providerProfile.findUnique({
-          where: { id: input.providerId },
-          select: { id: true },
-        });
-
-        if (!provider) {
-          throw new NotFoundException('Provider not found');
-        }
-
-        const latestTransaction = await tx.providerCreditTransaction.findFirst({
-          where: { providerId: input.providerId },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          select: { balanceAfter: true },
-        });
-        const currentBalance = latestTransaction?.balanceAfter ?? 0;
-        const balanceAfter = currentBalance + input.amount;
-
-        if (balanceAfter < 0) {
-          throw new BadRequestException('Credit balance cannot go below zero');
-        }
-
-        return tx.providerCreditTransaction.create({
-          data: {
-            providerId: input.providerId,
-            type: input.type,
-            amount: input.amount,
-            balanceAfter,
-            reason: normalizeNullableString(input.reason),
-            referenceType: normalizeNullableString(input.referenceType),
-            referenceId: normalizeNullableString(input.referenceId),
-            createdById: normalizeNullableString(input.createdById),
-          },
-        });
-      },
+      async (tx) => this.createProviderCreditTransactionInTransaction(tx, input),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+  }
+
+  async createProviderCreditTransactionInTransaction(tx: CreditTransactionTx, input: CreditTransactionInput) {
+    const provider = await tx.providerProfile.findUnique({
+      where: { id: input.providerId },
+      select: { id: true },
+    });
+
+    if (!provider) {
+      throw new NotFoundException('Provider not found');
+    }
+
+    const latestTransaction = await tx.providerCreditTransaction.findFirst({
+      where: { providerId: input.providerId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { balanceAfter: true },
+    });
+    const currentBalance = latestTransaction?.balanceAfter ?? 0;
+    const balanceAfter = currentBalance + input.amount;
+
+    if (balanceAfter < 0) {
+      throw new BadRequestException('Credit balance cannot go below zero');
+    }
+
+    return tx.providerCreditTransaction.create({
+      data: {
+        providerId: input.providerId,
+        type: input.type,
+        amount: input.amount,
+        balanceAfter,
+        reason: normalizeNullableString(input.reason),
+        referenceType: normalizeNullableString(input.referenceType),
+        referenceId: normalizeNullableString(input.referenceId),
+        createdById: normalizeNullableString(input.createdById),
+      },
+    });
   }
 
   private async ensureProviderExists(providerId: string) {

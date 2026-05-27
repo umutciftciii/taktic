@@ -17,7 +17,8 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
       <p>
         <Link href="/providers">Sağlayıcılara dön</Link>{' '}
         <Link href={`/offers?providerId=${provider.id}`}>Teklifleri Gör</Link>{' '}
-        <Link href={`/providers/${provider.id}/credits`}>Kredileri Gör</Link>
+        <Link href={`/providers/${provider.id}/credits`}>Kredileri Gör</Link>{' '}
+        <Link href={`/package-purchases?providerId=${provider.id}`}>Paket Satın Almaları</Link>
       </p>
       <h1>{provider.businessName}</h1>
 

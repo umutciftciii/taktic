@@ -310,6 +310,48 @@ export type ProviderCredits = {
   transactions: ProviderCreditTransaction[];
 };
 
+export type PackagePurchaseStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'REFUNDED';
+
+export type PackagePurchase = {
+  id: string;
+  providerId: string;
+  packageId: string;
+  status: PackagePurchaseStatus;
+  creditAmountSnapshot: number;
+  priceAmountSnapshot: number;
+  currencySnapshot: string;
+  packageNameSnapshot: string;
+  providerNote: string | null;
+  adminNote: string | null;
+  mockPaymentReference: string | null;
+  mockPaymentFailureReason: string | null;
+  paidAt: string | null;
+  failedAt: string | null;
+  cancelledAt: string | null;
+  expiredAt: string | null;
+  refundedAt: string | null;
+  creditTransactionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  provider?: {
+    id: string;
+    businessName: string;
+    contactName: string;
+    email: string | null;
+    city: string;
+    district: string;
+    status: ProviderStatus;
+  };
+  package?: {
+    id: string;
+    name: string;
+    creditAmount: number;
+    priceAmount: number;
+    currency: string;
+    isActive: boolean;
+  };
+};
+
 export function statusLabel(status: string) {
   const labels: Record<string, string> = {
     SUBMITTED: 'Gönderildi',
@@ -323,7 +365,11 @@ export function statusLabel(status: string) {
     WITHDRAWN: 'Geri çekildi',
     EXPIRED: 'Süresi doldu',
     PENDING_REVIEW: 'İnceleme bekliyor',
+    PENDING: 'Bekliyor',
+    PAID: 'Ödendi',
+    FAILED: 'Başarısız',
     SUSPENDED: 'Askıya alındı',
+    REFUNDED: 'İade edildi',
     DRAFT: 'Taslak',
   };
 

@@ -52,7 +52,7 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
             {credits.transactions.map((transaction) => (
               <tr key={transaction.id}>
                 <td>{formatDate(transaction.createdAt)}</td>
-                  <td>{formatTransactionType(transaction.type)}</td>
+                <td>{formatTransactionType(transaction.type)}</td>
                 <td>{transaction.amount}</td>
                 <td>{transaction.balanceAfter}</td>
                 <td>{transaction.reason ?? '-'}</td>
@@ -72,6 +72,18 @@ function formatTransactionType(type: string) {
 
   if (type === 'OFFER_REFUND') {
     return 'Offer refund';
+  }
+
+  if (type === 'PACKAGE_PURCHASE') {
+    return 'Package purchase';
+  }
+
+  if (type === 'ADMIN_GRANT') {
+    return 'Admin grant';
+  }
+
+  if (type === 'ADMIN_DEDUCT') {
+    return 'Admin deduct';
   }
 
   return type;

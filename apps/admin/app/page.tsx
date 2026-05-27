@@ -22,6 +22,7 @@ export default async function AdminHomePage() {
         <SummaryCard label="Bekleyen Sağlayıcılar" value={summary.pendingProviders} href="/providers" />
         <SummaryCard label="Toplam Teklifler" value={summary.totalOffers} href="/offers" />
         <SummaryCard label="İade Adayları" value={summary.refundableOffers} href="/refund-scan" />
+        <SummaryCard label="Paket Satın Almaları" value={summary.packagePurchases} href="/package-purchases" />
       </section>
 
       <section>
@@ -32,6 +33,7 @@ export default async function AdminHomePage() {
           <Link href="/providers">Review providers</Link>
           <Link href="/offers">Review offers</Link>
           <Link href="/credit-packages">Manage credit packages</Link>
+          <Link href="/package-purchases">Package purchases</Link>
           <Link href="/refund-scan">Refund Scan</Link>
         </p>
       </section>

@@ -61,6 +61,15 @@ enum CreditTransactionType {
   ADJUSTMENT
 }
 
+enum PackagePurchaseStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
 model User {
   id           String    @id @default(cuid())
   email        String?   @unique
@@ -223,6 +232,7 @@ model ProviderProfile {
   serviceAreas       ProviderServiceArea[]
   offers             Offer[]
   creditTransactions ProviderCreditTransaction[]
+  packagePurchases   PackagePurchase[]
 
   @@index([status])
   @@index([city])
@@ -310,7 +320,41 @@ model OfferCreditPackage {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  purchases PackagePurchase[]
+
   @@index([isActive, sortOrder])
+}
+
+model PackagePurchase {
+  id                       String                @id @default(cuid())
+  providerId               String
+  packageId                String
+  status                   PackagePurchaseStatus @default(PENDING)
+  creditAmountSnapshot     Int
+  priceAmountSnapshot      Int
+  currencySnapshot         String                @default("TRY")
+  packageNameSnapshot      String
+  providerNote             String?
+  adminNote                String?
+  mockPaymentReference     String?
+  mockPaymentFailureReason String?
+  paidAt                   DateTime?
+  failedAt                 DateTime?
+  cancelledAt              DateTime?
+  expiredAt                DateTime?
+  refundedAt               DateTime?
+  creditTransactionId      String?
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+
+  provider ProviderProfile    @relation(fields: [providerId], references: [id])
+  package  OfferCreditPackage @relation(fields: [packageId], references: [id])
+
+  @@index([providerId])
+  @@index([packageId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([mockPaymentReference])
 }
 
 model ProviderCreditTransaction {

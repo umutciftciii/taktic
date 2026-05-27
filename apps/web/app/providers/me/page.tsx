@@ -84,6 +84,9 @@ export default async function MyProviderPage() {
           <Link className="button" href={`/providers/${provider.id}/credits`}>
             Kredilerim
           </Link>
+          <Link className="button" href={`/providers/${provider.id}/package-purchases`}>
+            Paket Geçmişim
+          </Link>
           <Link className="button" href={`/providers/${provider.id}/edit`}>
             Profilimi Düzenle
           </Link>

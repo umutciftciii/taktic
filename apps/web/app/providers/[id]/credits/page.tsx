@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { apiFetch, OfferCreditPackage, ProviderCredits } from '../../../../lib/api';
+import { createPackagePurchaseAction } from '../package-purchases/actions';
 
 type ProviderCreditsPageProps = {
   params: Promise<{ id: string }>;
@@ -15,14 +16,17 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
   return (
     <main>
       <p>
-        <Link href="/providers/me">Panelim</Link> <Link href={`/providers/${id}`}>Profil</Link>
+        <Link href="/providers/me">Panelim</Link> <Link href={`/providers/${id}`}>Profil</Link>{' '}
+        <Link href={`/providers/${id}/package-purchases`}>Paket satın alma geçmişi</Link>
       </p>
       <h1>Teklif Kredileri</h1>
       <section className="summary-card">
         <p className="muted">Kredi Bakiyesi</p>
         <p className="metric">{credits.balance}</p>
       </section>
-      <p className="notice">Yakında satın alma aktif olacak. Bu fazda ödeme veya paket satın alma akışı yoktur.</p>
+      <p className="notice">
+        Paket satın alma akışı mock ödeme ile çalışır. Gerçek ödeme sağlayıcısı veya gerçek kart işlemi yoktur.
+      </p>
 
       <section>
         <h2>Paketler</h2>
@@ -34,6 +38,17 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
               Fiyat: {creditPackage.priceAmount} {creditPackage.currency}
             </p>
             {creditPackage.description ? <p>{creditPackage.description}</p> : null}
+            <form action={createPackagePurchaseAction}>
+              <input type="hidden" name="providerId" value={id} />
+              <input type="hidden" name="packageId" value={creditPackage.id} />
+              <p>
+                <label>
+                  Not
+                  <input name="providerNote" placeholder="İsteğe bağlı" />
+                </label>
+              </p>
+              <button type="submit">Paket Satın Al</button>
+            </form>
           </article>
         ))}
       </section>

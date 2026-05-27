@@ -15,6 +15,7 @@ export class DashboardService {
       pendingProviders,
       totalOffers,
       refundableOffers,
+      packagePurchases,
     ] = await Promise.all([
       this.prisma.serviceRequest.count(),
       this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.SUBMITTED } }),
@@ -30,6 +31,7 @@ export class DashboardService {
           viewedAt: null,
         },
       }),
+      this.prisma.packagePurchase.count(),
     ]);
 
     return {
@@ -40,6 +42,7 @@ export class DashboardService {
       pendingProviders,
       totalOffers,
       refundableOffers,
+      packagePurchases,
     };
   }
 }
