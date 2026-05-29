@@ -23,7 +23,14 @@ type CategoryHit = {
 
 const quickPicks = ['Klima', 'Kombi', 'Elektrikçi', 'Temizlik', 'Boya Badana'];
 
-export function LandingHero() {
+type LandingHeroProps = {
+  isCustomer?: boolean;
+  isAuthenticated?: boolean;
+};
+
+export function LandingHero({ isCustomer = false, isAuthenticated = false }: LandingHeroProps) {
+  const primaryCtaLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Teklif Al';
+  const heroCtaLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al';
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<CategoryHit[]>([]);
@@ -186,7 +193,7 @@ export function LandingHero() {
                   else submitFreeText();
                 }}
               >
-                Teklif Al
+                {primaryCtaLabel}
                 <IconArrowRight />
               </button>
             </div>
@@ -258,11 +265,18 @@ export function LandingHero() {
 
           <div className="lp-hero-cta">
             <Link className="btn btn-primary btn-lg" href="/categories">
-              Hizmet Al
+              {heroCtaLabel}
             </Link>
-            <Link className="btn btn-secondary btn-lg" href="/providers/register">
-              Hizmet Veren Ol
-            </Link>
+            {!isAuthenticated ? (
+              <Link className="btn btn-secondary btn-lg" href="/providers/register">
+                Hizmet Veren Ol
+              </Link>
+            ) : null}
+            {isCustomer ? (
+              <Link className="btn btn-secondary btn-lg" href="/requests/my">
+                Taleplerim
+              </Link>
+            ) : null}
           </div>
 
           <div className="lp-hero-trust">

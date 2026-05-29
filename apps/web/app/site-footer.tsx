@@ -41,7 +41,18 @@ const cols: Array<{ title: string; links: Array<{ label: string; href: string }>
   },
 ];
 
-export function SiteFooter() {
+type SiteFooterProps = {
+  isAuthenticated?: boolean;
+};
+
+export function SiteFooter({ isAuthenticated = false }: SiteFooterProps = {}) {
+  const visibleCols = cols.map((col) => ({
+    ...col,
+    links: col.links.filter(
+      (link) => !(isAuthenticated && link.href === '/login'),
+    ),
+  }));
+
   return (
     <footer className="lp-footer">
       <div className="lp-container">
@@ -56,7 +67,7 @@ export function SiteFooter() {
             </p>
           </div>
 
-          {cols.map((c) => (
+          {visibleCols.map((c) => (
             <div className="lp-footer-col" key={c.title}>
               <h4>{c.title}</h4>
               <ul>

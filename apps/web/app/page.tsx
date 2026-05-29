@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, Category } from '../lib/api';
+import { apiFetch, Category, getCurrentUser } from '../lib/api';
 import { LandingHero } from './landing-hero';
 import { LandingFAQ } from './landing-faq';
 import {
@@ -39,9 +39,13 @@ export default async function HomePage() {
     categories = fallbackCategories;
   }
 
+  const user = await getCurrentUser();
+  const isCustomer = user?.role === 'CUSTOMER';
+  const isAuthenticated = !!user;
+
   return (
     <>
-      <LandingHero />
+      <LandingHero isCustomer={isCustomer} isAuthenticated={isAuthenticated} />
       <PopularCategories categories={categories} />
       <HowItWorks />
       <ProviderValue />
@@ -49,7 +53,7 @@ export default async function HomePage() {
       <TrustSection />
       <ProviderCTABand />
       <LandingFAQ />
-      <FinalCTA />
+      <FinalCTA isCustomer={isCustomer} isAuthenticated={isAuthenticated} />
     </>
   );
 }
@@ -462,21 +466,39 @@ function ProviderCTABand() {
   );
 }
 
-function FinalCTA() {
+function FinalCTA({
+  isCustomer = false,
+  isAuthenticated = false,
+}: {
+  isCustomer?: boolean;
+  isAuthenticated?: boolean;
+}) {
+  const primaryLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al';
+  const heading = isCustomer
+    ? 'İhtiyacın olan hizmet için yeni talebini oluştur.'
+    : 'İhtiyacın olan hizmet için ilk talebini oluştur.';
+
   return (
     <section className="lp-final-cta">
       <div className="lp-container">
-        <h2 className="lp-h2">İhtiyacın olan hizmet için ilk talebini oluştur.</h2>
+        <h2 className="lp-h2">{heading}</h2>
         <p className="lp-final-cta-sub">
           Birkaç dakikada talebini gönder, doğrulanmış hizmet verenlerden teklifleri karşılaştır.
         </p>
         <div className="lp-final-cta-buttons">
           <Link className="btn btn-primary btn-lg" href="/categories">
-            Hizmet Al
+            {primaryLabel}
           </Link>
-          <Link className="btn btn-secondary btn-lg" href="/providers/register">
-            Hizmet Veren Ol
-          </Link>
+          {!isAuthenticated ? (
+            <Link className="btn btn-secondary btn-lg" href="/providers/register">
+              Hizmet Veren Ol
+            </Link>
+          ) : null}
+          {isCustomer ? (
+            <Link className="btn btn-secondary btn-lg" href="/requests/my">
+              Taleplerim
+            </Link>
+          ) : null}
         </div>
       </div>
     </section>
