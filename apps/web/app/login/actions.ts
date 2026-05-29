@@ -103,6 +103,11 @@ export async function logoutAction() {
   redirect('/login');
 }
 
+export async function customerLogoutAction() {
+  (await cookies()).delete(authCookieName);
+  redirect('/');
+}
+
 function readFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === 'string' ? value : '';

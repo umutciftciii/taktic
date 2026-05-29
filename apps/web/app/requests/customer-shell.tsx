@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '../../lib/api';
+import { customerLogoutAction } from '../login/actions';
 
 type CustomerShellProps = {
   user: AuthUser;
@@ -118,15 +119,53 @@ export function CustomerShell({ user, active = 'requests', children }: CustomerS
             >
               ?
             </span>
-            <span className="cdash-avatar" aria-hidden="true">
-              {initials}
-            </span>
+            <CustomerUserMenu user={user} display={display} initials={initials} />
           </div>
         </div>
 
         {children}
       </div>
     </div>
+  );
+}
+
+type CustomerUserMenuProps = {
+  user: AuthUser;
+  display: string;
+  initials: string;
+};
+
+function CustomerUserMenu({ user, display, initials }: CustomerUserMenuProps) {
+  return (
+    <details className="cdash-user">
+      <summary className="cdash-user-summary" aria-label="Kullanıcı menüsü">
+        <span className="cdash-avatar" aria-hidden="true">
+          {initials}
+        </span>
+        <span className="cdash-user-caret" aria-hidden="true">
+          ▾
+        </span>
+      </summary>
+      <div className="cdash-user-menu" role="menu">
+        <div className="cdash-user-info">
+          <div className="cdash-user-info-name">{display}</div>
+          {user.email ? <div className="cdash-user-info-meta">{user.email}</div> : null}
+          <div className="cdash-user-info-role">Müşteri</div>
+        </div>
+        <div className="cdash-user-divider" />
+        <Link className="cdash-user-link" href="/account/profile" role="menuitem">
+          Profil Bilgileri
+        </Link>
+        <Link className="cdash-user-link" href="/account/password" role="menuitem">
+          Şifre Değiştir
+        </Link>
+        <form action={customerLogoutAction}>
+          <button type="submit" className="cdash-user-link cdash-user-logout" role="menuitem">
+            Çıkış Yap
+          </button>
+        </form>
+      </div>
+    </details>
   );
 }
 
