@@ -9,39 +9,74 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
   const { error } = await searchParams;
 
   return (
-    <main className="auth-page">
-      <form className="auth-card" action={registerCustomerAction}>
-        <h1 className="auth-title">Müşteri Hesabı Oluştur</h1>
-        <p className="muted">Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.</p>
+    <main className="auth-screen">
+      <form className="auth-screen-card auth-screen-card-compact" action={registerCustomerAction}>
+        <div className="auth-screen-card-head">
+          <h1 className="auth-screen-title">Müşteri Hesabı Oluştur</h1>
+          <p className="auth-screen-subtitle">
+            Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.
+          </p>
+        </div>
+
         {error ? (
-          <div className="error-message" style={{ marginTop: 8 }}>
-            {error === 'duplicate' ? 'Bu e-posta veya telefon zaten kayıtlı.' : 'Bilgileri kontrol edin.'}
+          <div className="auth-screen-error" role="alert">
+            {error === 'duplicate'
+              ? 'Bu e-posta veya telefon zaten kayıtlı.'
+              : 'Bilgileri kontrol edin.'}
           </div>
         ) : null}
-        <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
-          <label className="form-row">
-            <span>Ad soyad *</span>
-            <input name="name" required autoComplete="name" />
+
+        <div className="auth-screen-fields">
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">Ad soyad *</span>
+            <input
+              className="auth-screen-input"
+              name="name"
+              required
+              autoComplete="name"
+            />
           </label>
-          <label className="form-row">
-            <span>E-posta *</span>
-            <input name="email" type="email" required autoComplete="email" />
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">E-posta *</span>
+            <input
+              className="auth-screen-input"
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+            />
           </label>
-          <label className="form-row">
-            <span>Şifre *</span>
-            <input name="password" type="password" minLength={8} required autoComplete="new-password" />
-            <span className="help-text">En az 8 karakter.</span>
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">Şifre *</span>
+            <input
+              className="auth-screen-input"
+              name="password"
+              type="password"
+              minLength={8}
+              required
+              autoComplete="new-password"
+            />
+            <span className="auth-screen-help">En az 8 karakter.</span>
           </label>
-          <label className="form-row">
-            <span>Telefon</span>
-            <input name="phone" autoComplete="tel" placeholder="05XX XXX XX XX" />
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">Telefon</span>
+            <input
+              className="auth-screen-input"
+              name="phone"
+              autoComplete="tel"
+              placeholder="05XX XXX XX XX"
+            />
           </label>
-          <button className="btn btn-primary btn-block" type="submit">Hesap Oluştur</button>
         </div>
-        <div className="inline-actions" style={{ marginTop: 14, justifyContent: 'center' }}>
-          <span className="muted">Zaten hesabınız var mı?</span>
+
+        <button className="auth-screen-submit" type="submit">
+          Hesap Oluştur
+        </button>
+
+        <p className="auth-screen-bottom-link">
+          Zaten hesabınız var mı?
           <Link href="/login">Giriş yapın</Link>
-        </div>
+        </p>
       </form>
     </main>
   );

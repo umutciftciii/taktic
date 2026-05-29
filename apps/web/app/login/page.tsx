@@ -13,7 +13,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="auth-screen">
-      <form className="auth-screen-card" action={loginAction}>
+      <form className="auth-screen-card auth-screen-card-compact" action={loginAction}>
         <h1 className="auth-screen-title">Giriş</h1>
         <p className="auth-screen-subtitle">
           Müşteri ve hizmet veren hesapları için giriş yapın.

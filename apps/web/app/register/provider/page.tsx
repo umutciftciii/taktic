@@ -10,7 +10,7 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
 
   return (
     <main className="auth-screen">
-      <form className="auth-screen-card" action={registerProviderAction}>
+      <form className="auth-screen-card auth-screen-card-compact" action={registerProviderAction}>
         <div className="auth-screen-card-head">
           <span className="auth-screen-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

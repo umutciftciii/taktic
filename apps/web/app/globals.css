@@ -5672,6 +5672,118 @@ body:has(.pdash-shell) #site-header {
   }
 }
 
+/* Auth screen — compact card variant. Opt-in via .auth-screen-card-compact.
+   Shared by /login, /register/customer, /register/provider. */
+.auth-screen-card.auth-screen-card-compact {
+  padding: 28px 24px 24px;
+}
+
+.auth-screen-card-compact .auth-screen-card-head {
+  gap: 8px;
+  margin: 0 0 18px;
+}
+
+.auth-screen-card-compact .auth-screen-title {
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: -0.01em;
+}
+
+.auth-screen-card-compact .auth-screen-subtitle {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* Head-less layout (e.g. /login): tighten direct title/subtitle margins. */
+.auth-screen-card-compact > .auth-screen-title {
+  margin: 0 0 6px;
+}
+
+.auth-screen-card-compact > .auth-screen-subtitle {
+  margin: 0 0 18px;
+}
+
+.auth-screen-card-compact .auth-screen-error {
+  margin: 0 0 14px;
+}
+
+.auth-screen-card-compact .auth-screen-fields {
+  gap: 14px;
+}
+
+.auth-screen-card-compact .auth-screen-field {
+  gap: 6px;
+}
+
+.auth-screen-card-compact .auth-screen-input {
+  height: 42px;
+  min-height: 42px;
+  font-size: 14px;
+}
+
+.auth-screen-card-compact .auth-screen-help {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.auth-screen-card-compact .auth-screen-submit {
+  margin-top: 18px;
+  height: 44px;
+  min-height: 44px;
+}
+
+.auth-screen-card-compact .auth-screen-bottom-link {
+  margin: 10px 0 0;
+}
+
+.auth-screen-card-compact .auth-screen-divider {
+  margin: 20px 0 14px;
+}
+
+.auth-screen-card-compact .auth-screen-alt-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.auth-screen-card-compact .auth-screen-alt-actions {
+  gap: 10px;
+}
+
+.auth-screen-card-compact .auth-screen-alt-btn {
+  height: 40px;
+  font-size: 13px;
+}
+
+.auth-screen-card-compact .auth-screen-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.auth-screen-card-compact .auth-screen-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.auth-screen-card-compact .auth-screen-hint {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+@media (max-width: 480px) {
+  .auth-screen-card.auth-screen-card-compact {
+    padding: 22px 20px 20px;
+  }
+  .auth-screen-card-compact .auth-screen-card-head {
+    gap: 6px;
+    margin: 0 0 14px;
+  }
+  .auth-screen-card-compact > .auth-screen-subtitle {
+    margin: 0 0 14px;
+  }
+}
+
 /* Provider application — Hizmet Veren Başvurusu (Slate & Steel).
    Scoped via .provider-apply-shell wrapper. Independent of cdash-*,
    pdash-*, lp-* and auth-screen-* namespaces. */
