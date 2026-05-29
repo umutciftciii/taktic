@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { getCurrentUser } from '../../lib/api';
 import { loginAction } from './actions';
 
 type LoginPageProps = {
@@ -11,41 +10,67 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const { error, redirectTo } = await searchParams;
-  const user = await getCurrentUser();
 
   return (
-    <main className="auth-page">
-      <form className="auth-card" action={loginAction}>
-        <h1 className="auth-title">Giriş</h1>
-        <p className="muted">Müşteri ve hizmet veren hesapları için giriş yapın.</p>
-        {user ? (
-          <div className="notice" style={{ marginTop: 8 }}>
-            Şu an giriş yaptınız: <strong>{user.email ?? user.name ?? user.id}</strong> ({user.role})
-          </div>
-        ) : null}
+    <main className="auth-screen">
+      <form className="auth-screen-card" action={loginAction}>
+        <h1 className="auth-screen-title">Giriş</h1>
+        <p className="auth-screen-subtitle">
+          Müşteri ve hizmet veren hesapları için giriş yapın.
+        </p>
+
         {error ? (
-          <div className="error-message" style={{ marginTop: 8 }}>
-            Giriş bilgileri geçersiz veya kullanıcı aktif değil.
+          <div className="auth-screen-error" role="alert">
+            E-posta veya şifre hatalı. Lütfen tekrar deneyin.
           </div>
         ) : null}
+
         {redirectTo ? <input type="hidden" name="redirectTo" value={redirectTo} /> : null}
-        <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
-          <label className="form-row">
-            <span>E-posta</span>
-            <input name="email" type="email" required autoComplete="email" />
+
+        <div className="auth-screen-fields">
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">E-posta</span>
+            <input
+              className="auth-screen-input"
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="ornek@email.com"
+            />
           </label>
-          <label className="form-row">
-            <span>Şifre</span>
-            <input name="password" type="password" required autoComplete="current-password" />
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">Şifre</span>
+            <input
+              className="auth-screen-input"
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+            />
           </label>
-          <button className="btn btn-primary btn-block" type="submit">Giriş Yap</button>
         </div>
-        <div className="inline-actions" style={{ marginTop: 14, justifyContent: 'center' }}>
-          <Link href="/register/customer">Müşteri hesabı oluştur</Link>
-          <span className="muted">·</span>
-          <Link href="/register/provider">Hizmet veren hesabı oluştur</Link>
+
+        <button className="auth-screen-submit" type="submit">
+          Giriş Yap
+        </button>
+
+        <hr className="auth-screen-divider" />
+
+        <p className="auth-screen-alt-title">Henüz hesabınız yok mu?</p>
+        <div className="auth-screen-alt-actions">
+          <Link className="auth-screen-alt-btn" href="/register/customer">
+            Müşteri Kaydı
+          </Link>
+          <Link className="auth-screen-alt-btn" href="/register/provider">
+            Hizmet Veren Kaydı
+          </Link>
         </div>
       </form>
+
+      <p className="auth-screen-support">
+        Yardıma mı ihtiyacınız var? Destek ile iletişime geçin.
+      </p>
     </main>
   );
 }
