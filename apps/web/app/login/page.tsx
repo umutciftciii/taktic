@@ -28,7 +28,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             Giriş bilgileri geçersiz veya kullanıcı aktif değil.
           </div>
         ) : null}
-        <input type="hidden" name="redirectTo" value={redirectTo ?? '/'} />
+        {redirectTo ? <input type="hidden" name="redirectTo" value={redirectTo} /> : null}
         <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
           <label className="form-row">
             <span>E-posta</span>

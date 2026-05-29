@@ -43,31 +43,41 @@ export default async function MyRequestsPage() {
       ) : null}
 
       <div className="list-stack">
-        {requests.map((request) => (
-          <article className="list-card" key={request.id}>
-            <div className="list-card-header">
-              <div>
-                <h2 className="list-card-title">{request.category.name}</h2>
-                <p className="list-card-meta">
-                  <span>{request.city}/{request.district}</span>
-                  <span>{formatDateTime(request.submittedAt)}</span>
-                  <span>{request.offersCount} teklif</span>
-                </p>
+        {requests.map((request) => {
+          const hasOffers = request.offersCount > 0;
+          const offersBadgeText = hasOffers
+            ? `${request.offersCount} teklif geldi`
+            : 'Henüz teklif yok';
+          const offersBadgeClass = hasOffers ? 'badge badge-info' : 'badge badge-muted';
+          const ctaLabel = hasOffers ? 'Teklifleri görüntüle' : 'Talebi görüntüle';
+          const ctaClass = hasOffers ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+
+          return (
+            <article className="list-card" key={request.id}>
+              <div className="list-card-header">
+                <div>
+                  <h2 className="list-card-title">{request.category.name}</h2>
+                  <p className="list-card-meta">
+                    <span>{request.city}/{request.district}</span>
+                    <span>{formatDateTime(request.submittedAt)}</span>
+                  </p>
+                </div>
+                <div className="inline-actions">
+                  <span className={offersBadgeClass}>{offersBadgeText}</span>
+                  <span className={statusBadgeClass(request.status)}>{statusLabel(request.status)}</span>
+                  <span className={qualityBadgeClass(request.qualityLabel)}>
+                    Kalite {request.qualityScore} · {qualityLabel(request.qualityLabel)}
+                  </span>
+                </div>
               </div>
               <div className="inline-actions">
-                <span className={statusBadgeClass(request.status)}>{statusLabel(request.status)}</span>
-                <span className={qualityBadgeClass(request.qualityLabel)}>
-                  Kalite {request.qualityScore} · {qualityLabel(request.qualityLabel)}
-                </span>
+                <Link className={ctaClass} href={`/requests/${request.id}/offers`}>
+                  {ctaLabel}
+                </Link>
               </div>
-            </div>
-            <div className="inline-actions">
-              <Link className="btn btn-primary btn-sm" href={`/requests/${request.id}/offers`}>
-                Teklifleri görüntüle
-              </Link>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
     </main>
   );
