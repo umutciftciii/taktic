@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import type { AuthUser } from '../lib/api';
 import {
   IconArrowRight,
   IconCheck,
@@ -11,6 +12,7 @@ import {
   IconSearch,
   IconWallet,
 } from './landing-icons';
+import { StartChoiceModal } from './start-choice-modal';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -26,11 +28,15 @@ const quickPicks = ['Klima', 'Kombi', 'Elektrikçi', 'Temizlik', 'Boya Badana'];
 type LandingHeroProps = {
   isCustomer?: boolean;
   isAuthenticated?: boolean;
+  user?: AuthUser | null;
 };
 
-export function LandingHero({ isCustomer = false, isAuthenticated = false }: LandingHeroProps) {
+export function LandingHero({
+  isCustomer = false,
+  isAuthenticated = false,
+  user = null,
+}: LandingHeroProps) {
   const primaryCtaLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Teklif Al';
-  const heroCtaLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al';
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<CategoryHit[]>([]);
@@ -264,14 +270,13 @@ export function LandingHero({ isCustomer = false, isAuthenticated = false }: Lan
           </div>
 
           <div className="lp-hero-cta">
-            <Link className="btn btn-primary btn-lg" href="/categories">
-              {heroCtaLabel}
-            </Link>
-            {!isAuthenticated ? (
-              <Link className="btn btn-secondary btn-lg" href="/providers/register">
-                Hizmet Veren Ol
+            {isAuthenticated ? (
+              <Link className="btn btn-primary btn-lg" href="/categories">
+                {isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al'}
               </Link>
-            ) : null}
+            ) : (
+              <StartChoiceModal user={user} className="btn btn-primary btn-lg" />
+            )}
             {isCustomer ? (
               <Link className="btn btn-secondary btn-lg" href="/requests/my">
                 Taleplerim

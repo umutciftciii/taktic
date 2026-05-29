@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { AuthUser } from '../lib/api';
 import { logoutAction } from './login/actions';
+import { StartChoiceModal } from './start-choice-modal';
 
 type SiteHeaderProps = {
   user: AuthUser | null;
@@ -29,7 +30,6 @@ function HeaderNav({ user, providerId }: SiteHeaderProps) {
       <nav className="lp-nav" aria-label="Site navigation">
         <Link href="/categories">Kategoriler</Link>
         <Link href="/#nasil-calisir">Nasıl Çalışır</Link>
-        <Link href="/providers/register">Hizmet Ver</Link>
         <Link href="/requests/my">Taleplerim</Link>
         <Link href="/login">Giriş</Link>
       </nav>
@@ -63,12 +63,7 @@ function HeaderCta({ user }: { user: AuthUser | null }) {
   if (!user) {
     return (
       <div className="lp-header-cta">
-        <Link className="btn btn-secondary btn-sm" href="/providers/register">
-          Hizmet Veren Ol
-        </Link>
-        <Link className="btn btn-primary btn-sm" href="/categories">
-          Hizmet Al
-        </Link>
+        <StartChoiceModal user={user} className="btn btn-primary btn-sm" />
       </div>
     );
   }

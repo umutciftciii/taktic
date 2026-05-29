@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import { apiFetch, Category, getCurrentUser } from '../lib/api';
+import { apiFetch, AuthUser, Category, getCurrentUser } from '../lib/api';
 import { LandingHero } from './landing-hero';
 import { LandingFAQ } from './landing-faq';
+import { StartChoiceModal } from './start-choice-modal';
 import {
   IconArrowRight,
   IconCheck,
@@ -45,7 +46,7 @@ export default async function HomePage() {
 
   return (
     <>
-      <LandingHero isCustomer={isCustomer} isAuthenticated={isAuthenticated} />
+      <LandingHero isCustomer={isCustomer} isAuthenticated={isAuthenticated} user={user} />
       <PopularCategories categories={categories} />
       <HowItWorks />
       <ProviderValue />
@@ -53,7 +54,7 @@ export default async function HomePage() {
       <TrustSection />
       <ProviderCTABand />
       <LandingFAQ />
-      <FinalCTA isCustomer={isCustomer} isAuthenticated={isAuthenticated} />
+      <FinalCTA isCustomer={isCustomer} isAuthenticated={isAuthenticated} user={user} />
     </>
   );
 }
@@ -469,11 +470,12 @@ function ProviderCTABand() {
 function FinalCTA({
   isCustomer = false,
   isAuthenticated = false,
+  user = null,
 }: {
   isCustomer?: boolean;
   isAuthenticated?: boolean;
+  user?: AuthUser | null;
 }) {
-  const primaryLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al';
   const heading = isCustomer
     ? 'İhtiyacın olan hizmet için yeni talebini oluştur.'
     : 'İhtiyacın olan hizmet için ilk talebini oluştur.';
@@ -486,14 +488,13 @@ function FinalCTA({
           Birkaç dakikada talebini gönder, doğrulanmış hizmet verenlerden teklifleri karşılaştır.
         </p>
         <div className="lp-final-cta-buttons">
-          <Link className="btn btn-primary btn-lg" href="/categories">
-            {primaryLabel}
-          </Link>
-          {!isAuthenticated ? (
-            <Link className="btn btn-secondary btn-lg" href="/providers/register">
-              Hizmet Veren Ol
+          {isAuthenticated ? (
+            <Link className="btn btn-primary btn-lg" href="/categories">
+              {isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al'}
             </Link>
-          ) : null}
+          ) : (
+            <StartChoiceModal user={user} className="btn btn-primary btn-lg" />
+          )}
           {isCustomer ? (
             <Link className="btn btn-secondary btn-lg" href="/requests/my">
               Taleplerim
