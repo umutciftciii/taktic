@@ -1,5 +1,13 @@
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { apiFetch, ProviderProfile, statusLabel, statusBadgeClass } from '../../../lib/api';
+import {
+  apiFetch,
+  getCurrentUser,
+  ProviderProfile,
+  statusLabel,
+} from '../../../lib/api';
+import { ProviderShell } from '../provider-shell';
+import { providerStatusBadgeClass } from '../provider-ui';
 
 type ProviderPreviewPageProps = {
   params: Promise<{ id: string }>;
@@ -7,72 +15,90 @@ type ProviderPreviewPageProps = {
 
 export default async function ProviderPreviewPage({ params }: ProviderPreviewPageProps) {
   const { id } = await params;
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect(`/login?redirectTo=/providers/${id}`);
+  }
+
   const provider = await apiFetch<ProviderProfile>(`/providers/${id}`);
 
   return (
-    <main>
-      <p className="breadcrumbs">
-        <Link href="/">Ana sayfa</Link>
-        <span aria-hidden="true">/</span>
+    <ProviderShell user={user} providerId={provider.id} businessName={provider.businessName} active="profile">
+      <p className="pdash-crumbs">
         <Link href="/providers/me">Panelim</Link>
         <span aria-hidden="true">/</span>
         <span>Profil</span>
       </p>
 
-      <header className="page-header">
-        <h1 className="page-title">{provider.businessName}</h1>
-        <p className="page-subtitle">
-          <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>{' '}
-          <span className="muted">· {provider.city}/{provider.district}</span>
+      <header className="pdash-page-head">
+        <h1 className="pdash-page-title">{provider.businessName}</h1>
+        <p className="pdash-page-sub">
+          <span className={providerStatusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>
+          <span style={{ marginLeft: 8 }}>· {provider.city}/{provider.district}</span>
         </p>
+        <div className="pdash-page-actions">
+          {provider.status === 'APPROVED' ? (
+            <>
+              <Link className="pdash-btn pdash-btn-primary" href={`/providers/${provider.id}/requests`}>
+                Uygun Talepler
+              </Link>
+              <Link className="pdash-btn pdash-btn-secondary" href={`/providers/${provider.id}/offers`}>
+                Tekliflerim
+              </Link>
+              <Link className="pdash-btn pdash-btn-secondary" href={`/providers/${provider.id}/credits`}>
+                Kredilerim
+              </Link>
+            </>
+          ) : null}
+          <Link className="pdash-btn pdash-btn-ghost" href={`/providers/${provider.id}/edit`}>
+            Profili Düzenle
+          </Link>
+        </div>
       </header>
 
-      <div className="inline-actions" style={{ marginBottom: 18 }}>
-        {provider.status === 'APPROVED' ? (
-          <>
-            <Link className="btn btn-primary" href={`/providers/${provider.id}/requests`}>Uygun Talepler</Link>
-            <Link className="btn btn-secondary" href={`/providers/${provider.id}/offers`}>Tekliflerim</Link>
-            <Link className="btn btn-secondary" href={`/providers/${provider.id}/credits`}>Kredilerim</Link>
-          </>
-        ) : null}
-        <Link className="btn btn-ghost" href={`/providers/${provider.id}/edit`}>Profili düzenle</Link>
-      </div>
-
-      <div className="detail-grid">
-        <div className="stack">
-          <section className="card" style={{ margin: 0 }}>
+      <div className="pdash-detail-grid">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <section className="pdash-detail-card">
             <h2>Hakkında</h2>
-            <dl className="meta-row">
-              <dt>Yetkili</dt>
-              <dd>{provider.contactName}</dd>
-              <dt>Konum</dt>
-              <dd>{provider.city}/{provider.district}</dd>
-              <dt>Açıklama</dt>
-              <dd>{provider.description ?? '-'}</dd>
+            <dl className="pdash-info-grid">
+              <div className="pdash-info-row">
+                <dt>Yetkili</dt>
+                <dd>{provider.contactName}</dd>
+              </div>
+              <div className="pdash-info-row">
+                <dt>Konum</dt>
+                <dd>{provider.city}/{provider.district}</dd>
+              </div>
+              <div className="pdash-info-row">
+                <dt>Açıklama</dt>
+                <dd>{provider.description ?? '-'}</dd>
+              </div>
             </dl>
           </section>
 
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Kategoriler</h2>
-            <div className="inline-actions">
+          <section className="pdash-detail-card">
+            <h2>Hizmet Kategorileri</h2>
+            <div className="pdash-chip-list">
               {provider.serviceCategories.length === 0 ? (
-                <span className="muted">Kategori seçilmemiş.</span>
+                <span className="pdash-card-sub">Kategori seçilmemiş.</span>
               ) : (
                 provider.serviceCategories.map((item) => (
-                  <span className="badge badge-info" key={item.id}>{item.category.name}</span>
+                  <span className="pdash-chip pdash-chip-info" key={item.id}>
+                    {item.category.name}
+                  </span>
                 ))
               )}
             </div>
           </section>
 
-          <section className="card" style={{ margin: 0 }}>
+          <section className="pdash-detail-card">
             <h2>Hizmet Bölgeleri</h2>
-            <div className="inline-actions">
+            <div className="pdash-chip-list">
               {provider.serviceAreas.length === 0 ? (
-                <span className="muted">Bölge tanımlı değil.</span>
+                <span className="pdash-card-sub">Bölge tanımlı değil.</span>
               ) : (
                 provider.serviceAreas.map((area) => (
-                  <span className="badge badge-muted" key={area.id}>
+                  <span className="pdash-chip" key={area.id}>
                     {area.city}
                     {area.district ? `/${area.district}` : ''}
                     {area.neighborhood ? `/${area.neighborhood}` : ''}
@@ -83,18 +109,40 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
           </section>
         </div>
 
-        <div className="stack">
-          <section className="card" style={{ margin: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <section className="pdash-detail-card">
             <h2>İletişim</h2>
-            <dl className="meta-row">
-              <dt>Telefon</dt>
-              <dd>{provider.phone}</dd>
-              <dt>E-posta</dt>
-              <dd>{provider.email ?? '-'}</dd>
+            <dl className="pdash-info-grid">
+              <div className="pdash-info-row">
+                <dt>Telefon</dt>
+                <dd>{provider.phone}</dd>
+              </div>
+              <div className="pdash-info-row">
+                <dt>E-posta</dt>
+                <dd>{provider.email ?? '-'}</dd>
+              </div>
+              {provider.addressNote ? (
+                <div className="pdash-info-row">
+                  <dt>Adres notu</dt>
+                  <dd>{provider.addressNote}</dd>
+                </div>
+              ) : null}
             </dl>
           </section>
+
+          {provider.status === 'REJECTED' && provider.rejectionReason ? (
+            <div className="pdash-notice pdash-notice-error">
+              Başvuru reddedildi. Sebep: {provider.rejectionReason}
+            </div>
+          ) : null}
+
+          {provider.status === 'SUSPENDED' ? (
+            <div className="pdash-notice pdash-notice-warn">
+              Profil askıya alındı. Teklif akışı kullanılamaz.
+            </div>
+          ) : null}
         </div>
       </div>
-    </main>
+    </ProviderShell>
   );
 }

@@ -250,6 +250,7 @@ export class ProvidersService {
       where: {
         status: ServiceRequestStatus.APPROVED,
         categoryId: { in: provider.serviceCategories.map((item) => item.categoryId) },
+        offers: { none: { providerId } },
         ...(normalizedFilters.categoryId ? { categoryId: normalizedFilters.categoryId } : {}),
         ...(normalizedFilters.city ? { city: { equals: normalizedFilters.city, mode: 'insensitive' } } : {}),
         ...(normalizedFilters.district
