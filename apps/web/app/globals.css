@@ -5576,6 +5576,102 @@ body:has(.pdash-shell) #site-header {
   }
 }
 
+/* Auth screen — opt-in modifiers used by /register/provider.
+   Do not change behavior of /login (auth-screen-* base rules). */
+.auth-screen-card-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 24px;
+  text-align: center;
+}
+
+.auth-screen-card-head .auth-screen-title,
+.auth-screen-card-head .auth-screen-subtitle {
+  margin: 0;
+  text-align: center;
+}
+
+.auth-screen-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: #d8e3fb;
+  color: #091426;
+}
+
+.auth-screen-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.auth-screen-help {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: #45474c;
+}
+
+.auth-screen-hint {
+  margin: 20px 0 0;
+  text-align: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  color: #1d4ed8;
+}
+
+.auth-screen-hint a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auth-screen-hint a:hover {
+  text-decoration: underline;
+}
+
+.auth-screen-bottom-link {
+  margin: 12px 0 0;
+  text-align: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  color: #45474c;
+}
+
+.auth-screen-bottom-link a {
+  margin-left: 4px;
+  color: #091426;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auth-screen-bottom-link a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .auth-screen-card-head {
+    gap: 12px;
+    margin: 0 0 20px;
+  }
+  .auth-screen-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+  }
+  .auth-screen-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+}
+
 /* Provider application — Hizmet Veren Başvurusu (Slate & Steel).
    Scoped via .provider-apply-shell wrapper. Independent of cdash-*,
    pdash-*, lp-* and auth-screen-* namespaces. */
