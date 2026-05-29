@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { AuthUser } from '../../lib/api';
 import { providerDashboardLogoutAction } from '../login/actions';
 
-type ProviderShellActive = 'dashboard' | 'requests' | 'offers' | 'credits' | 'profile';
+type ProviderShellActive = 'dashboard' | 'requests' | 'offers' | 'credits' | 'packages' | 'profile';
 
 type ProviderShellProps = {
   user: AuthUser;
@@ -26,6 +26,7 @@ export function ProviderShell({
   const requestsHref = providerId ? `/providers/${providerId}/requests` : '/providers/me';
   const offersHref = providerId ? `/providers/${providerId}/offers` : null;
   const creditsHref = providerId ? `/providers/${providerId}/credits` : null;
+  const packagesHref = providerId ? `/providers/${providerId}/package-purchases` : null;
   const profileHref = providerId ? `/providers/${providerId}` : null;
 
   const navItems: ReadonlyArray<{
@@ -38,6 +39,7 @@ export function ProviderShell({
     { key: 'requests', label: 'Uygun Talepler', icon: '🧭', href: requestsHref },
     { key: 'offers', label: 'Tekliflerim', icon: '📨', href: offersHref },
     { key: 'credits', label: 'Kredilerim', icon: '🪙', href: creditsHref },
+    { key: 'packages', label: 'Paket Geçmişim', icon: '📦', href: packagesHref },
     { key: 'profile', label: 'Profilim', icon: '👤', href: profileHref },
   ];
 
