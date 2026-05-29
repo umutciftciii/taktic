@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { apiFetch, Category } from '../../lib/api';
 import { CategorySearch } from '../category-search';
+import { IconArrowRight, iconForCategory } from '../landing-icons';
 
 type CategoriesPageProps = {
   searchParams: Promise<{ q?: string }>;
@@ -12,63 +13,82 @@ export default async function CategoriesPage({ searchParams }: CategoriesPagePro
   const path = term ? `/categories?q=${encodeURIComponent(term)}` : '/categories';
   const categories = await apiFetch<Category[]>(path);
 
+  const hasSearch = term.length > 0;
+  const isEmpty = categories.length === 0;
+
   return (
-    <main>
-      <header className="page-header">
-        <h1 className="page-title">
-          {term ? `“${term}” için sonuçlar` : 'Hizmet Kategorileri'}
-        </h1>
-        <p className="page-subtitle">
-          {term
-            ? `${categories.length} eşleşen kategori`
-            : 'İhtiyacınız olan kategoriyi seçin, dakikalar içinde talep oluşturun.'}
-        </p>
-      </header>
-
-      <div className="page-narrow" style={{ marginBottom: 22 }}>
-        <CategorySearch
-          variant="hero"
-          placeholder="Kategori ara (ör. klima, tadilat, temizlik)"
-        />
-      </div>
-
-      {term ? (
-        <div className="inline-actions" style={{ marginBottom: 14 }}>
-          <Link className="btn btn-secondary btn-sm" href="/categories">
-            Aramayı temizle
-          </Link>
-        </div>
-      ) : null}
-
-      {categories.length === 0 ? (
-        <div className="empty-state">
-          <h2>{term ? 'Eşleşen kategori bulunamadı' : 'Henüz kategori yok'}</h2>
-          <p className="muted">
-            {term
-              ? 'Farklı bir anahtar kelime deneyin veya tüm kategorileri inceleyin.'
-              : 'Yeni kategoriler eklendiğinde burada listelenecek.'}
+    <main className="cat-page">
+      <div className="cat-page-shell">
+        <header className="cat-page-head">
+          <h1 className="cat-page-title">Hizmet Kategorileri</h1>
+          <p className="cat-page-subtitle">
+            İhtiyacına uygun kategoriyi seç, dakikalar içinde talep oluştur.
           </p>
-          {term ? (
-            <Link className="btn btn-primary" href="/categories" style={{ marginTop: 8 }}>
-              Tüm kategorilere dön
-            </Link>
-          ) : null}
+        </header>
+
+        <div className="cat-page-search">
+          <CategorySearch
+            variant="hero"
+            placeholder="Kategori ara (örn. klima, tadilat, temizlik)"
+          />
         </div>
-      ) : (
-        <div className="category-tile-grid">
-          {categories.map((category) => (
-            <Link className="category-tile" href={`/categories/${category.slug}`} key={category.id}>
-              <span className="category-tile-mark" aria-hidden="true">
-                {category.name.charAt(0)}
-              </span>
-              <span className="category-tile-name">{category.name}</span>
-              {category.description ? (
-                <span className="category-tile-desc">{category.description}</span>
-              ) : null}
+
+        {hasSearch ? (
+          <div className="cat-page-meta">
+            <span className="cat-page-meta-text">
+              {isEmpty
+                ? `“${term}” için sonuç bulunamadı`
+                : `“${term}” için ${categories.length} kategori`}
+            </span>
+            <Link className="cat-page-meta-link" href="/categories">
+              Aramayı temizle
             </Link>
-          ))}
-        </div>
-      )}
+          </div>
+        ) : null}
+
+        {isEmpty ? (
+          <div className="cat-page-empty">
+            <h2 className="cat-page-empty-title">
+              {hasSearch ? 'Aramana uygun kategori bulunamadı.' : 'Henüz kategori yok.'}
+            </h2>
+            <p className="cat-page-empty-desc">
+              {hasSearch
+                ? 'Farklı bir anahtar kelime dene veya tüm kategorilere göz at.'
+                : 'Yeni kategoriler eklendiğinde burada listelenecek.'}
+            </p>
+            {hasSearch ? (
+              <Link className="cat-page-empty-cta" href="/categories">
+                Tüm kategorileri göster
+              </Link>
+            ) : null}
+          </div>
+        ) : (
+          <div className="cat-page-grid">
+            {categories.map((category) => {
+              const IconCmp = iconForCategory(category.name);
+              return (
+                <Link
+                  className="cat-page-card"
+                  href={`/categories/${category.slug}`}
+                  key={category.id}
+                >
+                  <span className="cat-page-card-icon" aria-hidden="true">
+                    <IconCmp size={22} />
+                  </span>
+                  <span className="cat-page-card-name">{category.name}</span>
+                  {category.description ? (
+                    <span className="cat-page-card-desc">{category.description}</span>
+                  ) : null}
+                  <span className="cat-page-card-cta">
+                    Talep oluştur
+                    <IconArrowRight size={12} />
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </main>
   );
 }
