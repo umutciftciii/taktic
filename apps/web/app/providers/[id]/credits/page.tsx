@@ -1,6 +1,8 @@
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  getCurrentUser,
   OfferCreditPackage,
   ProviderCredits,
   creditTxnTypeLabel,
@@ -8,6 +10,7 @@ import {
   formatDateTime,
 } from '../../../../lib/api';
 import { createPackagePurchaseAction } from '../package-purchases/actions';
+import { ProviderShell } from '../../provider-shell';
 
 type ProviderCreditsPageProps = {
   params: Promise<{ id: string }>;
@@ -15,119 +18,168 @@ type ProviderCreditsPageProps = {
 
 export default async function ProviderCreditsPage({ params }: ProviderCreditsPageProps) {
   const { id } = await params;
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect(`/login?redirectTo=/providers/${id}/credits`);
+  }
+
   const [credits, packages] = await Promise.all([
     apiFetch<ProviderCredits>(`/providers/${id}/credits`),
     apiFetch<OfferCreditPackage[]>('/credit-packages'),
   ]);
 
+  const activePackages = packages.filter((p) => p.isActive);
+  const refundedTotal = credits.transactions
+    .filter((t) => t.type === 'OFFER_REFUND')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const spentTotal = credits.transactions
+    .filter((t) => t.type === 'OFFER_SPEND')
+    .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
   return (
-    <main>
-      <p className="breadcrumbs">
+    <ProviderShell user={user} providerId={id} active="credits">
+      <p className="pdash-crumbs">
         <Link href="/providers/me">Panelim</Link>
         <span aria-hidden="true">/</span>
-        <Link href={`/providers/${id}`}>Profil</Link>
-        <span aria-hidden="true">/</span>
-        <span>Teklif Kredileri</span>
+        <span>Kredilerim</span>
       </p>
 
-      <header className="page-header">
-        <h1 className="page-title">Teklif Kredileri</h1>
-        <p className="page-subtitle">Kredi bakiyenizi takip edin, paket alarak bakiyeni doldurun.</p>
+      <header className="pdash-page-head">
+        <h1 className="pdash-page-title">Kredilerim</h1>
+        <p className="pdash-page-sub">
+          Kredi bakiyenizi takip edin, paket alarak bakiyenizi doldurun.
+        </p>
       </header>
 
-      <section className="stat-grid">
-        <div className="stat-card">
-          <span className="muted">Kredi bakiyesi</span>
-          <span className="metric">{credits.balance}</span>
+      <section className="pdash-stat-grid" aria-label="Kredi özetleri">
+        <div className="pdash-stat-card">
+          <span className="pdash-stat-label">Mevcut Bakiye</span>
+          <span className="pdash-stat-value">{credits.balance}</span>
+          <span className="pdash-stat-hint">Kredi</span>
         </div>
-        <div className="stat-card">
-          <span className="muted">İşlem sayısı</span>
-          <span className="metric">{credits.transactions.length}</span>
+        <div className="pdash-stat-card">
+          <span className="pdash-stat-label">Harcanan</span>
+          <span className="pdash-stat-value">{spentTotal}</span>
+          <span className="pdash-stat-hint">Teklif gönderim toplamı</span>
         </div>
-        <div className="stat-card">
-          <span className="muted">Mevcut paket</span>
-          <span className="metric">{packages.filter((p) => p.isActive).length}</span>
+        <div className="pdash-stat-card">
+          <span className="pdash-stat-label">İade Edilen</span>
+          <span className="pdash-stat-value">{refundedTotal}</span>
+          <span className="pdash-stat-hint">Kredi iade işlemi toplamı</span>
+        </div>
+        <div className="pdash-stat-card">
+          <span className="pdash-stat-label">Aktif Paket</span>
+          <span className="pdash-stat-value">{activePackages.length}</span>
+          <span className="pdash-stat-hint">Satın alınabilir paket sayısı</span>
         </div>
       </section>
 
-      <div className="notice" style={{ marginTop: 18 }}>
-        Paket satın alma akışı mock ödeme ile çalışır. Gerçek ödeme sağlayıcısı veya gerçek kart işlemi yoktur.{' '}
+      <div className="pdash-notice">
+        Paket satın alma akışı mock ödeme ile çalışır. Gerçek ödeme sağlayıcısı veya gerçek kart işlemi
+        yoktur.{' '}
         <Link href={`/providers/${id}/package-purchases`}>Geçmiş satın almalarımı gör</Link>
       </div>
 
-      <section style={{ marginTop: 18 }}>
-        <h2 style={{ fontSize: 18 }}>Paketler</h2>
-        <div className="list-stack">
-          {packages.map((creditPackage) => (
-            <article className="list-card" key={creditPackage.id}>
-              <div className="list-card-header">
-                <div>
-                  <h3 className="list-card-title">{creditPackage.name}</h3>
+      <div className="pdash-section-head">
+        <h2 className="pdash-section-title">
+          Kredi Paketleri
+          <span className="pdash-section-count">{activePackages.length}</span>
+        </h2>
+      </div>
+
+      {activePackages.length === 0 ? (
+        <div className="pdash-empty">
+          <h3>Şu an aktif paket yok</h3>
+          <p>Yeni paket eklendiğinde burada listelenecek.</p>
+        </div>
+      ) : (
+        <div className="pdash-grid">
+          {activePackages.map((creditPackage) => (
+            <article className="pdash-card" key={creditPackage.id}>
+              <div className="pdash-card-head">
+                <div style={{ minWidth: 0 }}>
+                  <h3 className="pdash-card-title">{creditPackage.name}</h3>
                   {creditPackage.description ? (
-                    <p className="muted" style={{ margin: 0, fontSize: 13 }}>{creditPackage.description}</p>
+                    <p className="pdash-card-sub">{creditPackage.description}</p>
                   ) : null}
                 </div>
-                <div className="inline-actions">
-                  <span className="badge badge-info">{creditPackage.creditAmount} kredi</span>
-                  <span className="badge">{formatPrice(creditPackage.priceAmount, creditPackage.currency)}</span>
+                <span className="pdash-badge pdash-badge-info">
+                  {creditPackage.creditAmount} kredi
+                </span>
+              </div>
+
+              <div className="pdash-card-foot">
+                <div>
+                  <div className="pdash-card-price-label">Fiyat</div>
+                  <div className="pdash-card-price">
+                    {formatPrice(creditPackage.priceAmount, creditPackage.currency)}
+                  </div>
                 </div>
               </div>
-              <form action={createPackagePurchaseAction} style={{ display: 'grid', gap: 10 }}>
+
+              <form action={createPackagePurchaseAction} className="pdash-form">
                 <input type="hidden" name="providerId" value={id} />
                 <input type="hidden" name="packageId" value={creditPackage.id} />
-                <label className="form-row">
+                <label className="pdash-form-row">
                   <span>Not (isteğe bağlı)</span>
                   <input name="providerNote" placeholder="Satın alma için kısa not" />
                 </label>
-                <div>
-                  <button className="btn btn-primary" type="submit">Paket Satın Al</button>
-                </div>
+                <button className="pdash-btn pdash-btn-primary pdash-btn-block" type="submit">
+                  Paket Satın Al
+                </button>
               </form>
             </article>
           ))}
         </div>
-      </section>
+      )}
 
-      <section style={{ marginTop: 18 }}>
-        <div className="table-card">
-          <div className="table-header">
-            <h2>İşlem Geçmişi</h2>
-            <span className="muted" style={{ fontSize: 13 }}>{credits.transactions.length} kayıt</span>
-          </div>
-          {credits.transactions.length === 0 ? (
-            <div style={{ padding: 18 }} className="empty-state">Henüz kredi işlemi yok.</div>
-          ) : (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Tarih</th>
-                    <th>Tip</th>
-                    <th>Tutar</th>
-                    <th>Bakiye</th>
-                    <th>Açıklama</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {credits.transactions.map((transaction) => (
-                    <tr key={transaction.id}>
-                      <td>{formatDateTime(transaction.createdAt)}</td>
-                      <td>{creditTxnTypeLabel(transaction.type)}</td>
-                      <td>
-                        <span className={transaction.amount >= 0 ? 'badge badge-good' : 'badge badge-bad'}>
-                          {transaction.amount > 0 ? `+${transaction.amount}` : transaction.amount}
-                        </span>
-                      </td>
-                      <td>{transaction.balanceAfter}</td>
-                      <td className="muted">{transaction.reason ?? '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      <section className="pdash-table-card">
+        <div className="pdash-table-head">
+          <h2>İşlem Geçmişi</h2>
+          <span className="pdash-card-sub">{credits.transactions.length} kayıt</span>
         </div>
+        {credits.transactions.length === 0 ? (
+          <div className="pdash-empty" style={{ borderTop: 0, borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
+            <h3>Henüz kredi işlemi yok</h3>
+            <p>Bir paket satın aldığınızda veya teklif gönderdiğinizde işlemler burada görünecek.</p>
+          </div>
+        ) : (
+          <div className="pdash-table-scroll">
+            <table className="pdash-table">
+              <thead>
+                <tr>
+                  <th>Tarih</th>
+                  <th>Tip</th>
+                  <th>Tutar</th>
+                  <th>Bakiye</th>
+                  <th>Açıklama</th>
+                </tr>
+              </thead>
+              <tbody>
+                {credits.transactions.map((transaction) => (
+                  <tr key={transaction.id}>
+                    <td>{formatDateTime(transaction.createdAt)}</td>
+                    <td>{creditTxnTypeLabel(transaction.type)}</td>
+                    <td>
+                      <span
+                        className={
+                          transaction.amount >= 0
+                            ? 'pdash-badge pdash-badge-success'
+                            : 'pdash-badge pdash-badge-muted'
+                        }
+                      >
+                        {transaction.amount > 0 ? `+${transaction.amount}` : transaction.amount}
+                      </span>
+                    </td>
+                    <td>{transaction.balanceAfter}</td>
+                    <td style={{ color: 'var(--muted)' }}>{transaction.reason ?? '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
-    </main>
+    </ProviderShell>
   );
 }

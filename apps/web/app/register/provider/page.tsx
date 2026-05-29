@@ -9,42 +9,86 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
   const { error } = await searchParams;
 
   return (
-    <main className="auth-page">
-      <form className="auth-card" action={registerProviderAction}>
-        <h1 className="auth-title">Hizmet Veren Hesabı Oluştur</h1>
-        <p className="muted">Profilinizi bağlamak ve teklif akışını yönetmek için hesap açın.</p>
+    <main className="auth-screen">
+      <form className="auth-screen-card auth-screen-card-compact" action={registerProviderAction}>
+        <div className="auth-screen-card-head">
+          <span className="auth-screen-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="7" width="18" height="13" rx="2.5" />
+              <path d="M8 7V5.5A2.5 2.5 0 0 1 10.5 3h3A2.5 2.5 0 0 1 16 5.5V7" />
+              <path d="M3 12h18" />
+            </svg>
+          </span>
+          <h1 className="auth-screen-title">Hizmet Veren Hesabı Oluştur</h1>
+          <p className="auth-screen-subtitle">
+            Profilinizi bağlamak ve teklif akışını yönetmek için hesap açın.
+          </p>
+        </div>
+
         {error ? (
-          <div className="error-message" style={{ marginTop: 8 }}>
-            {error === 'duplicate' ? 'Bu e-posta veya telefon zaten kayıtlı.' : 'Bilgileri kontrol edin.'}
+          <div className="auth-screen-error" role="alert">
+            {error === 'duplicate'
+              ? 'Bu e-posta veya telefon zaten kayıtlı.'
+              : 'Bilgileri kontrol edin.'}
           </div>
         ) : null}
-        <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
-          <label className="form-row">
-            <span>Yetkili adı *</span>
-            <input name="name" required autoComplete="name" />
+
+        <div className="auth-screen-fields">
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">Yetkili adı *</span>
+            <input
+              className="auth-screen-input"
+              name="name"
+              required
+              autoComplete="name"
+            />
           </label>
-          <label className="form-row">
-            <span>E-posta *</span>
-            <input name="email" type="email" required autoComplete="email" />
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">E-posta *</span>
+            <input
+              className="auth-screen-input"
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+            />
           </label>
-          <label className="form-row">
-            <span>Şifre *</span>
-            <input name="password" type="password" minLength={8} required autoComplete="new-password" />
-            <span className="help-text">En az 8 karakter.</span>
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">Şifre *</span>
+            <input
+              className="auth-screen-input"
+              name="password"
+              type="password"
+              minLength={8}
+              required
+              autoComplete="new-password"
+            />
+            <span className="auth-screen-help">En az 8 karakter.</span>
           </label>
-          <label className="form-row">
-            <span>Telefon</span>
-            <input name="phone" autoComplete="tel" placeholder="05XX XXX XX XX" />
+          <label className="auth-screen-field">
+            <span className="auth-screen-label">Telefon</span>
+            <input
+              className="auth-screen-input"
+              name="phone"
+              autoComplete="tel"
+              placeholder="05XX XXX XX XX"
+            />
           </label>
-          <button className="btn btn-primary btn-block" type="submit">Hesap Oluştur</button>
         </div>
-        <p className="muted" style={{ marginTop: 14, fontSize: 13 }}>
+
+        <button className="auth-screen-submit" type="submit">
+          Hesap Oluştur
+        </button>
+
+        <hr className="auth-screen-divider" />
+
+        <p className="auth-screen-hint">
           Hesap oluşturduktan sonra <Link href="/providers/register">hizmet veren başvurusunu</Link> tamamlayın.
         </p>
-        <div className="inline-actions" style={{ marginTop: 6, justifyContent: 'center' }}>
-          <span className="muted">Zaten hesabınız var mı?</span>
+        <p className="auth-screen-bottom-link">
+          Zaten hesabınız var mı?
           <Link href="/login">Giriş yapın</Link>
-        </div>
+        </p>
       </form>
     </main>
   );
