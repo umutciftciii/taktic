@@ -1,13 +1,15 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import {
   apiFetch,
   RequestOfferDetail,
-  statusLabel,
-  statusBadgeClass,
-  formatPrice,
   formatDate,
   formatDateTime,
+  formatPrice,
+  getCurrentUser,
+  statusLabel,
 } from '../../../../../lib/api';
+import { CustomerShell } from '../../../customer-shell';
 import { customerOfferAction } from './actions';
 
 type RequestOfferDetailPageProps = {
@@ -16,39 +18,48 @@ type RequestOfferDetailPageProps = {
 
 export default async function RequestOfferDetailPage({ params }: RequestOfferDetailPageProps) {
   const { id, offerId } = await params;
-  const offer = await apiFetch<RequestOfferDetail>(`/service-requests/${id}/offers/${offerId}/view`, {
-    method: 'POST',
-  });
 
-  const actionable = offer.status !== 'ACCEPTED' && offer.status !== 'REJECTED' && offer.status !== 'WITHDRAWN';
+  const user = await getCurrentUser();
+  if (!user || user.role !== 'CUSTOMER') {
+    redirect(`/login?redirectTo=/requests/${id}/offers/${offerId}`);
+  }
+
+  const offer = await apiFetch<RequestOfferDetail>(
+    `/service-requests/${id}/offers/${offerId}/view`,
+    { method: 'POST' },
+  );
+
+  const actionable =
+    offer.status !== 'ACCEPTED' && offer.status !== 'REJECTED' && offer.status !== 'WITHDRAWN';
 
   return (
-    <main>
-      <p className="breadcrumbs">
-        <Link href="/requests/my">Taleplerim</Link>
-        <span aria-hidden="true">/</span>
-        <Link href={`/requests/${id}/offers`}>Teklifler</Link>
-        <span aria-hidden="true">/</span>
-        <span>Teklif detayı</span>
-      </p>
+    <CustomerShell user={user} active="requests">
+      <Link className="cdash-page-back" href={`/requests/${id}/offers`}>
+        <span aria-hidden="true">←</span>
+        <span>Tekliflere Dön</span>
+      </Link>
 
-      <header className="page-header">
-        <h1 className="page-title">{offer.provider.businessName}</h1>
-        <p className="page-subtitle">
-          <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>{' '}
-          <span className="muted">· {offer.provider.city}/{offer.provider.district}</span>
+      <header className="cdash-page-head">
+        <h1 className="cdash-page-title">{offer.provider.businessName}</h1>
+        <p className="cdash-page-sub">
+          {offer.provider.city}
+          {offer.provider.district ? `, ${offer.provider.district}` : ''}
         </p>
       </header>
 
-      <div className="detail-grid">
-        <div className="stack">
-          <section className="card" style={{ margin: 0 }}>
+      <div className="cdash-detail-grid">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section className="cdash-detail-card">
             <h2>Teklif</h2>
-            <dl className="meta-row">
+            <dl className="cdash-meta-list">
               <dt>Fiyat</dt>
-              <dd><strong>{formatPrice(offer.priceAmount, offer.currency)}</strong></dd>
+              <dd>
+                <strong>{formatPrice(offer.priceAmount, offer.currency)}</strong>
+              </dd>
               <dt>Durum</dt>
-              <dd><span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span></dd>
+              <dd>
+                <span className={offerStatusClass(offer.status)}>{statusLabel(offer.status)}</span>
+              </dd>
               <dt>Tahmini başlangıç</dt>
               <dd>{offer.estimatedStartDate ? formatDate(offer.estimatedStartDate) : '-'}</dd>
               <dt>Tahmini bitiş</dt>
@@ -60,47 +71,79 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
             </dl>
           </section>
 
-          <section className="card" style={{ margin: 0 }}>
+          <section className="cdash-detail-card">
             <h2>Mesaj</h2>
-            <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{offer.message}</p>
+            <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14, color: 'var(--text-2)' }}>
+              {offer.message}
+            </p>
             {offer.warrantyNote ? (
               <>
-                <h3 style={{ marginTop: 14, fontSize: 14 }}>Garanti notu</h3>
-                <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{offer.warrantyNote}</p>
+                <h2 style={{ marginTop: 6, fontSize: 14 }}>Garanti notu</h2>
+                <p
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    margin: 0,
+                    fontSize: 13,
+                    color: 'var(--muted)',
+                  }}
+                >
+                  {offer.warrantyNote}
+                </p>
               </>
             ) : null}
           </section>
         </div>
 
-        <div className="stack">
-          <section className="card" style={{ margin: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section className="cdash-detail-card">
             <h2>Hizmet Veren</h2>
-            <dl className="meta-row">
+            <dl className="cdash-meta-list">
               <dt>İşletme</dt>
               <dd>{offer.provider.businessName}</dd>
               <dt>Konum</dt>
-              <dd>{offer.provider.city}/{offer.provider.district}</dd>
+              <dd>
+                {offer.provider.city}
+                {offer.provider.district ? `, ${offer.provider.district}` : ''}
+              </dd>
             </dl>
           </section>
 
           {actionable ? (
-            <section className="card" style={{ margin: 0 }}>
+            <section className="cdash-detail-card">
               <h2>Aksiyonlar</h2>
-              <div className="inline-actions" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                <ActionButton requestId={id} offerId={offerId} action="ACCEPT" label="Kabul Et" variant="primary" />
-                <ActionButton requestId={id} offerId={offerId} action="SHORTLIST" label="Kısa Listeye Al" variant="secondary" />
-                <ActionButton requestId={id} offerId={offerId} action="REJECT" label="Reddet" variant="danger" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <ActionButton
+                  requestId={id}
+                  offerId={offerId}
+                  action="ACCEPT"
+                  label="Kabul Et"
+                  variant="primary"
+                />
+                <ActionButton
+                  requestId={id}
+                  offerId={offerId}
+                  action="SHORTLIST"
+                  label="Kısa Listeye Al"
+                  variant="secondary"
+                />
+                <ActionButton
+                  requestId={id}
+                  offerId={offerId}
+                  action="REJECT"
+                  label="Reddet"
+                  variant="danger"
+                />
               </div>
             </section>
           ) : null}
 
-          <div className="notice">
-            Ödeme ve doğrudan iletişim akışı henüz aktif değildir. Teklifi kabul ettiğinizde hizmet veren
-            bilgilendirilir.
+          <div className="cdash-notice">
+            Ödeme ve doğrudan iletişim akışı henüz aktif değildir. Teklifi kabul ettiğinizde hizmet
+            veren bilgilendirilir.
           </div>
         </div>
       </div>
-    </main>
+    </CustomerShell>
   );
 }
 
@@ -119,10 +162,10 @@ function ActionButton({
 }) {
   const className =
     variant === 'primary'
-      ? 'btn btn-primary btn-block'
+      ? 'cdash-btn cdash-btn-primary cdash-btn-block'
       : variant === 'danger'
-        ? 'btn btn-danger btn-block'
-        : 'btn btn-secondary btn-block';
+        ? 'cdash-btn cdash-btn-danger cdash-btn-block'
+        : 'cdash-btn cdash-btn-secondary cdash-btn-block';
 
   return (
     <form action={customerOfferAction}>
@@ -134,4 +177,22 @@ function ActionButton({
       </button>
     </form>
   );
+}
+
+function offerStatusClass(status: string): string {
+  switch (status) {
+    case 'ACCEPTED':
+      return 'cdash-badge cdash-badge-success';
+    case 'REJECTED':
+    case 'WITHDRAWN':
+    case 'EXPIRED':
+    case 'CANCELLED':
+      return 'cdash-badge cdash-badge-danger';
+    case 'SHORTLISTED':
+      return 'cdash-badge cdash-badge-info';
+    case 'SUBMITTED':
+    case 'VIEWED':
+    default:
+      return 'cdash-badge cdash-badge-warn';
+  }
 }
