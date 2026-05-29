@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import {
   apiFetch,
   CustomerServiceRequest,
+  OfferStatus,
   RequestOfferPreview,
   formatDateTime,
   formatPrice,
@@ -123,6 +124,7 @@ function OfferCard({ offer, requestId }: { offer: RequestOfferPreview; requestId
   return (
     <article className="cdash-offer">
       <div className="cdash-offer-head">
+        <span className={offerStatusClass(offer.status)}>{offerStatusLabel(offer.status)}</span>
         <div className="cdash-offer-provider">
           <span className="cdash-offer-avatar" aria-hidden="true">
             {initials}
@@ -155,6 +157,38 @@ function OfferCard({ offer, requestId }: { offer: RequestOfferPreview; requestId
       </div>
     </article>
   );
+}
+
+const OFFER_STATUS_LABELS: Record<OfferStatus, string> = {
+  SUBMITTED: 'Bekliyor',
+  VIEWED: 'Görüntülendi',
+  SHORTLISTED: 'Kısa listede',
+  ACCEPTED: 'Kabul edildi',
+  REJECTED: 'Reddedildi',
+  WITHDRAWN: 'Geri çekildi',
+  EXPIRED: 'Süresi doldu',
+  CANCELLED: 'İptal edildi',
+};
+
+function offerStatusLabel(status: OfferStatus): string {
+  return OFFER_STATUS_LABELS[status] ?? statusLabel(status);
+}
+
+function offerStatusClass(status: OfferStatus): string {
+  switch (status) {
+    case 'ACCEPTED':
+      return 'cdash-badge cdash-badge-success';
+    case 'REJECTED':
+    case 'WITHDRAWN':
+    case 'EXPIRED':
+    case 'CANCELLED':
+      return 'cdash-badge cdash-badge-danger';
+    case 'SUBMITTED':
+    case 'VIEWED':
+    case 'SHORTLISTED':
+    default:
+      return 'cdash-badge cdash-badge-info';
+  }
 }
 
 async function safeFetchMyRequests(): Promise<CustomerServiceRequest[]> {
