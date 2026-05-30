@@ -1125,3 +1125,683 @@ button:disabled {
 .section-card.is-padded > .section-card-body {
   padding: 18px 20px;
 }
+
+/* ---- Admin module patterns (Categories P2 revize) ---- */
+
+/* Toolbar */
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  margin: 0 0 14px;
+}
+
+.admin-toolbar-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-toolbar-field > label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-toolbar input,
+.admin-toolbar select {
+  min-height: 32px;
+  padding: 5px 9px;
+  font-size: 13px;
+  width: auto;
+  border-radius: 8px;
+}
+
+.admin-toolbar .btn,
+.admin-toolbar .btn-sm,
+.admin-toolbar .btn-primary,
+.admin-toolbar .btn-secondary,
+.admin-toolbar .btn-ghost {
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  border-radius: 8px;
+}
+
+.admin-toolbar-search input {
+  width: 220px;
+}
+
+.admin-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.admin-toolbar-summary {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Table tweaks */
+
+.table-card .table-header {
+  padding: 12px 16px;
+}
+
+.table-card .table-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.table-card .table-header h2 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.table-card .table-header-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Global, low-risk: hover row state for all admin tables */
+.data-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+/* Utility column classes — only apply where explicitly opted in */
+.data-table .col-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.data-table .col-num {
+  width: 92px;
+}
+
+/* Categories module scope: tighter padding/font/row height */
+.categories-page .data-table th,
+.categories-page .data-table td {
+  padding: 11px 14px;
+  font-size: 13.5px;
+}
+
+.categories-page .data-table tbody tr {
+  height: 56px;
+}
+
+.btn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.btn-pill:hover {
+  background: #dbeafe;
+  color: var(--primary-dark);
+  text-decoration: none;
+}
+
+/* Module layout (two-column) */
+
+.admin-module-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+.admin-main-column {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.admin-side-column {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  position: sticky;
+  top: 80px;
+}
+
+@media (max-width: 1024px) {
+  .admin-module-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .admin-side-column {
+    position: static;
+  }
+}
+
+/* Meta pills row */
+
+.admin-meta-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -8px 0 14px;
+}
+
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.meta-pill code {
+  font-size: 11.5px;
+  color: #1e293b;
+  background: transparent;
+  padding: 0;
+}
+
+.meta-pill-good {
+  background: #ecfdf5;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.meta-pill-muted {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+/* Side action panel */
+
+.admin-action-panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.admin-action-panel h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #334155;
+}
+
+.admin-action-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.admin-action-panel .panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-action-panel.is-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.admin-action-panel.is-warning h3 {
+  color: #92400e;
+}
+
+/* Compact form */
+
+.compact-form {
+  display: grid;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.compact-form-wide {
+  max-width: none;
+}
+
+.compact-field-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.compact-field-grid > .field {
+  display: grid;
+  gap: 5px;
+  grid-column: span 12;
+  margin: 0;
+}
+
+.compact-field-grid > .field-6 {
+  grid-column: span 6;
+}
+
+.compact-field-grid > .field-4 {
+  grid-column: span 4;
+}
+
+.compact-field-grid > .field-3 {
+  grid-column: span 3;
+}
+
+.compact-field-grid > .field-8 {
+  grid-column: span 8;
+}
+
+@media (max-width: 640px) {
+  .compact-field-grid > .field-6,
+  .compact-field-grid > .field-4,
+  .compact-field-grid > .field-3,
+  .compact-field-grid > .field-8 {
+    grid-column: span 12;
+  }
+}
+
+.compact-field-grid .field > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.compact-form input,
+.compact-form select,
+.compact-form textarea {
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  border-radius: 8px;
+}
+
+.compact-form textarea {
+  min-height: 88px;
+  max-height: 200px;
+}
+
+.compact-form .help-text {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.compact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.compact-actions.is-flush {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* Helper / note card */
+
+.helper-card {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.helper-card h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #1e40af;
+}
+
+.helper-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1e3a8a;
+}
+
+.helper-card ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: #1e3a8a;
+  display: grid;
+  gap: 4px;
+}
+
+/* Question manager */
+
+.question-manager {
+  display: grid;
+}
+
+.question-table {
+  display: block;
+}
+
+.question-table-head {
+  display: grid;
+  grid-template-columns: 48px minmax(180px, 2fr) minmax(120px, 1.2fr) 100px 80px 90px 96px;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 16px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
+.question-table-head > span:last-child {
+  text-align: right;
+}
+
+.question-row {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.question-row:last-child {
+  border-bottom: 0;
+}
+
+.question-row > summary {
+  display: grid;
+  grid-template-columns: 48px minmax(180px, 2fr) minmax(120px, 1.2fr) 100px 80px 90px 96px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  min-height: 56px;
+}
+
+.question-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.question-row > summary:hover {
+  background: #f8fafc;
+}
+
+.question-row[open] > summary {
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+}
+
+.question-row .q-order {
+  color: var(--muted);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.question-row .q-label {
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.question-row .q-key code {
+  font-size: 11.5px;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.question-row .q-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.question-row .q-req-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.question-row .q-req-badge.is-on {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.question-row .q-action {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.question-row > summary:hover .q-action {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.question-row[open] .q-action::after {
+  content: "▴";
+  font-size: 10px;
+}
+
+.question-row:not([open]) .q-action::after {
+  content: "▾";
+  font-size: 10px;
+}
+
+/* Edit panel inside a question row */
+
+.question-edit-panel {
+  padding: 16px 18px 18px;
+  background: #fafbfc;
+  display: grid;
+  gap: 12px;
+}
+
+.question-edit-panel form {
+  margin: 0;
+}
+
+.question-edit-panel .q-options textarea {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  min-height: 96px;
+  max-height: 160px;
+}
+
+.question-edit-panel .panel-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.question-edit-panel .panel-footer .status-form {
+  margin-left: auto;
+}
+
+/* Create-question panel (compact collapsible) */
+
+.question-create-panel {
+  margin: 14px 16px 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.question-create-panel[open] {
+  background: var(--surface);
+  border-style: solid;
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.question-create-panel > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-weight: 700;
+  color: var(--primary-dark);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.question-create-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.question-create-panel > summary::before {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: #dbeafe;
+  color: var(--primary-dark);
+  font-weight: 800;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.question-create-panel[open] > summary::before {
+  content: "−";
+}
+
+.question-create-panel > summary:hover {
+  color: var(--primary);
+}
+
+.question-create-panel[open] > summary {
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.question-create-panel-body {
+  padding: 14px 16px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.question-create-panel-body .q-options textarea {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  min-height: 88px;
+  max-height: 160px;
+}
+
+/* Responsive question table */
+
+@media (max-width: 900px) {
+  .question-table-head {
+    display: none;
+  }
+
+  .question-row > summary {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "label status"
+      "meta action";
+    row-gap: 6px;
+    min-height: 0;
+    padding: 12px 14px;
+  }
+
+  .question-row .q-order,
+  .question-row .q-type-badge,
+  .question-row .q-req-badge {
+    display: none;
+  }
+
+  .question-row .q-label {
+    grid-area: label;
+    white-space: normal;
+  }
+
+  .question-row .q-key {
+    grid-area: meta;
+  }
+
+  .question-row .q-status {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .question-row .q-action {
+    grid-area: action;
+    justify-self: end;
+  }
+}
+
