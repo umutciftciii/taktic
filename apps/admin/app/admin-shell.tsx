@@ -1,20 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
-import { logoutAction } from './login/actions';
-
-const navItems: Array<{ href: string; label: string }> = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/requests', label: 'Talepler' },
-  { href: '/providers', label: 'Hizmet Verenler' },
-  { href: '/offers', label: 'Teklifler' },
-  { href: '/categories', label: 'Kategoriler' },
-  { href: '/credit-packages', label: 'Kredi Paketleri' },
-  { href: '/package-purchases', label: 'Paket Talepleri' },
-  { href: '/refund-scan', label: 'İade Taraması' },
-];
+import { Sidebar } from '../components/sidebar';
+import { Topbar } from '../components/topbar';
 
 type AdminShellProps = {
   children: ReactNode;
@@ -22,35 +11,37 @@ type AdminShellProps = {
 
 export function AdminShell({ children }: AdminShellProps) {
   const pathname = usePathname();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), []);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
 
   if (pathname === '/login') {
-    return children;
+    return <>{children}</>;
   }
 
   return (
-    <div className="admin-shell">
-      <header className="app-header">
-        <div className="app-header-inner">
-          <Link className="brand" href="/">
-            <span className="brand-mark">T</span>
-            <span>TakTic Admin</span>
-          </Link>
-          <nav className="app-nav" aria-label="Admin navigation">
-            {navItems.map((item) => {
-              const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
-              return (
-                <Link key={item.href} className={isActive ? 'active' : ''} href={item.href}>
-                  {item.label}
-                </Link>
-              );
-            })}
-            <form action={logoutAction}>
-              <button className="btn btn-secondary btn-sm" type="submit">Çıkış</button>
-            </form>
-          </nav>
-        </div>
-      </header>
-      {children}
+    <div className={sidebarOpen ? 'admin-shell is-sidebar-open' : 'admin-shell'}>
+      <aside className="admin-sidebar" aria-label="Birincil navigasyon">
+        <Sidebar onNavigate={closeSidebar} />
+      </aside>
+
+      <button
+        type="button"
+        className="admin-sidebar-backdrop"
+        aria-label="Menüyü kapat"
+        onClick={closeSidebar}
+        tabIndex={sidebarOpen ? 0 : -1}
+      />
+
+      <div className="admin-main">
+        <Topbar onToggleSidebar={toggleSidebar} />
+        <div className="admin-content">{children}</div>
+      </div>
     </div>
   );
 }

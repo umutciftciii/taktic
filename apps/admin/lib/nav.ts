@@ -1,0 +1,46 @@
+export type NavItem = {
+  href: string;
+  label: string;
+  exact?: boolean;
+};
+
+export type NavGroup = {
+  title: string;
+  items: NavItem[];
+};
+
+export const navGroups: NavGroup[] = [
+  {
+    title: 'Genel',
+    items: [{ href: '/', label: 'Dashboard', exact: true }],
+  },
+  {
+    title: 'Operasyon',
+    items: [
+      { href: '/requests', label: 'Talepler' },
+      { href: '/offers', label: 'Teklifler' },
+      { href: '/providers', label: 'Hizmet Verenler' },
+    ],
+  },
+  {
+    title: 'Katalog',
+    items: [
+      { href: '/categories', label: 'Kategoriler' },
+      { href: '/credit-packages', label: 'Kredi Paketleri' },
+    ],
+  },
+  {
+    title: 'Finans',
+    items: [
+      { href: '/package-purchases', label: 'Paket Satın Almaları' },
+      { href: '/refund-scan', label: 'İade Taraması' },
+    ],
+  },
+];
+
+export function isNavItemActive(item: NavItem, pathname: string): boolean {
+  if (item.exact) {
+    return pathname === item.href;
+  }
+  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+}
