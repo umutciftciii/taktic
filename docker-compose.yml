@@ -39,6 +39,11 @@ services:
       REFUND_SCHEDULER_CRON: ${REFUND_SCHEDULER_CRON:-0 * * * *}
       REFUND_SCAN_OLDER_THAN_HOURS: ${REFUND_SCAN_OLDER_THAN_HOURS:-48}
       REFUND_SCAN_LIMIT: ${REFUND_SCAN_LIMIT:-100}
+      # Force polling-based file watching so tsx/chokidar reliably detect
+      # host edits under the macOS bind mount. inotify events don't cross
+      # the Docker Desktop VirtioFS/gRPC-FUSE boundary on macOS.
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "1000"
     ports:
       - "${API_PORT:-3001}:3001"
     volumes:
