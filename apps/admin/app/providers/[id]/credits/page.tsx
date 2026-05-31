@@ -1,6 +1,17 @@
 import Link from 'next/link';
-import { apiFetch, ProviderCredits, creditTxnTypeLabel, formatDateTime } from '../../../../lib/api';
-import { deductProviderCreditsAction, grantProviderCreditsAction } from './actions';
+import {
+  apiFetch,
+  ProviderCredits,
+  ProviderProfile,
+  statusBadgeClass,
+  statusLabel,
+} from '../../../../lib/api';
+import { PageHeader } from '../../../../components/page-header';
+import { SectionCard } from '../../../../components/section-card';
+import { StatCard } from '../../../../components/stat-card';
+import { submitCreditOperationAction } from './actions';
+import { CreditOperationForm } from './credit-operation-form';
+import { TransactionsPanel } from './transactions-panel';
 
 type AdminProviderCreditsPageProps = {
   params: Promise<{ id: string }>;
@@ -8,122 +19,109 @@ type AdminProviderCreditsPageProps = {
 
 export default async function AdminProviderCreditsPage({ params }: AdminProviderCreditsPageProps) {
   const { id } = await params;
-  const credits = await apiFetch<ProviderCredits>(`/providers/${id}/credits`);
+
+  const [credits, provider] = await Promise.all([
+    apiFetch<ProviderCredits>(`/providers/${id}/credits`),
+    apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`),
+  ]);
+
+  const transactions = credits.transactions;
+  const totalGrant = transactions
+    .filter((t) => t.type === 'ADMIN_GRANT')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const totalDeduct = transactions
+    .filter((t) => t.type === 'ADMIN_DEDUCT')
+    .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+  const listedHint = 'Listelenen işlemler içinde';
 
   return (
-    <main>
-      <p className="breadcrumbs">
-        <Link href="/">Dashboard</Link>
-        <span aria-hidden="true">/</span>
-        <Link href="/providers">Hizmet Verenler</Link>
-        <span aria-hidden="true">/</span>
-        <Link href={`/providers/${id}`}>Detay</Link>
-        <span aria-hidden="true">/</span>
-        <span>Krediler</span>
-      </p>
-
-      <header className="page-header">
-        <h1 className="page-title">Hizmet Veren Kredileri</h1>
-        <p className="page-subtitle">Manuel kredi ekleyin, düşürün veya işlem geçmişine bakın.</p>
-      </header>
+    <main className="credit-ops-page">
+      <PageHeader
+        breadcrumbs={[
+          { label: 'Dashboard', href: '/' },
+          { label: 'Hizmet Verenler', href: '/providers' },
+          { label: provider.businessName, href: `/providers/${id}` },
+          { label: 'Krediler' },
+        ]}
+        title="Hizmet Veren Kredileri"
+        subtitle={
+          <>
+            <strong>{provider.businessName}</strong>
+            <span className="muted">
+              {' · '}
+              <span className={statusBadgeClass(provider.status)}>
+                {statusLabel(provider.status)}
+              </span>
+              {' · '}
+              {provider.city}/{provider.district}
+            </span>
+          </>
+        }
+        actions={
+          <>
+            <Link className="btn btn-secondary btn-sm" href={`/providers/${id}`}>
+              Hizmet veren detayı
+            </Link>
+            <Link className="btn btn-ghost btn-sm" href={`/offers?providerId=${id}`}>
+              Teklifler
+            </Link>
+          </>
+        }
+      />
 
       <section className="stat-grid">
-        <div className="stat-card">
-          <span className="muted">Mevcut bakiye</span>
-          <span className="metric">{credits.balance}</span>
-        </div>
-        <div className="stat-card">
-          <span className="muted">İşlem sayısı</span>
-          <span className="metric">{credits.transactions.length}</span>
-        </div>
+        <StatCard
+          label="Mevcut bakiye"
+          value={credits.balance}
+          tone={credits.balance > 0 ? 'neutral' : 'warning'}
+        />
+        <StatCard label="İşlem sayısı" value={transactions.length} hint={listedHint} />
+        <StatCard label="Manuel ekleme" value={totalGrant} hint={listedHint} />
+        <StatCard label="Manuel düşme" value={totalDeduct} hint={listedHint} />
       </section>
 
-      <div className="detail-grid" style={{ marginTop: 18 }}>
-        <div className="stack">
-          <section className="table-card">
-            <div className="table-header">
-              <h2>İşlemler</h2>
-              <span className="muted" style={{ fontSize: 13 }}>{credits.transactions.length} kayıt</span>
-            </div>
-            {credits.transactions.length === 0 ? (
-              <div style={{ padding: 18 }} className="empty-state">Henüz kredi işlemi yok.</div>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Tarih</th>
-                      <th>Tip</th>
-                      <th>Tutar</th>
-                      <th>Bakiye</th>
-                      <th>Sebep</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {credits.transactions.map((transaction) => (
-                      <tr key={transaction.id}>
-                        <td>{formatDateTime(transaction.createdAt)}</td>
-                        <td>{creditTxnTypeLabel(transaction.type)}</td>
-                        <td>
-                          <span className={transaction.amount >= 0 ? 'badge badge-good' : 'badge badge-bad'}>
-                            {transaction.amount > 0 ? `+${transaction.amount}` : transaction.amount}
-                          </span>
-                        </td>
-                        <td>{transaction.balanceAfter}</td>
-                        <td className="muted">{transaction.reason ?? '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
+      <div className="credit-ops-grid">
+        <SectionCard
+          title="İşlem geçmişi"
+          subtitle={`Toplam ${transactions.length} kayıt`}
+          padded={false}
+          className="credit-ops-history"
+        >
+          <TransactionsPanel transactions={transactions} />
+        </SectionCard>
 
-        <div className="stack">
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Manuel Kredi Ekle</h2>
-            <form action={grantProviderCreditsAction} style={{ display: 'grid', gap: 12 }}>
-              <input type="hidden" name="providerId" value={id} />
-              <CreditFormFields />
-              <div>
-                <button className="btn btn-primary btn-block" type="submit">Kredi ekle</button>
-              </div>
-            </form>
-          </section>
+        <div className="credit-ops-side">
+          <SectionCard
+            title="Manuel kredi işlemi"
+            subtitle="Ekle veya düş — tek formdan"
+            className="credit-operation-card"
+          >
+            <CreditOperationForm
+              providerId={id}
+              currentBalance={credits.balance}
+              action={submitCreditOperationAction}
+            />
+          </SectionCard>
 
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Manuel Kredi Düş</h2>
-            <form action={deductProviderCreditsAction} style={{ display: 'grid', gap: 12 }}>
-              <input type="hidden" name="providerId" value={id} />
-              <CreditFormFields />
-              <div>
-                <button className="btn btn-danger btn-block" type="submit">Kredi düş</button>
-              </div>
-            </form>
-          </section>
+          <SectionCard title="Denetim notu" className="credit-ops-audit">
+            <ul className="credit-ops-audit-list">
+              <li>
+                Manuel işlemlerde sebep alanı zorunludur ve kredi hareketleri ile birlikte saklanır.
+              </li>
+              <li>
+                İşlemi yapan yöneticinin kaydı tutulur ve geçmiş listede &quot;Yapan&quot;
+                sütununda görünür.
+              </li>
+              <li>
+                Eski tarihli bazı kayıtlarda işlemi yapan bilgisi bulunmayabilir; bu kayıtlar
+                &quot;—&quot; olarak görünür.
+              </li>
+              <li>Negatif bakiyeye düşüren işlemler sunucu tarafında reddedilir.</li>
+            </ul>
+          </SectionCard>
         </div>
       </div>
     </main>
-  );
-}
-
-function CreditFormFields() {
-  return (
-    <>
-      <label className="form-row">
-        <span>Tutar</span>
-        <input name="amount" type="number" min="1" required />
-      </label>
-      <label className="form-row">
-        <span>Sebep</span>
-        <input
-          name="reason"
-          placeholder="Yönetici notu"
-          required
-          minLength={3}
-        />
-      </label>
-    </>
   );
 }

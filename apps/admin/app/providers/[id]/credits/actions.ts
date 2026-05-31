@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { apiFetch, ProviderCreditTransaction } from '../../../../lib/api';
 
+export type CreditOperationType = 'GRANT' | 'DEDUCT';
+
 export async function grantProviderCreditsAction(formData: FormData) {
   const providerId = readFormString(formData, 'providerId');
 
@@ -25,6 +27,17 @@ export async function deductProviderCreditsAction(formData: FormData) {
 
   revalidatePath(`/providers/${providerId}`);
   revalidatePath(`/providers/${providerId}/credits`);
+}
+
+export async function submitCreditOperationAction(formData: FormData) {
+  const operationType = readFormString(formData, 'operationType');
+
+  if (operationType === 'DEDUCT') {
+    await deductProviderCreditsAction(formData);
+    return;
+  }
+
+  await grantProviderCreditsAction(formData);
 }
 
 function creditPayload(formData: FormData) {
