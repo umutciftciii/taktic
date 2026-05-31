@@ -95,6 +95,13 @@ export class ProvidersController {
     return this.providersService.getProviderOffer(providerId, offerId);
   }
 
+  @Get(':providerId/admin-detail')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  getAdminProviderDetail(@Param('providerId') providerId: string) {
+    return this.providersService.getAdminProviderDetail(providerId);
+  }
+
   @Get(':id')
   getProvider(@Param('id') id: string) {
     return this.providersService.getProvider(id);
