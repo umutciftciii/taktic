@@ -127,10 +127,16 @@ export class ServiceRequestsService {
         customer: {
           select: { id: true, email: true, phone: true, name: true },
         },
+        _count: {
+          select: { offers: true },
+        },
       },
     });
 
-    return requests.map(withQualityLabel);
+    return requests.map((request) => ({
+      ...withQualityLabel(request),
+      offersCount: request._count.offers,
+    }));
   }
 
   async listCustomerServiceRequests(customerId: string) {
