@@ -60,27 +60,42 @@ export class CreditsController {
 
   @Get('providers/:providerId/credits')
   @UseGuards(AuthGuard, ProviderAccessGuard)
-  getProviderCredits(@Param('providerId') providerId: string) {
-    return this.creditsService.getProviderCredits(providerId);
+  getProviderCredits(@Param('providerId') providerId: string, @CurrentUser() user: AuthUser) {
+    return this.creditsService.getProviderCredits(providerId, {
+      includeActor: user.role === UserRole.SUPER_ADMIN,
+    });
   }
 
   @Get('providers/:providerId/credits/transactions')
   @UseGuards(AuthGuard, ProviderAccessGuard)
-  listProviderCreditTransactions(@Param('providerId') providerId: string) {
-    return this.creditsService.listProviderCreditTransactions(providerId);
+  listProviderCreditTransactions(
+    @Param('providerId') providerId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.creditsService.listProviderCreditTransactions(providerId, {
+      includeActor: user.role === UserRole.SUPER_ADMIN,
+    });
   }
 
   @Post('providers/:providerId/credits/grant')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  grantCredits(@Param('providerId') providerId: string, @Body() dto: ManualCreditTransactionDto) {
-    return this.creditsService.grantCredits(providerId, dto);
+  grantCredits(
+    @Param('providerId') providerId: string,
+    @Body() dto: ManualCreditTransactionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.creditsService.grantCredits(providerId, dto, user.id);
   }
 
   @Post('providers/:providerId/credits/deduct')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  deductCredits(@Param('providerId') providerId: string, @Body() dto: ManualCreditTransactionDto) {
-    return this.creditsService.deductCredits(providerId, dto);
+  deductCredits(
+    @Param('providerId') providerId: string,
+    @Body() dto: ManualCreditTransactionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.creditsService.deductCredits(providerId, dto, user.id);
   }
 }

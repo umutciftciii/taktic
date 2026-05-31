@@ -117,7 +117,12 @@ function CreditFormFields() {
       </label>
       <label className="form-row">
         <span>Sebep</span>
-        <input name="reason" placeholder="Yönetici notu" />
+        <input
+          name="reason"
+          placeholder="Yönetici notu"
+          required
+          minLength={3}
+        />
       </label>
     </>
   );
