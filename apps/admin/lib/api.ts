@@ -133,6 +133,39 @@ export type ProviderServiceArea = {
   neighborhood: string | null;
 };
 
+export type ProviderRecentOffer = {
+  id: string;
+  status: OfferStatus;
+  priceAmount: number;
+  currency: string;
+  submittedAt: string;
+  request: {
+    id: string;
+    city: string;
+    district: string;
+    category: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+  };
+};
+
+export type ProviderRecentPackagePurchase = {
+  id: string;
+  status: PackagePurchaseStatus;
+  packageNameSnapshot: string;
+  creditAmountSnapshot: number;
+  priceAmountSnapshot: number;
+  currencySnapshot: string;
+  createdAt: string;
+  paidAt: string | null;
+  failedAt: string | null;
+  cancelledAt: string | null;
+  expiredAt: string | null;
+  refundedAt: string | null;
+};
+
 export type ProviderProfile = {
   id: string;
   userId: string | null;
@@ -163,6 +196,12 @@ export type ProviderProfile = {
   } | null;
   serviceCategories: ProviderServiceCategory[];
   serviceAreas: ProviderServiceArea[];
+  creditBalance?: number;
+  activeOffersCount?: number;
+  totalOffersCount?: number;
+  packagePurchasesCount?: number;
+  recentOffers?: ProviderRecentOffer[];
+  recentPackagePurchases?: ProviderRecentPackagePurchase[];
 };
 
 export type OfferStatus =

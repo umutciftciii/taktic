@@ -2541,3 +2541,132 @@ button:disabled {
   padding: 1px 6px;
   border-radius: 6px;
 }
+
+/* Provider detail balanced layout */
+
+.provider-detail-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+.provider-detail-card-grid > .section-card {
+  margin-top: 0;
+}
+
+.provider-detail-card-grid > .section-card.card-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .provider-detail-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .provider-detail-card-grid > .section-card.card-wide {
+    grid-column: auto;
+  }
+}
+
+/* Moderation dialog */
+
+.moderation-dialog {
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  max-width: 560px;
+  width: calc(100% - 32px);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.32);
+}
+
+.moderation-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.moderation-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.moderation-dialog-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.moderation-dialog-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.moderation-dialog-close {
+  appearance: none;
+  background: none;
+  border: 0;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.moderation-dialog-close:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.moderation-dialog-body {
+  padding: 18px 20px 20px;
+  display: grid;
+  gap: 18px;
+}
+
+.moderation-dialog-section {
+  display: grid;
+  gap: 10px;
+}
+
+.moderation-dialog-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.moderation-dialog-quick {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.moderation-dialog-hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.moderation-dialog-divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+.moderation-dialog-form {
+  display: grid;
+  gap: 12px;
+}
+
+.moderation-dialog-actions {
+  justify-content: flex-end;
+}
+
+.moderation-dialog-required {
+  margin-left: 8px;
+}

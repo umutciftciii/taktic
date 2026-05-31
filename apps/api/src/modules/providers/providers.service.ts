@@ -98,12 +98,12 @@ export class ProvidersService {
     });
   }
 
-  listProviders(filters: ProviderListFilters) {
+  async listProviders(filters: ProviderListFilters) {
     const status = normalizeOptionalStatus(filters.status);
     const city = normalizeNullableString(filters.city);
     const categoryId = normalizeNullableString(filters.categoryId);
 
-    return this.prisma.providerProfile.findMany({
+    const providers = await this.prisma.providerProfile.findMany({
       where: {
         ...(status ? { status } : {}),
         ...(city ? { city: { equals: city, mode: 'insensitive' } } : {}),
@@ -118,6 +118,21 @@ export class ProvidersService {
       orderBy: { createdAt: 'desc' },
       include: providerInclude,
     });
+
+    if (providers.length === 0) {
+      return providers;
+    }
+
+    const providerIds = providers.map((provider) => provider.id);
+    const metrics = await this.getProviderListMetrics(providerIds);
+
+    return providers.map((provider) => ({
+      ...provider,
+      creditBalance: metrics.creditBalance.get(provider.id) ?? 0,
+      activeOffersCount: metrics.activeOffers.get(provider.id) ?? 0,
+      totalOffersCount: metrics.totalOffers.get(provider.id) ?? 0,
+      packagePurchasesCount: metrics.packagePurchases.get(provider.id) ?? 0,
+    }));
   }
 
   async getProvider(id: string) {
@@ -131,6 +146,133 @@ export class ProvidersService {
     }
 
     return provider;
+  }
+
+  async getAdminProviderDetail(id: string) {
+    const provider = await this.getProvider(id);
+
+    const [
+      creditBalance,
+      activeOffersCount,
+      totalOffersCount,
+      packagePurchasesCount,
+      recentOffers,
+      recentPackagePurchases,
+    ] = await Promise.all([
+      this.getProviderCreditBalance(id),
+      this.prisma.offer.count({
+        where: {
+          providerId: id,
+          status: {
+            in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
+          },
+          request: {
+            offers: { none: { status: OfferStatus.ACCEPTED } },
+          },
+        },
+      }),
+      this.prisma.offer.count({ where: { providerId: id } }),
+      this.prisma.packagePurchase.count({ where: { providerId: id } }),
+      this.prisma.offer.findMany({
+        where: { providerId: id },
+        orderBy: { submittedAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          status: true,
+          priceAmount: true,
+          currency: true,
+          submittedAt: true,
+          request: {
+            select: {
+              id: true,
+              city: true,
+              district: true,
+              category: { select: { id: true, name: true, slug: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.packagePurchase.findMany({
+        where: { providerId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          status: true,
+          packageNameSnapshot: true,
+          creditAmountSnapshot: true,
+          priceAmountSnapshot: true,
+          currencySnapshot: true,
+          createdAt: true,
+          paidAt: true,
+          failedAt: true,
+          cancelledAt: true,
+          expiredAt: true,
+          refundedAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      ...provider,
+      creditBalance,
+      activeOffersCount,
+      totalOffersCount,
+      packagePurchasesCount,
+      recentOffers,
+      recentPackagePurchases,
+    };
+  }
+
+  private async getProviderListMetrics(providerIds: string[]) {
+    const [latestTransactions, activeOffersGroups, totalOffersGroups, packagePurchasesGroups] =
+      await Promise.all([
+        this.prisma.providerCreditTransaction.findMany({
+          where: { providerId: { in: providerIds } },
+          orderBy: [{ providerId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
+          distinct: ['providerId'],
+          select: { providerId: true, balanceAfter: true },
+        }),
+        this.prisma.offer.groupBy({
+          by: ['providerId'],
+          where: {
+            providerId: { in: providerIds },
+            status: {
+              in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
+            },
+            request: {
+              offers: { none: { status: OfferStatus.ACCEPTED } },
+            },
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.offer.groupBy({
+          by: ['providerId'],
+          where: { providerId: { in: providerIds } },
+          _count: { _all: true },
+        }),
+        this.prisma.packagePurchase.groupBy({
+          by: ['providerId'],
+          where: { providerId: { in: providerIds } },
+          _count: { _all: true },
+        }),
+      ]);
+
+    return {
+      creditBalance: new Map(
+        latestTransactions.map((row) => [row.providerId, row.balanceAfter]),
+      ),
+      activeOffers: new Map(
+        activeOffersGroups.map((row) => [row.providerId, row._count._all]),
+      ),
+      totalOffers: new Map(
+        totalOffersGroups.map((row) => [row.providerId, row._count._all]),
+      ),
+      packagePurchases: new Map(
+        packagePurchasesGroups.map((row) => [row.providerId, row._count._all]),
+      ),
+    };
   }
 
   async getProviderForUser(userId: string) {
