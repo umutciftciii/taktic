@@ -109,6 +109,10 @@ export type ServiceRequest = {
     name: string | null;
   } | null;
   answers?: ServiceRequestAnswer[];
+  offersCount?: number;
+  _count?: {
+    offers: number;
+  };
 };
 
 export type ProviderStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
@@ -395,6 +399,19 @@ export function statusLabel(status: string) {
   return labels[status] ?? status;
 }
 
+export function requestStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    DRAFT: 'Taslak',
+    SUBMITTED: 'Yeni Talep',
+    IN_REVIEW: 'İncelemede',
+    APPROVED: 'Onaylandı',
+    REJECTED: 'Reddedildi',
+    CANCELLED: 'İptal Edildi',
+  };
+
+  return labels[status] ?? statusLabel(status);
+}
+
 export function qualityLabel(label: string) {
   const labels: Record<string, string> = {
     HIGH: 'Yüksek',
@@ -466,6 +483,45 @@ export function refundActionBadgeClass(action: string) {
     default:
       return 'badge';
   }
+}
+
+export function qualityBreakdownLabel(key: string) {
+  const labels: Record<string, string> = {
+    phonePresent: 'Telefon bilgisi',
+    namePresent: 'Müşteri adı',
+    cityDistrictPresent: 'İl / ilçe',
+    locationDetailPresent: 'Konum detayı',
+    budgetPresent: 'Bütçe',
+    preferredDatePresent: 'Tercih tarihi',
+    urgencyPresent: 'Aciliyet',
+    descriptionDetailed: 'Açıklama detayı',
+    requiredAnswersComplete: 'Zorunlu yanıtlar',
+    optionalAnswersCompleted: 'Opsiyonel yanıtlar',
+  };
+
+  if (labels[key]) return labels[key];
+
+  const spaced = key.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+  return spaced.charAt(0).toLocaleUpperCase('tr-TR') + spaced.slice(1);
+}
+
+export function formatBudgetRange(min: number | null, max: number | null, currency: string = 'TRY') {
+  if (min === null && max === null) {
+    return 'Belirtilmedi';
+  }
+
+  if (min !== null && max !== null) {
+    if (min === max) {
+      return formatPrice(min, currency);
+    }
+    return `${formatPrice(min, currency)} – ${formatPrice(max, currency)}`;
+  }
+
+  if (min !== null) {
+    return `≥ ${formatPrice(min, currency)}`;
+  }
+
+  return `≤ ${formatPrice(max as number, currency)}`;
 }
 
 export function urgencyLabel(urgency: string | null) {
