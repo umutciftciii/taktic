@@ -344,6 +344,11 @@ export type ProviderCreditTransaction = {
   referenceType: string | null;
   referenceId: string | null;
   createdAt: string;
+  createdBy?: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
 };
 
 export type ProviderCredits = {

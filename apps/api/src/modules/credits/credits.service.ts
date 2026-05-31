@@ -66,7 +66,7 @@ export class CreditsService {
     });
   }
 
-  async getProviderCredits(providerId: string) {
+  async getProviderCredits(providerId: string, options: { includeActor?: boolean } = {}) {
     await this.ensureProviderExists(providerId);
     const [balance, transactions] = await Promise.all([
       this.getProviderCreditBalance(providerId),
@@ -74,6 +74,9 @@ export class CreditsService {
         where: { providerId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 20,
+        ...(options.includeActor
+          ? { include: { createdBy: { select: { id: true, name: true, email: true } } } }
+          : {}),
       }),
     ]);
 
@@ -84,34 +87,44 @@ export class CreditsService {
     };
   }
 
-  async listProviderCreditTransactions(providerId: string) {
+  async listProviderCreditTransactions(
+    providerId: string,
+    options: { includeActor?: boolean } = {},
+  ) {
     await this.ensureProviderExists(providerId);
 
     return this.prisma.providerCreditTransaction.findMany({
       where: { providerId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(options.includeActor
+        ? { include: { createdBy: { select: { id: true, name: true, email: true } } } }
+        : {}),
     });
   }
 
-  grantCredits(providerId: string, dto: ManualCreditTransactionDto) {
+  grantCredits(providerId: string, dto: ManualCreditTransactionDto, createdById: string) {
     const amount = normalizePositiveAmount(dto.amount);
+    const reason = normalizeRequiredReason(dto.reason);
 
     return this.createProviderCreditTransaction({
       providerId,
       type: CreditTransactionType.ADMIN_GRANT,
       amount,
-      reason: normalizeNullableString(dto.reason),
+      reason,
+      createdById,
     });
   }
 
-  deductCredits(providerId: string, dto: ManualCreditTransactionDto) {
+  deductCredits(providerId: string, dto: ManualCreditTransactionDto, createdById: string) {
     const amount = normalizePositiveAmount(dto.amount);
+    const reason = normalizeRequiredReason(dto.reason);
 
     return this.createProviderCreditTransaction({
       providerId,
       type: CreditTransactionType.ADMIN_DEDUCT,
       amount: -amount,
-      reason: normalizeNullableString(dto.reason),
+      reason,
+      createdById,
     });
   }
 
@@ -236,6 +249,19 @@ function normalizeRequiredString(value: unknown, fieldName: string) {
   const trimmed = value.trim();
   if (!trimmed) {
     throw new BadRequestException(`${fieldName} cannot be empty`);
+  }
+
+  return trimmed;
+}
+
+function normalizeRequiredReason(value: unknown) {
+  if (typeof value !== 'string') {
+    throw new BadRequestException('Reason is required');
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length < 3) {
+    throw new BadRequestException('Reason must be at least 3 characters');
   }
 
   return trimmed;
