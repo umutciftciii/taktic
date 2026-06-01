@@ -14,8 +14,11 @@ export class CreateCreditPackageDto {
   @Min(1)
   creditAmount!: number;
 
+  // priceAmount is stored in the currency's minor unit (e.g. kuruş for TRY).
+  // Minimum 100 = 1 unit (1,00 TRY). Decimals must be converted to minor units
+  // on the client/server-action side before reaching the API.
   @IsInt()
-  @Min(1)
+  @Min(100)
   priceAmount!: number;
 
   @IsOptional()

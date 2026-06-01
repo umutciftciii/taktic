@@ -100,11 +100,32 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
           <div className="form-grid">
             <label className="form-row">
               <span>Minimum bütçe</span>
-              <input name="budgetMin" type="number" min="0" placeholder="₺" />
+              <input
+                name="budgetMin"
+                type="number"
+                step="0.01"
+                min="1"
+                inputMode="decimal"
+                placeholder="Örn. 1500.00"
+              />
+              <small style={{ color: 'var(--muted)', fontSize: 12 }}>
+                İsteğe bağlı. Boş bırakırsanız bütçe sınırı belirtmemiş olursunuz. Ondalıklı tutar
+                girebilirsiniz.
+              </small>
             </label>
             <label className="form-row">
               <span>Maksimum bütçe</span>
-              <input name="budgetMax" type="number" min="0" placeholder="₺" />
+              <input
+                name="budgetMax"
+                type="number"
+                step="0.01"
+                min="1"
+                inputMode="decimal"
+                placeholder="Örn. 3000.00"
+              />
+              <small style={{ color: 'var(--muted)', fontSize: 12 }}>
+                İsteğe bağlı. Boş bırakabilirsiniz.
+              </small>
             </label>
             <label className="form-row">
               <span>Tercih edilen tarih</span>

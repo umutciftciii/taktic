@@ -81,8 +81,8 @@ export class ServiceRequestsService {
       district: normalizeRequiredString(dto.district, 'District'),
       neighborhood: normalizeNullableString(dto.neighborhood),
       addressNote: normalizeNullableString(dto.addressNote),
-      budgetMin: normalizeOptionalInteger(dto.budgetMin, 'Budget minimum'),
-      budgetMax: normalizeOptionalInteger(dto.budgetMax, 'Budget maximum'),
+      budgetMin: normalizeOptionalPriceMinor(dto.budgetMin, 'Budget minimum'),
+      budgetMax: normalizeOptionalPriceMinor(dto.budgetMax, 'Budget maximum'),
       preferredDate,
       urgency: normalizeNullableString(dto.urgency),
       description: normalizeNullableString(dto.description),
@@ -563,13 +563,18 @@ function normalizePhone(value: string) {
   return normalizeRequiredString(value, 'Customer phone').replace(/[^\d+]/g, '');
 }
 
-function normalizeOptionalInteger(value: number | null | undefined, fieldName: string) {
+// Monetary amounts are stored in minor units (e.g. kuruş for TRY). When a customer
+// supplies a budget, it must represent at least one whole currency unit (>= 100 minor
+// units). null/undefined means "no preference" and is preserved as-is.
+function normalizeOptionalPriceMinor(value: number | null | undefined, fieldName: string) {
   if (value === undefined || value === null) {
     return null;
   }
 
-  if (!Number.isInteger(value) || value < 0) {
-    throw new BadRequestException(`${fieldName} must be a positive integer`);
+  if (!Number.isInteger(value) || value < 100) {
+    throw new BadRequestException(
+      `${fieldName} must be a positive integer in minor units (kuruş) and at least 100 (1,00).`,
+    );
   }
 
   return value;

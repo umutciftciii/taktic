@@ -52,14 +52,17 @@ export class CreateServiceRequestDto {
   @IsString()
   addressNote?: string | null;
 
+  // budgetMin / budgetMax are stored in the currency's minor unit (kuruş for TRY)
+  // and are nullable when the customer does not specify a budget. When provided,
+  // the value must represent at least one whole currency unit (>= 100 minor units).
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(100)
   budgetMin?: number | null;
 
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(100)
   budgetMax?: number | null;
 
   @IsOptional()
