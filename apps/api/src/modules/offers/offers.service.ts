@@ -18,9 +18,15 @@ import {
 } from './refund-policy';
 
 type OfferListFilters = {
+  q?: string;
   status?: string;
   providerId?: string;
   requestId?: string;
+  categoryId?: string;
+  categorySlug?: string;
+  city?: string;
+  submittedFrom?: string;
+  submittedTo?: string;
 };
 
 @Injectable()
@@ -31,13 +37,62 @@ export class OffersService {
     const status = normalizeOptionalOfferStatus(filters.status);
     const providerId = normalizeNullableString(filters.providerId);
     const requestId = normalizeNullableString(filters.requestId);
+    const categoryId = normalizeNullableString(filters.categoryId);
+    const categorySlug = normalizeNullableString(filters.categorySlug);
+    const city = normalizeNullableString(filters.city);
+    const submittedFrom = normalizeOptionalDate(filters.submittedFrom, 'submittedFrom');
+    const submittedTo = normalizeOptionalDate(filters.submittedTo, 'submittedTo');
+    const search = normalizeNullableString(filters.q);
+
+    if (submittedFrom && submittedTo && submittedFrom > submittedTo) {
+      throw new BadRequestException('submittedFrom cannot be after submittedTo');
+    }
+
+    const requestFilter: Prisma.ServiceRequestWhereInput = {};
+    if (categoryId) {
+      requestFilter.categoryId = categoryId;
+    }
+    if (categorySlug) {
+      requestFilter.category = { slug: categorySlug };
+    }
+    if (city) {
+      requestFilter.city = { contains: city, mode: 'insensitive' };
+    }
+
+    const where: Prisma.OfferWhereInput = {
+      ...(status ? { status } : {}),
+      ...(providerId ? { providerId } : {}),
+      ...(requestId ? { requestId } : {}),
+      ...(submittedFrom || submittedTo
+        ? {
+            submittedAt: {
+              ...(submittedFrom ? { gte: submittedFrom } : {}),
+              ...(submittedTo ? { lte: submittedTo } : {}),
+            },
+          }
+        : {}),
+      ...(Object.keys(requestFilter).length > 0 ? { request: { is: requestFilter } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { id: { contains: search, mode: 'insensitive' } },
+              { requestId: { contains: search, mode: 'insensitive' } },
+              { providerId: { contains: search, mode: 'insensitive' } },
+              { provider: { is: { businessName: { contains: search, mode: 'insensitive' } } } },
+              { provider: { is: { contactName: { contains: search, mode: 'insensitive' } } } },
+              { provider: { is: { phone: { contains: search, mode: 'insensitive' } } } },
+              { request: { is: { customerName: { contains: search, mode: 'insensitive' } } } },
+              { request: { is: { customerPhone: { contains: search, mode: 'insensitive' } } } },
+              { request: { is: { customerEmail: { contains: search, mode: 'insensitive' } } } },
+              { request: { is: { city: { contains: search, mode: 'insensitive' } } } },
+              { request: { is: { district: { contains: search, mode: 'insensitive' } } } },
+            ],
+          }
+        : {}),
+    };
 
     const offers = await this.prisma.offer.findMany({
-      where: {
-        ...(status ? { status } : {}),
-        ...(providerId ? { providerId } : {}),
-        ...(requestId ? { requestId } : {}),
-      },
+      where,
       orderBy: { submittedAt: 'desc' },
       include: offerInclude,
     });
@@ -396,12 +451,23 @@ const offerInclude = {
       neighborhood: true,
       status: true,
       qualityScore: true,
+      customerName: true,
+      customerPhone: true,
+      customerEmail: true,
       category: {
         select: { id: true, name: true, slug: true },
       },
+      customer: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+        },
+      },
     },
   },
-};
+} satisfies Prisma.OfferInclude;
 
 const customerOfferInclude = {
   provider: {
@@ -519,4 +585,18 @@ function normalizeRefundReasonCode(value: unknown) {
   }
 
   return reasonCode;
+}
+
+function normalizeOptionalDate(value: string | undefined | null, fieldName: string): Date | null {
+  const normalized = normalizeNullableString(value ?? undefined);
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException(`${fieldName} must be a valid ISO-8601 date`);
+  }
+
+  return date;
 }
