@@ -284,11 +284,20 @@ export type Offer = {
     neighborhood: string | null;
     status: ServiceRequestStatus;
     qualityScore: number;
+    customerName: string;
+    customerPhone: string;
+    customerEmail: string | null;
     category: {
       id: string;
       name: string;
       slug: string;
     };
+    customer: {
+      id: string;
+      name: string | null;
+      email: string | null;
+      phone: string | null;
+    } | null;
   };
 };
 

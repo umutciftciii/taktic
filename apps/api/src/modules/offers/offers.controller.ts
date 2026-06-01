@@ -3,6 +3,7 @@ import { UserRole } from '@prisma/client';
 import { Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { ListOffersQueryDto } from './dto/list-offers-query.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { ExecuteRefundScanDto, RefundScanQueryDto } from './dto/refund-scan.dto';
 import { UpdateOfferStatusDto } from './dto/update-offer-status.dto';
@@ -19,12 +20,18 @@ export class OffersController {
   @Get()
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  listOffers(
-    @Query('status') status?: string,
-    @Query('providerId') providerId?: string,
-    @Query('requestId') requestId?: string,
-  ) {
-    return this.offersService.listOffers({ status, providerId, requestId });
+  listOffers(@Query() query: ListOffersQueryDto) {
+    return this.offersService.listOffers({
+      q: query.q,
+      status: query.status,
+      providerId: query.providerId,
+      requestId: query.requestId,
+      categoryId: query.categoryId,
+      categorySlug: query.categorySlug,
+      city: query.city,
+      submittedFrom: query.submittedFrom,
+      submittedTo: query.submittedTo,
+    });
   }
 
   @Get('refund-scan')

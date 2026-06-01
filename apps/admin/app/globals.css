@@ -892,6 +892,14 @@ button:disabled {
 
 .meta-row dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meta-row dd code,
+.meta-row dd a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @media (max-width: 560px) {
@@ -3115,4 +3123,97 @@ button:disabled {
   border: 1px solid #fecaca;
   padding: 6px 10px;
   border-radius: 8px;
+}
+
+/* ----- Offer detail timeline ----- */
+.offer-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: grid;
+  gap: 14px;
+}
+
+.offer-timeline-item {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 12px;
+  align-items: flex-start;
+  position: relative;
+}
+
+.offer-timeline-item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 18px;
+  bottom: -14px;
+  width: 2px;
+  background: #e5e7eb;
+}
+
+.offer-timeline-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  margin-top: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+.offer-timeline-item.is-done .offer-timeline-dot {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.offer-timeline-item.is-emphasis.is-done .offer-timeline-dot {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+
+.offer-timeline-item.is-pending .offer-timeline-time {
+  color: #9ca3af;
+}
+
+.offer-timeline-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.offer-timeline-label {
+  font-size: 13px;
+  color: #111827;
+  font-weight: 500;
+}
+
+.offer-timeline-item.is-pending .offer-timeline-label {
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.offer-timeline-time {
+  font-size: 12px;
+  color: #4b5563;
+}
+
+/* ----- Pinned filter rozetleri ----- */
+.admin-filter-pins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-filter-pins .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-filter-pins .cell-link {
+  font-weight: 600;
+  padding: 0 2px;
 }

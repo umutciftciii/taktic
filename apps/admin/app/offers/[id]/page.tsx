@@ -3,14 +3,21 @@ import {
   apiFetch,
   Offer,
   OfferStatus,
+  RefundRecommendedAction,
   statusLabel,
   statusBadgeClass,
   refundActionLabel,
   refundActionBadgeClass,
   formatPrice,
+  formatDate,
   formatDateTime,
 } from '../../../lib/api';
+import { PageHeader } from '../../../components/page-header';
+import { SectionCard } from '../../../components/section-card';
+import { StatCard } from '../../../components/stat-card';
 import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
+
+type StatTone = 'neutral' | 'success' | 'warning' | 'error';
 
 const statuses: OfferStatus[] = [
   'SUBMITTED',
@@ -33,141 +40,376 @@ const refundReasonCodes = [
   'OTHER',
 ];
 
-type OfferDetailPageProps = {
-  params: Promise<{ id: string }>;
+function statusTone(status: OfferStatus): StatTone {
+  switch (status) {
+    case 'ACCEPTED':
+      return 'success';
+    case 'SHORTLISTED':
+    case 'VIEWED':
+      return 'warning';
+    case 'REJECTED':
+    case 'WITHDRAWN':
+    case 'EXPIRED':
+    case 'CANCELLED':
+      return 'error';
+    default:
+      return 'neutral';
+  }
+}
+
+function refundTone(action: RefundRecommendedAction): StatTone {
+  switch (action) {
+    case 'FULL_REFUND':
+      return 'success';
+    case 'MANUAL_REVIEW':
+      return 'warning';
+    default:
+      return 'neutral';
+  }
+}
+
+type TimelineEvent = {
+  key: string;
+  label: string;
+  at: string | null;
+  emphasis?: boolean;
 };
 
-export default async function OfferDetailPage({ params }: OfferDetailPageProps) {
+function buildTimeline(offer: Offer): TimelineEvent[] {
+  return [
+    { key: 'submitted', label: 'Gönderildi', at: offer.submittedAt, emphasis: true },
+    { key: 'viewed', label: 'Müşteri görüntüledi', at: offer.viewedAt },
+    { key: 'accepted', label: 'Kabul edildi', at: offer.acceptedAt, emphasis: true },
+    { key: 'rejected', label: 'Reddedildi', at: offer.rejectedAt },
+    { key: 'withdrawn', label: 'Geri çekildi', at: offer.withdrawnAt },
+    { key: 'refunded', label: 'Kredi iadesi yapıldı', at: offer.creditRefundedAt, emphasis: true },
+  ];
+}
+
+type OfferDetailPageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ refunded?: string; statusSaved?: string }>;
+};
+
+export default async function OfferDetailPage({ params, searchParams }: OfferDetailPageProps) {
   const { id } = await params;
+  const search = (await searchParams) ?? {};
+  const justRefunded = search.refunded === '1';
+  const justStatusSaved = search.statusSaved === '1';
+
   const offer = await apiFetch<Offer>(`/offers/${id}`);
+
+  const timeline = buildTimeline(offer);
+  const customerName = offer.request.customerName;
+  const customerPhone = offer.request.customerPhone;
+  const customerEmail = offer.request.customerEmail;
+  const customerLinkedAccount = offer.request.customer;
+  const isRefunded = Boolean(offer.creditRefundedAt);
 
   return (
     <main>
-      <p className="breadcrumbs">
-        <Link href="/">Dashboard</Link>
-        <span aria-hidden="true">/</span>
-        <Link href="/offers">Teklifler</Link>
-        <span aria-hidden="true">/</span>
-        <span>Detay</span>
-      </p>
+      <PageHeader
+        breadcrumbs={[
+          { label: 'Dashboard', href: '/' },
+          { label: 'Teklifler', href: '/offers' },
+          { label: 'Detay' },
+        ]}
+        title={offer.provider.businessName}
+        subtitle={
+          <>
+            <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>{' '}
+            <span className="muted">
+              · {formatPrice(offer.priceAmount, offer.currency)} · {offer.request.category.name}
+            </span>
+          </>
+        }
+        actions={
+          <>
+            <Link className="btn btn-secondary btn-sm" href={`/requests/${offer.request.id}`}>
+              Talebi aç
+            </Link>
+            <Link className="btn btn-secondary btn-sm" href={`/providers/${offer.provider.id}`}>
+              Hizmet vereni aç
+            </Link>
+            <Link
+              className="btn btn-ghost btn-sm"
+              href={`/offers?requestId=${offer.request.id}`}
+            >
+              Bu talebin tüm teklifleri
+            </Link>
+          </>
+        }
+      />
 
-      <header className="page-header">
-        <h1 className="page-title">{offer.provider.businessName}</h1>
-        <p className="page-subtitle">
-          <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>{' '}
-          <span className="muted">
-            · {formatPrice(offer.priceAmount, offer.currency)} · {offer.request.category.name}
-          </span>
-        </p>
-      </header>
+      {justRefunded ? (
+        <div className="notice-success" role="status" style={{ marginBottom: 14 }}>
+          İade işlemi başarıyla tamamlandı. Kredi hizmet verenin bakiyesine eklendi.
+        </div>
+      ) : null}
+      {justStatusSaved ? (
+        <div className="notice-success" role="status" style={{ marginBottom: 14 }}>
+          Teklif durumu güncellendi.
+        </div>
+      ) : null}
 
-      <div className="inline-actions" style={{ marginBottom: 18 }}>
-        <Link className="btn btn-secondary btn-sm" href={`/requests/${offer.request.id}`}>Talebi aç</Link>
-        <Link className="btn btn-secondary btn-sm" href={`/providers/${offer.provider.id}`}>
-          Hizmet vereni aç
-        </Link>
-        <Link className="btn btn-ghost btn-sm" href={`/offers?requestId=${offer.request.id}`}>
-          Bu talebin tüm teklifleri
-        </Link>
-      </div>
+      <section className="stat-grid">
+        <StatCard label="Fiyat" value={formatPrice(offer.priceAmount, offer.currency)} />
+        <StatCard label="Kredi maliyeti" value={offer.creditCost} />
+        <StatCard
+          label="Durum"
+          value={statusLabel(offer.status)}
+          tone={statusTone(offer.status)}
+        />
+        <StatCard
+          label="İade uygunluğu"
+          value={
+            isRefunded
+              ? 'İade tamamlandı'
+              : refundActionLabel(offer.refundEligibility.recommendedAction)
+          }
+          tone={isRefunded ? 'success' : refundTone(offer.refundEligibility.recommendedAction)}
+          hint={
+            isRefunded
+              ? offer.creditRefundedAt
+                ? formatDateTime(offer.creditRefundedAt)
+                : undefined
+              : offer.refundEligibility.hoursSinceSubmitted !== null
+                ? `${offer.refundEligibility.hoursSinceSubmitted} sa geçti`
+                : undefined
+          }
+        />
+      </section>
 
       <div className="detail-grid">
         <div className="stack">
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Özet</h2>
+          <SectionCard title="Teklif özeti">
             <dl className="meta-row">
               <dt>Teklif ID</dt>
-              <dd><code style={{ fontSize: 12 }}>{offer.id}</code></dd>
+              <dd>
+                <code style={{ fontSize: 12 }}>{offer.id}</code>
+              </dd>
               <dt>Fiyat</dt>
-              <dd><strong>{formatPrice(offer.priceAmount, offer.currency)}</strong></dd>
+              <dd>
+                <strong>{formatPrice(offer.priceAmount, offer.currency)}</strong>
+              </dd>
               <dt>Mesaj</dt>
               <dd style={{ whiteSpace: 'pre-wrap' }}>{offer.message}</dd>
               <dt>Garanti</dt>
               <dd className="muted">{offer.warrantyNote ?? '-'}</dd>
               <dt>İç not</dt>
               <dd className="muted">{offer.internalNote ?? '-'}</dd>
-              <dt>Gönderim</dt>
-              <dd>{formatDateTime(offer.submittedAt)}</dd>
-              <dt>Görüntülendi</dt>
-              <dd>{offer.viewedAt ? formatDateTime(offer.viewedAt) : '-'}</dd>
-              <dt>Kabul</dt>
-              <dd>{offer.acceptedAt ? formatDateTime(offer.acceptedAt) : '-'}</dd>
-              <dt>Ret</dt>
-              <dd>{offer.rejectedAt ? formatDateTime(offer.rejectedAt) : '-'}</dd>
-              <dt>Geri çekildi</dt>
-              <dd>{offer.withdrawnAt ? formatDateTime(offer.withdrawnAt) : '-'}</dd>
+              <dt>Tahmini başlangıç</dt>
+              <dd>{formatDate(offer.estimatedStartDate)}</dd>
+              <dt>Tahmini bitiş</dt>
+              <dd>{formatDate(offer.estimatedCompletionDate)}</dd>
             </dl>
-          </section>
+          </SectionCard>
 
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Kredi ve İade</h2>
+          <SectionCard title="Durum çizelgesi">
+            <ol className="offer-timeline">
+              {timeline.map((event) => {
+                const className = [
+                  'offer-timeline-item',
+                  event.at ? 'is-done' : 'is-pending',
+                  event.emphasis ? 'is-emphasis' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ');
+                return (
+                  <li key={event.key} className={className}>
+                    <span className="offer-timeline-dot" aria-hidden="true" />
+                    <div className="offer-timeline-body">
+                      <span className="offer-timeline-label">{event.label}</span>
+                      <span className="offer-timeline-time">
+                        {event.at ? formatDateTime(event.at) : '—'}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </SectionCard>
+
+          <SectionCard title="Kredi ve İade">
             <dl className="meta-row">
               <dt>Kredi maliyeti</dt>
               <dd>{offer.creditCost}</dd>
               <dt>Harcama işlemi</dt>
-              <dd>{offer.creditSpentTransactionId ?? '-'}</dd>
+              <dd>
+                {offer.creditSpentTransactionId ? (
+                  <code style={{ fontSize: 12 }}>{offer.creditSpentTransactionId}</code>
+                ) : (
+                  '-'
+                )}
+              </dd>
               <dt>İade işlemi</dt>
-              <dd>{offer.creditRefundedTransactionId ?? '-'}</dd>
+              <dd>
+                {offer.creditRefundedTransactionId ? (
+                  <code style={{ fontSize: 12 }}>{offer.creditRefundedTransactionId}</code>
+                ) : (
+                  '-'
+                )}
+              </dd>
               <dt>İade tarihi</dt>
               <dd>{offer.creditRefundedAt ? formatDateTime(offer.creditRefundedAt) : '-'}</dd>
               <dt>İade sebebi</dt>
               <dd className="muted">{offer.creditRefundReason ?? '-'}</dd>
               <dt>Uygunluk</dt>
               <dd>
-                <span className={offer.refundEligibility.eligible ? 'badge badge-good' : 'badge badge-muted'}>
-                  {offer.refundEligibility.eligible ? 'Uygun' : 'Uygun değil'}
-                </span>
+                {isRefunded ? (
+                  <span className="badge badge-good">İade tamamlandı</span>
+                ) : (
+                  <span
+                    className={
+                      offer.refundEligibility.eligible ? 'badge badge-good' : 'badge badge-muted'
+                    }
+                  >
+                    {offer.refundEligibility.eligible ? 'Uygun' : 'Uygun değil'}
+                  </span>
+                )}
               </dd>
               <dt>Öneri</dt>
               <dd>
-                <span className={refundActionBadgeClass(offer.refundEligibility.recommendedAction)}>
-                  {refundActionLabel(offer.refundEligibility.recommendedAction)}
-                </span>
+                {isRefunded ? (
+                  <span className="badge badge-good">İade edildi</span>
+                ) : (
+                  <span
+                    className={refundActionBadgeClass(offer.refundEligibility.recommendedAction)}
+                  >
+                    {refundActionLabel(offer.refundEligibility.recommendedAction)}
+                  </span>
+                )}
               </dd>
               <dt>Sebep kodu</dt>
-              <dd><code style={{ fontSize: 12 }}>{offer.refundEligibility.reasonCode}</code></dd>
-              <dt>Sebep</dt>
-              <dd>{offer.refundEligibility.reasonLabel}</dd>
+              <dd>
+                <code style={{ fontSize: 12 }}>{offer.refundEligibility.reasonCode}</code>
+              </dd>
               <dt>Detay</dt>
               <dd className="muted">{offer.refundEligibility.details}</dd>
               <dt>Gönderim sonrası saat</dt>
               <dd>{offer.refundEligibility.hoursSinceSubmitted ?? '-'}</dd>
             </dl>
-          </section>
+            <div className="inline-actions" style={{ marginTop: 12 }}>
+              <Link
+                className="btn btn-ghost btn-sm"
+                href={`/providers/${offer.provider.id}/credits`}
+              >
+                Hizmet veren kredi geçmişi
+              </Link>
+            </div>
+          </SectionCard>
         </div>
 
         <div className="stack">
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Hizmet Veren</h2>
+          <SectionCard title="Hizmet Veren">
             <dl className="meta-row">
               <dt>İşletme</dt>
               <dd>{offer.provider.businessName}</dd>
               <dt>Yetkili</dt>
               <dd>{offer.provider.contactName}</dd>
               <dt>Telefon</dt>
-              <dd>{offer.provider.phone}</dd>
+              <dd>
+                {offer.provider.phone ? (
+                  <a className="cell-link" href={`tel:${offer.provider.phone}`}>
+                    {offer.provider.phone}
+                  </a>
+                ) : (
+                  '-'
+                )}
+              </dd>
               <dt>E-posta</dt>
-              <dd>{offer.provider.email ?? '-'}</dd>
+              <dd>
+                {offer.provider.email ? (
+                  <a className="cell-link" href={`mailto:${offer.provider.email}`}>
+                    {offer.provider.email}
+                  </a>
+                ) : (
+                  '-'
+                )}
+              </dd>
+              <dt>Konum</dt>
+              <dd>
+                {offer.provider.city}/{offer.provider.district}
+              </dd>
+              <dt>Durum</dt>
+              <dd>
+                <span className={statusBadgeClass(offer.provider.status)}>
+                  {statusLabel(offer.provider.status)}
+                </span>
+              </dd>
             </dl>
-            <Link className="btn btn-ghost btn-sm" href={`/providers/${offer.provider.id}/credits`}>
-              Kredi geçmişi
-            </Link>
-          </section>
+            <div className="inline-actions" style={{ marginTop: 12 }}>
+              <Link
+                className="btn btn-ghost btn-sm"
+                href={`/providers/${offer.provider.id}/credits`}
+              >
+                Kredi geçmişi
+              </Link>
+              <Link
+                className="btn btn-ghost btn-sm"
+                href={`/offers?providerId=${offer.provider.id}`}
+              >
+                Diğer teklifleri
+              </Link>
+            </div>
+          </SectionCard>
 
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Talep</h2>
+          <SectionCard title="Talep ve Müşteri">
             <dl className="meta-row">
               <dt>Kategori</dt>
               <dd>{offer.request.category.name}</dd>
               <dt>Konum</dt>
-              <dd>{offer.request.city}/{offer.request.district}</dd>
+              <dd>
+                {offer.request.city}/{offer.request.district}
+                {offer.request.neighborhood ? ` · ${offer.request.neighborhood}` : ''}
+              </dd>
+              <dt>Talep durumu</dt>
+              <dd>
+                <span className={statusBadgeClass(offer.request.status)}>
+                  {statusLabel(offer.request.status)}
+                </span>
+              </dd>
               <dt>Kalite</dt>
               <dd>{offer.request.qualityScore}/100</dd>
+              <dt>Müşteri</dt>
+              <dd>{customerName || '-'}</dd>
+              <dt>Telefon</dt>
+              <dd>
+                {customerPhone ? (
+                  <a className="cell-link" href={`tel:${customerPhone}`}>
+                    {customerPhone}
+                  </a>
+                ) : (
+                  '-'
+                )}
+              </dd>
+              <dt>E-posta</dt>
+              <dd>
+                {customerEmail ? (
+                  <a className="cell-link" href={`mailto:${customerEmail}`}>
+                    {customerEmail}
+                  </a>
+                ) : (
+                  '-'
+                )}
+              </dd>
+              {customerLinkedAccount ? (
+                <>
+                  <dt>Kullanıcı hesabı</dt>
+                  <dd className="muted">
+                    {customerLinkedAccount.name ?? customerLinkedAccount.email ?? customerLinkedAccount.phone ?? customerLinkedAccount.id}
+                  </dd>
+                </>
+              ) : null}
             </dl>
-          </section>
+            <div className="inline-actions" style={{ marginTop: 12 }}>
+              <Link className="btn btn-ghost btn-sm" href={`/requests/${offer.request.id}`}>
+                Talep detayı
+              </Link>
+            </div>
+          </SectionCard>
 
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Durumu Güncelle</h2>
+          <SectionCard title="Durumu Güncelle">
             <form action={updateOfferStatusAction} style={{ display: 'grid', gap: 12 }}>
               <input type="hidden" name="id" value={offer.id} />
               <label className="form-row">
@@ -181,21 +423,35 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
                 </select>
               </label>
               <div>
-                <button className="btn btn-primary btn-block" type="submit">Durumu Kaydet</button>
+                <button className="btn btn-primary btn-block" type="submit">
+                  Durumu Kaydet
+                </button>
               </div>
             </form>
-          </section>
+          </SectionCard>
 
-          <section className="card" style={{ margin: 0 }}>
-            <h2>Kredi İadesi</h2>
+          <SectionCard title="Kredi İadesi">
             {offer.creditRefundedAt ? (
-              <div className="notice-success">Bu teklif için kredi zaten iade edilmiş.</div>
+              <div className="notice-success">
+                {justRefunded
+                  ? 'İade işlemi başarıyla tamamlandı.'
+                  : 'Bu teklifin kredi iadesi tamamlandı.'}
+                {offer.creditRefundedAt ? (
+                  <>
+                    {' '}
+                    <span className="muted">{formatDateTime(offer.creditRefundedAt)}</span>
+                  </>
+                ) : null}
+              </div>
             ) : offer.creditSpentTransactionId ? (
               <form action={refundOfferCreditAction} style={{ display: 'grid', gap: 12 }}>
                 <input type="hidden" name="id" value={offer.id} />
                 <label className="form-row">
                   <span>Sebep kodu *</span>
-                  <select name="reasonCode" defaultValue={offer.refundEligibility.reasonCode}>
+                  <select
+                    name="reasonCode"
+                    defaultValue={offer.refundEligibility.reasonCode}
+                  >
                     {refundReasonCodes.map((reasonCode) => (
                       <option key={reasonCode} value={reasonCode}>
                         {reasonCode}
@@ -210,17 +466,19 @@ export default async function OfferDetailPage({ params }: OfferDetailPageProps) 
                 {offer.refundEligibility.recommendedAction === 'NO_REFUND' ? (
                   <label className="checkbox-row">
                     <input type="checkbox" name="override" value="true" />
-                    <span>"İade yok" önerisini geçersiz kıl</span>
+                    <span>&quot;İade yok&quot; önerisini geçersiz kıl</span>
                   </label>
                 ) : null}
                 <div>
-                  <button className="btn btn-danger btn-block" type="submit">Kredi iade et</button>
+                  <button className="btn btn-danger btn-block" type="submit">
+                    Kredi iade et
+                  </button>
                 </div>
               </form>
             ) : (
               <div className="notice-warning">Bu teklifin kredi harcama işlemi yok.</div>
             )}
-          </section>
+          </SectionCard>
         </div>
       </div>
     </main>

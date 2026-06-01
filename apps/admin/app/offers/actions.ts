@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { apiFetch, Offer, OfferStatus } from '../../lib/api';
 
 export async function updateOfferStatusAction(formData: FormData) {
@@ -14,6 +15,7 @@ export async function updateOfferStatusAction(formData: FormData) {
 
   revalidatePath('/offers');
   revalidatePath(`/offers/${id}`);
+  redirect(`/offers/${id}?statusSaved=1`);
 }
 
 export async function refundOfferCreditAction(formData: FormData) {
@@ -29,6 +31,7 @@ export async function refundOfferCreditAction(formData: FormData) {
 
   revalidatePath('/offers');
   revalidatePath(`/offers/${id}`);
+  redirect(`/offers/${id}?refunded=1`);
 }
 
 function readFormString(formData: FormData, key: string) {
