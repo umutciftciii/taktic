@@ -209,8 +209,8 @@ function creditPackageCreatePayload(dto: CreateCreditPackageDto) {
   return {
     name: normalizeRequiredString(dto.name, 'Credit package name'),
     slug: normalizeSlug(dto.slug),
-    creditAmount: normalizePositiveAmount(dto.creditAmount),
-    priceAmount: normalizePositiveAmount(dto.priceAmount),
+    creditAmount: normalizePositiveCount(dto.creditAmount, 'creditAmount'),
+    priceAmount: normalizePriceMinor(dto.priceAmount, 'priceAmount'),
     currency: normalizeNullableString(dto.currency) ?? 'TRY',
     description: normalizeNullableString(dto.description),
     isActive: dto.isActive ?? true,
@@ -224,8 +224,12 @@ function creditPackageUpdatePayload(dto: UpdateCreditPackageDto) {
       ? { name: normalizeRequiredString(dto.name, 'Credit package name') }
       : {}),
     ...(dto.slug !== undefined ? { slug: normalizeSlug(dto.slug) } : {}),
-    ...(dto.creditAmount !== undefined ? { creditAmount: normalizePositiveAmount(dto.creditAmount) } : {}),
-    ...(dto.priceAmount !== undefined ? { priceAmount: normalizePositiveAmount(dto.priceAmount) } : {}),
+    ...(dto.creditAmount !== undefined
+      ? { creditAmount: normalizePositiveCount(dto.creditAmount, 'creditAmount') }
+      : {}),
+    ...(dto.priceAmount !== undefined
+      ? { priceAmount: normalizePriceMinor(dto.priceAmount, 'priceAmount') }
+      : {}),
     ...(dto.currency !== undefined ? { currency: normalizeNullableString(dto.currency) ?? 'TRY' } : {}),
     ...(dto.description !== undefined ? { description: normalizeNullableString(dto.description) } : {}),
     ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
@@ -233,12 +237,30 @@ function creditPackageUpdatePayload(dto: UpdateCreditPackageDto) {
   };
 }
 
-function normalizePositiveAmount(value: number) {
+// Used for credit counts and other non-monetary positive integers.
+function normalizePositiveCount(value: number, fieldName: string) {
   if (!Number.isInteger(value) || value <= 0) {
-    throw new BadRequestException('Amount must be a positive integer');
+    throw new BadRequestException(`${fieldName} must be a positive integer`);
   }
 
   return value;
+}
+
+// Monetary amounts are stored in minor units (e.g. kuruş for TRY). The smallest
+// acceptable value is 100 = one whole currency unit (1,00 TRY / $1.00 / 1,00 €).
+function normalizePriceMinor(value: number, fieldName: string) {
+  if (!Number.isInteger(value) || value < 100) {
+    throw new BadRequestException(
+      `${fieldName} must be a positive integer in minor units (kuruş) and at least 100 (1,00).`,
+    );
+  }
+
+  return value;
+}
+
+// Kept for backwards compatibility with callers that pass non-monetary amounts.
+function normalizePositiveAmount(value: number) {
+  return normalizePositiveCount(value, 'Amount');
 }
 
 function normalizeRequiredString(value: unknown, fieldName: string) {

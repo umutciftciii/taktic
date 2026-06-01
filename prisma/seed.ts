@@ -144,12 +144,23 @@ const categories = [
   },
 ];
 
+// Monetary values throughout the platform are stored as integers in the
+// currency's minor unit (kuruş for TRY, cents for USD/EUR). When seeding,
+// always express prices in minor units. For TRY this means multiplying the
+// nominal Turkish-lira value by 100 — `priceAmount: 49900` represents 499,00 TL,
+// `priceAmount: 14990` represents 149,90 TL, and so on. Helper `tlToMinor`
+// keeps the conversion explicit and self-documenting.
+function tlToMinor(amount: number): number {
+  return Math.round(amount * 100);
+}
+
 const creditPackages = [
   {
     slug: 'starter-20',
     name: 'Başlangıç Paketi',
     creditAmount: 20,
-    priceAmount: 49900,
+    // 499,00 TL = 49900 kuruş
+    priceAmount: tlToMinor(499),
     currency: 'TRY',
     sortOrder: 10,
   },
@@ -157,7 +168,8 @@ const creditPackages = [
     slug: 'pro-50',
     name: 'Pro Paket',
     creditAmount: 50,
-    priceAmount: 99900,
+    // 999,00 TL = 99900 kuruş
+    priceAmount: tlToMinor(999),
     currency: 'TRY',
     sortOrder: 20,
   },
@@ -165,7 +177,8 @@ const creditPackages = [
     slug: 'business-100',
     name: 'Business Paket',
     creditAmount: 100,
-    priceAmount: 179900,
+    // 1.799,00 TL = 179900 kuruş
+    priceAmount: tlToMinor(1799),
     currency: 'TRY',
     sortOrder: 30,
   },

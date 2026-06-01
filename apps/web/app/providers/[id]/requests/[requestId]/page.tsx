@@ -202,7 +202,18 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
                 <div className="pdash-form-grid">
                   <label className="pdash-form-row">
                     <span>Fiyat *</span>
-                    <input name="priceAmount" type="number" min="1" required />
+                    <input
+                      name="priceAmount"
+                      type="number"
+                      step="0.01"
+                      min="1"
+                      inputMode="decimal"
+                      placeholder="Örn. 1500.00"
+                      required
+                    />
+                    <small style={{ color: 'var(--muted)', fontSize: 12 }}>
+                      Ondalıklı fiyat girebilirsiniz. Örn: 149,90 veya 1500.00 TRY.
+                    </small>
                   </label>
                   <label className="pdash-form-row">
                     <span>Para birimi</span>

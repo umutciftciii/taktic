@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { apiFetch, QuestionType, ServiceRequest } from '../../lib/api';
+import { apiFetch, parseDecimalToMinor, QuestionType, ServiceRequest } from '../../lib/api';
 
 type QuestionMeta = {
   key: string;
@@ -22,8 +22,11 @@ export async function submitServiceRequestAction(formData: FormData) {
       district: readFormString(formData, 'district'),
       neighborhood: readOptionalFormString(formData, 'neighborhood'),
       addressNote: readOptionalFormString(formData, 'addressNote'),
-      budgetMin: readOptionalFormNumber(formData, 'budgetMin'),
-      budgetMax: readOptionalFormNumber(formData, 'budgetMax'),
+      // Budget inputs accept a human-readable decimal ("1500,00" or "149.90").
+      // parseDecimalToMinor returns the minor-unit integer (kuruş for TRY) or null
+      // when the customer left the field empty — preserving the optional semantics.
+      budgetMin: parseDecimalToMinor(readFormString(formData, 'budgetMin')),
+      budgetMax: parseDecimalToMinor(readFormString(formData, 'budgetMax')),
       preferredDate: readOptionalFormString(formData, 'preferredDate'),
       urgency: readOptionalFormString(formData, 'urgency'),
       description: readOptionalFormString(formData, 'description'),

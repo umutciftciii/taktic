@@ -15,9 +15,10 @@ export class UpdateCreditPackageDto {
   @Min(1)
   creditAmount?: number;
 
+  // priceAmount is stored in the currency's minor unit. Minimum 100 = 1,00 TRY.
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(100)
   priceAmount?: number;
 
   @IsOptional()

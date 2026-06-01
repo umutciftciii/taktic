@@ -982,9 +982,13 @@ async function getProviderCreditBalanceInTransaction(
 }
 
 function normalizeOfferPayload(dto: CreateOfferDto) {
+  // priceAmount is stored in minor units (e.g. kuruş for TRY). The DTO already
+  // enforces @IsInt + @Min(100); this is the defence-in-depth check.
   const priceAmount = dto.priceAmount;
-  if (!Number.isInteger(priceAmount) || priceAmount <= 0) {
-    throw new BadRequestException('priceAmount must be a positive integer');
+  if (!Number.isInteger(priceAmount) || priceAmount < 100) {
+    throw new BadRequestException(
+      'priceAmount must be a positive integer in minor units (kuruş) and at least 100 (1,00).',
+    );
   }
 
   const message = normalizeRequiredString(dto.message, 'Message');

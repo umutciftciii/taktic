@@ -549,6 +549,8 @@ export function qualityBreakdownLabel(key: string) {
   return spaced.charAt(0).toLocaleUpperCase('tr-TR') + spaced.slice(1);
 }
 
+// `min` and `max` are stored as minor-unit integers (kuruş for TRY). `formatPrice`
+// converts them to the human readable amount with two fractional digits.
 export function formatBudgetRange(min: number | null, max: number | null, currency: string = 'TRY') {
   if (min === null && max === null) {
     return 'Belirtilmedi';
@@ -595,16 +597,67 @@ export function creditTxnTypeLabel(type: string) {
   return labels[type] ?? type;
 }
 
-export function formatPrice(amount: number, currency: string = 'TRY') {
+// `amountMinor` is the monetary value in the currency's minor unit (e.g. kuruş for TRY,
+// cents for USD/EUR). The function converts it back to a human-readable string with
+// two fractional digits, matching the storage contract used across the platform.
+// Example: formatPrice(49900, 'TRY') -> "₺499,00"
+export function formatPrice(amountMinor: number, currency: string = 'TRY') {
+  const major = amountMinor / 100;
   try {
     return new Intl.NumberFormat('tr-TR', {
       style: 'currency',
       currency,
-      maximumFractionDigits: 0,
-    }).format(amount);
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(major);
   } catch {
-    return `${amount} ${currency}`;
+    return `${major.toFixed(2)} ${currency}`;
   }
+}
+
+// Parses a user-provided decimal string ("149.90", "149,90", "  1500 ", "0",
+// or numeric values) into a minor-unit integer. Returns null when the input is
+// empty / whitespace / non-finite so optional form fields can preserve "no value".
+// Negative inputs are also rejected (returned as null). Invalid inputs do not throw;
+// callers should rely on API-side validation (DTO @Min(100)) for final enforcement.
+export function parseDecimalToMinor(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  let raw: string;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    raw = String(value);
+  } else {
+    raw = value.trim();
+    if (!raw) return null;
+  }
+
+  const normalized = raw.replace(/\s/g, '').replace(',', '.');
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+
+  const major = Number(normalized);
+  if (!Number.isFinite(major) || major < 0) {
+    return null;
+  }
+
+  return Math.round(major * 100);
+}
+
+// Renders a minor-unit integer as a "x.xx" string suitable for a controlled
+// decimal <input>. Null/undefined become an empty string so optional form fields
+// stay empty by default.
+export function formatMinorAsInput(amountMinor: number | null | undefined): string {
+  if (amountMinor === null || amountMinor === undefined) {
+    return '';
+  }
+  if (!Number.isFinite(amountMinor)) {
+    return '';
+  }
+  return (amountMinor / 100).toFixed(2);
 }
 
 export function formatDate(value: string | null | undefined) {
