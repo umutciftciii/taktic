@@ -39,6 +39,7 @@ services:
       REFUND_SCHEDULER_CRON: ${REFUND_SCHEDULER_CRON:-0 * * * *}
       REFUND_SCAN_OLDER_THAN_HOURS: ${REFUND_SCAN_OLDER_THAN_HOURS:-48}
       REFUND_SCAN_LIMIT: ${REFUND_SCAN_LIMIT:-100}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross
       # the Docker Desktop VirtioFS/gRPC-FUSE boundary on macOS.
@@ -52,6 +53,11 @@ services:
       - taktic-api-node-modules:/app/apps/api/node_modules
       - taktic-shared-node-modules:/app/packages/shared/node_modules
       - taktic-api-pnpm-store:/root/.local/share/pnpm/store
+      # Persist admin-uploaded category images so they survive container
+      # rebuilds and `docker compose down`. The mount overlays the
+      # repo-tracked apps/api/uploads/.gitkeep skeleton with the named
+      # volume's contents at runtime.
+      - taktic-api-uploads:/app/apps/api/uploads
 
   web:
     image: node:22-alpine
@@ -88,6 +94,7 @@ services:
       NODE_ENV: development
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
       API_INTERNAL_URL: http://api:3001
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
     ports:
       - "${ADMIN_PORT:-3002}:3002"
@@ -113,3 +120,4 @@ volumes:
   taktic-web-next:
   taktic-admin-next:
   taktic-shared-node-modules:
+  taktic-api-uploads:

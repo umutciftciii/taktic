@@ -88,6 +88,9 @@ function categoryPayload(formData: FormData) {
     name: readFormString(formData, 'name'),
     slug: readFormString(formData, 'slug'),
     description: readOptionalFormString(formData, 'description'),
+    imageUrl: readOptionalFormString(formData, 'imageUrl'),
+    coverImageUrl: readOptionalFormString(formData, 'coverImageUrl'),
+    iconKey: readOptionalFormString(formData, 'iconKey'),
     sortOrder: readFormNumber(formData, 'sortOrder'),
     isActive: readFormString(formData, 'isActive') === 'true',
   };

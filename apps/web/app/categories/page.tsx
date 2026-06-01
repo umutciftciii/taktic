@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { apiFetch, Category } from '../../lib/api';
 import { CategorySearch } from '../category-search';
-import { IconArrowRight, iconForCategory } from '../landing-icons';
+import { CategoryVisual } from '../category-visual';
+import { IconArrowRight } from '../landing-icons';
 
 type CategoriesPageProps = {
   searchParams: Promise<{ q?: string }>;
@@ -65,16 +66,35 @@ export default async function CategoriesPage({ searchParams }: CategoriesPagePro
         ) : (
           <div className="cat-page-grid">
             {categories.map((category) => {
-              const IconCmp = iconForCategory(category.name);
+              const hasImage = Boolean(category.imageUrl);
               return (
                 <Link
-                  className="cat-page-card"
+                  className={`cat-page-card${hasImage ? ' cat-page-card-with-image' : ''}`}
                   href={`/categories/${category.slug}`}
                   key={category.id}
                 >
-                  <span className="cat-page-card-icon" aria-hidden="true">
-                    <IconCmp size={22} />
-                  </span>
+                  {hasImage ? (
+                    <span className="cat-page-card-media">
+                      <CategoryVisual
+                        imageUrl={category.imageUrl}
+                        iconKey={category.iconKey}
+                        name={category.name}
+                        imgClassName="cat-page-card-img"
+                        iconWrapperClassName="cat-page-card-icon"
+                        iconSize={22}
+                        alt={category.name}
+                      />
+                    </span>
+                  ) : (
+                    <CategoryVisual
+                      imageUrl={category.imageUrl}
+                      iconKey={category.iconKey}
+                      name={category.name}
+                      iconWrapperClassName="cat-page-card-icon"
+                      iconSize={22}
+                      alt={category.name}
+                    />
+                  )}
                   <span className="cat-page-card-name">{category.name}</span>
                   {category.description ? (
                     <span className="cat-page-card-desc">{category.description}</span>

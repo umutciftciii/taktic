@@ -1,4 +1,5 @@
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min } from 'class-validator';
+import { CATEGORY_ICON_KEYS, CategoryIconKey } from '../category-visuals';
 
 export class CreateCategoryDto {
   @IsString()
@@ -17,6 +18,18 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsString()
   parentId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  coverImageUrl?: string | null;
+
+  @IsOptional()
+  @IsIn([...CATEGORY_ICON_KEYS, '', null])
+  iconKey?: CategoryIconKey | '' | null;
 
   @IsOptional()
   @IsBoolean()

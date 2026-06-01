@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  normalizeCategoryIconKey,
+  normalizeCategoryImageUrl,
+} from './category-visuals';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
@@ -76,6 +80,10 @@ export class CategoriesService {
           slug: normalizeSlug(dto.slug),
           description: normalizeNullableString(dto.description),
           parentId: normalizeNullableString(dto.parentId),
+          imageUrl: normalizeCategoryImageUrl(dto.imageUrl, 'imageUrl') ?? null,
+          coverImageUrl:
+            normalizeCategoryImageUrl(dto.coverImageUrl, 'coverImageUrl') ?? null,
+          iconKey: normalizeCategoryIconKey(dto.iconKey) ?? null,
           isActive: dto.isActive ?? true,
           sortOrder: dto.sortOrder ?? 0,
         },
@@ -88,6 +96,10 @@ export class CategoriesService {
   async updateCategory(id: string, dto: UpdateCategoryDto) {
     await this.ensureCategoryExists(id);
 
+    const imageUrl = normalizeCategoryImageUrl(dto.imageUrl, 'imageUrl');
+    const coverImageUrl = normalizeCategoryImageUrl(dto.coverImageUrl, 'coverImageUrl');
+    const iconKey = normalizeCategoryIconKey(dto.iconKey);
+
     try {
       return await this.prisma.serviceCategory.update({
         where: { id },
@@ -98,6 +110,9 @@ export class CategoriesService {
             ? { description: normalizeNullableString(dto.description) }
             : {}),
           ...(dto.parentId !== undefined ? { parentId: normalizeNullableString(dto.parentId) } : {}),
+          ...(imageUrl !== undefined ? { imageUrl } : {}),
+          ...(coverImageUrl !== undefined ? { coverImageUrl } : {}),
+          ...(iconKey !== undefined ? { iconKey } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
           ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         },

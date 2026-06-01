@@ -28,11 +28,30 @@ export type Question = {
   sortOrder: number;
 };
 
+export const CATEGORY_ICON_KEYS = [
+  'snowflake',
+  'flame',
+  'bolt',
+  'drop',
+  'brush',
+  'sparkles',
+  'truck',
+  'box',
+  'wrench',
+  'tool',
+  'book',
+] as const;
+
+export type CategoryIconKey = (typeof CATEGORY_ICON_KEYS)[number];
+
 export type Category = {
   id: string;
   name: string;
   slug: string;
   description: string | null;
+  imageUrl?: string | null;
+  coverImageUrl?: string | null;
+  iconKey?: CategoryIconKey | string | null;
   sortOrder: number;
   questions?: Question[];
 };

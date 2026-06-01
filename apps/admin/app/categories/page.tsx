@@ -116,6 +116,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="cat-list-thumb-cell" aria-label="Görsel" />
                   <th>Kategori adı</th>
                   <th>Slug</th>
                   <th>Durum</th>
@@ -127,6 +128,20 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
               <tbody>
                 {filtered.map((category) => (
                   <tr key={category.id}>
+                    <td className="cat-list-thumb-cell">
+                      {category.imageUrl ? (
+                        <img
+                          src={category.imageUrl}
+                          alt=""
+                          className="cat-list-thumb"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="cat-list-thumb-placeholder" aria-hidden="true">
+                          {category.iconKey ? category.iconKey.slice(0, 3) : '—'}
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <Link href={`/categories/${category.slug}`}>{category.name}</Link>
                     </td>

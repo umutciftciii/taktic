@@ -18,11 +18,13 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "cron": "^4.4.0",
+    "multer": "^2.1.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@taktic/tsconfig": "workspace:*",
+    "@types/multer": "^2.1.0",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0"

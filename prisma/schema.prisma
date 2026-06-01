@@ -109,15 +109,18 @@ model Session {
 }
 
 model ServiceCategory {
-  id          String   @id @default(cuid())
-  parentId    String?
-  name        String
-  slug        String   @unique
-  description String?
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  parentId      String?
+  name          String
+  slug          String   @unique
+  description   String?
+  imageUrl      String?
+  coverImageUrl String?
+  iconKey       String?
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   parent    ServiceCategory?          @relation("ServiceCategoryTree", fields: [parentId], references: [id])
   children  ServiceCategory[]         @relation("ServiceCategoryTree")

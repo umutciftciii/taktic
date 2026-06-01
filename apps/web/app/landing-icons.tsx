@@ -293,3 +293,24 @@ export function iconForCategory(name: string): IconComponent {
   }
   return IconSparkles;
 }
+
+const iconByKeyMap: Record<string, IconComponent> = {
+  snowflake: IconSnowflake,
+  flame: IconFlame,
+  bolt: IconBolt,
+  drop: IconDrop,
+  brush: IconBrush,
+  sparkles: IconSparkles,
+  truck: IconTruck,
+  box: IconBox,
+  wrench: IconWrench,
+  tool: IconTool,
+  book: IconBook,
+};
+
+export function iconByKey(key: string | null | undefined): IconComponent | null {
+  if (!key) return null;
+  const normalized = key.trim().toLowerCase();
+  if (!normalized) return null;
+  return iconByKeyMap[normalized] ?? null;
+}
