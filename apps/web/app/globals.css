@@ -2070,6 +2070,23 @@ small {
   transform: translateX(2px);
 }
 
+.lp-cat-media {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--border-2);
+  margin-bottom: 4px;
+}
+
+.lp-cat-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* ----- Steps ----- */
 .lp-steps-grid {
   display: grid;
@@ -6386,6 +6403,43 @@ body:has(.pdash-shell) #site-header {
 
 .cat-page-card:hover .cat-page-card-cta svg {
   transform: translateX(2px);
+}
+
+.cat-page-card-media {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--border, #e2e8f0);
+  margin-bottom: 4px;
+}
+
+.cat-page-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cat-page-card-with-image {
+  min-height: 220px;
+}
+
+.cat-detail-cover {
+  margin: 0 auto 18px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--border, #e2e8f0);
+  aspect-ratio: 16 / 6;
+  max-height: 280px;
+}
+
+.cat-detail-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .cat-page-empty {

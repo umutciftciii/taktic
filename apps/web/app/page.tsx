@@ -3,6 +3,7 @@ import { apiFetch, AuthUser, Category, getCurrentUser } from '../lib/api';
 import { LandingHero } from './landing-hero';
 import { LandingFAQ } from './landing-faq';
 import { StartChoiceModal } from './start-choice-modal';
+import { CategoryVisual } from './category-visual';
 import {
   IconArrowRight,
   IconCheck,
@@ -16,11 +17,18 @@ import {
   IconUsers,
   IconWallet,
   IconX,
-  iconForCategory,
 } from './landing-icons';
 import type { IconComponent } from './landing-icons';
 
-const fallbackCategories: Array<{ name: string; slug: string; description: string }> = [
+type HomePageCategory = {
+  name: string;
+  slug: string;
+  description: string | null;
+  imageUrl?: string | null;
+  iconKey?: string | null;
+};
+
+const fallbackCategories: HomePageCategory[] = [
   { name: 'Klima Servisi', slug: 'klima-servisi', description: 'Bakım, arıza ve gaz dolumu' },
   { name: 'Klima Montajı', slug: 'klima-montaji', description: 'Yeni cihaz kurulumu' },
   { name: 'Kombi Servisi', slug: 'kombi-servisi', description: 'Bakım, arıza tespiti' },
@@ -32,7 +40,7 @@ const fallbackCategories: Array<{ name: string; slug: string; description: strin
 ];
 
 export default async function HomePage() {
-  let categories: Array<{ name: string; slug: string; description: string | null }> = [];
+  let categories: HomePageCategory[] = [];
   try {
     const fromApi = await apiFetch<Category[]>('/categories?limit=10');
     categories = fromApi.length > 0 ? fromApi : fallbackCategories;
@@ -59,11 +67,7 @@ export default async function HomePage() {
   );
 }
 
-function PopularCategories({
-  categories,
-}: {
-  categories: Array<{ name: string; slug: string; description: string | null }>;
-}) {
+function PopularCategories({ categories }: { categories: HomePageCategory[] }) {
   return (
     <section className="lp-section" id="kategoriler">
       <div className="lp-container">
@@ -78,12 +82,35 @@ function PopularCategories({
 
         <div className="lp-cat-grid">
           {categories.map((c) => {
-            const IconCmp = iconForCategory(c.name);
+            const hasImage = Boolean(c.imageUrl);
             return (
-              <Link className="lp-cat-card" href={`/categories/${c.slug}`} key={c.slug}>
-                <span className="lp-cat-icon">
-                  <IconCmp size={22} />
-                </span>
+              <Link
+                className={`lp-cat-card${hasImage ? ' lp-cat-card-with-image' : ''}`}
+                href={`/categories/${c.slug}`}
+                key={c.slug}
+              >
+                {hasImage ? (
+                  <span className="lp-cat-media">
+                    <CategoryVisual
+                      imageUrl={c.imageUrl}
+                      iconKey={c.iconKey}
+                      name={c.name}
+                      imgClassName="lp-cat-img"
+                      iconWrapperClassName="lp-cat-icon"
+                      iconSize={22}
+                      alt={c.name}
+                    />
+                  </span>
+                ) : (
+                  <CategoryVisual
+                    imageUrl={c.imageUrl}
+                    iconKey={c.iconKey}
+                    name={c.name}
+                    iconWrapperClassName="lp-cat-icon"
+                    iconSize={22}
+                    alt={c.name}
+                  />
+                )}
                 <span className="lp-cat-name">{c.name}</span>
                 {c.description ? <span className="lp-cat-desc">{c.description}</span> : null}
                 <span className="lp-cat-link">

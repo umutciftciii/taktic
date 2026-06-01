@@ -11,6 +11,7 @@ import { CreditsModule } from './modules/credits/credits.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CreditsModule,
     DashboardModule,
     PackagePurchasesModule,
+    UploadsModule,
   ],
 })
 export class AppModule {}

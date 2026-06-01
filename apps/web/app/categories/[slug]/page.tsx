@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { apiFetch, Category, getCurrentUser, Question } from '../../../lib/api';
+import { CategoryCover } from '../../category-visual';
 import { submitServiceRequestAction } from '../actions';
 
 type CategoryPageProps = {
@@ -23,6 +24,16 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         <span aria-hidden="true">/</span>
         <span>{category.name}</span>
       </p>
+
+      {category.coverImageUrl ? (
+        <div className="cat-detail-cover page-narrow">
+          <CategoryCover
+            coverImageUrl={category.coverImageUrl}
+            alt={`${category.name} kapak görseli`}
+            className="cat-detail-cover-img"
+          />
+        </div>
+      ) : null}
 
       <header className="page-header page-narrow">
         <h1 className="page-title">{category.name}</h1>

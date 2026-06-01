@@ -5,7 +5,16 @@ import {
   updateQuestionAction,
   updateQuestionStatusAction,
 } from '../actions';
-import { apiFetch, Category, Question, QuestionOption, QuestionType, requireAdmin } from '../../../lib/api';
+import { CategoryImageUploader } from '../category-image-uploader';
+import {
+  apiFetch,
+  CATEGORY_ICON_KEYS,
+  Category,
+  Question,
+  QuestionOption,
+  QuestionType,
+  requireAdmin,
+} from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { EmptyState } from '../../../components/empty-state';
@@ -88,6 +97,35 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 <label className="field field-12">
                   <span>Açıklama</span>
                   <textarea name="description" defaultValue={category.description ?? ''} />
+                </label>
+                <CategoryImageUploader
+                  name="imageUrl"
+                  label="Kart görseli"
+                  variant="card"
+                  defaultValue={category.imageUrl ?? ''}
+                  helpText="Kategoriler listesindeki kart için kullanılır."
+                />
+                <CategoryImageUploader
+                  name="coverImageUrl"
+                  label="Kapak görseli"
+                  variant="cover"
+                  defaultValue={category.coverImageUrl ?? ''}
+                  helpText="Kategori detay sayfasının geniş kapak görseli. Boş bırakılırsa cover gösterilmez."
+                />
+                <label className="field field-12">
+                  <span>Fallback ikon anahtarı</span>
+                  <select name="iconKey" defaultValue={category.iconKey ?? ''}>
+                    <option value="">— (otomatik ikon kullan)</option>
+                    {CATEGORY_ICON_KEYS.map((key) => (
+                      <option key={key} value={key}>
+                        {key}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">
+                    Görsel verilmediğinde kullanılacak ikon. Boş bırakılırsa kategori adına göre
+                    otomatik fallback ikon kullanılır. Upload sistemi ayrı fazda eklenecek.
+                  </span>
                 </label>
               </div>
               <input type="hidden" name="isActive" value={String(category.isActive)} />

@@ -3,12 +3,31 @@ import { redirect } from 'next/navigation';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
+export const CATEGORY_ICON_KEYS = [
+  'snowflake',
+  'flame',
+  'bolt',
+  'drop',
+  'brush',
+  'sparkles',
+  'truck',
+  'box',
+  'wrench',
+  'tool',
+  'book',
+] as const;
+
+export type CategoryIconKey = (typeof CATEGORY_ICON_KEYS)[number];
+
 export type Category = {
   id: string;
   parentId: string | null;
   name: string;
   slug: string;
   description: string | null;
+  imageUrl: string | null;
+  coverImageUrl: string | null;
+  iconKey: CategoryIconKey | string | null;
   isActive: boolean;
   sortOrder: number;
   _count?: {

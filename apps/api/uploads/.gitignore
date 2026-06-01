@@ -1,0 +1,9 @@
+# Ignore all uploaded files. Folder skeleton (.gitkeep files) is kept so the
+# directory exists in the repo and Nest's static serving has a valid mount
+# point even before any uploads happen.
+*
+!.gitignore
+!.gitkeep
+!category-images/
+category-images/*
+!category-images/.gitkeep
