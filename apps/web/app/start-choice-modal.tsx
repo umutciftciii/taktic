@@ -115,14 +115,16 @@ export function StartChoiceModal({ user, label = DEFAULT_LABEL, className }: Sta
                 onSelect={() => setChoice('BUY')}
                 title="Hizmet almak istiyorum."
                 description="İhtiyacını anlat, doğrulanmış hizmet verenlerden teklif al."
-                icon={<BuyIcon />}
+                visualSrc="/brand/start-choice-customer.png"
+                visualAlt="Hizmet almak"
               />
               <ChoiceCard
                 active={choice === 'SELL'}
                 onSelect={() => setChoice('SELL')}
                 title="Hizmet vermek istiyorum."
                 description="Profilini oluştur, uygun taleplere teklif ver."
-                icon={<SellIcon />}
+                visualSrc="/brand/start-choice-provider.png"
+                visualAlt="Hizmet vermek"
               />
             </div>
 
@@ -148,10 +150,11 @@ type ChoiceCardProps = {
   onSelect: () => void;
   title: string;
   description: string;
-  icon: React.ReactNode;
+  visualSrc: string;
+  visualAlt: string;
 };
 
-function ChoiceCard({ active, onSelect, title, description, icon }: ChoiceCardProps) {
+function ChoiceCard({ active, onSelect, title, description, visualSrc, visualAlt }: ChoiceCardProps) {
   return (
     <button
       type="button"
@@ -159,56 +162,9 @@ function ChoiceCard({ active, onSelect, title, description, icon }: ChoiceCardPr
       onClick={onSelect}
       aria-pressed={active}
     >
-      <span className="start-choice-card-icon" aria-hidden="true">
-        {icon}
-      </span>
+      <img className="start-choice-card-visual" src={visualSrc} alt={visualAlt} />
       <span className="start-choice-card-title">{title}</span>
       <span className="start-choice-card-desc">{description}</span>
     </button>
-  );
-}
-
-function BuyIcon() {
-  return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M4 5h2l2.2 10.4a2 2 0 0 0 2 1.6h7a2 2 0 0 0 1.95-1.55L21 8H7"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="10" cy="20" r="1.4" fill="currentColor" />
-      <circle cx="17" cy="20" r="1.4" fill="currentColor" />
-    </svg>
-  );
-}
-
-function SellIcon() {
-  return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect
-        x="3"
-        y="7"
-        width="18"
-        height="13"
-        rx="2"
-        stroke="currentColor"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-      <path d="M3 12h18" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path
-        d="M11 12v2.5a1 1 0 0 0 1 1h0a1 1 0 0 0 1-1V12"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }
