@@ -11,3 +11,4 @@ coverage
 *.tsbuildinfo
 .DS_Store
 prisma/dev.db
+.claude/
