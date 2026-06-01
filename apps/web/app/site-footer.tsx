@@ -58,9 +58,8 @@ export function SiteFooter({ isAuthenticated = false }: SiteFooterProps = {}) {
       <div className="lp-container">
         <div className="lp-footer-grid">
           <div className="lp-footer-brand">
-            <Link className="lp-footer-logo" href="/">
-              <span className="lp-logo-mark">T</span>
-              <span>TakTic</span>
+            <Link className="lp-footer-logo" href="/" aria-label="TakTick ana sayfa">
+              <img className="brand-logo" src="/brand/logo.png" alt="TakTick" />
             </Link>
             <p>
               Doğrulanmış talepler ve adil teklif kredisiyle, daha şeffaf bir yerel hizmet pazaryeri.

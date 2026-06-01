@@ -14,6 +14,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="auth-screen">
       <form className="auth-screen-card auth-screen-card-compact" action={loginAction}>
+        <img className="auth-brand-logo" src="/brand/logo.png" alt="TakTick" />
         <h1 className="auth-screen-title">Giriş</h1>
         <p className="auth-screen-subtitle">
           Müşteri ve hizmet veren hesapları için giriş yapın.

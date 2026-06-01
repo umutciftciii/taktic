@@ -13,12 +13,9 @@ export function Sidebar({ onNavigate }: SidebarProps) {
 
   return (
     <nav className="admin-sidebar-nav" aria-label="Admin navigasyonu">
-      <Link className="admin-sidebar-brand" href="/" onClick={onNavigate}>
-        <span className="admin-sidebar-brand-mark">T</span>
-        <span className="admin-sidebar-brand-text">
-          <span className="admin-sidebar-brand-name">TakTic</span>
-          <span className="admin-sidebar-brand-tag">Yönetim Paneli</span>
-        </span>
+      <Link className="admin-sidebar-brand" href="/" onClick={onNavigate} aria-label="TakTick yönetim paneli">
+        <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
+        <span className="admin-sidebar-brand-tag">Yönetim Paneli</span>
       </Link>
 
       <div className="admin-sidebar-groups">
