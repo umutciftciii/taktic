@@ -28,6 +28,9 @@ export function CustomerShell({ user, active = 'requests', children }: CustomerS
   return (
     <div className="cdash-shell">
       <aside className="cdash-sidebar" aria-label="Müşteri Paneli navigasyonu">
+        <Link className="shell-brand-logo-link" href="/" aria-label="TakTick ana sayfa">
+          <img className="shell-brand-logo" src="/brand/logo.png" alt="TakTick" />
+        </Link>
         <div className="cdash-brand">
           <span className="cdash-brand-mark" aria-hidden="true">
             M

@@ -46,6 +46,9 @@ export function ProviderShell({
   return (
     <div className="pdash-shell">
       <aside className="pdash-sidebar" aria-label="Hizmet Veren Paneli navigasyonu">
+        <Link className="shell-brand-logo-link" href="/" aria-label="TakTick ana sayfa">
+          <img className="shell-brand-logo" src="/brand/logo.png" alt="TakTick" />
+        </Link>
         <div className="pdash-brand">
           <span className="pdash-brand-mark" aria-hidden="true">
             {initials || 'H'}

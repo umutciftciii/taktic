@@ -12,6 +12,7 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
     <main className="auth-screen">
       <form className="auth-screen-card auth-screen-card-compact" action={registerCustomerAction}>
         <div className="auth-screen-card-head">
+          <img className="auth-brand-logo" src="/brand/logo.png" alt="TakTick" />
           <h1 className="auth-screen-title">Müşteri Hesabı Oluştur</h1>
           <p className="auth-screen-subtitle">
             Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.

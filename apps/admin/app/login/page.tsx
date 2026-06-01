@@ -10,6 +10,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="auth-page">
       <form className="auth-card" action={loginAction}>
+        <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
         <h1 className="auth-title">TakTic Admin</h1>
         <p className="muted">Yönetim paneline giriş yapın</p>
         {error ? (

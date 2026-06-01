@@ -100,6 +100,7 @@ export function StartChoiceModal({ user, label = DEFAULT_LABEL, className }: Sta
             </button>
 
             <div className="start-choice-head">
+              <img className="start-choice-brand-logo" src="/brand/logo.png" alt="TakTick" />
               <h2 className="start-choice-title" id={titleId}>
                 Neye ihtiyacın var?
               </h2>

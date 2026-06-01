@@ -12,9 +12,8 @@ export function SiteHeader({ user, providerId }: SiteHeaderProps) {
   return (
     <header className="lp-header" id="site-header">
       <div className="lp-container lp-header-inner">
-        <Link className="lp-logo" href="/" aria-label="TakTic ana sayfa">
-          <span className="lp-logo-mark">T</span>
-          <span>TakTic</span>
+        <Link className="lp-logo" href="/" aria-label="TakTick ana sayfa">
+          <img className="brand-logo" src="/brand/logo.png" alt="TakTick" />
         </Link>
 
         <HeaderNav user={user} providerId={providerId} />

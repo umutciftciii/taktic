@@ -1344,9 +1344,7 @@ small {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: saturate(140%) blur(8px);
-  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  background: rgba(255, 255, 255, 0.95);
   border-bottom: 1px solid var(--border-2);
 }
 
@@ -6688,4 +6686,52 @@ body:has(.pdash-shell) #site-header {
     padding: 14px 20px;
     border-radius: 0 0 16px 16px;
   }
+}
+
+/* ----- Brand assets ----- */
+.brand-logo {
+  display: block;
+  height: 65px;
+  width: auto;
+}
+
+.lp-footer-brand .brand-logo {
+  height: 65px;
+}
+
+.auth-brand-logo {
+  display: block;
+  height: 70px;
+  width: auto;
+  margin: 0 0 16px;
+}
+
+.auth-screen-card > .auth-brand-logo {
+  align-self: center;
+}
+
+.shell-brand-logo-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  margin: 0 0 10px;
+  border-radius: 8px;
+}
+
+.shell-brand-logo-link:hover {
+  text-decoration: none;
+  background: var(--border-2);
+}
+
+.shell-brand-logo {
+  display: block;
+  height: 75px;
+  width: auto;
+}
+
+.start-choice-brand-logo {
+  display: block;
+  height: 65px;
+  width: auto;
+  margin: 0 auto 14px;
 }

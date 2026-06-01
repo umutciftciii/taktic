@@ -3011,3 +3011,21 @@ button:disabled {
   box-shadow: none;
   padding: 28px 18px;
 }
+
+/* ----- Brand assets ----- */
+.admin-brand-logo {
+  display: block;
+  height: 50px;
+  width: auto;
+}
+
+.admin-sidebar-brand {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.auth-card .admin-brand-logo {
+  height: 70px;
+  margin: 0 auto 16px;
+}

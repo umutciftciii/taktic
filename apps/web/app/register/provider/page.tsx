@@ -12,13 +12,7 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
     <main className="auth-screen">
       <form className="auth-screen-card auth-screen-card-compact" action={registerProviderAction}>
         <div className="auth-screen-card-head">
-          <span className="auth-screen-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="7" width="18" height="13" rx="2.5" />
-              <path d="M8 7V5.5A2.5 2.5 0 0 1 10.5 3h3A2.5 2.5 0 0 1 16 5.5V7" />
-              <path d="M3 12h18" />
-            </svg>
-          </span>
+          <img className="auth-brand-logo" src="/brand/logo.png" alt="TakTick" />
           <h1 className="auth-screen-title">Hizmet Veren Hesabı Oluştur</h1>
           <p className="auth-screen-subtitle">
             Profilinizi bağlamak ve teklif akışını yönetmek için hesap açın.
