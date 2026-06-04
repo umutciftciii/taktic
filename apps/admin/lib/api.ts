@@ -447,6 +447,77 @@ export type AdminSummary = {
   packagePurchases: number;
 };
 
+export type FinanceSummaryRecentTransaction = {
+  id: string;
+  providerId: string;
+  type: CreditTransactionType;
+  amount: number;
+  balanceAfter: number;
+  reason: string | null;
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+  provider: {
+    id: string;
+    businessName: string;
+  };
+  createdBy: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+};
+
+export type FinanceSummaryRecentPurchase = {
+  id: string;
+  providerId: string;
+  packageId: string;
+  status: PackagePurchaseStatus;
+  creditAmountSnapshot: number;
+  priceAmountSnapshot: number;
+  currencySnapshot: string;
+  packageNameSnapshot: string;
+  mockPaymentReference: string | null;
+  paidAt: string | null;
+  createdAt: string;
+  provider: {
+    id: string;
+    businessName: string;
+  };
+  package: {
+    id: string;
+    name: string;
+  };
+};
+
+export type FinanceSummary = {
+  revenue: {
+    totalRevenuePaid: number;
+    todayRevenuePaid: number;
+    monthRevenuePaid: number;
+  };
+  packagePurchases: {
+    totalPackagePurchases: number;
+    paidPackagePurchases: number;
+    pendingPackagePurchases: number;
+    cancelledPackagePurchases: number;
+    failedPackagePurchases: number;
+    expiredPackagePurchases: number;
+    refundedPackagePurchases: number;
+  };
+  credits: {
+    totalCreditsSold: number;
+    totalCreditsSpent: number;
+    totalCreditsRefunded: number;
+    totalCreditsAdminGranted: number;
+    totalCreditsAdminDeducted: number;
+    totalCreditsAdjusted: number;
+    totalActiveProviderCreditBalance: number;
+  };
+  recentTransactions: FinanceSummaryRecentTransaction[];
+  recentPurchases: FinanceSummaryRecentPurchase[];
+};
+
 export function statusLabel(status: string) {
   const labels: Record<string, string> = {
     SUBMITTED: 'Gönderildi',

@@ -10,6 +10,7 @@ import { RefundSchedulerModule } from './modules/refund-scheduler/refund-schedul
 import { CreditsModule } from './modules/credits/credits.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -28,6 +29,7 @@ import { PrismaModule } from './prisma/prisma.module';
     RefundSchedulerModule,
     CreditsModule,
     DashboardModule,
+    FinanceModule,
     PackagePurchasesModule,
     UploadsModule,
   ],

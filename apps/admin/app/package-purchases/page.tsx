@@ -58,7 +58,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
                   <th>Kredi</th>
                   <th>Tutar</th>
                   <th>Durum</th>
-                  <th>Mock referans</th>
+                  <th>Ödeme Referansı</th>
                   <th>İşlem</th>
                 </tr>
               </thead>

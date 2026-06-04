@@ -32,6 +32,7 @@ export const navGroups: NavGroup[] = [
   {
     title: 'Finans',
     items: [
+      { href: '/finance', label: 'Dashboard', exact: true },
       { href: '/package-purchases', label: 'Paket Satın Almaları' },
       { href: '/refund-scan', label: 'İade Taraması' },
     ],

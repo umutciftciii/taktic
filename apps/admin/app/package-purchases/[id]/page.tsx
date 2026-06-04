@@ -83,7 +83,7 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
           <section className="card" style={{ margin: 0 }}>
             <h2>Notlar ve referanslar</h2>
             <dl className="meta-row">
-              <dt>Mock ref.</dt>
+              <dt>Ödeme Referansı</dt>
               <dd>{purchase.mockPaymentReference ?? '-'}</dd>
               <dt>Başarısızlık sebebi</dt>
               <dd className="muted">{purchase.mockPaymentFailureReason ?? '-'}</dd>
