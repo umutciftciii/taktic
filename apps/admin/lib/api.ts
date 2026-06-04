@@ -577,6 +577,42 @@ export type ProviderFinanceResponse = {
   hasNextPage: boolean;
 };
 
+export type FinanceAnalyticsGroupBy = 'day' | 'month' | 'year';
+
+export type FinanceAnalyticsBucket = {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  paidRevenue: number;
+  paidPackageCount: number;
+  soldCredits: number;
+  spentCredits: number;
+  refundedCredits: number;
+  adminGrantedCredits: number;
+  adminDeductedCredits: number;
+};
+
+export type FinanceAnalyticsTotals = {
+  paidRevenue: number;
+  paidPackageCount: number;
+  soldCredits: number;
+  spentCredits: number;
+  refundedCredits: number;
+  adminGrantedCredits: number;
+  adminDeductedCredits: number;
+};
+
+export type FinanceAnalyticsResponse = {
+  range: {
+    from: string;
+    to: string;
+    groupBy: FinanceAnalyticsGroupBy;
+  };
+  totals: FinanceAnalyticsTotals;
+  buckets: FinanceAnalyticsBucket[];
+};
+
 export type FinanceSummary = {
   revenue: {
     totalRevenuePaid: number;

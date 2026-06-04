@@ -5,6 +5,10 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  FinanceAnalyticsDto,
+  FinanceAnalyticsGroupBy,
+} from './dto/finance-analytics.dto';
 import { ListCreditLedgerDto } from './dto/list-credit-ledger.dto';
 import {
   ListProviderFinanceDto,
@@ -17,6 +21,38 @@ const DEFAULT_LEDGER_PAGE_SIZE = 50;
 const MAX_LEDGER_PAGE_SIZE = 200;
 const DEFAULT_PROVIDER_FINANCE_PAGE_SIZE = 25;
 const MAX_PROVIDER_FINANCE_PAGE_SIZE = 100;
+
+const ISTANBUL_TZ_OFFSET = '+03:00';
+const ANALYTICS_DEFAULT_RANGE_DAYS = 30;
+const ANALYTICS_BUCKET_LIMITS: Record<FinanceAnalyticsGroupBy, number> = {
+  day: 370,
+  month: 60,
+  year: 10,
+};
+const ANALYTICS_TRACKED_CREDIT_TYPES: CreditTransactionType[] = [
+  CreditTransactionType.PACKAGE_PURCHASE,
+  CreditTransactionType.OFFER_SPEND,
+  CreditTransactionType.OFFER_REFUND,
+  CreditTransactionType.ADMIN_GRANT,
+  CreditTransactionType.ADMIN_DEDUCT,
+];
+
+type AnalyticsAccumulator = {
+  paidRevenue: number;
+  paidPackageCount: number;
+  soldCredits: number;
+  spentCredits: number;
+  refundedCredits: number;
+  adminGrantedCredits: number;
+  adminDeductedCredits: number;
+};
+
+type AnalyticsBucketDescriptor = {
+  key: string;
+  label: string;
+  start: Date;
+  end: Date;
+};
 
 type CreditTotals = Record<CreditTransactionType, number>;
 type PurchaseCounts = Record<PackagePurchaseStatus, number>;
@@ -134,6 +170,127 @@ export class FinanceService {
       },
       recentTransactions,
       recentPurchases,
+    };
+  }
+
+  async analytics(filters: FinanceAnalyticsDto) {
+    const groupBy = normalizeAnalyticsGroupBy(filters.groupBy);
+
+    if (filters.from !== undefined && !isValidIsoDate(filters.from)) {
+      throw new BadRequestException('"from" must be in YYYY-MM-DD format');
+    }
+    if (filters.to !== undefined && !isValidIsoDate(filters.to)) {
+      throw new BadRequestException('"to" must be in YYYY-MM-DD format');
+    }
+
+    const { fromDate, toDate } = resolveAnalyticsRange(filters.from, filters.to);
+
+    if (fromDate > toDate) {
+      throw new BadRequestException('"from" must be on or before "to"');
+    }
+
+    const bucketLimit = ANALYTICS_BUCKET_LIMITS[groupBy];
+    const estimatedBuckets = estimateAnalyticsBucketCount(
+      fromDate,
+      toDate,
+      groupBy,
+    );
+    if (estimatedBuckets > bucketLimit) {
+      throw new BadRequestException(
+        `Range too large for groupBy=${groupBy} (max ${bucketLimit} buckets, requested ${estimatedBuckets})`,
+      );
+    }
+
+    const fromInstant = parseIstanbulDayStart(fromDate);
+    const toInstant = parseIstanbulDayEnd(toDate);
+
+    const buckets = generateAnalyticsBuckets(fromDate, toDate, groupBy);
+
+    const [purchases, transactions] = await Promise.all([
+      this.prisma.packagePurchase.findMany({
+        where: {
+          status: PackagePurchaseStatus.PAID,
+          paidAt: { gte: fromInstant, lte: toInstant },
+        },
+        select: { paidAt: true, priceAmountSnapshot: true },
+      }),
+      this.prisma.providerCreditTransaction.findMany({
+        where: {
+          createdAt: { gte: fromInstant, lte: toInstant },
+          type: { in: ANALYTICS_TRACKED_CREDIT_TYPES },
+        },
+        select: { createdAt: true, type: true, amount: true },
+      }),
+    ]);
+
+    const bucketMap = new Map<string, AnalyticsAccumulator>();
+    for (const bucket of buckets) {
+      bucketMap.set(bucket.key, createEmptyAnalyticsAccumulator());
+    }
+
+    for (const purchase of purchases) {
+      if (!purchase.paidAt) continue;
+      const key = computeAnalyticsBucketKey(purchase.paidAt, groupBy);
+      const acc = bucketMap.get(key);
+      if (!acc) continue;
+      acc.paidRevenue += purchase.priceAmountSnapshot;
+      acc.paidPackageCount += 1;
+    }
+
+    for (const transaction of transactions) {
+      const key = computeAnalyticsBucketKey(transaction.createdAt, groupBy);
+      const acc = bucketMap.get(key);
+      if (!acc) continue;
+      switch (transaction.type) {
+        case CreditTransactionType.PACKAGE_PURCHASE:
+          acc.soldCredits += transaction.amount;
+          break;
+        case CreditTransactionType.OFFER_SPEND:
+          acc.spentCredits += Math.abs(transaction.amount);
+          break;
+        case CreditTransactionType.OFFER_REFUND:
+          acc.refundedCredits += transaction.amount;
+          break;
+        case CreditTransactionType.ADMIN_GRANT:
+          acc.adminGrantedCredits += transaction.amount;
+          break;
+        case CreditTransactionType.ADMIN_DEDUCT:
+          acc.adminDeductedCredits += Math.abs(transaction.amount);
+          break;
+        default:
+          break;
+      }
+    }
+
+    const totals = createEmptyAnalyticsAccumulator();
+    const bucketsOut = buckets.map((bucket) => {
+      const acc = bucketMap.get(bucket.key) ?? createEmptyAnalyticsAccumulator();
+      totals.paidRevenue += acc.paidRevenue;
+      totals.paidPackageCount += acc.paidPackageCount;
+      totals.soldCredits += acc.soldCredits;
+      totals.spentCredits += acc.spentCredits;
+      totals.refundedCredits += acc.refundedCredits;
+      totals.adminGrantedCredits += acc.adminGrantedCredits;
+      totals.adminDeductedCredits += acc.adminDeductedCredits;
+      return {
+        key: bucket.key,
+        label: bucket.label,
+        start: bucket.start.toISOString(),
+        end: bucket.end.toISOString(),
+        paidRevenue: acc.paidRevenue,
+        paidPackageCount: acc.paidPackageCount,
+        soldCredits: acc.soldCredits,
+        spentCredits: acc.spentCredits,
+        refundedCredits: acc.refundedCredits,
+        adminGrantedCredits: acc.adminGrantedCredits,
+        adminDeductedCredits: acc.adminDeductedCredits,
+      };
+    });
+
+    return {
+      range: { from: fromDate, to: toDate, groupBy },
+      totals,
+      buckets: bucketsOut,
     };
   }
 
@@ -626,4 +783,210 @@ function istanbulDateParts(now: Date): {
   const formatted = formatter.format(now);
   const [year = '1970', month = '01', day = '01'] = formatted.split('-');
   return { year, month, day };
+}
+
+// Defensive normalizer for the analytics groupBy. The DTO already restricts
+// this via @IsIn, but Nest's query-string ValidationPipe behavior has historically
+// let unexpected values through, so we re-check at the service boundary and
+// return 400 rather than silently falling back.
+function normalizeAnalyticsGroupBy(
+  raw: FinanceAnalyticsGroupBy | undefined,
+): FinanceAnalyticsGroupBy {
+  if (raw === undefined) return 'day';
+  if (raw === 'day' || raw === 'month' || raw === 'year') return raw;
+  throw new BadRequestException(
+    `Invalid groupBy: ${String(raw)} (expected day, month, or year)`,
+  );
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidIsoDate(value: string): boolean {
+  if (!ISO_DATE_RE.test(value)) return false;
+  const { year, month, day } = splitIsoDate(value);
+  if (month < 1 || month > 12) return false;
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day >= 1 && day <= lastDay;
+}
+
+// Resolves the analytics date range. Both bounds are YYYY-MM-DD strings
+// interpreted as Istanbul civil days. When neither is provided we return the
+// last 30 calendar days ending today (inclusive); when only one is provided we
+// align the other to the same day.
+function resolveAnalyticsRange(
+  fromInput: string | undefined,
+  toInput: string | undefined,
+): { fromDate: string; toDate: string } {
+  if (fromInput && toInput) {
+    return { fromDate: fromInput, toDate: toInput };
+  }
+
+  const todayParts = istanbulDateParts(new Date());
+  const today = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
+
+  if (!fromInput && !toInput) {
+    return {
+      fromDate: addDaysToIsoDate(today, -(ANALYTICS_DEFAULT_RANGE_DAYS - 1)),
+      toDate: today,
+    };
+  }
+
+  if (fromInput && !toInput) {
+    return { fromDate: fromInput, toDate: today };
+  }
+
+  // toInput only
+  return {
+    fromDate: addDaysToIsoDate(
+      toInput as string,
+      -(ANALYTICS_DEFAULT_RANGE_DAYS - 1),
+    ),
+    toDate: toInput as string,
+  };
+}
+
+function parseIstanbulDayStart(isoDate: string): Date {
+  return new Date(`${isoDate}T00:00:00.000${ISTANBUL_TZ_OFFSET}`);
+}
+
+function parseIstanbulDayEnd(isoDate: string): Date {
+  return new Date(`${isoDate}T23:59:59.999${ISTANBUL_TZ_OFFSET}`);
+}
+
+function addDaysToIsoDate(isoDate: string, days: number): string {
+  const { year, month, day } = splitIsoDate(isoDate);
+  const t = Date.UTC(year, month - 1, day) + days * 86_400_000;
+  const d = new Date(t);
+  return formatUtcAsIsoDate(d);
+}
+
+// Parses YYYY-MM-DD into numeric parts. The DTO regex guarantees this format
+// reaches us, so any missing piece would mean a programmer error; falling back
+// to epoch keeps TS happy without quietly accepting invalid input elsewhere.
+function splitIsoDate(isoDate: string): {
+  year: number;
+  month: number;
+  day: number;
+} {
+  const segments = isoDate.split('-');
+  return {
+    year: Number.parseInt(segments[0] ?? '1970', 10),
+    month: Number.parseInt(segments[1] ?? '01', 10),
+    day: Number.parseInt(segments[2] ?? '01', 10),
+  };
+}
+
+function formatUtcAsIsoDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function createEmptyAnalyticsAccumulator(): AnalyticsAccumulator {
+  return {
+    paidRevenue: 0,
+    paidPackageCount: 0,
+    soldCredits: 0,
+    spentCredits: 0,
+    refundedCredits: 0,
+    adminGrantedCredits: 0,
+    adminDeductedCredits: 0,
+  };
+}
+
+function estimateAnalyticsBucketCount(
+  fromDate: string,
+  toDate: string,
+  groupBy: FinanceAnalyticsGroupBy,
+): number {
+  const from = splitIsoDate(fromDate);
+  const to = splitIsoDate(toDate);
+
+  switch (groupBy) {
+    case 'day': {
+      const diff =
+        Date.UTC(to.year, to.month - 1, to.day) -
+        Date.UTC(from.year, from.month - 1, from.day);
+      return Math.floor(diff / 86_400_000) + 1;
+    }
+    case 'month':
+      return (to.year - from.year) * 12 + (to.month - from.month) + 1;
+    case 'year':
+      return to.year - from.year + 1;
+    default:
+      return 0;
+  }
+}
+
+function generateAnalyticsBuckets(
+  fromDate: string,
+  toDate: string,
+  groupBy: FinanceAnalyticsGroupBy,
+): AnalyticsBucketDescriptor[] {
+  const from = splitIsoDate(fromDate);
+  const to = splitIsoDate(toDate);
+
+  if (groupBy === 'day') {
+    const buckets: AnalyticsBucketDescriptor[] = [];
+    const start = Date.UTC(from.year, from.month - 1, from.day);
+    const end = Date.UTC(to.year, to.month - 1, to.day);
+    for (let t = start; t <= end; t += 86_400_000) {
+      const dateStr = formatUtcAsIsoDate(new Date(t));
+      buckets.push({
+        key: dateStr,
+        label: dateStr,
+        start: parseIstanbulDayStart(dateStr),
+        end: parseIstanbulDayEnd(dateStr),
+      });
+    }
+    return buckets;
+  }
+
+  if (groupBy === 'month') {
+    const buckets: AnalyticsBucketDescriptor[] = [];
+    let year = from.year;
+    let month = from.month;
+    while (year < to.year || (year === to.year && month <= to.month)) {
+      const monthStr = String(month).padStart(2, '0');
+      const key = `${year}-${monthStr}`;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const lastDayStr = String(lastDay).padStart(2, '0');
+      buckets.push({
+        key,
+        label: key,
+        start: parseIstanbulDayStart(`${year}-${monthStr}-01`),
+        end: parseIstanbulDayEnd(`${year}-${monthStr}-${lastDayStr}`),
+      });
+      month += 1;
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+    }
+    return buckets;
+  }
+
+  // year
+  const buckets: AnalyticsBucketDescriptor[] = [];
+  for (let year = from.year; year <= to.year; year += 1) {
+    const key = String(year);
+    buckets.push({
+      key,
+      label: key,
+      start: parseIstanbulDayStart(`${year}-01-01`),
+      end: parseIstanbulDayEnd(`${year}-12-31`),
+    });
+  }
+  return buckets;
+}
+
+function computeAnalyticsBucketKey(
+  date: Date,
+  groupBy: FinanceAnalyticsGroupBy,
+): string {
+  const parts = istanbulDateParts(date);
+  if (groupBy === 'day') return `${parts.year}-${parts.month}-${parts.day}`;
+  if (groupBy === 'month') return `${parts.year}-${parts.month}`;
+  return parts.year;
 }

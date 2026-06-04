@@ -3199,6 +3199,147 @@ button:disabled {
   color: #4b5563;
 }
 
+/* ----- Finance analytics ----- */
+.finance-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.finance-analytics-grid .section-card {
+  margin: 0;
+}
+
+.finance-analytics-chart-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.finance-analytics-chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.finance-bar-chart {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.finance-bar-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 160px;
+  padding: 8px 4px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.finance-bar-chart-column {
+  flex: 1 1 0;
+  min-width: 14px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  cursor: default;
+}
+
+.finance-bar-chart-bar-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.finance-bar-chart-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.finance-bar-chart-bar:hover {
+  opacity: 0.85;
+}
+
+.finance-bar-chart-bar-primary {
+  background: #2563eb;
+}
+
+.finance-bar-chart-bar-success {
+  background: #16a34a;
+}
+
+.finance-bar-chart-bar-warning {
+  background: #d97706;
+}
+
+.finance-bar-chart-bar-danger {
+  background: #dc2626;
+}
+
+.finance-bar-chart-bar-muted {
+  background: #94a3b8;
+}
+
+.finance-bar-chart-bar-value {
+  position: absolute;
+  top: -2px;
+  transform: translateY(-100%);
+  font-size: 10px;
+  font-weight: 600;
+  color: #374151;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s ease-in-out;
+  pointer-events: none;
+}
+
+.finance-bar-chart-column:hover .finance-bar-chart-bar-value {
+  opacity: 1;
+}
+
+.finance-bar-chart-label {
+  position: absolute;
+  bottom: -20px;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  transform: rotate(-45deg);
+  transform-origin: top right;
+  pointer-events: none;
+}
+
+.finance-bar-chart-label-hidden {
+  visibility: hidden;
+}
+
+.finance-bar-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 160px;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.finance-analytics-period-pills {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 /* ----- Pinned filter rozetleri ----- */
 .admin-filter-pins {
   display: flex;
