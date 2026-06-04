@@ -9,6 +9,7 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../lib/api';
+import { formatLedgerReason, formatLedgerSource } from '../../lib/finance-format';
 import { EmptyState } from '../../components/empty-state';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
@@ -135,38 +136,75 @@ export default async function AdminFinanceDashboardPage() {
                   <th className="col-num">Kredi</th>
                   <th className="col-num">Bakiye</th>
                   <th>Sebep</th>
-                  <th>Kaynak</th>
+                  <th>İlişkili Kayıt</th>
                 </tr>
               </thead>
               <tbody>
-                {recentTransactions.map((transaction) => (
-                  <tr key={transaction.id}>
-                    <td>{formatDateTime(transaction.createdAt)}</td>
-                    <td>
-                      <Link href={`/providers/${transaction.providerId}/credits`}>
-                        {transaction.provider.businessName}
-                      </Link>
-                    </td>
-                    <td>{creditTxnTypeLabel(transaction.type)}</td>
-                    <td className="col-num">
-                      <strong>
-                        {transaction.amount > 0 ? `+${transaction.amount}` : transaction.amount}
-                      </strong>
-                    </td>
-                    <td className="col-num">{transaction.balanceAfter}</td>
-                    <td>{transaction.reason ?? '-'}</td>
-                    <td>
-                      {transaction.referenceType ? (
-                        <span className="muted" style={{ fontSize: 12 }}>
-                          {transaction.referenceType}
-                          {transaction.referenceId ? ` · ${transaction.referenceId}` : ''}
-                        </span>
-                      ) : (
-                        <span className="muted">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {recentTransactions.map((transaction) => {
+                  const reason = formatLedgerReason(transaction.reason);
+                  const source = formatLedgerSource(
+                    transaction.referenceType,
+                    transaction.referenceId,
+                  );
+                  return (
+                    <tr key={transaction.id}>
+                      <td>{formatDateTime(transaction.createdAt)}</td>
+                      <td>
+                        <Link href={`/providers/${transaction.providerId}/credits`}>
+                          {transaction.provider.businessName}
+                        </Link>
+                      </td>
+                      <td>{creditTxnTypeLabel(transaction.type)}</td>
+                      <td className="col-num">
+                        <strong>
+                          {transaction.amount > 0 ? `+${transaction.amount}` : transaction.amount}
+                        </strong>
+                      </td>
+                      <td className="col-num">{transaction.balanceAfter}</td>
+                      <td>
+                        {reason ? (
+                          <div className="cell-stack">
+                            <span>{reason.label}</span>
+                            {reason.note ? (
+                              <span className="cell-muted" style={{ fontSize: 12 }}>
+                                Not: {reason.note}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="muted">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {source.isSystem ? (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            {source.label}
+                          </span>
+                        ) : source.href ? (
+                          <Link href={source.href}>
+                            <span className="cell-stack">
+                              <span>{source.label}</span>
+                              {source.shortId ? (
+                                <span className="cell-muted" style={{ fontSize: 11 }}>
+                                  Kısa ID: {source.shortId}
+                                </span>
+                              ) : null}
+                            </span>
+                          </Link>
+                        ) : (
+                          <div className="cell-stack">
+                            <span>{source.label}</span>
+                            {source.shortId ? (
+                              <span className="cell-muted" style={{ fontSize: 11 }}>
+                                Kısa ID: {source.shortId}
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

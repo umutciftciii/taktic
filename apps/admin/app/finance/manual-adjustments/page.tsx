@@ -6,6 +6,7 @@ import {
   formatDateTime,
   requireAdmin,
 } from '../../../lib/api';
+import { formatLedgerReason } from '../../../lib/finance-format';
 import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
@@ -364,7 +365,22 @@ function ManualRow({ entry }: { entry: CreditLedgerEntry }) {
       <td className="col-num">
         <strong>{entry.balanceAfter}</strong>
       </td>
-      <td>{entry.reason ?? <span className="cell-muted">-</span>}</td>
+      <td>
+        {(() => {
+          const reason = formatLedgerReason(entry.reason);
+          if (!reason) return <span className="cell-muted">-</span>;
+          return (
+            <div className="cell-stack">
+              <span>{reason.label}</span>
+              {reason.note ? (
+                <span className="cell-muted" style={{ fontSize: 12 }}>
+                  Not: {reason.note}
+                </span>
+              ) : null}
+            </div>
+          );
+        })()}
+      </td>
       <td>
         {entry.createdBy ? (
           <div className="cell-stack">

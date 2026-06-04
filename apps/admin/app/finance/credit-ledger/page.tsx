@@ -9,6 +9,7 @@ import {
   formatDateTime,
   requireAdmin,
 } from '../../../lib/api';
+import { formatLedgerReason, formatLedgerSource } from '../../../lib/finance-format';
 import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
@@ -65,20 +66,6 @@ function normalizePage(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? '', 10);
   if (!Number.isFinite(parsed) || parsed < 1) return 1;
   return parsed;
-}
-
-function sourceLabel(referenceType: string | null, referenceId: string | null): string {
-  if (!referenceType) return '';
-  if (referenceType === 'Offer') return 'Teklif';
-  if (referenceType === 'PackagePurchase') return 'Paket Satın Alma';
-  return referenceType;
-}
-
-function sourceHref(referenceType: string | null, referenceId: string | null): string | null {
-  if (!referenceType || !referenceId) return null;
-  if (referenceType === 'Offer') return `/offers/${referenceId}`;
-  if (referenceType === 'PackagePurchase') return `/package-purchases/${referenceId}`;
-  return null;
 }
 
 function buildQueryString(params: Record<string, string | number | undefined>): string {
@@ -267,7 +254,7 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
                   <th className="col-num">Önceki Bakiye</th>
                   <th className="col-num">Sonraki Bakiye</th>
                   <th>Sebep</th>
-                  <th>Kaynak</th>
+                  <th>İlişkili Kayıt</th>
                   <th>İşlemi Yapan</th>
                 </tr>
               </thead>
@@ -309,8 +296,8 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
 function LedgerRow({ entry }: { entry: CreditLedgerEntry }) {
   const amountClass = entry.amount > 0 ? 'badge badge-good' : entry.amount < 0 ? 'badge badge-bad' : 'badge badge-muted';
   const amountText = entry.amount > 0 ? `+${entry.amount}` : String(entry.amount);
-  const label = sourceLabel(entry.referenceType, entry.referenceId);
-  const href = sourceHref(entry.referenceType, entry.referenceId);
+  const reason = formatLedgerReason(entry.reason);
+  const source = formatLedgerSource(entry.referenceType, entry.referenceId);
 
   return (
     <tr>
@@ -339,32 +326,43 @@ function LedgerRow({ entry }: { entry: CreditLedgerEntry }) {
       <td className="col-num">
         <strong>{entry.balanceAfter}</strong>
       </td>
-      <td>{entry.reason ?? <span className="cell-muted">-</span>}</td>
       <td>
-        {label ? (
-          href ? (
-            <Link href={href}>
-              <span className="cell-stack">
-                <span>{label}</span>
-                {entry.referenceId ? (
-                  <span className="cell-muted" style={{ fontSize: 11 }}>
-                    {entry.referenceId}
-                  </span>
-                ) : null}
+        {reason ? (
+          <div className="cell-stack">
+            <span>{reason.label}</span>
+            {reason.note ? (
+              <span className="cell-muted" style={{ fontSize: 12 }}>
+                Not: {reason.note}
               </span>
-            </Link>
-          ) : (
-            <div className="cell-stack">
-              <span>{label}</span>
-              {entry.referenceId ? (
-                <span className="cell-muted" style={{ fontSize: 11 }}>
-                  {entry.referenceId}
-                </span>
-              ) : null}
-            </div>
-          )
+            ) : null}
+          </div>
         ) : (
           <span className="cell-muted">-</span>
+        )}
+      </td>
+      <td>
+        {source.isSystem ? (
+          <span className="cell-muted">{source.label}</span>
+        ) : source.href ? (
+          <Link href={source.href}>
+            <span className="cell-stack">
+              <span>{source.label}</span>
+              {source.shortId ? (
+                <span className="cell-muted" style={{ fontSize: 11 }}>
+                  Kısa ID: {source.shortId}
+                </span>
+              ) : null}
+            </span>
+          </Link>
+        ) : (
+          <div className="cell-stack">
+            <span>{source.label}</span>
+            {source.shortId ? (
+              <span className="cell-muted" style={{ fontSize: 11 }}>
+                Kısa ID: {source.shortId}
+              </span>
+            ) : null}
+          </div>
         )}
       </td>
       <td>
