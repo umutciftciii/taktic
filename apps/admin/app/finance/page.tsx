@@ -27,6 +27,9 @@ export default async function AdminFinanceDashboardPage() {
         subtitle="Tahsilat, kredi hareketleri ve paket talep durumlarına dair özet."
         actions={
           <>
+            <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
+              Kredi Hareketleri
+            </Link>
             <Link className="btn btn-secondary btn-sm" href="/package-purchases">
               Paket Satın Almaları
             </Link>
@@ -230,7 +233,10 @@ export default async function AdminFinanceDashboardPage() {
 
       <SectionCard title="Hızlı bağlantılar" subtitle="Sık kullanılan finans ekranları.">
         <div className="inline-actions">
-          <Link className="btn btn-primary btn-sm" href="/package-purchases">
+          <Link className="btn btn-primary btn-sm" href="/finance/credit-ledger">
+            Kredi Hareketleri
+          </Link>
+          <Link className="btn btn-secondary btn-sm" href="/package-purchases">
             Paket Satın Almaları
           </Link>
           <Link className="btn btn-secondary btn-sm" href="/refund-scan">

@@ -1,13 +1,16 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import {
   CreditTransactionType,
   PackagePurchaseStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ListCreditLedgerDto } from './dto/list-credit-ledger.dto';
 
 const RECENT_TRANSACTIONS_LIMIT = 10;
 const RECENT_PURCHASES_LIMIT = 5;
+const DEFAULT_LEDGER_PAGE_SIZE = 50;
+const MAX_LEDGER_PAGE_SIZE = 200;
 
 type CreditTotals = Record<CreditTransactionType, number>;
 type PurchaseCounts = Record<PackagePurchaseStatus, number>;
@@ -128,6 +131,60 @@ export class FinanceService {
     };
   }
 
+  async listCreditLedger(filters: ListCreditLedgerDto) {
+    const page = filters.page ?? 1;
+    const pageSize = clampPageSize(filters.pageSize);
+
+    const where = buildCreditLedgerWhere(filters);
+
+    const [total, rows] = await Promise.all([
+      this.prisma.providerCreditTransaction.count({ where }),
+      this.prisma.providerCreditTransaction.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          provider: {
+            select: {
+              id: true,
+              businessName: true,
+              phone: true,
+              email: true,
+            },
+          },
+          createdBy: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+      }),
+    ]);
+
+    const items = rows.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt,
+      type: row.type,
+      amount: row.amount,
+      balanceAfter: row.balanceAfter,
+      previousBalance: row.balanceAfter - row.amount,
+      reason: row.reason,
+      referenceType: row.referenceType,
+      referenceId: row.referenceId,
+      provider: row.provider,
+      createdBy: row.createdBy,
+    }));
+
+    const hasNextPage = page * pageSize < total;
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      hasNextPage,
+    };
+  }
+
   private async computeActiveProviderCreditBalance(): Promise<number> {
     const rows = await this.prisma.$queryRaw<
       { balance_after: number | bigint }[]
@@ -139,6 +196,87 @@ export class FinanceService {
 
     return rows.reduce((sum, row) => sum + Number(row.balance_after), 0);
   }
+}
+
+function clampPageSize(value: number | undefined): number {
+  if (!value || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_LEDGER_PAGE_SIZE;
+  }
+  return Math.min(Math.floor(value), MAX_LEDGER_PAGE_SIZE);
+}
+
+function buildCreditLedgerWhere(
+  filters: ListCreditLedgerDto,
+): Prisma.ProviderCreditTransactionWhereInput {
+  const where: Prisma.ProviderCreditTransactionWhereInput = {};
+
+  if (filters.providerId) {
+    where.providerId = filters.providerId;
+  }
+
+  if (filters.type && filters.type.length > 0) {
+    where.type = filters.type.length === 1
+      ? filters.type[0]
+      : { in: filters.type };
+  }
+
+  if (filters.referenceType) {
+    where.referenceType = filters.referenceType;
+  }
+
+  const createdAt = buildCreatedAtRange(filters.from, filters.to);
+  if (createdAt) {
+    where.createdAt = createdAt;
+  }
+
+  if (filters.q) {
+    const term = filters.q;
+    where.OR = [
+      { reason: { contains: term, mode: 'insensitive' } },
+      {
+        provider: {
+          is: {
+            OR: [
+              { businessName: { contains: term, mode: 'insensitive' } },
+              { phone: { contains: term, mode: 'insensitive' } },
+              { email: { contains: term, mode: 'insensitive' } },
+            ],
+          },
+        },
+      },
+    ];
+  }
+
+  return where;
+}
+
+function buildCreatedAtRange(
+  from: string | undefined,
+  to: string | undefined,
+): Prisma.DateTimeFilter | undefined {
+  const range: Prisma.DateTimeFilter = {};
+
+  if (from) {
+    const fromDate = new Date(from);
+    if (Number.isNaN(fromDate.getTime())) {
+      throw new BadRequestException('Invalid "from" date');
+    }
+    range.gte = fromDate;
+  }
+
+  if (to) {
+    const toDate = new Date(to);
+    if (Number.isNaN(toDate.getTime())) {
+      throw new BadRequestException('Invalid "to" date');
+    }
+    range.lte = toDate;
+  }
+
+  if (range.gte === undefined && range.lte === undefined) {
+    return undefined;
+  }
+
+  return range;
 }
 
 function toPurchaseCounts(

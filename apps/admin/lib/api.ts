@@ -490,6 +490,48 @@ export type FinanceSummaryRecentPurchase = {
   };
 };
 
+export const CREDIT_TRANSACTION_TYPES: CreditTransactionType[] = [
+  'PACKAGE_PURCHASE',
+  'OFFER_SPEND',
+  'OFFER_REFUND',
+  'ADMIN_GRANT',
+  'ADMIN_DEDUCT',
+  'ADJUSTMENT',
+];
+
+export type CreditLedgerProvider = {
+  id: string;
+  businessName: string;
+  phone: string;
+  email: string | null;
+};
+
+export type CreditLedgerEntry = {
+  id: string;
+  createdAt: string;
+  type: CreditTransactionType;
+  amount: number;
+  balanceAfter: number;
+  previousBalance: number;
+  reason: string | null;
+  referenceType: string | null;
+  referenceId: string | null;
+  provider: CreditLedgerProvider;
+  createdBy: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+};
+
+export type CreditLedgerResponse = {
+  items: CreditLedgerEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
+
 export type FinanceSummary = {
   revenue: {
     totalRevenuePaid: number;
