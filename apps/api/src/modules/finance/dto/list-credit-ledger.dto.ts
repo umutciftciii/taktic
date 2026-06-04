@@ -1,8 +1,6 @@
 import { Transform } from 'class-transformer';
 import { CreditTransactionType } from '@prisma/client';
 import {
-  IsArray,
-  IsEnum,
   IsInt,
   IsISO8601,
   IsOptional,
@@ -60,11 +58,13 @@ export class ListCreditLedgerDto {
   @IsString()
   providerId?: string;
 
+  // Runtime can be string (single value or CSV) or string[] (repeated query
+  // params). The service normalizer (`normalizeLedgerTypeFilter`) does final
+  // validation and produces a clean `CreditTransactionType[]`. Keeping the
+  // DTO permissive so a malformed @Transform output never silently slips past.
   @IsOptional()
   @Transform(({ value }) => splitCsv(value))
-  @IsArray()
-  @IsEnum(CreditTransactionType, { each: true })
-  type?: CreditTransactionType[];
+  type?: CreditTransactionType[] | string | string[];
 
   @IsOptional()
   @Transform(({ value }) => trimOrUndefined(value))

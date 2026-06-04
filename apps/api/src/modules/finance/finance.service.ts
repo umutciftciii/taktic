@@ -454,6 +454,39 @@ function clampPageSize(value: number | undefined): number {
   return Math.min(Math.floor(value), MAX_LEDGER_PAGE_SIZE);
 }
 
+const KNOWN_CREDIT_TRANSACTION_TYPES = new Set<string>(
+  Object.values(CreditTransactionType),
+);
+
+// Defensive normalizer for the ledger type filter. Accepts whatever shape
+// reaches the service — single string, comma-separated string, repeated query
+// array, or already-parsed enum array — and returns a clean enum array. Throws
+// a 400 when an unknown enum value slips through (rather than letting Prisma
+// return a 500 on validation failure).
+function normalizeLedgerTypeFilter(
+  raw: ListCreditLedgerDto['type'],
+): CreditTransactionType[] {
+  if (raw === undefined || raw === null) return [];
+
+  const tokens: string[] = Array.isArray(raw)
+    ? raw.flatMap((item) => (typeof item === 'string' ? item.split(',') : []))
+    : typeof raw === 'string'
+      ? raw.split(',')
+      : [];
+
+  const cleaned = tokens
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  for (const token of cleaned) {
+    if (!KNOWN_CREDIT_TRANSACTION_TYPES.has(token)) {
+      throw new BadRequestException(`Invalid credit transaction type: ${token}`);
+    }
+  }
+
+  return cleaned as CreditTransactionType[];
+}
+
 function buildCreditLedgerWhere(
   filters: ListCreditLedgerDto,
 ): Prisma.ProviderCreditTransactionWhereInput {
@@ -463,10 +496,9 @@ function buildCreditLedgerWhere(
     where.providerId = filters.providerId;
   }
 
-  if (filters.type && filters.type.length > 0) {
-    where.type = filters.type.length === 1
-      ? filters.type[0]
-      : { in: filters.type };
+  const types = normalizeLedgerTypeFilter(filters.type);
+  if (types.length > 0) {
+    where.type = types.length === 1 ? types[0] : { in: types };
   }
 
   if (filters.referenceType) {
