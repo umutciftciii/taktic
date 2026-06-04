@@ -18,6 +18,7 @@ type ManualFilter = 'ALL' | 'ADMIN_GRANT' | 'ADMIN_DEDUCT';
 type RawSearchParams = {
   q?: string;
   type?: string;
+  providerId?: string;
   from?: string;
   to?: string;
   page?: string;
@@ -90,6 +91,7 @@ function buildApiQuery(params: {
   page: number;
   q: string;
   type: ManualFilter;
+  providerId: string;
   from: string;
   to: string;
 }) {
@@ -98,6 +100,7 @@ function buildApiQuery(params: {
   apiQuery.set('pageSize', String(DEFAULT_PAGE_SIZE));
   apiQuery.set('type', resolveApiTypeFilter(params.type));
   if (params.q) apiQuery.set('q', params.q);
+  if (params.providerId) apiQuery.set('providerId', params.providerId);
   const fromIso = formatRangeDateForApi(params.from, false);
   const toIso = formatRangeDateForApi(params.to, true);
   if (fromIso) apiQuery.set('from', fromIso);
@@ -113,20 +116,25 @@ export default async function AdminManualAdjustmentsPage({
   const params = await searchParams;
   const q = (params.q ?? '').trim();
   const type = normalizeTypeFilter(params.type);
+  const providerId = (params.providerId ?? '').trim();
   const from = normalizeDate(params.from);
   const to = normalizeDate(params.to);
   const page = normalizePage(params.page);
 
-  const apiQuery = buildApiQuery({ page, q, type, from, to });
+  const apiQuery = buildApiQuery({ page, q, type, providerId, from, to });
   const response = await apiFetch<CreditLedgerResponse>(`/finance/credit-ledger?${apiQuery}`);
 
-  const hasFilters = Boolean(q || (type !== 'ALL') || from || to);
+  const hasFilters = Boolean(q || providerId || (type !== 'ALL') || from || to);
   const baseParams = {
     q,
     type: type === 'ALL' ? '' : type,
+    providerId,
     from,
     to,
   };
+  const filteredProviderName = providerId
+    ? (response.items[0]?.provider.businessName ?? null)
+    : null;
 
   const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
   const endIndex = Math.min(response.page * response.pageSize, response.total);
@@ -162,7 +170,19 @@ export default async function AdminManualAdjustmentsPage({
         </ul>
       </SectionCard>
 
+      {providerId ? (
+        <div className="notice" style={{ marginBottom: 18 }}>
+          Belirli hizmet veren filtreleniyor
+          {filteredProviderName ? <> · <strong>{filteredProviderName}</strong></> : null} (
+          <code>{providerId}</code>).{' '}
+          <Link href={`/providers/${providerId}/credits`}>Provider kredi sayfası</Link>
+          {' · '}
+          <Link href="/finance/manual-adjustments">Provider filtresini kaldır</Link>
+        </div>
+      ) : null}
+
       <form className="admin-toolbar" method="get" action="/finance/manual-adjustments">
+        {providerId ? <input type="hidden" name="providerId" value={providerId} /> : null}
         <div className="admin-toolbar-field admin-toolbar-search">
           <label htmlFor="manual-search">Ara</label>
           <input

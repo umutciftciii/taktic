@@ -341,7 +341,7 @@ function ProviderFinanceRow({ item }: { item: ProviderFinanceItem }) {
           </Link>
           <Link
             className="btn btn-ghost btn-sm"
-            href={`/finance/manual-adjustments?q=${encodeURIComponent(provider.businessName)}`}
+            href={`/finance/manual-adjustments?providerId=${provider.id}`}
           >
             Manuel İşlemler
           </Link>
