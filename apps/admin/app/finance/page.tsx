@@ -239,6 +239,9 @@ export default async function AdminFinanceDashboardPage() {
           <Link className="btn btn-secondary btn-sm" href="/finance/manual-adjustments">
             Manuel İşlemler
           </Link>
+          <Link className="btn btn-secondary btn-sm" href="/finance/providers">
+            Provider Finans Bakiyeleri
+          </Link>
           <Link className="btn btn-secondary btn-sm" href="/package-purchases">
             Paket Satın Almaları
           </Link>

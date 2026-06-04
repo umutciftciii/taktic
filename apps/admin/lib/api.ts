@@ -532,6 +532,51 @@ export type CreditLedgerResponse = {
   hasNextPage: boolean;
 };
 
+export const PROVIDER_FINANCE_SORT_FIELDS = [
+  'businessName',
+  'currentBalance',
+  'totalPaidAmount',
+  'totalCreditsPurchased',
+  'totalCreditsSpent',
+  'totalCreditsRefunded',
+  'manualNetCredits',
+  'lastPaymentAt',
+  'lastTransactionAt',
+] as const;
+
+export type ProviderFinanceSortField = (typeof PROVIDER_FINANCE_SORT_FIELDS)[number];
+
+export type ProviderFinanceSortDirection = 'asc' | 'desc';
+
+export type ProviderFinanceItem = {
+  provider: {
+    id: string;
+    businessName: string;
+    phone: string;
+    email: string | null;
+    status: ProviderStatus;
+  };
+  currentBalance: number;
+  totalPaidAmount: number;
+  totalCreditsPurchased: number;
+  totalCreditsSpent: number;
+  totalCreditsRefunded: number;
+  totalCreditsAdminGranted: number;
+  totalCreditsAdminDeducted: number;
+  manualNetCredits: number;
+  totalCreditsAdjusted: number;
+  lastPaymentAt: string | null;
+  lastTransactionAt: string | null;
+};
+
+export type ProviderFinanceResponse = {
+  items: ProviderFinanceItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
+
 export type FinanceSummary = {
   revenue: {
     totalRevenuePaid: number;

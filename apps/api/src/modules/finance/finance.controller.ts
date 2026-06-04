@@ -4,6 +4,7 @@ import { Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { ListCreditLedgerDto } from './dto/list-credit-ledger.dto';
+import { ListProviderFinanceDto } from './dto/list-provider-finance.dto';
 import { FinanceService } from './finance.service';
 
 @Controller('finance')
@@ -22,5 +23,12 @@ export class FinanceController {
   @Roles(UserRole.SUPER_ADMIN)
   creditLedger(@Query() query: ListCreditLedgerDto) {
     return this.financeService.listCreditLedger(query);
+  }
+
+  @Get('providers')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  providerFinance(@Query() query: ListProviderFinanceDto) {
+    return this.financeService.listProviderFinance(query);
   }
 }

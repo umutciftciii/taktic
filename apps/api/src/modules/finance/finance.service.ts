@@ -6,11 +6,17 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ListCreditLedgerDto } from './dto/list-credit-ledger.dto';
+import {
+  ListProviderFinanceDto,
+  ProviderFinanceSortField,
+} from './dto/list-provider-finance.dto';
 
 const RECENT_TRANSACTIONS_LIMIT = 10;
 const RECENT_PURCHASES_LIMIT = 5;
 const DEFAULT_LEDGER_PAGE_SIZE = 50;
 const MAX_LEDGER_PAGE_SIZE = 200;
+const DEFAULT_PROVIDER_FINANCE_PAGE_SIZE = 25;
+const MAX_PROVIDER_FINANCE_PAGE_SIZE = 100;
 
 type CreditTotals = Record<CreditTransactionType, number>;
 type PurchaseCounts = Record<PackagePurchaseStatus, number>;
@@ -185,6 +191,145 @@ export class FinanceService {
     };
   }
 
+  async listProviderFinance(filters: ListProviderFinanceDto) {
+    const page = filters.page ?? 1;
+    const pageSize = clampProviderFinancePageSize(filters.pageSize);
+    const sortBy: ProviderFinanceSortField = filters.sortBy ?? 'lastTransactionAt';
+    const sortDir: 'asc' | 'desc' = filters.sortDir ?? 'desc';
+
+    const providerWhere = buildProviderFinanceWhere(filters);
+
+    const providers = await this.prisma.providerProfile.findMany({
+      where: providerWhere,
+      select: {
+        id: true,
+        businessName: true,
+        phone: true,
+        email: true,
+        status: true,
+      },
+    });
+
+    const total = providers.length;
+    const providerIds = providers.map((row) => row.id);
+
+    const [creditByType, packagePaid, lastTxn, balances] =
+      providerIds.length === 0
+        ? ([[], [], [], []] as const)
+        : await Promise.all([
+            this.prisma.providerCreditTransaction.groupBy({
+              by: ['providerId', 'type'],
+              _sum: { amount: true },
+              where: { providerId: { in: providerIds } },
+            }),
+            this.prisma.packagePurchase.groupBy({
+              by: ['providerId'],
+              _sum: { priceAmountSnapshot: true },
+              _max: { paidAt: true },
+              where: {
+                providerId: { in: providerIds },
+                status: PackagePurchaseStatus.PAID,
+              },
+            }),
+            this.prisma.providerCreditTransaction.groupBy({
+              by: ['providerId'],
+              _max: { createdAt: true },
+              where: { providerId: { in: providerIds } },
+            }),
+            this.prisma.$queryRaw<
+              { providerId: string; balanceAfter: number | bigint }[]
+            >(Prisma.sql`
+              SELECT DISTINCT ON ("providerId") "providerId", "balanceAfter"
+              FROM "ProviderCreditTransaction"
+              WHERE "providerId" IN (${Prisma.join(providerIds)})
+              ORDER BY "providerId", "createdAt" DESC, "id" DESC
+            `),
+          ]);
+
+    const creditSumByProvider = new Map<string, Record<CreditTransactionType, number>>();
+    for (const row of creditByType) {
+      const totals =
+        creditSumByProvider.get(row.providerId) ?? createEmptyCreditTotals();
+      totals[row.type] = row._sum.amount ?? 0;
+      creditSumByProvider.set(row.providerId, totals);
+    }
+
+    const paidByProvider = new Map<
+      string,
+      { totalPaid: number; lastPaidAt: Date | null }
+    >();
+    for (const row of packagePaid) {
+      paidByProvider.set(row.providerId, {
+        totalPaid: row._sum.priceAmountSnapshot ?? 0,
+        lastPaidAt: row._max.paidAt ?? null,
+      });
+    }
+
+    const lastTxnByProvider = new Map<string, Date | null>();
+    for (const row of lastTxn) {
+      lastTxnByProvider.set(row.providerId, row._max.createdAt ?? null);
+    }
+
+    const balanceByProvider = new Map<string, number>();
+    for (const row of balances) {
+      balanceByProvider.set(row.providerId, Number(row.balanceAfter));
+    }
+
+    const items = providers.map((provider) => {
+      const totals =
+        creditSumByProvider.get(provider.id) ?? createEmptyCreditTotals();
+      const paid = paidByProvider.get(provider.id);
+
+      const totalCreditsPurchased = totals[CreditTransactionType.PACKAGE_PURCHASE];
+      const totalCreditsSpent = Math.abs(totals[CreditTransactionType.OFFER_SPEND]);
+      const totalCreditsRefunded = totals[CreditTransactionType.OFFER_REFUND];
+      const totalCreditsAdminGranted = totals[CreditTransactionType.ADMIN_GRANT];
+      const totalCreditsAdminDeducted = Math.abs(
+        totals[CreditTransactionType.ADMIN_DEDUCT],
+      );
+      const totalCreditsAdjusted = totals[CreditTransactionType.ADJUSTMENT];
+      const manualNetCredits =
+        totals[CreditTransactionType.ADMIN_GRANT] +
+        totals[CreditTransactionType.ADMIN_DEDUCT];
+
+      return {
+        provider: {
+          id: provider.id,
+          businessName: provider.businessName,
+          phone: provider.phone,
+          email: provider.email,
+          status: provider.status,
+        },
+        currentBalance: balanceByProvider.get(provider.id) ?? 0,
+        totalPaidAmount: paid?.totalPaid ?? 0,
+        totalCreditsPurchased,
+        totalCreditsSpent,
+        totalCreditsRefunded,
+        totalCreditsAdminGranted,
+        totalCreditsAdminDeducted,
+        manualNetCredits,
+        totalCreditsAdjusted,
+        lastPaymentAt: paid?.lastPaidAt ?? null,
+        lastTransactionAt: lastTxnByProvider.get(provider.id) ?? null,
+      };
+    });
+
+    items.sort(buildProviderFinanceComparator(sortBy, sortDir));
+
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const pagedItems = items.slice(start, end);
+    const hasNextPage = end < total;
+
+    return {
+      items: pagedItems,
+      total,
+      page,
+      pageSize,
+      hasNextPage,
+    };
+  }
+
   private async computeActiveProviderCreditBalance(): Promise<number> {
     const rows = await this.prisma.$queryRaw<
       { balance_after: number | bigint }[]
@@ -196,6 +341,110 @@ export class FinanceService {
 
     return rows.reduce((sum, row) => sum + Number(row.balance_after), 0);
   }
+}
+
+function clampProviderFinancePageSize(value: number | undefined): number {
+  if (!value || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_PROVIDER_FINANCE_PAGE_SIZE;
+  }
+  return Math.min(Math.floor(value), MAX_PROVIDER_FINANCE_PAGE_SIZE);
+}
+
+function buildProviderFinanceWhere(
+  filters: ListProviderFinanceDto,
+): Prisma.ProviderProfileWhereInput {
+  if (!filters.q) return {};
+  const term = filters.q;
+  return {
+    OR: [
+      { businessName: { contains: term, mode: 'insensitive' } },
+      { phone: { contains: term, mode: 'insensitive' } },
+      { email: { contains: term, mode: 'insensitive' } },
+    ],
+  };
+}
+
+function createEmptyCreditTotals(): Record<CreditTransactionType, number> {
+  return {
+    [CreditTransactionType.ADMIN_GRANT]: 0,
+    [CreditTransactionType.ADMIN_DEDUCT]: 0,
+    [CreditTransactionType.PACKAGE_PURCHASE]: 0,
+    [CreditTransactionType.OFFER_SPEND]: 0,
+    [CreditTransactionType.OFFER_REFUND]: 0,
+    [CreditTransactionType.ADJUSTMENT]: 0,
+  };
+}
+
+type ProviderFinanceItem = {
+  provider: {
+    id: string;
+    businessName: string;
+    phone: string;
+    email: string | null;
+    status: string;
+  };
+  currentBalance: number;
+  totalPaidAmount: number;
+  totalCreditsPurchased: number;
+  totalCreditsSpent: number;
+  totalCreditsRefunded: number;
+  totalCreditsAdminGranted: number;
+  totalCreditsAdminDeducted: number;
+  manualNetCredits: number;
+  totalCreditsAdjusted: number;
+  lastPaymentAt: Date | null;
+  lastTransactionAt: Date | null;
+};
+
+function buildProviderFinanceComparator(
+  sortBy: ProviderFinanceSortField,
+  sortDir: 'asc' | 'desc',
+) {
+  const direction = sortDir === 'desc' ? -1 : 1;
+  return (a: ProviderFinanceItem, b: ProviderFinanceItem): number => {
+    const cmp = compareProviderFinance(a, b, sortBy);
+    if (cmp !== 0) return cmp * direction;
+    // Stable tiebreaker so order is deterministic across queries.
+    return a.provider.businessName.localeCompare(b.provider.businessName, 'tr');
+  };
+}
+
+function compareProviderFinance(
+  a: ProviderFinanceItem,
+  b: ProviderFinanceItem,
+  sortBy: ProviderFinanceSortField,
+): number {
+  switch (sortBy) {
+    case 'businessName':
+      return a.provider.businessName.localeCompare(b.provider.businessName, 'tr');
+    case 'currentBalance':
+      return a.currentBalance - b.currentBalance;
+    case 'totalPaidAmount':
+      return a.totalPaidAmount - b.totalPaidAmount;
+    case 'totalCreditsPurchased':
+      return a.totalCreditsPurchased - b.totalCreditsPurchased;
+    case 'totalCreditsSpent':
+      return a.totalCreditsSpent - b.totalCreditsSpent;
+    case 'totalCreditsRefunded':
+      return a.totalCreditsRefunded - b.totalCreditsRefunded;
+    case 'manualNetCredits':
+      return a.manualNetCredits - b.manualNetCredits;
+    case 'lastPaymentAt':
+      return compareNullableDates(a.lastPaymentAt, b.lastPaymentAt);
+    case 'lastTransactionAt':
+      return compareNullableDates(a.lastTransactionAt, b.lastTransactionAt);
+    default:
+      return 0;
+  }
+}
+
+// Null/undefined dates always sort lowest so "desc" puts the freshest at the top
+// and "asc" surfaces never-active providers first.
+function compareNullableDates(a: Date | null, b: Date | null): number {
+  if (a && b) return a.getTime() - b.getTime();
+  if (a) return 1;
+  if (b) return -1;
+  return 0;
 }
 
 function clampPageSize(value: number | undefined): number {
