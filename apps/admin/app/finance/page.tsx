@@ -15,13 +15,19 @@ import {
 import { formatLedgerReason, formatLedgerSource } from '../../lib/finance-format';
 import { EmptyState } from '../../components/empty-state';
 import {
-  FinanceBarChart,
-  FinanceBarChartDatum,
-} from '../../components/finance-bar-chart';
-import {
   AnalyticsPeriod,
   FinanceAnalyticsToolbar,
 } from '../../components/finance-analytics-toolbar';
+import {
+  FinanceTrendPanel,
+  FinanceTrendPoint,
+} from '../../components/finance-trend-panel';
+import {
+  FinanceMiniSparkline,
+  FinanceSparklinePoint,
+} from '../../components/finance-mini-sparkline';
+import { FinanceInsightCard } from '../../components/finance-insight-card';
+import { FinanceProgressMetric } from '../../components/finance-progress-metric';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { StatCard } from '../../components/stat-card';
@@ -41,6 +47,12 @@ const GROUP_BY_LABEL: Record<FinanceAnalyticsGroupBy, string> = {
   day: 'günlük',
   month: 'aylık',
   year: 'yıllık',
+};
+
+const GROUP_BY_BUCKET_LABEL: Record<FinanceAnalyticsGroupBy, string> = {
+  day: 'gün',
+  month: 'ay',
+  year: 'yıl',
 };
 
 // period → default groupBy. Only `custom` honors the user's groupBy override;
@@ -111,10 +123,6 @@ function addDaysIso(iso: string, days: number): string {
   return formatIsoDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
 }
 
-function lastDayOfMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
 type ResolvedRange = {
   from: string;
   to: string;
@@ -158,60 +166,126 @@ function resolveRange(params: {
   }
 }
 
-function bucketLabel(bucket: FinanceAnalyticsBucket, groupBy: FinanceAnalyticsGroupBy): string {
+function bucketShortLabel(
+  bucket: FinanceAnalyticsBucket,
+  groupBy: FinanceAnalyticsGroupBy,
+): string {
   if (groupBy === 'year') return bucket.label;
   if (groupBy === 'month') {
-    const [y, m] = bucket.key.split('-');
-    return `${m}/${y}`;
+    const [, m] = bucket.key.split('-');
+    return monthShortName(Number.parseInt(m ?? '1', 10));
   }
-  // day → DD.MM
   const [, m, d] = bucket.key.split('-');
   return `${d}.${m}`;
 }
 
-function bucketTooltipDate(bucket: FinanceAnalyticsBucket, groupBy: FinanceAnalyticsGroupBy): string {
-  if (groupBy === 'year') return bucket.key;
+function bucketLongLabel(
+  bucket: FinanceAnalyticsBucket,
+  groupBy: FinanceAnalyticsGroupBy,
+): string {
+  if (groupBy === 'year') return bucket.label;
   if (groupBy === 'month') {
     const [y, m] = bucket.key.split('-');
-    return `${m}/${y}`;
+    return `${monthLongName(Number.parseInt(m ?? '1', 10))} ${y}`;
   }
   const [y, m, d] = bucket.key.split('-');
   return `${d}.${m}.${y}`;
 }
 
-function toRevenueChartData(
-  buckets: FinanceAnalyticsBucket[],
-  groupBy: FinanceAnalyticsGroupBy,
-): FinanceBarChartDatum[] {
-  return buckets.map((b) => ({
-    key: b.key,
-    label: bucketLabel(b, groupBy),
-    value: b.paidRevenue,
-    displayValue: formatPrice(b.paidRevenue),
-    tooltip: `${bucketTooltipDate(b, groupBy)} · ${formatPrice(b.paidRevenue)}`,
-  }));
+const MONTH_SHORT = [
+  'Oca',
+  'Şub',
+  'Mar',
+  'Nis',
+  'May',
+  'Haz',
+  'Tem',
+  'Ağu',
+  'Eyl',
+  'Eki',
+  'Kas',
+  'Ara',
+];
+
+const MONTH_LONG = [
+  'Ocak',
+  'Şubat',
+  'Mart',
+  'Nisan',
+  'Mayıs',
+  'Haziran',
+  'Temmuz',
+  'Ağustos',
+  'Eylül',
+  'Ekim',
+  'Kasım',
+  'Aralık',
+];
+
+function monthShortName(month: number): string {
+  return MONTH_SHORT[(month - 1 + 12) % 12] ?? String(month);
 }
 
-function toCountChartData(
-  buckets: FinanceAnalyticsBucket[],
-  groupBy: FinanceAnalyticsGroupBy,
-  selector: (b: FinanceAnalyticsBucket) => number,
-  unit: string,
-): FinanceBarChartDatum[] {
-  return buckets.map((b) => {
-    const value = selector(b);
-    return {
-      key: b.key,
-      label: bucketLabel(b, groupBy),
-      value,
-      displayValue: String(value),
-      tooltip: `${bucketTooltipDate(b, groupBy)} · ${value} ${unit}`,
-    };
-  });
+function monthLongName(month: number): string {
+  return MONTH_LONG[(month - 1 + 12) % 12] ?? String(month);
+}
+
+const COUNT_FORMATTER = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 });
+
+function formatCount(value: number): string {
+  return COUNT_FORMATTER.format(value);
+}
+
+function formatPercent(ratio: number | null, fractionDigits = 0): string {
+  if (ratio === null || Number.isNaN(ratio) || !Number.isFinite(ratio)) return '—';
+  return `%${(ratio * 100).toFixed(fractionDigits).replace('.', ',')}`;
+}
+
+function formatSignedCount(value: number): string {
+  if (value > 0) return `+${formatCount(value)}`;
+  return formatCount(value);
 }
 
 function rangeSummaryText(range: ResolvedRange): string {
   return `${range.from} → ${range.to} · ${GROUP_BY_LABEL[range.groupBy]}`;
+}
+
+function toRevenueTrend(
+  buckets: FinanceAnalyticsBucket[],
+  groupBy: FinanceAnalyticsGroupBy,
+): FinanceTrendPoint[] {
+  return buckets.map((b) => ({
+    key: b.key,
+    label: bucketShortLabel(b, groupBy),
+    longLabel: bucketLongLabel(b, groupBy),
+    value: b.paidRevenue,
+    displayValue: formatPrice(b.paidRevenue),
+  }));
+}
+
+function toCountSparkline(
+  buckets: FinanceAnalyticsBucket[],
+  selector: (b: FinanceAnalyticsBucket) => number,
+): FinanceSparklinePoint[] {
+  return buckets.map((b) => ({ key: b.key, value: selector(b) }));
+}
+
+function pickPeak(
+  buckets: FinanceAnalyticsBucket[],
+  selector: (b: FinanceAnalyticsBucket) => number,
+): { bucket: FinanceAnalyticsBucket; value: number } | null {
+  if (buckets.length === 0) return null;
+  let peak = buckets[0]!;
+  let peakValue = selector(peak);
+  for (let i = 1; i < buckets.length; i++) {
+    const v = selector(buckets[i]!);
+    if (v > peakValue) {
+      peak = buckets[i]!;
+      peakValue = v;
+    }
+  }
+  if (peakValue <= 0) return null;
+  return { bucket: peak, value: peakValue };
 }
 
 export default async function AdminFinanceDashboardPage({
@@ -242,25 +316,22 @@ export default async function AdminFinanceDashboardPage({
   const { revenue, packagePurchases, credits, recentTransactions, recentPurchases } = summary;
   const { totals, buckets } = analytics;
 
-  const revenueChartData = toRevenueChartData(buckets, range.groupBy);
-  const packageCountChartData = toCountChartData(
-    buckets,
-    range.groupBy,
-    (b) => b.paidPackageCount,
-    'paket',
-  );
-  const soldCreditsChartData = toCountChartData(
-    buckets,
-    range.groupBy,
-    (b) => b.soldCredits,
-    'kredi',
-  );
-  const adminGrantedChartData = toCountChartData(
-    buckets,
-    range.groupBy,
-    (b) => b.adminGrantedCredits,
-    'kredi',
-  );
+  const revenueTrend = toRevenueTrend(buckets, range.groupBy);
+  const packageSparkline = toCountSparkline(buckets, (b) => b.paidPackageCount);
+  const soldCreditsSparkline = toCountSparkline(buckets, (b) => b.soldCredits);
+
+  const peakRevenue = pickPeak(buckets, (b) => b.paidRevenue);
+  const peakPackage = pickPeak(buckets, (b) => b.paidPackageCount);
+
+  const creditUsageRatio =
+    totals.soldCredits > 0 ? totals.spentCredits / totals.soldCredits : null;
+  const refundRatio =
+    totals.spentCredits > 0 ? totals.refundedCredits / totals.spentCredits : null;
+  const manualNetCredits = totals.adminGrantedCredits - totals.adminDeductedCredits;
+  const manualGrossActivity =
+    totals.adminGrantedCredits + totals.adminDeductedCredits;
+
+  const bucketUnit = GROUP_BY_BUCKET_LABEL[range.groupBy];
 
   return (
     <main>
@@ -296,101 +367,175 @@ export default async function AdminFinanceDashboardPage({
       >
         <div className="stat-grid">
           <StatCard
-            label="Dönem tahsilatı"
+            label="Toplam tahsilat"
             value={formatPrice(totals.paidRevenue)}
-            hint={`${totals.paidPackageCount} paket`}
+            hint={`${formatCount(totals.paidPackageCount)} paket`}
             tone={totals.paidRevenue > 0 ? 'success' : 'neutral'}
           />
-          <StatCard label="Satılan kredi" value={totals.soldCredits} />
-          <StatCard label="Harcanan kredi" value={totals.spentCredits} />
+          <StatCard label="Satılan kredi" value={formatCount(totals.soldCredits)} />
+          <StatCard label="Harcanan kredi" value={formatCount(totals.spentCredits)} />
           <StatCard
             label="İade edilen kredi"
-            value={totals.refundedCredits}
+            value={formatCount(totals.refundedCredits)}
             tone={totals.refundedCredits > 0 ? 'warning' : 'neutral'}
           />
-          <StatCard label="Manuel eklenen kredi" value={totals.adminGrantedCredits} />
           <StatCard
-            label="Manuel düşülen kredi"
-            value={totals.adminDeductedCredits}
-            tone={totals.adminDeductedCredits > 0 ? 'warning' : 'neutral'}
+            label="Manuel net kredi"
+            value={formatSignedCount(manualNetCredits)}
+            hint={
+              manualGrossActivity > 0
+                ? `+${formatCount(totals.adminGrantedCredits)} / -${formatCount(totals.adminDeductedCredits)}`
+                : 'Manuel işlem yok'
+            }
+            tone={
+              manualNetCredits > 0
+                ? 'success'
+                : manualNetCredits < 0
+                  ? 'warning'
+                  : 'neutral'
+            }
           />
         </div>
       </SectionCard>
 
+      <SectionCard padded={false} className="finance-trend-section">
+        <FinanceTrendPanel
+          title="Tahsilat trendi"
+          subtitle={`${rangeSummaryText(range)} · ${buckets.length} ${bucketUnit}`}
+          total={formatPrice(totals.paidRevenue)}
+          data={revenueTrend}
+          tone="success"
+          emptyMessage="Bu dönem için tahsilat yok."
+          footer={
+            <div className="finance-trend-insights">
+              <FinanceInsightCard
+                label={`En yüksek ${bucketUnit}`}
+                value={
+                  peakRevenue ? formatPrice(peakRevenue.value) : '—'
+                }
+                hint={
+                  peakRevenue
+                    ? bucketLongLabel(peakRevenue.bucket, range.groupBy)
+                    : 'Tahsilat kaydı yok'
+                }
+                tone={peakRevenue ? 'success' : 'neutral'}
+              />
+              <FinanceInsightCard
+                label="Toplam paket"
+                value={formatCount(totals.paidPackageCount)}
+                hint={
+                  peakPackage
+                    ? `Zirve: ${bucketLongLabel(peakPackage.bucket, range.groupBy)} (${formatCount(peakPackage.value)})`
+                    : 'Bu dönemde paket satışı yok'
+                }
+              />
+              <FinanceInsightCard
+                label="Ortalama / bucket"
+                value={
+                  buckets.length > 0
+                    ? formatPrice(Math.round(totals.paidRevenue / buckets.length))
+                    : '—'
+                }
+                hint={`${buckets.length} ${bucketUnit} ortalaması`}
+              />
+            </div>
+          }
+        />
+      </SectionCard>
+
+      <div className="finance-two-col">
+        <SectionCard
+          title="Paket satışları"
+          subtitle="Dönem boyunca ödenmiş paket adetleri."
+        >
+          <div className="finance-mini-section">
+            <div className="finance-mini-stat">
+              <div className="finance-mini-stat-label">Toplam paket</div>
+              <div className="finance-mini-stat-value">
+                {formatCount(totals.paidPackageCount)}
+              </div>
+              <div className="finance-mini-stat-hint">
+                {peakPackage
+                  ? `Zirve: ${bucketLongLabel(peakPackage.bucket, range.groupBy)} · ${formatCount(peakPackage.value)}`
+                  : 'Bu dönemde paket satışı yok'}
+              </div>
+            </div>
+            <FinanceMiniSparkline
+              data={packageSparkline}
+              tone="primary"
+              ariaLabel="Paket satışları mini trend"
+            />
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Kredi kullanımı"
+          subtitle="Satılan kredinin harcama ve iade akışı."
+        >
+          <div className="finance-progress-stack">
+            <FinanceProgressMetric
+              label="Kullanım oranı"
+              value={formatPercent(creditUsageRatio)}
+              ratio={creditUsageRatio}
+              tone="primary"
+              hint={`Harcanan ${formatCount(totals.spentCredits)} / Satılan ${formatCount(totals.soldCredits)}`}
+            />
+            <FinanceProgressMetric
+              label="İade oranı"
+              value={formatPercent(refundRatio)}
+              ratio={refundRatio}
+              tone="warning"
+              hint={`İade edilen ${formatCount(totals.refundedCredits)} / Harcanan ${formatCount(totals.spentCredits)}`}
+            />
+            <div className="finance-mini-sparkline-row">
+              <div className="finance-mini-sparkline-row-label">Satılan kredi trendi</div>
+              <FinanceMiniSparkline
+                data={soldCreditsSparkline}
+                tone="success"
+                ariaLabel="Satılan kredi mini trend"
+              />
+            </div>
+          </div>
+        </SectionCard>
+      </div>
+
       <SectionCard
-        title="Dönem grafikleri"
-        subtitle={`Toplam ${buckets.length} ${GROUP_BY_LABEL[range.groupBy]} bucket.`}
+        title="Operasyonel müdahale"
+        subtitle="Adminlerin manuel kredi eklemesi ve düşmesi."
       >
-        <div className="finance-analytics-grid">
-          <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-block-header">
-              <div className="finance-analytics-chart-title">Tahsilat trendi</div>
-              <div className="finance-analytics-chart-total">
-                {formatPrice(totals.paidRevenue)}
-              </div>
-            </div>
-            <FinanceBarChart
-              data={revenueChartData}
-              tone="success"
-              emptyMessage="Bu dönemde tahsilat yok."
-              valueFormatter={(value) => formatPrice(value)}
-            />
-          </div>
-
-          <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-block-header">
-              <div className="finance-analytics-chart-title">Paket satış adedi</div>
-              <div className="finance-analytics-chart-total">
-                {totals.paidPackageCount} paket
-              </div>
-            </div>
-            <FinanceBarChart
-              data={packageCountChartData}
-              tone="primary"
-              emptyMessage="Bu dönemde paket satışı yok."
-            />
-          </div>
-
-          <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-block-header">
-              <div className="finance-analytics-chart-title">Kredi hareketleri</div>
-              <div className="finance-analytics-chart-total">
-                {totals.soldCredits} satılan
-              </div>
-            </div>
-            <div className="finance-analytics-chart-aux">
-              <span>
-                Harcanan: <strong>{totals.spentCredits}</strong>
-              </span>
-              <span>
-                İade edilen: <strong>{totals.refundedCredits}</strong>
-              </span>
-            </div>
-            <FinanceBarChart
-              data={soldCreditsChartData}
-              tone="primary"
-              emptyMessage="Bu dönemde satılan kredi yok."
-            />
-          </div>
-
-          <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-block-header">
-              <div className="finance-analytics-chart-title">Manuel kredi işlemleri</div>
-              <div className="finance-analytics-chart-total">
-                {totals.adminGrantedCredits} eklenen
-              </div>
-            </div>
-            <div className="finance-analytics-chart-aux">
-              <span>
-                Düşülen: <strong>{totals.adminDeductedCredits}</strong>
-              </span>
-            </div>
-            <FinanceBarChart
-              data={adminGrantedChartData}
-              tone="success"
-              emptyMessage="Bu dönemde manuel ekleme yok."
-            />
-          </div>
+        <div className="finance-manual-grid">
+          <FinanceInsightCard
+            label="Eklenen kredi"
+            value={formatCount(totals.adminGrantedCredits)}
+            tone={totals.adminGrantedCredits > 0 ? 'success' : 'neutral'}
+            hint="Manuel olarak provider bakiyesine eklendi"
+          />
+          <FinanceInsightCard
+            label="Düşülen kredi"
+            value={formatCount(totals.adminDeductedCredits)}
+            tone={totals.adminDeductedCredits > 0 ? 'warning' : 'neutral'}
+            hint="Manuel olarak provider bakiyesinden düşüldü"
+          />
+          <FinanceInsightCard
+            label="Manuel net etki"
+            value={formatSignedCount(manualNetCredits)}
+            tone={
+              manualNetCredits > 0
+                ? 'success'
+                : manualNetCredits < 0
+                  ? 'warning'
+                  : 'neutral'
+            }
+            hint={
+              manualGrossActivity === 0
+                ? 'Bu dönemde manuel işlem yok'
+                : manualNetCredits === 0
+                  ? 'Ekleme ve düşme dengeli'
+                  : manualNetCredits > 0
+                    ? 'Sisteme net kredi eklendi'
+                    : 'Sistemden net kredi düşüldü'
+            }
+          />
         </div>
       </SectionCard>
 
@@ -404,22 +549,25 @@ export default async function AdminFinanceDashboardPage({
 
       <SectionCard title="Kredi hareketleri" subtitle="Tüm zaman toplamları ve sistem geneli aktif bakiye.">
         <div className="stat-grid">
-          <StatCard label="Satılan kredi" value={credits.totalCreditsSold} />
-          <StatCard label="Harcanan kredi" value={credits.totalCreditsSpent} />
+          <StatCard label="Satılan kredi" value={formatCount(credits.totalCreditsSold)} />
+          <StatCard label="Harcanan kredi" value={formatCount(credits.totalCreditsSpent)} />
           <StatCard
             label="İade edilen kredi"
-            value={credits.totalCreditsRefunded}
+            value={formatCount(credits.totalCreditsRefunded)}
             tone={credits.totalCreditsRefunded > 0 ? 'warning' : 'neutral'}
           />
-          <StatCard label="Manuel eklenen kredi" value={credits.totalCreditsAdminGranted} />
+          <StatCard
+            label="Manuel eklenen kredi"
+            value={formatCount(credits.totalCreditsAdminGranted)}
+          />
           <StatCard
             label="Manuel düşülen kredi"
-            value={credits.totalCreditsAdminDeducted}
+            value={formatCount(credits.totalCreditsAdminDeducted)}
             tone={credits.totalCreditsAdminDeducted > 0 ? 'warning' : 'neutral'}
           />
           <StatCard
             label="Aktif provider kredi bakiyesi"
-            value={credits.totalActiveProviderCreditBalance}
+            value={formatCount(credits.totalActiveProviderCreditBalance)}
             hint="Tüm hizmet verenlerin son bakiyelerinin toplamı"
             tone="success"
           />
@@ -428,40 +576,40 @@ export default async function AdminFinanceDashboardPage({
 
       <SectionCard
         title="Paket talep durumları"
-        subtitle={`Toplam ${packagePurchases.totalPackagePurchases} kayıt`}
+        subtitle={`Toplam ${formatCount(packagePurchases.totalPackagePurchases)} kayıt`}
       >
         <div className="stat-grid">
           <StatCard
             label="Ödenmiş"
-            value={packagePurchases.paidPackagePurchases}
+            value={formatCount(packagePurchases.paidPackagePurchases)}
             href="/package-purchases?status=PAID"
             tone="success"
           />
           <StatCard
             label="Bekleyen"
-            value={packagePurchases.pendingPackagePurchases}
+            value={formatCount(packagePurchases.pendingPackagePurchases)}
             href="/package-purchases?status=PENDING"
             tone={packagePurchases.pendingPackagePurchases > 0 ? 'warning' : 'neutral'}
           />
           <StatCard
             label="İptal"
-            value={packagePurchases.cancelledPackagePurchases}
+            value={formatCount(packagePurchases.cancelledPackagePurchases)}
             href="/package-purchases?status=CANCELLED"
           />
           <StatCard
             label="Başarısız"
-            value={packagePurchases.failedPackagePurchases}
+            value={formatCount(packagePurchases.failedPackagePurchases)}
             href="/package-purchases?status=FAILED"
             tone={packagePurchases.failedPackagePurchases > 0 ? 'error' : 'neutral'}
           />
           <StatCard
             label="Süresi dolmuş"
-            value={packagePurchases.expiredPackagePurchases}
+            value={formatCount(packagePurchases.expiredPackagePurchases)}
             href="/package-purchases?status=EXPIRED"
           />
           <StatCard
             label="İade edilmiş"
-            value={packagePurchases.refundedPackagePurchases}
+            value={formatCount(packagePurchases.refundedPackagePurchases)}
             href="/package-purchases?status=REFUNDED"
             tone={packagePurchases.refundedPackagePurchases > 0 ? 'warning' : 'neutral'}
           />
