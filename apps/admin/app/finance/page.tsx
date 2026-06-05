@@ -18,6 +18,10 @@ import {
   FinanceBarChart,
   FinanceBarChartDatum,
 } from '../../components/finance-bar-chart';
+import {
+  AnalyticsPeriod,
+  FinanceAnalyticsToolbar,
+} from '../../components/finance-analytics-toolbar';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { StatCard } from '../../components/stat-card';
@@ -33,31 +37,20 @@ type AdminFinancePageProps = {
   searchParams: Promise<RawSearchParams>;
 };
 
-type AnalyticsPeriod = '7d' | '30d' | 'this_month' | 'this_year' | 'custom';
-
-type PeriodOption = {
-  value: AnalyticsPeriod;
-  label: string;
-};
-
-const PERIOD_OPTIONS: PeriodOption[] = [
-  { value: '7d', label: 'Son 7 gün' },
-  { value: '30d', label: 'Son 30 gün' },
-  { value: 'this_month', label: 'Bu ay' },
-  { value: 'this_year', label: 'Bu yıl' },
-  { value: 'custom', label: 'Özel aralık' },
-];
-
-const GROUP_BY_OPTIONS: { value: FinanceAnalyticsGroupBy; label: string }[] = [
-  { value: 'day', label: 'Günlük' },
-  { value: 'month', label: 'Aylık' },
-  { value: 'year', label: 'Yıllık' },
-];
-
 const GROUP_BY_LABEL: Record<FinanceAnalyticsGroupBy, string> = {
   day: 'günlük',
   month: 'aylık',
   year: 'yıllık',
+};
+
+// period → default groupBy. Only `custom` honors the user's groupBy override;
+// preset periods always use a fixed groupBy so toolbar/URL stay coherent.
+const PERIOD_DEFAULT_GROUP_BY: Record<AnalyticsPeriod, FinanceAnalyticsGroupBy> = {
+  '7d': 'day',
+  '30d': 'day',
+  this_month: 'day',
+  this_year: 'month',
+  custom: 'day',
 };
 
 function normalizePeriod(value: string | undefined): AnalyticsPeriod {
@@ -74,9 +67,9 @@ function normalizePeriod(value: string | undefined): AnalyticsPeriod {
   return '30d';
 }
 
-function normalizeGroupBy(value: string | undefined): FinanceAnalyticsGroupBy {
-  if (value === 'month' || value === 'year') return value;
-  return 'day';
+function normalizeGroupBy(value: string | undefined): FinanceAnalyticsGroupBy | undefined {
+  if (value === 'day' || value === 'month' || value === 'year') return value;
+  return undefined;
 }
 
 function normalizeIsoDate(value: string | undefined): string | undefined {
@@ -132,40 +125,35 @@ function resolveRange(params: {
   period: AnalyticsPeriod;
   customFrom?: string;
   customTo?: string;
-  groupBy: FinanceAnalyticsGroupBy;
+  customGroupBy?: FinanceAnalyticsGroupBy;
 }): ResolvedRange {
   const today = istanbulTodayParts();
   const todayIso = formatIsoDate(today.year, today.month, today.day);
 
+  // Preset periods always use their canonical groupBy. Only `custom` honors
+  // a user-provided groupBy.
+  const groupBy =
+    params.period === 'custom'
+      ? params.customGroupBy ?? PERIOD_DEFAULT_GROUP_BY.custom
+      : PERIOD_DEFAULT_GROUP_BY[params.period];
+
   switch (params.period) {
     case '7d':
-      return {
-        from: addDaysIso(todayIso, -6),
-        to: todayIso,
-        groupBy: params.groupBy,
-      };
+      return { from: addDaysIso(todayIso, -6), to: todayIso, groupBy };
     case '30d':
-      return {
-        from: addDaysIso(todayIso, -29),
-        to: todayIso,
-        groupBy: params.groupBy,
-      };
+      return { from: addDaysIso(todayIso, -29), to: todayIso, groupBy };
     case 'this_month':
-      return {
-        from: formatIsoDate(today.year, today.month, 1),
-        to: todayIso,
-        groupBy: params.groupBy,
-      };
+      return { from: formatIsoDate(today.year, today.month, 1), to: todayIso, groupBy };
     case 'this_year':
       return {
         from: formatIsoDate(today.year, 1, 1),
-        to: todayIso,
-        groupBy: params.groupBy,
+        to: formatIsoDate(today.year, 12, 31),
+        groupBy,
       };
     case 'custom': {
       const from = params.customFrom ?? addDaysIso(todayIso, -29);
       const to = params.customTo ?? todayIso;
-      return { from, to, groupBy: params.groupBy };
+      return { from, to, groupBy };
     }
   }
 }
@@ -233,10 +221,10 @@ export default async function AdminFinanceDashboardPage({
 
   const params = await searchParams;
   const period = normalizePeriod(params.period);
-  const groupBy = normalizeGroupBy(params.groupBy);
+  const customGroupBy = normalizeGroupBy(params.groupBy);
   const customFrom = normalizeIsoDate(params.from);
   const customTo = normalizeIsoDate(params.to);
-  const range = resolveRange({ period, customFrom, customTo, groupBy });
+  const range = resolveRange({ period, customFrom, customTo, customGroupBy });
 
   const analyticsQuery = new URLSearchParams({
     from: range.from,
@@ -267,28 +255,10 @@ export default async function AdminFinanceDashboardPage({
     (b) => b.soldCredits,
     'kredi',
   );
-  const spentCreditsChartData = toCountChartData(
-    buckets,
-    range.groupBy,
-    (b) => b.spentCredits,
-    'kredi',
-  );
-  const refundedCreditsChartData = toCountChartData(
-    buckets,
-    range.groupBy,
-    (b) => b.refundedCredits,
-    'kredi',
-  );
   const adminGrantedChartData = toCountChartData(
     buckets,
     range.groupBy,
     (b) => b.adminGrantedCredits,
-    'kredi',
-  );
-  const adminDeductedChartData = toCountChartData(
-    buckets,
-    range.groupBy,
-    (b) => b.adminDeductedCredits,
     'kredi',
   );
 
@@ -312,57 +282,13 @@ export default async function AdminFinanceDashboardPage({
         }
       />
 
-      <form className="admin-toolbar" method="get" action="/finance">
-        <div className="admin-toolbar-field">
-          <label htmlFor="finance-period">Dönem</label>
-          <select id="finance-period" name="period" defaultValue={period}>
-            {PERIOD_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="finance-from">Başlangıç</label>
-          <input
-            id="finance-from"
-            name="from"
-            type="date"
-            defaultValue={period === 'custom' ? customFrom ?? range.from : ''}
-            autoComplete="off"
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="finance-to">Bitiş</label>
-          <input
-            id="finance-to"
-            name="to"
-            type="date"
-            defaultValue={period === 'custom' ? customTo ?? range.to : ''}
-            autoComplete="off"
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="finance-groupby">Gruplama</label>
-          <select id="finance-groupby" name="groupBy" defaultValue={range.groupBy}>
-            {GROUP_BY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">{rangeSummaryText(range)}</span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          <Link className="btn btn-ghost btn-sm" href="/finance">
-            Temizle
-          </Link>
-        </div>
-      </form>
+      <FinanceAnalyticsToolbar
+        initialPeriod={period}
+        initialFrom={range.from}
+        initialTo={range.to}
+        initialGroupBy={range.groupBy}
+        summary={rangeSummaryText(range)}
+      />
 
       <SectionCard
         title="Dönem özeti"
@@ -397,7 +323,12 @@ export default async function AdminFinanceDashboardPage({
       >
         <div className="finance-analytics-grid">
           <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-title">Tahsilat trendi</div>
+            <div className="finance-analytics-chart-block-header">
+              <div className="finance-analytics-chart-title">Tahsilat trendi</div>
+              <div className="finance-analytics-chart-total">
+                {formatPrice(totals.paidRevenue)}
+              </div>
+            </div>
             <FinanceBarChart
               data={revenueChartData}
               tone="success"
@@ -405,52 +336,59 @@ export default async function AdminFinanceDashboardPage({
               valueFormatter={(value) => formatPrice(value)}
             />
           </div>
+
           <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-title">Paket satış adedi</div>
+            <div className="finance-analytics-chart-block-header">
+              <div className="finance-analytics-chart-title">Paket satış adedi</div>
+              <div className="finance-analytics-chart-total">
+                {totals.paidPackageCount} paket
+              </div>
+            </div>
             <FinanceBarChart
               data={packageCountChartData}
               tone="primary"
               emptyMessage="Bu dönemde paket satışı yok."
             />
           </div>
+
           <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-title">Satılan kredi</div>
+            <div className="finance-analytics-chart-block-header">
+              <div className="finance-analytics-chart-title">Kredi hareketleri</div>
+              <div className="finance-analytics-chart-total">
+                {totals.soldCredits} satılan
+              </div>
+            </div>
+            <div className="finance-analytics-chart-aux">
+              <span>
+                Harcanan: <strong>{totals.spentCredits}</strong>
+              </span>
+              <span>
+                İade edilen: <strong>{totals.refundedCredits}</strong>
+              </span>
+            </div>
             <FinanceBarChart
               data={soldCreditsChartData}
               tone="primary"
               emptyMessage="Bu dönemde satılan kredi yok."
             />
           </div>
+
           <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-title">Harcanan kredi</div>
-            <FinanceBarChart
-              data={spentCreditsChartData}
-              tone="muted"
-              emptyMessage="Bu dönemde harcanan kredi yok."
-            />
-          </div>
-          <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-title">İade edilen kredi</div>
-            <FinanceBarChart
-              data={refundedCreditsChartData}
-              tone="warning"
-              emptyMessage="Bu dönemde iade yok."
-            />
-          </div>
-          <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-title">Manuel eklenen kredi</div>
+            <div className="finance-analytics-chart-block-header">
+              <div className="finance-analytics-chart-title">Manuel kredi işlemleri</div>
+              <div className="finance-analytics-chart-total">
+                {totals.adminGrantedCredits} eklenen
+              </div>
+            </div>
+            <div className="finance-analytics-chart-aux">
+              <span>
+                Düşülen: <strong>{totals.adminDeductedCredits}</strong>
+              </span>
+            </div>
             <FinanceBarChart
               data={adminGrantedChartData}
               tone="success"
               emptyMessage="Bu dönemde manuel ekleme yok."
-            />
-          </div>
-          <div className="finance-analytics-chart-block">
-            <div className="finance-analytics-chart-title">Manuel düşülen kredi</div>
-            <FinanceBarChart
-              data={adminDeductedChartData}
-              tone="danger"
-              emptyMessage="Bu dönemde manuel düşüş yok."
             />
           </div>
         </div>

@@ -28,7 +28,7 @@ export function FinanceBarChart({
   data,
   emptyMessage = 'Bu dönem için veri yok.',
   tone = 'primary',
-  maxLabels = 12,
+  maxLabels = 6,
   valueFormatter,
 }: FinanceBarChartProps) {
   const max = data.reduce((acc, d) => Math.max(acc, d.value), 0);
@@ -45,7 +45,8 @@ export function FinanceBarChart({
     <div className="finance-bar-chart">
       <div className="finance-bar-chart-bars" role="list">
         {data.map((d, index) => {
-          const pct = max === 0 ? 0 : Math.max(2, Math.round((d.value / max) * 100));
+          const ratio = Math.round((d.value / max) * 100);
+          const pct = d.value > 0 ? Math.max(2, ratio) : 0;
           const showLabel = index % labelStep === 0 || index === data.length - 1;
           const display =
             d.displayValue ?? (valueFormatter ? valueFormatter(d.value) : String(d.value));
@@ -60,7 +61,11 @@ export function FinanceBarChart({
                 <span className="finance-bar-chart-bar-value">{display}</span>
                 <div
                   className={`finance-bar-chart-bar ${toneClass}`}
-                  style={{ height: `${pct}%` }}
+                  style={
+                    d.value > 0
+                      ? { height: `${pct}%` }
+                      : { height: 0, minHeight: 0 }
+                  }
                   aria-label={`${d.label}: ${display}`}
                 />
               </div>
