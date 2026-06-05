@@ -16,6 +16,7 @@ type AdminPackagePurchaseDetailPageProps = {
 export default async function AdminPackagePurchaseDetailPage({ params }: AdminPackagePurchaseDetailPageProps) {
   const { id } = await params;
   const purchase = await apiFetch<PackagePurchase>(`/package-purchases/${id}`);
+  const purchaseRef = purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;
 
   return (
     <main>
@@ -31,7 +32,7 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
         <h1 className="page-title">{purchase.packageNameSnapshot}</h1>
         <p className="page-subtitle">
           <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>{' '}
-          <span className="muted">· {purchase.provider.businessName}</span>
+          <span className="muted">· <code>{purchaseRef}</code> · {purchase.provider.businessName}</span>
         </p>
       </header>
 
@@ -49,8 +50,16 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
           <section className="card" style={{ margin: 0 }}>
             <h2>Özet</h2>
             <dl className="meta-row">
-              <dt>Talep ID</dt>
-              <dd><code style={{ fontSize: 12 }}>{purchase.id}</code></dd>
+              <dt>Satın Alma No</dt>
+              <dd>
+                <code>{purchaseRef}</code>
+                {purchase.purchaseNumber ? (
+                  <details className="muted" style={{ marginTop: 4, fontSize: 11 }}>
+                    <summary>Teknik ID</summary>
+                    <code style={{ fontSize: 11 }}>{purchase.id}</code>
+                  </details>
+                ) : null}
+              </dd>
               <dt>Hizmet Veren</dt>
               <dd>{purchase.provider.businessName}</dd>
               <dt>HV e-posta</dt>

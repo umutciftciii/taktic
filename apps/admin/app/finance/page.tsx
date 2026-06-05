@@ -646,6 +646,7 @@ export default async function AdminFinanceDashboardPage({
                   const source = formatLedgerSource(
                     transaction.referenceType,
                     transaction.referenceId,
+                    transaction.sourceNumber,
                   );
                   return (
                     <tr key={transaction.id}>
@@ -685,7 +686,11 @@ export default async function AdminFinanceDashboardPage({
                           <Link href={source.href}>
                             <span className="cell-stack">
                               <span>{source.label}</span>
-                              {source.shortId ? (
+                              {source.displayNumber ? (
+                                <code style={{ fontSize: 11 }}>
+                                  No: {source.displayNumber}
+                                </code>
+                              ) : source.shortId ? (
                                 <span className="cell-muted" style={{ fontSize: 11 }}>
                                   Kısa ID: {source.shortId}
                                 </span>
@@ -695,7 +700,11 @@ export default async function AdminFinanceDashboardPage({
                         ) : (
                           <div className="cell-stack">
                             <span>{source.label}</span>
-                            {source.shortId ? (
+                            {source.displayNumber ? (
+                              <code style={{ fontSize: 11 }}>
+                                No: {source.displayNumber}
+                              </code>
+                            ) : source.shortId ? (
                               <span className="cell-muted" style={{ fontSize: 11 }}>
                                 Kısa ID: {source.shortId}
                               </span>
@@ -727,6 +736,7 @@ export default async function AdminFinanceDashboardPage({
             <table className="data-table">
               <thead>
                 <tr>
+                  <th>Satın Alma No</th>
                   <th>Tarih</th>
                   <th>Hizmet Veren</th>
                   <th>Paket</th>
@@ -737,8 +747,16 @@ export default async function AdminFinanceDashboardPage({
                 </tr>
               </thead>
               <tbody>
-                {recentPurchases.map((purchase) => (
+                {recentPurchases.map((purchase) => {
+                  const purchaseRef =
+                    purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;
+                  return (
                   <tr key={purchase.id}>
+                    <td>
+                      <Link href={`/package-purchases/${purchase.id}`}>
+                        <code className="display-number">{purchaseRef}</code>
+                      </Link>
+                    </td>
                     <td>{formatDateTime(purchase.createdAt)}</td>
                     <td>
                       <Link href={`/providers/${purchase.providerId}`}>
@@ -763,7 +781,8 @@ export default async function AdminFinanceDashboardPage({
                       {purchase.mockPaymentReference ?? '-'}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

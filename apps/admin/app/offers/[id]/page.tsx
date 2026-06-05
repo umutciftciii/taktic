@@ -105,6 +105,8 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
   const customerEmail = offer.request.customerEmail;
   const customerLinkedAccount = offer.request.customer;
   const isRefunded = Boolean(offer.creditRefundedAt);
+  const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;
+  const requestRef = offer.request.requestNumber ?? `#${offer.request.id.slice(-8)}`;
 
   return (
     <main>
@@ -119,7 +121,8 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
           <>
             <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>{' '}
             <span className="muted">
-              · {formatPrice(offer.priceAmount, offer.currency)} · {offer.request.category.name}
+              · <code>{offerRef}</code> · {formatPrice(offer.priceAmount, offer.currency)} ·{' '}
+              {offer.request.category.name}
             </span>
           </>
         }
@@ -184,9 +187,15 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
         <div className="stack">
           <SectionCard title="Teklif özeti">
             <dl className="meta-row">
-              <dt>Teklif ID</dt>
+              <dt>Teklif No</dt>
               <dd>
-                <code style={{ fontSize: 12 }}>{offer.id}</code>
+                <code>{offerRef}</code>
+                {offer.offerNumber ? (
+                  <details className="muted" style={{ marginTop: 4, fontSize: 11 }}>
+                    <summary>Teknik ID</summary>
+                    <code style={{ fontSize: 11 }}>{offer.id}</code>
+                  </details>
+                ) : null}
               </dd>
               <dt>Fiyat</dt>
               <dd>
@@ -356,6 +365,12 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
 
           <SectionCard title="Talep ve Müşteri">
             <dl className="meta-row">
+              <dt>Talep No</dt>
+              <dd>
+                <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+                  <code>{requestRef}</code>
+                </Link>
+              </dd>
               <dt>Kategori</dt>
               <dd>{offer.request.category.name}</dd>
               <dt>Konum</dt>

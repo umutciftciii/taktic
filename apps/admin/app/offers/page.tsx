@@ -339,9 +339,11 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
             <table className="data-table">
               <thead>
                 <tr>
+                  <th>Teklif No</th>
+                  <th>Talep No</th>
                   <th>Gönderim</th>
                   <th>Hizmet Veren</th>
-                  <th>Talep / Kategori</th>
+                  <th>Kategori</th>
                   <th>Müşteri</th>
                   <th>Konum</th>
                   <th className="col-num">Fiyat</th>
@@ -358,8 +360,19 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
                     offer.refundEligibility.recommendedAction === 'MANUAL_REVIEW';
                   const customerName = offer.request.customerName;
                   const customerPhone = offer.request.customerPhone;
+                  const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;
+                  const requestRef =
+                    offer.request.requestNumber ?? `#${offer.request.id.slice(-8)}`;
                   return (
                     <tr key={offer.id}>
+                      <td>
+                        <code className="display-number">{offerRef}</code>
+                      </td>
+                      <td>
+                        <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+                          <code className="display-number">{requestRef}</code>
+                        </Link>
+                      </td>
                       <td>{formatDateTime(offer.submittedAt)}</td>
                       <td>
                         <div className="cell-stack">
@@ -367,14 +380,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
                           <span className="cell-muted">{offer.provider.contactName}</span>
                         </div>
                       </td>
-                      <td>
-                        <div className="cell-stack">
-                          <span>{offer.request.category.name}</span>
-                          <span className="cell-muted">
-                            #{offer.request.id.slice(-6)}
-                          </span>
-                        </div>
-                      </td>
+                      <td>{offer.request.category.name}</td>
                       <td>
                         <div className="cell-stack">
                           <span>{customerName || '-'}</span>

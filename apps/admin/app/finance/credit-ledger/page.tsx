@@ -297,7 +297,11 @@ function LedgerRow({ entry }: { entry: CreditLedgerEntry }) {
   const amountClass = entry.amount > 0 ? 'badge badge-good' : entry.amount < 0 ? 'badge badge-bad' : 'badge badge-muted';
   const amountText = entry.amount > 0 ? `+${entry.amount}` : String(entry.amount);
   const reason = formatLedgerReason(entry.reason);
-  const source = formatLedgerSource(entry.referenceType, entry.referenceId);
+  const source = formatLedgerSource(
+    entry.referenceType,
+    entry.referenceId,
+    entry.sourceNumber,
+  );
 
   return (
     <tr>
@@ -347,7 +351,9 @@ function LedgerRow({ entry }: { entry: CreditLedgerEntry }) {
           <Link href={source.href}>
             <span className="cell-stack">
               <span>{source.label}</span>
-              {source.shortId ? (
+              {source.displayNumber ? (
+                <code style={{ fontSize: 11 }}>No: {source.displayNumber}</code>
+              ) : source.shortId ? (
                 <span className="cell-muted" style={{ fontSize: 11 }}>
                   Kısa ID: {source.shortId}
                 </span>
@@ -357,7 +363,9 @@ function LedgerRow({ entry }: { entry: CreditLedgerEntry }) {
         ) : (
           <div className="cell-stack">
             <span>{source.label}</span>
-            {source.shortId ? (
+            {source.displayNumber ? (
+              <code style={{ fontSize: 11 }}>No: {source.displayNumber}</code>
+            ) : source.shortId ? (
               <span className="cell-muted" style={{ fontSize: 11 }}>
                 Kısa ID: {source.shortId}
               </span>

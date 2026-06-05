@@ -32,7 +32,7 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
   const request = await apiFetch<ServiceRequest>(`/service-requests/${id}`);
   const offers = await apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]);
   const recentOffers = offers.slice(0, RECENT_OFFERS_LIMIT);
-  const shortId = request.id.slice(-8);
+  const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
   const categoryName = request.category.name;
   const headerTitle = categoryName ? `${categoryName} Talebi` : 'Talep Detayı';
   const qualityFillPercent = Math.min(100, Math.max(0, request.qualityScore));
@@ -56,7 +56,7 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
               {request.qualityScore}/100 · {qualityLabel(request.qualityLabel)}
             </span>
             <span className="muted">· {formatDateTime(request.submittedAt)}</span>
-            <span className="muted">· #{shortId}</span>
+            <span className="muted">· <code>{requestRef}</code></span>
           </span>
         }
         actions={
@@ -159,14 +159,17 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
             <p className="request-offers-empty">Bu talebe henüz teklif verilmemiş.</p>
           ) : (
             <ul className="offer-mini-list">
-              {recentOffers.map((offer) => (
+              {recentOffers.map((offer) => {
+                const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;
+                return (
                 <li className="offer-mini-row" key={offer.id}>
                   <div className="offer-mini-main">
                     <Link className="offer-mini-title" href={`/offers/${offer.id}`}>
                       {offer.provider.businessName}
                     </Link>
                     <span className="offer-mini-meta">
-                      {formatDateTime(offer.submittedAt)} · {offer.provider.city}/{offer.provider.district}
+                      <code>{offerRef}</code> · {formatDateTime(offer.submittedAt)} ·{' '}
+                      {offer.provider.city}/{offer.provider.district}
                     </span>
                   </div>
                   <div className="offer-mini-side">
@@ -174,7 +177,8 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
                     <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
                   </div>
                 </li>
-              ))}
+                );
+              })}
               {offers.length > RECENT_OFFERS_LIMIT ? (
                 <li className="offer-mini-more">
                   <Link href={`/offers?requestId=${request.id}`}>
@@ -212,8 +216,16 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
           </div>
           <dl className="request-quickfacts">
             <div>
-              <dt>Talep ID</dt>
-              <dd><code>{request.id}</code></dd>
+              <dt>Talep No</dt>
+              <dd>
+                <code>{requestRef}</code>
+                {request.requestNumber ? (
+                  <details className="muted" style={{ marginTop: 4, fontSize: 11 }}>
+                    <summary>Teknik ID</summary>
+                    <code style={{ fontSize: 11 }}>{request.id}</code>
+                  </details>
+                ) : null}
+              </dd>
             </div>
             <div>
               <dt>Kategori</dt>

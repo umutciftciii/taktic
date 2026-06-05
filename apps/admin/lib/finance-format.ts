@@ -43,6 +43,7 @@ const REFERENCE_TYPE_LABELS: Record<string, string> = {
 
 export type LedgerSource = {
   label: string;
+  displayNumber: string | null;
   shortId: string | null;
   href: string | null;
   isSystem: boolean;
@@ -58,13 +59,21 @@ function shortenId(value: string): string {
 export function formatLedgerSource(
   referenceType: string | null | undefined,
   referenceId: string | null | undefined,
+  sourceNumber?: string | null,
 ): LedgerSource {
   if (!referenceType) {
-    return { label: SYSTEM_SOURCE_LABEL, shortId: null, href: null, isSystem: true };
+    return {
+      label: SYSTEM_SOURCE_LABEL,
+      displayNumber: null,
+      shortId: null,
+      href: null,
+      isSystem: true,
+    };
   }
 
   const label = REFERENCE_TYPE_LABELS[referenceType] ?? referenceType;
-  const shortId = referenceId ? shortenId(referenceId) : null;
+  const displayNumber = sourceNumber ?? null;
+  const shortId = displayNumber || !referenceId ? null : shortenId(referenceId);
 
   let href: string | null = null;
   if (referenceId) {
@@ -72,5 +81,5 @@ export function formatLedgerSource(
     else if (referenceType === 'PackagePurchase') href = `/package-purchases/${referenceId}`;
   }
 
-  return { label, shortId, href, isSystem: false };
+  return { label, displayNumber, shortId, href, isSystem: false };
 }

@@ -277,6 +277,7 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
             <table className="data-table">
               <thead>
                 <tr>
+                  <th>Talep No</th>
                   <th>Gönderim</th>
                   <th>Kategori</th>
                   <th>Müşteri</th>
@@ -297,8 +298,12 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
                         ? request._count.offers
                         : null;
                   const secondaryLocation = request.neighborhood || request.addressNote;
+                  const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
                   return (
                     <tr key={request.id}>
+                      <td>
+                        <code className="display-number">{requestRef}</code>
+                      </td>
                       <td>{formatDateTime(request.submittedAt)}</td>
                       <td>
                         <div className="cell-stack">

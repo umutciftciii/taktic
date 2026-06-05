@@ -57,6 +57,25 @@ type AnalyticsBucketDescriptor = {
 type CreditTotals = Record<CreditTransactionType, number>;
 type PurchaseCounts = Record<PackagePurchaseStatus, number>;
 
+type SourceNumberLookup = {
+  offerNumberById: Map<string, string | null>;
+  purchaseNumberById: Map<string, string | null>;
+};
+
+function resolveSourceNumber(
+  row: { referenceType: string | null; referenceId: string | null },
+  lookup: SourceNumberLookup,
+): string | null {
+  if (!row.referenceId) return null;
+  if (row.referenceType === 'Offer') {
+    return lookup.offerNumberById.get(row.referenceId) ?? null;
+  }
+  if (row.referenceType === 'PackagePurchase') {
+    return lookup.purchaseNumberById.get(row.referenceId) ?? null;
+  }
+  return null;
+}
+
 @Injectable()
 export class FinanceService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -103,18 +122,20 @@ export class FinanceService {
         _sum: { amount: true },
       }),
       this.computeActiveProviderCreditBalance(),
-      this.prisma.providerCreditTransaction.findMany({
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: RECENT_TRANSACTIONS_LIMIT,
-        include: {
-          provider: {
-            select: { id: true, businessName: true },
+      this.prisma.providerCreditTransaction
+        .findMany({
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: RECENT_TRANSACTIONS_LIMIT,
+          include: {
+            provider: {
+              select: { id: true, businessName: true },
+            },
+            createdBy: {
+              select: { id: true, name: true, email: true },
+            },
           },
-          createdBy: {
-            select: { id: true, name: true, email: true },
-          },
-        },
-      }),
+        })
+        .then((rows) => this.attachSourceNumbers(rows)),
       this.prisma.packagePurchase.findMany({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: RECENT_PURCHASES_LIMIT,
@@ -323,6 +344,8 @@ export class FinanceService {
       }),
     ]);
 
+    const sourceNumbers = await this.lookupSourceNumbers(rows);
+
     const items = rows.map((row) => ({
       id: row.id,
       createdAt: row.createdAt,
@@ -333,6 +356,7 @@ export class FinanceService {
       reason: row.reason,
       referenceType: row.referenceType,
       referenceId: row.referenceId,
+      sourceNumber: resolveSourceNumber(row, sourceNumbers),
       provider: row.provider,
       createdBy: row.createdBy,
     }));
@@ -485,6 +509,56 @@ export class FinanceService {
       pageSize,
       hasNextPage,
     };
+  }
+
+  private async lookupSourceNumbers(
+    rows: Array<{ referenceType: string | null; referenceId: string | null }>,
+  ): Promise<SourceNumberLookup> {
+    const offerIds = new Set<string>();
+    const purchaseIds = new Set<string>();
+    for (const row of rows) {
+      if (!row.referenceId) continue;
+      if (row.referenceType === 'Offer') offerIds.add(row.referenceId);
+      else if (row.referenceType === 'PackagePurchase')
+        purchaseIds.add(row.referenceId);
+    }
+
+    const [offers, purchases] = await Promise.all([
+      offerIds.size === 0
+        ? Promise.resolve(
+            [] as Array<{ id: string; offerNumber: string | null }>,
+          )
+        : this.prisma.offer.findMany({
+            where: { id: { in: Array.from(offerIds) } },
+            select: { id: true, offerNumber: true },
+          }),
+      purchaseIds.size === 0
+        ? Promise.resolve(
+            [] as Array<{ id: string; purchaseNumber: string | null }>,
+          )
+        : this.prisma.packagePurchase.findMany({
+            where: { id: { in: Array.from(purchaseIds) } },
+            select: { id: true, purchaseNumber: true },
+          }),
+    ]);
+
+    const offerNumberById = new Map<string, string | null>();
+    for (const row of offers) offerNumberById.set(row.id, row.offerNumber);
+    const purchaseNumberById = new Map<string, string | null>();
+    for (const row of purchases)
+      purchaseNumberById.set(row.id, row.purchaseNumber);
+
+    return { offerNumberById, purchaseNumberById };
+  }
+
+  private async attachSourceNumbers<
+    T extends { referenceType: string | null; referenceId: string | null },
+  >(rows: T[]): Promise<Array<T & { sourceNumber: string | null }>> {
+    const lookup = await this.lookupSourceNumbers(rows);
+    return rows.map((row) => ({
+      ...row,
+      sourceNumber: resolveSourceNumber(row, lookup),
+    }));
   }
 
   private async computeActiveProviderCreditBalance(): Promise<number> {

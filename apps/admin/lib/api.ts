@@ -93,6 +93,7 @@ export type ServiceRequestAnswer = {
 
 export type ServiceRequest = {
   id: string;
+  requestNumber: string | null;
   customerId: string | null;
   status: ServiceRequestStatus;
   qualityScore: number;
@@ -154,12 +155,14 @@ export type ProviderServiceArea = {
 
 export type ProviderRecentOffer = {
   id: string;
+  offerNumber?: string | null;
   status: OfferStatus;
   priceAmount: number;
   currency: string;
   submittedAt: string;
   request: {
     id: string;
+    requestNumber?: string | null;
     city: string;
     district: string;
     category: {
@@ -172,6 +175,7 @@ export type ProviderRecentOffer = {
 
 export type ProviderRecentPackagePurchase = {
   id: string;
+  purchaseNumber?: string | null;
   status: PackagePurchaseStatus;
   packageNameSnapshot: string;
   creditAmountSnapshot: number;
@@ -246,6 +250,7 @@ export type RefundEligibility = {
 
 export type Offer = {
   id: string;
+  offerNumber: string | null;
   requestId: string;
   providerId: string;
   status: OfferStatus;
@@ -279,6 +284,7 @@ export type Offer = {
   };
   request: {
     id: string;
+    requestNumber: string | null;
     city: string;
     district: string;
     neighborhood: string | null;
@@ -389,6 +395,7 @@ export type PackagePurchaseStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' 
 
 export type PackagePurchase = {
   id: string;
+  purchaseNumber: string | null;
   providerId: string;
   packageId: string;
   status: PackagePurchaseStatus;
@@ -456,6 +463,7 @@ export type FinanceSummaryRecentTransaction = {
   reason: string | null;
   referenceType: string | null;
   referenceId: string | null;
+  sourceNumber: string | null;
   createdAt: string;
   provider: {
     id: string;
@@ -470,6 +478,7 @@ export type FinanceSummaryRecentTransaction = {
 
 export type FinanceSummaryRecentPurchase = {
   id: string;
+  purchaseNumber: string | null;
   providerId: string;
   packageId: string;
   status: PackagePurchaseStatus;
@@ -516,6 +525,7 @@ export type CreditLedgerEntry = {
   reason: string | null;
   referenceType: string | null;
   referenceId: string | null;
+  sourceNumber: string | null;
   provider: CreditLedgerProvider;
   createdBy: {
     id: string;

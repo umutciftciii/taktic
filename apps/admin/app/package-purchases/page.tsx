@@ -52,6 +52,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
             <table className="data-table">
               <thead>
                 <tr>
+                  <th>Satın Alma No</th>
                   <th>Oluşturulma</th>
                   <th>Hizmet Veren</th>
                   <th>Paket</th>
@@ -63,8 +64,14 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
                 </tr>
               </thead>
               <tbody>
-                {purchases.map((purchase) => (
+                {purchases.map((purchase) => {
+                  const purchaseRef =
+                    purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;
+                  return (
                   <tr key={purchase.id}>
+                    <td>
+                      <code className="display-number">{purchaseRef}</code>
+                    </td>
                     <td>{formatDateTime(purchase.createdAt)}</td>
                     <td><strong>{purchase.provider.businessName}</strong></td>
                     <td>{purchase.packageNameSnapshot}</td>
@@ -85,7 +92,8 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
