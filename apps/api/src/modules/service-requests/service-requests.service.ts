@@ -1,4 +1,11 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -59,7 +66,10 @@ export class ServiceRequestsService {
   ) {}
 
   async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
-    const customerId = resolveCustomerIdForCreate(user);
+    if (user && user.role === UserRole.PROVIDER) {
+      throw new ForbiddenException('Providers cannot create customer service requests');
+    }
+
     const categorySlug = normalizeRequiredString(dto.categorySlug, 'Category slug');
     const category = await this.prisma.serviceCategory.findUnique({
       where: { slug: categorySlug },
@@ -80,7 +90,7 @@ export class ServiceRequestsService {
     const requestData = {
       customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
       customerPhone: normalizePhone(dto.customerPhone),
-      customerEmail: normalizeNullableString(dto.customerEmail),
+      customerEmail: normalizeNullableEmail(dto.customerEmail),
       city: normalizeRequiredString(dto.city, 'City'),
       district: normalizeRequiredString(dto.district, 'District'),
       neighborhood: normalizeNullableString(dto.neighborhood),
@@ -98,6 +108,7 @@ export class ServiceRequestsService {
     });
 
     const request = await this.prisma.$transaction(async (tx) => {
+      const customerId = await resolveCustomerForCreate(tx, requestData, user);
       const requestNumber = await this.numbering.generateDisplayNumber(
         tx,
         NumberedEntityType.SERVICE_REQUEST,
@@ -295,20 +306,64 @@ export class ServiceRequestsService {
   }
 }
 
-function resolveCustomerIdForCreate(user: AuthUser | null) {
-  if (!user) {
-    return null;
-  }
-
-  if (user.role === UserRole.CUSTOMER) {
+async function resolveCustomerForCreate(
+  tx: Prisma.TransactionClient,
+  data: { customerName: string; customerPhone: string; customerEmail: string | null },
+  user: AuthUser | null,
+): Promise<string | null> {
+  if (user && user.role === UserRole.CUSTOMER) {
     return user.id;
   }
 
-  if (user.role === UserRole.SUPER_ADMIN) {
-    return null;
+  const phone = data.customerPhone;
+  const email = data.customerEmail;
+
+  const [byPhone, byEmail] = await Promise.all([
+    tx.user.findFirst({
+      where: { role: UserRole.CUSTOMER, phone },
+      select: { id: true },
+    }),
+    email
+      ? tx.user.findFirst({
+          where: { role: UserRole.CUSTOMER, email },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (byPhone && byEmail && byPhone.id !== byEmail.id) {
+    throw new ConflictException('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
   }
 
-  throw new ForbiddenException('Providers cannot create customer service requests');
+  if (byPhone) {
+    return byPhone.id;
+  }
+
+  if (byEmail) {
+    return byEmail.id;
+  }
+
+  try {
+    const created = await tx.user.create({
+      data: {
+        role: UserRole.CUSTOMER,
+        name: data.customerName,
+        phone,
+        email,
+        isActive: true,
+        passwordHash: null,
+      },
+      select: { id: true },
+    });
+    return created.id;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException(
+        'Müşteri kaydı oluşturulamadı: telefon veya e-posta başka bir kayıtla çakışıyor.',
+      );
+    }
+    throw error;
+  }
 }
 
 function calculateQualityScore(input: QualityScoringInput) {
@@ -573,6 +628,11 @@ function normalizeRequiredString(value: unknown, fieldName: string) {
 
 function normalizePhone(value: string) {
   return normalizeRequiredString(value, 'Customer phone').replace(/[^\d+]/g, '');
+}
+
+function normalizeNullableEmail(value: string | null | undefined) {
+  const normalized = normalizeNullableString(value);
+  return normalized ? normalized.toLowerCase() : null;
 }
 
 // Monetary amounts are stored in minor units (e.g. kuruş for TRY). When a customer
