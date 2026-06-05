@@ -50,7 +50,7 @@ export default async function ProviderPackagePurchaseDetailPage({
   const notice = noticeForStatus(purchase.status, purchase.mockPaymentFailureReason);
   const title = purchase.packageNameSnapshot || 'Paket Satın Alma';
   const referenceText =
-    purchase.mockPaymentReference ?? `#${purchase.id.slice(-8).toUpperCase()}`;
+    purchase.purchaseNumber ?? purchase.mockPaymentReference ?? '—';
 
   return (
     <ProviderShell user={user} providerId={id} active="packages">

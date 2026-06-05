@@ -32,7 +32,8 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
   const summary = myRequests.find((request) => request.id === id) ?? null;
   const sortedOffers = [...offers].sort((a, b) => a.priceAmount - b.priceAmount);
   const offerCount = sortedOffers.length;
-  const shortId = `#TKL-${id.slice(0, 6).toUpperCase()}`;
+  const requestReference =
+    summary?.requestNumber ?? `#${id.slice(-6).toUpperCase()}`;
 
   return (
     <CustomerShell user={user} active="requests">
@@ -67,7 +68,7 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
               </span>
               <span>
                 <span aria-hidden="true">🔖</span>
-                {shortId}
+                {requestReference}
               </span>
             </div>
           </div>
@@ -121,6 +122,8 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
 
 function OfferCard({ offer, requestId }: { offer: RequestOfferPreview; requestId: string }) {
   const initials = getInitials(offer.provider.businessName);
+  const offerReference =
+    offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`;
   return (
     <article className="cdash-offer">
       <div className="cdash-offer-head">
@@ -134,6 +137,12 @@ function OfferCard({ offer, requestId }: { offer: RequestOfferPreview; requestId
             <p className="cdash-offer-sub">
               {offer.provider.city}
               {offer.provider.district ? `, ${offer.provider.district}` : ''} · {formatDateTime(offer.submittedAt)}
+            </p>
+            <p
+              className="cdash-offer-sub"
+              style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 2 }}
+            >
+              {offerReference}
             </p>
           </div>
         </div>

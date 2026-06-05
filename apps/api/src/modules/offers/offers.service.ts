@@ -224,6 +224,7 @@ export class OffersService {
 
     return offers.map((offer) => ({
       id: offer.id,
+      offerNumber: offer.offerNumber,
       provider: offer.provider,
       status: offer.status,
       priceAmount: offer.priceAmount,

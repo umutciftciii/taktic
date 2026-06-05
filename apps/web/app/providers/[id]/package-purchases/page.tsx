@@ -45,7 +45,11 @@ export default async function ProviderPackagePurchasesPage({
   const searchQuery = (q ?? '').trim().toLocaleLowerCase('tr-TR');
   const filteredPurchases = searchQuery
     ? allPurchases.filter((p) => {
-        const haystack = [p.packageNameSnapshot, p.mockPaymentReference ?? '', p.id]
+        const haystack = [
+          p.packageNameSnapshot,
+          p.purchaseNumber ?? '',
+          p.mockPaymentReference ?? '',
+        ]
           .join(' ')
           .toLocaleLowerCase('tr-TR');
         return haystack.includes(searchQuery);
@@ -241,8 +245,9 @@ export default async function ProviderPackagePurchasesPage({
                   filteredPurchases.map((purchase) => {
                     const { date, time } = splitDateAndTime(purchase.createdAt);
                     const ref =
+                      purchase.purchaseNumber ??
                       purchase.mockPaymentReference ??
-                      `#${purchase.id.slice(-8).toUpperCase()}`;
+                      '—';
                     return (
                       <tr key={purchase.id}>
                         <td>

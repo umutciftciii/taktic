@@ -72,6 +72,7 @@ export type AuthUser = {
 
 export type CustomerServiceRequest = {
   id: string;
+  requestNumber: string | null;
   status: string;
   customerName: string;
   customerPhone: string;
@@ -223,6 +224,7 @@ export type RefundEligibility = {
 
 export type ProviderOffer = {
   id: string;
+  offerNumber: string | null;
   requestId: string;
   providerId: string;
   status: OfferStatus;
@@ -246,6 +248,7 @@ export type ProviderOffer = {
   withdrawnAt: string | null;
   request: {
     id: string;
+    requestNumber: string | null;
     city: string;
     district: string;
     neighborhood: string | null;
@@ -265,6 +268,7 @@ export type ProviderOffer = {
 
 export type RequestOfferPreview = {
   id: string;
+  offerNumber: string | null;
   provider: {
     businessName: string;
     city: string;
@@ -333,6 +337,7 @@ export type PackagePurchaseStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' 
 
 export type PackagePurchase = {
   id: string;
+  purchaseNumber: string | null;
   providerId: string;
   packageId: string;
   status: PackagePurchaseStatus;

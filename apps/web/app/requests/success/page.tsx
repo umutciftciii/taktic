@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getCurrentUser } from '../../../lib/api';
+import { apiFetch, CustomerServiceRequest, getCurrentUser } from '../../../lib/api';
 
 type RequestSuccessPageProps = {
   searchParams: Promise<{ id?: string }>;
@@ -8,6 +8,21 @@ type RequestSuccessPageProps = {
 export default async function RequestSuccessPage({ searchParams }: RequestSuccessPageProps) {
   const { id } = await searchParams;
   const user = await getCurrentUser();
+
+  let referenceLabel: string | null = null;
+  if (id) {
+    if (user?.role === 'CUSTOMER') {
+      try {
+        const myRequests = await apiFetch<CustomerServiceRequest[]>('/service-requests/my');
+        const match = myRequests.find((r) => r.id === id);
+        referenceLabel = match?.requestNumber ?? `#${id.slice(-6).toUpperCase()}`;
+      } catch {
+        referenceLabel = `#${id.slice(-6).toUpperCase()}`;
+      }
+    } else {
+      referenceLabel = `#${id.slice(-6).toUpperCase()}`;
+    }
+  }
 
   return (
     <main>
@@ -18,9 +33,9 @@ export default async function RequestSuccessPage({ searchParams }: RequestSucces
           <p className="muted" style={{ marginBottom: 0 }}>
             Onay sonrasında uygun hizmet verenler teklif gönderebilir.
           </p>
-          {id ? (
+          {referenceLabel ? (
             <p style={{ marginTop: 14 }}>
-              Talep referansı: <code>{id}</code>
+              Talep referansı: <code>{referenceLabel}</code>
             </p>
           ) : null}
           <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 18 }}>

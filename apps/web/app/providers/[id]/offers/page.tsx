@@ -105,6 +105,15 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
                     <p className="pdash-card-sub">
                       {offer.request.city}/{offer.request.district}
                     </p>
+                    <p
+                      className="pdash-card-sub"
+                      style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 2 }}
+                    >
+                      {offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`}
+                      <span style={{ color: 'var(--muted)' }}> · Talep: </span>
+                      {offer.request.requestNumber ??
+                        `#${offer.request.id.slice(-6).toUpperCase()}`}
+                    </p>
                   </div>
                   <span className={providerStatusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
                 </div>

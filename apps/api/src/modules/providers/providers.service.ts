@@ -748,6 +748,7 @@ const providerOfferInclude = {
   request: {
     select: {
       id: true,
+      requestNumber: true,
       city: true,
       district: true,
       neighborhood: true,

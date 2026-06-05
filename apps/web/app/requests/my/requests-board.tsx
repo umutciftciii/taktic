@@ -28,6 +28,7 @@ export function RequestsBoard({ requests }: RequestsBoardProps) {
         request.category?.name ?? '',
         request.city ?? '',
         request.district ?? '',
+        request.requestNumber ?? '',
         statusLabel(request.status),
       ]
         .join(' ')
@@ -108,14 +109,15 @@ function RequestCard({ request }: { request: CustomerServiceRequest }) {
   const ctaLabel = hasOffers ? 'Teklifleri görüntüle' : 'Detaylar';
   const ctaClass = hasOffers ? 'cdash-btn cdash-btn-primary' : 'cdash-btn cdash-btn-secondary';
   const statusClass = statusBadgeClass(request.status);
-  const shortId = `#TKL-${request.id.slice(0, 6).toUpperCase()}`;
+  const referenceLabel =
+    request.requestNumber ?? `#${request.id.slice(-6).toUpperCase()}`;
 
   return (
     <article className="cdash-card">
       <div className="cdash-card-head">
         <div style={{ minWidth: 0 }}>
           <h2 className="cdash-card-title">{request.category?.name ?? 'Talep'}</h2>
-          <p className="cdash-card-sub">{shortId}</p>
+          <p className="cdash-card-sub">{referenceLabel}</p>
         </div>
         <span className={statusClass}>{statusLabel(request.status)}</span>
       </div>
