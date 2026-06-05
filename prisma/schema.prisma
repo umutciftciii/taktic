@@ -70,6 +70,12 @@ enum PackagePurchaseStatus {
   REFUNDED
 }
 
+enum NumberedEntityType {
+  SERVICE_REQUEST
+  OFFER
+  PACKAGE_PURCHASE
+}
+
 model User {
   id           String    @id @default(cuid())
   email        String?   @unique
@@ -155,6 +161,7 @@ model ServiceRequestQuestion {
 
 model ServiceRequest {
   id                    String               @id @default(cuid())
+  requestNumber         String?              @unique
   categoryId            String
   customerId            String?
   status                ServiceRequestStatus @default(SUBMITTED)
@@ -275,6 +282,7 @@ model ProviderServiceArea {
 
 model Offer {
   id                          String      @id @default(cuid())
+  offerNumber                 String?     @unique
   requestId                   String
   providerId                  String
   status                      OfferStatus @default(SUBMITTED)
@@ -330,6 +338,7 @@ model OfferCreditPackage {
 
 model PackagePurchase {
   id                       String                @id @default(cuid())
+  purchaseNumber           String?               @unique
   providerId               String
   packageId                String
   status                   PackagePurchaseStatus @default(PENDING)
@@ -358,6 +367,17 @@ model PackagePurchase {
   @@index([status])
   @@index([createdAt])
   @@index([mockPaymentReference])
+}
+
+model SequenceCounter {
+  id         String             @id @default(cuid())
+  entityType NumberedEntityType
+  year       Int
+  lastNumber Int                @default(0)
+  updatedAt  DateTime           @updatedAt
+
+  @@unique([entityType, year])
+  @@index([entityType])
 }
 
 model ProviderCreditTransaction {
