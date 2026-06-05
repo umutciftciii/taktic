@@ -5,9 +5,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CreditTransactionType, PackagePurchaseStatus, Prisma } from '@prisma/client';
+import { CreditTransactionType, NumberedEntityType, PackagePurchaseStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
+import { NumberingService } from '../numbering/numbering.service';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
 import { UpdatePackagePurchaseStatusDto } from './dto/update-package-purchase-status.dto';
@@ -23,6 +24,7 @@ export class PackagePurchasesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CreditsService) private readonly creditsService: CreditsService,
+    @Inject(NumberingService) private readonly numbering: NumberingService,
   ) {}
 
   async createProviderPurchase(providerId: string, dto: CreatePackagePurchaseDto) {
@@ -35,17 +37,25 @@ export class PackagePurchasesService {
       throw new BadRequestException('Active credit package not found');
     }
 
-    return this.prisma.packagePurchase.create({
-      data: {
-        providerId,
-        packageId: creditPackage.id,
-        creditAmountSnapshot: creditPackage.creditAmount,
-        priceAmountSnapshot: creditPackage.priceAmount,
-        currencySnapshot: creditPackage.currency,
-        packageNameSnapshot: creditPackage.name,
-        providerNote: normalizeNullableString(dto.providerNote),
-      },
-      include: packagePurchaseInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const purchaseNumber = await this.numbering.generateDisplayNumber(
+        tx,
+        NumberedEntityType.PACKAGE_PURCHASE,
+      );
+
+      return tx.packagePurchase.create({
+        data: {
+          providerId,
+          packageId: creditPackage.id,
+          purchaseNumber,
+          creditAmountSnapshot: creditPackage.creditAmount,
+          priceAmountSnapshot: creditPackage.priceAmount,
+          currencySnapshot: creditPackage.currency,
+          packageNameSnapshot: creditPackage.name,
+          providerNote: normalizeNullableString(dto.providerNote),
+        },
+        include: packagePurchaseInclude,
+      });
     });
   }
 

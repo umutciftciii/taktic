@@ -1,7 +1,8 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { NumberingService } from '../numbering/numbering.service';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
@@ -52,7 +53,10 @@ const moderatedStatuses = new Set<ServiceRequestStatus>([
 
 @Injectable()
 export class ServiceRequestsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(NumberingService) private readonly numbering: NumberingService,
+  ) {}
 
   async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
     const customerId = resolveCustomerIdForCreate(user);
@@ -93,25 +97,33 @@ export class ServiceRequestsService {
       answers,
     });
 
-    const request = await this.prisma.serviceRequest.create({
-      data: {
-        categoryId: category.id,
-        customerId,
-        ...requestData,
-        qualityScore: quality.score,
-        qualityScoreBreakdown: quality.breakdown,
-        answers: {
-          create: answers,
+    const request = await this.prisma.$transaction(async (tx) => {
+      const requestNumber = await this.numbering.generateDisplayNumber(
+        tx,
+        NumberedEntityType.SERVICE_REQUEST,
+      );
+
+      return tx.serviceRequest.create({
+        data: {
+          categoryId: category.id,
+          customerId,
+          requestNumber,
+          ...requestData,
+          qualityScore: quality.score,
+          qualityScoreBreakdown: quality.breakdown,
+          answers: {
+            create: answers,
+          },
         },
-      },
-      include: {
-        category: {
-          select: { id: true, name: true, slug: true },
+        include: {
+          category: {
+            select: { id: true, name: true, slug: true },
+          },
+          answers: {
+            orderBy: { createdAt: 'asc' },
+          },
         },
-        answers: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
+      });
     });
 
     return withQualityLabel(request);

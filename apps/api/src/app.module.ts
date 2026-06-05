@@ -13,6 +13,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { NumberingModule } from './modules/numbering/numbering.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -32,6 +33,7 @@ import { PrismaModule } from './prisma/prisma.module';
     FinanceModule,
     PackagePurchasesModule,
     UploadsModule,
+    NumberingModule,
   ],
 })
 export class AppModule {}

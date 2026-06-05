@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   CreditTransactionType,
+  NumberedEntityType,
   OfferStatus,
   Prisma,
   ProviderStatus,
@@ -18,6 +19,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { NumberingService } from '../numbering/numbering.service';
 import { calculateRefundEligibility } from '../offers/refund-policy';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -63,7 +65,10 @@ const OFFER_CREDIT_COST = 1;
 
 @Injectable()
 export class ProvidersService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(NumberingService) private readonly numbering: NumberingService,
+  ) {}
 
   async createProvider(dto: CreateProviderDto, user: AuthUser | null = null) {
     if (user?.role === UserRole.CUSTOMER) {
@@ -493,10 +498,16 @@ export class ProvidersService {
             throw new HttpException('Yetersiz teklif kredisi.', HttpStatus.PAYMENT_REQUIRED);
           }
 
+          const offerNumber = await this.numbering.generateDisplayNumber(
+            tx,
+            NumberedEntityType.OFFER,
+          );
+
           const offer = await tx.offer.create({
             data: {
               providerId,
               requestId,
+              offerNumber,
               priceAmount: payload.priceAmount,
               currency: payload.currency,
               estimatedStartDate: payload.estimatedStartDate,
