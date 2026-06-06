@@ -192,6 +192,7 @@ model ServiceRequest {
   offers   Offer[]
 
   @@index([categoryId])
+  @@index([customerId])
   @@index([status])
   @@index([city, district])
   @@index([submittedAt])

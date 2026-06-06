@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { CustomersModule } from './modules/customers/customers.module';
 import { HealthModule } from './modules/health/health.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
@@ -29,6 +30,7 @@ import { PrismaModule } from './prisma/prisma.module';
     OffersModule,
     RefundSchedulerModule,
     CreditsModule,
+    CustomersModule,
     DashboardModule,
     FinanceModule,
     PackagePurchasesModule,
