@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import {
   apiFetch,
   CustomerDetailResponse,
@@ -22,11 +23,31 @@ type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
 };
 
+// apiFetch backend hatası geldiğinde body metnini Error.message'a koyar.
+// Backend NestJS NotFoundException JSON şekli: {"statusCode":404,...}.
+function isBackendNotFound(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  try {
+    const parsed = JSON.parse(error.message) as { statusCode?: unknown };
+    return parsed?.statusCode === 404;
+  } catch {
+    return error.message.includes('Customer not found');
+  }
+}
+
 export default async function AdminCustomerDetailPage({ params }: CustomerDetailPageProps) {
   await requireAdmin();
   const { id } = await params;
 
-  const response = await apiFetch<CustomerDetailResponse>(`/customers/${id}`);
+  let response: CustomerDetailResponse;
+  try {
+    response = await apiFetch<CustomerDetailResponse>(`/customers/${id}`);
+  } catch (error) {
+    if (isBackendNotFound(error)) {
+      notFound();
+    }
+    throw error;
+  }
   const { customer, metrics, recentRequests, recentOffers, acceptedOffers } = response;
 
   const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
