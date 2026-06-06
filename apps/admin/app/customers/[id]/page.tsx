@@ -22,10 +22,21 @@ import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
-import { createCustomerNoteAction, updateCustomerStatusAction } from '../actions';
+import {
+  createCustomerActivationLinkAction,
+  createCustomerNoteAction,
+  updateCustomerStatusAction,
+} from '../actions';
+
+type SearchParams = {
+  activationUrl?: string;
+  activationExpiresAt?: string;
+  activationError?: string;
+};
 
 type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<SearchParams>;
 };
 
 // apiFetch backend hatası geldiğinde body metnini Error.message'a koyar.
@@ -40,9 +51,13 @@ function isBackendNotFound(error: unknown): boolean {
   }
 }
 
-export default async function AdminCustomerDetailPage({ params }: CustomerDetailPageProps) {
+export default async function AdminCustomerDetailPage({
+  params,
+  searchParams,
+}: CustomerDetailPageProps) {
   await requireAdmin();
   const { id } = await params;
+  const search = (await searchParams) ?? {};
 
   let response: CustomerDetailResponse;
   let notesResponse: CustomerNotesResponse;
@@ -109,6 +124,13 @@ export default async function AdminCustomerDetailPage({ params }: CustomerDetail
       </section>
 
       <div className="provider-detail-card-grid">
+        <CustomerActivationSection
+          customer={customer}
+          activationUrl={search.activationUrl}
+          activationExpiresAt={search.activationExpiresAt}
+          activationError={search.activationError}
+        />
+
         <SectionCard title="Profil & İletişim" className="card-wide">
           <dl className="meta-row">
             <dt>Ad</dt>
@@ -345,6 +367,104 @@ export default async function AdminCustomerDetailPage({ params }: CustomerDetail
         </SectionCard>
       </div>
     </main>
+  );
+}
+
+function CustomerActivationSection({
+  customer,
+  activationUrl,
+  activationExpiresAt,
+  activationError,
+}: {
+  customer: CustomerDetailResponse['customer'];
+  activationUrl?: string;
+  activationExpiresAt?: string;
+  activationError?: string;
+}) {
+  const canCreate =
+    customer.customerOrigin === 'AUTO_CREATED_REQUEST' &&
+    !customer.hasPassword &&
+    customer.isActive;
+
+  if (!canCreate && !activationUrl && !activationError) {
+    return null;
+  }
+
+  return (
+    <SectionCard title="Hesap aktivasyonu" className="card-wide">
+      {!canCreate && !activationUrl && !activationError ? null : null}
+      {canCreate ? (
+        <div style={{ marginBottom: 12 }}>
+          <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+            Bu müşteri talep formu üzerinden otomatik oluşturuldu. Hesabını kullanabilmesi için
+            şifre belirleme bağlantısı oluşturabilirsiniz. Bağlantıyı kopyalayıp WhatsApp / SMS /
+            e-posta ile manuel olarak paylaşın.
+          </p>
+          <form action={createCustomerActivationLinkAction}>
+            <input type="hidden" name="customerId" value={customer.id} />
+            <button type="submit" className="btn btn-primary btn-sm">
+              Aktivasyon linki oluştur
+            </button>
+          </form>
+        </div>
+      ) : null}
+
+      {!canCreate && customer.hasPassword ? (
+        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+          Bu müşteri için zaten bir şifre tanımlı. Aktivasyon linki üretilmesine gerek yok.
+        </p>
+      ) : null}
+
+      {!canCreate && !customer.isActive ? (
+        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+          Pasif müşteri için aktivasyon linki oluşturulamaz. Önce müşteriyi aktifleştirin.
+        </p>
+      ) : null}
+
+      {activationError ? (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            borderRadius: 8,
+            background: 'rgba(220, 38, 38, 0.08)',
+            border: '1px solid rgba(220, 38, 38, 0.25)',
+            color: 'rgb(153, 27, 27)',
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          {activationError}
+        </div>
+      ) : null}
+
+      {activationUrl ? (
+        <div style={{ marginTop: 12 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+            Aktivasyon bağlantısı oluşturuldu. Bu bağlantı 72 saat geçerlidir.
+          </div>
+          <code
+            style={{
+              display: 'block',
+              padding: 10,
+              background: 'var(--surface-soft, #f3f4f6)',
+              border: '1px solid var(--border, #e5e7eb)',
+              borderRadius: 8,
+              fontSize: 12,
+              lineHeight: 1.5,
+              wordBreak: 'break-all',
+            }}
+          >
+            {activationUrl}
+          </code>
+          {activationExpiresAt ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              Son geçerlilik: {formatDateTime(activationExpiresAt)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </SectionCard>
   );
 }
 

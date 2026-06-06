@@ -495,6 +495,7 @@ export type CustomerDetail = {
   updatedAt: string;
   lastLoginAt: string | null;
   customerOrigin: CustomerOrigin | null;
+  hasPassword: boolean;
 };
 
 export type CustomerMetrics = {
@@ -564,6 +565,18 @@ export type UpdateCustomerStatusInput = {
 export type UpdateCustomerStatusResponse = {
   id: string;
   isActive: boolean;
+};
+
+export type CustomerActivationLinkResponse = {
+  activationUrl: string;
+  expiresAt: string;
+  customer: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    customerOrigin: CustomerOrigin | null;
+  };
 };
 
 export type AuthUser = {

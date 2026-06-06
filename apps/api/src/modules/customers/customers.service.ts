@@ -239,12 +239,15 @@ export class CustomersService {
         updatedAt: true,
         lastLoginAt: true,
         customerOrigin: true,
+        passwordHash: true,
       },
     });
 
     if (!user || user.role !== UserRole.CUSTOMER) {
       throw new NotFoundException('Customer not found');
     }
+
+    const hasPassword = user.passwordHash !== null;
 
     const [
       requestCount,
@@ -353,6 +356,7 @@ export class CustomersService {
         updatedAt: user.updatedAt,
         lastLoginAt: user.lastLoginAt,
         customerOrigin: user.customerOrigin,
+        hasPassword,
       },
       metrics: {
         requestCount,

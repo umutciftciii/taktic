@@ -96,12 +96,14 @@ model User {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  serviceRequests      ServiceRequest[]
-  providerProfiles     ProviderProfile[]
-  creditTransactions   ProviderCreditTransaction[]
-  sessions             Session[]
-  customerNotes        CustomerNote[]              @relation("CustomerNoteCustomer")
-  createdCustomerNotes CustomerNote[]              @relation("CustomerNoteCreatedBy")
+  serviceRequests          ServiceRequest[]
+  providerProfiles         ProviderProfile[]
+  creditTransactions       ProviderCreditTransaction[]
+  sessions                 Session[]
+  customerNotes            CustomerNote[]              @relation("CustomerNoteCustomer")
+  createdCustomerNotes     CustomerNote[]              @relation("CustomerNoteCreatedBy")
+  activationTokens         CustomerActivationToken[]   @relation("CustomerActivationTokenCustomer")
+  createdActivationTokens  CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
 
   @@index([role])
   @@index([isActive])
@@ -426,4 +428,21 @@ model CustomerNote {
   @@index([customerId])
   @@index([createdById])
   @@index([createdAt])
+}
+
+model CustomerActivationToken {
+  id          String    @id @default(cuid())
+  customerId  String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  customer  User  @relation("CustomerActivationTokenCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("CustomerActivationTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@index([createdById])
+  @@index([expiresAt])
 }

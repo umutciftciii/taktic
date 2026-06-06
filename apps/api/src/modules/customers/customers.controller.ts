@@ -4,6 +4,7 @@ import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { CustomersService } from './customers.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
 import { ListCustomersDto } from './dto/list-customers.dto';
@@ -11,7 +12,11 @@ import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
 
 @Controller('customers')
 export class CustomersController {
-  constructor(@Inject(CustomersService) private readonly customersService: CustomersService) {}
+  constructor(
+    @Inject(CustomersService) private readonly customersService: CustomersService,
+    @Inject(CustomerActivationService)
+    private readonly activationService: CustomerActivationService,
+  ) {}
 
   @Get()
   @UseGuards(AuthGuard, RolesGuard)
@@ -50,5 +55,12 @@ export class CustomersController {
   @Roles(UserRole.SUPER_ADMIN)
   updateStatus(@Param('id') id: string, @Body() dto: UpdateCustomerStatusDto) {
     return this.customersService.updateStatus(id, dto);
+  }
+
+  @Post(':id/activation-link')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  createActivationLink(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.activationService.createForCustomer(id, user.id);
   }
 }
