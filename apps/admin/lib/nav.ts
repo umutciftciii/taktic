@@ -18,6 +18,7 @@ export const navGroups: NavGroup[] = [
     title: 'Operasyon',
     items: [
       { href: '/requests', label: 'Talepler' },
+      { href: '/customers', label: 'Hizmet Alanlar' },
       { href: '/offers', label: 'Teklifler' },
       { href: '/providers', label: 'Hizmet Verenler' },
     ],

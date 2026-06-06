@@ -1,0 +1,302 @@
+import Link from 'next/link';
+import {
+  apiFetch,
+  CustomerDetailResponse,
+  CustomerRecentOffer,
+  CustomerRecentRequest,
+  formatDateTime,
+  formatPrice,
+  qualityBadgeClass,
+  qualityLabel,
+  requestStatusLabel,
+  requireAdmin,
+  statusBadgeClass,
+  statusLabel,
+} from '../../../lib/api';
+import { EmptyState } from '../../../components/empty-state';
+import { PageHeader } from '../../../components/page-header';
+import { SectionCard } from '../../../components/section-card';
+import { StatCard } from '../../../components/stat-card';
+
+type CustomerDetailPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+export default async function AdminCustomerDetailPage({ params }: CustomerDetailPageProps) {
+  await requireAdmin();
+  const { id } = await params;
+
+  const response = await apiFetch<CustomerDetailResponse>(`/customers/${id}`);
+  const { customer, metrics, recentRequests, recentOffers, acceptedOffers } = response;
+
+  const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
+  const subtitleParts: string[] = [];
+  if (customer.phone) subtitleParts.push(customer.phone);
+  if (customer.email) subtitleParts.push(customer.email);
+
+  return (
+    <main className="customer-detail-page">
+      <PageHeader
+        breadcrumbs={[
+          { label: 'Dashboard', href: '/' },
+          { label: 'Hizmet Alanlar', href: '/customers' },
+          { label: displayName },
+        ]}
+        title={displayName}
+        subtitle={
+          <>
+            {customer.isActive ? (
+              <span className="badge badge-good">Aktif</span>
+            ) : (
+              <span className="badge badge-bad">Pasif</span>
+            )}
+            {subtitleParts.length > 0 ? (
+              <span className="muted"> · {subtitleParts.join(' · ')}</span>
+            ) : null}
+          </>
+        }
+        actions={
+          <Link className="btn btn-ghost btn-sm" href="/customers">
+            ← Listeye dön
+          </Link>
+        }
+      />
+
+      <section className="stat-grid">
+        <StatCard label="Talep sayısı" value={metrics.requestCount} />
+        <StatCard label="Teklif sayısı" value={metrics.offerCount} />
+        <StatCard
+          label="Kabul edilen teklif"
+          value={metrics.acceptedOfferCount}
+          tone={metrics.acceptedOfferCount > 0 ? 'success' : 'neutral'}
+        />
+        <StatCard
+          label="Son talep"
+          value={metrics.lastRequestAt ? formatDateTime(metrics.lastRequestAt) : '—'}
+          hint={metrics.lastRequestAt ? undefined : 'Henüz talep yok'}
+        />
+      </section>
+
+      <div className="provider-detail-card-grid">
+        <SectionCard title="Profil & İletişim" className="card-wide">
+          <dl className="meta-row">
+            <dt>Ad</dt>
+            <dd>{customer.name ?? '-'}</dd>
+            <dt>Telefon</dt>
+            <dd>
+              {customer.phone ? (
+                <a className="cell-link" href={`tel:${customer.phone}`}>
+                  {customer.phone}
+                </a>
+              ) : (
+                '-'
+              )}
+            </dd>
+            <dt>E-posta</dt>
+            <dd>
+              {customer.email ? (
+                <a className="cell-link" href={`mailto:${customer.email}`}>
+                  {customer.email}
+                </a>
+              ) : (
+                '-'
+              )}
+            </dd>
+            <dt>Durum</dt>
+            <dd>
+              {customer.isActive ? (
+                <span className="badge badge-good">Aktif</span>
+              ) : (
+                <span className="badge badge-bad">Pasif</span>
+              )}
+            </dd>
+            <dt>Kayıt tarihi</dt>
+            <dd>{formatDateTime(customer.createdAt)}</dd>
+            <dt>Son giriş</dt>
+            <dd>{customer.lastLoginAt ? formatDateTime(customer.lastLoginAt) : '-'}</dd>
+            <dt>Güncellenme</dt>
+            <dd>{formatDateTime(customer.updatedAt)}</dd>
+          </dl>
+          <details style={{ marginTop: 12 }}>
+            <summary className="cell-muted" style={{ cursor: 'pointer', fontSize: 12 }}>
+              Teknik bilgi
+            </summary>
+            <dl className="meta-row" style={{ marginTop: 8 }}>
+              <dt>Müşteri ID</dt>
+              <dd>
+                <code style={{ fontSize: 12 }}>{customer.id}</code>
+              </dd>
+            </dl>
+          </details>
+        </SectionCard>
+
+        <SectionCard
+          title="Talep geçmişi"
+          subtitle={metrics.requestCount > 0 ? `Toplam ${metrics.requestCount}` : undefined}
+          className="card-wide"
+        >
+          {recentRequests.length === 0 ? (
+            <EmptyState title="Henüz talep yok." />
+          ) : (
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Talep No</th>
+                    <th>Kategori</th>
+                    <th>Konum</th>
+                    <th>Kalite</th>
+                    <th>Durum</th>
+                    <th>Tarih</th>
+                    <th className="col-num">Teklif</th>
+                    <th className="col-actions">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentRequests.map((request) => (
+                    <CustomerRequestRow key={request.id} request={request} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Aldığı teklifler"
+          subtitle={metrics.offerCount > 0 ? `Toplam ${metrics.offerCount}` : undefined}
+          className="card-wide"
+        >
+          {recentOffers.length === 0 ? (
+            <EmptyState title="Henüz teklif yok." />
+          ) : (
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Teklif No</th>
+                    <th>Talep No</th>
+                    <th>Hizmet Veren</th>
+                    <th>Fiyat</th>
+                    <th>Durum</th>
+                    <th>Tarih</th>
+                    <th className="col-actions">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentOffers.map((offer) => (
+                    <CustomerOfferRow key={offer.id} offer={offer} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Kabul edilen teklifler"
+          subtitle={
+            metrics.acceptedOfferCount > 0
+              ? `Toplam ${metrics.acceptedOfferCount}`
+              : undefined
+          }
+          className="card-wide"
+        >
+          {acceptedOffers.length === 0 ? (
+            <EmptyState title="Henüz kabul edilmiş teklif yok." />
+          ) : (
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Teklif No</th>
+                    <th>Talep No</th>
+                    <th>Hizmet Veren</th>
+                    <th>Fiyat</th>
+                    <th>Durum</th>
+                    <th>Tarih</th>
+                    <th className="col-actions">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {acceptedOffers.map((offer) => (
+                    <CustomerOfferRow key={offer.id} offer={offer} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+      </div>
+    </main>
+  );
+}
+
+function CustomerRequestRow({ request }: { request: CustomerRecentRequest }) {
+  const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
+  return (
+    <tr>
+      <td>
+        <code className="display-number">{requestRef}</code>
+      </td>
+      <td>{request.categoryName}</td>
+      <td>
+        {request.city}
+        {request.district ? `/${request.district}` : ''}
+      </td>
+      <td>
+        <span className={qualityBadgeClass(request.qualityLabel)}>
+          {qualityLabel(request.qualityLabel)}
+        </span>
+      </td>
+      <td>
+        <span className={statusBadgeClass(request.status)}>
+          {requestStatusLabel(request.status)}
+        </span>
+      </td>
+      <td>{formatDateTime(request.submittedAt)}</td>
+      <td className="col-num">
+        {request.offerCount === 0 ? (
+          <span className="cell-muted">0</span>
+        ) : (
+          <span className="badge badge-good">{request.offerCount}</span>
+        )}
+      </td>
+      <td className="col-actions">
+        <Link className="btn btn-secondary btn-sm" href={`/requests/${request.id}`}>
+          Detay
+        </Link>
+      </td>
+    </tr>
+  );
+}
+
+function CustomerOfferRow({ offer }: { offer: CustomerRecentOffer }) {
+  const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;
+  const requestRef = offer.requestNumber ?? `#${offer.requestId.slice(-8)}`;
+  return (
+    <tr>
+      <td>
+        <code className="display-number">{offerRef}</code>
+      </td>
+      <td>
+        <Link href={`/requests/${offer.requestId}`}>
+          <code className="display-number">{requestRef}</code>
+        </Link>
+      </td>
+      <td>
+        <Link href={`/providers/${offer.providerId}`}>{offer.providerName}</Link>
+      </td>
+      <td>{formatPrice(offer.priceAmount, offer.currency)}</td>
+      <td>
+        <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
+      </td>
+      <td>{formatDateTime(offer.submittedAt)}</td>
+      <td className="col-actions">
+        <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
+          Detay
+        </Link>
+      </td>
+    </tr>
+  );
+}

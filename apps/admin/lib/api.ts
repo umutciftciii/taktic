@@ -434,6 +434,98 @@ export type PackagePurchase = {
   };
 };
 
+export const CUSTOMER_SORT_FIELDS = [
+  'name',
+  'createdAt',
+  'lastRequestAt',
+  'requestCount',
+  'offerCount',
+  'acceptedOfferCount',
+] as const;
+
+export type CustomerSortField = (typeof CUSTOMER_SORT_FIELDS)[number];
+
+export type CustomerSortDirection = 'asc' | 'desc';
+
+export type CustomerSummary = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  isActive: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  requestCount: number;
+  offerCount: number;
+  acceptedOfferCount: number;
+  lastRequestAt: string | null;
+  lastRequestCity: string | null;
+};
+
+export type CustomerListMeta = {
+  anonymousRequestCount: number;
+};
+
+export type CustomerListResponse = {
+  items: CustomerSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  meta: CustomerListMeta;
+};
+
+export type CustomerDetail = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+};
+
+export type CustomerMetrics = {
+  requestCount: number;
+  offerCount: number;
+  acceptedOfferCount: number;
+  lastRequestAt: string | null;
+};
+
+export type CustomerRecentRequest = {
+  id: string;
+  requestNumber: string | null;
+  categoryName: string;
+  city: string;
+  district: string;
+  status: ServiceRequestStatus;
+  qualityLabel: QualityLabel;
+  submittedAt: string;
+  offerCount: number;
+};
+
+export type CustomerRecentOffer = {
+  id: string;
+  offerNumber: string | null;
+  requestId: string;
+  requestNumber: string | null;
+  providerId: string;
+  providerName: string;
+  priceAmount: number;
+  currency: string;
+  status: OfferStatus;
+  submittedAt: string;
+};
+
+export type CustomerDetailResponse = {
+  customer: CustomerDetail;
+  metrics: CustomerMetrics;
+  recentRequests: CustomerRecentRequest[];
+  recentOffers: CustomerRecentOffer[];
+  acceptedOffers: CustomerRecentOffer[];
+};
+
 export type AuthUser = {
   id: string;
   email: string | null;
