@@ -1,6 +1,7 @@
 import {
   Allow,
   IsArray,
+  IsEmail,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -8,7 +9,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateServiceRequestAnswerDto {
   @IsString()
@@ -32,9 +33,13 @@ export class CreateServiceRequestDto {
   @IsNotEmpty()
   customerPhone!: string;
 
-  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   @IsString()
-  customerEmail?: string | null;
+  @IsNotEmpty()
+  @IsEmail()
+  customerEmail!: string;
 
   @IsString()
   @IsNotEmpty()

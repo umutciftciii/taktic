@@ -90,7 +90,7 @@ export class ServiceRequestsService {
     const requestData = {
       customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
       customerPhone: normalizePhone(dto.customerPhone),
-      customerEmail: normalizeNullableEmail(dto.customerEmail),
+      customerEmail: normalizeRequiredEmail(dto.customerEmail),
       city: normalizeRequiredString(dto.city, 'City'),
       district: normalizeRequiredString(dto.district, 'District'),
       neighborhood: normalizeNullableString(dto.neighborhood),
@@ -308,7 +308,7 @@ export class ServiceRequestsService {
 
 async function resolveCustomerForCreate(
   tx: Prisma.TransactionClient,
-  data: { customerName: string; customerPhone: string; customerEmail: string | null },
+  data: { customerName: string; customerPhone: string; customerEmail: string },
   user: AuthUser | null,
 ): Promise<string | null> {
   if (user && user.role === UserRole.CUSTOMER) {
@@ -323,12 +323,10 @@ async function resolveCustomerForCreate(
       where: { role: UserRole.CUSTOMER, phone },
       select: { id: true },
     }),
-    email
-      ? tx.user.findFirst({
-          where: { role: UserRole.CUSTOMER, email },
-          select: { id: true },
-        })
-      : Promise.resolve(null),
+    tx.user.findFirst({
+      where: { role: UserRole.CUSTOMER, email },
+      select: { id: true },
+    }),
   ]);
 
   if (byPhone && byEmail && byPhone.id !== byEmail.id) {
@@ -631,9 +629,8 @@ function normalizePhone(value: string) {
   return normalizeRequiredString(value, 'Customer phone').replace(/[^\d+]/g, '');
 }
 
-function normalizeNullableEmail(value: string | null | undefined) {
-  const normalized = normalizeNullableString(value);
-  return normalized ? normalized.toLowerCase() : null;
+function normalizeRequiredEmail(value: unknown) {
+  return normalizeRequiredString(value, 'Customer email').toLowerCase();
 }
 
 // Monetary amounts are stored in minor units (e.g. kuruş for TRY). When a customer

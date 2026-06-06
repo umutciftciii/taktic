@@ -82,9 +82,16 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
             </label>
           </div>
           <label className="form-row">
-            <span>E-posta</span>
-            <input name="customerEmail" type="email" placeholder="ornek@eposta.com" />
-            <span className="help-text">Tekliflerden haberdar olmak için önerilir.</span>
+            <span>E-posta *</span>
+            <input
+              name="customerEmail"
+              type="email"
+              required
+              placeholder="ornek@eposta.com"
+            />
+            <span className="help-text">
+              Tekliflerinizi takip edebilmeniz için e-posta adresiniz gereklidir.
+            </span>
           </label>
           <div className="form-grid">
             <label className="form-row">

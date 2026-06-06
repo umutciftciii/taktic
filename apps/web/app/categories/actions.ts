@@ -17,7 +17,7 @@ export async function submitServiceRequestAction(formData: FormData) {
       categorySlug,
       customerName: readFormString(formData, 'customerName'),
       customerPhone: readFormString(formData, 'customerPhone'),
-      customerEmail: readOptionalFormString(formData, 'customerEmail'),
+      customerEmail: readFormString(formData, 'customerEmail'),
       city: readFormString(formData, 'city'),
       district: readFormString(formData, 'district'),
       neighborhood: readOptionalFormString(formData, 'neighborhood'),
