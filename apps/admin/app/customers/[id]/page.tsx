@@ -381,45 +381,46 @@ function CustomerActivationSection({
   activationExpiresAt?: string;
   activationError?: string;
 }) {
-  const canCreate =
-    customer.customerOrigin === 'AUTO_CREATED_REQUEST' &&
-    !customer.hasPassword &&
-    customer.isActive;
-
-  if (!canCreate && !activationUrl && !activationError) {
+  if (customer.customerOrigin !== 'AUTO_CREATED_REQUEST') {
     return null;
+  }
+
+  if (customer.hasPassword) {
+    return (
+      <SectionCard title="Hesap aktivasyonu" className="card-wide">
+        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+          Aktivasyon tamamlandı. Bu müşteri şifresini belirlemiş; yeni aktivasyon bağlantısı
+          oluşturulmasına gerek yok.
+        </p>
+      </SectionCard>
+    );
+  }
+
+  if (!customer.isActive) {
+    return (
+      <SectionCard title="Hesap aktivasyonu" className="card-wide">
+        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+          Pasif müşteri için aktivasyon linki oluşturulamaz. Önce müşteriyi aktifleştirin.
+        </p>
+      </SectionCard>
+    );
   }
 
   return (
     <SectionCard title="Hesap aktivasyonu" className="card-wide">
-      {!canCreate && !activationUrl && !activationError ? null : null}
-      {canCreate ? (
-        <div style={{ marginBottom: 12 }}>
-          <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-            Bu müşteri talep formu üzerinden otomatik oluşturuldu. Hesabını kullanabilmesi için
-            şifre belirleme bağlantısı oluşturabilirsiniz. Bağlantıyı kopyalayıp WhatsApp / SMS /
-            e-posta ile manuel olarak paylaşın.
-          </p>
-          <form action={createCustomerActivationLinkAction}>
-            <input type="hidden" name="customerId" value={customer.id} />
-            <button type="submit" className="btn btn-primary btn-sm">
-              Aktivasyon linki oluştur
-            </button>
-          </form>
-        </div>
-      ) : null}
-
-      {!canCreate && customer.hasPassword ? (
+      <div style={{ marginBottom: 12 }}>
         <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Bu müşteri için zaten bir şifre tanımlı. Aktivasyon linki üretilmesine gerek yok.
+          Bu müşteri talep formu üzerinden otomatik oluşturuldu. Hesabını kullanabilmesi için şifre
+          belirleme bağlantısı oluşturabilirsiniz. Bağlantıyı kopyalayıp WhatsApp / SMS / e-posta
+          ile manuel olarak paylaşın.
         </p>
-      ) : null}
-
-      {!canCreate && !customer.isActive ? (
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Pasif müşteri için aktivasyon linki oluşturulamaz. Önce müşteriyi aktifleştirin.
-        </p>
-      ) : null}
+        <form action={createCustomerActivationLinkAction}>
+          <input type="hidden" name="customerId" value={customer.id} />
+          <button type="submit" className="btn btn-primary btn-sm">
+            Aktivasyon linki oluştur
+          </button>
+        </form>
+      </div>
 
       {activationError ? (
         <div
