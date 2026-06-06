@@ -537,6 +537,35 @@ export type CustomerDetailResponse = {
   acceptedOffers: CustomerRecentOffer[];
 };
 
+export type CustomerNote = {
+  id: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+};
+
+export type CustomerNotesResponse = {
+  items: CustomerNote[];
+};
+
+export type CreateCustomerNoteInput = {
+  note: string;
+};
+
+export type UpdateCustomerStatusInput = {
+  isActive: boolean;
+};
+
+export type UpdateCustomerStatusResponse = {
+  id: string;
+  isActive: boolean;
+};
+
 export type AuthUser = {
   id: string;
   email: string | null;

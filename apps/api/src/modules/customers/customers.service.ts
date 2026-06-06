@@ -1,11 +1,13 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { CustomerOrigin, OfferStatus, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
 import {
   CustomerSortDirection,
   CustomerSortField,
   ListCustomersDto,
 } from './dto/list-customers.dto';
+import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -362,6 +364,82 @@ export class CustomersService {
       recentOffers: recentOfferRows.map(mapOffer),
       acceptedOffers: acceptedOfferRows.map(mapOffer),
     };
+  }
+
+  async listNotes(customerId: string) {
+    await this.assertCustomerExists(customerId);
+
+    const notes = await this.prisma.customerNote.findMany({
+      where: { customerId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        note: true,
+        createdAt: true,
+        updatedAt: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return { items: notes };
+  }
+
+  async createNote(customerId: string, dto: CreateCustomerNoteDto, actorId: string) {
+    await this.assertCustomerExists(customerId);
+
+    const note = await this.prisma.customerNote.create({
+      data: {
+        customerId,
+        note: dto.note,
+        createdById: actorId,
+      },
+      select: {
+        id: true,
+        note: true,
+        createdAt: true,
+        updatedAt: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return note;
+  }
+
+  async updateStatus(customerId: string, dto: UpdateCustomerStatusDto) {
+    await this.assertCustomerExists(customerId);
+
+    const updated = await this.prisma.user.update({
+      where: { id: customerId },
+      data: { isActive: dto.isActive },
+      select: { id: true, isActive: true },
+    });
+
+    return updated;
+  }
+
+  private async assertCustomerExists(customerId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: customerId },
+      select: { id: true, role: true },
+    });
+
+    if (!user || user.role !== UserRole.CUSTOMER) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    return user;
   }
 }
 

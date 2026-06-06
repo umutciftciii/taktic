@@ -96,10 +96,12 @@ model User {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  serviceRequests    ServiceRequest[]
-  providerProfiles   ProviderProfile[]
-  creditTransactions ProviderCreditTransaction[]
-  sessions           Session[]
+  serviceRequests      ServiceRequest[]
+  providerProfiles     ProviderProfile[]
+  creditTransactions   ProviderCreditTransaction[]
+  sessions             Session[]
+  customerNotes        CustomerNote[]              @relation("CustomerNoteCustomer")
+  createdCustomerNotes CustomerNote[]              @relation("CustomerNoteCreatedBy")
 
   @@index([role])
   @@index([isActive])
@@ -407,5 +409,21 @@ model ProviderCreditTransaction {
   @@index([providerId])
   @@index([type])
   @@index([referenceType, referenceId])
+  @@index([createdAt])
+}
+
+model CustomerNote {
+  id          String   @id @default(cuid())
+  customerId  String
+  note        String
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer  User  @relation("CustomerNoteCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("CustomerNoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@index([createdById])
   @@index([createdAt])
 }

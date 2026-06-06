@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import {
   apiFetch,
   CustomerDetailResponse,
+  CustomerNote,
+  CustomerNotesResponse,
   CustomerRecentOffer,
   CustomerRecentRequest,
   customerOriginBadgeClass,
@@ -20,6 +22,7 @@ import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
+import { createCustomerNoteAction, updateCustomerStatusAction } from '../actions';
 
 type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -42,8 +45,12 @@ export default async function AdminCustomerDetailPage({ params }: CustomerDetail
   const { id } = await params;
 
   let response: CustomerDetailResponse;
+  let notesResponse: CustomerNotesResponse;
   try {
-    response = await apiFetch<CustomerDetailResponse>(`/customers/${id}`);
+    [response, notesResponse] = await Promise.all([
+      apiFetch<CustomerDetailResponse>(`/customers/${id}`),
+      apiFetch<CustomerNotesResponse>(`/customers/${id}/notes`),
+    ]);
   } catch (error) {
     if (isBackendNotFound(error)) {
       notFound();
@@ -51,6 +58,7 @@ export default async function AdminCustomerDetailPage({ params }: CustomerDetail
     throw error;
   }
   const { customer, metrics, recentRequests, recentOffers, acceptedOffers } = response;
+  const notes = notesResponse.items;
 
   const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
   const subtitleParts: string[] = [];
@@ -127,11 +135,35 @@ export default async function AdminCustomerDetailPage({ params }: CustomerDetail
             </dd>
             <dt>Durum</dt>
             <dd>
-              {customer.isActive ? (
-                <span className="badge badge-good">Aktif</span>
-              ) : (
-                <span className="badge badge-bad">Pasif</span>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {customer.isActive ? (
+                  <span className="badge badge-good">Aktif</span>
+                ) : (
+                  <span className="badge badge-bad">Pasif</span>
+                )}
+                <form action={updateCustomerStatusAction}>
+                  <input type="hidden" name="customerId" value={customer.id} />
+                  <input
+                    type="hidden"
+                    name="isActive"
+                    value={customer.isActive ? 'false' : 'true'}
+                  />
+                  <button
+                    type="submit"
+                    className={
+                      customer.isActive ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'
+                    }
+                  >
+                    {customer.isActive ? 'Pasifleştir' : 'Aktifleştir'}
+                  </button>
+                </form>
+              </div>
+              <div
+                className="muted"
+                style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}
+              >
+                Bu alan müşterinin aktiflik durumunu yönetmek için kullanılır.
+              </div>
             </dd>
             <dt>Müşteri tipi</dt>
             <dd>
@@ -166,6 +198,52 @@ export default async function AdminCustomerDetailPage({ params }: CustomerDetail
               </dd>
             </dl>
           </details>
+        </SectionCard>
+
+        <SectionCard
+          title="Müşteri Notları"
+          subtitle={notes.length > 0 ? `Toplam ${notes.length}` : undefined}
+          className="card-wide"
+        >
+          <form
+            action={createCustomerNoteAction}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}
+          >
+            <input type="hidden" name="customerId" value={customer.id} />
+            <textarea
+              className="input"
+              name="note"
+              required
+              minLength={2}
+              maxLength={2000}
+              rows={3}
+              placeholder="Müşteriyle ilgili operasyonel bir not ekleyin..."
+            />
+            <div>
+              <button type="submit" className="btn btn-primary btn-sm">
+                Not ekle
+              </button>
+            </div>
+          </form>
+
+          {notes.length === 0 ? (
+            <EmptyState title="Henüz müşteri notu yok." />
+          ) : (
+            <ul
+              style={{
+                listStyle: 'none',
+                margin: 0,
+                padding: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              {notes.map((note) => (
+                <CustomerNoteItem key={note.id} note={note} />
+              ))}
+            </ul>
+          )}
         </SectionCard>
 
         <SectionCard
@@ -306,6 +384,35 @@ function CustomerRequestRow({ request }: { request: CustomerRecentRequest }) {
         </Link>
       </td>
     </tr>
+  );
+}
+
+function CustomerNoteItem({ note }: { note: CustomerNote }) {
+  const authorName = note.createdBy?.name ?? note.createdBy?.email ?? 'Bilinmeyen kullanıcı';
+  return (
+    <li
+      style={{
+        border: '1px solid var(--border, #e5e7eb)',
+        borderRadius: 8,
+        padding: 12,
+        background: 'var(--surface-soft, #f9fafb)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+          gap: 12,
+          marginBottom: 6,
+          fontSize: 12,
+        }}
+      >
+        <strong>{authorName}</strong>
+        <span className="muted">{formatDateTime(note.createdAt)}</span>
+      </div>
+      <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{note.note}</div>
+    </li>
   );
 }
 
