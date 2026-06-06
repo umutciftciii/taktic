@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
-  IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsOptional,
@@ -23,41 +23,59 @@ export type CustomerSortField = (typeof CUSTOMER_SORT_FIELDS)[number];
 export const CUSTOMER_SORT_DIRECTIONS = ['asc', 'desc'] as const;
 export type CustomerSortDirection = (typeof CUSTOMER_SORT_DIRECTIONS)[number];
 
-const SORT_FIELD_SET = new Set<string>(CUSTOMER_SORT_FIELDS);
+// Transform fonksiyonları "absent" değeri (undefined/null/boş string) için undefined döndürür,
+// böylece @IsOptional() doğru çalışır. Geçersiz değerleri ise OLDUĞU GİBİ geri verir, ki sonraki
+// validator (@IsInt, @IsIn, ...) bunu 400 ile reddedebilsin. Eski permissive pattern (invalid→undefined)
+// silently default'lara düşüyordu — burada onu tekrar etmiyoruz.
 
-function toInt(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
+function toIntOrPass(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? value : value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return undefined;
+    if (!/^-?\d+$/.test(trimmed)) return value;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
 }
 
-function trimOrUndefined(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
+function trimOrUndefined(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return value;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function normalizeSortField(value: unknown): CustomerSortField | undefined {
-  if (typeof value !== 'string') return undefined;
+function normalizeSortFieldOrPass(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return value;
   const trimmed = value.trim();
-  return SORT_FIELD_SET.has(trimmed) ? (trimmed as CustomerSortField) : undefined;
+  if (trimmed === '') return undefined;
+  return trimmed;
 }
 
-function normalizeSortDirection(value: unknown): CustomerSortDirection | undefined {
-  if (typeof value !== 'string') return undefined;
-  const lower = value.trim().toLowerCase();
-  return lower === 'asc' || lower === 'desc' ? lower : undefined;
+function normalizeSortDirectionOrPass(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  const lower = trimmed.toLowerCase();
+  return lower === 'asc' || lower === 'desc' ? lower : trimmed;
 }
 
 export class ListCustomersDto {
   @IsOptional()
-  @Transform(({ value }) => toInt(value))
+  @Transform(({ value }) => toIntOrPass(value))
   @IsInt()
   @Min(1)
   page?: number;
 
   @IsOptional()
-  @Transform(({ value }) => toInt(value))
+  @Transform(({ value }) => toIntOrPass(value))
   @IsInt()
   @Min(1)
   @Max(100)
@@ -84,12 +102,12 @@ export class ListCustomersDto {
   lastRequestTo?: string;
 
   @IsOptional()
-  @Transform(({ value }) => normalizeSortField(value))
-  @IsEnum(CUSTOMER_SORT_FIELDS)
+  @Transform(({ value }) => normalizeSortFieldOrPass(value))
+  @IsIn(CUSTOMER_SORT_FIELDS as readonly string[])
   sortBy?: CustomerSortField;
 
   @IsOptional()
-  @Transform(({ value }) => normalizeSortDirection(value))
-  @IsEnum(CUSTOMER_SORT_DIRECTIONS)
+  @Transform(({ value }) => normalizeSortDirectionOrPass(value))
+  @IsIn(CUSTOMER_SORT_DIRECTIONS as readonly string[])
   sortDir?: CustomerSortDirection;
 }
