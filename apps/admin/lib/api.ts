@@ -447,6 +447,15 @@ export type CustomerSortField = (typeof CUSTOMER_SORT_FIELDS)[number];
 
 export type CustomerSortDirection = 'asc' | 'desc';
 
+export const CUSTOMER_ORIGIN_VALUES = [
+  'REGISTERED',
+  'AUTO_CREATED_REQUEST',
+  'ADMIN_CREATED',
+  'IMPORTED',
+] as const;
+
+export type CustomerOrigin = (typeof CUSTOMER_ORIGIN_VALUES)[number];
+
 export type CustomerSummary = {
   id: string;
   name: string | null;
@@ -455,6 +464,7 @@ export type CustomerSummary = {
   isActive: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  customerOrigin: CustomerOrigin | null;
   requestCount: number;
   offerCount: number;
   acceptedOfferCount: number;
@@ -484,6 +494,7 @@ export type CustomerDetail = {
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;
+  customerOrigin: CustomerOrigin | null;
 };
 
 export type CustomerMetrics = {
@@ -850,6 +861,32 @@ export function refundActionBadgeClass(action: string) {
       return 'badge badge-muted';
     default:
       return 'badge';
+  }
+}
+
+export function customerOriginLabel(origin: CustomerOrigin | null | undefined): string {
+  if (!origin) return 'Bilinmiyor';
+  const labels: Record<CustomerOrigin, string> = {
+    REGISTERED: 'Normal kayıt',
+    AUTO_CREATED_REQUEST: 'Otomatik oluşturulan müşteri',
+    ADMIN_CREATED: 'Admin oluşturdu',
+    IMPORTED: 'İçe aktarıldı',
+  };
+  return labels[origin];
+}
+
+export function customerOriginBadgeClass(origin: CustomerOrigin | null | undefined): string {
+  switch (origin) {
+    case 'REGISTERED':
+      return 'badge badge-good';
+    case 'AUTO_CREATED_REQUEST':
+      return 'badge badge-warn';
+    case 'ADMIN_CREATED':
+      return 'badge';
+    case 'IMPORTED':
+      return 'badge badge-muted';
+    default:
+      return 'badge badge-muted';
   }
 }
 

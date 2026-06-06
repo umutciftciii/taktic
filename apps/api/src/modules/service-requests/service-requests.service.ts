@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { CustomerOrigin, NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { NumberingService } from '../numbering/numbering.service';
@@ -352,6 +352,7 @@ async function resolveCustomerForCreate(
         email,
         isActive: true,
         passwordHash: null,
+        customerOrigin: CustomerOrigin.AUTO_CREATED_REQUEST,
       },
       select: { id: true },
     });

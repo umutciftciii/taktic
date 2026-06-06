@@ -13,6 +13,13 @@ enum UserRole {
   PROVIDER
 }
 
+enum CustomerOrigin {
+  REGISTERED
+  AUTO_CREATED_REQUEST
+  ADMIN_CREATED
+  IMPORTED
+}
+
 enum ServiceRequestQuestionType {
   TEXT
   TEXTAREA
@@ -77,16 +84,17 @@ enum NumberedEntityType {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String?   @unique
-  phone        String?   @unique
-  name         String?
-  role         UserRole
-  isActive     Boolean   @default(true)
-  passwordHash String?
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id             String          @id @default(cuid())
+  email          String?         @unique
+  phone          String?         @unique
+  name           String?
+  role           UserRole
+  isActive       Boolean         @default(true)
+  passwordHash   String?
+  customerOrigin CustomerOrigin?
+  lastLoginAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   serviceRequests    ServiceRequest[]
   providerProfiles   ProviderProfile[]

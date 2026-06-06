@@ -23,6 +23,15 @@ export type CustomerSortField = (typeof CUSTOMER_SORT_FIELDS)[number];
 export const CUSTOMER_SORT_DIRECTIONS = ['asc', 'desc'] as const;
 export type CustomerSortDirection = (typeof CUSTOMER_SORT_DIRECTIONS)[number];
 
+export const CUSTOMER_ORIGIN_VALUES = [
+  'REGISTERED',
+  'AUTO_CREATED_REQUEST',
+  'ADMIN_CREATED',
+  'IMPORTED',
+] as const;
+
+export type CustomerOriginValue = (typeof CUSTOMER_ORIGIN_VALUES)[number];
+
 // Transform fonksiyonları "absent" değeri (undefined/null/boş string) için undefined döndürür,
 // böylece @IsOptional() doğru çalışır. Geçersiz değerleri ise OLDUĞU GİBİ geri verir, ki sonraki
 // validator (@IsInt, @IsIn, ...) bunu 400 ile reddedebilsin. Eski permissive pattern (invalid→undefined)
@@ -56,6 +65,14 @@ function normalizeSortFieldOrPass(value: unknown): unknown {
   const trimmed = value.trim();
   if (trimmed === '') return undefined;
   return trimmed;
+}
+
+function normalizeCustomerOriginOrPass(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  return trimmed.toUpperCase();
 }
 
 function normalizeSortDirectionOrPass(value: unknown): unknown {
@@ -110,4 +127,9 @@ export class ListCustomersDto {
   @Transform(({ value }) => normalizeSortDirectionOrPass(value))
   @IsIn(CUSTOMER_SORT_DIRECTIONS as readonly string[])
   sortDir?: CustomerSortDirection;
+
+  @IsOptional()
+  @Transform(({ value }) => normalizeCustomerOriginOrPass(value))
+  @IsIn(CUSTOMER_ORIGIN_VALUES as readonly string[])
+  customerOrigin?: CustomerOriginValue;
 }

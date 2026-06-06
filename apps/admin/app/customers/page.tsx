@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  CUSTOMER_ORIGIN_VALUES,
   CUSTOMER_SORT_FIELDS,
   CustomerListResponse,
+  CustomerOrigin,
+  customerOriginBadgeClass,
+  customerOriginLabel,
   CustomerSortDirection,
   CustomerSortField,
   CustomerSummary,
@@ -23,6 +27,7 @@ type RawSearchParams = {
   city?: string;
   lastRequestFrom?: string;
   lastRequestTo?: string;
+  customerOrigin?: string;
   sortBy?: string;
   sortDir?: string;
   page?: string;
@@ -53,6 +58,13 @@ function normalizeSortDir(value: string | undefined): CustomerSortDirection {
   if (value === 'asc') return 'asc';
   if (value === 'desc') return 'desc';
   return DEFAULT_SORT_DIR;
+}
+
+function normalizeCustomerOrigin(value: string | undefined): CustomerOrigin | '' {
+  if (value && (CUSTOMER_ORIGIN_VALUES as readonly string[]).includes(value)) {
+    return value as CustomerOrigin;
+  }
+  return '';
 }
 
 function normalizePage(value: string | undefined): number {
@@ -95,6 +107,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
   const city = (params.city ?? '').trim();
   const lastRequestFrom = (params.lastRequestFrom ?? '').trim();
   const lastRequestTo = (params.lastRequestTo ?? '').trim();
+  const customerOrigin = normalizeCustomerOrigin(params.customerOrigin);
   const sortBy = normalizeSortBy(params.sortBy);
   const sortDir = normalizeSortDir(params.sortDir);
   const page = normalizePage(params.page);
@@ -109,6 +122,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
   if (city) apiQuery.set('city', city);
   if (lastRequestFrom) apiQuery.set('lastRequestFrom', lastRequestFrom);
   if (lastRequestTo) apiQuery.set('lastRequestTo', lastRequestTo);
+  if (customerOrigin) apiQuery.set('customerOrigin', customerOrigin);
 
   const response = await apiFetch<CustomerListResponse>(
     `/customers?${apiQuery.toString()}`,
@@ -119,6 +133,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
       city ||
       lastRequestFrom ||
       lastRequestTo ||
+      customerOrigin ||
       sortBy !== DEFAULT_SORT_BY ||
       sortDir !== DEFAULT_SORT_DIR,
   );
@@ -128,6 +143,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
     city,
     lastRequestFrom,
     lastRequestTo,
+    customerOrigin: customerOrigin || undefined,
     sortBy: sortBy !== DEFAULT_SORT_BY ? sortBy : undefined,
     sortDir: sortDir !== DEFAULT_SORT_DIR ? sortDir : undefined,
     pageSize: pageSize !== DEFAULT_PAGE_SIZE ? pageSize : undefined,
@@ -204,6 +220,17 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
             type="date"
             defaultValue={lastRequestTo}
           />
+        </div>
+        <div className="admin-toolbar-field">
+          <label htmlFor="customer-origin">Müşteri tipi</label>
+          <select id="customer-origin" name="customerOrigin" defaultValue={customerOrigin}>
+            <option value="">Tümü</option>
+            {CUSTOMER_ORIGIN_VALUES.map((origin) => (
+              <option key={origin} value={origin}>
+                {customerOriginLabel(origin)}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="admin-toolbar-field">
           <label htmlFor="customer-sort">Sıralama</label>
@@ -336,7 +363,9 @@ function CustomerRow({ customer }: { customer: CustomerSummary }) {
           <Link href={`/customers/${customer.id}`}>
             <strong>{displayName}</strong>
           </Link>
-          <span className="cell-muted">Kayıtlı müşteri</span>
+          <span className={customerOriginBadgeClass(customer.customerOrigin)}>
+            {customerOriginLabel(customer.customerOrigin)}
+          </span>
         </div>
       </td>
       <td>

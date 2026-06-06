@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { OfferStatus, Prisma, UserRole } from '@prisma/client';
+import { CustomerOrigin, OfferStatus, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CustomerSortDirection,
@@ -30,6 +30,7 @@ type CustomerListItem = {
   isActive: boolean;
   createdAt: Date;
   lastLoginAt: Date | null;
+  customerOrigin: CustomerOrigin | null;
   requestCount: number;
   offerCount: number;
   acceptedOfferCount: number;
@@ -67,6 +68,10 @@ export class CustomersService {
       ];
     }
 
+    if (filters.customerOrigin) {
+      userWhere.customerOrigin = filters.customerOrigin as CustomerOrigin;
+    }
+
     // city ve lastRequest* filtreleri müşterinin taleplerine bakar.
     const serviceRequestFilters: Prisma.ServiceRequestWhereInput[] = [];
     if (filters.city) {
@@ -94,6 +99,7 @@ export class CustomersService {
         isActive: true,
         createdAt: true,
         lastLoginAt: true,
+        customerOrigin: true,
       },
     });
 
@@ -187,6 +193,7 @@ export class CustomersService {
         isActive: customer.isActive,
         createdAt: customer.createdAt,
         lastLoginAt: customer.lastLoginAt,
+        customerOrigin: customer.customerOrigin,
         requestCount: requestStat?.count ?? 0,
         offerCount: offerStat?.total ?? 0,
         acceptedOfferCount: offerStat?.accepted ?? 0,
@@ -229,6 +236,7 @@ export class CustomersService {
         createdAt: true,
         updatedAt: true,
         lastLoginAt: true,
+        customerOrigin: true,
       },
     });
 
@@ -342,6 +350,7 @@ export class CustomersService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
         lastLoginAt: user.lastLoginAt,
+        customerOrigin: user.customerOrigin,
       },
       metrics: {
         requestCount,

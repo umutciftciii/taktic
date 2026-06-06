@@ -6,7 +6,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -143,6 +143,7 @@ export class AuthService {
           role,
           isActive: true,
           passwordHash,
+          customerOrigin: role === UserRole.CUSTOMER ? CustomerOrigin.REGISTERED : null,
         },
         select: {
           id: true,

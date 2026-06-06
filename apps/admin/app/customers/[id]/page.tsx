@@ -5,6 +5,8 @@ import {
   CustomerDetailResponse,
   CustomerRecentOffer,
   CustomerRecentRequest,
+  customerOriginBadgeClass,
+  customerOriginLabel,
   formatDateTime,
   formatPrice,
   qualityBadgeClass,
@@ -130,6 +132,21 @@ export default async function AdminCustomerDetailPage({ params }: CustomerDetail
               ) : (
                 <span className="badge badge-bad">Pasif</span>
               )}
+            </dd>
+            <dt>Müşteri tipi</dt>
+            <dd>
+              <span className={customerOriginBadgeClass(customer.customerOrigin)}>
+                {customerOriginLabel(customer.customerOrigin)}
+              </span>
+              {customer.customerOrigin === 'AUTO_CREATED_REQUEST' ? (
+                <div
+                  className="muted"
+                  style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}
+                >
+                  Bu müşteri, talep formu üzerinden otomatik oluşturuldu. Henüz
+                  normal kayıt sürecini tamamlamamış olabilir.
+                </div>
+              ) : null}
             </dd>
             <dt>Kayıt tarihi</dt>
             <dd>{formatDateTime(customer.createdAt)}</dd>
