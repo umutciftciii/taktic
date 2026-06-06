@@ -143,24 +143,26 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
         subtitle="Kayıtlı müşterileri inceleyin, talep ve teklif geçmişlerini takip edin."
       />
 
-      <div
-        className="notice"
-        role="status"
-        style={{
-          marginBottom: 16,
-          padding: '10px 14px',
-          border: '1px solid var(--border, #e5e7eb)',
-          borderRadius: 8,
-          background: 'var(--muted-bg, #f9fafb)',
-          fontSize: 13,
-        }}
-      >
-        Anonim talep sayısı:{' '}
-        <strong>{response.meta.anonymousRequestCount}</strong>
-        <span className="muted" style={{ marginLeft: 8 }}>
-          (Müşteri hesabıyla eşleşmemiş talepler)
-        </span>
-      </div>
+      {response.meta.anonymousRequestCount > 0 ? (
+        <div
+          className="notice"
+          role="status"
+          style={{
+            marginBottom: 16,
+            padding: '10px 14px',
+            border: '1px solid var(--border, #e5e7eb)',
+            borderRadius: 8,
+            background: 'var(--muted-bg, #f9fafb)',
+            fontSize: 13,
+          }}
+        >
+          <strong>Müşteri hesabına bağlanmamış eski talepler var</strong>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {response.meta.anonymousRequestCount} eski talep henüz müşteri
+            hesabıyla eşleşmemiş. Backfill/onarım scripti çalıştırılmalı.
+          </div>
+        </div>
+      ) : null}
 
       <form className="admin-toolbar" method="get" action="/customers">
         <div className="admin-toolbar-field admin-toolbar-search">
