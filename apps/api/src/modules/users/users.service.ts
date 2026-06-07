@@ -8,6 +8,8 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { AdminInviteService } from './admin-invite.service';
+import { CreateUserDto } from './dto/create-user.dto';
 import {
   ListUsersDto,
   UserSortDirection,
@@ -34,7 +36,98 @@ type UserListItem = {
 
 @Injectable()
 export class UsersService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AdminInviteService) private readonly adminInviteService: AdminInviteService,
+  ) {}
+
+  async create(dto: CreateUserDto, actor: AuthUser) {
+    const name = dto.name.trim();
+    const email = dto.email.trim().toLowerCase();
+    const phone = dto.phone ? dto.phone.trim() : null;
+
+    if (name.length < 2) {
+      throw new BadRequestException('Name must be at least 2 characters');
+    }
+
+    const existingEmail = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (existingEmail) {
+      throw new ConflictException('Bu e-posta başka bir kullanıcıya ait.');
+    }
+
+    if (phone) {
+      const existingPhone = await this.prisma.user.findUnique({
+        where: { phone },
+        select: { id: true },
+      });
+      if (existingPhone) {
+        throw new ConflictException('Bu telefon başka bir kullanıcıya ait.');
+      }
+    }
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            name,
+            email,
+            phone,
+            role: UserRole.SUPER_ADMIN,
+            isActive: true,
+            passwordHash: null,
+            customerOrigin: null,
+          },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            role: true,
+            isActive: true,
+            passwordHash: true,
+            createdAt: true,
+          },
+        });
+
+        const invite = await this.adminInviteService.createForUser(tx, user.id, actor.id);
+
+        return { user, invite };
+      });
+
+      return {
+        user: {
+          id: result.user.id,
+          name: result.user.name,
+          email: result.user.email,
+          phone: result.user.phone,
+          role: result.user.role,
+          isActive: result.user.isActive,
+          hasPassword: result.user.passwordHash !== null,
+          createdAt: result.user.createdAt,
+        },
+        inviteUrl: result.invite.inviteUrl,
+        expiresAt: result.invite.expiresAt,
+      };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = Array.isArray(error.meta?.target)
+          ? error.meta.target.join(',')
+          : String(error.meta?.target ?? '');
+        if (target.includes('phone')) {
+          throw new ConflictException('Bu telefon başka bir kullanıcıya ait.');
+        }
+        throw new ConflictException('Bu e-posta başka bir kullanıcıya ait.');
+      }
+      throw error;
+    }
+  }
+
+  createInviteLink(userId: string, actor: AuthUser) {
+    return this.adminInviteService.regenerateForUser(userId, actor.id);
+  }
 
   async list(filters: ListUsersDto) {
     const page = filters.page ?? 1;

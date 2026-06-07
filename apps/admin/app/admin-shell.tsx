@@ -20,7 +20,7 @@ export function AdminShell({ children }: AdminShellProps) {
     setSidebarOpen(false);
   }, [pathname]);
 
-  if (pathname === '/login') {
+  if (pathname === '/login' || pathname === '/admin-invite') {
     return <>{children}</>;
   }
 

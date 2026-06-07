@@ -96,14 +96,16 @@ model User {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  serviceRequests          ServiceRequest[]
-  providerProfiles         ProviderProfile[]
-  creditTransactions       ProviderCreditTransaction[]
-  sessions                 Session[]
-  customerNotes            CustomerNote[]              @relation("CustomerNoteCustomer")
-  createdCustomerNotes     CustomerNote[]              @relation("CustomerNoteCreatedBy")
-  activationTokens         CustomerActivationToken[]   @relation("CustomerActivationTokenCustomer")
-  createdActivationTokens  CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
+  serviceRequests           ServiceRequest[]
+  providerProfiles          ProviderProfile[]
+  creditTransactions        ProviderCreditTransaction[]
+  sessions                  Session[]
+  customerNotes             CustomerNote[]              @relation("CustomerNoteCustomer")
+  createdCustomerNotes      CustomerNote[]              @relation("CustomerNoteCreatedBy")
+  activationTokens          CustomerActivationToken[]   @relation("CustomerActivationTokenCustomer")
+  createdActivationTokens   CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
+  adminInviteTokens         AdminInviteToken[]          @relation("AdminInviteTokenUser")
+  createdAdminInviteTokens  AdminInviteToken[]          @relation("AdminInviteTokenCreatedBy")
 
   @@index([role])
   @@index([isActive])
@@ -443,6 +445,23 @@ model CustomerActivationToken {
   createdBy User? @relation("CustomerActivationTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([customerId])
+  @@index([createdById])
+  @@index([expiresAt])
+}
+
+model AdminInviteToken {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  user      User  @relation("AdminInviteTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("AdminInviteTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
   @@index([createdById])
   @@index([expiresAt])
 }

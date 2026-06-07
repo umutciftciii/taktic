@@ -2,8 +2,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 const authCookieName = process.env.AUTH_COOKIE_NAME ?? 'taktic_session';
 
+const PUBLIC_PATHS = new Set(['/login', '/admin-invite']);
+
 export function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname === '/login') {
+  if (PUBLIC_PATHS.has(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
 

@@ -160,6 +160,11 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
       <PageHeader
         title="Admin Kullanıcıları"
         subtitle="Admin panel kullanıcılarını görüntüleyin; durum ve şifre bilgilerine göre filtreleyin."
+        actions={
+          <Link className="btn btn-primary btn-sm" href="/users/new">
+            Yeni Admin Kullanıcısı
+          </Link>
+        }
       />
 
       <form className="admin-toolbar" method="get" action="/users">

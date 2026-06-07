@@ -659,6 +659,48 @@ export type UpdateUserStatusResponse = {
   isActive: boolean;
 };
 
+export type CreateAdminUserInput = {
+  name: string;
+  email: string;
+  phone?: string;
+};
+
+export type CreateAdminUserResponse = {
+  user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    role: UserRole;
+    isActive: boolean;
+    hasPassword: boolean;
+    createdAt: string;
+  };
+  inviteUrl: string;
+  expiresAt: string;
+};
+
+export type AdminInviteLinkResponse = {
+  inviteUrl: string;
+  expiresAt: string;
+  user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    role: UserRole;
+  };
+};
+
+export type AdminInviteValidateResponse = {
+  valid: true;
+  user: {
+    name: string | null;
+    email: string | null;
+  };
+  expiresAt: string;
+};
+
 export function userRoleLabel(role: UserRole): string {
   const labels: Record<UserRole, string> = {
     SUPER_ADMIN: 'Süper Admin',

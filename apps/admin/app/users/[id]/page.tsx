@@ -11,10 +11,13 @@ import {
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
-import { updateUserStatusAction } from '../actions';
+import { createAdminInviteLinkAction, updateUserStatusAction } from '../actions';
 
 type SearchParams = {
   statusError?: string;
+  inviteUrl?: string;
+  inviteExpiresAt?: string;
+  inviteError?: string;
 };
 
 type AdminUserDetailPageProps = {
@@ -157,6 +160,13 @@ export default async function AdminUserDetailPage({
           </details>
         </SectionCard>
 
+        <AdminInviteSection
+          user={user}
+          inviteUrl={search.inviteUrl}
+          inviteExpiresAt={search.inviteExpiresAt}
+          inviteError={search.inviteError}
+        />
+
         <SectionCard title="Güvenlik & Yönetim" className="card-wide">
           <dl className="meta-row">
             <dt>Durum</dt>
@@ -225,5 +235,106 @@ export default async function AdminUserDetailPage({
         </SectionCard>
       </div>
     </main>
+  );
+}
+
+function AdminInviteSection({
+  user,
+  inviteUrl,
+  inviteExpiresAt,
+  inviteError,
+}: {
+  user: AdminUserDetailResponse['user'];
+  inviteUrl?: string;
+  inviteExpiresAt?: string;
+  inviteError?: string;
+}) {
+  if (user.role !== 'SUPER_ADMIN') {
+    return null;
+  }
+
+  if (user.hasPassword) {
+    return (
+      <SectionCard title="Admin daveti" className="card-wide">
+        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+          Bu admin kullanıcısı şifresini belirlemiş; yeni davet bağlantısı oluşturulmasına gerek
+          yok.
+        </p>
+      </SectionCard>
+    );
+  }
+
+  if (!user.isActive) {
+    return (
+      <SectionCard title="Admin daveti" className="card-wide">
+        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+          Pasif admin kullanıcısı için davet bağlantısı oluşturulamaz. Önce kullanıcıyı
+          aktifleştirin.
+        </p>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <SectionCard title="Admin daveti" className="card-wide">
+      <div style={{ marginBottom: 12 }}>
+        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+          Bu admin kullanıcısı henüz şifre belirlememiş. Şifre belirleme bağlantısı oluşturabilir
+          ve manuel olarak paylaşabilirsiniz. Yeni bir bağlantı oluşturulduğunda önceki kullanılmamış
+          bağlantılar geçersiz olur.
+        </p>
+        <form action={createAdminInviteLinkAction}>
+          <input type="hidden" name="userId" value={user.id} />
+          <button type="submit" className="btn btn-primary btn-sm">
+            Davet linki oluştur
+          </button>
+        </form>
+      </div>
+
+      {inviteError ? (
+        <div
+          role="alert"
+          style={{
+            marginTop: 12,
+            padding: 10,
+            borderRadius: 8,
+            background: 'rgba(220, 38, 38, 0.08)',
+            border: '1px solid rgba(220, 38, 38, 0.25)',
+            color: 'rgb(153, 27, 27)',
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          {inviteError}
+        </div>
+      ) : null}
+
+      {inviteUrl ? (
+        <div style={{ marginTop: 12 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+            Davet bağlantısı oluşturuldu. Bu bağlantı 72 saat geçerlidir.
+          </div>
+          <code
+            style={{
+              display: 'block',
+              padding: 10,
+              background: 'var(--surface-soft, #f3f4f6)',
+              border: '1px solid var(--border, #e5e7eb)',
+              borderRadius: 8,
+              fontSize: 12,
+              lineHeight: 1.5,
+              wordBreak: 'break-all',
+            }}
+          >
+            {inviteUrl}
+          </code>
+          {inviteExpiresAt ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              Son geçerlilik: {formatDateTime(inviteExpiresAt)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </SectionCard>
   );
 }
