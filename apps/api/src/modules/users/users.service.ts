@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   CustomerOrigin,
   OfferStatus,
@@ -7,11 +13,13 @@ import {
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../auth/auth.types';
 import {
   ListUsersDto,
   UserSortDirection,
   UserSortField,
 } from './dto/list-users.dto';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -293,6 +301,44 @@ export class UsersService {
       providerProfiles,
       customerSummary,
     };
+  }
+
+  async updateStatus(id: string, dto: UpdateUserStatusDto, actor: AuthUser) {
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, isActive: true },
+    });
+
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (target.isActive === dto.isActive) {
+      return { id: target.id, isActive: target.isActive };
+    }
+
+    if (dto.isActive === false) {
+      if (actor.id === target.id) {
+        throw new ConflictException('Kendi hesabınızı pasifleştiremezsiniz.');
+      }
+
+      if (target.role === UserRole.SUPER_ADMIN) {
+        const activeSuperAdminCount = await this.prisma.user.count({
+          where: { role: UserRole.SUPER_ADMIN, isActive: true },
+        });
+        if (activeSuperAdminCount <= 1) {
+          throw new ConflictException('Son aktif süper admin pasifleştirilemez.');
+        }
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: target.id },
+      data: { isActive: dto.isActive },
+      select: { id: true, isActive: true },
+    });
+
+    return updated;
   }
 }
 

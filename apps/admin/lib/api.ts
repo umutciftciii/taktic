@@ -674,6 +674,15 @@ export type AdminUserDetailResponse = {
   customerSummary: AdminUserCustomerSummary | null;
 };
 
+export type UpdateUserStatusInput = {
+  isActive: boolean;
+};
+
+export type UpdateUserStatusResponse = {
+  id: string;
+  isActive: boolean;
+};
+
 export function userRoleLabel(role: UserRole): string {
   const labels: Record<UserRole, string> = {
     SUPER_ADMIN: 'Süper Admin',

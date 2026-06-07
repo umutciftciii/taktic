@@ -18,9 +18,15 @@ import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
+import { updateUserStatusAction } from '../actions';
+
+type SearchParams = {
+  statusError?: string;
+};
 
 type AdminUserDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<SearchParams>;
 };
 
 function isBackendNotFound(error: unknown): boolean {
@@ -33,9 +39,13 @@ function isBackendNotFound(error: unknown): boolean {
   }
 }
 
-export default async function AdminUserDetailPage({ params }: AdminUserDetailPageProps) {
-  await requireAdmin();
+export default async function AdminUserDetailPage({
+  params,
+  searchParams,
+}: AdminUserDetailPageProps) {
+  const actor = await requireAdmin();
   const { id } = await params;
+  const search = (await searchParams) ?? {};
 
   let response: AdminUserDetailResponse;
   try {
@@ -48,6 +58,7 @@ export default async function AdminUserDetailPage({ params }: AdminUserDetailPag
   }
 
   const { user, metrics, providerProfiles, customerSummary } = response;
+  const isSelf = actor.id === user.id;
 
   const displayName = user.name ?? user.email ?? user.phone ?? '—';
   const subtitleParts: string[] = [];
@@ -233,8 +244,69 @@ export default async function AdminUserDetailPage({ params }: AdminUserDetailPag
         ) : null}
 
         <SectionCard title="Güvenlik & Yönetim" className="card-wide">
-          <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-            Kullanıcı durum yönetimi ve şifre sıfırlama sonraki fazda eklenecek.
+          <dl className="meta-row">
+            <dt>Durum</dt>
+            <dd>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+              >
+                {user.isActive ? (
+                  <span className="badge badge-good">Aktif</span>
+                ) : (
+                  <span className="badge badge-bad">Pasif</span>
+                )}
+                {isSelf && user.isActive ? null : (
+                  <form action={updateUserStatusAction}>
+                    <input type="hidden" name="userId" value={user.id} />
+                    <input
+                      type="hidden"
+                      name="isActive"
+                      value={user.isActive ? 'false' : 'true'}
+                    />
+                    <button
+                      type="submit"
+                      className={
+                        user.isActive
+                          ? 'btn btn-secondary btn-sm'
+                          : 'btn btn-primary btn-sm'
+                      }
+                    >
+                      {user.isActive ? 'Pasifleştir' : 'Aktifleştir'}
+                    </button>
+                  </form>
+                )}
+              </div>
+              <div
+                className="muted"
+                style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}
+              >
+                {isSelf
+                  ? 'Kendi hesabınızı pasifleştiremezsiniz.'
+                  : user.isActive
+                    ? 'Pasif kullanıcılar giriş yapamaz.'
+                    : 'Aktifleştirilen kullanıcı yeniden giriş yapabilir.'}
+              </div>
+              {search.statusError ? (
+                <div
+                  role="alert"
+                  style={{
+                    marginTop: 8,
+                    padding: 10,
+                    borderRadius: 8,
+                    background: 'rgba(220, 38, 38, 0.08)',
+                    border: '1px solid rgba(220, 38, 38, 0.25)',
+                    color: 'rgb(153, 27, 27)',
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {search.statusError}
+                </div>
+              ) : null}
+            </dd>
+          </dl>
+          <p className="muted" style={{ marginTop: 12, lineHeight: 1.5 }}>
+            Rol değişikliği ve şifre sıfırlama sonraki fazda eklenecek.
           </p>
         </SectionCard>
       </div>
