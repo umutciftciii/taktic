@@ -588,6 +588,114 @@ export type AuthUser = {
   isActive: boolean;
 };
 
+export type UserRole = 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+
+export const USER_ROLE_VALUES = ['SUPER_ADMIN', 'CUSTOMER', 'PROVIDER'] as const;
+
+export const USER_SORT_FIELDS = [
+  'name',
+  'email',
+  'role',
+  'createdAt',
+  'lastLoginAt',
+  'isActive',
+] as const;
+
+export type AdminUserSortField = (typeof USER_SORT_FIELDS)[number];
+
+export const USER_SORT_DIRECTIONS = ['asc', 'desc'] as const;
+export type AdminUserSortDirection = (typeof USER_SORT_DIRECTIONS)[number];
+
+export type AdminUserSummary = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  role: UserRole;
+  isActive: boolean;
+  customerOrigin: CustomerOrigin | null;
+  hasPassword: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  providerProfileCount: number;
+  activeSessionCount: number;
+};
+
+export type AdminUsersResponse = {
+  items: AdminUserSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
+
+export type AdminUserDetail = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  role: UserRole;
+  isActive: boolean;
+  customerOrigin: CustomerOrigin | null;
+  hasPassword: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminUserMetrics = {
+  activeSessionCount: number;
+  providerProfileCount: number;
+  customerRequestCount: number;
+  customerOfferCount: number;
+};
+
+export type AdminUserProviderProfile = {
+  id: string;
+  businessName: string;
+  status: ProviderStatus;
+  city: string;
+  district: string;
+  createdAt: string;
+};
+
+export type AdminUserCustomerSummary = {
+  requestCount: number;
+  offerCount: number;
+  acceptedOfferCount: number;
+  lastRequestAt: string | null;
+};
+
+export type AdminUserDetailResponse = {
+  user: AdminUserDetail;
+  metrics: AdminUserMetrics;
+  providerProfiles: AdminUserProviderProfile[];
+  customerSummary: AdminUserCustomerSummary | null;
+};
+
+export function userRoleLabel(role: UserRole): string {
+  const labels: Record<UserRole, string> = {
+    SUPER_ADMIN: 'Süper Admin',
+    CUSTOMER: 'Müşteri',
+    PROVIDER: 'Hizmet Veren',
+  };
+  return labels[role] ?? role;
+}
+
+export function userRoleBadgeClass(role: UserRole): string {
+  switch (role) {
+    case 'SUPER_ADMIN':
+      return 'badge badge-warn';
+    case 'PROVIDER':
+      return 'badge badge-good';
+    case 'CUSTOMER':
+      return 'badge';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
 export type AdminSummary = {
   totalRequests: number;
   pendingRequests: number;

@@ -41,6 +41,10 @@ export const navGroups: NavGroup[] = [
       { href: '/refund-scan', label: 'İade Taraması' },
     ],
   },
+  {
+    title: 'Yönetim',
+    items: [{ href: '/users', label: 'Kullanıcılar' }],
+  },
 ];
 
 export function isNavItemActive(item: NavItem, pathname: string): boolean {
