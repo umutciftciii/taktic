@@ -2,19 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
   AdminUserDetailResponse,
-  AdminUserProviderProfile,
   apiFetch,
-  customerOriginBadgeClass,
-  customerOriginLabel,
-  formatDate,
   formatDateTime,
   requireAdmin,
-  statusBadgeClass,
-  statusLabel,
   userRoleBadgeClass,
   userRoleLabel,
 } from '../../../lib/api';
-import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
@@ -57,7 +50,7 @@ export default async function AdminUserDetailPage({
     throw error;
   }
 
-  const { user, metrics, providerProfiles, customerSummary } = response;
+  const { user, metrics } = response;
   const isSelf = actor.id === user.id;
 
   const displayName = user.name ?? user.email ?? user.phone ?? '—';
@@ -70,7 +63,7 @@ export default async function AdminUserDetailPage({
       <PageHeader
         breadcrumbs={[
           { label: 'Dashboard', href: '/' },
-          { label: 'Kullanıcılar', href: '/users' },
+          { label: 'Admin Kullanıcıları', href: '/users' },
           { label: displayName },
         ]}
         title={displayName}
@@ -97,9 +90,6 @@ export default async function AdminUserDetailPage({
 
       <section className="stat-grid">
         <StatCard label="Aktif oturum" value={metrics.activeSessionCount} />
-        <StatCard label="Provider profili" value={metrics.providerProfileCount} />
-        <StatCard label="Müşteri talebi" value={metrics.customerRequestCount} />
-        <StatCard label="Müşteri teklifi" value={metrics.customerOfferCount} />
       </section>
 
       <div className="provider-detail-card-grid">
@@ -147,16 +137,6 @@ export default async function AdminUserDetailPage({
                 <span className="badge badge-warn">Şifre yok</span>
               )}
             </dd>
-            {user.role === 'CUSTOMER' ? (
-              <>
-                <dt>Müşteri tipi</dt>
-                <dd>
-                  <span className={customerOriginBadgeClass(user.customerOrigin)}>
-                    {customerOriginLabel(user.customerOrigin)}
-                  </span>
-                </dd>
-              </>
-            ) : null}
             <dt>Kayıt tarihi</dt>
             <dd>{formatDateTime(user.createdAt)}</dd>
             <dt>Son giriş</dt>
@@ -176,72 +156,6 @@ export default async function AdminUserDetailPage({
             </dl>
           </details>
         </SectionCard>
-
-        {user.role === 'PROVIDER' ? (
-          <SectionCard
-            title="Provider profilleri"
-            subtitle={
-              providerProfiles.length > 0 ? `Toplam ${providerProfiles.length}` : undefined
-            }
-            className="card-wide"
-            padded={providerProfiles.length === 0}
-          >
-            {providerProfiles.length === 0 ? (
-              <EmptyState title="Bu kullanıcıya bağlı provider profili yok." />
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>İşletme</th>
-                      <th>Durum</th>
-                      <th>Şehir / İlçe</th>
-                      <th>Kayıt tarihi</th>
-                      <th className="col-actions">İşlem</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {providerProfiles.map((profile) => (
-                      <ProviderProfileRow key={profile.id} profile={profile} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
-        ) : null}
-
-        {user.role === 'CUSTOMER' && customerSummary ? (
-          <SectionCard title="Müşteri özeti" className="card-wide">
-            <dl className="meta-row">
-              <dt>Talep sayısı</dt>
-              <dd>{customerSummary.requestCount}</dd>
-              <dt>Teklif sayısı</dt>
-              <dd>{customerSummary.offerCount}</dd>
-              <dt>Kabul edilen teklif</dt>
-              <dd>
-                {customerSummary.acceptedOfferCount === 0 ? (
-                  '0'
-                ) : (
-                  <span className="badge badge-good">
-                    {customerSummary.acceptedOfferCount}
-                  </span>
-                )}
-              </dd>
-              <dt>Son talep</dt>
-              <dd>
-                {customerSummary.lastRequestAt
-                  ? formatDateTime(customerSummary.lastRequestAt)
-                  : '-'}
-              </dd>
-            </dl>
-            <div style={{ marginTop: 12 }}>
-              <Link className="btn btn-secondary btn-sm" href={`/customers/${user.id}`}>
-                Müşteri detayını aç
-              </Link>
-            </div>
-          </SectionCard>
-        ) : null}
 
         <SectionCard title="Güvenlik & Yönetim" className="card-wide">
           <dl className="meta-row">
@@ -311,30 +225,5 @@ export default async function AdminUserDetailPage({
         </SectionCard>
       </div>
     </main>
-  );
-}
-
-function ProviderProfileRow({ profile }: { profile: AdminUserProviderProfile }) {
-  return (
-    <tr>
-      <td>
-        <Link href={`/providers/${profile.id}`}>
-          <strong>{profile.businessName}</strong>
-        </Link>
-      </td>
-      <td>
-        <span className={statusBadgeClass(profile.status)}>{statusLabel(profile.status)}</span>
-      </td>
-      <td>
-        {profile.city}
-        {profile.district ? `/${profile.district}` : ''}
-      </td>
-      <td>{formatDate(profile.createdAt)}</td>
-      <td className="col-actions">
-        <Link className="btn btn-secondary btn-sm" href={`/providers/${profile.id}`}>
-          Detay
-        </Link>
-      </td>
-    </tr>
   );
 }

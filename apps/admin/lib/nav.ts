@@ -43,7 +43,7 @@ export const navGroups: NavGroup[] = [
   },
   {
     title: 'Yönetim',
-    items: [{ href: '/users', label: 'Kullanıcılar' }],
+    items: [{ href: '/users', label: 'Admin Kullanıcıları' }],
   },
 ];
 

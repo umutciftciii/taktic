@@ -15,17 +15,6 @@ export type UserSortField = (typeof USER_SORT_FIELDS)[number];
 export const USER_SORT_DIRECTIONS = ['asc', 'desc'] as const;
 export type UserSortDirection = (typeof USER_SORT_DIRECTIONS)[number];
 
-export const USER_ROLE_VALUES = ['SUPER_ADMIN', 'CUSTOMER', 'PROVIDER'] as const;
-export type UserRoleValue = (typeof USER_ROLE_VALUES)[number];
-
-export const USER_CUSTOMER_ORIGIN_VALUES = [
-  'REGISTERED',
-  'AUTO_CREATED_REQUEST',
-  'ADMIN_CREATED',
-  'IMPORTED',
-] as const;
-export type UserCustomerOriginValue = (typeof USER_CUSTOMER_ORIGIN_VALUES)[number];
-
 export const USER_BOOLEAN_VALUES = ['true', 'false'] as const;
 export type UserBooleanValue = (typeof USER_BOOLEAN_VALUES)[number];
 
@@ -51,14 +40,6 @@ function trimOrUndefined(value: unknown): unknown {
   if (typeof value !== 'string') return value;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizeUpperOrPass(value: unknown): unknown {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string') return value;
-  const trimmed = value.trim();
-  if (trimmed === '') return undefined;
-  return trimmed.toUpperCase();
 }
 
 function normalizeLowerOrPass(value: unknown): unknown {
@@ -97,19 +78,9 @@ export class ListUsersDto {
   q?: string;
 
   @IsOptional()
-  @Transform(({ value }) => normalizeUpperOrPass(value))
-  @IsIn(USER_ROLE_VALUES as readonly string[])
-  role?: UserRoleValue;
-
-  @IsOptional()
   @Transform(({ value }) => normalizeLowerOrPass(value))
   @IsIn(USER_BOOLEAN_VALUES as readonly string[])
   isActive?: UserBooleanValue;
-
-  @IsOptional()
-  @Transform(({ value }) => normalizeUpperOrPass(value))
-  @IsIn(USER_CUSTOMER_ORIGIN_VALUES as readonly string[])
-  customerOrigin?: UserCustomerOriginValue;
 
   @IsOptional()
   @Transform(({ value }) => normalizeLowerOrPass(value))

@@ -5,18 +5,10 @@ import {
   AdminUserSummary,
   AdminUsersResponse,
   apiFetch,
-  CUSTOMER_ORIGIN_VALUES,
-  CustomerOrigin,
-  customerOriginBadgeClass,
-  customerOriginLabel,
   formatDate,
   formatDateTime,
   requireAdmin,
-  UserRole,
-  USER_ROLE_VALUES,
   USER_SORT_FIELDS,
-  userRoleBadgeClass,
-  userRoleLabel,
 } from '../../lib/api';
 import { EmptyState } from '../../components/empty-state';
 import { PageHeader } from '../../components/page-header';
@@ -28,9 +20,7 @@ const DEFAULT_SORT_DIR: AdminUserSortDirection = 'desc';
 
 type RawSearchParams = {
   q?: string;
-  role?: string;
   isActive?: string;
-  customerOrigin?: string;
   hasPassword?: string;
   createdFrom?: string;
   createdTo?: string;
@@ -66,20 +56,6 @@ function normalizeSortDir(value: string | undefined): AdminUserSortDirection {
   if (value === 'asc') return 'asc';
   if (value === 'desc') return 'desc';
   return DEFAULT_SORT_DIR;
-}
-
-function normalizeRole(value: string | undefined): UserRole | '' {
-  if (value && (USER_ROLE_VALUES as readonly string[]).includes(value)) {
-    return value as UserRole;
-  }
-  return '';
-}
-
-function normalizeCustomerOrigin(value: string | undefined): CustomerOrigin | '' {
-  if (value && (CUSTOMER_ORIGIN_VALUES as readonly string[]).includes(value)) {
-    return value as CustomerOrigin;
-  }
-  return '';
 }
 
 function normalizeBool(value: string | undefined): 'true' | 'false' | '' {
@@ -125,9 +101,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
-  const role = normalizeRole(params.role);
   const isActive = normalizeBool(params.isActive);
-  const customerOrigin = normalizeCustomerOrigin(params.customerOrigin);
   const hasPassword = normalizeBool(params.hasPassword);
   const createdFrom = (params.createdFrom ?? '').trim();
   const createdTo = (params.createdTo ?? '').trim();
@@ -144,9 +118,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
   apiQuery.set('sortBy', sortBy);
   apiQuery.set('sortDir', sortDir);
   if (q) apiQuery.set('q', q);
-  if (role) apiQuery.set('role', role);
   if (isActive) apiQuery.set('isActive', isActive);
-  if (customerOrigin) apiQuery.set('customerOrigin', customerOrigin);
   if (hasPassword) apiQuery.set('hasPassword', hasPassword);
   if (createdFrom) apiQuery.set('createdFrom', createdFrom);
   if (createdTo) apiQuery.set('createdTo', createdTo);
@@ -157,9 +129,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
 
   const hasFilters = Boolean(
     q ||
-      role ||
       isActive ||
-      customerOrigin ||
       hasPassword ||
       createdFrom ||
       createdTo ||
@@ -171,9 +141,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
 
   const baseParams: Record<string, string | number | undefined> = {
     q,
-    role: role || undefined,
     isActive: isActive || undefined,
-    customerOrigin: customerOrigin || undefined,
     hasPassword: hasPassword || undefined,
     createdFrom,
     createdTo,
@@ -190,8 +158,8 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
   return (
     <main className="users-page">
       <PageHeader
-        title="Kullanıcılar"
-        subtitle="Platformdaki tüm kullanıcıları görüntüleyin; rol, durum ve şifre bilgilerine göre filtreleyin."
+        title="Admin Kullanıcıları"
+        subtitle="Admin panel kullanıcılarını görüntüleyin; durum ve şifre bilgilerine göre filtreleyin."
       />
 
       <form className="admin-toolbar" method="get" action="/users">
@@ -207,17 +175,6 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
           />
         </div>
         <div className="admin-toolbar-field">
-          <label htmlFor="user-role">Rol</label>
-          <select id="user-role" name="role" defaultValue={role}>
-            <option value="">Tümü</option>
-            {USER_ROLE_VALUES.map((value) => (
-              <option key={value} value={value}>
-                {userRoleLabel(value)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="admin-toolbar-field">
           <label htmlFor="user-active">Durum</label>
           <select id="user-active" name="isActive" defaultValue={isActive}>
             <option value="">Tümü</option>
@@ -231,17 +188,6 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
             <option value="">Tümü</option>
             <option value="true">Şifre var</option>
             <option value="false">Şifre yok</option>
-          </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-origin">Müşteri tipi</label>
-          <select id="user-origin" name="customerOrigin" defaultValue={customerOrigin}>
-            <option value="">Tümü</option>
-            {CUSTOMER_ORIGIN_VALUES.map((origin) => (
-              <option key={origin} value={origin}>
-                {customerOriginLabel(origin)}
-              </option>
-            ))}
           </select>
         </div>
         <div className="admin-toolbar-field">
@@ -315,17 +261,17 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
       </form>
 
       <SectionCard
-        title="Kullanıcı listesi"
+        title="Admin kullanıcıları"
         subtitle={`Sayfa ${response.page} · ${response.pageSize} kullanıcı/sayfa`}
         padded={false}
       >
         {response.items.length === 0 ? (
           <EmptyState
-            title="Kullanıcı bulunamadı"
+            title="Admin kullanıcısı bulunamadı"
             description={
               hasFilters
                 ? 'Aramayı daraltabilir veya filtreleri temizleyebilirsiniz.'
-                : 'Kayıtlı kullanıcılar eklendikçe burada listelenecek.'
+                : 'Kayıtlı admin kullanıcıları eklendikçe burada listelenecek.'
             }
             action={
               hasFilters ? (
@@ -341,12 +287,10 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
               <thead>
                 <tr>
                   <th>Kullanıcı</th>
-                  <th>Rol</th>
-                  <th>Kaynak / Müşteri Tipi</th>
+                  <th>E-posta</th>
                   <th>Telefon</th>
                   <th>Durum</th>
                   <th>Şifre</th>
-                  <th className="col-num">Provider Profili</th>
                   <th className="col-num">Aktif Oturum</th>
                   <th>Son Giriş</th>
                   <th>Kayıt Tarihi</th>
@@ -407,19 +351,15 @@ function UserRow({ user }: { user: AdminUserSummary }) {
           <Link href={`/users/${user.id}`}>
             <strong>{displayName}</strong>
           </Link>
-          {user.email ? <span className="cell-muted">{user.email}</span> : null}
         </div>
       </td>
       <td>
-        <span className={userRoleBadgeClass(user.role)}>{userRoleLabel(user.role)}</span>
-      </td>
-      <td>
-        {user.role === 'CUSTOMER' ? (
-          <span className={customerOriginBadgeClass(user.customerOrigin)}>
-            {customerOriginLabel(user.customerOrigin)}
-          </span>
+        {user.email ? (
+          <a className="cell-link" href={`mailto:${user.email}`}>
+            {user.email}
+          </a>
         ) : (
-          <span className="cell-muted">—</span>
+          <span className="cell-muted">-</span>
         )}
       </td>
       <td>
@@ -443,13 +383,6 @@ function UserRow({ user }: { user: AdminUserSummary }) {
           <span className="badge badge-good">Şifre var</span>
         ) : (
           <span className="badge badge-warn">Şifre yok</span>
-        )}
-      </td>
-      <td className="col-num">
-        {user.providerProfileCount === 0 ? (
-          <span className="cell-muted">0</span>
-        ) : (
-          user.providerProfileCount
         )}
       </td>
       <td className="col-num">

@@ -613,12 +613,10 @@ export type AdminUserSummary = {
   phone: string | null;
   role: UserRole;
   isActive: boolean;
-  customerOrigin: CustomerOrigin | null;
   hasPassword: boolean;
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
-  providerProfileCount: number;
   activeSessionCount: number;
 };
 
@@ -637,7 +635,6 @@ export type AdminUserDetail = {
   phone: string | null;
   role: UserRole;
   isActive: boolean;
-  customerOrigin: CustomerOrigin | null;
   hasPassword: boolean;
   lastLoginAt: string | null;
   createdAt: string;
@@ -646,32 +643,11 @@ export type AdminUserDetail = {
 
 export type AdminUserMetrics = {
   activeSessionCount: number;
-  providerProfileCount: number;
-  customerRequestCount: number;
-  customerOfferCount: number;
-};
-
-export type AdminUserProviderProfile = {
-  id: string;
-  businessName: string;
-  status: ProviderStatus;
-  city: string;
-  district: string;
-  createdAt: string;
-};
-
-export type AdminUserCustomerSummary = {
-  requestCount: number;
-  offerCount: number;
-  acceptedOfferCount: number;
-  lastRequestAt: string | null;
 };
 
 export type AdminUserDetailResponse = {
   user: AdminUserDetail;
   metrics: AdminUserMetrics;
-  providerProfiles: AdminUserProviderProfile[];
-  customerSummary: AdminUserCustomerSummary | null;
 };
 
 export type UpdateUserStatusInput = {

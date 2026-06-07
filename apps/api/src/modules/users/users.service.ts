@@ -5,13 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  CustomerOrigin,
-  OfferStatus,
-  Prisma,
-  ProviderStatus,
-  UserRole,
-} from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
@@ -31,12 +25,10 @@ type UserListItem = {
   phone: string | null;
   role: UserRole;
   isActive: boolean;
-  customerOrigin: CustomerOrigin | null;
   hasPassword: boolean;
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  providerProfileCount: number;
   activeSessionCount: number;
 };
 
@@ -63,7 +55,9 @@ export class UsersService {
       'lastLoginTo',
     );
 
-    const where: Prisma.UserWhereInput = {};
+    const where: Prisma.UserWhereInput = {
+      role: UserRole.SUPER_ADMIN,
+    };
 
     if (filters.q) {
       const term = filters.q;
@@ -74,16 +68,8 @@ export class UsersService {
       ];
     }
 
-    if (filters.role) {
-      where.role = filters.role as UserRole;
-    }
-
     if (filters.isActive !== undefined) {
       where.isActive = filters.isActive === 'true';
-    }
-
-    if (filters.customerOrigin) {
-      where.customerOrigin = filters.customerOrigin as CustomerOrigin;
     }
 
     if (filters.hasPassword !== undefined) {
@@ -113,7 +99,6 @@ export class UsersService {
           phone: true,
           role: true,
           isActive: true,
-          customerOrigin: true,
           lastLoginAt: true,
           createdAt: true,
           updatedAt: true,
@@ -124,17 +109,10 @@ export class UsersService {
 
     const userIds = rows.map((row) => row.id);
 
-    const [providerCounts, sessionCounts] = await Promise.all([
+    const sessionCounts =
       userIds.length === 0
-        ? Promise.resolve([] as Array<{ userId: string | null; _count: { _all: number } }>)
-        : this.prisma.providerProfile.groupBy({
-            by: ['userId'],
-            where: { userId: { in: userIds } },
-            _count: { _all: true },
-          }),
-      userIds.length === 0
-        ? Promise.resolve([] as Array<{ userId: string; _count: { _all: number } }>)
-        : this.prisma.session.groupBy({
+        ? ([] as Array<{ userId: string; _count: { _all: number } }>)
+        : await this.prisma.session.groupBy({
             by: ['userId'],
             where: {
               userId: { in: userIds },
@@ -142,14 +120,7 @@ export class UsersService {
               expiresAt: { gt: new Date() },
             },
             _count: { _all: true },
-          }),
-    ]);
-
-    const providerCountByUser = new Map<string, number>();
-    for (const row of providerCounts) {
-      if (!row.userId) continue;
-      providerCountByUser.set(row.userId, row._count._all);
-    }
+          });
 
     const sessionCountByUser = new Map<string, number>();
     for (const row of sessionCounts) {
@@ -163,12 +134,10 @@ export class UsersService {
       phone: row.phone,
       role: row.role,
       isActive: row.isActive,
-      customerOrigin: row.customerOrigin,
       hasPassword: row.passwordHash !== null,
       lastLoginAt: row.lastLoginAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      providerProfileCount: providerCountByUser.get(row.id) ?? 0,
       activeSessionCount: sessionCountByUser.get(row.id) ?? 0,
     }));
 
@@ -184,8 +153,8 @@ export class UsersService {
   }
 
   async detail(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
+    const user = await this.prisma.user.findFirst({
+      where: { id, role: UserRole.SUPER_ADMIN },
       select: {
         id: true,
         name: true,
@@ -193,7 +162,6 @@ export class UsersService {
         phone: true,
         role: true,
         isActive: true,
-        customerOrigin: true,
         lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
@@ -208,75 +176,13 @@ export class UsersService {
     const hasPassword = user.passwordHash !== null;
     const now = new Date();
 
-    const [
-      activeSessionCount,
-      providerProfileCount,
-      providerProfiles,
-      customerRequestCount,
-      customerOfferCount,
-      acceptedOfferCount,
-      lastCustomerRequest,
-    ] = await Promise.all([
-      this.prisma.session.count({
-        where: {
-          userId: id,
-          revokedAt: null,
-          expiresAt: { gt: now },
-        },
-      }),
-      this.prisma.providerProfile.count({ where: { userId: id } }),
-      user.role === UserRole.PROVIDER
-        ? this.prisma.providerProfile.findMany({
-            where: { userId: id },
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-            select: {
-              id: true,
-              businessName: true,
-              status: true,
-              city: true,
-              district: true,
-              createdAt: true,
-            },
-          })
-        : Promise.resolve(
-            [] as Array<{
-              id: string;
-              businessName: string;
-              status: ProviderStatus;
-              city: string;
-              district: string;
-              createdAt: Date;
-            }>,
-          ),
-      user.role === UserRole.CUSTOMER
-        ? this.prisma.serviceRequest.count({ where: { customerId: id } })
-        : Promise.resolve(0),
-      user.role === UserRole.CUSTOMER
-        ? this.prisma.offer.count({ where: { request: { customerId: id } } })
-        : Promise.resolve(0),
-      user.role === UserRole.CUSTOMER
-        ? this.prisma.offer.count({
-            where: { request: { customerId: id }, status: OfferStatus.ACCEPTED },
-          })
-        : Promise.resolve(0),
-      user.role === UserRole.CUSTOMER
-        ? this.prisma.serviceRequest.findFirst({
-            where: { customerId: id },
-            orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
-            select: { submittedAt: true },
-          })
-        : Promise.resolve(null as { submittedAt: Date } | null),
-    ]);
-
-    const customerSummary =
-      user.role === UserRole.CUSTOMER
-        ? {
-            requestCount: customerRequestCount,
-            offerCount: customerOfferCount,
-            acceptedOfferCount,
-            lastRequestAt: lastCustomerRequest?.submittedAt ?? null,
-          }
-        : null;
+    const activeSessionCount = await this.prisma.session.count({
+      where: {
+        userId: id,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+    });
 
     return {
       user: {
@@ -286,7 +192,6 @@ export class UsersService {
         phone: user.phone,
         role: user.role,
         isActive: user.isActive,
-        customerOrigin: user.customerOrigin,
         hasPassword,
         lastLoginAt: user.lastLoginAt,
         createdAt: user.createdAt,
@@ -294,18 +199,13 @@ export class UsersService {
       },
       metrics: {
         activeSessionCount,
-        providerProfileCount,
-        customerRequestCount: user.role === UserRole.CUSTOMER ? customerRequestCount : 0,
-        customerOfferCount: user.role === UserRole.CUSTOMER ? customerOfferCount : 0,
       },
-      providerProfiles,
-      customerSummary,
     };
   }
 
   async updateStatus(id: string, dto: UpdateUserStatusDto, actor: AuthUser) {
-    const target = await this.prisma.user.findUnique({
-      where: { id },
+    const target = await this.prisma.user.findFirst({
+      where: { id, role: UserRole.SUPER_ADMIN },
       select: { id: true, role: true, isActive: true },
     });
 
@@ -322,13 +222,11 @@ export class UsersService {
         throw new ConflictException('Kendi hesabınızı pasifleştiremezsiniz.');
       }
 
-      if (target.role === UserRole.SUPER_ADMIN) {
-        const activeSuperAdminCount = await this.prisma.user.count({
-          where: { role: UserRole.SUPER_ADMIN, isActive: true },
-        });
-        if (activeSuperAdminCount <= 1) {
-          throw new ConflictException('Son aktif süper admin pasifleştirilemez.');
-        }
+      const activeSuperAdminCount = await this.prisma.user.count({
+        where: { role: UserRole.SUPER_ADMIN, isActive: true },
+      });
+      if (activeSuperAdminCount <= 1) {
+        throw new ConflictException('Son aktif süper admin pasifleştirilemez.');
       }
     }
 
