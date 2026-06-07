@@ -16,6 +16,7 @@ import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { NumberingModule } from './modules/numbering/numbering.module';
+import { UsersModule } from './modules/users/users.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -38,6 +39,7 @@ import { PrismaModule } from './prisma/prisma.module';
     PackagePurchasesModule,
     UploadsModule,
     NumberingModule,
+    UsersModule,
   ],
 })
 export class AppModule {}
