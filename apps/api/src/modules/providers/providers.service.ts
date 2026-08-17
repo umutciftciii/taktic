@@ -23,6 +23,10 @@ import { isPhoneVerificationRequired } from '../phone-verification/phone-verific
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { NumberingService } from '../numbering/numbering.service';
+import {
+  offerNotWithdrawableException,
+  WITHDRAWABLE_OFFER_STATUSES,
+} from '../offers/offer-transitions';
 import { calculateRefundEligibility } from '../offers/refund-policy';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -720,6 +724,77 @@ export class ProvidersService {
     }
 
     return withRefundEligibility(offer);
+  }
+
+  /**
+   * Takes a provider's own live offer off the table.
+   *
+   * The conditional update is the whole concurrency guard: only an offer that is
+   * still in {@link WITHDRAWABLE_OFFER_STATUSES} can become WITHDRAWN, so of two
+   * simultaneous withdrawals exactly one updates a row and the other reaches the
+   * business rule. The same clause is what a simultaneous acceptance loses
+   * against — the customer path only moves offers that are not already closed —
+   * so the pair can never both write a terminal state.
+   *
+   * No ledger row is written and neither creditCost nor
+   * creditRefundedTransactionId is touched: the provider chose to walk away from
+   * an offer the platform already delivered, and that spend stands. The refund
+   * policy reports the same verdict for the resulting record.
+   */
+  async withdrawProviderOffer(providerId: string, offerId: string) {
+    await this.ensureProviderExists(providerId);
+    const now = new Date();
+
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        const offer = await tx.offer.findFirst({
+          where: { id: offerId, providerId },
+          select: { id: true, requestId: true },
+        });
+
+        // Somebody else's offer is indistinguishable from a missing one, so a
+        // provider cannot probe for offer ids it does not own.
+        if (!offer) {
+          throw new NotFoundException('Offer not found');
+        }
+
+        const request = await tx.serviceRequest.findUnique({
+          where: { id: offer.requestId },
+          select: { status: true },
+        });
+
+        // A matched, completed, cancelled or expired request is settled. Its
+        // offers stay exactly as that lifecycle left them.
+        if (!request || request.status !== ServiceRequestStatus.APPROVED) {
+          throw offerNotWithdrawableException();
+        }
+
+        const withdrawn = await tx.offer.updateMany({
+          where: {
+            id: offerId,
+            providerId,
+            status: { in: [...WITHDRAWABLE_OFFER_STATUSES] },
+          },
+          data: {
+            status: OfferStatus.WITHDRAWN,
+            withdrawnAt: now,
+          },
+        });
+
+        if (withdrawn.count !== 1) {
+          throw offerNotWithdrawableException();
+        }
+
+        const updated = await tx.offer.findUniqueOrThrow({
+          where: { id: offerId },
+          include: providerOfferInclude,
+        });
+
+        return withRefundEligibility(updated);
+      },
+      { label: 'providers.withdrawProviderOffer' },
+    );
   }
 
   private async normalizeAndValidatePayload(

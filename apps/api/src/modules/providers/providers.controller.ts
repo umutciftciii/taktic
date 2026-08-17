@@ -95,6 +95,22 @@ export class ProvidersController {
     return this.providersService.getProviderOffer(providerId, offerId);
   }
 
+  /**
+   * Guarded by the same ProviderAccessGuard as every other provider-scoped
+   * route, so it grants nothing this provider did not already have: a customer
+   * or an unrelated provider is refused before the service runs, and the service
+   * still checks the offer belongs to this provider. No admin-only branch is
+   * added here — the admin keeps its own offer operations under /offers.
+   */
+  @Post(':providerId/offers/:offerId/withdraw')
+  @UseGuards(AuthGuard, ProviderAccessGuard)
+  withdrawProviderOffer(
+    @Param('providerId') providerId: string,
+    @Param('offerId') offerId: string,
+  ) {
+    return this.providersService.withdrawProviderOffer(providerId, offerId);
+  }
+
   @Get(':providerId/admin-detail')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)

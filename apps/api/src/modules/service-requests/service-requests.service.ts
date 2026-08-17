@@ -9,7 +9,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
-import { CustomerOrigin, NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
@@ -217,7 +217,11 @@ export class ServiceRequestsService {
           select: { id: true, name: true, slug: true },
         },
         _count: {
-          select: { offers: true },
+          // The customer's own count is of offers they can still act on. An
+          // offer its provider withdrew is no longer one of them, and counting
+          // it would promise a choice that is not there. The admin listing above
+          // keeps the unfiltered total on purpose.
+          select: { offers: { where: { status: { not: OfferStatus.WITHDRAWN } } } },
         },
       },
     });

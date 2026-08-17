@@ -11,17 +11,25 @@ import {
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
 import {
+  canWithdrawOffer,
+  isWithdrawableOfferStatus,
   providerOfferStatusLabel,
   providerRefundBadgeClass,
   providerStatusBadgeClass,
 } from '../../../provider-ui';
+import { withdrawOfferAction } from './actions';
 
 type ProviderOfferDetailPageProps = {
   params: Promise<{ id: string; offerId: string }>;
+  searchParams?: Promise<{ withdrawError?: string }>;
 };
 
-export default async function ProviderOfferDetailPage({ params }: ProviderOfferDetailPageProps) {
+export default async function ProviderOfferDetailPage({
+  params,
+  searchParams,
+}: ProviderOfferDetailPageProps) {
   const { id, offerId } = await params;
+  const { withdrawError } = (await searchParams) ?? {};
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/offers/${offerId}`);
@@ -30,6 +38,11 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
   const offer = await fetchOrNotFound(() =>
     apiFetch<ProviderOffer>(`/providers/${id}/offers/${offerId}`),
   );
+
+  const canWithdraw = canWithdrawOffer(offer.status, offer.request.status);
+  // Still live, but on a request that no longer takes offers. Worth explaining;
+  // a closed offer needs no explanation because its own status already is one.
+  const withdrawBlockedByRequest = !canWithdraw && isWithdrawableOfferStatus(offer.status);
 
   return (
     <ProviderShell user={user} providerId={id} active="offers">
@@ -156,6 +169,53 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
               </div>
             </dl>
           </section>
+
+          {withdrawError ? (
+            <div className="pdash-notice pdash-notice-error" role="alert" data-testid="withdraw-error">
+              {withdrawError === 'conflict'
+                ? 'Bu teklif artık geri çekilemez. Güncel durumu yukarıda görebilirsiniz.'
+                : 'Bu işlem için yetkiniz yok.'}
+            </div>
+          ) : null}
+
+          {canWithdraw ? (
+            <section className="pdash-detail-card" id="geri-cek">
+              <h2>Teklifi Geri Çek</h2>
+              <p className="pdash-card-sub" style={{ marginTop: -4 }}>
+                Teklifinizi müşteriye kapatabilirsiniz.
+              </p>
+              {/*
+                A two-step disclosure, not a one-click button: the action is
+                irreversible and costs the provider the credit it already spent,
+                so the consequences are on screen before the confirm exists.
+              */}
+              <details className="pdash-withdraw">
+                <summary data-testid="withdraw-open">Teklifi geri çek</summary>
+                <ul className="pdash-withdraw-list">
+                  <li>Teklifiniz geri çekilecek.</li>
+                  <li>Bu işlem geri alınamaz.</li>
+                  <li>Kredi iadesi yapılmaz.</li>
+                </ul>
+                <form action={withdrawOfferAction}>
+                  <input type="hidden" name="providerId" value={id} />
+                  <input type="hidden" name="offerId" value={offer.id} />
+                  <button
+                    className="pdash-btn pdash-btn-danger pdash-btn-block"
+                    type="submit"
+                    data-testid="withdraw-confirm"
+                  >
+                    Evet, teklifi geri çek
+                  </button>
+                </form>
+              </details>
+            </section>
+          ) : null}
+
+          {withdrawBlockedByRequest ? (
+            <div className="pdash-notice pdash-notice-warn">
+              Bu talep artık teklif almıyor; teklifiniz geri çekilemez.
+            </div>
+          ) : null}
 
           <div className="pdash-notice">
             Bu fazda müşteriyle iletişim ve ödeme akışı henüz aktif değildir.

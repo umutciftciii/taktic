@@ -3917,6 +3917,38 @@ body:has(.cdash-shell) #site-header {
   font-weight: 700;
 }
 
+/* ----- Withdrawn offer history ----- */
+.cdash-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cdash-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.cdash-history-name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cdash-history-time {
+  margin-left: auto;
+  color: var(--muted);
+}
+
 .cdash-sort {
   display: inline-flex;
   align-items: center;
@@ -4856,6 +4888,18 @@ body:has(.pdash-shell) #site-header {
   text-decoration: none;
 }
 
+.pdash-btn-danger {
+  background: #fff;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.pdash-btn-danger:hover {
+  background: #fef2f2;
+  color: #991b1b;
+  text-decoration: none;
+}
+
 .pdash-btn-block {
   width: 100%;
 }
@@ -4863,6 +4907,39 @@ body:has(.pdash-shell) #site-header {
 .pdash-btn-sm {
   padding: 6px 10px;
   font-size: 12px;
+}
+
+/* ----- Withdraw confirmation ----- */
+.pdash-withdraw > summary {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pdash-withdraw > summary:hover {
+  background: #f8fafc;
+}
+
+.pdash-withdraw[open] > summary {
+  margin-bottom: 10px;
+}
+
+.pdash-withdraw-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .pdash-actions {

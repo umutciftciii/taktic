@@ -19,6 +19,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
+import { CUSTOMER_UNACTIONABLE_OFFER_STATUSES } from './offer-transitions';
 import {
   calculateRefundEligibility,
   isManualRefundReasonCode,
@@ -297,8 +298,16 @@ export class OffersService {
     }
 
     const now = new Date();
-    const offer = await this.prisma.offer.update({
-      where: { id: offerId },
+
+    // Conditional, because the status read above is already stale by the time
+    // this runs: the provider may have withdrawn the offer in between. The
+    // clause repeats the guard rather than trusting the read, so a withdrawal
+    // and a shortlist/reject cannot both land.
+    const updated = await this.prisma.offer.updateMany({
+      where: {
+        id: offerId,
+        status: { notIn: [...CUSTOMER_UNACTIONABLE_OFFER_STATUSES] },
+      },
       data: {
         status,
         ...(existingOffer.viewedAt ? {} : { viewedAt: now }),
@@ -306,6 +315,14 @@ export class OffersService {
         // what keeps its existing refund behaviour.
         ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
       },
+    });
+
+    if (updated.count !== 1) {
+      throw new ConflictException('This offer can no longer be acted on');
+    }
+
+    const offer = await this.prisma.offer.findUniqueOrThrow({
+      where: { id: offerId },
       include: customerOfferInclude,
     });
 
@@ -346,14 +363,25 @@ export class OffersService {
           throw new ConflictException('This request already has an accepted offer');
         }
 
-        await tx.offer.update({
-          where: { id: offerId },
+        // Conditional for the same reason the request transition above is: a
+        // provider may be withdrawing this very offer in a parallel Serializable
+        // transaction. Only one of the two clauses can match, so the request can
+        // never end up matched to an offer its provider had already pulled.
+        const acceptedUpdate = await tx.offer.updateMany({
+          where: {
+            id: offerId,
+            status: { notIn: [...CUSTOMER_UNACTIONABLE_OFFER_STATUSES] },
+          },
           data: {
             status: OfferStatus.ACCEPTED,
             acceptedAt: now,
             ...(viewedAt ? {} : { viewedAt: now }),
           },
         });
+
+        if (acceptedUpdate.count !== 1) {
+          throw new ConflictException('This offer can no longer be accepted');
+        }
 
         // Only offers still in play are closed. WITHDRAWN, CANCELLED, EXPIRED
         // and any already REJECTED offer are terminal and left untouched.

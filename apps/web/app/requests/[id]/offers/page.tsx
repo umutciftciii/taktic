@@ -38,7 +38,13 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   ]);
 
   const summary = myRequests.find((request) => request.id === id) ?? null;
-  const sortedOffers = [...offers].sort((a, b) => a.priceAmount - b.priceAmount);
+  // A withdrawn offer is not a choice the customer has, so it is kept out of the
+  // comparison list and its count entirely. It stays visible further down, as a
+  // neutral history line, because the customer did once receive it.
+  const withdrawnOffers = offers.filter((offer) => offer.status === 'WITHDRAWN');
+  const sortedOffers = offers
+    .filter((offer) => offer.status !== 'WITHDRAWN')
+    .sort((a, b) => a.priceAmount - b.priceAmount);
   const offerCount = sortedOffers.length;
   const requestReference =
     summary?.requestNumber ?? `#${id.slice(-6).toUpperCase()}`;
@@ -137,6 +143,31 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           ))}
         </div>
       )}
+
+      {withdrawnOffers.length > 0 ? (
+        <>
+          <div className="cdash-section-head">
+            <div className="cdash-section-title">
+              <span>Geçmiş</span>
+              <span className="cdash-section-count">{withdrawnOffers.length}</span>
+            </div>
+          </div>
+          {/*
+            Name, date and the fact of the withdrawal — nothing else. The price
+            is deliberately absent: it is not an amount the customer can take,
+            and showing it next to the live offers would read as a comparison.
+          */}
+          <ul className="cdash-history" data-testid="withdrawn-offers">
+            {withdrawnOffers.map((offer) => (
+              <li className="cdash-history-item" key={offer.id}>
+                <span className="cdash-badge cdash-badge-muted">Teklif geri çekildi</span>
+                <span className="cdash-history-name">{offer.provider.businessName}</span>
+                <span className="cdash-history-time">{formatDateTime(offer.submittedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </CustomerShell>
   );
 }

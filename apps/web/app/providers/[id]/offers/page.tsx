@@ -10,6 +10,7 @@ import {
 } from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
 import {
+  canWithdrawOffer,
   providerOfferStatusLabel,
   providerRefundBadgeClass,
   providerStatusBadgeClass,
@@ -144,6 +145,19 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
                     <div className="pdash-card-price">{formatPrice(offer.priceAmount, offer.currency)}</div>
                   </div>
                   <div className="pdash-actions">
+                    {/*
+                      A link, not the action itself: withdrawing is irreversible
+                      and unrefunded, so it is only ever confirmed on the detail
+                      screen where those consequences are spelled out.
+                    */}
+                    {canWithdrawOffer(offer.status, offer.request.status) ? (
+                      <Link
+                        className="pdash-btn pdash-btn-ghost pdash-btn-sm"
+                        href={`/providers/${id}/offers/${offer.id}#geri-cek`}
+                      >
+                        Teklifi Geri Çek
+                      </Link>
+                    ) : null}
                     <Link
                       className="pdash-btn pdash-btn-secondary pdash-btn-sm"
                       href={`/providers/${id}/requests/${offer.request.id}`}
