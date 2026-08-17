@@ -406,6 +406,11 @@ export function statusLabel(status: string) {
     SUBMITTED: 'Gönderildi',
     IN_REVIEW: 'İncelemede',
     APPROVED: 'Onaylandı',
+    // The matching lifecycle states. Without these the fallback below rendered
+    // the raw enum — a customer looking at their own accepted request saw
+    // "MATCHED" in an otherwise Turkish screen.
+    MATCHED: 'Eşleşti',
+    COMPLETED: 'Tamamlandı',
     REJECTED: 'Reddedildi',
     CANCELLED: 'İptal',
     VIEWED: 'Görüntülendi',
@@ -651,12 +656,22 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 /**
  * Runs a fetch and turns "not found" (and, for detail screens, "not yours")
  * into a proper 404 page rather than an error boundary.
+ *
+ * 403 is in the list on purpose. A signed-in customer who opens somebody else's
+ * request, or a provider who opens a request outside its categories, is not
+ * having an accident the error boundary should apologise for — and confirming
+ * "this exists, you just may not see it" is more than they should learn. The
+ * 404 copy already says both things: the record may be gone, or it may not be
+ * yours.
  */
 export async function fetchOrNotFound<T>(loader: () => Promise<T>): Promise<T> {
   try {
     return await loader();
   } catch (error) {
-    if (error instanceof ApiError && (error.status === 404 || error.status === 400)) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403 || error.status === 400)
+    ) {
       notFound();
     }
 

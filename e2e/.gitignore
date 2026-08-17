@@ -1,0 +1,4 @@
+# Run output: traces, screenshots, videos, the HTML report and the SMS outbox.
+.artifacts/
+playwright-report/
+test-results/

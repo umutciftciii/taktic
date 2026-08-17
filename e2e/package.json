@@ -1,0 +1,21 @@
+{
+  "name": "@taktic/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "e2e": "tsx src/prepare-database.ts && playwright test",
+    "e2e:ui": "tsx src/prepare-database.ts && playwright test --ui",
+    "e2e:install": "playwright install --with-deps chromium",
+    "e2e:report": "playwright show-report",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@prisma/client": "^6.0.0",
+    "@taktic/tsconfig": "workspace:*",
+    "@types/node": "^22.10.0",
+    "bcryptjs": "^3.0.3",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}

@@ -79,6 +79,30 @@ Seeding creates a local development admin if it does not already exist:
 
 Authentication uses an HTTP-only cookie session named `taktic_session` by default. The seed does not overwrite an existing admin password.
 
+## End-to-End Tests
+
+`pnpm test` runs the API integration suite (Vitest + supertest). The browser suite is separate and lives in `e2e/`.
+
+```bash
+pnpm e2e:install
+```
+
+```bash
+pnpm e2e
+```
+
+`pnpm e2e` builds the apps, prepares the database, starts the runtimes and runs the scenarios. Other commands: `pnpm e2e:ui` (Playwright UI mode) and `pnpm e2e:report` (last HTML report).
+
+**Database isolation.** The suite runs against its own database, derived from `DATABASE_URL` by appending `_e2e` (`taktic` → `taktic_e2e`), or from `E2E_DATABASE_URL` if you set one. It refuses to start against any database whose name does not end in `_e2e` — including the development database and the integration suite's `taktic_test` — and that check runs before a single server process starts. The database is created and migrated on first run, emptied before each run, and emptied again afterwards.
+
+**Runtimes.** `REQUIRE_PHONE_VERIFICATION` is read per call, so one API process can only represent one side of it. The suite therefore starts two full stacks — API + web + admin with the gate off on ports 3200-3202, and the same code with the gate on at 3210-3212 — and drives the comparison across both. The ports are clear of `docker compose` (3000-3002), so you can leave the dev stack running. Override them with `E2E_WEB_PORT`, `E2E_API_PORT`, `E2E_ADMIN_PORT` and their `E2E_GATE_*` counterparts.
+
+**One-time codes.** The verification scenario needs the code the application sent, which is never returned over HTTP and only reaches the database as a bcrypt hash. `NOTIFICATION_OUTBOX_DIR` (set automatically by the Playwright config) swaps the SMS transport for one that records what it sent to a file the test reads. It cannot be set in production — the API refuses to boot with it.
+
+Tests run serially in one worker: several assertions are about global state ("no refund transaction exists"), and every actor shares one database.
+
+In CI the suite is its own job, on Chromium only, with its own PostgreSQL service container. Traces, screenshots and videos are captured on failure and uploaded as artifacts.
+
 ## Local Ops
 
 Refund scan automation is disabled by default. The scheduled worker is optional and uses the same execution logic as the admin refund scan endpoint, so it preserves the same eligibility checks, transactions, and idempotency behavior.

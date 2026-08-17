@@ -68,3 +68,76 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  e2e:
+    name: e2e (chromium)
+    runs-on: ubuntu-latest
+
+    # A separate job, not extra steps on `verify`: it needs a browser and boots
+    # six application processes, so keeping it apart means a type error still
+    # fails in a minute instead of waiting behind a browser download. Both jobs
+    # start together, so the wall-clock cost to a PR is the slower of the two.
+    services:
+      postgres:
+        image: postgres:16.6-alpine
+        env:
+          POSTGRES_DB: taktic
+          POSTGRES_USER: taktic_user
+          POSTGRES_PASSWORD: taktic_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taktic_user -d taktic"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # This job gets its own PostgreSQL service container, so nothing is shared
+      # with `verify` in the first place. On top of that the suite derives
+      # `taktic_e2e` from this URL and refuses to start against any database
+      # whose name does not end in _e2e — the integration suite's `taktic_test`
+      # included.
+      DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
+      AUTH_COOKIE_NAME: taktic_session
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      # Chromium only. The critical journeys are about server actions, sessions
+      # and pricing rules — none of which differ by browser engine — so a second
+      # engine would double the runtime of every PR to re-test the same API.
+      - name: Install Chromium
+        run: pnpm e2e:install
+
+      - name: End-to-end tests
+        run: pnpm e2e
+
+      # Traces, screenshots and videos are only written for failures
+      # (see playwright.config.ts), so this uploads a debugging bundle exactly
+      # when there is something to debug.
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            e2e/.artifacts/test-results
+            e2e/.artifacts/report
+          retention-days: 7
+          if-no-files-found: ignore

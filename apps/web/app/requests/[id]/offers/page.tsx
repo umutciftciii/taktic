@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import {
   apiFetch,
   CustomerServiceRequest,
+  fetchOrNotFound,
   OfferStatus,
   RequestOfferPreview,
   formatDateTime,
@@ -28,8 +29,11 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
     redirect(`/login?redirectTo=/requests/${id}/offers`);
   }
 
+  // An unknown request and somebody else's request are the same 404 here: the
+  // API answers 403 for a request that belongs to another customer, and telling
+  // this one that it exists would be a disclosure on its own.
   const [offers, myRequests] = await Promise.all([
-    apiFetch<RequestOfferPreview[]>(`/service-requests/${id}/offers`),
+    fetchOrNotFound(() => apiFetch<RequestOfferPreview[]>(`/service-requests/${id}/offers`)),
     safeFetchMyRequests(),
   ]);
 
@@ -49,7 +53,7 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
       <section className="cdash-summary">
         <div className="cdash-summary-head">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-            <span className={requestStatusClass(summary?.status)}>
+            <span className={requestStatusClass(summary?.status)} data-testid="request-status">
               <span className="cdash-badge-dot" aria-hidden="true" />
               {statusLabel(summary?.status ?? 'SUBMITTED')}
             </span>

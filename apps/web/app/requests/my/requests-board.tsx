@@ -128,13 +128,15 @@ function RequestCard({ request }: { request: CustomerServiceRequest }) {
     request.requestNumber ?? `#${request.id.slice(-6).toUpperCase()}`;
 
   return (
-    <article className="cdash-card">
+    <article className="cdash-card" data-testid="request-card" data-request-id={request.id}>
       <div className="cdash-card-head">
         <div style={{ minWidth: 0 }}>
           <h2 className="cdash-card-title">{request.category?.name ?? 'Talep'}</h2>
           <p className="cdash-card-sub">{referenceLabel}</p>
         </div>
-        <span className={statusClass}>{statusLabel(request.status)}</span>
+        <span className={statusClass} data-testid="request-status">
+          {statusLabel(request.status)}
+        </span>
       </div>
 
       <div className="cdash-card-meta">

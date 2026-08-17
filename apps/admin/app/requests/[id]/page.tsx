@@ -29,6 +29,7 @@ import {
 
 type RequestDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ statusError?: string }>;
 };
 
 const RECENT_OFFERS_LIMIT = 3;
@@ -54,8 +55,12 @@ function plannedExpiry(request: ServiceRequest): string | null {
   return new Date(approved.getTime() + REQUEST_OPEN_DAYS * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export default async function RequestDetailPage({ params }: RequestDetailPageProps) {
+export default async function RequestDetailPage({
+  params,
+  searchParams,
+}: RequestDetailPageProps) {
   const { id } = await params;
+  const { statusError } = await searchParams;
   const request = await fetchOrNotFound(() =>
     apiFetch<ServiceRequest>(`/service-requests/${id}`),
   );
@@ -83,7 +88,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         title={headerTitle}
         subtitle={
           <span className="request-header-meta">
-            <span className={statusBadgeClass(request.status)}>{requestStatusLabel(request.status)}</span>
+            <span className={statusBadgeClass(request.status)} data-testid="request-status">
+              {requestStatusLabel(request.status)}
+            </span>
             <span className={qualityBadgeClass(request.qualityLabel)}>
               {request.qualityScore}/100 · {qualityLabel(request.qualityLabel)}
             </span>
@@ -119,6 +126,14 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
             tamamlanma ve süre dolumu buradan yazılamaz: süre dolumunu yalnızca zamanlayıcı
             yazar ve onaydan {REQUEST_OPEN_DAYS} gün sonra uygular.
           </p>
+
+          {statusError === 'phoneNotVerified' ? (
+            <div className="status-action-error" role="alert" data-testid="status-error">
+              <strong>Durum değiştirilmedi.</strong> Telefon doğrulaması zorunlu olduğu için
+              doğrulanmamış bir talep onaylanamaz. Müşteri numarasını doğruladıktan sonra tekrar
+              deneyin; reddetme ve iptal her durumda mümkündür.
+            </div>
+          ) : null}
 
           <p className="status-verification-note">
             <strong>Telefon doğrulaması:</strong>{' '}

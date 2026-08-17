@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   ProviderRequestDetail,
   RequestQualityBreakdownComponent,
@@ -38,7 +39,13 @@ export default async function ProviderRequestDetailPage({
     redirect(`/login?redirectTo=/providers/${id}/requests/${requestId}`);
   }
 
-  const request = await apiFetch<ProviderRequestDetail>(`/providers/${id}/requests/${requestId}`);
+  // A request that does not exist, is not open, is unverified while the phone
+  // gate is on, or sits outside this provider's categories and service areas
+  // all come back as one indistinguishable 404 — so a provider cannot probe for
+  // requests it may not see, and none of those cases reaches the error boundary.
+  const request = await fetchOrNotFound(() =>
+    apiFetch<ProviderRequestDetail>(`/providers/${id}/requests/${requestId}`),
+  );
   const creditBalance = request.providerCreditBalance ?? 0;
   // The cost comes from the request's category. When it is null the category is
   // inactive or unpriced, and offering is impossible.
@@ -156,9 +163,9 @@ export default async function ProviderRequestDetailPage({
             <h2>Teklif Ver</h2>
             {canOffer && offerCreditCost !== null ? (
               <p className="pdash-card-sub" style={{ marginTop: -4 }}>
-                Bu teklif <strong>{offerCreditCost}</strong> kredi kullanır. Kalan:{' '}
-                <strong>{creditBalance}</strong> → <strong>{creditBalance - offerCreditCost}</strong>{' '}
-                kredi
+                Bu teklif <strong data-testid="offer-credit-cost">{offerCreditCost}</strong> kredi
+                kullanır. Kalan: <strong data-testid="provider-credit-balance">{creditBalance}</strong> →{' '}
+                <strong>{creditBalance - offerCreditCost}</strong> kredi
               </p>
             ) : (
               <p className="pdash-card-sub" style={{ marginTop: -4 }}>

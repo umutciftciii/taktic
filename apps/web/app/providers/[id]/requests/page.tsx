@@ -3,6 +3,7 @@ import Link from 'next/link';
 import {
   apiFetch,
   Category,
+  fetchOrNotFound,
   getCurrentUser,
   OfferBlockedReason,
   ProviderProfile,
@@ -39,7 +40,9 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
   }
 
   const [provider, categories] = await Promise.all([
-    apiFetch<ProviderProfile>(`/providers/${id}`),
+    // Another provider's id in the URL comes back as 403; that belongs on the
+    // 404 page rather than in the error boundary.
+    fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
     apiFetch<Category[]>('/categories'),
   ]);
 

@@ -3567,3 +3567,13 @@ button:disabled {
   line-height: 1.5;
   opacity: 0.85;
 }
+
+/* A refused status transition, explained in place instead of as an error page. */
+.status-action-error {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn, #d97706);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}

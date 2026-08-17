@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   ProviderOffer,
   refundActionLabel,
@@ -26,7 +27,9 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
     redirect(`/login?redirectTo=/providers/${id}/offers/${offerId}`);
   }
 
-  const offer = await apiFetch<ProviderOffer>(`/providers/${id}/offers/${offerId}`);
+  const offer = await fetchOrNotFound(() =>
+    apiFetch<ProviderOffer>(`/providers/${id}/offers/${offerId}`),
+  );
 
   return (
     <ProviderShell user={user} providerId={id} active="offers">
@@ -43,7 +46,9 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
         <p className="pdash-page-sub">
           {offer.request.category.name} · {offer.request.city}/{offer.request.district}
           <span style={{ marginLeft: 8 }}>
-            <span className={providerStatusBadgeClass(offer.status)}>{providerOfferStatusLabel(offer.status)}</span>
+            <span className={providerStatusBadgeClass(offer.status)} data-testid="offer-status">
+              {providerOfferStatusLabel(offer.status)}
+            </span>
           </span>
         </p>
       </header>
