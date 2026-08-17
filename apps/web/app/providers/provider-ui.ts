@@ -1,3 +1,20 @@
+import { statusLabel } from '../../lib/request-formatters';
+
+/**
+ * How an offer's status reads in the provider's own panel.
+ *
+ * A rejection is always phrased the same way, whether the customer rejected it
+ * by hand or the platform closed it because another offer was accepted. The
+ * provider is never told that a competitor won, nor how many rivals there were.
+ */
+export function providerOfferStatusLabel(status: string): string {
+  if (status === 'REJECTED') {
+    return 'Teklifiniz kabul edilmedi';
+  }
+
+  return statusLabel(status);
+}
+
 export function providerStatusBadgeClass(status: string): string {
   switch (status) {
     case 'APPROVED':

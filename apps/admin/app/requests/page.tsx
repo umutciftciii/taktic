@@ -38,8 +38,11 @@ const statusFilters: Array<{ label: string; value: StatusFilter }> = [
   { label: 'Yeni Talep', value: 'SUBMITTED' },
   { label: 'İncelemede', value: 'IN_REVIEW' },
   { label: 'Onaylandı', value: 'APPROVED' },
+  { label: 'Eşleşti', value: 'MATCHED' },
+  { label: 'Tamamlandı', value: 'COMPLETED' },
   { label: 'Reddedildi', value: 'REJECTED' },
   { label: 'İptal Edildi', value: 'CANCELLED' },
+  { label: 'Süresi Doldu', value: 'EXPIRED' },
 ];
 
 const qualityFilters: Array<{ label: string; value: QualityFilter }> = [
@@ -56,8 +59,11 @@ function normalizeStatus(value: string | undefined): StatusFilter {
     upper === 'SUBMITTED' ||
     upper === 'IN_REVIEW' ||
     upper === 'APPROVED' ||
+    upper === 'MATCHED' ||
+    upper === 'COMPLETED' ||
     upper === 'REJECTED' ||
-    upper === 'CANCELLED'
+    upper === 'CANCELLED' ||
+    upper === 'EXPIRED'
   ) {
     return upper;
   }

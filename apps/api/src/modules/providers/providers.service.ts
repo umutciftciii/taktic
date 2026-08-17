@@ -11,6 +11,7 @@ import {
 import {
   CreditTransactionType,
   NumberedEntityType,
+  OfferRejectionReason,
   OfferStatus,
   Prisma,
   ProviderStatus,
@@ -1204,8 +1205,15 @@ function toProviderRequestDetail(
 }
 
 function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
+  // rejectionReason is internal. COMPETITOR_ACCEPTED tells the provider that
+  // somebody else won, which is exactly what the provider must not learn, so it
+  // is dropped here. What stays is refundEligibility, whose label for that case
+  // is the neutral "Teklif kabul edilmedi".
+  const { rejectionReason, ...visible } = offer;
+  void rejectionReason;
+
   return {
-    ...offer,
+    ...visible,
     refundEligibility: calculateRefundEligibility(offer),
   };
 }
@@ -1219,6 +1227,7 @@ type RefundPolicyOfferShape = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
+  rejectionReason?: OfferRejectionReason | null;
 };
 
 async function getProviderCreditBalanceInTransaction(

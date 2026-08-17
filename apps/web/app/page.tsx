@@ -75,8 +75,7 @@ function PopularCategories({ categories }: { categories: HomePageCategory[] }) {
           <span className="lp-eyebrow">Kategoriler</span>
           <h2 className="lp-h2">En çok talep edilen hizmetler</h2>
           <p className="lp-section-sub">
-            Bir kategori seç, kategoriye özel sorulara yanıt ver ve doğrulanmış hizmet verenlerden
-            teklifleri karşılaştır.
+            Bir kategori seç, kategoriye özel sorulara yanıt ver ve gelen teklifleri karşılaştır.
           </p>
         </div>
 
@@ -190,8 +189,8 @@ function HowItWorks() {
 
 const providerFeatures: Array<{ title: string; desc: string }> = [
   {
-    title: 'Doğrulanmış talepler',
-    desc: 'Telefon doğrulamalı, kategori formuyla detaylandırılmış talepler.',
+    title: 'İncelenmiş talepler',
+    desc: 'Kategori formuyla detaylandırılan talepler, yayına alınmadan önce incelenir.',
   },
   {
     title: 'Talep kalite skoru',
@@ -512,7 +511,7 @@ function FinalCTA({
       <div className="lp-container">
         <h2 className="lp-h2">{heading}</h2>
         <p className="lp-final-cta-sub">
-          Birkaç dakikada talebini gönder, doğrulanmış hizmet verenlerden teklifleri karşılaştır.
+          Birkaç dakikada talebini gönder, gelen teklifleri karşılaştır.
         </p>
         <div className="lp-final-cta-buttons">
           {isAuthenticated ? (

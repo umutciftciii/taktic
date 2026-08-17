@@ -60,6 +60,27 @@ const moderatedStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.REJECTED,
 ]);
 
+/**
+ * Lifecycle states the moderation endpoint must never write.
+ *
+ * MATCHED belongs to the offer-accept cascade, EXPIRED to the expiry scheduler,
+ * and COMPLETED to the dedicated lifecycle endpoint — each of them writes
+ * timestamps and runs invariants the moderation dropdown knows nothing about.
+ */
+const nonModerationStatuses = new Set<ServiceRequestStatus>([
+  ServiceRequestStatus.MATCHED,
+  ServiceRequestStatus.COMPLETED,
+  ServiceRequestStatus.EXPIRED,
+]);
+
+/** A request in one of these states has finished; nothing may move it again. */
+const terminalStatuses = new Set<ServiceRequestStatus>([
+  ServiceRequestStatus.COMPLETED,
+  ServiceRequestStatus.CANCELLED,
+  ServiceRequestStatus.EXPIRED,
+  ServiceRequestStatus.REJECTED,
+]);
+
 @Injectable()
 export class ServiceRequestsService {
   private readonly logger = new Logger(ServiceRequestsService.name);
@@ -233,11 +254,18 @@ export class ServiceRequestsService {
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
 
+    if (nonModerationStatuses.has(dto.status)) {
+      throw new ConflictException(
+        `${dto.status} is not a moderation status and cannot be set from here`,
+      );
+    }
+
     if (dto.status === ServiceRequestStatus.REJECTED && !rejectionReason) {
       throw new BadRequestException('Rejection reason is required when status is REJECTED');
     }
 
     const shouldModerate = moderatedStatuses.has(dto.status);
+    const now = new Date();
 
     const request = await this.prisma.serviceRequest.update({
       where: { id },
@@ -245,8 +273,96 @@ export class ServiceRequestsService {
         status: dto.status,
         moderationNote,
         rejectionReason: dto.status === ServiceRequestStatus.REJECTED ? rejectionReason : null,
-        ...(shouldModerate ? { moderatedAt: new Date() } : {}),
+        ...(shouldModerate ? { moderatedAt: now } : {}),
+        ...(dto.status === ServiceRequestStatus.CANCELLED ? { cancelledAt: now } : {}),
       },
+      include: {
+        category: {
+          select: { id: true, name: true, slug: true },
+        },
+        answers: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    return withQualityLabel(request);
+  }
+
+  /**
+   * Marks a matched request as delivered. Only the customer who owns it or a
+   * SUPER_ADMIN may do this — a provider cannot declare its own job finished.
+   *
+   * The transition is a conditional update, so it is also the concurrency
+   * guard: a second call finds no MATCHED row and gets a 409.
+   */
+  async completeServiceRequest(id: string, user: AuthUser) {
+    const request = await this.getRequestForLifecycleAction(id, user);
+
+    if (request.status !== ServiceRequestStatus.MATCHED) {
+      throw new ConflictException('Only a matched request can be completed');
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.serviceRequest.updateMany({
+      where: { id, status: ServiceRequestStatus.MATCHED },
+      data: { status: ServiceRequestStatus.COMPLETED, completedAt: now },
+    });
+
+    if (updated.count !== 1) {
+      throw new ConflictException('Only a matched request can be completed');
+    }
+
+    return this.getLifecycleProjection(id);
+  }
+
+  /** Cancels a request that has not finished yet. Customer (owner) or admin. */
+  async cancelServiceRequest(id: string, user: AuthUser) {
+    const request = await this.getRequestForLifecycleAction(id, user);
+
+    if (terminalStatuses.has(request.status)) {
+      throw new ConflictException(`A ${request.status} request can no longer be cancelled`);
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.serviceRequest.updateMany({
+      where: { id, status: { notIn: [...terminalStatuses] } },
+      data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
+    });
+
+    if (updated.count !== 1) {
+      throw new ConflictException('This request can no longer be cancelled');
+    }
+
+    return this.getLifecycleProjection(id);
+  }
+
+  private async getRequestForLifecycleAction(id: string, user: AuthUser) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id },
+      select: { id: true, status: true, customerId: true },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (user.role === UserRole.SUPER_ADMIN) {
+      return request;
+    }
+
+    // Anything that is not the owning customer — providers included — is told
+    // the request does not exist rather than that it exists but is off limits.
+    if (user.role !== UserRole.CUSTOMER || !request.customerId || request.customerId !== user.id) {
+      throw new ForbiddenException('Service request access denied');
+    }
+
+    return request;
+  }
+
+  private async getLifecycleProjection(id: string) {
+    const request = await this.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id },
       include: {
         category: {
           select: { id: true, name: true, slug: true },

@@ -6,7 +6,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CreditTransactionType, OfferStatus, Prisma, UserRole } from '@prisma/client';
+import {
+  CreditTransactionType,
+  OfferRejectionReason,
+  OfferStatus,
+  Prisma,
+  ServiceRequestStatus,
+  UserRole,
+} from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -153,6 +160,9 @@ export class OffersService {
             submittedAt: true,
             viewedAt: true,
             acceptedAt: true,
+            // Needed so the policy can see a competitor-rejected offer and
+            // recommend NO_REFUND; an admin can still refund it with override.
+            rejectionReason: true,
           },
         });
 
@@ -281,19 +291,96 @@ export class OffersService {
     }
 
     const status = customerActionToStatus(dto.action);
+
+    if (status === OfferStatus.ACCEPTED) {
+      return this.acceptRequestOffer(requestId, offerId, existingOffer.viewedAt);
+    }
+
     const now = new Date();
     const offer = await this.prisma.offer.update({
       where: { id: offerId },
       data: {
         status,
         ...(existingOffer.viewedAt ? {} : { viewedAt: now }),
-        ...(status === OfferStatus.ACCEPTED ? { acceptedAt: now } : {}),
+        // A hand-rejected offer deliberately gets no rejectionReason: NULL is
+        // what keeps its existing refund behaviour.
         ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
       },
       include: customerOfferInclude,
     });
 
     return toCustomerOfferDetail(offer);
+  }
+
+  /**
+   * Accepting an offer matches the request to it and closes every competing
+   * offer, in one Serializable transaction.
+   *
+   * The request transition is the concurrency guard: only an APPROVED request
+   * with no match yet can become MATCHED, so of two simultaneous accepts exactly
+   * one updates a row and the other gets a 409. runSerializable retries the
+   * write conflict Postgres raises for the loser, so the replay reaches that
+   * business rule instead of leaking a 500. A partial unique index
+   * (Offer_one_accepted_per_request) is the database-level backstop.
+   */
+  private acceptRequestOffer(requestId: string, offerId: string, viewedAt: Date | null) {
+    const now = new Date();
+
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        const matched = await tx.serviceRequest.updateMany({
+          where: {
+            id: requestId,
+            status: ServiceRequestStatus.APPROVED,
+            matchedOfferId: null,
+          },
+          data: {
+            status: ServiceRequestStatus.MATCHED,
+            matchedOfferId: offerId,
+            matchedAt: now,
+          },
+        });
+
+        if (matched.count !== 1) {
+          throw new ConflictException('This request already has an accepted offer');
+        }
+
+        await tx.offer.update({
+          where: { id: offerId },
+          data: {
+            status: OfferStatus.ACCEPTED,
+            acceptedAt: now,
+            ...(viewedAt ? {} : { viewedAt: now }),
+          },
+        });
+
+        // Only offers still in play are closed. WITHDRAWN, CANCELLED, EXPIRED
+        // and any already REJECTED offer are terminal and left untouched.
+        await tx.offer.updateMany({
+          where: {
+            requestId,
+            id: { not: offerId },
+            status: {
+              in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
+            },
+          },
+          data: {
+            status: OfferStatus.REJECTED,
+            rejectedAt: now,
+            rejectionReason: OfferRejectionReason.COMPETITOR_ACCEPTED,
+          },
+        });
+
+        const accepted = await tx.offer.findUniqueOrThrow({
+          where: { id: offerId },
+          include: customerOfferInclude,
+        });
+
+        return toCustomerOfferDetail(accepted);
+      },
+      { label: 'offers.acceptRequestOffer' },
+    );
   }
 
   private async ensureOfferExists(id: string) {
@@ -359,6 +446,7 @@ type RefundPolicyOfferShape = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
+  rejectionReason?: OfferRejectionReason | null;
 };
 
 export async function refundOfferCreditInTransaction(

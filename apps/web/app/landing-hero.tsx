@@ -7,7 +7,6 @@ import type { AuthUser } from '../lib/api';
 import {
   IconArrowRight,
   IconCheck,
-  IconPhone,
   IconPin,
   IconSearch,
   IconWallet,
@@ -156,11 +155,11 @@ export function LandingHero({
         <div className="lp-hero-left">
           <span className="lp-hero-eyebrow">
             <span className="lp-tag">Yeni</span>
-            <span>Doğrulanmış talep, adil teklif kredisi</span>
+            <span>Kategoriye özel talep, adil teklif kredisi</span>
           </span>
 
           <h1 className="lp-h1">
-            İhtiyacını anlat, <span className="lp-accent">doğrulanmış</span> hizmet verenlerden teklif al.
+            İhtiyacını anlat, <span className="lp-accent">uygun</span> hizmet verenlerden teklif al.
           </h1>
           <p className="lp-hero-sub">
             TakTic&apos;te talebini oluştur, uygun hizmet verenlerden teklifleri karşılaştır. Hizmet
@@ -289,7 +288,7 @@ export function LandingHero({
               <span className="lp-hero-trust-mark">
                 <IconCheck size={12} />
               </span>
-              <span>Telefon doğrulamalı talepler</span>
+              <span>Kategoriye özel talep formu</span>
             </span>
             <span className="lp-hero-trust-item">
               <span className="lp-hero-trust-mark">
@@ -316,8 +315,8 @@ export function LandingHero({
                 <IconCheck size={14} />
               </span>
               <span>
-                <span className="lp-floating-label">Telefon</span>
-                <span className="lp-floating-val">Doğrulandı</span>
+                <span className="lp-floating-label">Talep</span>
+                <span className="lp-floating-val">İncelendi</span>
               </span>
             </div>
 
@@ -349,8 +348,8 @@ function RequestCard() {
           </div>
         </div>
         <span className="lp-badge lp-badge-success">
-          <IconPhone size={11} />
-          Doğrulandı
+          <IconCheck size={11} />
+          İncelendi
         </span>
       </div>
 
@@ -392,7 +391,7 @@ function RequestCard() {
             <span className="lp-avatar lp-avatar-3">SD</span>
             <span className="lp-avatar lp-avatar-4">+1</span>
           </div>
-          <span className="lp-rc-offers-text">4 doğrulanmış hizmet veren</span>
+          <span className="lp-rc-offers-text">4 hizmet veren teklif verdi</span>
         </div>
       </div>
 

@@ -148,6 +148,8 @@ function statusBadgeClass(status: string): string {
   switch (status) {
     case 'APPROVED':
     case 'ACCEPTED':
+    case 'MATCHED':
+    case 'COMPLETED':
       return 'cdash-badge cdash-badge-success';
     case 'SUBMITTED':
     case 'IN_REVIEW':

@@ -11,6 +11,7 @@ import {
   statusLabel,
 } from '../../../../lib/api';
 import { CustomerShell } from '../../customer-shell';
+import { completeRequestAction } from './actions';
 
 type RequestOffersPageProps = {
   params: Promise<{ id: string }>;
@@ -78,11 +79,16 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
 
         <div>
           <span className="cdash-summary-label">Talep Özeti</span>
-          <p className="cdash-summary-body">
-            {summary
-              ? 'Talebiniz hizmet verenlere iletildi. Aşağıdaki kartlarda gelen teklifleri inceleyebilirsiniz.'
-              : 'Bu talebe ait özet bilgileri görüntülenemiyor. Talebiniz başka bir hesaptan oluşturulmuş olabilir.'}
-          </p>
+          <p className="cdash-summary-body">{summaryBody(summary)}</p>
+
+          {summary?.status === 'MATCHED' ? (
+            <form action={completeRequestAction} style={{ marginTop: 12 }}>
+              <input type="hidden" name="requestId" value={id} />
+              <button className="cdash-btn cdash-btn-primary" type="submit">
+                Hizmet tamamlandı
+              </button>
+            </form>
+          ) : null}
         </div>
       </section>
 
@@ -118,6 +124,22 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
       )}
     </CustomerShell>
   );
+}
+
+function summaryBody(summary: CustomerServiceRequest | null) {
+  if (!summary) {
+    return 'Bu talebe ait özet bilgileri görüntülenemiyor. Talebiniz başka bir hesaptan oluşturulmuş olabilir.';
+  }
+
+  if (summary.status === 'MATCHED') {
+    return 'Bir teklifi kabul ettiniz. Talebiniz artık yeni teklif almıyor. Hizmet tamamlandığında aşağıdan işaretleyebilirsiniz.';
+  }
+
+  if (summary.status === 'COMPLETED') {
+    return 'Bu talep tamamlandı olarak işaretlendi.';
+  }
+
+  return 'Talebiniz hizmet verenlere iletildi. Aşağıdaki kartlarda gelen teklifleri inceleyebilirsiniz.';
 }
 
 function OfferCard({ offer, requestId }: { offer: RequestOfferPreview; requestId: string }) {
@@ -211,6 +233,8 @@ async function safeFetchMyRequests(): Promise<CustomerServiceRequest[]> {
 function requestStatusClass(status: string | undefined): string {
   switch (status) {
     case 'APPROVED':
+    case 'MATCHED':
+    case 'COMPLETED':
       return 'cdash-badge cdash-badge-success';
     case 'REJECTED':
     case 'CANCELLED':

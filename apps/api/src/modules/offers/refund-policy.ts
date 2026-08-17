@@ -1,4 +1,4 @@
-import { OfferStatus } from '@prisma/client';
+import { OfferRejectionReason, OfferStatus } from '@prisma/client';
 
 export type RefundRecommendedAction = 'FULL_REFUND' | 'MANUAL_REVIEW' | 'NO_REFUND';
 
@@ -32,6 +32,12 @@ type RefundPolicyOffer = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
+  /**
+   * Only set when the platform closed the offer automatically. A hand-rejected
+   * offer keeps NULL here, which is also what every offer rejected before this
+   * field existed carries — so their eligibility is unchanged.
+   */
+  rejectionReason?: OfferRejectionReason | null;
 };
 
 export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new Date()): RefundEligibility {
@@ -51,6 +57,17 @@ export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new D
 
   if (offer.status === OfferStatus.ACCEPTED || offer.acceptedAt) {
     return policyResult(false, 'NO_REFUND', 'OFFER_ACCEPTED', hoursSinceSubmitted);
+  }
+
+  // Must come before the viewed / 48-hour branches: the provider delivered a
+  // real offer that simply was not selected, so the spend stands no matter how
+  // the offer scored on the visibility rules.
+  //
+  // The reason code deliberately does not echo the COMPETITOR_ACCEPTED enum:
+  // this result is rendered in the provider's own panel, which may not disclose
+  // that a rival was chosen. The enum stays internal, for admins.
+  if (offer.rejectionReason === OfferRejectionReason.COMPETITOR_ACCEPTED) {
+    return policyResult(false, 'NO_REFUND', 'OFFER_NOT_SELECTED', hoursSinceSubmitted);
   }
 
   if (offer.status === OfferStatus.VIEWED || offer.viewedAt) {
@@ -106,6 +123,9 @@ const REFUND_REASON_LABELS: Record<string, string> = {
   NO_CREDIT_SPEND: 'Kredi harcaması yok',
   PROVIDER_WITHDRAWN_OR_CANCELLED: 'Teklif sağlayıcı tarafından geri çekildi veya iptal edildi',
   OFFER_ACCEPTED: 'Teklif kabul edildi',
+  // Deliberately neutral: this label is rendered in the provider's own panel,
+  // where nothing about competing offers may be disclosed.
+  OFFER_NOT_SELECTED: 'Teklif kabul edilmedi',
   VIEWED_MANUAL_REVIEW: 'Görüntülenen teklif manuel incelenmeli',
   NOT_VIEWED_48H: '48 saat içinde görüntülenmedi',
   WAITING_VIEW_WINDOW: '48 saatlik pencere bekleniyor',
@@ -121,6 +141,7 @@ const REFUND_DETAILS: Record<string, string> = {
   NO_CREDIT_SPEND: 'Bu teklif için kayıtlı kredi harcaması bulunmuyor.',
   PROVIDER_WITHDRAWN_OR_CANCELLED: 'Sağlayıcı tarafından geri çekilen veya iptal edilen tekliflerde otomatik iade önerilmez.',
   OFFER_ACCEPTED: 'Kabul edilmiş tekliflerde kredi iadesi önerilmez.',
+  OFFER_NOT_SELECTED: 'Bu talep için teklifiniz kabul edilmedi. Gönderilen teklifin kredisi iade edilmez.',
   VIEWED_MANUAL_REVIEW: 'Müşteri teklifi görüntüledi. İade kararı manuel incelenmeli.',
   NOT_VIEWED_48H: 'Teklif 48 saat içinde görüntülenmedi. Tam iade önerilir.',
   WAITING_VIEW_WINDOW: '48 saatlik görüntüleme penceresi henüz dolmadı.',

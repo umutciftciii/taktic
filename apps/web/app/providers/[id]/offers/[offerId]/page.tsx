@@ -4,13 +4,16 @@ import {
   apiFetch,
   getCurrentUser,
   ProviderOffer,
-  statusLabel,
   refundActionLabel,
   formatPrice,
   formatDateTime,
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
-import { providerRefundBadgeClass, providerStatusBadgeClass } from '../../../provider-ui';
+import {
+  providerOfferStatusLabel,
+  providerRefundBadgeClass,
+  providerStatusBadgeClass,
+} from '../../../provider-ui';
 
 type ProviderOfferDetailPageProps = {
   params: Promise<{ id: string; offerId: string }>;
@@ -40,7 +43,7 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
         <p className="pdash-page-sub">
           {offer.request.category.name} · {offer.request.city}/{offer.request.district}
           <span style={{ marginLeft: 8 }}>
-            <span className={providerStatusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
+            <span className={providerStatusBadgeClass(offer.status)}>{providerOfferStatusLabel(offer.status)}</span>
           </span>
         </p>
       </header>
@@ -59,7 +62,7 @@ export default async function ProviderOfferDetailPage({ params }: ProviderOfferD
               <div className="pdash-info-row">
                 <dt>Durum</dt>
                 <dd>
-                  <span className={providerStatusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
+                  <span className={providerStatusBadgeClass(offer.status)}>{providerOfferStatusLabel(offer.status)}</span>
                 </dd>
               </div>
               <div className="pdash-info-row">

@@ -31,13 +31,34 @@ enum ServiceRequestQuestionType {
   IMAGE
 }
 
+/// Lifecycle: DRAFT → SUBMITTED → IN_REVIEW → APPROVED → MATCHED → COMPLETED.
+/// SUBMITTED and IN_REVIEW together are the moderation phase; they are kept
+/// under their original names so existing rows, admin filters and tests stay
+/// valid.
+///
+/// MATCHED is written only by the offer-accept cascade, EXPIRED only by the
+/// (not yet built) expiry scheduler, COMPLETED and CANCELLED only by the
+/// dedicated lifecycle endpoints — never by the admin moderation dropdown.
 enum ServiceRequestStatus {
   DRAFT
   SUBMITTED
   IN_REVIEW
   APPROVED
+  MATCHED
+  COMPLETED
   REJECTED
   CANCELLED
+  EXPIRED
+}
+
+/// Why an offer ended up REJECTED. NULL means a customer rejected it by hand,
+/// which is also the value every offer rejected before this field existed
+/// carries — that keeps their refund behaviour unchanged.
+enum OfferRejectionReason {
+  /// The customer accepted a competing offer on the same request. These offers
+  /// are deliberately NOT refundable: the provider's credit bought a real,
+  /// delivered offer that simply was not selected.
+  COMPETITOR_ACCEPTED
 }
 
 enum ProviderStatus {
@@ -207,20 +228,29 @@ model ServiceRequest {
   moderatedAt           DateTime?
   moderationNote        String?
   rejectionReason       String?
+  /// The single accepted offer. Unique so the request can never point at two
+  /// winners; the accept cascade is what writes it.
+  matchedOfferId        String?              @unique
+  matchedAt             DateTime?
+  completedAt           DateTime?
+  cancelledAt           DateTime?
+  expiredAt             DateTime?
   submittedAt           DateTime             @default(now())
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  category ServiceCategory        @relation(fields: [categoryId], references: [id])
-  customer User?                  @relation(fields: [customerId], references: [id])
-  answers  ServiceRequestAnswer[]
-  offers   Offer[]
+  category     ServiceCategory        @relation(fields: [categoryId], references: [id])
+  customer     User?                  @relation(fields: [customerId], references: [id])
+  answers      ServiceRequestAnswer[]
+  offers       Offer[]
+  matchedOffer Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
 
   @@index([categoryId])
   @@index([customerId])
   @@index([status])
   @@index([city, district])
   @@index([submittedAt])
+  @@index([status, submittedAt])
 }
 
 model ServiceRequestAnswer {
@@ -332,12 +362,14 @@ model Offer {
   viewedAt                    DateTime?
   acceptedAt                  DateTime?
   rejectedAt                  DateTime?
+  rejectionReason             OfferRejectionReason?
   withdrawnAt                 DateTime?
   createdAt                   DateTime    @default(now())
   updatedAt                   DateTime    @updatedAt
 
-  request  ServiceRequest  @relation(fields: [requestId], references: [id])
-  provider ProviderProfile @relation(fields: [providerId], references: [id])
+  request       ServiceRequest  @relation(fields: [requestId], references: [id])
+  provider      ProviderProfile @relation(fields: [providerId], references: [id])
+  matchedForRequest ServiceRequest? @relation("ServiceRequestMatchedOffer")
 
   @@unique([providerId, requestId])
   @@index([requestId])
@@ -346,6 +378,13 @@ model Offer {
   @@index([submittedAt])
   @@index([creditSpentTransactionId])
   @@index([creditRefundedTransactionId])
+  @@index([rejectionReason])
+  // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
+  // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
+  // add_request_matching migration. Prisma cannot express partial indexes in
+  // this schema, so it lives in raw SQL; it is the database-level backstop that
+  // makes a second accepted offer on a request unrepresentable even if the
+  // application guard is bypassed.
 }
 
 model OfferCreditPackage {

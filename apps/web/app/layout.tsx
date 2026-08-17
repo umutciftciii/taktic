@@ -6,9 +6,9 @@ import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
 
 export const metadata: Metadata = {
-  title: 'TakTic — Doğrulanmış hizmet, adil teklif',
+  title: 'TakTic — Yerel hizmet teklifleri, adil teklif kredisi',
   description:
-    'TakTic, yerel hizmet pazaryerinde doğrulanmış talepler ve adil teklif kredisiyle çalışır.',
+    'TakTic, yerel hizmet pazaryerinde talebinizi hizmet verenlere ulaştırır; gelen teklifleri karşılaştırarak seçim yaparsınız.',
 };
 
 type RootLayoutProps = {

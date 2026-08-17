@@ -20,7 +20,12 @@ import {
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { EmptyState } from '../../../components/empty-state';
-import { recalculateRequestQualityAction, updateRequestStatusAction } from '../actions';
+import {
+  cancelRequestAction,
+  completeRequestAction,
+  recalculateRequestQualityAction,
+  updateRequestStatusAction,
+} from '../actions';
 
 type RequestDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -35,6 +40,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
   );
   const offers = await apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]);
   const recentOffers = offers.slice(0, RECENT_OFFERS_LIMIT);
+  const matchedOffer = request.matchedOfferId
+    ? (offers.find((offer) => offer.id === request.matchedOfferId) ?? null)
+    : null;
   const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
   const categoryName = request.category.name;
   const headerTitle = categoryName ? `${categoryName} Talebi` : 'Talep Detayı';
@@ -85,7 +93,10 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
               {requestStatusLabel(request.status)}
             </span>
           </div>
-          <p>Durum geçişleri anında uygulanır. Reddetme için gerekçe zorunludur.</p>
+          <p>
+            İnceleme geçişleri anında uygulanır. Reddetme için gerekçe zorunludur. Eşleşme ve
+            tamamlanma durumları buradan yazılamaz.
+          </p>
           <div className="status-action-list">
             <StatusQuickForm
               requestId={request.id}
@@ -101,12 +112,28 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
               label="Onayla"
               variant="primary"
             />
-            <StatusQuickForm
+          </div>
+
+          <div className="status-action-list">
+            <LifecycleForm
               requestId={request.id}
-              targetStatus="CANCELLED"
-              currentStatus={request.status}
+              action={completeRequestAction}
+              label="Hizmeti tamamlandı işaretle"
+              variant="primary"
+              disabled={request.status !== 'MATCHED'}
+              hint={
+                request.status === 'MATCHED'
+                  ? null
+                  : 'Yalnız eşleşmiş talep tamamlanabilir.'
+              }
+            />
+            <LifecycleForm
+              requestId={request.id}
+              action={cancelRequestAction}
               label="İptal et"
               variant="ghost"
+              disabled={isTerminalStatus(request.status)}
+              hint={isTerminalStatus(request.status) ? 'Talep kapanmış durumda.' : null}
             />
           </div>
 
@@ -151,6 +178,53 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
               </button>
             </form>
           </details>
+        </div>
+
+        <div className="admin-action-panel request-offers-panel">
+          <div className="panel-head">
+            <h3>Eşleşme</h3>
+            <span className={statusBadgeClass(request.status)}>
+              {requestStatusLabel(request.status)}
+            </span>
+          </div>
+          {request.matchedOfferId ? (
+            <dl className="panel-dl">
+              <div>
+                <dt>Seçilen teklif</dt>
+                <dd>
+                  <Link href={`/offers/${request.matchedOfferId}`}>
+                    {matchedOffer
+                      ? matchedOffer.provider.businessName
+                      : `#${request.matchedOfferId.slice(-8)}`}
+                  </Link>
+                </dd>
+              </div>
+              <div>
+                <dt>Teklif kimliği</dt>
+                <dd>
+                  <code>{request.matchedOfferId}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Eşleşme zamanı</dt>
+                <dd>{formatDateTime(request.matchedAt)}</dd>
+              </div>
+              {request.completedAt ? (
+                <div>
+                  <dt>Tamamlanma</dt>
+                  <dd>{formatDateTime(request.completedAt)}</dd>
+                </div>
+              ) : null}
+              {request.cancelledAt ? (
+                <div>
+                  <dt>İptal</dt>
+                  <dd>{formatDateTime(request.cancelledAt)}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : (
+            <p className="request-offers-empty">Bu talep henüz bir teklifle eşleşmedi.</p>
+          )}
         </div>
 
         <div className="admin-action-panel request-offers-panel">
@@ -482,9 +556,44 @@ function QualityBreakdownItem({
   );
 }
 
+function isTerminalStatus(status: string) {
+  return (
+    status === 'COMPLETED' ||
+    status === 'CANCELLED' ||
+    status === 'EXPIRED' ||
+    status === 'REJECTED'
+  );
+}
+
+type LifecycleFormProps = {
+  requestId: string;
+  action: (formData: FormData) => Promise<void>;
+  label: string;
+  variant: 'primary' | 'secondary' | 'ghost';
+  disabled: boolean;
+  hint: string | null;
+};
+
+function LifecycleForm({ requestId, action, label, variant, disabled, hint }: LifecycleFormProps) {
+  return (
+    <form action={action} className="status-quick-form">
+      <input type="hidden" name="id" value={requestId} />
+      <button
+        className={`btn btn-${variant} btn-sm status-action-btn`}
+        type="submit"
+        disabled={disabled}
+        aria-disabled={disabled}
+        title={hint ?? undefined}
+      >
+        <span className="status-action-label">{label}</span>
+      </button>
+    </form>
+  );
+}
+
 type StatusQuickFormProps = {
   requestId: string;
-  targetStatus: 'IN_REVIEW' | 'APPROVED' | 'CANCELLED';
+  targetStatus: 'IN_REVIEW' | 'APPROVED';
   currentStatus: string;
   label: string;
   variant: 'primary' | 'secondary' | 'ghost';

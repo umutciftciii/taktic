@@ -4,13 +4,16 @@ import {
   apiFetch,
   getCurrentUser,
   ProviderOffer,
-  statusLabel,
   refundActionLabel,
   formatPrice,
   formatDateTime,
 } from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
-import { providerRefundBadgeClass, providerStatusBadgeClass } from '../../provider-ui';
+import {
+  providerOfferStatusLabel,
+  providerRefundBadgeClass,
+  providerStatusBadgeClass,
+} from '../../provider-ui';
 
 type ProviderOffersPageProps = {
   params: Promise<{ id: string }>;
@@ -115,7 +118,7 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
                         `#${offer.request.id.slice(-6).toUpperCase()}`}
                     </p>
                   </div>
-                  <span className={providerStatusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
+                  <span className={providerStatusBadgeClass(offer.status)}>{providerOfferStatusLabel(offer.status)}</span>
                 </div>
 
                 <div className="pdash-card-meta">

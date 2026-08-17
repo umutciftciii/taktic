@@ -75,8 +75,11 @@ export type ServiceRequestStatus =
   | 'SUBMITTED'
   | 'IN_REVIEW'
   | 'APPROVED'
+  | 'MATCHED'
+  | 'COMPLETED'
   | 'REJECTED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'EXPIRED';
 
 export type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -120,6 +123,11 @@ export type ServiceRequest = {
   moderatedAt: string | null;
   moderationNote: string | null;
   rejectionReason: string | null;
+  matchedOfferId: string | null;
+  matchedAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  expiredAt: string | null;
   submittedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -967,8 +975,11 @@ export function requestStatusLabel(status: string) {
     SUBMITTED: 'Yeni Talep',
     IN_REVIEW: 'İncelemede',
     APPROVED: 'Onaylandı',
+    MATCHED: 'Eşleşti',
+    COMPLETED: 'Tamamlandı',
     REJECTED: 'Reddedildi',
     CANCELLED: 'İptal Edildi',
+    EXPIRED: 'Süresi Doldu',
   };
 
   return labels[status] ?? statusLabel(status);
@@ -1001,6 +1012,8 @@ export function statusBadgeClass(status: string) {
   switch (status) {
     case 'APPROVED':
     case 'ACCEPTED':
+    case 'MATCHED':
+    case 'COMPLETED':
     case 'PAID':
       return 'badge badge-good';
     case 'PENDING':
