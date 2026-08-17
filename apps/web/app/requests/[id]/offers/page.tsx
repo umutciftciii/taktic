@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation';
 import {
   apiFetch,
   CustomerServiceRequest,
+  MatchedProviderContact,
   fetchOrNotFound,
+  getMatchedContactOrNull,
   OfferStatus,
   RequestOfferPreview,
   formatDateTime,
@@ -32,9 +34,13 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   // An unknown request and somebody else's request are the same 404 here: the
   // API answers 403 for a request that belongs to another customer, and telling
   // this one that it exists would be a disclosure on its own.
-  const [offers, myRequests] = await Promise.all([
+  const [offers, myRequests, matchedContact] = await Promise.all([
     fetchOrNotFound(() => apiFetch<RequestOfferPreview[]>(`/service-requests/${id}/offers`)),
     safeFetchMyRequests(),
+    // Its own request, never part of the offer payload. Null whenever the
+    // feature is off, the request is not matched, or no reveal was recorded —
+    // in all three cases the section below simply does not render.
+    getMatchedContactOrNull<MatchedProviderContact>(`/service-requests/${id}/matched-contact`),
   ]);
 
   const summary = myRequests.find((request) => request.id === id) ?? null;
@@ -112,6 +118,8 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           ) : null}
         </div>
       </section>
+
+      {matchedContact ? <MatchedContactCard contact={matchedContact} /> : null}
 
       <div className="cdash-section-head">
         <div className="cdash-section-title">
@@ -277,6 +285,53 @@ function summaryBody(summary: CustomerServiceRequest | null) {
   }
 
   return 'Talebiniz hizmet verenlere iletildi. Aşağıdaki kartlarda gelen teklifleri inceleyebilirsiniz.';
+}
+
+/**
+ * Shown only once the request is matched and the reveal is on record.
+ *
+ * Every value here came from the matched-contact route, which checks the match,
+ * the audit row and the caller before it answers. Nothing on this page reads a
+ * contact detail out of an offer, because no offer carries one.
+ */
+function MatchedContactCard({ contact }: { contact: MatchedProviderContact }) {
+  const { provider } = contact;
+
+  return (
+    <section className="cdash-contact-card" data-testid="matched-contact">
+      <div className="cdash-contact-head">
+        <h2 className="cdash-contact-title">İletişime Geç</h2>
+        <span className="cdash-badge cdash-badge-success">Eşleşme tamamlandı</span>
+      </div>
+      <p className="cdash-contact-sub">
+        Teklifini kabul ettiğiniz hizmet verenin iletişim bilgileri aşağıdadır.
+      </p>
+      <dl className="cdash-contact-list">
+        <dt>İşletme</dt>
+        <dd data-testid="matched-contact-name">{provider.businessName}</dd>
+        <dt>Yetkili</dt>
+        <dd>{provider.contactName}</dd>
+        <dt>Telefon</dt>
+        <dd>
+          <a href={`tel:${provider.phone}`} data-testid="matched-contact-phone">
+            {provider.phone}
+          </a>
+        </dd>
+        <dt>E-posta</dt>
+        <dd>
+          {provider.email ? <a href={`mailto:${provider.email}`}>{provider.email}</a> : '-'}
+        </dd>
+        <dt>Konum</dt>
+        <dd>
+          {provider.city}
+          {provider.district ? `, ${provider.district}` : ''}
+        </dd>
+      </dl>
+      <p className="cdash-contact-note">
+        Paylaşım {formatDateTime(contact.revealedAt)} tarihinde kaydedildi.
+      </p>
+    </section>
+  );
 }
 
 function OfferCard({ offer, requestId }: { offer: RequestOfferPreview; requestId: string }) {

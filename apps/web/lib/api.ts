@@ -320,6 +320,86 @@ export type RequestOfferDetail = RequestOfferPreview & {
   rejectedAt: string | null;
 };
 
+/**
+ * Whether contact sharing is on, and which text the request form must link to.
+ * Comes from the API so the flag has exactly one source of truth; carries no
+ * personal data.
+ */
+export type ContactDisclosureConfig = {
+  enabled: boolean;
+  disclosureUrl: string | null;
+  disclosureVersion: string | null;
+};
+
+/**
+ * The details a matched party may see about the other one. These only ever
+ * arrive from the dedicated matched-contact routes — no offer projection
+ * carries them, before or after the match.
+ */
+export type MatchedProviderContact = {
+  requestId: string;
+  offerId: string;
+  revealedAt: string;
+  disclosureVersion: string;
+  provider: {
+    id: string;
+    businessName: string;
+    contactName: string;
+    phone: string;
+    email: string | null;
+    city: string;
+    district: string;
+  };
+};
+
+export type MatchedCustomerContact = {
+  requestId: string;
+  offerId: string;
+  revealedAt: string;
+  disclosureVersion: string;
+  customer: {
+    customerName: string;
+    customerPhone: string;
+    customerEmail: string | null;
+  };
+};
+
+/**
+ * Reads the disclosure config, treating any failure as "off".
+ *
+ * A form that cannot reach the API must not render an acknowledgement it cannot
+ * describe — and with the feature off there is nothing to show anyway.
+ */
+export async function getContactDisclosure(): Promise<ContactDisclosureConfig> {
+  try {
+    return await apiFetch<ContactDisclosureConfig>('/contact-sharing/disclosure');
+  } catch {
+    return { enabled: false, disclosureUrl: null, disclosureVersion: null };
+  }
+}
+
+/**
+ * Loads matched contact details, returning null for every expected refusal.
+ *
+ * A 409 means the feature is off, a 404 that this request has no reveal, a 403
+ * that this caller is not one of the two parties. None of those is an error the
+ * screen should apologise for — the section simply does not appear.
+ */
+export async function getMatchedContactOrNull<T>(path: string): Promise<T | null> {
+  try {
+    return await apiFetch<T>(path);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 409 || error.status === 404 || error.status === 403 || error.status === 401)
+    ) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 export type CreditTransactionType =
   | 'ADMIN_GRANT'
   | 'ADMIN_DEDUCT'

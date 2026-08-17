@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  ContactRevealDetail,
   fetchOrNotFound,
   Offer,
   QualityScoreBreakdown,
@@ -65,6 +66,13 @@ export default async function RequestDetailPage({
     apiFetch<ServiceRequest>(`/service-requests/${id}`),
   );
   const offers = await apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]);
+  // Audit only: this panel reports whether contact details were opened and
+  // under which disclosure version. It renders no contact value — the operator
+  // already has the customer and provider panels for that, and this feature
+  // adds nothing to what they show.
+  const contactReveal = await apiFetch<ContactRevealDetail>(
+    `/service-requests/${id}/contact-reveal`,
+  ).catch(() => null);
   const recentOffers = offers.slice(0, RECENT_OFFERS_LIMIT);
   const matchedOffer = request.matchedOfferId
     ? (offers.find((offer) => offer.id === request.matchedOfferId) ?? null)
@@ -270,6 +278,32 @@ export default async function RequestDetailPage({
                   <dd>{formatDateTime(request.cancelledAt)}</dd>
                 </div>
               ) : null}
+              {/*
+                Read-only audit. There is no action here on purpose: the reveal
+                is written once inside the accept transaction, and nothing in
+                the product may repeat, edit or undo it.
+              */}
+              <div data-testid="contact-reveal-audit">
+                <dt>İletişim paylaşımı</dt>
+                <dd>
+                  {contactReveal?.event ? (
+                    <>
+                      {formatDateTime(contactReveal.event.revealedAt)}
+                      <span className="muted">
+                        {' '}
+                        · metin sürümü <code>{contactReveal.event.disclosureVersion}</code>
+                      </span>
+                      {contactReveal.event.offerId !== request.matchedOfferId ? (
+                        <span className="badge badge-bad" style={{ marginLeft: 6 }}>
+                          Eşleşme ile tutarsız
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="muted">Kayıt yok</span>
+                  )}
+                </dd>
+              </div>
             </dl>
           ) : (
             <p className="request-offers-empty">Bu talep henüz bir teklifle eşleşmedi.</p>

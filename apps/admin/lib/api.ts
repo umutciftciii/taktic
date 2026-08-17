@@ -846,6 +846,44 @@ export type CreditLedgerResponse = {
   hasNextPage: boolean;
 };
 
+/**
+ * The audit row that records a contact reveal, plus the details themselves when
+ * the feature is on and a reveal really happened.
+ *
+ * The event names ids and a timestamp — no person — so it stays visible to an
+ * operator regardless of the flag. `contacts` is null whenever the feature is
+ * off, no reveal exists, or the reveal does not agree with matchedOfferId.
+ */
+export type ContactRevealEvent = {
+  requestId: string;
+  offerId: string;
+  providerId: string;
+  customerUserId: string | null;
+  revealedAt: string;
+  disclosureVersion: string;
+};
+
+export type ContactRevealDetail = {
+  enabled: boolean;
+  event: ContactRevealEvent | null;
+  contacts: {
+    provider: {
+      id: string;
+      businessName: string;
+      contactName: string;
+      phone: string;
+      email: string | null;
+      city: string;
+      district: string;
+    };
+    customer: {
+      customerName: string;
+      customerPhone: string;
+      customerEmail: string | null;
+    };
+  } | null;
+};
+
 export const NOTIFICATION_CHANNELS = ['EMAIL', 'SMS'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 

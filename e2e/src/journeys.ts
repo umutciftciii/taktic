@@ -50,6 +50,15 @@ export async function createRequest(
   await form.locator('input[name="district"]').fill(values.district);
   await form.locator('textarea[name="description"]').fill(values.description);
 
+  // Present only on a runtime with contact sharing on, where it is required:
+  // the form cannot be submitted until the customer confirms having read the
+  // linked disclosure. Ticking it here is what every other scenario means by
+  // "the customer filled the form in".
+  const disclosure = actor.page.getByTestId('contact-disclosure-accept');
+  if ((await disclosure.count()) > 0) {
+    await disclosure.check();
+  }
+
   await actor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
 
   await expect(actor.page).toHaveURL(/\/requests\/success\?id=/);

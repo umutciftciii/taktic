@@ -1,7 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { describeDatabase, requireE2eDatabaseUrl } from './src/database-url';
-import { artifactsDir, outboxDir, phoneGateRuntime, primaryRuntime, repoRoot, type Runtime } from './src/runtime';
+import {
+  artifactsDir,
+  contactSharingRuntime,
+  outboxDir,
+  phoneGateRuntime,
+  primaryRuntime,
+  repoRoot,
+  type Runtime,
+} from './src/runtime';
 
 /**
  * Resolved at module scope, which is the earliest possible moment: Playwright
@@ -59,6 +67,16 @@ function apiServer(runtime: Runtime) {
       ...sharedEnv,
       API_PORT: String(runtime.ports.api),
       REQUIRE_PHONE_VERIFICATION: String(runtime.requirePhoneVerification),
+      // Off for every runtime but the contact-sharing one. The API refuses to
+      // boot with the flag on and no https URL and version, so a stack that
+      // asks for the feature has to supply both here.
+      CONTACT_SHARING_ENABLED: String(runtime.contactSharing.enabled),
+      ...(runtime.contactSharing.enabled
+        ? {
+            CONTACT_DISCLOSURE_URL: runtime.contactSharing.disclosureUrl,
+            CONTACT_DISCLOSURE_VERSION: runtime.contactSharing.disclosureVersion,
+          }
+        : {}),
       // Swaps the console SMS transport for one that records what it sent, so
       // the phone-verification test can read the code it was supposed to
       // receive instead of scraping a log line.
@@ -143,5 +161,8 @@ export default defineConfig({
     apiServer(phoneGateRuntime),
     nextServer(phoneGateRuntime, 'web'),
     nextServer(phoneGateRuntime, 'admin'),
+    apiServer(contactSharingRuntime),
+    nextServer(contactSharingRuntime, 'web'),
+    nextServer(contactSharingRuntime, 'admin'),
   ],
 });

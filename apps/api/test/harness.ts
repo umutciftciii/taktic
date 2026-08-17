@@ -138,6 +138,7 @@ export async function createTestApp(): Promise<TestContext> {
 }
 
 const TRUNCATED_TABLES = [
+  'ContactRevealEvent',
   'NotificationLog',
   'PhoneVerification',
   'ProviderCreditTransaction',

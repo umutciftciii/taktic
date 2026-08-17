@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -17,6 +18,10 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import {
+  contactDisclosureRequiredException,
+  readContactSharingConfig,
+} from '../contact-sharing/contact-sharing.config';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { CUSTOMER_UNACTIONABLE_OFFER_STATUSES } from './offer-transitions';
@@ -339,13 +344,38 @@ export class OffersService {
    * write conflict Postgres raises for the loser, so the replay reaches that
    * business rule instead of leaking a 500. A partial unique index
    * (Offer_one_accepted_per_request) is the database-level backstop.
+   *
+   * When contact sharing is on, the same transaction also carries the reveal:
+   * the request must already hold an acceptance of the current disclosure
+   * version, and the audit row is written before the transaction commits. Both
+   * halves therefore succeed together or not at all — there is no matched
+   * request whose contact details are open without a record of why.
    */
   private acceptRequestOffer(requestId: string, offerId: string, viewedAt: Date | null) {
     const now = new Date();
+    const contactSharing = readContactSharingConfig();
 
     return runSerializable(
       this.prisma,
       async (tx) => {
+        if (contactSharing.enabled) {
+          // Read inside the transaction, before anything is written: a request
+          // whose customer never confirmed reading the current disclosure must
+          // not be matched at all while the feature is on, because matching is
+          // what opens the details.
+          const disclosure = await tx.serviceRequest.findUnique({
+            where: { id: requestId },
+            select: { contactDisclosureVersion: true, contactDisclosureAcceptedAt: true },
+          });
+
+          if (
+            !disclosure?.contactDisclosureAcceptedAt ||
+            disclosure.contactDisclosureVersion !== contactSharing.disclosureVersion
+          ) {
+            throw contactDisclosureRequiredException();
+          }
+        }
+
         const matched = await tx.serviceRequest.updateMany({
           where: {
             id: requestId,
@@ -405,6 +435,17 @@ export class OffersService {
           include: customerOfferInclude,
         });
 
+        if (contactSharing.enabled) {
+          await createContactRevealEvent(tx, {
+            requestId,
+            offerId,
+            providerId: accepted.providerId,
+            customerUserId: accepted.request.customerId,
+            revealedAt: now,
+            disclosureVersion: contactSharing.disclosureVersion,
+          });
+        }
+
         return toCustomerOfferDetail(accepted);
       },
       { label: 'offers.acceptRequestOffer' },
@@ -437,6 +478,45 @@ export class OffersService {
     ensureCustomerCanAccessRequest(offer.request.customerId, user);
 
     return offer;
+  }
+}
+
+/**
+ * Writes the one audit row that says a match opened both sides' details.
+ *
+ * Inside the caller's transaction, so a failure here rolls the whole accept
+ * back: a matched request without its event would be exactly the state this
+ * feature must never produce. The unique index on requestId is what makes that
+ * true even against a concurrent writer — the loser's insert fails and takes its
+ * own accept down with it, rather than adding a second reveal.
+ */
+async function createContactRevealEvent(
+  tx: Prisma.TransactionClient,
+  event: {
+    requestId: string;
+    offerId: string;
+    providerId: string;
+    customerUserId: string | null;
+    revealedAt: Date;
+    disclosureVersion: string;
+  },
+) {
+  try {
+    await tx.contactRevealEvent.create({ data: event });
+  } catch (error) {
+    // A unique violation means somebody already revealed this request or this
+    // offer. Reported as the business rule it is, so the caller sees a 409
+    // instead of a leaked Prisma error.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'CONTACT_REVEAL_ALREADY_EXISTS',
+        message: 'Bu talep için iletişim paylaşımı zaten kayıtlı.',
+      });
+    }
+
+    throw error;
   }
 }
 

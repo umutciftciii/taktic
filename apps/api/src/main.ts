@@ -3,9 +3,15 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
 async function bootstrap() {
+  // Before anything listens. Turning contact sharing on without a disclosure
+  // URL and version must stop the process rather than degrade into a state
+  // where customers are asked to confirm having read nothing.
+  assertContactSharingConfig();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Rate limiting keys off req.ip. Express only derives that from

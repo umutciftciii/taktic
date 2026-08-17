@@ -44,6 +44,10 @@ export type RuntimePorts = {
   admin: number;
 };
 
+export type ContactSharing =
+  | { enabled: false }
+  | { enabled: true; disclosureUrl: string; disclosureVersion: string };
+
 export type Runtime = {
   name: string;
   ports: RuntimePorts;
@@ -51,7 +55,20 @@ export type Runtime = {
   webUrl: string;
   adminUrl: string;
   requirePhoneVerification: boolean;
+  contactSharing: ContactSharing;
 };
+
+/**
+ * A placeholder destination, deliberately not a legal text.
+ *
+ * What the suite exercises is the product rule — the feature refuses to run
+ * without an https URL and a version, and the form makes the customer confirm
+ * having read whatever is behind that link. Writing the disclosure itself is
+ * not this repository's job, so the URL points at example.test and is never
+ * fetched.
+ */
+export const E2E_DISCLOSURE_URL = 'https://example.test/taktic/contact-disclosure';
+export const E2E_DISCLOSURE_VERSION = 'e2e-v1';
 
 function port(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -62,6 +79,7 @@ function buildRuntime(
   name: string,
   ports: RuntimePorts,
   requirePhoneVerification: boolean,
+  contactSharing: ContactSharing = { enabled: false },
 ): Runtime {
   return {
     name,
@@ -70,6 +88,7 @@ function buildRuntime(
     webUrl: `http://127.0.0.1:${ports.web}`,
     adminUrl: `http://127.0.0.1:${ports.admin}`,
     requirePhoneVerification,
+    contactSharing,
   };
 }
 
@@ -93,4 +112,28 @@ export const phoneGateRuntime = buildRuntime(
   true,
 );
 
-export const runtimes = [primaryRuntime, phoneGateRuntime];
+/**
+ * The same code with CONTACT_SHARING_ENABLED on.
+ *
+ * A third stack for the same reason the phone gate has a second one: the flag
+ * is read per call from the API's environment, so one process cannot represent
+ * both sides. Running them side by side is what lets the suite show that the
+ * difference between "no contact details anywhere" and "each party sees the
+ * other" is this flag and nothing else.
+ */
+export const contactSharingRuntime = buildRuntime(
+  'contact-sharing',
+  {
+    api: port(process.env.E2E_CONTACT_API_PORT, 3221),
+    web: port(process.env.E2E_CONTACT_WEB_PORT, 3220),
+    admin: port(process.env.E2E_CONTACT_ADMIN_PORT, 3222),
+  },
+  false,
+  {
+    enabled: true,
+    disclosureUrl: E2E_DISCLOSURE_URL,
+    disclosureVersion: E2E_DISCLOSURE_VERSION,
+  },
+);
+
+export const runtimes = [primaryRuntime, phoneGateRuntime, contactSharingRuntime];

@@ -11,6 +11,7 @@ import { requireE2eDatabaseUrl } from './database-url';
  * framework into the test runner.
  */
 const TRUNCATED_TABLES = [
+  'ContactRevealEvent',
   'NotificationLog',
   'PhoneVerification',
   'ProviderCreditTransaction',

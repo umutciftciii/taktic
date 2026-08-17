@@ -12,6 +12,10 @@ import { isPhoneVerificationRequired } from '../phone-verification/phone-verific
 import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import {
+  CONTACT_DISCLOSURE_REQUIRED_CODE,
+  readContactSharingConfig,
+} from '../contact-sharing/contact-sharing.config';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { NumberingService } from '../numbering/numbering.service';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -116,6 +120,7 @@ export class ServiceRequestsService {
 
     const answers = validateAnswers(category.questions, dto.answers ?? []);
     const preferredDate = normalizeOptionalDate(dto.preferredDate, 'Preferred date');
+    const disclosure = resolveContactDisclosure(dto);
     const requestData = {
       customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
       customerPhone: normalizePhone(dto.customerPhone),
@@ -149,6 +154,7 @@ export class ServiceRequestsService {
           customerId,
           requestNumber,
           ...requestData,
+          ...disclosure,
           qualityScore: quality.score,
           qualityScoreBreakdown: quality.breakdown,
           answers: {
@@ -614,6 +620,48 @@ function qualityLabel(score: number): QualityLabel {
   }
 
   return 'LOW';
+}
+
+/**
+ * What the request should record about the contact-sharing disclosure.
+ *
+ * With the feature off this returns nothing at all, so request creation behaves
+ * exactly as it did before the columns existed and both stay NULL. With it on,
+ * the customer must confirm having read the linked text before the request can
+ * be created — because accepting an offer on that request is what opens their
+ * details, and by then it is too late to ask.
+ *
+ * The stored version always comes from configuration, never from the client.
+ */
+function resolveContactDisclosure(dto: CreateServiceRequestDto) {
+  const config = readContactSharingConfig();
+  if (!config.enabled) {
+    return {};
+  }
+
+  if (dto.contactDisclosureAccepted !== true) {
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      code: CONTACT_DISCLOSURE_REQUIRED_CODE,
+      message: 'Talebi göndermek için bilgilendirme metnini okuduğunuzu onaylayın.',
+    });
+  }
+
+  const shown = dto.contactDisclosureVersion?.trim().toLowerCase();
+  if (shown && shown !== config.disclosureVersion) {
+    throw new ConflictException({
+      statusCode: HttpStatus.CONFLICT,
+      error: 'Conflict',
+      code: CONTACT_DISCLOSURE_REQUIRED_CODE,
+      message: 'Bilgilendirme metni güncellendi. Lütfen sayfayı yenileyip tekrar onaylayın.',
+    });
+  }
+
+  return {
+    contactDisclosureVersion: config.disclosureVersion,
+    contactDisclosureAcceptedAt: new Date(),
+  };
 }
 
 function withQualityLabel<T extends { qualityScore: number }>(request: T): T & { qualityLabel: QualityLabel } {

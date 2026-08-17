@@ -95,13 +95,36 @@ pnpm e2e
 
 **Database isolation.** The suite runs against its own database, derived from `DATABASE_URL` by appending `_e2e` (`taktic` → `taktic_e2e`), or from `E2E_DATABASE_URL` if you set one. It refuses to start against any database whose name does not end in `_e2e` — including the development database and the integration suite's `taktic_test` — and that check runs before a single server process starts. The database is created and migrated on first run, emptied before each run, and emptied again afterwards.
 
-**Runtimes.** `REQUIRE_PHONE_VERIFICATION` is read per call, so one API process can only represent one side of it. The suite therefore starts two full stacks — API + web + admin with the gate off on ports 3200-3202, and the same code with the gate on at 3210-3212 — and drives the comparison across both. The ports are clear of `docker compose` (3000-3002), so you can leave the dev stack running. Override them with `E2E_WEB_PORT`, `E2E_API_PORT`, `E2E_ADMIN_PORT` and their `E2E_GATE_*` counterparts.
+**Runtimes.** `REQUIRE_PHONE_VERIFICATION` and `CONTACT_SHARING_ENABLED` are read per call, so one API process can only represent one side of either. The suite therefore starts three full stacks — API + web + admin with both flags off on ports 3200-3202, the same code with the phone gate on at 3210-3212, and the same code with contact sharing on at 3220-3222 — and drives the comparisons across them. The ports are clear of `docker compose` (3000-3002), so you can leave the dev stack running. Override them with `E2E_WEB_PORT`, `E2E_API_PORT`, `E2E_ADMIN_PORT` and their `E2E_GATE_*` / `E2E_CONTACT_*` counterparts.
 
 **One-time codes.** The verification scenario needs the code the application sent, which is never returned over HTTP and only reaches the database as a bcrypt hash. `NOTIFICATION_OUTBOX_DIR` (set automatically by the Playwright config) swaps the SMS transport for one that records what it sent to a file the test reads. It cannot be set in production — the API refuses to boot with it.
 
 Tests run serially in one worker: several assertions are about global state ("no refund transaction exists"), and every actor shares one database.
 
 In CI the suite is its own job, on Chromium only, with its own PostgreSQL service container. Traces, screenshots and videos are captured on failure and uploaded as artifacts.
+
+## Contact Sharing
+
+Once a customer accepts an offer, the two matched parties can be shown each other's contact details. The feature is **off by default** and is gated on three settings:
+
+```bash
+CONTACT_SHARING_ENABLED=false
+CONTACT_DISCLOSURE_URL=https://example.com/iletisim-paylasimi
+CONTACT_DISCLOSURE_VERSION=v1
+```
+
+With the flag on, both other values are mandatory: the URL must be `https`, the version must be a short identifier (`a-z`, `0-9`, `.`, `-`, `_`, normalised to lower case), and the API refuses to boot if either is missing or malformed. There is no silent fallback.
+
+**This is a technical switch, not an approval.** The request form renders a checkbox stating only that the linked text was read, and stores the configured version and a timestamp on the request. That record is not a legal basis on its own, and this repository neither contains nor generates the disclosure text — the flag must stay off until approved content exists behind the URL.
+
+How it behaves:
+
+- **Off** — request creation, matching and every offer projection are exactly as they were. No `ContactRevealEvent` is written, and the contact endpoints answer `409 CONTACT_SHARING_DISABLED`.
+- **On** — accepting an offer requires the request to carry an acceptance of the *current* version, or the accept is refused with `409 CONTACT_DISCLOSURE_REQUIRED`. When it succeeds, one immutable `ContactRevealEvent` is written inside the same transaction as the match, so a matched request either has its audit row or the match did not happen.
+
+Contact details are never added to an offer list or detail. They are served only by three dedicated routes, each of which checks the match, the audit row and the caller: the customer sees the provider they chose, that provider sees the customer, and `SUPER_ADMIN` sees both plus the audit row. A losing provider, an unrelated party and an anonymous caller get nothing. Requests created before the disclosure columns existed carry no acceptance and are never opened.
+
+Nothing in the product can repeat, edit or undo a reveal; the accept transaction is the only writer.
 
 ## Local Ops
 

@@ -4,6 +4,8 @@ import {
   apiFetch,
   fetchOrNotFound,
   getCurrentUser,
+  getMatchedContactOrNull,
+  MatchedCustomerContact,
   ProviderOffer,
   refundActionLabel,
   formatPrice,
@@ -37,6 +39,13 @@ export default async function ProviderOfferDetailPage({
 
   const offer = await fetchOrNotFound(() =>
     apiFetch<ProviderOffer>(`/providers/${id}/offers/${offerId}`),
+  );
+
+  // Its own request, and the API answers it for exactly one provider: the one
+  // whose offer this request was matched to. A losing offer gets null here, so
+  // the section below never renders for it.
+  const matchedContact = await getMatchedContactOrNull<MatchedCustomerContact>(
+    `/providers/${id}/offers/${offerId}/matched-contact`,
   );
 
   const canWithdraw = canWithdrawOffer(offer.status, offer.request.status);
@@ -132,6 +141,48 @@ export default async function ProviderOfferDetailPage({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {matchedContact ? (
+            <section className="pdash-detail-card" data-testid="matched-contact">
+              <h2>Müşteri İletişim</h2>
+              <p className="pdash-card-sub" style={{ marginTop: -4 }}>
+                Teklifiniz kabul edildi. Müşteriye aşağıdaki bilgilerden ulaşabilirsiniz.
+              </p>
+              <dl className="pdash-info-grid">
+                <div className="pdash-info-row">
+                  <dt>Ad Soyad</dt>
+                  <dd data-testid="matched-contact-name">{matchedContact.customer.customerName}</dd>
+                </div>
+                <div className="pdash-info-row">
+                  <dt>Telefon</dt>
+                  <dd>
+                    <a
+                      href={`tel:${matchedContact.customer.customerPhone}`}
+                      data-testid="matched-contact-phone"
+                    >
+                      {matchedContact.customer.customerPhone}
+                    </a>
+                  </dd>
+                </div>
+                <div className="pdash-info-row">
+                  <dt>E-posta</dt>
+                  <dd>
+                    {matchedContact.customer.customerEmail ? (
+                      <a href={`mailto:${matchedContact.customer.customerEmail}`}>
+                        {matchedContact.customer.customerEmail}
+                      </a>
+                    ) : (
+                      '-'
+                    )}
+                  </dd>
+                </div>
+                <div className="pdash-info-row">
+                  <dt>Paylaşım</dt>
+                  <dd>{formatDateTime(matchedContact.revealedAt)}</dd>
+                </div>
+              </dl>
+            </section>
+          ) : null}
+
           <section className="pdash-detail-card">
             <h2>Kredi ve İade</h2>
             <dl className="pdash-info-grid">
@@ -217,9 +268,11 @@ export default async function ProviderOfferDetailPage({
             </div>
           ) : null}
 
-          <div className="pdash-notice">
-            Bu fazda müşteriyle iletişim ve ödeme akışı henüz aktif değildir.
-          </div>
+          {matchedContact ? null : (
+            <div className="pdash-notice">
+              Bu fazda müşteriyle iletişim ve ödeme akışı henüz aktif değildir.
+            </div>
+          )}
 
           <div className="pdash-actions">
             <Link

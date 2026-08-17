@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { ContactSharingModule } from './modules/contact-sharing/contact-sharing.module';
 import { CustomerActivationModule } from './modules/customer-activation/customer-activation.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { HealthModule } from './modules/health/health.module';
@@ -45,6 +46,7 @@ import { PrismaModule } from './prisma/prisma.module';
     FinanceModule,
     PackagePurchasesModule,
     UploadsModule,
+    ContactSharingModule,
     NotificationLogsModule,
     NumberingModule,
     UsersModule,

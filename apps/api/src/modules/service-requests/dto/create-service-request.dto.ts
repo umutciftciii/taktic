@@ -1,6 +1,7 @@
 import {
   Allow,
   IsArray,
+  IsBoolean,
   IsEmail,
   IsInt,
   IsNotEmpty,
@@ -81,6 +82,25 @@ export class CreateServiceRequestDto {
   @IsOptional()
   @IsString()
   description?: string | null;
+
+  /**
+   * Whether the customer confirmed having read the linked contact-sharing
+   * disclosure. Only consulted while CONTACT_SHARING_ENABLED is true; with the
+   * feature off it is ignored and the request keeps null disclosure fields,
+   * exactly as before this field existed.
+   */
+  @IsOptional()
+  @IsBoolean()
+  contactDisclosureAccepted?: boolean;
+
+  /**
+   * The disclosure version the form displayed. Compared for equality against
+   * the configured one — like expectedCreditCost on an offer it never decides
+   * what is stored, it only catches a form filled in before a version bump.
+   */
+  @IsOptional()
+  @IsString()
+  contactDisclosureVersion?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

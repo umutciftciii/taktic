@@ -3917,6 +3917,64 @@ body:has(.cdash-shell) #site-header {
   font-weight: 700;
 }
 
+/* ----- Matched contact ----- */
+.cdash-contact-card {
+  background: #fff;
+  border: 1px solid #bbf7d0;
+  border-radius: 16px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cdash-contact-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.cdash-contact-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.005em;
+}
+
+.cdash-contact-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cdash-contact-list {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.cdash-contact-list dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.cdash-contact-list dd {
+  margin: 0;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.cdash-contact-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ----- Withdrawn offer history ----- */
 .cdash-history {
   list-style: none;
