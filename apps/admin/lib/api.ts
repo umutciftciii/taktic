@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -30,6 +30,12 @@ export type Category = {
   iconKey: CategoryIconKey | string | null;
   isActive: boolean;
   sortOrder: number;
+  /**
+   * Credits a provider spends per offer in this category. `null` means the price
+   * has never been set — such a category cannot receive offers and is flagged in
+   * the admin list.
+   */
+  offerCreditCost: number | null;
   _count?: {
     questions: number;
   };
@@ -69,8 +75,11 @@ export type ServiceRequestStatus =
   | 'SUBMITTED'
   | 'IN_REVIEW'
   | 'APPROVED'
+  | 'MATCHED'
+  | 'COMPLETED'
   | 'REJECTED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'EXPIRED';
 
 export type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -114,6 +123,21 @@ export type ServiceRequest = {
   moderatedAt: string | null;
   moderationNote: string | null;
   rejectionReason: string | null;
+  /** null until the customer proves control of customerPhone with a one-time code. */
+  phoneVerifiedAt: string | null;
+  /**
+   * When moderation approved the request — the clock the 14-day expiry and the
+   * day-7 reminder run on. null on requests approved before the field existed;
+   * those are never touched by either scheduler.
+   */
+  approvedAt: string | null;
+  /** When the day-7 "no offers yet" reminder was claimed. Written at most once. */
+  reminderSentAt: string | null;
+  matchedOfferId: string | null;
+  matchedAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  expiredAt: string | null;
   submittedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -822,6 +846,147 @@ export type CreditLedgerResponse = {
   hasNextPage: boolean;
 };
 
+/**
+ * The audit row that records a contact reveal, plus the details themselves when
+ * the feature is on and a reveal really happened.
+ *
+ * The event names ids and a timestamp — no person — so it stays visible to an
+ * operator regardless of the flag. `contacts` is null whenever the feature is
+ * off, no reveal exists, or the reveal does not agree with matchedOfferId.
+ */
+export type ContactRevealEvent = {
+  requestId: string;
+  offerId: string;
+  providerId: string;
+  customerUserId: string | null;
+  revealedAt: string;
+  disclosureVersion: string;
+};
+
+export type ContactRevealDetail = {
+  enabled: boolean;
+  event: ContactRevealEvent | null;
+  contacts: {
+    provider: {
+      id: string;
+      businessName: string;
+      contactName: string;
+      phone: string;
+      email: string | null;
+      city: string;
+      district: string;
+    };
+    customer: {
+      customerName: string;
+      customerPhone: string;
+      customerEmail: string | null;
+    };
+  } | null;
+};
+
+export const NOTIFICATION_CHANNELS = ['EMAIL', 'SMS'] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+
+export const NOTIFICATION_STATUSES = ['PENDING', 'SENT', 'FAILED'] as const;
+export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
+
+/** Mirrors NOTIFICATION_ERROR_CODES on the API side. */
+export const NOTIFICATION_ERROR_CODES = [
+  'TRANSPORT_UNAVAILABLE',
+  'REJECTED',
+  'TIMEOUT',
+  'INVALID_RECIPIENT',
+  'UNKNOWN',
+] as const;
+export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];
+
+/** The templates this build sends; the filter still accepts any stored value. */
+export const NOTIFICATION_TEMPLATES = [
+  'customer-activation',
+  'request-expiring',
+  'phone-verification-code',
+] as const;
+
+/**
+ * The whole notification payload an operator may see.
+ *
+ * There is no body, subject, action URL, one-time code or raw recipient field
+ * here, and there is none on the API side either — NotificationLog never stored
+ * any of them. `errorLabel` is the API's own safe wording for `errorCode`; the
+ * raw transport error never leaves the API process.
+ */
+export type NotificationLogEntry = {
+  id: string;
+  channel: NotificationChannel;
+  template: string;
+  maskedRecipient: string;
+  status: NotificationStatus;
+  errorCode: NotificationErrorCode | null;
+  errorLabel: string | null;
+  providerMessageId: string | null;
+  providerMessageIdRedacted: boolean;
+  requestId: string | null;
+  userId: string | null;
+  createdAt: string;
+  sentAt: string | null;
+  failedAt: string | null;
+};
+
+export type NotificationLogResponse = {
+  items: NotificationLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
+
+export function notificationChannelLabel(channel: NotificationChannel | string): string {
+  const labels: Record<string, string> = {
+    EMAIL: 'E-posta',
+    SMS: 'SMS',
+  };
+
+  return labels[channel] ?? channel;
+}
+
+export function notificationStatusLabel(status: NotificationStatus | string): string {
+  const labels: Record<string, string> = {
+    PENDING: 'Sırada',
+    SENT: 'Gönderildi',
+    FAILED: 'Başarısız',
+  };
+
+  return labels[status] ?? status;
+}
+
+export function notificationStatusBadgeClass(status: NotificationStatus | string): string {
+  switch (status) {
+    case 'SENT':
+      return 'badge badge-good';
+    case 'PENDING':
+      return 'badge badge-warn';
+    case 'FAILED':
+      return 'badge badge-bad';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
+/**
+ * A template name is a code-controlled literal, so an unrecognised one is shown
+ * as-is rather than hidden — that is what keeps a row from an older build
+ * readable instead of blank.
+ */
+export function notificationTemplateLabel(template: string): string {
+  const labels: Record<string, string> = {
+    'customer-activation': 'Hesap etkinleştirme',
+    'request-expiring': 'Talep süresi uyarısı',
+    'phone-verification-code': 'Telefon doğrulama kodu',
+  };
+
+  return labels[template] ?? template;
+}
+
 export const PROVIDER_FINANCE_SORT_FIELDS = [
   'businessName',
   'currentBalance',
@@ -961,8 +1126,11 @@ export function requestStatusLabel(status: string) {
     SUBMITTED: 'Yeni Talep',
     IN_REVIEW: 'İncelemede',
     APPROVED: 'Onaylandı',
+    MATCHED: 'Eşleşti',
+    COMPLETED: 'Tamamlandı',
     REJECTED: 'Reddedildi',
     CANCELLED: 'İptal Edildi',
+    EXPIRED: 'Süresi Doldu',
   };
 
   return labels[status] ?? statusLabel(status);
@@ -995,6 +1163,8 @@ export function statusBadgeClass(status: string) {
   switch (status) {
     case 'APPROVED':
     case 'ACCEPTED':
+    case 'MATCHED':
+    case 'COMPLETED':
     case 'PAID':
       return 'badge badge-good';
     case 'PENDING':
@@ -1226,6 +1396,20 @@ export function formatDateTime(value: string | null | undefined) {
   }
 }
 
+/**
+ * Carries the HTTP status so callers can map an upstream 404 onto Next's
+ * notFound() instead of letting it bubble up as a generic 500.
+ */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(body || `API request failed with status ${status}`);
+    this.name = 'ApiError';
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
@@ -1243,11 +1427,27 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       redirect('/login');
     }
 
-    const body = await response.text();
-    throw new Error(body || `API request failed with status ${response.status}`);
+    throw new ApiError(response.status, await response.text());
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * Runs a fetch and turns an upstream "not found" into a proper 404 page.
+ * Used by detail screens so a bad id (or a path like /providers/new that falls
+ * through to the dynamic [id] route) never renders a server-error screen.
+ */
+export async function fetchOrNotFound<T>(loader: () => Promise<T>): Promise<T> {
+  try {
+    return await loader();
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 400)) {
+      notFound();
+    }
+
+    throw error;
+  }
 }
 
 export async function requireAdmin() {

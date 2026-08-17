@@ -3,12 +3,20 @@ import {
   ConflictException,
   ForbiddenException,
   Inject,
+  HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CustomerOrigin, NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
+import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import {
+  CONTACT_DISCLOSURE_REQUIRED_CODE,
+  readContactSharingConfig,
+} from '../contact-sharing/contact-sharing.config';
+import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { NumberingService } from '../numbering/numbering.service';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
@@ -58,11 +66,36 @@ const moderatedStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.REJECTED,
 ]);
 
+/**
+ * Lifecycle states the moderation endpoint must never write.
+ *
+ * MATCHED belongs to the offer-accept cascade, EXPIRED to the expiry scheduler,
+ * and COMPLETED to the dedicated lifecycle endpoint — each of them writes
+ * timestamps and runs invariants the moderation dropdown knows nothing about.
+ */
+const nonModerationStatuses = new Set<ServiceRequestStatus>([
+  ServiceRequestStatus.MATCHED,
+  ServiceRequestStatus.COMPLETED,
+  ServiceRequestStatus.EXPIRED,
+]);
+
+/** A request in one of these states has finished; nothing may move it again. */
+const terminalStatuses = new Set<ServiceRequestStatus>([
+  ServiceRequestStatus.COMPLETED,
+  ServiceRequestStatus.CANCELLED,
+  ServiceRequestStatus.EXPIRED,
+  ServiceRequestStatus.REJECTED,
+]);
+
 @Injectable()
 export class ServiceRequestsService {
+  private readonly logger = new Logger(ServiceRequestsService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NumberingService) private readonly numbering: NumberingService,
+    @Inject(CustomerActivationService)
+    private readonly customerActivation: CustomerActivationService,
   ) {}
 
   async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
@@ -87,6 +120,7 @@ export class ServiceRequestsService {
 
     const answers = validateAnswers(category.questions, dto.answers ?? []);
     const preferredDate = normalizeOptionalDate(dto.preferredDate, 'Preferred date');
+    const disclosure = resolveContactDisclosure(dto);
     const requestData = {
       customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
       customerPhone: normalizePhone(dto.customerPhone),
@@ -120,6 +154,7 @@ export class ServiceRequestsService {
           customerId,
           requestNumber,
           ...requestData,
+          ...disclosure,
           qualityScore: quality.score,
           qualityScoreBreakdown: quality.breakdown,
           answers: {
@@ -136,6 +171,23 @@ export class ServiceRequestsService {
         },
       });
     });
+
+    // A guest request creates a password-less customer account behind the
+    // scenes. Mail them a claim link straight away, otherwise they can never
+    // reach the offers on their own request.
+    //
+    // Best-effort on purpose: the request is already committed, so a
+    // notification problem must not surface as a failed submission.
+    if (request.customerId) {
+      try {
+        await this.customerActivation.issueForAutoCreatedCustomer(request.customerId);
+      } catch (error) {
+        this.logger.error(
+          `Failed to issue activation link for request ${request.id}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
 
     return withQualityLabel(request);
   }
@@ -171,7 +223,11 @@ export class ServiceRequestsService {
           select: { id: true, name: true, slug: true },
         },
         _count: {
-          select: { offers: true },
+          // The customer's own count is of offers they can still act on. An
+          // offer its provider withdrew is no longer one of them, and counting
+          // it would promise a choice that is not there. The admin listing above
+          // keeps the unfiltered total on purpose.
+          select: { offers: { where: { status: { not: OfferStatus.WITHDRAWN } } } },
         },
       },
     });
@@ -206,15 +262,39 @@ export class ServiceRequestsService {
   }
 
   async updateServiceRequestStatus(id: string, dto: UpdateServiceRequestStatusDto) {
-    await this.ensureRequestExists(id);
+    const existing = await this.ensureRequestExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
+
+    // Approving is what publishes a request to providers, so it is the one
+    // transition the verification gate has to cover. Rejecting or cancelling an
+    // unverified request stays possible — an admin must still be able to clear
+    // the queue. While the flag is false this branch never fires.
+    if (
+      dto.status === ServiceRequestStatus.APPROVED &&
+      isPhoneVerificationRequired() &&
+      !existing.phoneVerifiedAt
+    ) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'PHONE_NOT_VERIFIED',
+        message: 'Telefonu doğrulanmamış talep onaylanamaz.',
+      });
+    }
+
+    if (nonModerationStatuses.has(dto.status)) {
+      throw new ConflictException(
+        `${dto.status} is not a moderation status and cannot be set from here`,
+      );
+    }
 
     if (dto.status === ServiceRequestStatus.REJECTED && !rejectionReason) {
       throw new BadRequestException('Rejection reason is required when status is REJECTED');
     }
 
     const shouldModerate = moderatedStatuses.has(dto.status);
+    const now = new Date();
 
     const request = await this.prisma.serviceRequest.update({
       where: { id },
@@ -222,8 +302,106 @@ export class ServiceRequestsService {
         status: dto.status,
         moderationNote,
         rejectionReason: dto.status === ServiceRequestStatus.REJECTED ? rejectionReason : null,
-        ...(shouldModerate ? { moderatedAt: new Date() } : {}),
+        ...(shouldModerate ? { moderatedAt: now } : {}),
+        // Written in the same statement that sets APPROVED, so the status and
+        // the clock the expiry/reminder jobs run on can never disagree.
+        //
+        // Only ever set, never cleared: a re-approval refreshes the window (the
+        // request really is open again from now), and a later transition to
+        // MATCHED, COMPLETED, CANCELLED or REJECTED leaves the old value in
+        // place as audit — nothing reads it once the status is no longer
+        // APPROVED, and erasing it would destroy the record of when the request
+        // went live.
+        ...(dto.status === ServiceRequestStatus.APPROVED ? { approvedAt: now } : {}),
+        ...(dto.status === ServiceRequestStatus.CANCELLED ? { cancelledAt: now } : {}),
       },
+      include: {
+        category: {
+          select: { id: true, name: true, slug: true },
+        },
+        answers: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    return withQualityLabel(request);
+  }
+
+  /**
+   * Marks a matched request as delivered. Only the customer who owns it or a
+   * SUPER_ADMIN may do this — a provider cannot declare its own job finished.
+   *
+   * The transition is a conditional update, so it is also the concurrency
+   * guard: a second call finds no MATCHED row and gets a 409.
+   */
+  async completeServiceRequest(id: string, user: AuthUser) {
+    const request = await this.getRequestForLifecycleAction(id, user);
+
+    if (request.status !== ServiceRequestStatus.MATCHED) {
+      throw new ConflictException('Only a matched request can be completed');
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.serviceRequest.updateMany({
+      where: { id, status: ServiceRequestStatus.MATCHED },
+      data: { status: ServiceRequestStatus.COMPLETED, completedAt: now },
+    });
+
+    if (updated.count !== 1) {
+      throw new ConflictException('Only a matched request can be completed');
+    }
+
+    return this.getLifecycleProjection(id);
+  }
+
+  /** Cancels a request that has not finished yet. Customer (owner) or admin. */
+  async cancelServiceRequest(id: string, user: AuthUser) {
+    const request = await this.getRequestForLifecycleAction(id, user);
+
+    if (terminalStatuses.has(request.status)) {
+      throw new ConflictException(`A ${request.status} request can no longer be cancelled`);
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.serviceRequest.updateMany({
+      where: { id, status: { notIn: [...terminalStatuses] } },
+      data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
+    });
+
+    if (updated.count !== 1) {
+      throw new ConflictException('This request can no longer be cancelled');
+    }
+
+    return this.getLifecycleProjection(id);
+  }
+
+  private async getRequestForLifecycleAction(id: string, user: AuthUser) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id },
+      select: { id: true, status: true, customerId: true },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (user.role === UserRole.SUPER_ADMIN) {
+      return request;
+    }
+
+    // Anything that is not the owning customer — providers included — is told
+    // the request does not exist rather than that it exists but is off limits.
+    if (user.role !== UserRole.CUSTOMER || !request.customerId || request.customerId !== user.id) {
+      throw new ForbiddenException('Service request access denied');
+    }
+
+    return request;
+  }
+
+  private async getLifecycleProjection(id: string) {
+    const request = await this.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id },
       include: {
         category: {
           select: { id: true, name: true, slug: true },
@@ -297,12 +475,14 @@ export class ServiceRequestsService {
   private async ensureRequestExists(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, phoneVerifiedAt: true },
     });
 
     if (!request) {
       throw new NotFoundException('Service request not found');
     }
+
+    return request;
   }
 }
 
@@ -440,6 +620,48 @@ function qualityLabel(score: number): QualityLabel {
   }
 
   return 'LOW';
+}
+
+/**
+ * What the request should record about the contact-sharing disclosure.
+ *
+ * With the feature off this returns nothing at all, so request creation behaves
+ * exactly as it did before the columns existed and both stay NULL. With it on,
+ * the customer must confirm having read the linked text before the request can
+ * be created — because accepting an offer on that request is what opens their
+ * details, and by then it is too late to ask.
+ *
+ * The stored version always comes from configuration, never from the client.
+ */
+function resolveContactDisclosure(dto: CreateServiceRequestDto) {
+  const config = readContactSharingConfig();
+  if (!config.enabled) {
+    return {};
+  }
+
+  if (dto.contactDisclosureAccepted !== true) {
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      code: CONTACT_DISCLOSURE_REQUIRED_CODE,
+      message: 'Talebi göndermek için bilgilendirme metnini okuduğunuzu onaylayın.',
+    });
+  }
+
+  const shown = dto.contactDisclosureVersion?.trim().toLowerCase();
+  if (shown && shown !== config.disclosureVersion) {
+    throw new ConflictException({
+      statusCode: HttpStatus.CONFLICT,
+      error: 'Conflict',
+      code: CONTACT_DISCLOSURE_REQUIRED_CODE,
+      message: 'Bilgilendirme metni güncellendi. Lütfen sayfayı yenileyip tekrar onaylayın.',
+    });
+  }
+
+  return {
+    contactDisclosureVersion: config.disclosureVersion,
+    contactDisclosureAcceptedAt: new Date(),
+  };
 }
 
 function withQualityLabel<T extends { qualityScore: number }>(request: T): T & { qualityLabel: QualityLabel } {

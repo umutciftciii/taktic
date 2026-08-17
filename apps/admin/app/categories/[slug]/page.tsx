@@ -94,6 +94,21 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                   <span>Sıralama</span>
                   <input name="sortOrder" type="number" min="0" defaultValue={category.sortOrder} />
                 </label>
+                <label className="field field-3">
+                  <span>Teklif kredisi *</span>
+                  <input
+                    name="offerCreditCost"
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    defaultValue={category.offerCreditCost ?? ''}
+                  />
+                  <span className="help-text">
+                    Yalnız bundan sonraki teklifleri etkiler; geçmiş teklif ve iadeleri
+                    değiştirmez.
+                  </span>
+                </label>
                 <label className="field field-12">
                   <span>Açıklama</span>
                   <textarea name="description" defaultValue={category.description ?? ''} />

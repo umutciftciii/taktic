@@ -2,15 +2,29 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CreditTransactionType, OfferStatus, Prisma, UserRole } from '@prisma/client';
+import {
+  CreditTransactionType,
+  OfferRejectionReason,
+  OfferStatus,
+  Prisma,
+  ServiceRequestStatus,
+  UserRole,
+} from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import {
+  contactDisclosureRequiredException,
+  readContactSharingConfig,
+} from '../contact-sharing/contact-sharing.config';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
+import { CUSTOMER_UNACTIONABLE_OFFER_STATUSES } from './offer-transitions';
 import {
   calculateRefundEligibility,
   isManualRefundReasonCode,
@@ -136,7 +150,8 @@ export class OffersService {
     const reasonCode = normalizeRefundReasonCode(dto.reasonCode);
     const reasonNote = normalizeOptionalReason(dto.reason);
 
-    return this.prisma.$transaction(
+    return runSerializable(
+      this.prisma,
       async (tx) => {
         const offer = await tx.offer.findUnique({
           where: { id },
@@ -151,6 +166,9 @@ export class OffersService {
             submittedAt: true,
             viewedAt: true,
             acceptedAt: true,
+            // Needed so the policy can see a competitor-rejected offer and
+            // recommend NO_REFUND; an admin can still refund it with override.
+            rejectionReason: true,
           },
         });
 
@@ -192,7 +210,7 @@ export class OffersService {
           refundTransaction,
         };
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      { label: 'offers.refundOfferCredit' },
     );
   }
 
@@ -279,19 +297,159 @@ export class OffersService {
     }
 
     const status = customerActionToStatus(dto.action);
+
+    if (status === OfferStatus.ACCEPTED) {
+      return this.acceptRequestOffer(requestId, offerId, existingOffer.viewedAt);
+    }
+
     const now = new Date();
-    const offer = await this.prisma.offer.update({
-      where: { id: offerId },
+
+    // Conditional, because the status read above is already stale by the time
+    // this runs: the provider may have withdrawn the offer in between. The
+    // clause repeats the guard rather than trusting the read, so a withdrawal
+    // and a shortlist/reject cannot both land.
+    const updated = await this.prisma.offer.updateMany({
+      where: {
+        id: offerId,
+        status: { notIn: [...CUSTOMER_UNACTIONABLE_OFFER_STATUSES] },
+      },
       data: {
         status,
         ...(existingOffer.viewedAt ? {} : { viewedAt: now }),
-        ...(status === OfferStatus.ACCEPTED ? { acceptedAt: now } : {}),
+        // A hand-rejected offer deliberately gets no rejectionReason: NULL is
+        // what keeps its existing refund behaviour.
         ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
       },
+    });
+
+    if (updated.count !== 1) {
+      throw new ConflictException('This offer can no longer be acted on');
+    }
+
+    const offer = await this.prisma.offer.findUniqueOrThrow({
+      where: { id: offerId },
       include: customerOfferInclude,
     });
 
     return toCustomerOfferDetail(offer);
+  }
+
+  /**
+   * Accepting an offer matches the request to it and closes every competing
+   * offer, in one Serializable transaction.
+   *
+   * The request transition is the concurrency guard: only an APPROVED request
+   * with no match yet can become MATCHED, so of two simultaneous accepts exactly
+   * one updates a row and the other gets a 409. runSerializable retries the
+   * write conflict Postgres raises for the loser, so the replay reaches that
+   * business rule instead of leaking a 500. A partial unique index
+   * (Offer_one_accepted_per_request) is the database-level backstop.
+   *
+   * When contact sharing is on, the same transaction also carries the reveal:
+   * the request must already hold an acceptance of the current disclosure
+   * version, and the audit row is written before the transaction commits. Both
+   * halves therefore succeed together or not at all — there is no matched
+   * request whose contact details are open without a record of why.
+   */
+  private acceptRequestOffer(requestId: string, offerId: string, viewedAt: Date | null) {
+    const now = new Date();
+    const contactSharing = readContactSharingConfig();
+
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        if (contactSharing.enabled) {
+          // Read inside the transaction, before anything is written: a request
+          // whose customer never confirmed reading the current disclosure must
+          // not be matched at all while the feature is on, because matching is
+          // what opens the details.
+          const disclosure = await tx.serviceRequest.findUnique({
+            where: { id: requestId },
+            select: { contactDisclosureVersion: true, contactDisclosureAcceptedAt: true },
+          });
+
+          if (
+            !disclosure?.contactDisclosureAcceptedAt ||
+            disclosure.contactDisclosureVersion !== contactSharing.disclosureVersion
+          ) {
+            throw contactDisclosureRequiredException();
+          }
+        }
+
+        const matched = await tx.serviceRequest.updateMany({
+          where: {
+            id: requestId,
+            status: ServiceRequestStatus.APPROVED,
+            matchedOfferId: null,
+          },
+          data: {
+            status: ServiceRequestStatus.MATCHED,
+            matchedOfferId: offerId,
+            matchedAt: now,
+          },
+        });
+
+        if (matched.count !== 1) {
+          throw new ConflictException('This request already has an accepted offer');
+        }
+
+        // Conditional for the same reason the request transition above is: a
+        // provider may be withdrawing this very offer in a parallel Serializable
+        // transaction. Only one of the two clauses can match, so the request can
+        // never end up matched to an offer its provider had already pulled.
+        const acceptedUpdate = await tx.offer.updateMany({
+          where: {
+            id: offerId,
+            status: { notIn: [...CUSTOMER_UNACTIONABLE_OFFER_STATUSES] },
+          },
+          data: {
+            status: OfferStatus.ACCEPTED,
+            acceptedAt: now,
+            ...(viewedAt ? {} : { viewedAt: now }),
+          },
+        });
+
+        if (acceptedUpdate.count !== 1) {
+          throw new ConflictException('This offer can no longer be accepted');
+        }
+
+        // Only offers still in play are closed. WITHDRAWN, CANCELLED, EXPIRED
+        // and any already REJECTED offer are terminal and left untouched.
+        await tx.offer.updateMany({
+          where: {
+            requestId,
+            id: { not: offerId },
+            status: {
+              in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
+            },
+          },
+          data: {
+            status: OfferStatus.REJECTED,
+            rejectedAt: now,
+            rejectionReason: OfferRejectionReason.COMPETITOR_ACCEPTED,
+          },
+        });
+
+        const accepted = await tx.offer.findUniqueOrThrow({
+          where: { id: offerId },
+          include: customerOfferInclude,
+        });
+
+        if (contactSharing.enabled) {
+          await createContactRevealEvent(tx, {
+            requestId,
+            offerId,
+            providerId: accepted.providerId,
+            customerUserId: accepted.request.customerId,
+            revealedAt: now,
+            disclosureVersion: contactSharing.disclosureVersion,
+          });
+        }
+
+        return toCustomerOfferDetail(accepted);
+      },
+      { label: 'offers.acceptRequestOffer' },
+    );
   }
 
   private async ensureOfferExists(id: string) {
@@ -320,6 +478,45 @@ export class OffersService {
     ensureCustomerCanAccessRequest(offer.request.customerId, user);
 
     return offer;
+  }
+}
+
+/**
+ * Writes the one audit row that says a match opened both sides' details.
+ *
+ * Inside the caller's transaction, so a failure here rolls the whole accept
+ * back: a matched request without its event would be exactly the state this
+ * feature must never produce. The unique index on requestId is what makes that
+ * true even against a concurrent writer — the loser's insert fails and takes its
+ * own accept down with it, rather than adding a second reveal.
+ */
+async function createContactRevealEvent(
+  tx: Prisma.TransactionClient,
+  event: {
+    requestId: string;
+    offerId: string;
+    providerId: string;
+    customerUserId: string | null;
+    revealedAt: Date;
+    disclosureVersion: string;
+  },
+) {
+  try {
+    await tx.contactRevealEvent.create({ data: event });
+  } catch (error) {
+    // A unique violation means somebody already revealed this request or this
+    // offer. Reported as the business rule it is, so the caller sees a 409
+    // instead of a leaked Prisma error.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'CONTACT_REVEAL_ALREADY_EXISTS',
+        message: 'Bu talep için iletişim paylaşımı zaten kayıtlı.',
+      });
+    }
+
+    throw error;
   }
 }
 
@@ -357,6 +554,7 @@ type RefundPolicyOfferShape = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
+  rejectionReason?: OfferRejectionReason | null;
 };
 
 export async function refundOfferCreditInTransaction(

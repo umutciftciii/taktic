@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { apiFetch, Category, getCurrentUser, Question } from '../../../lib/api';
+import { apiFetch, Category, getContactDisclosure, getCurrentUser, Question } from '../../../lib/api';
 import { CategoryCover } from '../../category-visual';
 import { submitServiceRequestAction } from '../actions';
 
@@ -9,11 +9,13 @@ type CategoryPageProps = {
 
 export default async function CategoryPage({ params }: CategoryPageProps) {
   const { slug } = await params;
-  const [category, user] = await Promise.all([
+  const [category, user, disclosure] = await Promise.all([
     apiFetch<Category>(`/categories/${slug}`),
     getCurrentUser(),
+    getContactDisclosure(),
   ]);
   const questions = category.questions ?? [];
+  const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
 
   return (
     <main>
@@ -164,6 +166,44 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
             <textarea name="description" placeholder="Hizmet verenlere iletmek istediğiniz ek detaylar" />
           </label>
         </section>
+
+        {showDisclosure ? (
+          <section className="form-section">
+            <h2>Bilgilendirme</h2>
+            {/*
+              The checkbox states one thing only: that the linked text was read.
+              It does not paraphrase, summarise or stand in for that text — the
+              disclosure itself lives at CONTACT_DISCLOSURE_URL, and the feature
+              cannot be switched on until it does.
+            */}
+            <input
+              type="hidden"
+              name="contactDisclosureVersion"
+              value={disclosure.disclosureVersion ?? ''}
+            />
+            <label className="checkbox-row" htmlFor="contact-disclosure">
+              <input
+                id="contact-disclosure"
+                name="contactDisclosureAccepted"
+                type="checkbox"
+                value="true"
+                required
+                data-testid="contact-disclosure-accept"
+              />
+              <span>
+                <a
+                  href={disclosure.disclosureUrl ?? '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid="contact-disclosure-link"
+                >
+                  İletişim bilgilerinin paylaşılmasına ilişkin bilgilendirme metnini
+                </a>{' '}
+                okudum.
+              </span>
+            </label>
+          </section>
+        ) : null}
 
         <div className="form-actions page-narrow" style={{ borderTop: 0, paddingTop: 0 }}>
           <button className="btn btn-primary" type="submit">Talebi Gönder</button>

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
   apiFetch,
+  fetchOrNotFound,
   RequestOfferDetail,
   formatDate,
   formatDateTime,
@@ -24,9 +25,12 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
     redirect(`/login?redirectTo=/requests/${id}/offers/${offerId}`);
   }
 
-  const offer = await apiFetch<RequestOfferDetail>(
-    `/service-requests/${id}/offers/${offerId}/view`,
-    { method: 'POST' },
+  // Unknown offer, offer on another request, another customer's request: all
+  // one 404, never the error boundary.
+  const offer = await fetchOrNotFound(() =>
+    apiFetch<RequestOfferDetail>(`/service-requests/${id}/offers/${offerId}/view`, {
+      method: 'POST',
+    }),
   );
 
   const actionable =
@@ -58,7 +62,9 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
               </dd>
               <dt>Durum</dt>
               <dd>
-                <span className={offerStatusClass(offer.status)}>{statusLabel(offer.status)}</span>
+                <span className={offerStatusClass(offer.status)} data-testid="offer-status">
+                  {statusLabel(offer.status)}
+                </span>
               </dd>
               <dt>Tahmini başlangıç</dt>
               <dd>{offer.estimatedStartDate ? formatDate(offer.estimatedStartDate) : '-'}</dd>

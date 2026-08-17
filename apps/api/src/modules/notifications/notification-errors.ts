@@ -1,0 +1,64 @@
+/**
+ * The complete, closed set of failure classes a notification send may record.
+ *
+ * Both sides of NotificationLog.errorCode depend on this list. The dispatcher
+ * writes nothing outside it — a raw provider error string can carry the
+ * destination address or the message body — and the admin read path normalises
+ * anything it does not recognise back to UNKNOWN, so a row written by an older
+ * build (or by hand) can never turn the API into an echo for arbitrary text.
+ */
+export const NOTIFICATION_ERROR_CODES = [
+  'TRANSPORT_UNAVAILABLE',
+  'REJECTED',
+  'TIMEOUT',
+  'INVALID_RECIPIENT',
+  'UNKNOWN',
+] as const;
+
+export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];
+
+/** The classes an adapter may raise; UNKNOWN is the dispatcher's own fallback. */
+const RAISABLE_ERROR_CODES: ReadonlySet<string> = new Set(
+  NOTIFICATION_ERROR_CODES.filter((code) => code !== 'UNKNOWN'),
+);
+
+/** Operator-facing wording. Says what class of thing went wrong, nothing more. */
+export const NOTIFICATION_ERROR_LABELS: Record<NotificationErrorCode, string> = {
+  TRANSPORT_UNAVAILABLE: 'Taşıma servisi kullanılamıyor',
+  REJECTED: 'Alıcı reddedildi',
+  TIMEOUT: 'Zaman aşımı',
+  INVALID_RECIPIENT: 'Geçersiz alıcı',
+  UNKNOWN: 'Bilinmeyen hata',
+};
+
+/**
+ * Reads the failure class off a thrown error. Anything unrecognised — including
+ * a plain Error whose message is the provider's own text — becomes UNKNOWN.
+ */
+export function classifyNotificationError(error: unknown): NotificationErrorCode {
+  const candidate = (error as { errorCode?: unknown } | null)?.errorCode;
+  if (typeof candidate === 'string' && RAISABLE_ERROR_CODES.has(candidate)) {
+    return candidate as NotificationErrorCode;
+  }
+
+  return 'UNKNOWN';
+}
+
+/**
+ * Read-side normaliser. A stored value outside the set is reported as UNKNOWN
+ * rather than passed through, so the response can only ever carry one of these
+ * five constants.
+ */
+export function normalizeStoredErrorCode(stored: string | null): NotificationErrorCode | null {
+  if (!stored) {
+    return null;
+  }
+
+  return (NOTIFICATION_ERROR_CODES as readonly string[]).includes(stored)
+    ? (stored as NotificationErrorCode)
+    : 'UNKNOWN';
+}
+
+export function notificationErrorLabel(code: NotificationErrorCode): string {
+  return NOTIFICATION_ERROR_LABELS[code];
+}

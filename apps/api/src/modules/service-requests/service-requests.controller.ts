@@ -88,6 +88,25 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.updateServiceRequestStatus(id, dto);
   }
 
+  /**
+   * Lifecycle endpoints, deliberately separate from the moderation status
+   * dropdown: they are open to the owning customer as well as SUPER_ADMIN, and
+   * they enforce transition rules the moderation path does not.
+   */
+  @Post(':id/complete')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.CUSTOMER, UserRole.SUPER_ADMIN)
+  completeServiceRequest(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.serviceRequestsService.completeServiceRequest(id, user);
+  }
+
+  @Post(':id/cancel')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.CUSTOMER, UserRole.SUPER_ADMIN)
+  cancelServiceRequest(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.serviceRequestsService.cancelServiceRequest(id, user);
+  }
+
   @Post(':id/recalculate-quality')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)

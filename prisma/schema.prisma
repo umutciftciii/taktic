@@ -31,13 +31,45 @@ enum ServiceRequestQuestionType {
   IMAGE
 }
 
+/// Lifecycle: DRAFT → SUBMITTED → IN_REVIEW → APPROVED → MATCHED → COMPLETED.
+/// SUBMITTED and IN_REVIEW together are the moderation phase; they are kept
+/// under their original names so existing rows, admin filters and tests stay
+/// valid.
+///
+/// MATCHED is written only by the offer-accept cascade, EXPIRED only by the
+/// (not yet built) expiry scheduler, COMPLETED and CANCELLED only by the
+/// dedicated lifecycle endpoints — never by the admin moderation dropdown.
 enum ServiceRequestStatus {
   DRAFT
   SUBMITTED
   IN_REVIEW
   APPROVED
+  MATCHED
+  COMPLETED
   REJECTED
   CANCELLED
+  EXPIRED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Why an offer ended up REJECTED. NULL means a customer rejected it by hand,
+/// which is also the value every offer rejected before this field existed
+/// carries — that keeps their refund behaviour unchanged.
+enum OfferRejectionReason {
+  /// The customer accepted a competing offer on the same request. These offers
+  /// are deliberately NOT refundable: the provider's credit bought a real,
+  /// delivered offer that simply was not selected.
+  COMPETITOR_ACCEPTED
 }
 
 enum ProviderStatus {
@@ -97,7 +129,7 @@ model User {
   updatedAt      DateTime        @updatedAt
 
   serviceRequests           ServiceRequest[]
-  providerProfiles          ProviderProfile[]
+  providerProfile           ProviderProfile?
   creditTransactions        ProviderCreditTransaction[]
   sessions                  Session[]
   customerNotes             CustomerNote[]              @relation("CustomerNoteCustomer")
@@ -106,6 +138,8 @@ model User {
   createdActivationTokens   CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
   adminInviteTokens         AdminInviteToken[]          @relation("AdminInviteTokenUser")
   createdAdminInviteTokens  AdminInviteToken[]          @relation("AdminInviteTokenCreatedBy")
+  notificationLogs          NotificationLog[]
+  contactRevealEvents       ContactRevealEvent[]
 
   @@index([role])
   @@index([isActive])
@@ -134,6 +168,17 @@ model ServiceCategory {
   name          String
   slug          String   @unique
   description   String?
+  /// Credits a provider spends to submit one offer on a request in this
+  /// category. There is deliberately NO default: a default value would be the
+  /// hidden "1 credit" fallback the pricing rules forbid.
+  ///
+  /// NULL means "price not set yet" — a first-class, observable state that is
+  /// distinct from 0, and it blocks offering entirely. A database CHECK
+  /// constraint (see the migration) makes 0 and negatives unrepresentable.
+  ///
+  /// There is no hierarchical inheritance: a request uses the cost of exactly
+  /// the category it is attached to, never a parent's.
+  offerCreditCost Int?
   imageUrl      String?
   coverImageUrl String?
   iconKey       String?
@@ -196,20 +241,181 @@ model ServiceRequest {
   moderatedAt           DateTime?
   moderationNote        String?
   rejectionReason       String?
+  /// When the customer proved control of customerPhone via a one-time code.
+  /// NULL means "not verified" — including every request created before phone
+  /// verification existed. What that blocks depends on REQUIRE_PHONE_VERIFICATION.
+  phoneVerifiedAt       DateTime?
+  /// When moderation approved the request — the single clock the expiry and
+  /// reminder schedulers run on.
+  ///
+  /// NULL means "no trustworthy approval time": every request approved before
+  /// this column existed carries NULL, because neither submittedAt nor
+  /// moderatedAt is the approval moment (moderatedAt is rewritten by any later
+  /// moderation edit). Those rows are deliberately never picked up by the
+  /// schedulers rather than backfilled with a guess.
+  ///
+  /// It is written once, when the status becomes APPROVED, and is never cleared
+  /// again — a later MATCHED/COMPLETED/CANCELLED transition keeps it as audit.
+  approvedAt            DateTime?
+  /// When the "your request is about to expire" reminder was claimed.
+  ///
+  /// Written by a conditional update that only matches while it is still NULL,
+  /// which is what makes one reminder per request the database-level guarantee.
+  /// It records the claim, not the delivery: a failed send stays visible in
+  /// NotificationLog and never re-opens the request for a second reminder.
+  reminderSentAt        DateTime?
+  /// Which version of the contact-sharing disclosure the customer confirmed
+  /// having read, and when.
+  ///
+  /// NULL means "no acceptance on file" — which is what every request created
+  /// before this column existed carries, deliberately: those customers were
+  /// never shown the text, so their details must stay closed even after the
+  /// feature is switched on. There is no backfill.
+  ///
+  /// This records a technical acknowledgement, not a legal basis on its own.
+  /// CONTACT_SHARING_ENABLED may only be turned on once approved disclosure
+  /// content exists behind CONTACT_DISCLOSURE_URL.
+  contactDisclosureVersion    String?
+  contactDisclosureAcceptedAt DateTime?
+  /// The single accepted offer. Unique so the request can never point at two
+  /// winners; the accept cascade is what writes it.
+  matchedOfferId        String?              @unique
+  matchedAt             DateTime?
+  completedAt           DateTime?
+  cancelledAt           DateTime?
+  expiredAt             DateTime?
   submittedAt           DateTime             @default(now())
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  category ServiceCategory        @relation(fields: [categoryId], references: [id])
-  customer User?                  @relation(fields: [customerId], references: [id])
-  answers  ServiceRequestAnswer[]
-  offers   Offer[]
+  category     ServiceCategory        @relation(fields: [categoryId], references: [id])
+  customer     User?                  @relation(fields: [customerId], references: [id])
+  answers      ServiceRequestAnswer[]
+  offers       Offer[]
+  matchedOffer Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
+  phoneVerifications PhoneVerification[]
+  notificationLogs   NotificationLog[]
+  contactRevealEvent ContactRevealEvent?
 
   @@index([categoryId])
   @@index([customerId])
   @@index([status])
   @@index([city, district])
   @@index([submittedAt])
+  @@index([status, submittedAt])
+  @@index([phoneVerifiedAt])
+  /// Expiry scan: "APPROVED and approved before <cutoff>".
+  @@index([status, approvedAt])
+  /// Reminder scan: the same window, narrowed to rows that have not been
+  /// claimed yet. reminderSentAt leads approvedAt because it is the equality
+  /// predicate.
+  @@index([status, reminderSentAt, approvedAt])
+}
+
+/// The moment a matched request opened both sides' contact details to each
+/// other, recorded once and never again.
+///
+/// It is written inside the accept transaction, so a matched request either
+/// carries its audit row or the match did not happen at all — there is no
+/// window in which contact details are reachable without a record of why.
+///
+/// `requestId` and `offerId` are both unique: one reveal per request, and one
+/// per offer. The application also checks the row against
+/// ServiceRequest.matchedOfferId, so an event can never point at an offer that
+/// did not win.
+///
+/// Immutable by contract. Nothing in the application updates or deletes a row
+/// here, and no endpoint exposes either operation.
+model ContactRevealEvent {
+  id                String   @id @default(cuid())
+  requestId         String   @unique
+  offerId           String   @unique
+  /// Nullable because a request need not belong to a signed-in account: an
+  /// unclaimed guest request has no customer user, and the event still has to
+  /// record that the reveal happened.
+  customerUserId    String?
+  providerId        String
+  revealedAt        DateTime @default(now())
+  /// The disclosure version in force at the moment of the reveal. Copied from
+  /// the request's own acceptance, so a later version bump cannot rewrite what
+  /// this customer actually agreed to.
+  disclosureVersion String
+  createdAt         DateTime @default(now())
+
+  request  ServiceRequest  @relation(fields: [requestId], references: [id])
+  offer    Offer           @relation(fields: [offerId], references: [id])
+  customer User?           @relation(fields: [customerUserId], references: [id])
+  provider ProviderProfile @relation(fields: [providerId], references: [id])
+
+  @@index([providerId])
+  @@index([customerUserId])
+  @@index([revealedAt])
+}
+
+/// A one-time code proving control of a phone number.
+///
+/// The code itself is never stored: only a bcrypt hash of it, so a database
+/// dump cannot be replayed. There is deliberately NO unique constraint on
+/// codeHash — six digits collide often, and a unique index would leak that a
+/// code is already in flight elsewhere.
+model PhoneVerification {
+  id              String    @id @default(cuid())
+  /// Digits-and-plus normalisation of the request's customerPhone.
+  normalizedPhone String
+  codeHash        String
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  /// Wrong codes entered against this row. At the limit the row locks.
+  attemptCount    Int       @default(0)
+  lockedUntil     DateTime?
+  /// How many codes have been issued in this request/phone conversation.
+  resendCount     Int       @default(0)
+  lastSentAt      DateTime  @default(now())
+  requestId       String?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime  @default(now())
+
+  request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  /// Per-phone send budget and "find the active code" lookups.
+  @@index([normalizedPhone, createdAt])
+  /// Per-IP send budget.
+  @@index([ipAddress, createdAt])
+  @@index([requestId])
+  /// Cleanup of expired rows.
+  @@index([expiresAt])
+}
+
+/// Audit trail of outbound messages.
+///
+/// Deliberately stores nothing that could be replayed or that identifies the
+/// recipient beyond a mask: no code, no token, no action URL, no message body,
+/// no raw phone or e-mail address.
+model NotificationLog {
+  id                String              @id @default(cuid())
+  channel           NotificationChannel
+  template          String
+  /// e.g. "u***@example.com" or "+90 *** *** ** 34".
+  maskedRecipient   String
+  status            NotificationStatus  @default(PENDING)
+  providerMessageId String?
+  /// Safe, enumerable failure class — never a raw provider error string.
+  errorCode         String?
+  requestId         String?
+  userId            String?
+  createdAt         DateTime            @default(now())
+  sentAt            DateTime?
+  failedAt          DateTime?
+
+  request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  user    User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([channel, createdAt])
+  @@index([status, createdAt])
+  @@index([template, createdAt])
+  @@index([requestId])
+  @@index([userId])
 }
 
 model ServiceRequestAnswer {
@@ -232,7 +438,11 @@ model ServiceRequestAnswer {
 
 model ProviderProfile {
   id              String         @id @default(cuid())
-  userId          String?
+  // A platform account may own at most one provider profile. The column stays
+  // nullable so guest (unclaimed) applications remain possible: PostgreSQL
+  // treats NULLs as distinct in a unique index, so the constraint only binds
+  // rows where userId IS NOT NULL.
+  userId          String?        @unique
   businessName    String
   contactName     String
   phone           String
@@ -258,6 +468,7 @@ model ProviderProfile {
   offers             Offer[]
   creditTransactions ProviderCreditTransaction[]
   packagePurchases   PackagePurchase[]
+  contactRevealEvents ContactRevealEvent[]
 
   @@index([status])
   @@index([city])
@@ -317,12 +528,15 @@ model Offer {
   viewedAt                    DateTime?
   acceptedAt                  DateTime?
   rejectedAt                  DateTime?
+  rejectionReason             OfferRejectionReason?
   withdrawnAt                 DateTime?
   createdAt                   DateTime    @default(now())
   updatedAt                   DateTime    @updatedAt
 
-  request  ServiceRequest  @relation(fields: [requestId], references: [id])
-  provider ProviderProfile @relation(fields: [providerId], references: [id])
+  request       ServiceRequest  @relation(fields: [requestId], references: [id])
+  provider      ProviderProfile @relation(fields: [providerId], references: [id])
+  matchedForRequest ServiceRequest? @relation("ServiceRequestMatchedOffer")
+  contactRevealEvent ContactRevealEvent?
 
   @@unique([providerId, requestId])
   @@index([requestId])
@@ -331,6 +545,13 @@ model Offer {
   @@index([submittedAt])
   @@index([creditSpentTransactionId])
   @@index([creditRefundedTransactionId])
+  @@index([rejectionReason])
+  // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
+  // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
+  // add_request_matching migration. Prisma cannot express partial indexes in
+  // this schema, so it lives in raw SQL; it is the database-level backstop that
+  // makes a second accepted offer on a request unrepresentable even if the
+  // application guard is bypassed.
 }
 
 model OfferCreditPackage {

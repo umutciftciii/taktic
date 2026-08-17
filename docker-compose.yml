@@ -39,6 +39,17 @@ services:
       REFUND_SCHEDULER_CRON: ${REFUND_SCHEDULER_CRON:-0 * * * *}
       REFUND_SCAN_OLDER_THAN_HOURS: ${REFUND_SCAN_OLDER_THAN_HOURS:-48}
       REFUND_SCAN_LIMIT: ${REFUND_SCAN_LIMIT:-100}
+      REQUEST_EXPIRY_SCHEDULER_ENABLED: ${REQUEST_EXPIRY_SCHEDULER_ENABLED:-false}
+      REQUEST_EXPIRY_SCHEDULER_CRON: ${REQUEST_EXPIRY_SCHEDULER_CRON:-15 * * * *}
+      REQUEST_REMINDER_SCHEDULER_ENABLED: ${REQUEST_REMINDER_SCHEDULER_ENABLED:-false}
+      REQUEST_REMINDER_SCHEDULER_CRON: ${REQUEST_REMINDER_SCHEDULER_CRON:-45 * * * *}
+      REQUEST_LIFECYCLE_SCAN_LIMIT: ${REQUEST_LIFECYCLE_SCAN_LIMIT:-200}
+      # Off unless the host environment says otherwise. With it on the two
+      # disclosure settings are mandatory and the API refuses to boot without
+      # them — see the Contact Sharing section of the README.
+      CONTACT_SHARING_ENABLED: ${CONTACT_SHARING_ENABLED:-false}
+      CONTACT_DISCLOSURE_URL: ${CONTACT_DISCLOSURE_URL:-}
+      CONTACT_DISCLOSURE_VERSION: ${CONTACT_DISCLOSURE_VERSION:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross

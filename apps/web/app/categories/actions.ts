@@ -30,6 +30,11 @@ export async function submitServiceRequestAction(formData: FormData) {
       preferredDate: readOptionalFormString(formData, 'preferredDate'),
       urgency: readOptionalFormString(formData, 'urgency'),
       description: readOptionalFormString(formData, 'description'),
+      // Rendered only while contact sharing is on. With the feature off the
+      // form carries neither field and the API ignores both, so request
+      // creation behaves exactly as it did before.
+      contactDisclosureAccepted: formData.get('contactDisclosureAccepted') === 'true',
+      contactDisclosureVersion: readOptionalFormString(formData, 'contactDisclosureVersion'),
       answers: questionMeta.map((question) => ({
         questionKey: question.key,
         value: readAnswerValue(formData, question),

@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { notFound } from 'next/navigation';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -81,6 +82,10 @@ export type CustomerServiceRequest = {
   district: string;
   qualityScore: number;
   qualityLabel: RequestQualityLabel;
+  /** null until the customer proves control of customerPhone with a one-time code. */
+  phoneVerifiedAt: string | null;
+  /** Set by the expiry scheduler when the request's 14-day window ran out. */
+  expiredAt: string | null;
   submittedAt: string;
   offersCount: number;
   category: {
@@ -108,18 +113,26 @@ export type ProviderServiceArea = {
   neighborhood: string | null;
 };
 
+/**
+ * `GET /providers/:id` narrows its payload by viewer: anonymous and unrelated
+ * callers get the public business card only. Everything the API strips from the
+ * public projection is optional here, and `visibility` says which shape arrived.
+ */
+export type ProviderVisibility = 'public' | 'owner' | 'admin';
+
 export type ProviderProfile = {
   id: string;
   userId?: string | null;
+  visibility?: ProviderVisibility;
   businessName: string;
-  contactName: string;
-  phone: string;
-  email: string | null;
+  contactName?: string;
+  phone?: string;
+  email?: string | null;
   rejectionReason?: string | null;
   suspendedAt?: string | null;
   city: string;
   district: string;
-  addressNote: string | null;
+  addressNote?: string | null;
   description: string | null;
   status: ProviderStatus;
   user?: {
@@ -171,13 +184,25 @@ export type ExistingOfferSummary = {
   submittedAt: string;
 };
 
+/** Why an otherwise matching request cannot be offered on. */
+export type OfferBlockedReason = 'CATEGORY_INACTIVE' | 'CATEGORY_PRICE_UNSET';
+
 export type ProviderRequestListItem = {
   id: string;
   category: {
     id: string;
     name: string;
     slug: string;
+    isActive: boolean;
+    offerCreditCost: number | null;
   };
+  /**
+   * Credits this offer would cost, taken from the request's category. `null`
+   * exactly when `canOffer` is false, and `offerBlockedReason` says why.
+   */
+  offerCreditCost: number | null;
+  canOffer: boolean;
+  offerBlockedReason: OfferBlockedReason | null;
   city: string;
   district: string;
   neighborhood: string | null;
@@ -295,6 +320,86 @@ export type RequestOfferDetail = RequestOfferPreview & {
   rejectedAt: string | null;
 };
 
+/**
+ * Whether contact sharing is on, and which text the request form must link to.
+ * Comes from the API so the flag has exactly one source of truth; carries no
+ * personal data.
+ */
+export type ContactDisclosureConfig = {
+  enabled: boolean;
+  disclosureUrl: string | null;
+  disclosureVersion: string | null;
+};
+
+/**
+ * The details a matched party may see about the other one. These only ever
+ * arrive from the dedicated matched-contact routes — no offer projection
+ * carries them, before or after the match.
+ */
+export type MatchedProviderContact = {
+  requestId: string;
+  offerId: string;
+  revealedAt: string;
+  disclosureVersion: string;
+  provider: {
+    id: string;
+    businessName: string;
+    contactName: string;
+    phone: string;
+    email: string | null;
+    city: string;
+    district: string;
+  };
+};
+
+export type MatchedCustomerContact = {
+  requestId: string;
+  offerId: string;
+  revealedAt: string;
+  disclosureVersion: string;
+  customer: {
+    customerName: string;
+    customerPhone: string;
+    customerEmail: string | null;
+  };
+};
+
+/**
+ * Reads the disclosure config, treating any failure as "off".
+ *
+ * A form that cannot reach the API must not render an acknowledgement it cannot
+ * describe — and with the feature off there is nothing to show anyway.
+ */
+export async function getContactDisclosure(): Promise<ContactDisclosureConfig> {
+  try {
+    return await apiFetch<ContactDisclosureConfig>('/contact-sharing/disclosure');
+  } catch {
+    return { enabled: false, disclosureUrl: null, disclosureVersion: null };
+  }
+}
+
+/**
+ * Loads matched contact details, returning null for every expected refusal.
+ *
+ * A 409 means the feature is off, a 404 that this request has no reveal, a 403
+ * that this caller is not one of the two parties. None of those is an error the
+ * screen should apologise for — the section simply does not appear.
+ */
+export async function getMatchedContactOrNull<T>(path: string): Promise<T | null> {
+  try {
+    return await apiFetch<T>(path);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 409 || error.status === 404 || error.status === 403 || error.status === 401)
+    ) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 export type CreditTransactionType =
   | 'ADMIN_GRANT'
   | 'ADMIN_DEDUCT'
@@ -381,6 +486,11 @@ export function statusLabel(status: string) {
     SUBMITTED: 'Gönderildi',
     IN_REVIEW: 'İncelemede',
     APPROVED: 'Onaylandı',
+    // The matching lifecycle states. Without these the fallback below rendered
+    // the raw enum — a customer looking at their own accepted request saw
+    // "MATCHED" in an otherwise Turkish screen.
+    MATCHED: 'Eşleşti',
+    COMPLETED: 'Tamamlandı',
     REJECTED: 'Reddedildi',
     CANCELLED: 'İptal',
     VIEWED: 'Görüntülendi',
@@ -590,6 +700,20 @@ export function formatDateTime(value: string | null | undefined) {
   }
 }
 
+/**
+ * Carries the HTTP status so callers can map an upstream 404 onto Next's
+ * notFound() instead of letting it bubble up as a generic 500.
+ */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(body || `API request failed with status ${status}`);
+    this.name = 'ApiError';
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
@@ -603,11 +727,36 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `API request failed with status ${response.status}`);
+    throw new ApiError(response.status, await response.text());
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * Runs a fetch and turns "not found" (and, for detail screens, "not yours")
+ * into a proper 404 page rather than an error boundary.
+ *
+ * 403 is in the list on purpose. A signed-in customer who opens somebody else's
+ * request, or a provider who opens a request outside its categories, is not
+ * having an accident the error boundary should apologise for — and confirming
+ * "this exists, you just may not see it" is more than they should learn. The
+ * 404 copy already says both things: the record may be gone, or it may not be
+ * yours.
+ */
+export async function fetchOrNotFound<T>(loader: () => Promise<T>): Promise<T> {
+  try {
+    return await loader();
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403 || error.status === 400)
+    ) {
+      notFound();
+    }
+
+    throw error;
+  }
 }
 
 export async function getCurrentUser() {

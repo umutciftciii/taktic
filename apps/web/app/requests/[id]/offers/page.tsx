@@ -3,6 +3,9 @@ import { redirect } from 'next/navigation';
 import {
   apiFetch,
   CustomerServiceRequest,
+  MatchedProviderContact,
+  fetchOrNotFound,
+  getMatchedContactOrNull,
   OfferStatus,
   RequestOfferPreview,
   formatDateTime,
@@ -11,26 +14,43 @@ import {
   statusLabel,
 } from '../../../../lib/api';
 import { CustomerShell } from '../../customer-shell';
+import { completeRequestAction, sendPhoneCodeAction, verifyPhoneCodeAction } from './actions';
 
 type RequestOffersPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function RequestOffersPage({ params }: RequestOffersPageProps) {
+export default async function RequestOffersPage({ params, searchParams }: RequestOffersPageProps) {
   const { id } = await params;
+  const query = (await searchParams) ?? {};
+  const verificationState = typeof query.verification === 'string' ? query.verification : null;
 
   const user = await getCurrentUser();
   if (!user || user.role !== 'CUSTOMER') {
     redirect(`/login?redirectTo=/requests/${id}/offers`);
   }
 
-  const [offers, myRequests] = await Promise.all([
-    apiFetch<RequestOfferPreview[]>(`/service-requests/${id}/offers`),
+  // An unknown request and somebody else's request are the same 404 here: the
+  // API answers 403 for a request that belongs to another customer, and telling
+  // this one that it exists would be a disclosure on its own.
+  const [offers, myRequests, matchedContact] = await Promise.all([
+    fetchOrNotFound(() => apiFetch<RequestOfferPreview[]>(`/service-requests/${id}/offers`)),
     safeFetchMyRequests(),
+    // Its own request, never part of the offer payload. Null whenever the
+    // feature is off, the request is not matched, or no reveal was recorded —
+    // in all three cases the section below simply does not render.
+    getMatchedContactOrNull<MatchedProviderContact>(`/service-requests/${id}/matched-contact`),
   ]);
 
   const summary = myRequests.find((request) => request.id === id) ?? null;
-  const sortedOffers = [...offers].sort((a, b) => a.priceAmount - b.priceAmount);
+  // A withdrawn offer is not a choice the customer has, so it is kept out of the
+  // comparison list and its count entirely. It stays visible further down, as a
+  // neutral history line, because the customer did once receive it.
+  const withdrawnOffers = offers.filter((offer) => offer.status === 'WITHDRAWN');
+  const sortedOffers = offers
+    .filter((offer) => offer.status !== 'WITHDRAWN')
+    .sort((a, b) => a.priceAmount - b.priceAmount);
   const offerCount = sortedOffers.length;
   const requestReference =
     summary?.requestNumber ?? `#${id.slice(-6).toUpperCase()}`;
@@ -45,7 +65,7 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
       <section className="cdash-summary">
         <div className="cdash-summary-head">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-            <span className={requestStatusClass(summary?.status)}>
+            <span className={requestStatusClass(summary?.status)} data-testid="request-status">
               <span className="cdash-badge-dot" aria-hidden="true" />
               {statusLabel(summary?.status ?? 'SUBMITTED')}
             </span>
@@ -78,13 +98,28 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
 
         <div>
           <span className="cdash-summary-label">Talep Özeti</span>
-          <p className="cdash-summary-body">
-            {summary
-              ? 'Talebiniz hizmet verenlere iletildi. Aşağıdaki kartlarda gelen teklifleri inceleyebilirsiniz.'
-              : 'Bu talebe ait özet bilgileri görüntülenemiyor. Talebiniz başka bir hesaptan oluşturulmuş olabilir.'}
-          </p>
+          <p className="cdash-summary-body">{summaryBody(summary)}</p>
+
+          {summary && !summary.phoneVerifiedAt ? (
+            <PhoneVerificationCard
+              requestId={id}
+              customerPhone={summary.customerPhone}
+              state={verificationState}
+            />
+          ) : null}
+
+          {summary?.status === 'MATCHED' ? (
+            <form action={completeRequestAction} style={{ marginTop: 12 }}>
+              <input type="hidden" name="requestId" value={id} />
+              <button className="cdash-btn cdash-btn-primary" type="submit">
+                Hizmet tamamlandı
+              </button>
+            </form>
+          ) : null}
         </div>
       </section>
+
+      {matchedContact ? <MatchedContactCard contact={matchedContact} /> : null}
 
       <div className="cdash-section-head">
         <div className="cdash-section-title">
@@ -116,7 +151,186 @@ export default async function RequestOffersPage({ params }: RequestOffersPagePro
           ))}
         </div>
       )}
+
+      {withdrawnOffers.length > 0 ? (
+        <>
+          <div className="cdash-section-head">
+            <div className="cdash-section-title">
+              <span>Geçmiş</span>
+              <span className="cdash-section-count">{withdrawnOffers.length}</span>
+            </div>
+          </div>
+          {/*
+            Name, date and the fact of the withdrawal — nothing else. The price
+            is deliberately absent: it is not an amount the customer can take,
+            and showing it next to the live offers would read as a comparison.
+          */}
+          <ul className="cdash-history" data-testid="withdrawn-offers">
+            {withdrawnOffers.map((offer) => (
+              <li className="cdash-history-item" key={offer.id}>
+                <span className="cdash-badge cdash-badge-muted">Teklif geri çekildi</span>
+                <span className="cdash-history-name">{offer.provider.businessName}</span>
+                <span className="cdash-history-time">{formatDateTime(offer.submittedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </CustomerShell>
+  );
+}
+
+/**
+ * Optional today: while REQUIRE_PHONE_VERIFICATION is off, verifying changes
+ * nothing about how the request is handled, so this card informs and invites
+ * but never blocks. It also makes no claim that the request *is* verified.
+ */
+function PhoneVerificationCard({
+  requestId,
+  customerPhone,
+  state,
+}: {
+  requestId: string;
+  customerPhone: string;
+  state: string | null;
+}) {
+  return (
+    <div className="cdash-verify-card" style={{ marginTop: 16 }}>
+      <span className="cdash-summary-label">Telefon Doğrulama</span>
+      <p className="cdash-summary-body">
+        {maskPhoneForDisplay(customerPhone)} numarasını doğrulayarak talebinizin bize doğru
+        ulaştığını teyit edebilirsiniz. Doğrulama şu anda zorunlu değildir ve talebiniz normal
+        şekilde ilerler.
+      </p>
+
+      {state ? <p className="cdash-summary-body">{verificationMessage(state)}</p> : null}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        <form action={sendPhoneCodeAction}>
+          <input type="hidden" name="requestId" value={requestId} />
+          <button className="cdash-btn cdash-btn-secondary" type="submit">
+            Doğrulama kodu gönder
+          </button>
+        </form>
+
+        <form
+          action={verifyPhoneCodeAction}
+          style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+        >
+          <input type="hidden" name="requestId" value={requestId} />
+          <label className="cdash-visually-hidden" htmlFor="phone-code">
+            Doğrulama kodu
+          </label>
+          <input
+            id="phone-code"
+            name="code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            pattern="\d{6}"
+            placeholder="6 haneli kod"
+            required
+          />
+          <button className="cdash-btn cdash-btn-primary" type="submit">
+            Doğrula
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function verificationMessage(state: string): string {
+  switch (state) {
+    case 'ok':
+      return 'İşlem tamamlandı. Kod gönderildiyse birkaç dakika içinde ulaşır.';
+    case 'invalid':
+      return 'Kod geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.';
+    case 'rate-limited':
+      return 'Çok fazla kod istendi. Lütfen bir süre sonra tekrar deneyin.';
+    case 'already-verified':
+      return 'Bu talebin telefonu zaten doğrulanmış.';
+    default:
+      return 'İşlem şu anda tamamlanamadı. Lütfen daha sonra tekrar deneyin.';
+  }
+}
+
+/** Display-only mask; the server never sends the full number back either. */
+function maskPhoneForDisplay(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 4) {
+    return '***';
+  }
+  return `${digits.slice(0, 3)}${'*'.repeat(Math.max(digits.length - 5, 0))}${digits.slice(-2)}`;
+}
+
+function summaryBody(summary: CustomerServiceRequest | null) {
+  if (!summary) {
+    return 'Bu talebe ait özet bilgileri görüntülenemiyor. Talebiniz başka bir hesaptan oluşturulmuş olabilir.';
+  }
+
+  if (summary.status === 'MATCHED') {
+    return 'Bir teklifi kabul ettiniz. Talebiniz artık yeni teklif almıyor. Hizmet tamamlandığında aşağıdan işaretleyebilirsiniz.';
+  }
+
+  if (summary.status === 'COMPLETED') {
+    return 'Bu talep tamamlandı olarak işaretlendi.';
+  }
+
+  // Neutral and factual: the window closed, and that is all it means.
+  if (summary.status === 'EXPIRED') {
+    return summary.expiredAt
+      ? `Talebin geçerlilik süresi ${formatDateTime(summary.expiredAt)} tarihinde doldu. Talep artık yeni teklif almıyor; daha önce gelen teklifleri aşağıda görebilirsiniz.`
+      : 'Talebin geçerlilik süresi doldu. Talep artık yeni teklif almıyor; daha önce gelen teklifleri aşağıda görebilirsiniz.';
+  }
+
+  return 'Talebiniz hizmet verenlere iletildi. Aşağıdaki kartlarda gelen teklifleri inceleyebilirsiniz.';
+}
+
+/**
+ * Shown only once the request is matched and the reveal is on record.
+ *
+ * Every value here came from the matched-contact route, which checks the match,
+ * the audit row and the caller before it answers. Nothing on this page reads a
+ * contact detail out of an offer, because no offer carries one.
+ */
+function MatchedContactCard({ contact }: { contact: MatchedProviderContact }) {
+  const { provider } = contact;
+
+  return (
+    <section className="cdash-contact-card" data-testid="matched-contact">
+      <div className="cdash-contact-head">
+        <h2 className="cdash-contact-title">İletişime Geç</h2>
+        <span className="cdash-badge cdash-badge-success">Eşleşme tamamlandı</span>
+      </div>
+      <p className="cdash-contact-sub">
+        Teklifini kabul ettiğiniz hizmet verenin iletişim bilgileri aşağıdadır.
+      </p>
+      <dl className="cdash-contact-list">
+        <dt>İşletme</dt>
+        <dd data-testid="matched-contact-name">{provider.businessName}</dd>
+        <dt>Yetkili</dt>
+        <dd>{provider.contactName}</dd>
+        <dt>Telefon</dt>
+        <dd>
+          <a href={`tel:${provider.phone}`} data-testid="matched-contact-phone">
+            {provider.phone}
+          </a>
+        </dd>
+        <dt>E-posta</dt>
+        <dd>
+          {provider.email ? <a href={`mailto:${provider.email}`}>{provider.email}</a> : '-'}
+        </dd>
+        <dt>Konum</dt>
+        <dd>
+          {provider.city}
+          {provider.district ? `, ${provider.district}` : ''}
+        </dd>
+      </dl>
+      <p className="cdash-contact-note">
+        Paylaşım {formatDateTime(contact.revealedAt)} tarihinde kaydedildi.
+      </p>
+    </section>
   );
 }
 
@@ -211,6 +425,8 @@ async function safeFetchMyRequests(): Promise<CustomerServiceRequest[]> {
 function requestStatusClass(status: string | undefined): string {
   switch (status) {
     case 'APPROVED':
+    case 'MATCHED':
+    case 'COMPLETED':
       return 'cdash-badge cdash-badge-success';
     case 'REJECTED':
     case 'CANCELLED':

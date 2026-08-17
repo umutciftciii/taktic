@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   ProviderRequestDetail,
   RequestQualityBreakdownComponent,
@@ -24,17 +25,33 @@ import { createOfferAction } from './actions';
 
 type ProviderRequestDetailPageProps = {
   params: Promise<{ id: string; requestId: string }>;
+  searchParams: Promise<{ offerError?: string; shownCost?: string; currentCost?: string }>;
 };
 
-export default async function ProviderRequestDetailPage({ params }: ProviderRequestDetailPageProps) {
+export default async function ProviderRequestDetailPage({
+  params,
+  searchParams,
+}: ProviderRequestDetailPageProps) {
   const { id, requestId } = await params;
+  const { offerError, shownCost, currentCost } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/requests/${requestId}`);
   }
 
-  const request = await apiFetch<ProviderRequestDetail>(`/providers/${id}/requests/${requestId}`);
+  // A request that does not exist, is not open, is unverified while the phone
+  // gate is on, or sits outside this provider's categories and service areas
+  // all come back as one indistinguishable 404 — so a provider cannot probe for
+  // requests it may not see, and none of those cases reaches the error boundary.
+  const request = await fetchOrNotFound(() =>
+    apiFetch<ProviderRequestDetail>(`/providers/${id}/requests/${requestId}`),
+  );
   const creditBalance = request.providerCreditBalance ?? 0;
+  // The cost comes from the request's category. When it is null the category is
+  // inactive or unpriced, and offering is impossible.
+  const offerCreditCost = request.offerCreditCost;
+  const canOffer = request.canOffer;
+  const hasEnoughCredit = offerCreditCost !== null && creditBalance >= offerCreditCost;
 
   return (
     <ProviderShell user={user} providerId={id} active="requests">
@@ -144,9 +161,49 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           <section className="pdash-detail-card">
             <h2>Teklif Ver</h2>
-            <p className="pdash-card-sub" style={{ marginTop: -4 }}>
-              Mevcut kredi: <strong>{creditBalance}</strong> · Bu teklif 1 kredi kullanır.
-            </p>
+            {canOffer && offerCreditCost !== null ? (
+              <p className="pdash-card-sub" style={{ marginTop: -4 }}>
+                Bu teklif <strong data-testid="offer-credit-cost">{offerCreditCost}</strong> kredi
+                kullanır. Kalan: <strong data-testid="provider-credit-balance">{creditBalance}</strong> →{' '}
+                <strong>{creditBalance - offerCreditCost}</strong> kredi
+              </p>
+            ) : (
+              <p className="pdash-card-sub" style={{ marginTop: -4 }}>
+                Mevcut kredi: <strong>{creditBalance}</strong>
+              </p>
+            )}
+
+            {offerError === 'costChanged' ? (
+              <div className="pdash-notice pdash-notice-warn" role="alert">
+                <strong>Teklif gönderilmedi, kredi düşülmedi.</strong> Bu kategorinin teklif
+                maliyeti siz formu doldururken güncellendi
+                {shownCost ? <> (gördüğünüz: {shownCost} kredi)</> : null}. Güncel maliyet{' '}
+                <strong>{currentCost ?? offerCreditCost}</strong> kredi. Devam etmek isterseniz
+                formu tekrar gönderin.
+              </div>
+            ) : null}
+
+            {offerError === 'priceUnset' ? (
+              <div className="pdash-notice pdash-notice-error" role="alert">
+                <strong>Teklif gönderilmedi, kredi düşülmedi.</strong> Bu kategori için teklif
+                kredisi tanımlı değil.
+              </div>
+            ) : null}
+
+            {offerError === 'categoryInactive' ? (
+              <div className="pdash-notice pdash-notice-error" role="alert">
+                <strong>Teklif gönderilmedi, kredi düşülmedi.</strong> Bu kategori pasif duruma
+                alındı; yeni teklif verilemez.
+              </div>
+            ) : null}
+
+            {!canOffer ? (
+              <div className="pdash-notice pdash-notice-error">
+                {request.offerBlockedReason === 'CATEGORY_INACTIVE'
+                  ? 'Bu kategori pasif durumda. Bu talebe yeni teklif verilemez.'
+                  : 'Bu kategori için teklif kredisi tanımlı değil. Teklif verilemez; yönetim ekibiyle iletişime geçin.'}
+              </div>
+            ) : null}
 
             {request.existingOffer ? (
               <>
@@ -195,10 +252,17 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
                   </Link>
                 </div>
               </>
-            ) : (
+            ) : !canOffer ? null : (
               <form action={createOfferAction} className="pdash-form">
                 <input type="hidden" name="providerId" value={id} />
                 <input type="hidden" name="requestId" value={requestId} />
+                {/*
+                  The cost this page rendered. The API compares it for equality
+                  against the live category price inside the offer transaction and
+                  refuses the submit if they differ, so the provider is never
+                  charged a price they did not see. It never sets the charge.
+                */}
+                <input type="hidden" name="expectedCreditCost" value={offerCreditCost ?? ''} />
                 <div className="pdash-form-grid">
                   <label className="pdash-form-row">
                     <span>Fiyat *</span>
@@ -240,16 +304,17 @@ export default async function ProviderRequestDetailPage({ params }: ProviderRequ
                   <span>İç not</span>
                   <textarea name="internalNote" placeholder="Müşteri görmez, sadece sizin notunuz" />
                 </label>
-                {creditBalance < 1 ? (
+                {canOffer && !hasEnoughCredit ? (
                   <div className="pdash-notice pdash-notice-warn">
-                    Teklif göndermek için en az 1 kredi gerekir.
+                    Teklif göndermek için {offerCreditCost} kredi gerekir; bakiyeniz{' '}
+                    {creditBalance}.
                   </div>
                 ) : null}
                 <div>
                   <button
                     className="pdash-btn pdash-btn-primary pdash-btn-block"
                     type="submit"
-                    disabled={creditBalance < 1}
+                    disabled={!canOffer || !hasEnoughCredit}
                   >
                     Teklifi Gönder
                   </button>

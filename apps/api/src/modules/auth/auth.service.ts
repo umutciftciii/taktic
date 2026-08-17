@@ -8,10 +8,10 @@ import {
 } from '@nestjs/common';
 import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SESSION_TTL_DAYS } from './auth.constants';
 import { AuthUser } from './auth.types';
+import { EmailAlreadyRegisteredException } from './auth.errors';
+import { createSessionForUser } from './session.util';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
@@ -55,25 +55,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const expiresAt = sessionExpiry();
-    const session = await this.prisma.session.create({
-      data: {
-        id: randomBytes(32).toString('hex'),
-        userId: user.id,
-        expiresAt,
-        ipAddress: meta.ipAddress ?? null,
-        userAgent: meta.userAgent ?? null,
-      },
-    });
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
+    const session = await createSessionForUser(this.prisma, user.id, meta);
 
     return {
-      sessionId: session.id,
-      expiresAt,
+      sessionId: session.sessionId,
+      expiresAt: session.expiresAt,
       user: toSafeUser(user),
     };
   }
@@ -155,25 +141,11 @@ export class AuthService {
         },
       });
 
-      const expiresAt = sessionExpiry();
-      const session = await this.prisma.session.create({
-        data: {
-          id: randomBytes(32).toString('hex'),
-          userId: user.id,
-          expiresAt,
-          ipAddress: meta.ipAddress ?? null,
-          userAgent: meta.userAgent ?? null,
-        },
-      });
-
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
+      const session = await createSessionForUser(this.prisma, user.id, meta);
 
       return {
-        sessionId: session.id,
-        expiresAt,
+        sessionId: session.sessionId,
+        expiresAt: session.expiresAt,
         user,
       };
     } catch (error) {
@@ -185,16 +157,12 @@ export class AuthService {
           throw new ConflictException('Phone already registered');
         }
 
-        throw new ConflictException('Email already registered');
+        throw new EmailAlreadyRegisteredException(email);
       }
 
       throw error;
     }
   }
-}
-
-function sessionExpiry() {
-  return new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
 }
 
 function toSafeUser(user: {

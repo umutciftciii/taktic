@@ -11,15 +11,22 @@ import {
 import {
   CreditTransactionType,
   NumberedEntityType,
+  OfferRejectionReason,
   OfferStatus,
   Prisma,
   ProviderStatus,
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
+import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { NumberingService } from '../numbering/numbering.service';
+import {
+  offerNotWithdrawableException,
+  WITHDRAWABLE_OFFER_STATUSES,
+} from '../offers/offer-transitions';
 import { calculateRefundEligibility } from '../offers/refund-policy';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -61,7 +68,13 @@ type NormalizedProviderPayload = {
 };
 
 type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
-const OFFER_CREDIT_COST = 1;
+/**
+ * Machine-readable codes for the offer-pricing conflicts, so the web app can
+ * render a specific explanation instead of a generic error screen.
+ */
+export const CATEGORY_PRICE_UNSET_CODE = 'CATEGORY_PRICE_UNSET';
+export const CREDIT_COST_CHANGED_CODE = 'CREDIT_COST_CHANGED';
+export const CATEGORY_INACTIVE_CODE = 'CATEGORY_INACTIVE';
 
 @Injectable()
 export class ProvidersService {
@@ -75,8 +88,38 @@ export class ProvidersService {
       throw new ForbiddenException('Customers cannot create provider profiles');
     }
 
+    // An account owns at most one provider profile. Checked here so the caller
+    // gets an explanatory 409 rather than a raw constraint violation; the unique
+    // index on ProviderProfile.userId is still the source of truth and is
+    // handled below for the concurrent-request case.
+    if (user?.role === UserRole.PROVIDER) {
+      const existing = await this.prisma.providerProfile.findFirst({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+
+      if (existing) {
+        throw new ConflictException('Bu hesap için zaten bir hizmet veren profili var.');
+      }
+    }
+
     const payload = await this.normalizeAndValidatePayload(dto);
 
+    try {
+      return await this.createProviderRecord(payload, user);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Bu hesap için zaten bir hizmet veren profili var.');
+      }
+
+      throw error;
+    }
+  }
+
+  private createProviderRecord(
+    payload: Awaited<ReturnType<ProvidersService['normalizeAndValidatePayload']>>,
+    user: AuthUser | null,
+  ) {
     return this.prisma.providerProfile.create({
       data: {
         userId: user?.role === UserRole.PROVIDER ? user.id : undefined,
@@ -140,6 +183,11 @@ export class ProvidersService {
     }));
   }
 
+  /**
+   * Full record, including contact and moderation fields. Internal use only —
+   * never hand this straight to an HTTP response. Public reads must go through
+   * getProviderForViewer.
+   */
   async getProvider(id: string) {
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id },
@@ -151,6 +199,33 @@ export class ProvidersService {
     }
 
     return provider;
+  }
+
+  /**
+   * Read a provider profile through the lens of whoever is asking.
+   *
+   * - anonymous / any unrelated account -> public projection, and only for
+   *   profiles that are publicly listable at all (see PUBLICLY_VISIBLE_STATUSES)
+   * - the owning provider account        -> full record, any status
+   * - SUPER_ADMIN                        -> full record, any status
+   */
+  async getProviderForViewer(id: string, user: AuthUser | null) {
+    const provider = await this.getProvider(id);
+    const visibility = resolveProviderVisibility(provider, user);
+
+    if (visibility === 'public') {
+      // 404, not 403: telling an anonymous caller "this exists but is pending"
+      // would let them walk the id space and discover who applied and who was
+      // rejected. An unlistable profile must be indistinguishable from a
+      // non-existent one.
+      if (!isPubliclyVisibleProvider(provider.status)) {
+        throw new NotFoundException('Provider not found');
+      }
+
+      return toPublicProvider(provider);
+    }
+
+    return { ...provider, visibility };
   }
 
   async getAdminProviderDetail(id: string) {
@@ -396,6 +471,7 @@ export class ProvidersService {
     const requests = await this.prisma.serviceRequest.findMany({
       where: {
         status: ServiceRequestStatus.APPROVED,
+        ...phoneVerifiedRequestFilter(),
         categoryId: { in: provider.serviceCategories.map((item) => item.categoryId) },
         offers: { none: { providerId } },
         ...(normalizedFilters.categoryId ? { categoryId: normalizedFilters.categoryId } : {}),
@@ -411,7 +487,13 @@ export class ProvidersService {
       orderBy: [{ qualityScore: 'desc' }, { submittedAt: 'desc' }],
       include: {
         category: {
-          select: { id: true, name: true, slug: true },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            isActive: true,
+            offerCreditCost: true,
+          },
         },
         _count: {
           select: { answers: true },
@@ -433,7 +515,13 @@ export class ProvidersService {
       where: { id: requestId },
       include: {
         category: {
-          select: { id: true, name: true, slug: true },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            isActive: true,
+            offerCreditCost: true,
+          },
         },
         answers: {
           orderBy: { createdAt: 'asc' },
@@ -461,6 +549,7 @@ export class ProvidersService {
     if (
       !request ||
       request.status !== ServiceRequestStatus.APPROVED ||
+      !isRequestVisibleToProviders(request) ||
       !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
       !matchesProviderArea(provider.serviceAreas, request)
     ) {
@@ -491,10 +580,69 @@ export class ProvidersService {
     }
 
     try {
-      return await this.prisma.$transaction(
+      return await runSerializable(
+        this.prisma,
         async (tx) => {
+          // The price is read inside the transaction, in the same serialisation
+          // window as the balance read and the ledger write. Reading it outside
+          // would let an admin change the price between the read and the charge,
+          // so the amount charged could differ from the snapshot written to the
+          // offer.
+          const request = await tx.serviceRequest.findUnique({
+            where: { id: requestId },
+            select: {
+              category: {
+                select: { id: true, slug: true, isActive: true, offerCreditCost: true },
+              },
+            },
+          });
+
+          if (!request) {
+            throw new NotFoundException('Request not found');
+          }
+
+          const category = request.category;
+
+          // A deactivated category stops accepting new offers, including on
+          // requests that were already open when it was deactivated.
+          if (!category.isActive) {
+            throw new ConflictException({
+              statusCode: HttpStatus.CONFLICT,
+              code: CATEGORY_INACTIVE_CODE,
+              message: 'Bu kategori pasif durumda; yeni teklif verilemez.',
+            });
+          }
+
+          const actualCreditCost = category.offerCreditCost;
+
+          // No hidden fallback: an unpriced (or somehow non-positive) category
+          // simply cannot receive offers.
+          if (actualCreditCost === null || actualCreditCost <= 0) {
+            throw new ConflictException({
+              statusCode: HttpStatus.CONFLICT,
+              code: CATEGORY_PRICE_UNSET_CODE,
+              message: 'Bu kategori için teklif kredisi tanımlı değil.',
+            });
+          }
+
+          // expectedCreditCost is an equality check only — it never decides the
+          // charge. Otherwise a client could set its own price by editing the
+          // payload.
+          if (
+            payload.expectedCreditCost !== null &&
+            payload.expectedCreditCost !== actualCreditCost
+          ) {
+            throw new ConflictException({
+              statusCode: HttpStatus.CONFLICT,
+              code: CREDIT_COST_CHANGED_CODE,
+              message: 'Bu kategorinin teklif maliyeti güncellendi.',
+              expectedCreditCost: payload.expectedCreditCost,
+              actualCreditCost,
+            });
+          }
+
           const currentBalance = await getProviderCreditBalanceInTransaction(tx, providerId);
-          if (currentBalance < OFFER_CREDIT_COST) {
+          if (currentBalance < actualCreditCost) {
             throw new HttpException('Yetersiz teklif kredisi.', HttpStatus.PAYMENT_REQUIRED);
           }
 
@@ -515,7 +663,9 @@ export class ProvidersService {
               message: payload.message,
               warrantyNote: payload.warrantyNote,
               internalNote: payload.internalNote,
-              creditCost: OFFER_CREDIT_COST,
+              // Immutable snapshot. Refunds read this, never the live category
+              // price, so a later price change cannot alter historical amounts.
+              creditCost: actualCreditCost,
             },
           });
 
@@ -523,9 +673,9 @@ export class ProvidersService {
             data: {
               providerId,
               type: CreditTransactionType.OFFER_SPEND,
-              amount: -OFFER_CREDIT_COST,
-              balanceAfter: currentBalance - OFFER_CREDIT_COST,
-              reason: 'Offer submitted',
+              amount: -actualCreditCost,
+              balanceAfter: currentBalance - actualCreditCost,
+              reason: `Offer submitted (${category.slug}, ${actualCreditCost} kredi)`,
               referenceType: 'Offer',
               referenceId: offer.id,
             },
@@ -539,7 +689,7 @@ export class ProvidersService {
 
           return withRefundEligibility(updatedOffer);
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        { label: 'providers.createOffer' },
       );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -574,6 +724,77 @@ export class ProvidersService {
     }
 
     return withRefundEligibility(offer);
+  }
+
+  /**
+   * Takes a provider's own live offer off the table.
+   *
+   * The conditional update is the whole concurrency guard: only an offer that is
+   * still in {@link WITHDRAWABLE_OFFER_STATUSES} can become WITHDRAWN, so of two
+   * simultaneous withdrawals exactly one updates a row and the other reaches the
+   * business rule. The same clause is what a simultaneous acceptance loses
+   * against — the customer path only moves offers that are not already closed —
+   * so the pair can never both write a terminal state.
+   *
+   * No ledger row is written and neither creditCost nor
+   * creditRefundedTransactionId is touched: the provider chose to walk away from
+   * an offer the platform already delivered, and that spend stands. The refund
+   * policy reports the same verdict for the resulting record.
+   */
+  async withdrawProviderOffer(providerId: string, offerId: string) {
+    await this.ensureProviderExists(providerId);
+    const now = new Date();
+
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        const offer = await tx.offer.findFirst({
+          where: { id: offerId, providerId },
+          select: { id: true, requestId: true },
+        });
+
+        // Somebody else's offer is indistinguishable from a missing one, so a
+        // provider cannot probe for offer ids it does not own.
+        if (!offer) {
+          throw new NotFoundException('Offer not found');
+        }
+
+        const request = await tx.serviceRequest.findUnique({
+          where: { id: offer.requestId },
+          select: { status: true },
+        });
+
+        // A matched, completed, cancelled or expired request is settled. Its
+        // offers stay exactly as that lifecycle left them.
+        if (!request || request.status !== ServiceRequestStatus.APPROVED) {
+          throw offerNotWithdrawableException();
+        }
+
+        const withdrawn = await tx.offer.updateMany({
+          where: {
+            id: offerId,
+            providerId,
+            status: { in: [...WITHDRAWABLE_OFFER_STATUSES] },
+          },
+          data: {
+            status: OfferStatus.WITHDRAWN,
+            withdrawnAt: now,
+          },
+        });
+
+        if (withdrawn.count !== 1) {
+          throw offerNotWithdrawableException();
+        }
+
+        const updated = await tx.offer.findUniqueOrThrow({
+          where: { id: offerId },
+          include: providerOfferInclude,
+        });
+
+        return withRefundEligibility(updated);
+      },
+      { label: 'providers.withdrawProviderOffer' },
+    );
   }
 
   private async normalizeAndValidatePayload(
@@ -673,12 +894,14 @@ export class ProvidersService {
         city: true,
         district: true,
         neighborhood: true,
+        phoneVerifiedAt: true,
       },
     });
 
     if (
       !request ||
       request.status !== ServiceRequestStatus.APPROVED ||
+      !isRequestVisibleToProviders(request) ||
       !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
       !matchesProviderArea(provider.serviceAreas, request)
     ) {
@@ -719,24 +942,87 @@ const providerInclude = {
   },
 } satisfies Prisma.ProviderProfileInclude;
 
+export type ProviderVisibility = 'public' | 'owner' | 'admin';
+
+/**
+ * Only an approved provider is a public entity. Everything else — a draft, an
+ * application under review, a rejected or suspended profile — is private
+ * moderation state and must not be discoverable by id.
+ *
+ * Deliberately an allow-list: a status added later stays private until someone
+ * consciously decides it should be public.
+ */
+const PUBLICLY_VISIBLE_STATUSES: ReadonlySet<ProviderStatus> = new Set([ProviderStatus.APPROVED]);
+
+export function isPubliclyVisibleProvider(status: ProviderStatus): boolean {
+  return PUBLICLY_VISIBLE_STATUSES.has(status);
+}
+
+function resolveProviderVisibility(
+  provider: { userId: string | null },
+  user: AuthUser | null,
+): ProviderVisibility {
+  if (!user) {
+    return 'public';
+  }
+
+  if (user.role === UserRole.SUPER_ADMIN) {
+    return 'admin';
+  }
+
+  if (user.role === UserRole.PROVIDER && provider.userId && provider.userId === user.id) {
+    return 'owner';
+  }
+
+  return 'public';
+}
+
+/**
+ * The only shape an unauthenticated or unrelated caller may see.
+ *
+ * Deliberately omitted: the linked platform `user` object, phone, e-mail,
+ * contactName, tax type/number, addressNote, and the moderation fields
+ * (moderationNote, rejectionReason, approved/rejected/suspended timestamps).
+ * Built as an allow-list so a future column is private until someone
+ * consciously adds it here.
+ */
+function toPublicProvider(
+  provider: Prisma.ProviderProfileGetPayload<{ include: typeof providerInclude }>,
+) {
+  return {
+    id: provider.id,
+    businessName: provider.businessName,
+    city: provider.city,
+    district: provider.district,
+    description: provider.description,
+    status: provider.status,
+    createdAt: provider.createdAt,
+    serviceCategories: provider.serviceCategories,
+    serviceAreas: provider.serviceAreas,
+    visibility: 'public' as const,
+  };
+}
+
 function ensureProviderUpdateAccess(
   provider: { userId: string | null },
   user: AuthUser | null,
 ) {
-  if (user?.role === UserRole.CUSTOMER) {
-    throw new ForbiddenException('Customers cannot update provider profiles');
-  }
-
-  if (!provider.userId) {
-    return;
-  }
-
   if (!user) {
     throw new ForbiddenException('Provider profile requires authentication');
   }
 
   if (user.role === UserRole.SUPER_ADMIN) {
     return;
+  }
+
+  if (user.role === UserRole.CUSTOMER) {
+    throw new ForbiddenException('Customers cannot update provider profiles');
+  }
+
+  // Guest applications have no owner yet. Until a claim flow exists they are
+  // administrable only — anonymous or third-party edits are never allowed.
+  if (!provider.userId) {
+    throw new ForbiddenException('Unclaimed provider profiles can only be updated by an admin');
   }
 
   if (user.role !== UserRole.PROVIDER || user.id !== provider.userId) {
@@ -855,6 +1141,23 @@ function normalizeOptionalQualityLabel(value: string | undefined): QualityLabel 
   return normalized;
 }
 
+/**
+ * Provider-side visibility gate for unverified requests.
+ *
+ * While REQUIRE_PHONE_VERIFICATION is false this is a no-op, so requests that
+ * predate phone verification — every existing row — keep behaving exactly as
+ * before. When it is true, an unverified request is invisible to providers, and
+ * the check is applied in the list query, the detail lookup and the offer path
+ * alike: hiding it in the UI only would still leave the id guessable.
+ */
+function phoneVerifiedRequestFilter(): Prisma.ServiceRequestWhereInput {
+  return isPhoneVerificationRequired() ? { phoneVerifiedAt: { not: null } } : {};
+}
+
+function isRequestVisibleToProviders(request: { phoneVerifiedAt: Date | null }): boolean {
+  return !isPhoneVerificationRequired() || request.phoneVerifiedAt !== null;
+}
+
 function matchesProviderArea(
   areas: Array<{ city: string; district: string | null; neighborhood: string | null }>,
   request: { city: string; district: string; neighborhood: string | null },
@@ -880,17 +1183,48 @@ function sameText(left: string | null, right: string | null) {
   return (left ?? '').toLocaleLowerCase('tr-TR') === (right ?? '').toLocaleLowerCase('tr-TR');
 }
 
+export type OfferBlockedReason = 'CATEGORY_INACTIVE' | 'CATEGORY_PRICE_UNSET';
+
+/**
+ * Derives what the provider UI needs to decide whether an offer can be made and
+ * what it would cost. Mirrors the checks createOffer performs inside its
+ * transaction, so the screen never invites an action the API would reject.
+ *
+ * `offerCreditCost` is null exactly when offering is impossible, and
+ * `offerBlockedReason` says which rule blocks it.
+ */
+function resolveOfferPricing(category: { isActive: boolean; offerCreditCost: number | null }): {
+  offerCreditCost: number | null;
+  canOffer: boolean;
+  offerBlockedReason: OfferBlockedReason | null;
+} {
+  if (!category.isActive) {
+    return { offerCreditCost: null, canOffer: false, offerBlockedReason: 'CATEGORY_INACTIVE' };
+  }
+
+  if (category.offerCreditCost === null || category.offerCreditCost <= 0) {
+    return { offerCreditCost: null, canOffer: false, offerBlockedReason: 'CATEGORY_PRICE_UNSET' };
+  }
+
+  return { offerCreditCost: category.offerCreditCost, canOffer: true, offerBlockedReason: null };
+}
+
 function toProviderRequestListItem(
   request: Prisma.ServiceRequestGetPayload<{
     include: {
-      category: { select: { id: true; name: true; slug: true } };
+      category: {
+        select: { id: true; name: true; slug: true; isActive: true; offerCreditCost: true };
+      };
       _count: { select: { answers: true } };
     };
   }>,
 ) {
+  const pricing = resolveOfferPricing(request.category);
+
   return {
     id: request.id,
     category: request.category,
+    ...pricing,
     city: request.city,
     district: request.district,
     neighborhood: request.neighborhood,
@@ -909,7 +1243,9 @@ function toProviderRequestListItem(
 function toProviderRequestDetail(
   request: Prisma.ServiceRequestGetPayload<{
     include: {
-      category: { select: { id: true; name: true; slug: true } };
+      category: {
+        select: { id: true; name: true; slug: true; isActive: true; offerCreditCost: true };
+      };
       answers: true;
       offers: {
         where: { providerId: string };
@@ -932,9 +1268,12 @@ function toProviderRequestDetail(
   }>,
   providerCreditBalance: number,
 ) {
+  const pricing = resolveOfferPricing(request.category);
+
   return {
     id: request.id,
     category: request.category,
+    ...pricing,
     city: request.city,
     district: request.district,
     neighborhood: request.neighborhood,
@@ -963,8 +1302,15 @@ function toProviderRequestDetail(
 }
 
 function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
+  // rejectionReason is internal. COMPETITOR_ACCEPTED tells the provider that
+  // somebody else won, which is exactly what the provider must not learn, so it
+  // is dropped here. What stays is refundEligibility, whose label for that case
+  // is the neutral "Teklif kabul edilmedi".
+  const { rejectionReason, ...visible } = offer;
+  void rejectionReason;
+
   return {
-    ...offer,
+    ...visible,
     refundEligibility: calculateRefundEligibility(offer),
   };
 }
@@ -978,6 +1324,7 @@ type RefundPolicyOfferShape = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
+  rejectionReason?: OfferRejectionReason | null;
 };
 
 async function getProviderCreditBalanceInTransaction(
@@ -1020,6 +1367,9 @@ function normalizeOfferPayload(dto: CreateOfferDto) {
 
   return {
     priceAmount,
+    // Carried through untouched: it is compared against the live category price
+    // inside the transaction and is never used as the charged amount.
+    expectedCreditCost: dto.expectedCreditCost ?? null,
     currency: normalizeNullableString(dto.currency) ?? 'TRY',
     estimatedStartDate,
     estimatedCompletionDate,

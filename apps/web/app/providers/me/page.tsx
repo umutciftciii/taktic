@@ -63,7 +63,7 @@ export default async function MyProviderPage() {
         <div className="pdash-stat-card">
           <span className="pdash-stat-label">Kredi Bakiyesi</span>
           <span className="pdash-stat-value">{creditBalance}</span>
-          <span className="pdash-stat-hint">Her teklif 1 kredi kullanır</span>
+          <span className="pdash-stat-hint">Teklif maliyeti kategoriye göre değişir</span>
         </div>
         <div className="pdash-stat-card">
           <span className="pdash-stat-label">Uygun Onaylı Talep</span>

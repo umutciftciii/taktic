@@ -3,6 +3,8 @@ export function statusLabel(status: string): string {
     SUBMITTED: 'Gönderildi',
     IN_REVIEW: 'İncelemede',
     APPROVED: 'Onaylandı',
+    MATCHED: 'Eşleşti',
+    COMPLETED: 'Tamamlandı',
     REJECTED: 'Reddedildi',
     CANCELLED: 'İptal',
     VIEWED: 'Görüntülendi',

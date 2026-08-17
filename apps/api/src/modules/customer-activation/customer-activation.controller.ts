@@ -1,4 +1,15 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
+import { sessionCookie } from '../auth/cookie';
 import { CustomerActivationService } from './customer-activation.service';
 import { SubmitCustomerActivationDto } from './dto/submit-customer-activation.dto';
 
@@ -19,7 +30,20 @@ export class CustomerActivationController {
   }
 
   @Post()
-  submit(@Body() dto: SubmitCustomerActivationDto) {
-    return this.activationService.submit(dto);
+  async submit(
+    @Body() dto: SubmitCustomerActivationDto,
+    @Req() request: any,
+    @Res({ passthrough: true }) response: any,
+  ) {
+    const result = await this.activationService.submit(dto, {
+      ipAddress: request.ip ?? null,
+      userAgent: request.headers?.['user-agent'] ?? null,
+    });
+
+    // Setting the password logs the customer straight in, so they land on their
+    // own requests/offers instead of being bounced to a login screen.
+    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+
+    return { success: result.success, user: result.user };
   }
 }

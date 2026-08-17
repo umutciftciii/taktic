@@ -17,7 +17,7 @@ const items = [
   {
     q: 'Talep kalite skoru nedir?',
     a:
-      'Talebin ne kadar detaylı, doğrulanmış ve takip edilebilir olduğunu özetleyen bir puandır. Telefon doğrulaması, brief detayı, lokasyon ve zaman bilgisi gibi sinyaller hesaplamaya girer.',
+      'Talebin ne kadar detaylı ve takip edilebilir olduğunu özetleyen bir puandır. İletişim bilgisinin verilmiş olması, brief detayı, lokasyon ve zaman bilgisi gibi sinyaller hesaplamaya girer.',
   },
   {
     q: 'Teklif kredisi nedir?',

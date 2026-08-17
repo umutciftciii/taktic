@@ -1,6 +1,12 @@
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
-import { apiFetch, Category, getCurrentUser, ProviderProfile } from '../../../../lib/api';
+import {
+  apiFetch,
+  Category,
+  fetchOrNotFound,
+  getCurrentUser,
+  ProviderProfile,
+} from '../../../../lib/api';
 import { updateProviderAction } from '../../actions';
 import { ProviderShell } from '../../provider-shell';
 
@@ -16,9 +22,15 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
   }
 
   const [provider, categories] = await Promise.all([
-    apiFetch<ProviderProfile>(`/providers/${id}`),
+    fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
     apiFetch<Category[]>('/categories'),
   ]);
+
+  // Editing needs the private projection (phone, e-mail, tax fields). A viewer
+  // who only gets the public shape is not the owner and must not see this form.
+  if (provider.visibility === 'public') {
+    notFound();
+  }
   const selectedCategoryIds = new Set(provider.serviceCategories.map((item) => item.category.id));
   const firstArea = provider.serviceAreas[0];
 

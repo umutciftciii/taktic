@@ -114,7 +114,7 @@ export function StartChoiceModal({ user, label = DEFAULT_LABEL, className }: Sta
                 active={choice === 'BUY'}
                 onSelect={() => setChoice('BUY')}
                 title="Hizmet almak istiyorum."
-                description="İhtiyacını anlat, doğrulanmış hizmet verenlerden teklif al."
+                description="İhtiyacını anlat, uygun hizmet verenlerden teklif al."
                 visualSrc="/brand/start-choice-customer.png"
                 visualAlt="Hizmet almak"
               />

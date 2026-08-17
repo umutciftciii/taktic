@@ -102,8 +102,23 @@ export function RequestsBoard({ requests }: RequestsBoardProps) {
   );
 }
 
+/**
+ * A neutral, factual line for a closed request: what happened and what it means
+ * from here. No apology, no blame, and no promise that anything will change.
+ */
+function statusNote(request: CustomerServiceRequest): string | null {
+  if (request.status !== 'EXPIRED') {
+    return null;
+  }
+
+  return request.expiredAt
+    ? `Talebin geçerlilik süresi ${formatDateTime(request.expiredAt)} tarihinde doldu. Yeni teklif alınmıyor.`
+    : 'Talebin geçerlilik süresi doldu. Yeni teklif alınmıyor.';
+}
+
 function RequestCard({ request }: { request: CustomerServiceRequest }) {
   const hasOffers = request.offersCount > 0;
+  const note = statusNote(request);
   const offersText = hasOffers ? `${request.offersCount} teklif geldi` : 'Henüz teklif yok';
   const offersBadgeClass = `cdash-badge ${hasOffers ? 'cdash-badge-info' : 'cdash-badge-muted'}`;
   const ctaLabel = hasOffers ? 'Teklifleri görüntüle' : 'Detaylar';
@@ -113,13 +128,15 @@ function RequestCard({ request }: { request: CustomerServiceRequest }) {
     request.requestNumber ?? `#${request.id.slice(-6).toUpperCase()}`;
 
   return (
-    <article className="cdash-card">
+    <article className="cdash-card" data-testid="request-card" data-request-id={request.id}>
       <div className="cdash-card-head">
         <div style={{ minWidth: 0 }}>
           <h2 className="cdash-card-title">{request.category?.name ?? 'Talep'}</h2>
           <p className="cdash-card-sub">{referenceLabel}</p>
         </div>
-        <span className={statusClass}>{statusLabel(request.status)}</span>
+        <span className={statusClass} data-testid="request-status">
+          {statusLabel(request.status)}
+        </span>
       </div>
 
       <div className="cdash-card-meta">
@@ -133,6 +150,8 @@ function RequestCard({ request }: { request: CustomerServiceRequest }) {
           {request.district ? `, ${request.district}` : ''}
         </span>
       </div>
+
+      {note ? <p className="cdash-card-note">{note}</p> : null}
 
       <div className="cdash-card-foot">
         <span className={offersBadgeClass}>{offersText}</span>
@@ -148,6 +167,8 @@ function statusBadgeClass(status: string): string {
   switch (status) {
     case 'APPROVED':
     case 'ACCEPTED':
+    case 'MATCHED':
+    case 'COMPLETED':
       return 'cdash-badge cdash-badge-success';
     case 'SUBMITTED':
     case 'IN_REVIEW':

@@ -1,3 +1,6 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # Browser end-to-end suite. Deliberately outside apps/*: it ships no runtime
+  # code and must never become a build or `pnpm test` dependency of the apps.
+  - "e2e"

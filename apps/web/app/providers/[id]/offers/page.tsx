@@ -4,13 +4,17 @@ import {
   apiFetch,
   getCurrentUser,
   ProviderOffer,
-  statusLabel,
   refundActionLabel,
   formatPrice,
   formatDateTime,
 } from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
-import { providerRefundBadgeClass, providerStatusBadgeClass } from '../../provider-ui';
+import {
+  canWithdrawOffer,
+  providerOfferStatusLabel,
+  providerRefundBadgeClass,
+  providerStatusBadgeClass,
+} from '../../provider-ui';
 
 type ProviderOffersPageProps = {
   params: Promise<{ id: string }>;
@@ -115,7 +119,7 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
                         `#${offer.request.id.slice(-6).toUpperCase()}`}
                     </p>
                   </div>
-                  <span className={providerStatusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
+                  <span className={providerStatusBadgeClass(offer.status)}>{providerOfferStatusLabel(offer.status)}</span>
                 </div>
 
                 <div className="pdash-card-meta">
@@ -141,6 +145,19 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
                     <div className="pdash-card-price">{formatPrice(offer.priceAmount, offer.currency)}</div>
                   </div>
                   <div className="pdash-actions">
+                    {/*
+                      A link, not the action itself: withdrawing is irreversible
+                      and unrefunded, so it is only ever confirmed on the detail
+                      screen where those consequences are spelled out.
+                    */}
+                    {canWithdrawOffer(offer.status, offer.request.status) ? (
+                      <Link
+                        className="pdash-btn pdash-btn-ghost pdash-btn-sm"
+                        href={`/providers/${id}/offers/${offer.id}#geri-cek`}
+                      >
+                        Teklifi Geri Çek
+                      </Link>
+                    ) : null}
                     <Link
                       className="pdash-btn pdash-btn-secondary pdash-btn-sm"
                       href={`/providers/${id}/requests/${offer.request.id}`}

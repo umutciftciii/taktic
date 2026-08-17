@@ -38,8 +38,11 @@ const statusFilters: Array<{ label: string; value: StatusFilter }> = [
   { label: 'Yeni Talep', value: 'SUBMITTED' },
   { label: 'İncelemede', value: 'IN_REVIEW' },
   { label: 'Onaylandı', value: 'APPROVED' },
+  { label: 'Eşleşti', value: 'MATCHED' },
+  { label: 'Tamamlandı', value: 'COMPLETED' },
   { label: 'Reddedildi', value: 'REJECTED' },
   { label: 'İptal Edildi', value: 'CANCELLED' },
+  { label: 'Süresi Doldu', value: 'EXPIRED' },
 ];
 
 const qualityFilters: Array<{ label: string; value: QualityFilter }> = [
@@ -56,8 +59,11 @@ function normalizeStatus(value: string | undefined): StatusFilter {
     upper === 'SUBMITTED' ||
     upper === 'IN_REVIEW' ||
     upper === 'APPROVED' ||
+    upper === 'MATCHED' ||
+    upper === 'COMPLETED' ||
     upper === 'REJECTED' ||
-    upper === 'CANCELLED'
+    upper === 'CANCELLED' ||
+    upper === 'EXPIRED'
   ) {
     return upper;
   }
@@ -86,6 +92,33 @@ function parseDateBoundary(value: string | undefined, edge: 'start' | 'end'): Da
     date.setHours(0, 0, 0, 0);
   }
   return date;
+}
+
+/**
+ * The lifecycle clock behind the status badge.
+ *
+ * An APPROVED request without an approval time is worth calling out: it was
+ * approved before the field existed, so the 14-day expiry and the day-7
+ * reminder will never act on it.
+ */
+function lifecycleNotes(request: ServiceRequest): string[] {
+  const notes: string[] = [];
+
+  if (request.status === 'EXPIRED' && request.expiredAt) {
+    notes.push(`Süre doldu · ${formatDateTime(request.expiredAt)}`);
+  } else if (request.status === 'APPROVED') {
+    notes.push(
+      request.approvedAt
+        ? `Onay · ${formatDateTime(request.approvedAt)}`
+        : 'Onay zamanı kayıtlı değil',
+    );
+  }
+
+  if (request.reminderSentAt) {
+    notes.push(`Hatırlatma · ${formatDateTime(request.reminderSentAt)}`);
+  }
+
+  return notes;
 }
 
 export default async function AdminRequestsPage({ searchParams }: AdminRequestsPageProps) {
@@ -356,9 +389,16 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
                         </div>
                       </td>
                       <td>
-                        <span className={statusBadgeClass(request.status)}>
-                          {requestStatusLabel(request.status)}
-                        </span>
+                        <div className="cell-stack">
+                          <span className={statusBadgeClass(request.status)}>
+                            {requestStatusLabel(request.status)}
+                          </span>
+                          {lifecycleNotes(request).map((note) => (
+                            <span className="cell-muted" key={note}>
+                              {note}
+                            </span>
+                          ))}
+                        </div>
                       </td>
                       <td className="col-num">
                         {offerCount === null ? (

@@ -79,6 +79,7 @@ export class CategoriesService {
           name: normalizeRequiredString(dto.name, 'Category name'),
           slug: normalizeSlug(dto.slug),
           description: normalizeNullableString(dto.description),
+          offerCreditCost: dto.offerCreditCost,
           parentId: normalizeNullableString(dto.parentId),
           imageUrl: normalizeCategoryImageUrl(dto.imageUrl, 'imageUrl') ?? null,
           coverImageUrl:
@@ -108,6 +109,11 @@ export class CategoriesService {
           ...(dto.slug !== undefined ? { slug: normalizeSlug(dto.slug) } : {}),
           ...(dto.description !== undefined
             ? { description: normalizeNullableString(dto.description) }
+            : {}),
+          // Only written when the caller sends it. There is no branch that sets
+          // it to null: unpricing a category is not a supported operation.
+          ...(dto.offerCreditCost !== undefined
+            ? { offerCreditCost: dto.offerCreditCost }
             : {}),
           ...(dto.parentId !== undefined ? { parentId: normalizeNullableString(dto.parentId) } : {}),
           ...(imageUrl !== undefined ? { imageUrl } : {}),

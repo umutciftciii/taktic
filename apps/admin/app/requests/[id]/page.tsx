@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  ContactRevealDetail,
+  fetchOrNotFound,
   Offer,
   QualityScoreBreakdown,
   ServiceRequest,
@@ -19,19 +21,62 @@ import {
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { EmptyState } from '../../../components/empty-state';
-import { recalculateRequestQualityAction, updateRequestStatusAction } from '../actions';
+import {
+  cancelRequestAction,
+  completeRequestAction,
+  recalculateRequestQualityAction,
+  updateRequestStatusAction,
+} from '../actions';
 
 type RequestDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ statusError?: string }>;
 };
 
 const RECENT_OFFERS_LIMIT = 3;
 
-export default async function RequestDetailPage({ params }: RequestDetailPageProps) {
+/** An approved request stays open for 14 days from its approval moment. */
+const REQUEST_OPEN_DAYS = 14;
+
+/**
+ * When the expiry scheduler would close this request, or null when there is
+ * nothing to project: the request is not open any more, or it was approved
+ * before approvedAt existed and is therefore never picked up by the scheduler.
+ */
+function plannedExpiry(request: ServiceRequest): string | null {
+  if (request.status !== 'APPROVED' || !request.approvedAt) {
+    return null;
+  }
+
+  const approved = new Date(request.approvedAt);
+  if (Number.isNaN(approved.getTime())) {
+    return null;
+  }
+
+  return new Date(approved.getTime() + REQUEST_OPEN_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export default async function RequestDetailPage({
+  params,
+  searchParams,
+}: RequestDetailPageProps) {
   const { id } = await params;
-  const request = await apiFetch<ServiceRequest>(`/service-requests/${id}`);
+  const { statusError } = await searchParams;
+  const request = await fetchOrNotFound(() =>
+    apiFetch<ServiceRequest>(`/service-requests/${id}`),
+  );
   const offers = await apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]);
+  // Audit only: this panel reports whether contact details were opened and
+  // under which disclosure version. It renders no contact value — the operator
+  // already has the customer and provider panels for that, and this feature
+  // adds nothing to what they show.
+  const contactReveal = await apiFetch<ContactRevealDetail>(
+    `/service-requests/${id}/contact-reveal`,
+  ).catch(() => null);
   const recentOffers = offers.slice(0, RECENT_OFFERS_LIMIT);
+  const matchedOffer = request.matchedOfferId
+    ? (offers.find((offer) => offer.id === request.matchedOfferId) ?? null)
+    : null;
   const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
   const categoryName = request.category.name;
   const headerTitle = categoryName ? `${categoryName} Talebi` : 'Talep Detayı';
@@ -51,7 +96,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         title={headerTitle}
         subtitle={
           <span className="request-header-meta">
-            <span className={statusBadgeClass(request.status)}>{requestStatusLabel(request.status)}</span>
+            <span className={statusBadgeClass(request.status)} data-testid="request-status">
+              {requestStatusLabel(request.status)}
+            </span>
             <span className={qualityBadgeClass(request.qualityLabel)}>
               {request.qualityScore}/100 · {qualityLabel(request.qualityLabel)}
             </span>
@@ -82,7 +129,31 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
               {requestStatusLabel(request.status)}
             </span>
           </div>
-          <p>Durum geçişleri anında uygulanır. Reddetme için gerekçe zorunludur.</p>
+          <p>
+            İnceleme geçişleri anında uygulanır. Reddetme için gerekçe zorunludur. Eşleşme,
+            tamamlanma ve süre dolumu buradan yazılamaz: süre dolumunu yalnızca zamanlayıcı
+            yazar ve onaydan {REQUEST_OPEN_DAYS} gün sonra uygular.
+          </p>
+
+          {statusError === 'phoneNotVerified' ? (
+            <div className="status-action-error" role="alert" data-testid="status-error">
+              <strong>Durum değiştirilmedi.</strong> Telefon doğrulaması zorunlu olduğu için
+              doğrulanmamış bir talep onaylanamaz. Müşteri numarasını doğruladıktan sonra tekrar
+              deneyin; reddetme ve iptal her durumda mümkündür.
+            </div>
+          ) : null}
+
+          <p className="status-verification-note">
+            <strong>Telefon doğrulaması:</strong>{' '}
+            {request.phoneVerifiedAt ? (
+              <>Doğrulandı · {formatDateTime(request.phoneVerifiedAt)}</>
+            ) : (
+              <>
+                Doğrulanmadı. Telefon doğrulaması zorunlu hale getirildiğinde bu talep onaylanamaz
+                ve hizmet verenlere gösterilmez; reddetme ve iptal her durumda mümkündür.
+              </>
+            )}
+          </p>
           <div className="status-action-list">
             <StatusQuickForm
               requestId={request.id}
@@ -98,12 +169,28 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
               label="Onayla"
               variant="primary"
             />
-            <StatusQuickForm
+          </div>
+
+          <div className="status-action-list">
+            <LifecycleForm
               requestId={request.id}
-              targetStatus="CANCELLED"
-              currentStatus={request.status}
+              action={completeRequestAction}
+              label="Hizmeti tamamlandı işaretle"
+              variant="primary"
+              disabled={request.status !== 'MATCHED'}
+              hint={
+                request.status === 'MATCHED'
+                  ? null
+                  : 'Yalnız eşleşmiş talep tamamlanabilir.'
+              }
+            />
+            <LifecycleForm
+              requestId={request.id}
+              action={cancelRequestAction}
               label="İptal et"
               variant="ghost"
+              disabled={isTerminalStatus(request.status)}
+              hint={isTerminalStatus(request.status) ? 'Talep kapanmış durumda.' : null}
             />
           </div>
 
@@ -148,6 +235,79 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
               </button>
             </form>
           </details>
+        </div>
+
+        <div className="admin-action-panel request-offers-panel">
+          <div className="panel-head">
+            <h3>Eşleşme</h3>
+            <span className={statusBadgeClass(request.status)}>
+              {requestStatusLabel(request.status)}
+            </span>
+          </div>
+          {request.matchedOfferId ? (
+            <dl className="panel-dl">
+              <div>
+                <dt>Seçilen teklif</dt>
+                <dd>
+                  <Link href={`/offers/${request.matchedOfferId}`}>
+                    {matchedOffer
+                      ? matchedOffer.provider.businessName
+                      : `#${request.matchedOfferId.slice(-8)}`}
+                  </Link>
+                </dd>
+              </div>
+              <div>
+                <dt>Teklif kimliği</dt>
+                <dd>
+                  <code>{request.matchedOfferId}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Eşleşme zamanı</dt>
+                <dd>{formatDateTime(request.matchedAt)}</dd>
+              </div>
+              {request.completedAt ? (
+                <div>
+                  <dt>Tamamlanma</dt>
+                  <dd>{formatDateTime(request.completedAt)}</dd>
+                </div>
+              ) : null}
+              {request.cancelledAt ? (
+                <div>
+                  <dt>İptal</dt>
+                  <dd>{formatDateTime(request.cancelledAt)}</dd>
+                </div>
+              ) : null}
+              {/*
+                Read-only audit. There is no action here on purpose: the reveal
+                is written once inside the accept transaction, and nothing in
+                the product may repeat, edit or undo it.
+              */}
+              <div data-testid="contact-reveal-audit">
+                <dt>İletişim paylaşımı</dt>
+                <dd>
+                  {contactReveal?.event ? (
+                    <>
+                      {formatDateTime(contactReveal.event.revealedAt)}
+                      <span className="muted">
+                        {' '}
+                        · metin sürümü <code>{contactReveal.event.disclosureVersion}</code>
+                      </span>
+                      {contactReveal.event.offerId !== request.matchedOfferId ? (
+                        <span className="badge badge-bad" style={{ marginLeft: 6 }}>
+                          Eşleşme ile tutarsız
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="muted">Kayıt yok</span>
+                  )}
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="request-offers-empty">Bu talep henüz bir teklifle eşleşmedi.</p>
+          )}
         </div>
 
         <div className="admin-action-panel request-offers-panel">
@@ -278,6 +438,40 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
             <div>
               <dt>Moderasyon</dt>
               <dd>{request.moderatedAt ? formatDateTime(request.moderatedAt) : <span className="cell-muted">—</span>}</dd>
+            </div>
+            <div>
+              <dt>Onay</dt>
+              <dd>
+                {request.approvedAt ? (
+                  formatDateTime(request.approvedAt)
+                ) : request.status === 'APPROVED' ? (
+                  <span className="cell-muted">Kayıtlı değil</span>
+                ) : (
+                  <span className="cell-muted">—</span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Süre bitişi</dt>
+              <dd>
+                {request.expiredAt ? (
+                  formatDateTime(request.expiredAt)
+                ) : plannedExpiry(request) ? (
+                  <span className="cell-muted">{formatDateTime(plannedExpiry(request))} (planlanan)</span>
+                ) : (
+                  <span className="cell-muted">—</span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Hatırlatma</dt>
+              <dd>
+                {request.reminderSentAt ? (
+                  formatDateTime(request.reminderSentAt)
+                ) : (
+                  <span className="cell-muted">Gönderilmedi</span>
+                )}
+              </dd>
             </div>
             <div>
               <dt>Aciliyet</dt>
@@ -479,9 +673,44 @@ function QualityBreakdownItem({
   );
 }
 
+function isTerminalStatus(status: string) {
+  return (
+    status === 'COMPLETED' ||
+    status === 'CANCELLED' ||
+    status === 'EXPIRED' ||
+    status === 'REJECTED'
+  );
+}
+
+type LifecycleFormProps = {
+  requestId: string;
+  action: (formData: FormData) => Promise<void>;
+  label: string;
+  variant: 'primary' | 'secondary' | 'ghost';
+  disabled: boolean;
+  hint: string | null;
+};
+
+function LifecycleForm({ requestId, action, label, variant, disabled, hint }: LifecycleFormProps) {
+  return (
+    <form action={action} className="status-quick-form">
+      <input type="hidden" name="id" value={requestId} />
+      <button
+        className={`btn btn-${variant} btn-sm status-action-btn`}
+        type="submit"
+        disabled={disabled}
+        aria-disabled={disabled}
+        title={hint ?? undefined}
+      >
+        <span className="status-action-label">{label}</span>
+      </button>
+    </form>
+  );
+}
+
 type StatusQuickFormProps = {
   requestId: string;
-  targetStatus: 'IN_REVIEW' | 'APPROVED' | 'CANCELLED';
+  targetStatus: 'IN_REVIEW' | 'APPROVED';
   currentStatus: string;
   label: string;
   variant: 'primary' | 'secondary' | 'ghost';

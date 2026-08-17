@@ -8,6 +8,20 @@ export class CreateOfferDto {
   @Min(100)
   priceAmount!: number;
 
+  /**
+   * The credit cost the provider was shown when the form was rendered.
+   *
+   * Optional, and it is only ever compared for equality against the live
+   * category price inside the offer transaction — it never determines what is
+   * charged. A mismatch means the price changed while the form was open, and
+   * the request is rejected with 409 CREDIT_COST_CHANGED so nothing is billed
+   * at a price the provider never saw.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedCreditCost?: number;
+
   @IsOptional()
   @IsString()
   currency?: string | null;

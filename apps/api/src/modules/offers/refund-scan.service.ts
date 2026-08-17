@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
-import { OfferStatus, Prisma } from '@prisma/client';
+import { OfferRejectionReason, OfferStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { calculateRefundEligibility } from './refund-policy';
 import { refundOfferCreditInTransaction } from './offers.service';
@@ -39,7 +39,29 @@ const refundScanOfferSelect = {
   submittedAt: true,
   viewedAt: true,
   acceptedAt: true,
+  rejectionReason: true,
 } satisfies Prisma.OfferSelect;
+
+/**
+ * Offers the platform closed because a competing offer was accepted are never
+ * automatically refunded.
+ *
+ * This filters on the reason, not on the REJECTED status: an offer the customer
+ * rejected by hand carries no reason and keeps the refund behaviour it had
+ * before matching existed.
+ */
+const notCompetitorRejectedWhere = {
+  // Written as an explicit OR rather than `not`, because SQL inequality does not
+  // match NULL and the overwhelming majority of rows have no reason at all.
+  OR: [
+    { rejectionReason: null },
+    { rejectionReason: { notIn: [OfferRejectionReason.COMPETITOR_ACCEPTED] } },
+  ],
+} satisfies Prisma.OfferWhereInput;
+
+const competitorRejectedWhere = {
+  rejectionReason: OfferRejectionReason.COMPETITOR_ACCEPTED,
+} satisfies Prisma.OfferWhereInput;
 
 type RefundScanOffer = Prisma.OfferGetPayload<{ select: typeof refundScanOfferSelect }>;
 
@@ -192,7 +214,7 @@ export class RefundScanService {
           creditSpentTransactionId: { not: null },
           creditCost: { gt: 0 },
           viewedAt: null,
-          status: { in: [...INELIGIBLE_STATUSES] },
+          OR: [{ status: { in: [...INELIGIBLE_STATUSES] } }, competitorRejectedWhere],
         },
       }),
       this.prisma.offer.count({
@@ -203,6 +225,7 @@ export class RefundScanService {
           viewedAt: null,
           status: { notIn: [OfferStatus.VIEWED, ...INELIGIBLE_STATUSES] },
           submittedAt: { gt: cutoff },
+          AND: [notCompetitorRejectedWhere],
         },
       }),
     ]);
@@ -309,6 +332,9 @@ function automaticRefundCandidateWhere(cutoff: Date): Prisma.OfferWhereInput {
     viewedAt: null,
     status: { notIn: [OfferStatus.VIEWED, ...INELIGIBLE_STATUSES] },
     submittedAt: { lte: cutoff },
+    // Nested under AND so the OR inside it cannot collide with any OR the
+    // caller merges into this filter.
+    AND: [notCompetitorRejectedWhere],
   };
 }
 

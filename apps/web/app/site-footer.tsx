@@ -62,7 +62,8 @@ export function SiteFooter({ isAuthenticated = false }: SiteFooterProps = {}) {
               <img className="brand-logo" src="/brand/logo.png" alt="TakTick" />
             </Link>
             <p>
-              Doğrulanmış talepler ve adil teklif kredisiyle, daha şeffaf bir yerel hizmet pazaryeri.
+              Kategoriye özel talepler ve adil teklif kredisiyle, daha şeffaf bir yerel hizmet
+              pazaryeri.
             </p>
           </div>
 

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   ProviderProfile,
   ProviderRecentPackagePurchase,
   formatDateTime,
@@ -40,7 +41,11 @@ function packagePurchaseStatusTimestamp(purchase: ProviderRecentPackagePurchase)
 
 export default async function ProviderDetailPage({ params }: ProviderDetailPageProps) {
   const { id } = await params;
-  const provider = await apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`);
+  // An unknown id — including a path like /providers/new that falls through to
+  // this dynamic route — renders the 404 screen instead of a server error.
+  const provider = await fetchOrNotFound(() =>
+    apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`),
+  );
 
   const creditBalance = provider.creditBalance ?? 0;
   const openOffers = provider.activeOffersCount ?? 0;

@@ -1,5 +1,6 @@
 'use server';
 
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 const apiUrl =
@@ -40,7 +41,49 @@ export async function submitCustomerActivationAction(formData: FormData) {
     redirect(`/activate-customer?${params.toString()}`);
   }
 
+  // Activation logs the customer in, so persist the session cookie the API
+  // issued and drop them straight onto their own requests instead of a login
+  // screen — that is the whole point of the claim flow.
+  const session = parseSetCookie(response.headers.get('set-cookie'));
+  if (session) {
+    (await cookies()).set(session.name, session.value, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      expires: session.expires,
+    });
+
+    redirect('/requests/my');
+  }
+
   redirect('/activate-customer?success=1');
+}
+
+function parseSetCookie(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const [nameValue, ...attributes] = value.split(';').map((part) => part.trim());
+  if (!nameValue) {
+    return null;
+  }
+
+  const [name, ...rawValue] = nameValue.split('=');
+  if (!name) {
+    return null;
+  }
+
+  const expiresAttribute = attributes.find((attribute) =>
+    attribute.toLowerCase().startsWith('expires='),
+  );
+
+  return {
+    name,
+    value: decodeURIComponent(rawValue.join('=')),
+    expires: expiresAttribute ? new Date(expiresAttribute.slice('expires='.length)) : undefined,
+  };
 }
 
 async function safeReadErrorMessage(response: Response): Promise<string | null> {

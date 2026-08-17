@@ -3,7 +3,9 @@ import Link from 'next/link';
 import {
   apiFetch,
   Category,
+  fetchOrNotFound,
   getCurrentUser,
+  OfferBlockedReason,
   ProviderProfile,
   ProviderRequestListItem,
   formatPrice,
@@ -38,7 +40,9 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
   }
 
   const [provider, categories] = await Promise.all([
-    apiFetch<ProviderProfile>(`/providers/${id}`),
+    // Another provider's id in the URL comes back as 403; that belongs on the
+    // 404 page rather than in the error boundary.
+    fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
     apiFetch<Category[]>('/categories'),
   ]);
 
@@ -154,7 +158,18 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
               </div>
 
               <div className="pdash-card-foot">
-                <span className="pdash-badge pdash-badge-info">Teklif: 1 kredi</span>
+                {request.canOffer ? (
+                  <span className="pdash-badge pdash-badge-info">
+                    Teklif: {request.offerCreditCost} kredi
+                  </span>
+                ) : (
+                  <span
+                    className="pdash-badge pdash-badge-warn"
+                    title={offerBlockedTitle(request.offerBlockedReason)}
+                  >
+                    Teklif verilemez
+                  </span>
+                )}
                 <Link
                   className="pdash-btn pdash-btn-primary pdash-btn-sm"
                   href={`/providers/${id}/requests/${request.id}`}
@@ -168,6 +183,18 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
       ) : null}
     </ProviderShell>
   );
+}
+
+function offerBlockedTitle(reason: OfferBlockedReason | null) {
+  if (reason === 'CATEGORY_INACTIVE') {
+    return 'Bu kategori pasif durumda; yeni teklif verilemez.';
+  }
+
+  if (reason === 'CATEGORY_PRICE_UNSET') {
+    return 'Bu kategori için teklif kredisi tanımlı değil.';
+  }
+
+  return 'Bu talebe şu anda teklif verilemiyor.';
 }
 
 function toQueryString(filters: Record<string, string | undefined>) {
