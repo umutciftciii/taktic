@@ -3642,6 +3642,14 @@ body:has(.cdash-shell) #site-header {
   gap: 6px;
 }
 
+/* Neutral explanation under a closed request's badge. */
+.cdash-card-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
 .cdash-card-foot {
   display: flex;
   align-items: center;

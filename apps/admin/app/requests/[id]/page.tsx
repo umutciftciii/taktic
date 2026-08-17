@@ -33,6 +33,27 @@ type RequestDetailPageProps = {
 
 const RECENT_OFFERS_LIMIT = 3;
 
+/** An approved request stays open for 14 days from its approval moment. */
+const REQUEST_OPEN_DAYS = 14;
+
+/**
+ * When the expiry scheduler would close this request, or null when there is
+ * nothing to project: the request is not open any more, or it was approved
+ * before approvedAt existed and is therefore never picked up by the scheduler.
+ */
+function plannedExpiry(request: ServiceRequest): string | null {
+  if (request.status !== 'APPROVED' || !request.approvedAt) {
+    return null;
+  }
+
+  const approved = new Date(request.approvedAt);
+  if (Number.isNaN(approved.getTime())) {
+    return null;
+  }
+
+  return new Date(approved.getTime() + REQUEST_OPEN_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
 export default async function RequestDetailPage({ params }: RequestDetailPageProps) {
   const { id } = await params;
   const request = await fetchOrNotFound(() =>
@@ -94,8 +115,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
             </span>
           </div>
           <p>
-            İnceleme geçişleri anında uygulanır. Reddetme için gerekçe zorunludur. Eşleşme ve
-            tamamlanma durumları buradan yazılamaz.
+            İnceleme geçişleri anında uygulanır. Reddetme için gerekçe zorunludur. Eşleşme,
+            tamamlanma ve süre dolumu buradan yazılamaz: süre dolumunu yalnızca zamanlayıcı
+            yazar ve onaydan {REQUEST_OPEN_DAYS} gün sonra uygular.
           </p>
 
           <p className="status-verification-note">
@@ -367,6 +389,40 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
             <div>
               <dt>Moderasyon</dt>
               <dd>{request.moderatedAt ? formatDateTime(request.moderatedAt) : <span className="cell-muted">—</span>}</dd>
+            </div>
+            <div>
+              <dt>Onay</dt>
+              <dd>
+                {request.approvedAt ? (
+                  formatDateTime(request.approvedAt)
+                ) : request.status === 'APPROVED' ? (
+                  <span className="cell-muted">Kayıtlı değil</span>
+                ) : (
+                  <span className="cell-muted">—</span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Süre bitişi</dt>
+              <dd>
+                {request.expiredAt ? (
+                  formatDateTime(request.expiredAt)
+                ) : plannedExpiry(request) ? (
+                  <span className="cell-muted">{formatDateTime(plannedExpiry(request))} (planlanan)</span>
+                ) : (
+                  <span className="cell-muted">—</span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Hatırlatma</dt>
+              <dd>
+                {request.reminderSentAt ? (
+                  formatDateTime(request.reminderSentAt)
+                ) : (
+                  <span className="cell-muted">Gönderilmedi</span>
+                )}
+              </dd>
             </div>
             <div>
               <dt>Aciliyet</dt>

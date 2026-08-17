@@ -244,6 +244,25 @@ model ServiceRequest {
   /// NULL means "not verified" — including every request created before phone
   /// verification existed. What that blocks depends on REQUIRE_PHONE_VERIFICATION.
   phoneVerifiedAt       DateTime?
+  /// When moderation approved the request — the single clock the expiry and
+  /// reminder schedulers run on.
+  ///
+  /// NULL means "no trustworthy approval time": every request approved before
+  /// this column existed carries NULL, because neither submittedAt nor
+  /// moderatedAt is the approval moment (moderatedAt is rewritten by any later
+  /// moderation edit). Those rows are deliberately never picked up by the
+  /// schedulers rather than backfilled with a guess.
+  ///
+  /// It is written once, when the status becomes APPROVED, and is never cleared
+  /// again — a later MATCHED/COMPLETED/CANCELLED transition keeps it as audit.
+  approvedAt            DateTime?
+  /// When the "your request is about to expire" reminder was claimed.
+  ///
+  /// Written by a conditional update that only matches while it is still NULL,
+  /// which is what makes one reminder per request the database-level guarantee.
+  /// It records the claim, not the delivery: a failed send stays visible in
+  /// NotificationLog and never re-opens the request for a second reminder.
+  reminderSentAt        DateTime?
   /// The single accepted offer. Unique so the request can never point at two
   /// winners; the accept cascade is what writes it.
   matchedOfferId        String?              @unique
@@ -270,6 +289,12 @@ model ServiceRequest {
   @@index([submittedAt])
   @@index([status, submittedAt])
   @@index([phoneVerifiedAt])
+  /// Expiry scan: "APPROVED and approved before <cutoff>".
+  @@index([status, approvedAt])
+  /// Reminder scan: the same window, narrowed to rows that have not been
+  /// claimed yet. reminderSentAt leads approvedAt because it is the equality
+  /// predicate.
+  @@index([status, reminderSentAt, approvedAt])
 }
 
 /// A one-time code proving control of a phone number.

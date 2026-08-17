@@ -5,7 +5,13 @@
  * and wiring a real provider is a later phase. Call sites depend on this
  * abstract class so swapping the adapter never touches business code.
  */
-export type NotificationTemplate = 'customer-activation';
+/**
+ * `request-expiring` is the day-7 nudge for an approved request that has not
+ * received a single offer. It states that the request's window is running out
+ * and nothing more: it must never claim the request is "verified", and it must
+ * never promise that offers are coming.
+ */
+export type NotificationTemplate = 'customer-activation' | 'request-expiring';
 
 export type NotificationMessage = {
   template: NotificationTemplate;

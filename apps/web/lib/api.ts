@@ -84,6 +84,8 @@ export type CustomerServiceRequest = {
   qualityLabel: RequestQualityLabel;
   /** null until the customer proves control of customerPhone with a one-time code. */
   phoneVerifiedAt: string | null;
+  /** Set by the expiry scheduler when the request's 14-day window ran out. */
+  expiredAt: string | null;
   submittedAt: string;
   offersCount: number;
   category: {

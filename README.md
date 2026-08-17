@@ -98,6 +98,29 @@ Relevant environment variables:
 
 The scheduler only runs full refunds for the existing not-viewed offer policy. It does not perform partial refunds.
 
+### Request expiry and reminder
+
+An approved request stays open for **14 days**. Two independent jobs act on that window, and both are disabled by default:
+
+- **Expiry** — a request that is still `APPROVED` 14 days after its approval becomes `EXPIRED` and gets an `expiredAt` stamp. This is the only writer of `EXPIRED`; the admin moderation controls refuse that status by design.
+- **Reminder** — a request that is still `APPROVED` 7 days after its approval and has **no offer at all** earns exactly one customer e-mail. A request with even one offer (including a withdrawn one) is never reminded.
+
+Relevant environment variables:
+
+- `REQUEST_EXPIRY_SCHEDULER_ENABLED=false`
+- `REQUEST_EXPIRY_SCHEDULER_CRON=15 * * * *`
+- `REQUEST_REMINDER_SCHEDULER_ENABLED=false`
+- `REQUEST_REMINDER_SCHEDULER_CRON=45 * * * *`
+- `REQUEST_LIFECYCLE_SCAN_LIMIT=200` (1–1000)
+
+Both flags accept only `true` or `false`, and both cron expressions are validated: an unreadable value fails at boot instead of leaving a job silently off, or running on a schedule nobody chose.
+
+Both jobs measure from `ServiceRequest.approvedAt`, which is written in the same statement that sets `APPROVED`. Requests approved before that column existed carry `NULL` and are deliberately never picked up — neither `submittedAt` nor `moderatedAt` is the approval moment, so backfilling one would expire live requests on a fabricated clock.
+
+Both jobs are idempotent by construction: every write is a conditional update that still requires the row to be in the state the job found it in. A second run, a second instance, or a request that was matched, cancelled or completed in the meantime changes nothing.
+
+Reminder delivery is best-effort and the claim is not: `reminderSentAt` is committed before the send, so a transport failure leaves a `FAILED` row in `NotificationLog` and never re-mails the customer. With no real e-mail provider wired, production sends are expected to fail visibly — the scheduling logic is still correct.
+
 ## Phase 0 Scope
 
 Included:

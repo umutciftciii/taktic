@@ -125,6 +125,14 @@ export type ServiceRequest = {
   rejectionReason: string | null;
   /** null until the customer proves control of customerPhone with a one-time code. */
   phoneVerifiedAt: string | null;
+  /**
+   * When moderation approved the request — the clock the 14-day expiry and the
+   * day-7 reminder run on. null on requests approved before the field existed;
+   * those are never touched by either scheduler.
+   */
+  approvedAt: string | null;
+  /** When the day-7 "no offers yet" reminder was claimed. Written at most once. */
+  reminderSentAt: string | null;
   matchedOfferId: string | null;
   matchedAt: string | null;
   completedAt: string | null;

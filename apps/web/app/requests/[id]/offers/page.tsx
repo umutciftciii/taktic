@@ -234,6 +234,13 @@ function summaryBody(summary: CustomerServiceRequest | null) {
     return 'Bu talep tamamlandı olarak işaretlendi.';
   }
 
+  // Neutral and factual: the window closed, and that is all it means.
+  if (summary.status === 'EXPIRED') {
+    return summary.expiredAt
+      ? `Talebin geçerlilik süresi ${formatDateTime(summary.expiredAt)} tarihinde doldu. Talep artık yeni teklif almıyor; daha önce gelen teklifleri aşağıda görebilirsiniz.`
+      : 'Talebin geçerlilik süresi doldu. Talep artık yeni teklif almıyor; daha önce gelen teklifleri aşağıda görebilirsiniz.';
+  }
+
   return 'Talebiniz hizmet verenlere iletildi. Aşağıdaki kartlarda gelen teklifleri inceleyebilirsiniz.';
 }
 

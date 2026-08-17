@@ -293,6 +293,16 @@ export class ServiceRequestsService {
         moderationNote,
         rejectionReason: dto.status === ServiceRequestStatus.REJECTED ? rejectionReason : null,
         ...(shouldModerate ? { moderatedAt: now } : {}),
+        // Written in the same statement that sets APPROVED, so the status and
+        // the clock the expiry/reminder jobs run on can never disagree.
+        //
+        // Only ever set, never cleared: a re-approval refreshes the window (the
+        // request really is open again from now), and a later transition to
+        // MATCHED, COMPLETED, CANCELLED or REJECTED leaves the old value in
+        // place as audit — nothing reads it once the status is no longer
+        // APPROVED, and erasing it would destroy the record of when the request
+        // went live.
+        ...(dto.status === ServiceRequestStatus.APPROVED ? { approvedAt: now } : {}),
         ...(dto.status === ServiceRequestStatus.CANCELLED ? { cancelledAt: now } : {}),
       },
       include: {

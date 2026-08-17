@@ -10,8 +10,13 @@ assertIsTestDatabase(databaseUrl);
 
 process.env.DATABASE_URL = databaseUrl;
 process.env.NODE_ENV = 'test';
-// The scheduled refund worker must never start inside the suite.
+// No scheduled worker may start inside the suite. All three already default to
+// disabled; setting them explicitly means a stray value in the developer's
+// shell cannot let a cron fire mid-test and rewrite rows a case is asserting on.
+// The lifecycle specs drive their jobs by calling the services directly.
 process.env.REFUND_SCHEDULER_ENABLED = 'false';
+process.env.REQUEST_EXPIRY_SCHEDULER_ENABLED = 'false';
+process.env.REQUEST_REMINDER_SCHEDULER_ENABLED = 'false';
 // A small, explicit auth budget keeps the rate-limit test fast. Each spec file
 // boots its own Nest app, so the in-memory counters never leak between files.
 process.env.AUTH_RATE_LIMIT_MAX ??= '5';

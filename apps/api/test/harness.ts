@@ -24,17 +24,42 @@ import { PrismaService } from '../src/prisma/prisma.service';
  */
 export class RecordingNotificationPort extends NotificationPort {
   readonly sent: NotificationMessage[] = [];
+  /** Makes the next send throw, to exercise the FAILED audit branch. */
+  failNextSend = false;
 
   async send(message: NotificationMessage): Promise<void> {
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new EmailTransportUnavailableError();
+    }
+
     this.sent.push(message);
   }
 
   clear() {
     this.sent.length = 0;
+    this.failNextSend = false;
   }
 
   lastOfTemplate(template: NotificationMessage['template']): NotificationMessage | undefined {
     return [...this.sent].reverse().find((message) => message.template === template);
+  }
+
+  ofTemplate(template: NotificationMessage['template']): NotificationMessage[] {
+    return this.sent.filter((message) => message.template === template);
+  }
+}
+
+/**
+ * Mirrors {@link SmsTransportUnavailableError} for the e-mail port: carries a
+ * known errorCode and nothing about the recipient or the message.
+ */
+export class EmailTransportUnavailableError extends Error {
+  readonly errorCode = 'TRANSPORT_UNAVAILABLE';
+
+  constructor() {
+    super('No e-mail transport is configured');
+    this.name = 'EmailTransportUnavailableError';
   }
 }
 
@@ -259,9 +284,22 @@ export async function createDiscoverableProvider(
   return provider;
 }
 
+/**
+ * An APPROVED request. `approvedAt` defaults to null — i.e. the shape of every
+ * request approved before that column existed, which both lifecycle jobs skip
+ * on purpose. A test that wants the expiry or reminder clock to run has to say
+ * when the request was approved.
+ */
 export async function createApprovedRequest(
   prisma: PrismaClient,
-  options: { categoryId: string; customerId?: string | null; city?: string; district?: string },
+  options: {
+    categoryId: string;
+    customerId?: string | null;
+    city?: string;
+    district?: string;
+    approvedAt?: Date | null;
+    customerEmail?: string | null;
+  },
 ) {
   const suffix = uniqueSuffix();
   return prisma.serviceRequest.create({
@@ -271,13 +309,22 @@ export async function createApprovedRequest(
       requestNumber: `TR-TEST-${suffix}`,
       customerName: `Müşteri ${suffix}`,
       customerPhone: `0555444${suffix.padStart(4, '0')}`,
-      customerEmail: `req-${suffix}@example.test`,
+      customerEmail:
+        options.customerEmail === undefined
+          ? `req-${suffix}@example.test`
+          : options.customerEmail,
       city: options.city ?? 'İstanbul',
       district: options.district ?? 'Kadıköy',
       status: ServiceRequestStatus.APPROVED,
+      approvedAt: options.approvedAt ?? null,
       qualityScore: 80,
     },
   });
+}
+
+/** Shifts a Date `days` into the past; the lifecycle specs' whole vocabulary. */
+export function daysAgo(days: number): Date {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 }
 
 /** Seeds a credit balance by appending an ADMIN_GRANT ledger row. */
