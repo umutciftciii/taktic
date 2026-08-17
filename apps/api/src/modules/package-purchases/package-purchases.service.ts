@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CreditTransactionType, NumberedEntityType, PackagePurchaseStatus, Prisma } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
 import { NumberingService } from '../numbering/numbering.service';
@@ -86,7 +87,8 @@ export class PackagePurchasesService {
     const payment = normalizeMockPayment(dto);
     const now = new Date();
 
-    return this.prisma.$transaction(
+    return runSerializable(
+      this.prisma,
       async (tx) => {
         const purchase = await tx.packagePurchase.findFirst({
           where: { id: purchaseId, providerId },
@@ -137,7 +139,7 @@ export class PackagePurchasesService {
           include: packagePurchaseInclude,
         });
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      { label: 'packagePurchases.mockPayProviderPurchase' },
     );
   }
 

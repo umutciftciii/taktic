@@ -17,6 +17,7 @@ import {
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { NumberingService } from '../numbering/numbering.service';
@@ -571,7 +572,8 @@ export class ProvidersService {
     }
 
     try {
-      return await this.prisma.$transaction(
+      return await runSerializable(
+        this.prisma,
         async (tx) => {
           // The price is read inside the transaction, in the same serialisation
           // window as the balance read and the ledger write. Reading it outside
@@ -679,7 +681,7 @@ export class ProvidersService {
 
           return withRefundEligibility(updatedOffer);
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        { label: 'providers.createOffer' },
       );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

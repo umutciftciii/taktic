@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CreditTransactionType, OfferStatus, Prisma, UserRole } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
@@ -136,7 +137,8 @@ export class OffersService {
     const reasonCode = normalizeRefundReasonCode(dto.reasonCode);
     const reasonNote = normalizeOptionalReason(dto.reason);
 
-    return this.prisma.$transaction(
+    return runSerializable(
+      this.prisma,
       async (tx) => {
         const offer = await tx.offer.findUnique({
           where: { id },
@@ -192,7 +194,7 @@ export class OffersService {
           refundTransaction,
         };
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      { label: 'offers.refundOfferCredit' },
     );
   }
 

@@ -298,11 +298,11 @@ describe('offer credit refund — idempotency', () => {
     ]);
 
     expect(results.filter((result) => result.status === 201)).toHaveLength(1);
-    // Known rough edge: the loser currently surfaces Prisma's serialization
-    // abort (P2034) as a 500 rather than the 409 the sequential path returns.
-    // The money invariants below still hold, which is what this test guards.
+    // The loser must reach a business-rule answer, not a leaked serialization
+    // abort: runSerializable retries the P2034 and the replay then sees the
+    // refund already recorded. A 500 here is a regression, never acceptable.
     const loser = results.find((result) => result.status !== 201);
-    expect([409, 500]).toContain(loser?.status);
+    expect(loser?.status).toBe(409);
 
     const refunds = await ctx.prisma.providerCreditTransaction.count({
       where: { providerId: provider.id, type: CreditTransactionType.OFFER_REFUND },
@@ -387,10 +387,10 @@ describe('mock package payment — single settlement', () => {
     ]);
 
     expect(results.filter((result) => result.status === 201)).toHaveLength(1);
-    // Same rough edge as the concurrent refund: the loser may come back as a
-    // 500 (P2034) instead of 409. Credits must still be loaded exactly once.
+    // Same contract as the concurrent refund: the retried transaction replays,
+    // sees the purchase already PAID, and answers 409. Never a 500.
     const loser = results.find((result) => result.status !== 201);
-    expect([409, 500]).toContain(loser?.status);
+    expect(loser?.status).toBe(409);
 
     const loads = await ctx.prisma.providerCreditTransaction.count({
       where: { providerId: provider.id, type: CreditTransactionType.PACKAGE_PURCHASE },
