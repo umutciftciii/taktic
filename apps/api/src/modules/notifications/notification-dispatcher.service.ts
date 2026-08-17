@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel, NotificationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { maskEmail, maskPhone } from './mask';
+import { classifyNotificationError } from './notification-errors';
 import { NotificationMessage, NotificationPort } from './notification.port';
 import { SmsMessage, SmsPort } from './sms.port';
 
@@ -96,7 +97,7 @@ export class NotificationDispatcher {
 
       return { logId: log.id, status: NotificationStatus.SENT, errorCode: null };
     } catch (error) {
-      const errorCode = safeErrorCode(error);
+      const errorCode = classifyNotificationError(error);
       // Only the class is recorded and logged. A provider error string can
       // contain the destination address or the message body.
       this.logger.warn(`${template} via ${channel} failed for ${maskedRecipient}: ${errorCode}`);
@@ -113,15 +114,4 @@ export class NotificationDispatcher {
       return { logId: log.id, status: NotificationStatus.FAILED, errorCode };
     }
   }
-}
-
-const KNOWN_ERROR_CODES = new Set(['TRANSPORT_UNAVAILABLE', 'REJECTED', 'TIMEOUT', 'INVALID_RECIPIENT']);
-
-function safeErrorCode(error: unknown): string {
-  const candidate = (error as { errorCode?: unknown } | null)?.errorCode;
-  if (typeof candidate === 'string' && KNOWN_ERROR_CODES.has(candidate)) {
-    return candidate;
-  }
-
-  return 'UNKNOWN';
 }

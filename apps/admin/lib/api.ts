@@ -846,6 +846,109 @@ export type CreditLedgerResponse = {
   hasNextPage: boolean;
 };
 
+export const NOTIFICATION_CHANNELS = ['EMAIL', 'SMS'] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+
+export const NOTIFICATION_STATUSES = ['PENDING', 'SENT', 'FAILED'] as const;
+export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
+
+/** Mirrors NOTIFICATION_ERROR_CODES on the API side. */
+export const NOTIFICATION_ERROR_CODES = [
+  'TRANSPORT_UNAVAILABLE',
+  'REJECTED',
+  'TIMEOUT',
+  'INVALID_RECIPIENT',
+  'UNKNOWN',
+] as const;
+export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];
+
+/** The templates this build sends; the filter still accepts any stored value. */
+export const NOTIFICATION_TEMPLATES = [
+  'customer-activation',
+  'request-expiring',
+  'phone-verification-code',
+] as const;
+
+/**
+ * The whole notification payload an operator may see.
+ *
+ * There is no body, subject, action URL, one-time code or raw recipient field
+ * here, and there is none on the API side either — NotificationLog never stored
+ * any of them. `errorLabel` is the API's own safe wording for `errorCode`; the
+ * raw transport error never leaves the API process.
+ */
+export type NotificationLogEntry = {
+  id: string;
+  channel: NotificationChannel;
+  template: string;
+  maskedRecipient: string;
+  status: NotificationStatus;
+  errorCode: NotificationErrorCode | null;
+  errorLabel: string | null;
+  providerMessageId: string | null;
+  providerMessageIdRedacted: boolean;
+  requestId: string | null;
+  userId: string | null;
+  createdAt: string;
+  sentAt: string | null;
+  failedAt: string | null;
+};
+
+export type NotificationLogResponse = {
+  items: NotificationLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
+
+export function notificationChannelLabel(channel: NotificationChannel | string): string {
+  const labels: Record<string, string> = {
+    EMAIL: 'E-posta',
+    SMS: 'SMS',
+  };
+
+  return labels[channel] ?? channel;
+}
+
+export function notificationStatusLabel(status: NotificationStatus | string): string {
+  const labels: Record<string, string> = {
+    PENDING: 'Sırada',
+    SENT: 'Gönderildi',
+    FAILED: 'Başarısız',
+  };
+
+  return labels[status] ?? status;
+}
+
+export function notificationStatusBadgeClass(status: NotificationStatus | string): string {
+  switch (status) {
+    case 'SENT':
+      return 'badge badge-good';
+    case 'PENDING':
+      return 'badge badge-warn';
+    case 'FAILED':
+      return 'badge badge-bad';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
+/**
+ * A template name is a code-controlled literal, so an unrecognised one is shown
+ * as-is rather than hidden — that is what keeps a row from an older build
+ * readable instead of blank.
+ */
+export function notificationTemplateLabel(template: string): string {
+  const labels: Record<string, string> = {
+    'customer-activation': 'Hesap etkinleştirme',
+    'request-expiring': 'Talep süresi uyarısı',
+    'phone-verification-code': 'Telefon doğrulama kodu',
+  };
+
+  return labels[template] ?? template;
+}
+
 export const PROVIDER_FINANCE_SORT_FIELDS = [
   'businessName',
   'currentBalance',

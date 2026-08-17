@@ -17,6 +17,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { NotificationLogsModule } from './modules/notification-logs/notification-logs.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { NumberingModule } from './modules/numbering/numbering.module';
 import { UsersModule } from './modules/users/users.module';
@@ -44,6 +45,7 @@ import { PrismaModule } from './prisma/prisma.module';
     FinanceModule,
     PackagePurchasesModule,
     UploadsModule,
+    NotificationLogsModule,
     NumberingModule,
     UsersModule,
   ],
