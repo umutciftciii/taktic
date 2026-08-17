@@ -97,6 +97,18 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
             İnceleme geçişleri anında uygulanır. Reddetme için gerekçe zorunludur. Eşleşme ve
             tamamlanma durumları buradan yazılamaz.
           </p>
+
+          <p className="status-verification-note">
+            <strong>Telefon doğrulaması:</strong>{' '}
+            {request.phoneVerifiedAt ? (
+              <>Doğrulandı · {formatDateTime(request.phoneVerifiedAt)}</>
+            ) : (
+              <>
+                Doğrulanmadı. Telefon doğrulaması zorunlu hale getirildiğinde bu talep onaylanamaz
+                ve hizmet verenlere gösterilmez; reddetme ve iptal her durumda mümkündür.
+              </>
+            )}
+          </p>
           <div className="status-action-list">
             <StatusQuickForm
               requestId={request.id}

@@ -3,10 +3,12 @@ import {
   ConflictException,
   ForbiddenException,
   Inject,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { CustomerOrigin, NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -250,9 +252,26 @@ export class ServiceRequestsService {
   }
 
   async updateServiceRequestStatus(id: string, dto: UpdateServiceRequestStatusDto) {
-    await this.ensureRequestExists(id);
+    const existing = await this.ensureRequestExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
+
+    // Approving is what publishes a request to providers, so it is the one
+    // transition the verification gate has to cover. Rejecting or cancelling an
+    // unverified request stays possible — an admin must still be able to clear
+    // the queue. While the flag is false this branch never fires.
+    if (
+      dto.status === ServiceRequestStatus.APPROVED &&
+      isPhoneVerificationRequired() &&
+      !existing.phoneVerifiedAt
+    ) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'PHONE_NOT_VERIFIED',
+        message: 'Telefonu doğrulanmamış talep onaylanamaz.',
+      });
+    }
 
     if (nonModerationStatuses.has(dto.status)) {
       throw new ConflictException(
@@ -436,12 +455,14 @@ export class ServiceRequestsService {
   private async ensureRequestExists(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, phoneVerifiedAt: true },
     });
 
     if (!request) {
       throw new NotFoundException('Service request not found');
     }
+
+    return request;
   }
 }
 

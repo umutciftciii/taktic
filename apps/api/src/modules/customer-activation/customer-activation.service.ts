@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createSessionForUser, SessionMeta } from '../auth/session.util';
-import { NotificationPort } from '../notifications/notification.port';
+import { NotificationDispatcher } from '../notifications/notification-dispatcher.service';
 import {
   CUSTOMER_ACTIVATION_PATH,
   CUSTOMER_ACTIVATION_TOKEN_TTL_HOURS,
@@ -66,7 +66,7 @@ function isClaimableCustomer(customer: {
 export class CustomerActivationService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(NotificationPort) private readonly notifications: NotificationPort,
+    @Inject(NotificationDispatcher) private readonly notifications: NotificationDispatcher,
   ) {}
 
   async createForCustomer(customerId: string, createdById: string | null) {
@@ -185,16 +185,23 @@ export class CustomerActivationService {
   ) {
     const issued = await this.issueToken(customerId, createdById);
 
-    await this.notifications.send({
-      template: 'customer-activation',
-      to: email,
-      subject: 'TakTic hesabınızı etkinleştirin',
-      actionUrl: issued.activationUrl,
-      data: {
-        name,
-        expiresAt: issued.expiresAt.toISOString(),
+    // Goes through the dispatcher so the send is audited, but the payload and
+    // the transport are unchanged: the same NotificationPort adapter receives
+    // the same message. A transport failure is recorded as FAILED and does not
+    // invalidate the token that was just issued.
+    await this.notifications.sendEmail(
+      {
+        template: 'customer-activation',
+        to: email,
+        subject: 'TakTic hesabınızı etkinleştirin',
+        actionUrl: issued.activationUrl,
+        data: {
+          name,
+          expiresAt: issued.expiresAt.toISOString(),
+        },
       },
-    });
+      { userId: customerId },
+    );
 
     return issued;
   }

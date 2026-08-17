@@ -19,6 +19,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
+import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { NumberingService } from '../numbering/numbering.service';
@@ -466,6 +467,7 @@ export class ProvidersService {
     const requests = await this.prisma.serviceRequest.findMany({
       where: {
         status: ServiceRequestStatus.APPROVED,
+        ...phoneVerifiedRequestFilter(),
         categoryId: { in: provider.serviceCategories.map((item) => item.categoryId) },
         offers: { none: { providerId } },
         ...(normalizedFilters.categoryId ? { categoryId: normalizedFilters.categoryId } : {}),
@@ -543,6 +545,7 @@ export class ProvidersService {
     if (
       !request ||
       request.status !== ServiceRequestStatus.APPROVED ||
+      !isRequestVisibleToProviders(request) ||
       !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
       !matchesProviderArea(provider.serviceAreas, request)
     ) {
@@ -816,12 +819,14 @@ export class ProvidersService {
         city: true,
         district: true,
         neighborhood: true,
+        phoneVerifiedAt: true,
       },
     });
 
     if (
       !request ||
       request.status !== ServiceRequestStatus.APPROVED ||
+      !isRequestVisibleToProviders(request) ||
       !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
       !matchesProviderArea(provider.serviceAreas, request)
     ) {
@@ -1059,6 +1064,23 @@ function normalizeOptionalQualityLabel(value: string | undefined): QualityLabel 
   }
 
   return normalized;
+}
+
+/**
+ * Provider-side visibility gate for unverified requests.
+ *
+ * While REQUIRE_PHONE_VERIFICATION is false this is a no-op, so requests that
+ * predate phone verification — every existing row — keep behaving exactly as
+ * before. When it is true, an unverified request is invisible to providers, and
+ * the check is applied in the list query, the detail lookup and the offer path
+ * alike: hiding it in the UI only would still leave the id guessable.
+ */
+function phoneVerifiedRequestFilter(): Prisma.ServiceRequestWhereInput {
+  return isPhoneVerificationRequired() ? { phoneVerifiedAt: { not: null } } : {};
+}
+
+function isRequestVisibleToProviders(request: { phoneVerifiedAt: Date | null }): boolean {
+  return !isPhoneVerificationRequired() || request.phoneVerifiedAt !== null;
 }
 
 function matchesProviderArea(

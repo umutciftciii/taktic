@@ -123,6 +123,8 @@ export type ServiceRequest = {
   moderatedAt: string | null;
   moderationNote: string | null;
   rejectionReason: string | null;
+  /** null until the customer proves control of customerPhone with a one-time code. */
+  phoneVerifiedAt: string | null;
   matchedOfferId: string | null;
   matchedAt: string | null;
   completedAt: string | null;

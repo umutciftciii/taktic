@@ -3559,3 +3559,11 @@ button:disabled {
   font-weight: 600;
   padding: 0 2px;
 }
+
+/* Phone verification note in the request status panel. */
+.status-verification-note {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  opacity: 0.85;
+}

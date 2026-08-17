@@ -51,6 +51,17 @@ enum ServiceRequestStatus {
   EXPIRED
 }
 
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 /// Why an offer ended up REJECTED. NULL means a customer rejected it by hand,
 /// which is also the value every offer rejected before this field existed
 /// carries — that keeps their refund behaviour unchanged.
@@ -127,6 +138,7 @@ model User {
   createdActivationTokens   CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
   adminInviteTokens         AdminInviteToken[]          @relation("AdminInviteTokenUser")
   createdAdminInviteTokens  AdminInviteToken[]          @relation("AdminInviteTokenCreatedBy")
+  notificationLogs          NotificationLog[]
 
   @@index([role])
   @@index([isActive])
@@ -228,6 +240,10 @@ model ServiceRequest {
   moderatedAt           DateTime?
   moderationNote        String?
   rejectionReason       String?
+  /// When the customer proved control of customerPhone via a one-time code.
+  /// NULL means "not verified" — including every request created before phone
+  /// verification existed. What that blocks depends on REQUIRE_PHONE_VERIFICATION.
+  phoneVerifiedAt       DateTime?
   /// The single accepted offer. Unique so the request can never point at two
   /// winners; the accept cascade is what writes it.
   matchedOfferId        String?              @unique
@@ -244,6 +260,8 @@ model ServiceRequest {
   answers      ServiceRequestAnswer[]
   offers       Offer[]
   matchedOffer Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
+  phoneVerifications PhoneVerification[]
+  notificationLogs   NotificationLog[]
 
   @@index([categoryId])
   @@index([customerId])
@@ -251,6 +269,73 @@ model ServiceRequest {
   @@index([city, district])
   @@index([submittedAt])
   @@index([status, submittedAt])
+  @@index([phoneVerifiedAt])
+}
+
+/// A one-time code proving control of a phone number.
+///
+/// The code itself is never stored: only a bcrypt hash of it, so a database
+/// dump cannot be replayed. There is deliberately NO unique constraint on
+/// codeHash — six digits collide often, and a unique index would leak that a
+/// code is already in flight elsewhere.
+model PhoneVerification {
+  id              String    @id @default(cuid())
+  /// Digits-and-plus normalisation of the request's customerPhone.
+  normalizedPhone String
+  codeHash        String
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  /// Wrong codes entered against this row. At the limit the row locks.
+  attemptCount    Int       @default(0)
+  lockedUntil     DateTime?
+  /// How many codes have been issued in this request/phone conversation.
+  resendCount     Int       @default(0)
+  lastSentAt      DateTime  @default(now())
+  requestId       String?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime  @default(now())
+
+  request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  /// Per-phone send budget and "find the active code" lookups.
+  @@index([normalizedPhone, createdAt])
+  /// Per-IP send budget.
+  @@index([ipAddress, createdAt])
+  @@index([requestId])
+  /// Cleanup of expired rows.
+  @@index([expiresAt])
+}
+
+/// Audit trail of outbound messages.
+///
+/// Deliberately stores nothing that could be replayed or that identifies the
+/// recipient beyond a mask: no code, no token, no action URL, no message body,
+/// no raw phone or e-mail address.
+model NotificationLog {
+  id                String              @id @default(cuid())
+  channel           NotificationChannel
+  template          String
+  /// e.g. "u***@example.com" or "+90 *** *** ** 34".
+  maskedRecipient   String
+  status            NotificationStatus  @default(PENDING)
+  providerMessageId String?
+  /// Safe, enumerable failure class — never a raw provider error string.
+  errorCode         String?
+  requestId         String?
+  userId            String?
+  createdAt         DateTime            @default(now())
+  sentAt            DateTime?
+  failedAt          DateTime?
+
+  request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  user    User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([channel, createdAt])
+  @@index([status, createdAt])
+  @@index([template, createdAt])
+  @@index([requestId])
+  @@index([userId])
 }
 
 model ServiceRequestAnswer {

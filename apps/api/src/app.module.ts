@@ -8,6 +8,7 @@ import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { OffersModule } from './modules/offers/offers.module';
+import { PhoneVerificationModule } from './modules/phone-verification/phone-verification.module';
 import { RefundSchedulerModule } from './modules/refund-scheduler/refund-scheduler.module';
 import { CreditsModule } from './modules/credits/credits.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -32,6 +33,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ServiceRequestsModule,
     ProvidersModule,
     OffersModule,
+    PhoneVerificationModule,
     RefundSchedulerModule,
     CreditsModule,
     CustomersModule,

@@ -82,6 +82,8 @@ export type CustomerServiceRequest = {
   district: string;
   qualityScore: number;
   qualityLabel: RequestQualityLabel;
+  /** null until the customer proves control of customerPhone with a one-time code. */
+  phoneVerifiedAt: string | null;
   submittedAt: string;
   offersCount: number;
   category: {

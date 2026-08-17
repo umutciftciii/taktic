@@ -12,7 +12,9 @@ import {
 import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
+import { SmsTransportUnavailableError } from '../src/modules/notifications/console-sms.adapter';
 import { NotificationMessage, NotificationPort } from '../src/modules/notifications/notification.port';
+import { SmsMessage, SmsPort, SmsSendResult } from '../src/modules/notifications/sms.port';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -36,11 +38,45 @@ export class RecordingNotificationPort extends NotificationPort {
   }
 }
 
+/**
+ * Stands in for the SMS transport. Tests read the one-time code from here —
+ * the production path never returns or logs it — and can make a send fail to
+ * exercise the FAILED audit branch.
+ */
+export class RecordingSmsPort extends SmsPort {
+  readonly sent: SmsMessage[] = [];
+  failNextSend = false;
+
+  async send(message: SmsMessage): Promise<SmsSendResult> {
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new SmsTransportUnavailableError();
+    }
+
+    this.sent.push(message);
+    return { providerMessageId: `test-${this.sent.length}` };
+  }
+
+  clear() {
+    this.sent.length = 0;
+    this.failNextSend = false;
+  }
+
+  lastCode(): string {
+    const last = this.sent.at(-1);
+    if (!last) {
+      throw new Error('no SMS was sent');
+    }
+    return last.code;
+  }
+}
+
 export type TestContext = {
   app: INestApplication;
   prisma: PrismaService;
   server: Server;
   notifications: RecordingNotificationPort;
+  sms: RecordingSmsPort;
 };
 
 /**
@@ -51,10 +87,13 @@ export type TestContext = {
  */
 export async function createTestApp(): Promise<TestContext> {
   const notifications = new RecordingNotificationPort();
+  const sms = new RecordingSmsPort();
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(NotificationPort)
     .useValue(notifications)
+    .overrideProvider(SmsPort)
+    .useValue(sms)
     .compile();
 
   const app = moduleRef.createNestApplication<NestExpressApplication>();
@@ -69,10 +108,13 @@ export async function createTestApp(): Promise<TestContext> {
     prisma: app.get(PrismaService),
     server: app.getHttpServer(),
     notifications,
+    sms,
   };
 }
 
 const TRUNCATED_TABLES = [
+  'NotificationLog',
+  'PhoneVerification',
   'ProviderCreditTransaction',
   'PackagePurchase',
   'Offer',
