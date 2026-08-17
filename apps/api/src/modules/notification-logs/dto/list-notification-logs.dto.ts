@@ -62,6 +62,12 @@ export class ListNotificationLogsDto {
 
   @IsOptional()
   @Transform(({ value }) => trimOrUndefined(value))
+  @IsString()
+  @MaxLength(64)
+  providerId?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => trimOrUndefined(value))
   @IsISO8601()
   from?: string;
 

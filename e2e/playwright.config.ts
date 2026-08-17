@@ -7,6 +7,7 @@ import {
   outboxDir,
   phoneGateRuntime,
   primaryRuntime,
+  providerClaimRuntime,
   repoRoot,
   type Runtime,
 } from './src/runtime';
@@ -71,15 +72,20 @@ function apiServer(runtime: Runtime) {
       // boot with the flag on and no https URL and version, so a stack that
       // asks for the feature has to supply both here.
       CONTACT_SHARING_ENABLED: String(runtime.contactSharing.enabled),
+      // Off for every runtime but the claim one. The API refuses to boot with
+      // the flag on in production without a delivering e-mail transport; here
+      // NODE_ENV is "test", so the file outbox below is what carries the link.
+      PROVIDER_CLAIM_ENABLED: String(runtime.providerClaim),
       ...(runtime.contactSharing.enabled
         ? {
             CONTACT_DISCLOSURE_URL: runtime.contactSharing.disclosureUrl,
             CONTACT_DISCLOSURE_VERSION: runtime.contactSharing.disclosureVersion,
           }
         : {}),
-      // Swaps the console SMS transport for one that records what it sent, so
+      // Swaps the console transports for ones that record what they sent, so
       // the phone-verification test can read the code it was supposed to
-      // receive instead of scraping a log line.
+      // receive and the claim test can follow the link it was supposed to get,
+      // instead of scraping a log line.
       NOTIFICATION_OUTBOX_DIR: outboxDir,
       WEB_ORIGIN: runtime.webUrl,
       ADMIN_ORIGIN: runtime.adminUrl,
@@ -105,6 +111,9 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
       // talks to its own runtime's API even though both apps were built once.
       API_INTERNAL_URL: runtime.apiUrl,
       NEXT_PUBLIC_API_URL: runtime.apiUrl,
+      // The web app reads the same flag to decide what its forms and its
+      // confirmation screen say, so it has to agree with its own API.
+      PROVIDER_CLAIM_ENABLED: String(runtime.providerClaim),
     },
   };
 }
@@ -164,5 +173,8 @@ export default defineConfig({
     apiServer(contactSharingRuntime),
     nextServer(contactSharingRuntime, 'web'),
     nextServer(contactSharingRuntime, 'admin'),
+    apiServer(providerClaimRuntime),
+    nextServer(providerClaimRuntime, 'web'),
+    nextServer(providerClaimRuntime, 'admin'),
   ],
 });

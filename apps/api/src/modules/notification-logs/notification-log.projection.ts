@@ -14,6 +14,7 @@ export const NOTIFICATION_TEMPLATES = [
   'customer-activation',
   'request-expiring',
   'phone-verification-code',
+  'provider-claim',
 ] as const;
 
 /**
@@ -26,6 +27,11 @@ export const NOTIFICATION_TEMPLATES = [
  *
  * Note what is absent by construction — there is no body, no subject, no action
  * URL, no one-time code and no raw recipient anywhere in the table.
+ *
+ * `providerId` is an id and stays an id: the relation is deliberately not
+ * loaded here, because joining ProviderProfile would pull an application's
+ * contact address into a payload whose entire design is that addresses only
+ * appear masked.
  */
 export const notificationLogSelect = {
   id: true,
@@ -37,6 +43,7 @@ export const notificationLogSelect = {
   errorCode: true,
   requestId: true,
   userId: true,
+  providerId: true,
   createdAt: true,
   sentAt: true,
   failedAt: true,
@@ -60,6 +67,7 @@ export type SafeNotificationLog = {
   providerMessageIdRedacted: boolean;
   requestId: string | null;
   userId: string | null;
+  providerId: string | null;
   createdAt: Date;
   sentAt: Date | null;
   failedAt: Date | null;
@@ -80,6 +88,7 @@ export function toSafeNotificationLog(row: NotificationLogRow): SafeNotification
     ...providerMessageId,
     requestId: row.requestId,
     userId: row.userId,
+    providerId: row.providerId,
     createdAt: row.createdAt,
     sentAt: row.sentAt,
     failedAt: row.failedAt,

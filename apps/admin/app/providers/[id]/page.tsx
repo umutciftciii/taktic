@@ -14,10 +14,54 @@ import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
 import { EmptyState } from '../../../components/empty-state';
 import { ModerationDialog } from '../../../components/moderation-dialog';
-import { updateProviderStatusAction } from '../actions';
+import { sendProviderClaimInviteAction, updateProviderStatusAction } from '../actions';
 
 type ProviderDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ claimInvite?: string }>;
+};
+
+/**
+ * What the operator is told after pressing "davet gönder".
+ *
+ * Every outcome is a short code the action put in the URL; none of them carries
+ * the link, the token or the address. "undelivered" is the honest answer for a
+ * deployment with no real e-mail transport: the invitation exists and is valid,
+ * but nothing carried it anywhere.
+ */
+const CLAIM_INVITE_MESSAGES: Record<string, { tone: 'good' | 'warn'; text: string }> = {
+  sent: { tone: 'good', text: 'Davet gönderildi. Bağlantı 72 saat geçerli.' },
+  undelivered: {
+    tone: 'warn',
+    text: 'Davet oluşturuldu ancak gönderilemedi. Nedenini bildirim geçmişinde görebilirsiniz.',
+  },
+  'rate-limited': {
+    tone: 'warn',
+    text: 'Çok fazla davet isteği gönderildi. Lütfen daha sonra tekrar deneyin.',
+  },
+  'claim-email-missing': {
+    tone: 'warn',
+    text: 'Bu başvuruda e-posta adresi yok. Önce başvurunun e-posta adresini girin.',
+  },
+  'claim-already-completed': { tone: 'warn', text: 'Bu başvuru zaten bir hesaba bağlı.' },
+  'claim-not-available': {
+    tone: 'warn',
+    text: 'Bu durumdaki bir başvuru için davet gönderilemez.',
+  },
+  disabled: { tone: 'warn', text: 'Başvuru sahiplenme şu anda kapalı.' },
+  error: { tone: 'warn', text: 'Davet gönderilemedi. Lütfen tekrar deneyin.' },
+};
+
+const CLAIM_BLOCKED_LABELS: Record<string, string> = {
+  CLAIM_ALREADY_COMPLETED: 'Başvuru zaten bir hesaba bağlı.',
+  CLAIM_NOT_AVAILABLE: 'Bu durumdaki bir başvuru sahiplenilemez.',
+  CLAIM_EMAIL_MISSING: 'Başvuruda e-posta adresi yok.',
+};
+
+const CLAIM_INVITATION_STATE_LABELS: Record<string, string> = {
+  ACTIVE: 'Geçerli',
+  USED: 'Kullanıldı',
+  EXPIRED: 'Süresi doldu',
 };
 
 const webUrl = process.env.NEXT_PUBLIC_WEB_URL?.replace(/\/$/, '') ?? '';
@@ -39,13 +83,20 @@ function packagePurchaseStatusTimestamp(purchase: ProviderRecentPackagePurchase)
   }
 }
 
-export default async function ProviderDetailPage({ params }: ProviderDetailPageProps) {
+export default async function ProviderDetailPage({
+  params,
+  searchParams,
+}: ProviderDetailPageProps) {
   const { id } = await params;
+  const { claimInvite } = await searchParams;
   // An unknown id — including a path like /providers/new that falls through to
   // this dynamic route — renders the 404 screen instead of a server error.
   const provider = await fetchOrNotFound(() =>
     apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`),
   );
+
+  const claim = provider.claim ?? null;
+  const inviteNotice = claimInvite ? CLAIM_INVITE_MESSAGES[claimInvite] : undefined;
 
   const creditBalance = provider.creditBalance ?? 0;
   const openOffers = provider.activeOffersCount ?? 0;
@@ -152,8 +203,7 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
                 '-'
               )}
             </dd>
-            <dt>Bağlı hesap</dt>
-            <dd>{provider.user?.email ?? provider.user?.phone ?? '-'}</dd>
+            {/* Ownership now has a card of its own, below. */}
             <dt>Konum</dt>
             <dd>
               {provider.city}/{provider.district}
@@ -197,6 +247,79 @@ export default async function ProviderDetailPage({ params }: ProviderDetailPageP
               ))}
             </div>
           )}
+        </SectionCard>
+
+        <SectionCard title="Sahiplik">
+          {inviteNotice ? (
+            <p
+              className={inviteNotice.tone === 'good' ? 'badge badge-good' : 'badge badge-warn'}
+              role="status"
+              style={{ display: 'inline-block', marginBottom: 12 }}
+            >
+              {inviteNotice.text}
+            </p>
+          ) : null}
+
+          <dl className="meta-row">
+            <dt>Durum</dt>
+            <dd>
+              {provider.userId ? (
+                <span className="badge badge-good">Hesaba bağlı</span>
+              ) : (
+                <span className="badge badge-warn">Sahipsiz</span>
+              )}
+            </dd>
+            <dt>Bağlı hesap</dt>
+            <dd>{provider.user?.email ?? provider.user?.phone ?? '-'}</dd>
+            <dt>Sahiplenme</dt>
+            <dd>
+              {provider.claimedAt
+                ? formatDateTime(provider.claimedAt)
+                : provider.userId
+                  ? 'Hesapla oluşturuldu'
+                  : '-'}
+            </dd>
+            <dt>Son davet</dt>
+            <dd>
+              {claim?.lastInvitation ? (
+                <>
+                  {formatDateTime(claim.lastInvitation.createdAt)} ·{' '}
+                  {CLAIM_INVITATION_STATE_LABELS[claim.lastInvitation.state] ??
+                    claim.lastInvitation.state}{' '}
+                  · son geçerlilik {formatDateTime(claim.lastInvitation.expiresAt)} ·{' '}
+                  {claim.lastInvitation.byAdmin ? 'admin' : 'başvuru'}
+                </>
+              ) : (
+                '-'
+              )}
+            </dd>
+          </dl>
+
+          {provider.claimEnabled === false ? (
+            <p className="muted" style={{ marginBottom: 0 }}>
+              Başvuru sahiplenme şu anda kapalı.
+            </p>
+          ) : claim?.canInvite ? (
+            <form action={sendProviderClaimInviteAction} className="inline-actions">
+              <input type="hidden" name="id" value={provider.id} />
+              <button className="btn btn-secondary btn-sm" type="submit">
+                Claim daveti gönder
+              </button>
+            </form>
+          ) : (
+            <p className="muted" style={{ marginBottom: 0 }}>
+              {(claim?.blockedCode && CLAIM_BLOCKED_LABELS[claim.blockedCode]) ??
+                'Bu başvuru için davet gönderilemez.'}
+            </p>
+          )}
+
+          <p className="muted" style={{ marginTop: 12, marginBottom: 0, fontSize: 12 }}>
+            Bağlantı yalnızca başvurunun e-posta adresine gönderilir; bu ekranda hiçbir zaman
+            gösterilmez.{' '}
+            <Link className="cell-link" href={`/notifications?providerId=${provider.id}`}>
+              Gönderim geçmişi
+            </Link>
+          </p>
         </SectionCard>
 
         {hasTaxInfo ? (

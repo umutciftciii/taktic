@@ -85,6 +85,7 @@ function buildNotificationLogWhere(
     ...(filters.template ? { template: filters.template } : {}),
     ...(filters.requestId ? { requestId: filters.requestId } : {}),
     ...(filters.userId ? { userId: filters.userId } : {}),
+    ...(filters.providerId ? { providerId: filters.providerId } : {}),
     ...(from || to
       ? {
           createdAt: {

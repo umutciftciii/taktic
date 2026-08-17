@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
+import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
 async function bootstrap() {
@@ -11,6 +12,11 @@ async function bootstrap() {
   // URL and version must stop the process rather than degrade into a state
   // where customers are asked to confirm having read nothing.
   assertContactSharingConfig();
+
+  // Same reasoning, one flag over. A production process that offers to mail
+  // claim links while nothing can actually deliver e-mail would hand out
+  // ownership invitations no applicant ever receives, so it must not start.
+  assertProviderClaimConfig();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 

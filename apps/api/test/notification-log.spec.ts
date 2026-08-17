@@ -324,6 +324,10 @@ describe('notification log — what the payload may contain', () => {
         'failedAt',
         'id',
         'maskedRecipient',
+        // The provider application a message was about. An id and nothing
+        // else — the relation is deliberately never loaded, so no contact
+        // detail can arrive through it.
+        'providerId',
         'providerMessageId',
         'providerMessageIdRedacted',
         'requestId',

@@ -241,6 +241,7 @@ export type ProviderProfile = {
     name: string | null;
     role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
   } | null;
+  claimedAt: string | null;
   serviceCategories: ProviderServiceCategory[];
   serviceAreas: ProviderServiceArea[];
   creditBalance?: number;
@@ -249,6 +250,37 @@ export type ProviderProfile = {
   packagePurchasesCount?: number;
   recentOffers?: ProviderRecentOffer[];
   recentPackagePurchases?: ProviderRecentPackagePurchase[];
+  claim?: ProviderClaimSummary;
+  claimEnabled?: boolean;
+};
+
+export type ProviderClaimInvitationState = 'ACTIVE' | 'USED' | 'EXPIRED';
+
+/**
+ * Everything the admin screens may know about a claim.
+ *
+ * Note what is absent: the token, the claim URL, and the applicant's address in
+ * any form. The application's own contact address is already shown on the
+ * detail screen from the profile itself — this block is about ownership, not
+ * about who to write to.
+ */
+export type ProviderClaimSummary = {
+  canInvite: boolean;
+  blockedCode: string | null;
+  claimedAt: string | null;
+  ownership: 'UNCLAIMED' | 'CLAIMED' | 'OWNED';
+  lastInvitation: {
+    createdAt: string;
+    expiresAt: string;
+    state: ProviderClaimInvitationState;
+    byAdmin: boolean;
+  } | null;
+};
+
+export type ProviderClaimInviteResult = {
+  status: 'ISSUED';
+  expiresAt: string;
+  delivery: 'PENDING' | 'SENT' | 'FAILED';
 };
 
 export type OfferStatus =
@@ -905,6 +937,7 @@ export const NOTIFICATION_TEMPLATES = [
   'customer-activation',
   'request-expiring',
   'phone-verification-code',
+  'provider-claim',
 ] as const;
 
 /**
@@ -927,6 +960,8 @@ export type NotificationLogEntry = {
   providerMessageIdRedacted: boolean;
   requestId: string | null;
   userId: string | null;
+  /** The provider application a message was about. An id only — never a join. */
+  providerId: string | null;
   createdAt: string;
   sentAt: string | null;
   failedAt: string | null;

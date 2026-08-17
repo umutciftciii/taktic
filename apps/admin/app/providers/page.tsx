@@ -16,6 +16,7 @@ type RawSearchParams = {
   status?: string;
   city?: string;
   category?: string;
+  ownership?: string;
 };
 
 type AdminProvidersPageProps = {
@@ -47,6 +48,24 @@ function normalizeStatus(value: string | undefined): StatusFilter {
   return 'all';
 }
 
+type OwnershipFilter = 'all' | 'unclaimed' | 'claimed';
+
+/**
+ * "Sahipsiz" is the applications queue: nobody can sign in and manage these,
+ * and until somebody does they are administrable only. It is the one cut of
+ * this list the claim flow made worth having.
+ */
+const ownershipFilters: Array<{ label: string; value: OwnershipFilter }> = [
+  { label: 'Tümü', value: 'all' },
+  { label: 'Sahipsiz', value: 'unclaimed' },
+  { label: 'Hesaba bağlı', value: 'claimed' },
+];
+
+function normalizeOwnership(value: string | undefined): OwnershipFilter {
+  const lower = value?.toLowerCase();
+  return lower === 'unclaimed' || lower === 'claimed' ? lower : 'all';
+}
+
 function toLower(value: string | null | undefined) {
   return (value ?? '').toLocaleLowerCase('tr-TR');
 }
@@ -57,6 +76,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
   const status = normalizeStatus(params.status);
   const cityFilter = (params.city ?? '').trim();
   const categorySlug = (params.category ?? '').trim();
+  const ownership = normalizeOwnership(params.ownership);
 
   const categories = await apiFetch<Category[]>('/categories?includeInactive=true').catch(
     () => [] as Category[],
@@ -69,6 +89,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
   if (status !== 'all') apiQuery.set('status', status);
   if (cityFilter) apiQuery.set('city', cityFilter);
   if (categoryId) apiQuery.set('categoryId', categoryId);
+  if (ownership !== 'all') apiQuery.set('ownership', ownership);
   const queryString = apiQuery.toString();
   const providersPath = queryString ? `/providers?${queryString}` : '/providers';
 
@@ -99,7 +120,8 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
     query.length > 0 ||
     status !== 'all' ||
     cityFilter.length > 0 ||
-    categorySlug.length > 0;
+    categorySlug.length > 0 ||
+    ownership !== 'all';
 
   return (
     <main className="providers-page">
@@ -148,6 +170,16 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
             {sortedCategories.map((category) => (
               <option key={category.id} value={category.slug}>
                 {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="admin-toolbar-field">
+          <label htmlFor="provider-ownership">Sahiplik</label>
+          <select id="provider-ownership" name="ownership" defaultValue={ownership}>
+            {ownershipFilters.map((filter) => (
+              <option key={filter.value} value={filter.value}>
+                {filter.label}
               </option>
             ))}
           </select>
@@ -205,6 +237,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                   <th>Konum</th>
                   <th>Kategoriler</th>
                   <th>Durum</th>
+                  <th>Sahiplik</th>
                   <th className="col-num">Kredi</th>
                   <th className="col-num" title="Müşteri tarafından hâlâ değerlendirilebilir teklifler">Açık teklif</th>
                   <th className="col-num">Paket</th>
@@ -272,6 +305,20 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                         <span className={statusBadgeClass(provider.status)}>
                           {statusLabel(provider.status)}
                         </span>
+                      </td>
+                      <td>
+                        {provider.userId ? (
+                          <div className="cell-stack">
+                            <span className="badge badge-good">Hesaba bağlı</span>
+                            {provider.claimedAt ? (
+                              <span className="cell-muted">
+                                {formatDateTime(provider.claimedAt)}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="badge badge-warn">Sahipsiz</span>
+                        )}
                       </td>
                       <td className="col-num">
                         {creditBalance === 0 ? (

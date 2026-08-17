@@ -79,7 +79,17 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
             </label>
             <label className="pdash-form-row">
               <span>E-posta</span>
-              <input name="email" type="email" defaultValue={provider.email ?? ''} />
+              {/*
+                Read-only rather than disabled: a disabled field submits nothing,
+                and an absent address reads as a request to clear it — which the
+                API refuses for an owned profile. This address is the one that
+                proved ownership, so it is frozen; every other field here stays
+                editable.
+              */}
+              <input name="email" type="email" defaultValue={provider.email ?? ''} readOnly />
+              <span className="muted" style={{ fontSize: 12 }}>
+                Hesabınıza bağlı e-posta adresi değiştirilemez.
+              </span>
             </label>
           </div>
         </section>

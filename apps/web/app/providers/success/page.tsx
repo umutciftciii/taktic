@@ -1,11 +1,22 @@
+import { cookies } from 'next/headers';
 import Link from 'next/link';
+import { APPLY_HINT_COOKIE, isProviderClaimEnabled } from '../../../lib/provider-claim';
 
-type ProviderSuccessPageProps = {
-  searchParams: Promise<{ id?: string }>;
-};
-
-export default async function ProviderSuccessPage({ searchParams }: ProviderSuccessPageProps) {
-  const { id } = await searchParams;
+/**
+ * The application confirmation.
+ *
+ * It deliberately takes no parameters. The previous version carried the new
+ * application's id in its URL, which put a record identifier into browser
+ * history — and into anything the applicant pasted the link into — for no
+ * benefit, since the id opens nothing and proves nothing. What replaces it is
+ * the only thing the applicant needs next: which mailbox to check, masked, read
+ * from a short-lived cookie so no address reaches a URL either.
+ */
+export default async function ProviderSuccessPage() {
+  const claimEnabled = isProviderClaimEnabled();
+  const maskedEmail = claimEnabled
+    ? ((await cookies()).get(APPLY_HINT_COOKIE)?.value ?? null)
+    : null;
 
   return (
     <main>
@@ -16,11 +27,31 @@ export default async function ProviderSuccessPage({ searchParams }: ProviderSucc
           <p className="muted" style={{ marginBottom: 0 }}>
             Onay sonrasında eşleşen taleplere teklif vermeye başlayabilirsiniz.
           </p>
-          {id ? (
-            <p style={{ marginTop: 14 }}>
-              Başvuru referansı: <code>{id}</code>
-            </p>
+
+          {claimEnabled ? (
+            <div
+              className="card"
+              style={{ marginTop: 20, marginBottom: 0, textAlign: 'left' }}
+              data-testid="claim-mail-notice"
+            >
+              <h2 style={{ fontSize: 16, marginTop: 0 }}>E-postanızı kontrol edin</h2>
+              <p className="muted" style={{ marginBottom: 0 }}>
+                {maskedEmail ? (
+                  <>
+                    Başvurunuzu kendi hesabınıza bağlayabilmeniz için <strong>{maskedEmail}</strong>{' '}
+                    adresine bir bağlantı gönderdik.
+                  </>
+                ) : (
+                  <>
+                    Başvurunuzu kendi hesabınıza bağlayabilmeniz için başvuruda verdiğiniz e-posta
+                    adresine bir bağlantı gönderdik.
+                  </>
+                )}{' '}
+                Bağlantı 72 saat geçerlidir.
+              </p>
+            </div>
           ) : null}
+
           <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 18 }}>
             <Link className="btn btn-primary" href="/providers/me">Hizmet Veren Paneli</Link>
             <Link className="btn btn-ghost" href="/">Ana sayfa</Link>

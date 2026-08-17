@@ -37,6 +37,7 @@ type RawSearchParams = {
   template?: string;
   requestId?: string;
   userId?: string;
+  providerId?: string;
   from?: string;
   to?: string;
   page?: string;
@@ -112,6 +113,7 @@ export default async function AdminNotificationsPage({
   const template = (params.template ?? '').trim();
   const requestId = (params.requestId ?? '').trim();
   const userId = (params.userId ?? '').trim();
+  const providerId = (params.providerId ?? '').trim();
   const from = normalizeDate(params.from);
   const to = normalizeDate(params.to);
   const page = normalizePage(params.page);
@@ -124,6 +126,7 @@ export default async function AdminNotificationsPage({
   if (template) apiQuery.set('template', template);
   if (requestId) apiQuery.set('requestId', requestId);
   if (userId) apiQuery.set('userId', userId);
+  if (providerId) apiQuery.set('providerId', providerId);
   const fromIso = formatRangeDateForApi(from, false);
   const toIso = formatRangeDateForApi(to, true);
   if (fromIso) apiQuery.set('from', fromIso);
@@ -133,8 +136,10 @@ export default async function AdminNotificationsPage({
     `/notification-logs?${apiQuery.toString()}`,
   );
 
-  const hasFilters = Boolean(status || channel || template || requestId || userId || from || to);
-  const baseParams = { status, channel, template, requestId, userId, from, to };
+  const hasFilters = Boolean(
+    status || channel || template || requestId || userId || providerId || from || to,
+  );
+  const baseParams = { status, channel, template, requestId, userId, providerId, from, to };
 
   const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
   const endIndex = Math.min(response.page * response.pageSize, response.total);
@@ -215,6 +220,17 @@ export default async function AdminNotificationsPage({
             type="search"
             placeholder="Kullanıcı kimliği"
             defaultValue={userId}
+            autoComplete="off"
+          />
+        </div>
+        <div className="admin-toolbar-field">
+          <label htmlFor="notification-provider-id">Hizmet veren ID</label>
+          <input
+            id="notification-provider-id"
+            name="providerId"
+            type="search"
+            placeholder="Hizmet veren kimliği"
+            defaultValue={providerId}
             autoComplete="off"
           />
         </div>
