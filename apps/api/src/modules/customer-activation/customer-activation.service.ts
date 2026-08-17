@@ -9,6 +9,8 @@ import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { createSessionForUser, SessionMeta } from '../auth/session.util';
+import { NotificationPort } from '../notifications/notification.port';
 import {
   CUSTOMER_ACTIVATION_PATH,
   CUSTOMER_ACTIVATION_TOKEN_TTL_HOURS,
@@ -39,9 +41,33 @@ function buildActivationUrl(rawToken: string): string {
   return url.toString();
 }
 
+/**
+ * A customer account is claimable when the platform created it on the visitor's
+ * behalf (guest service request) and it still has no password. Anything else —
+ * a self-registered customer, an admin-created one, an account that already set
+ * a password — must keep the ordinary duplicate/conflict behaviour so an
+ * existing account can never be taken over without proving mailbox ownership.
+ */
+function isClaimableCustomer(customer: {
+  role: UserRole;
+  isActive: boolean;
+  passwordHash: string | null;
+  customerOrigin: CustomerOrigin | null;
+}): boolean {
+  return (
+    customer.role === UserRole.CUSTOMER &&
+    customer.isActive &&
+    customer.passwordHash === null &&
+    customer.customerOrigin === CustomerOrigin.AUTO_CREATED_REQUEST
+  );
+}
+
 @Injectable()
 export class CustomerActivationService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(NotificationPort) private readonly notifications: NotificationPort,
+  ) {}
 
   async createForCustomer(customerId: string, createdById: string | null) {
     const customer = await this.prisma.user.findUnique({
@@ -76,6 +102,108 @@ export class CustomerActivationService {
       throw new ConflictException('Pasif müşteri için aktivasyon linki oluşturulamaz.');
     }
 
+    const issued = await this.issueToken(customer.id, createdById);
+
+    return {
+      activationUrl: issued.activationUrl,
+      expiresAt: issued.expiresAt,
+      customer: this.toSummary(customer),
+    };
+  }
+
+  /**
+   * Guest service-request path: the platform just auto-created a password-less
+   * customer account, so mail them a link to claim it.
+   *
+   * Best-effort by design — a notification failure must never roll back or fail
+   * the service request the visitor just submitted. Returns null when the
+   * account is not claimable (already has a password, self-registered, …).
+   */
+  async issueForAutoCreatedCustomer(customerId: string) {
+    const customer = await this.prisma.user.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        customerOrigin: true,
+        passwordHash: true,
+      },
+    });
+
+    if (!customer || !customer.email || !isClaimableCustomer(customer)) {
+      return null;
+    }
+
+    return this.issueAndNotify(customer.id, customer.email, customer.name, null);
+  }
+
+  /**
+   * Registration claim path: someone tried to register with an e-mail that
+   * already belongs to an auto-created, password-less account. Instead of a
+   * dead-end duplicate error we re-send the activation link. The caller never
+   * receives the token, so this cannot be used to take over an account.
+   *
+   * Returns null when the e-mail does not belong to a claimable account — the
+   * caller must then keep its ordinary duplicate behaviour.
+   */
+  async requestActivationForEmail(email: string) {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+
+    const customer = await this.prisma.user.findUnique({
+      where: { email: normalized },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        customerOrigin: true,
+        passwordHash: true,
+      },
+    });
+
+    if (!customer || !customer.email || !isClaimableCustomer(customer)) {
+      return null;
+    }
+
+    await this.issueAndNotify(customer.id, customer.email, customer.name, null);
+    return { status: 'activation-sent' as const };
+  }
+
+  private async issueAndNotify(
+    customerId: string,
+    email: string,
+    name: string | null,
+    createdById: string | null,
+  ) {
+    const issued = await this.issueToken(customerId, createdById);
+
+    await this.notifications.send({
+      template: 'customer-activation',
+      to: email,
+      subject: 'TakTic hesabınızı etkinleştirin',
+      actionUrl: issued.activationUrl,
+      data: {
+        name,
+        expiresAt: issued.expiresAt.toISOString(),
+      },
+    });
+
+    return issued;
+  }
+
+  /**
+   * Issues a fresh single-use token and invalidates every other outstanding one
+   * for the same customer, so at most one activation link is ever live.
+   */
+  private async issueToken(customerId: string, createdById: string | null) {
     const rawToken = generateRawToken();
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(
@@ -86,7 +214,7 @@ export class CustomerActivationService {
     await this.prisma.$transaction(async (tx) => {
       await tx.customerActivationToken.updateMany({
         where: {
-          customerId: customer.id,
+          customerId,
           usedAt: null,
         },
         data: {
@@ -96,7 +224,7 @@ export class CustomerActivationService {
 
       await tx.customerActivationToken.create({
         data: {
-          customerId: customer.id,
+          customerId,
           tokenHash,
           expiresAt,
           createdById,
@@ -104,11 +232,7 @@ export class CustomerActivationService {
       });
     });
 
-    return {
-      activationUrl: buildActivationUrl(rawToken),
-      expiresAt,
-      customer: this.toSummary(customer),
-    };
+    return { activationUrl: buildActivationUrl(rawToken), expiresAt };
   }
 
   async validateRawToken(rawToken: string) {
@@ -121,7 +245,7 @@ export class CustomerActivationService {
     };
   }
 
-  async submit(dto: SubmitCustomerActivationDto) {
+  async submit(dto: SubmitCustomerActivationDto, meta: SessionMeta = {}) {
     const token = dto.token.trim();
     if (!token) {
       throw new BadRequestException('Token is required');
@@ -132,8 +256,13 @@ export class CustomerActivationService {
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const now = new Date();
 
+    let session: { sessionId: string; expiresAt: Date };
+
     try {
-      await this.prisma.$transaction(async (tx) => {
+      session = await this.prisma.$transaction(async (tx) => {
+        // Consuming the token and setting the password happen in one
+        // transaction, and the token row is only claimed when it is still
+        // unused and unexpired — so two concurrent submits cannot both win.
         const updated = await tx.customerActivationToken.updateMany({
           where: {
             id: lookup.token.id,
@@ -160,6 +289,8 @@ export class CustomerActivationService {
         if (customerUpdate.count === 0) {
           throw new ConflictException('Bu müşteri için aktivasyon yapılamıyor.');
         }
+
+        return createSessionForUser(tx, lookup.customer.id, meta);
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -169,7 +300,19 @@ export class CustomerActivationService {
       throw error;
     }
 
-    return { success: true as const };
+    return {
+      success: true as const,
+      sessionId: session.sessionId,
+      expiresAt: session.expiresAt,
+      user: {
+        id: lookup.customer.id,
+        email: lookup.customer.email,
+        phone: lookup.customer.phone,
+        name: lookup.customer.name,
+        role: UserRole.CUSTOMER,
+        isActive: true,
+      },
+    };
   }
 
   private async lookupActiveToken(rawToken: string) {

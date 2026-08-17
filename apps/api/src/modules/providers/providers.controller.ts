@@ -103,12 +103,13 @@ export class ProvidersController {
   }
 
   @Get(':id')
-  getProvider(@Param('id') id: string) {
-    return this.providersService.getProvider(id);
+  @UseGuards(OptionalAuthGuard)
+  getProvider(@Param('id') id: string, @CurrentUser() user: AuthUser | null) {
+    return this.providersService.getProviderForViewer(id, user);
   }
 
   @Patch(':id')
-  @UseGuards(OptionalAuthGuard)
+  @UseGuards(AuthGuard)
   updateProvider(@Param('id') id: string, @Body() dto: UpdateProviderDto, @CurrentUser() user: AuthUser | null) {
     return this.providersService.updateProvider(id, dto, user);
   }

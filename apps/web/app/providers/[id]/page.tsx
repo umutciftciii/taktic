@@ -1,7 +1,8 @@
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   ProviderProfile,
   statusLabel,
@@ -20,7 +21,14 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
     redirect(`/login?redirectTo=/providers/${id}`);
   }
 
-  const provider = await apiFetch<ProviderProfile>(`/providers/${id}`);
+  const provider = await fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`));
+
+  // This screen is the provider's own profile inside their panel, so it needs
+  // the private projection. Anyone else gets the public business card back and
+  // has no business on this route.
+  if (provider.visibility === 'public') {
+    notFound();
+  }
 
   return (
     <ProviderShell user={user} providerId={provider.id} businessName={provider.businessName} active="profile">

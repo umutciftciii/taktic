@@ -5417,6 +5417,18 @@ body:has(.pdash-shell) #site-header {
   line-height: 18px;
 }
 
+.auth-screen-notice {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #cfe3ff;
+  border-radius: 10px;
+  background: #f2f8ff;
+  color: #16436e;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+}
+
 .auth-screen-fields {
   display: flex;
   flex-direction: column;
@@ -5718,7 +5730,8 @@ body:has(.pdash-shell) #site-header {
   margin: 0 0 18px;
 }
 
-.auth-screen-card-compact .auth-screen-error {
+.auth-screen-card-compact .auth-screen-error,
+.auth-screen-card-compact .auth-screen-notice {
   margin: 0 0 14px;
 }
 

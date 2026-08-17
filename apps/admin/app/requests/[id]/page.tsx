@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   Offer,
   QualityScoreBreakdown,
   ServiceRequest,
@@ -29,7 +30,9 @@ const RECENT_OFFERS_LIMIT = 3;
 
 export default async function RequestDetailPage({ params }: RequestDetailPageProps) {
   const { id } = await params;
-  const request = await apiFetch<ServiceRequest>(`/service-requests/${id}`);
+  const request = await fetchOrNotFound(() =>
+    apiFetch<ServiceRequest>(`/service-requests/${id}`),
+  );
   const offers = await apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]);
   const recentOffers = offers.slice(0, RECENT_OFFERS_LIMIT);
   const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;

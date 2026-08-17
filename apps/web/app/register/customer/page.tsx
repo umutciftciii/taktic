@@ -2,11 +2,11 @@ import Link from 'next/link';
 import { registerCustomerAction } from '../actions';
 
 type CustomerRegisterPageProps = {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string }>;
 };
 
 export default async function CustomerRegisterPage({ searchParams }: CustomerRegisterPageProps) {
-  const { error } = await searchParams;
+  const { error, notice } = await searchParams;
 
   return (
     <main className="auth-screen">
@@ -18,6 +18,15 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
             Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.
           </p>
         </div>
+
+        {notice === 'activation-sent' ? (
+          <div className="auth-screen-notice" role="status">
+            Bu e-posta ile daha önce talep oluşturulmuş ve sizin adınıza bir hesap açılmış.
+            Hesabınızı kullanabilmeniz için e-posta adresinize bir etkinleştirme bağlantısı
+            gönderdik. Bağlantıdan şifrenizi belirledikten sonra taleplerinize ve tekliflerinize
+            erişebilirsiniz.
+          </div>
+        ) : null}
 
         {error ? (
           <div className="auth-screen-error" role="alert">

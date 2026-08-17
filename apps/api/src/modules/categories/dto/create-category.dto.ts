@@ -15,6 +15,15 @@ export class CreateCategoryDto {
   @IsString()
   description?: string | null;
 
+  /**
+   * Mandatory on create: a category must never come into existence without a
+   * price, otherwise it silently cannot receive offers. @Min(1) rejects 0 and
+   * negatives, @IsInt rejects non-numeric and fractional input.
+   */
+  @IsInt()
+  @Min(1)
+  offerCreditCost!: number;
+
   @IsOptional()
   @IsString()
   parentId?: string | null;

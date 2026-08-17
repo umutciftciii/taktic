@@ -8,6 +8,7 @@ const allowedSeedEnvironments = new Set(['development', 'test']);
 const categories = [
   {
     slug: 'klima-servisi',
+    offerCreditCost: 2,
     name: 'Klima Servisi',
     description: 'Klima bakim, ariza ve servis talepleri.',
     sortOrder: 10,
@@ -15,6 +16,7 @@ const categories = [
   },
   {
     slug: 'klima-montaji',
+    offerCreditCost: 4,
     name: 'Klima Montaji',
     description: 'Yeni veya mevcut klima montaji talepleri.',
     sortOrder: 20,
@@ -49,6 +51,7 @@ const categories = [
   },
   {
     slug: 'kombi-servisi',
+    offerCreditCost: 3,
     name: 'Kombi Servisi',
     description: 'Kombi bakim, ariza ve servis talepleri.',
     sortOrder: 30,
@@ -88,6 +91,7 @@ const categories = [
   },
   {
     slug: 'elektrikci',
+    offerCreditCost: 2,
     name: 'Elektrikci',
     description: 'Elektrik ariza, montaj ve onarim talepleri.',
     sortOrder: 40,
@@ -123,6 +127,7 @@ const categories = [
   },
   {
     slug: 'su-tesisatcisi',
+    offerCreditCost: 2,
     name: 'Su Tesisatcisi',
     description: 'Su tesisati ariza ve onarim talepleri.',
     sortOrder: 50,
@@ -130,6 +135,7 @@ const categories = [
   },
   {
     slug: 'boya-badana',
+    offerCreditCost: 4,
     name: 'Boya Badana',
     description: 'Ic mekan boya ve badana talepleri.',
     sortOrder: 60,
@@ -137,6 +143,7 @@ const categories = [
   },
   {
     slug: 'ev-temizligi',
+    offerCreditCost: 1,
     name: 'Ev Temizligi',
     description: 'Ev temizligi talepleri.',
     sortOrder: 70,
@@ -198,6 +205,11 @@ async function main() {
   }
 
   for (const category of categories) {
+    const existingCategory = await prisma.serviceCategory.findUnique({
+      where: { slug: category.slug },
+      select: { offerCreditCost: true },
+    });
+
     const savedCategory = await prisma.serviceCategory.upsert({
       where: { slug: category.slug },
       update: {
@@ -205,6 +217,11 @@ async function main() {
         description: category.description,
         sortOrder: category.sortOrder,
         isActive: true,
+        // Only fill the price when it has never been set, so re-seeding a local
+        // database does not silently revert a price an admin changed.
+        ...(existingCategory?.offerCreditCost == null
+          ? { offerCreditCost: category.offerCreditCost }
+          : {}),
       },
       create: {
         slug: category.slug,
@@ -212,6 +229,7 @@ async function main() {
         description: category.description,
         sortOrder: category.sortOrder,
         isActive: true,
+        offerCreditCost: category.offerCreditCost,
       },
     });
 

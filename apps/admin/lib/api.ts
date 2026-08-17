@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -30,6 +30,12 @@ export type Category = {
   iconKey: CategoryIconKey | string | null;
   isActive: boolean;
   sortOrder: number;
+  /**
+   * Credits a provider spends per offer in this category. `null` means the price
+   * has never been set — such a category cannot receive offers and is flagged in
+   * the admin list.
+   */
+  offerCreditCost: number | null;
   _count?: {
     questions: number;
   };
@@ -1226,6 +1232,20 @@ export function formatDateTime(value: string | null | undefined) {
   }
 }
 
+/**
+ * Carries the HTTP status so callers can map an upstream 404 onto Next's
+ * notFound() instead of letting it bubble up as a generic 500.
+ */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(body || `API request failed with status ${status}`);
+    this.name = 'ApiError';
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
@@ -1243,11 +1263,27 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       redirect('/login');
     }
 
-    const body = await response.text();
-    throw new Error(body || `API request failed with status ${response.status}`);
+    throw new ApiError(response.status, await response.text());
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * Runs a fetch and turns an upstream "not found" into a proper 404 page.
+ * Used by detail screens so a bad id (or a path like /providers/new that falls
+ * through to the dynamic [id] route) never renders a server-error screen.
+ */
+export async function fetchOrNotFound<T>(loader: () => Promise<T>): Promise<T> {
+  try {
+    return await loader();
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 400)) {
+      notFound();
+    }
+
+    throw error;
+  }
 }
 
 export async function requireAdmin() {

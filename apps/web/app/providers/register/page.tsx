@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { apiFetch, Category, getCurrentUser } from '../../../lib/api';
+import { redirect } from 'next/navigation';
+import { apiFetch, Category, getCurrentUser, ProviderDashboard } from '../../../lib/api';
 import { createProviderAction } from '../actions';
 
 export default async function ProviderRegisterPage() {
@@ -7,6 +8,18 @@ export default async function ProviderRegisterPage() {
     apiFetch<Category[]>('/categories'),
     getCurrentUser(),
   ]);
+
+  // An account owns at most one provider profile, so a provider who already has
+  // one would only hit a 409 on submit. Send them to their panel instead.
+  if (user?.role === 'PROVIDER') {
+    const existingProviderId = await apiFetch<ProviderDashboard>('/providers/me/dashboard')
+      .then((dashboard) => dashboard.provider?.id ?? null)
+      .catch(() => null);
+
+    if (existingProviderId) {
+      redirect('/providers/me');
+    }
+  }
 
   return (
     <div className="provider-apply-shell">

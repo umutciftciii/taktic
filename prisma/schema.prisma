@@ -97,7 +97,7 @@ model User {
   updatedAt      DateTime        @updatedAt
 
   serviceRequests           ServiceRequest[]
-  providerProfiles          ProviderProfile[]
+  providerProfile           ProviderProfile?
   creditTransactions        ProviderCreditTransaction[]
   sessions                  Session[]
   customerNotes             CustomerNote[]              @relation("CustomerNoteCustomer")
@@ -134,6 +134,17 @@ model ServiceCategory {
   name          String
   slug          String   @unique
   description   String?
+  /// Credits a provider spends to submit one offer on a request in this
+  /// category. There is deliberately NO default: a default value would be the
+  /// hidden "1 credit" fallback the pricing rules forbid.
+  ///
+  /// NULL means "price not set yet" — a first-class, observable state that is
+  /// distinct from 0, and it blocks offering entirely. A database CHECK
+  /// constraint (see the migration) makes 0 and negatives unrepresentable.
+  ///
+  /// There is no hierarchical inheritance: a request uses the cost of exactly
+  /// the category it is attached to, never a parent's.
+  offerCreditCost Int?
   imageUrl      String?
   coverImageUrl String?
   iconKey       String?
@@ -232,7 +243,11 @@ model ServiceRequestAnswer {
 
 model ProviderProfile {
   id              String         @id @default(cuid())
-  userId          String?
+  // A platform account may own at most one provider profile. The column stays
+  // nullable so guest (unclaimed) applications remain possible: PostgreSQL
+  // treats NULLs as distinct in a unique index, so the constraint only binds
+  // rows where userId IS NOT NULL.
+  userId          String?        @unique
   businessName    String
   contactName     String
   phone           String

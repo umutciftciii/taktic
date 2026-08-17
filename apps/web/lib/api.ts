@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { notFound } from 'next/navigation';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -108,18 +109,26 @@ export type ProviderServiceArea = {
   neighborhood: string | null;
 };
 
+/**
+ * `GET /providers/:id` narrows its payload by viewer: anonymous and unrelated
+ * callers get the public business card only. Everything the API strips from the
+ * public projection is optional here, and `visibility` says which shape arrived.
+ */
+export type ProviderVisibility = 'public' | 'owner' | 'admin';
+
 export type ProviderProfile = {
   id: string;
   userId?: string | null;
+  visibility?: ProviderVisibility;
   businessName: string;
-  contactName: string;
-  phone: string;
-  email: string | null;
+  contactName?: string;
+  phone?: string;
+  email?: string | null;
   rejectionReason?: string | null;
   suspendedAt?: string | null;
   city: string;
   district: string;
-  addressNote: string | null;
+  addressNote?: string | null;
   description: string | null;
   status: ProviderStatus;
   user?: {
@@ -171,13 +180,25 @@ export type ExistingOfferSummary = {
   submittedAt: string;
 };
 
+/** Why an otherwise matching request cannot be offered on. */
+export type OfferBlockedReason = 'CATEGORY_INACTIVE' | 'CATEGORY_PRICE_UNSET';
+
 export type ProviderRequestListItem = {
   id: string;
   category: {
     id: string;
     name: string;
     slug: string;
+    isActive: boolean;
+    offerCreditCost: number | null;
   };
+  /**
+   * Credits this offer would cost, taken from the request's category. `null`
+   * exactly when `canOffer` is false, and `offerBlockedReason` says why.
+   */
+  offerCreditCost: number | null;
+  canOffer: boolean;
+  offerBlockedReason: OfferBlockedReason | null;
   city: string;
   district: string;
   neighborhood: string | null;
@@ -590,6 +611,20 @@ export function formatDateTime(value: string | null | undefined) {
   }
 }
 
+/**
+ * Carries the HTTP status so callers can map an upstream 404 onto Next's
+ * notFound() instead of letting it bubble up as a generic 500.
+ */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(body || `API request failed with status ${status}`);
+    this.name = 'ApiError';
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
@@ -603,11 +638,26 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `API request failed with status ${response.status}`);
+    throw new ApiError(response.status, await response.text());
   }
 
   return response.json() as Promise<T>;
+}
+
+/**
+ * Runs a fetch and turns "not found" (and, for detail screens, "not yours")
+ * into a proper 404 page rather than an error boundary.
+ */
+export async function fetchOrNotFound<T>(loader: () => Promise<T>): Promise<T> {
+  try {
+    return await loader();
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 400)) {
+      notFound();
+    }
+
+    throw error;
+  }
 }
 
 export async function getCurrentUser() {

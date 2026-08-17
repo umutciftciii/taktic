@@ -36,6 +36,14 @@ export default async function NewCategoryPage() {
                   <span>Sıralama</span>
                   <input name="sortOrder" type="number" min="0" defaultValue="0" />
                 </label>
+                <label className="field field-4">
+                  <span>Teklif kredisi *</span>
+                  <input name="offerCreditCost" type="number" min="1" step="1" required />
+                  <span className="help-text">
+                    Bu kategoride bir teklifin maliyeti. Yalnız bundan sonraki teklifleri etkiler;
+                    geçmiş teklif ve iadeleri değiştirmez.
+                  </span>
+                </label>
                 <label className="field field-12">
                   <span>Slug *</span>
                   <input

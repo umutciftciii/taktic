@@ -92,6 +92,10 @@ function categoryPayload(formData: FormData) {
     coverImageUrl: readOptionalFormString(formData, 'coverImageUrl'),
     iconKey: readOptionalFormString(formData, 'iconKey'),
     sortOrder: readFormNumber(formData, 'sortOrder'),
+    // Mandatory in both forms. Sent as a number so the API DTO's @IsInt/@Min(1)
+    // rejects empty, zero, negative and non-numeric input rather than the value
+    // silently becoming null.
+    offerCreditCost: readFormNumber(formData, 'offerCreditCost'),
     isActive: readFormString(formData, 'isActive') === 'true',
   };
 }

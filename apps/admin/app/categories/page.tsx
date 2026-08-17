@@ -120,6 +120,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                   <th>Kategori adı</th>
                   <th>Slug</th>
                   <th>Durum</th>
+                  <th className="col-num">Teklif Kredisi</th>
                   <th className="col-num">Soru sayısı</th>
                   <th className="col-num">Sıra</th>
                   <th className="col-actions">İşlem</th>
@@ -152,6 +153,18 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                       <span className={category.isActive ? 'badge badge-good' : 'badge badge-muted'}>
                         {category.isActive ? 'Aktif' : 'Pasif'}
                       </span>
+                    </td>
+                    <td className="col-num">
+                      {category.offerCreditCost === null ? (
+                        <span
+                          className="badge badge-bad"
+                          title="Fiyat tanımlı olmadığı için bu kategoride teklif verilemez."
+                        >
+                          Fiyat tanımsız
+                        </span>
+                      ) : (
+                        <strong>{category.offerCreditCost}</strong>
+                      )}
                     </td>
                     <td className="col-num">{category._count?.questions ?? 0}</td>
                     <td className="col-num">{category.sortOrder}</td>

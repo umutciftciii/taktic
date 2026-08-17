@@ -4,11 +4,13 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CustomerOrigin, NumberedEntityType, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { NumberingService } from '../numbering/numbering.service';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
@@ -60,9 +62,13 @@ const moderatedStatuses = new Set<ServiceRequestStatus>([
 
 @Injectable()
 export class ServiceRequestsService {
+  private readonly logger = new Logger(ServiceRequestsService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NumberingService) private readonly numbering: NumberingService,
+    @Inject(CustomerActivationService)
+    private readonly customerActivation: CustomerActivationService,
   ) {}
 
   async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
@@ -136,6 +142,23 @@ export class ServiceRequestsService {
         },
       });
     });
+
+    // A guest request creates a password-less customer account behind the
+    // scenes. Mail them a claim link straight away, otherwise they can never
+    // reach the offers on their own request.
+    //
+    // Best-effort on purpose: the request is already committed, so a
+    // notification problem must not surface as a failed submission.
+    if (request.customerId) {
+      try {
+        await this.customerActivation.issueForAutoCreatedCustomer(request.customerId);
+      } catch (error) {
+        this.logger.error(
+          `Failed to issue activation link for request ${request.id}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
 
     return withQualityLabel(request);
   }

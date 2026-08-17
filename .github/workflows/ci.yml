@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+
+    services:
+      # Integration tests need a real PostgreSQL: they exercise Serializable
+      # transactions, unique constraints and the credit ledger, none of which a
+      # mock would reproduce faithfully.
+      postgres:
+        image: postgres:16.6-alpine
+        env:
+          POSTGRES_DB: taktic
+          POSTGRES_USER: taktic_user
+          POSTGRES_PASSWORD: taktic_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taktic_user -d taktic"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # The suite derives its own database (<name>_test) from this URL and
+      # refuses to run against anything not ending in _test, so the job never
+      # touches the database named here.
+      DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
+      AUTH_COOKIE_NAME: taktic_session
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
