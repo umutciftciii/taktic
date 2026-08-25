@@ -7,23 +7,33 @@ import { FileOutboxSmsAdapter } from './file-outbox-sms.adapter';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationPort } from './notification.port';
 import { isNotificationOutboxEnabled } from './notification-outbox';
+import { resolveEmailTransportKind } from './email-transport';
+import { ResendNotificationAdapter } from './resend-notification.adapter';
 import { SmsPort } from './sms.port';
 
 /**
- * The console adapters are the default everywhere. NOTIFICATION_OUTBOX_DIR swaps
- * both transports for the recording ones the browser end-to-end suite reads its
- * one-time codes and claim links from; it cannot be set in production, so this
- * branch is unreachable there. Nothing else about the graph changes — the
- * dispatcher, the audit rows and the masking are the production ones in both
- * cases.
+ * Which e-mail adapter is bound is decided by EMAIL_TRANSPORT, through the same
+ * allow-list every boot check reads (see email-transport.ts). The console
+ * adapter stays the default: a developer who configures nothing gets a process
+ * that delivers nothing, and only an explicit EMAIL_TRANSPORT=resend puts mail
+ * in a stranger's inbox.
  *
- * Neither branch delivers mail to anybody. That is what
- * `isDeliveringEmailTransportConfigured` reports, and it is why
- * PROVIDER_CLAIM_ENABLED cannot be turned on in production against either.
+ * NOTIFICATION_OUTBOX_DIR selects the recording transports the browser
+ * end-to-end suite reads its one-time codes and claim links from; it cannot be
+ * set in production. SMS has no provider yet, so it still follows that switch
+ * alone.
+ *
+ * Nothing else about the graph changes in any branch — the dispatcher, the
+ * audit rows and the masking are the production ones throughout.
  */
-const useOutbox = isNotificationOutboxEnabled();
-const emailAdapter = useOutbox ? FileOutboxNotificationAdapter : ConsoleNotificationAdapter;
-const smsAdapter = useOutbox ? FileOutboxSmsAdapter : ConsoleSmsAdapter;
+const emailTransport = resolveEmailTransportKind();
+const emailAdapter =
+  emailTransport === 'resend'
+    ? ResendNotificationAdapter
+    : emailTransport === 'file-outbox'
+      ? FileOutboxNotificationAdapter
+      : ConsoleNotificationAdapter;
+const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : ConsoleSmsAdapter;
 
 @Global()
 @Module({

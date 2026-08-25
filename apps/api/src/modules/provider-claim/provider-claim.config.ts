@@ -15,7 +15,8 @@ import { isDeliveringEmailTransportConfigured } from '../notifications/email-tra
  * the application — so a process that cannot send that link would issue tokens
  * nobody can ever receive. The console adapter refuses to print an action URL
  * outside development and the file outbox cannot exist in production, so
- * neither counts (see notifications/email-transport.ts).
+ * neither counts; EMAIL_TRANSPORT=resend, fully configured, is what satisfies
+ * this (see notifications/email-transport.ts).
  */
 
 /** Returned when a claim endpoint is reached while the feature is off. */
@@ -77,8 +78,8 @@ export function assertProviderClaimConfig(): void {
     throw new Error(
       'PROVIDER_CLAIM_ENABLED=true requires a real, configured e-mail transport in production: ' +
         'the claim link is the only proof of mailbox ownership the flow has, and neither the ' +
-        'console adapter nor the file outbox delivers it. Wire an e-mail provider, or keep the ' +
-        'flag off.',
+        'console adapter nor the file outbox delivers it. Set EMAIL_TRANSPORT=resend with its ' +
+        'credentials, or keep the flag off.',
     );
   }
 }

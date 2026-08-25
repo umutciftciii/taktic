@@ -50,6 +50,13 @@ services:
       CONTACT_SHARING_ENABLED: ${CONTACT_SHARING_ENABLED:-false}
       CONTACT_DISCLOSURE_URL: ${CONTACT_DISCLOSURE_URL:-}
       CONTACT_DISCLOSURE_VERSION: ${CONTACT_DISCLOSURE_VERSION:-}
+      # console|file-outbox|resend. The dev stack keeps the console adapter:
+      # nothing leaves the container and the links land in the API log. Only
+      # EMAIL_TRANSPORT=resend delivers, and it then requires RESEND_API_KEY —
+      # which belongs in the host environment, never in this file.
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-console}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross

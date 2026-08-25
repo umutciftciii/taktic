@@ -87,6 +87,10 @@ function apiServer(runtime: Runtime) {
       // receive and the claim test can follow the link it was supposed to get,
       // instead of scraping a log line.
       NOTIFICATION_OUTBOX_DIR: outboxDir,
+      // Stated explicitly rather than inferred from the directory above: the
+      // suite must never be one stray environment variable away from handing a
+      // real provider a live claim link.
+      EMAIL_TRANSPORT: 'file-outbox',
       WEB_ORIGIN: runtime.webUrl,
       ADMIN_ORIGIN: runtime.adminUrl,
       API_PUBLIC_URL: runtime.apiUrl,

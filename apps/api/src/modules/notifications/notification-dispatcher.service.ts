@@ -54,10 +54,7 @@ export class NotificationDispatcher {
       message.template,
       maskEmail(message.to),
       context,
-      async () => {
-        await this.email.send(message);
-        return { providerMessageId: null };
-      },
+      () => this.email.send(message),
     );
   }
 
