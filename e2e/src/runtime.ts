@@ -56,6 +56,7 @@ export type Runtime = {
   adminUrl: string;
   requirePhoneVerification: boolean;
   contactSharing: ContactSharing;
+  providerClaim: boolean;
 };
 
 /**
@@ -80,6 +81,7 @@ function buildRuntime(
   ports: RuntimePorts,
   requirePhoneVerification: boolean,
   contactSharing: ContactSharing = { enabled: false },
+  providerClaim = false,
 ): Runtime {
   return {
     name,
@@ -89,6 +91,7 @@ function buildRuntime(
     adminUrl: `http://127.0.0.1:${ports.admin}`,
     requirePhoneVerification,
     contactSharing,
+    providerClaim,
   };
 }
 
@@ -136,4 +139,31 @@ export const contactSharingRuntime = buildRuntime(
   },
 );
 
-export const runtimes = [primaryRuntime, phoneGateRuntime, contactSharingRuntime];
+/**
+ * The same code with PROVIDER_CLAIM_ENABLED on.
+ *
+ * A fourth stack for the reason the other two extra ones exist: the flag is
+ * read per call from the API's environment and per render from the web app's,
+ * so one process cannot represent both sides. Running them side by side is what
+ * lets the suite show that the difference between "a guest application is a
+ * dead record" and "its applicant can take it over" is this flag and nothing
+ * else — the primary runtime keeps the flag off and covers exactly that.
+ */
+export const providerClaimRuntime = buildRuntime(
+  'provider-claim',
+  {
+    api: port(process.env.E2E_CLAIM_API_PORT, 3231),
+    web: port(process.env.E2E_CLAIM_WEB_PORT, 3230),
+    admin: port(process.env.E2E_CLAIM_ADMIN_PORT, 3232),
+  },
+  false,
+  { enabled: false },
+  true,
+);
+
+export const runtimes = [
+  primaryRuntime,
+  phoneGateRuntime,
+  contactSharingRuntime,
+  providerClaimRuntime,
+];

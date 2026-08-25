@@ -23,11 +23,26 @@ export type SmsOutboxEntry = {
   sentAt: string;
 };
 
-function readEntries(): SmsOutboxEntry[] {
+/**
+ * The e-mail twin, for the same reason.
+ *
+ * A claim link carries a single-use token that is never returned over HTTP,
+ * never stored in plaintext and never printed by the console adapter outside
+ * development — so a browser driving the real screens has no other way to reach
+ * it.
+ */
+export type EmailOutboxEntry = {
+  template: string;
+  to: string;
+  actionUrl: string | null;
+  sentAt: string;
+};
+
+function readLines<T>(file: string): T[] {
   let raw: string;
 
   try {
-    raw = readFileSync(join(outboxDir, 'sms.jsonl'), 'utf8');
+    raw = readFileSync(join(outboxDir, file), 'utf8');
   } catch {
     // Nothing sent yet in this run.
     return [];
@@ -36,7 +51,11 @@ function readEntries(): SmsOutboxEntry[] {
   return raw
     .split('\n')
     .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as SmsOutboxEntry);
+    .map((line) => JSON.parse(line) as T);
+}
+
+function readEntries(): SmsOutboxEntry[] {
+  return readLines<SmsOutboxEntry>('sms.jsonl');
 }
 
 /**
@@ -89,4 +108,47 @@ export async function waitForLatestSmsCode(phone: string): Promise<string> {
   expect(latest.code).toMatch(/^\d{6}$/);
 
   return latest.code;
+}
+
+export function emailEntriesFor(email: string): EmailOutboxEntry[] {
+  const wanted = email.trim().toLowerCase();
+  return readLines<EmailOutboxEntry>('email.jsonl').filter(
+    (entry) => entry.to.trim().toLowerCase() === wanted,
+  );
+}
+
+/**
+ * Waits for the newest claim link the application mailed to this address.
+ *
+ * Polling rather than a fixed wait: the send happens inside the server action
+ * the click triggered, and how long that takes is not this test's business.
+ */
+export async function waitForLatestClaimUrl(email: string): Promise<string> {
+  let entries: EmailOutboxEntry[] = [];
+
+  await expect
+    .poll(
+      () => {
+        entries = emailEntriesFor(email).filter((entry) => entry.template === 'provider-claim');
+        return entries.length;
+      },
+      {
+        message: `no claim invitation was recorded for ${email}`,
+        timeout: 20_000,
+        intervals: [100, 200, 500],
+      },
+    )
+    .toBeGreaterThan(0);
+
+  const latest = entries[entries.length - 1];
+  if (!latest?.actionUrl) {
+    throw new Error(`no claim invitation was recorded for ${email}`);
+  }
+
+  return latest.actionUrl;
+}
+
+/** How many claim invitations this address has received so far in the run. */
+export function claimInvitationCount(email: string): number {
+  return emailEntriesFor(email).filter((entry) => entry.template === 'provider-claim').length;
 }

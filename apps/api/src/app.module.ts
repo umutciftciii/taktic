@@ -7,6 +7,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { HealthModule } from './modules/health/health.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
+import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { OffersModule } from './modules/offers/offers.module';
 import { PhoneVerificationModule } from './modules/phone-verification/phone-verification.module';
@@ -34,6 +35,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CategoriesModule,
     QuestionsModule,
     ServiceRequestsModule,
+    ProviderClaimModule,
     ProvidersModule,
     OffersModule,
     PhoneVerificationModule,

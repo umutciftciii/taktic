@@ -18,6 +18,11 @@ import {
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
+import {
+  isValidProviderEmail,
+  normalizeProviderEmail,
+  sameProviderEmail,
+} from '../../common/provider-email';
 import { runSerializable } from '../../common/serializable-transaction';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -28,15 +33,23 @@ import {
   WITHDRAWABLE_OFFER_STATUSES,
 } from '../offers/offer-transitions';
 import { calculateRefundEligibility } from '../offers/refund-policy';
+import {
+  isClaimableProviderStatus,
+  isProviderClaimEnabled,
+} from '../provider-claim/provider-claim.config';
+import { ProviderClaimService } from '../provider-claim/provider-claim.service';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
 
+type ProviderOwnershipFilter = 'claimed' | 'unclaimed';
+
 type ProviderListFilters = {
   status?: string;
   city?: string;
   categoryId?: string;
+  ownership?: string;
 };
 
 type RequestDiscoveryFilters = {
@@ -76,14 +89,40 @@ export const CATEGORY_PRICE_UNSET_CODE = 'CATEGORY_PRICE_UNSET';
 export const CREDIT_COST_CHANGED_CODE = 'CREDIT_COST_CHANGED';
 export const CATEGORY_INACTIVE_CODE = 'CATEGORY_INACTIVE';
 
+/**
+ * Refused when a guest application arrives without a usable contact address
+ * while the claim flow is on. Such an application could never be handed to
+ * anybody: the claim link is the only proof of ownership the flow has.
+ */
+export const PROVIDER_EMAIL_REQUIRED_CODE = 'PROVIDER_EMAIL_REQUIRED';
+
+/**
+ * Refused when a claimed application tries to move its contact address.
+ *
+ * The account's e-mail and the application's e-mail are set equal at the moment
+ * a claim grants ownership, and nothing afterwards may pull them apart — an
+ * application whose contact address is not the owner's would let a future
+ * invitation reach somebody who is not the owner.
+ *
+ * Scoped to claimed applications only. A profile a signed-in provider created
+ * for themselves was never claimed, so it carries none of that history and
+ * keeps its ordinary editing behaviour.
+ */
+export const PROVIDER_EMAIL_IMMUTABLE_CODE = 'PROVIDER_EMAIL_IMMUTABLE';
+
 @Injectable()
 export class ProvidersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NumberingService) private readonly numbering: NumberingService,
+    @Inject(ProviderClaimService) private readonly providerClaim: ProviderClaimService,
   ) {}
 
-  async createProvider(dto: CreateProviderDto, user: AuthUser | null = null) {
+  async createProvider(
+    dto: CreateProviderDto,
+    user: AuthUser | null = null,
+    meta: { ipAddress?: string | null; userAgent?: string | null } = {},
+  ) {
     if (user?.role === UserRole.CUSTOMER) {
       throw new ForbiddenException('Customers cannot create provider profiles');
     }
@@ -105,8 +144,19 @@ export class ProvidersService {
 
     const payload = await this.normalizeAndValidatePayload(dto);
 
+    // An application nobody is signed in for is the one the claim flow exists
+    // for, and it is the only one that needs a reachable address. A provider
+    // creating their own profile is already the owner, so their address stays
+    // as optional as it has always been.
+    const willBeUnowned = user?.role !== UserRole.PROVIDER;
+    if (willBeUnowned && isProviderClaimEnabled()) {
+      requireClaimableApplicationEmail(payload.email);
+    }
+
+    let provider: Awaited<ReturnType<ProvidersService['createProviderRecord']>>;
+
     try {
-      return await this.createProviderRecord(payload, user);
+      provider = await this.createProviderRecord(payload, user);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Bu hesap için zaten bir hizmet veren profili var.');
@@ -114,6 +164,15 @@ export class ProvidersService {
 
       throw error;
     }
+
+    if (willBeUnowned) {
+      // Best-effort and outside the write above: a transport failure must not
+      // undo an application the visitor already completed. The service is a
+      // no-op while the flag is off.
+      await this.providerClaim.issueForNewApplication(provider.id, meta);
+    }
+
+    return provider;
   }
 
   private createProviderRecord(
@@ -150,6 +209,7 @@ export class ProvidersService {
     const status = normalizeOptionalStatus(filters.status);
     const city = normalizeNullableString(filters.city);
     const categoryId = normalizeNullableString(filters.categoryId);
+    const ownership = normalizeOptionalOwnership(filters.ownership);
 
     const providers = await this.prisma.providerProfile.findMany({
       where: {
@@ -162,6 +222,11 @@ export class ProvidersService {
               },
             }
           : {}),
+        // "Unclaimed" is exactly "no account owns this", which is the one
+        // question the applications queue is about. It deliberately does not
+        // split owned profiles by how they got their owner.
+        ...(ownership === 'unclaimed' ? { userId: null } : {}),
+        ...(ownership === 'claimed' ? { userId: { not: null } } : {}),
       },
       orderBy: { createdAt: 'desc' },
       include: providerInclude,
@@ -238,6 +303,7 @@ export class ProvidersService {
       packagePurchasesCount,
       recentOffers,
       recentPackagePurchases,
+      claim,
     ] = await Promise.all([
       this.getProviderCreditBalance(id),
       this.prisma.offer.count({
@@ -292,6 +358,7 @@ export class ProvidersService {
           refundedAt: true,
         },
       }),
+      this.providerClaim.getClaimSummary(id),
     ]);
 
     return {
@@ -302,7 +369,25 @@ export class ProvidersService {
       packagePurchasesCount,
       recentOffers,
       recentPackagePurchases,
+      claim,
+      claimEnabled: isProviderClaimEnabled(),
     };
+  }
+
+  /**
+   * Re-sends the claim invitation for an application nobody owns yet.
+   *
+   * The result carries a status and an expiry and nothing else. Handing the
+   * link back over HTTP would make the mailbox stop being the thing that proves
+   * ownership, and it is the same reason the customer activation path returns
+   * no URL either.
+   */
+  async resendClaimInvitation(
+    providerId: string,
+    actor: AuthUser,
+    meta: { ipAddress?: string | null; userAgent?: string | null } = {},
+  ) {
+    return this.providerClaim.resendForProvider(providerId, actor.id, meta);
   }
 
   private async getProviderListMetrics(providerIds: string[]) {
@@ -408,6 +493,7 @@ export class ProvidersService {
     const existingProvider = await this.getProviderForUpdate(id);
     ensureProviderUpdateAccess(existingProvider, user);
     const payload = await this.normalizeAndValidatePayload(dto);
+    ensureContactEmailStable(existingProvider, payload.email);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.providerServiceCategory.deleteMany({ where: { providerId: id } });
@@ -451,17 +537,30 @@ export class ProvidersService {
 
     const now = new Date();
 
-    return this.prisma.providerProfile.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        moderationNote,
-        rejectionReason: dto.status === ProviderStatus.REJECTED ? rejectionReason : null,
-        ...(dto.status === ProviderStatus.APPROVED ? { approvedAt: now } : {}),
-        ...(dto.status === ProviderStatus.REJECTED ? { rejectedAt: now } : {}),
-        ...(dto.status === ProviderStatus.SUSPENDED ? { suspendedAt: now } : {}),
-      },
-      include: providerInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.providerProfile.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          moderationNote,
+          rejectionReason: dto.status === ProviderStatus.REJECTED ? rejectionReason : null,
+          ...(dto.status === ProviderStatus.APPROVED ? { approvedAt: now } : {}),
+          ...(dto.status === ProviderStatus.REJECTED ? { rejectedAt: now } : {}),
+          ...(dto.status === ProviderStatus.SUSPENDED ? { suspendedAt: now } : {}),
+        },
+        include: providerInclude,
+      });
+
+      // A link mailed while the application was under review must not outlive
+      // its rejection or suspension. Same transaction as the status change, so
+      // there is no window in which the new status is live and an old link
+      // still is. An application moving *into* a claimable status keeps its
+      // links — nothing about them became untrue.
+      if (!isClaimableProviderStatus(dto.status)) {
+        await this.providerClaim.invalidateActiveTokens(tx, id);
+      }
+
+      return updated;
     });
   }
 
@@ -809,7 +908,11 @@ export class ProvidersService {
       businessName: normalizeRequiredString(dto.businessName, 'Business name'),
       contactName: normalizeRequiredString(dto.contactName, 'Contact name'),
       phone: normalizePhone(dto.phone),
-      email: normalizeNullableString(dto.email),
+      // Folded to lower case, like User.email: the claim flow decides who may
+      // take an application over by comparing the two, and a comparison between
+      // a folded value and an unfolded one fails for anybody who typed a
+      // capital letter.
+      email: normalizeProviderEmail(dto.email),
       taxType: normalizeNullableString(dto.taxType),
       taxNumber: normalizeNullableString(dto.taxNumber),
       city: normalizeRequiredString(dto.city, 'City'),
@@ -849,7 +952,7 @@ export class ProvidersService {
   private async getProviderForUpdate(id: string) {
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, email: true, claimedAt: true },
     });
 
     if (!provider) {
@@ -1019,8 +1122,9 @@ function ensureProviderUpdateAccess(
     throw new ForbiddenException('Customers cannot update provider profiles');
   }
 
-  // Guest applications have no owner yet. Until a claim flow exists they are
-  // administrable only — anonymous or third-party edits are never allowed.
+  // Guest applications have no owner yet: an anonymous or third-party edit is
+  // never allowed, and an applicant reaches their own application by claiming
+  // it — which makes them the owner — not by editing it as a stranger.
   if (!provider.userId) {
     throw new ForbiddenException('Unclaimed provider profiles can only be updated by an admin');
   }
@@ -1028,6 +1132,73 @@ function ensureProviderUpdateAccess(
   if (user.role !== UserRole.PROVIDER || user.id !== provider.userId) {
     throw new ForbiddenException('Provider access denied');
   }
+}
+
+/**
+ * A guest application must be reachable, or nobody can ever be given it.
+ *
+ * Only enforced while PROVIDER_CLAIM_ENABLED is on and only for applications
+ * that will have no owner: with the flag off the address stays as optional as
+ * it has always been, so nothing about today's guest form changes.
+ */
+function requireClaimableApplicationEmail(email: string | null) {
+  if (!email) {
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      code: PROVIDER_EMAIL_REQUIRED_CODE,
+      message: 'Başvuruyu hesabınıza bağlayabilmemiz için e-posta adresi gerekli.',
+    });
+  }
+
+  if (!isValidProviderEmail(email)) {
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      code: PROVIDER_EMAIL_REQUIRED_CODE,
+      message: 'Geçerli bir e-posta adresi girin.',
+    });
+  }
+}
+
+/**
+ * A *claimed* profile's contact address is frozen.
+ *
+ * The lock exists for one reason: a claim grants ownership by proving control
+ * of exactly this address, and the new account's own e-mail is set equal to it
+ * at that moment. Letting either side move afterwards would point a later
+ * invitation — or a support conversation driven off the application — at
+ * somebody who is not the owner. Admins are not exempt; the invariant protects
+ * the owner, not the operator.
+ *
+ * `claimedAt`, not `userId`, is what that reasoning is about. A profile created
+ * by a provider who was already signed in was never claimed and never had an
+ * address vouched for, so freezing it would be a rule with no argument behind
+ * it — and a retroactive one: such a profile may legitimately carry no address
+ * at all, and the lock would leave it unable to ever gain one. Those profiles
+ * keep the editing behaviour they have always had.
+ *
+ * Unclaimed applications also stay editable, which is the supported way to fix
+ * an address that was typed wrong before a fresh invitation is issued.
+ *
+ * Comparison is case-insensitive, so re-submitting an unchanged legacy value is
+ * not a change; clearing the address is one, and is refused like any other.
+ */
+function ensureContactEmailStable(
+  provider: { claimedAt: Date | null; email: string | null },
+  nextEmail: string | null,
+) {
+  if (!provider.claimedAt || sameProviderEmail(provider.email, nextEmail)) {
+    return;
+  }
+
+  throw new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: PROVIDER_EMAIL_IMMUTABLE_CODE,
+    message:
+      'Sahiplenilmiş bir başvurunun e-posta adresi değiştirilemez. Diğer bilgileri güncelleyebilirsiniz.',
+  });
 }
 
 const providerOfferInclude = {
@@ -1098,6 +1269,19 @@ function normalizeOptionalStatus(value: string | undefined) {
   }
 
   return normalized as ProviderStatus;
+}
+
+function normalizeOptionalOwnership(value: string | undefined): ProviderOwnershipFilter | null {
+  const normalized = normalizeNullableString(value)?.toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized !== 'claimed' && normalized !== 'unclaimed') {
+    throw new BadRequestException('ownership must be claimed or unclaimed');
+  }
+
+  return normalized;
 }
 
 function normalizeDiscoveryFilters(filters: RequestDiscoveryFilters) {

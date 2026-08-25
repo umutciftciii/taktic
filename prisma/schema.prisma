@@ -140,6 +140,7 @@ model User {
   createdAdminInviteTokens  AdminInviteToken[]          @relation("AdminInviteTokenCreatedBy")
   notificationLogs          NotificationLog[]
   contactRevealEvents       ContactRevealEvent[]
+  createdProviderClaimTokens ProviderClaimToken[]       @relation("ProviderClaimTokenCreatedBy")
 
   @@index([role])
   @@index([isActive])
@@ -404,18 +405,29 @@ model NotificationLog {
   errorCode         String?
   requestId         String?
   userId            String?
+  /// Which provider application a message was about — the audit link behind
+  /// "how many claim invitations went out for this application, and did the
+  /// last one leave the building".
+  ///
+  /// Nullable and never backfilled: every row written before this column
+  /// existed carries NULL, and messages that are not about a provider still do.
+  /// It is an id and nothing else — no address, no token, no action URL — so it
+  /// does not widen what this table holds.
+  providerId        String?
   createdAt         DateTime            @default(now())
   sentAt            DateTime?
   failedAt          DateTime?
 
-  request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
-  user    User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  request  ServiceRequest?  @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  user     User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  provider ProviderProfile? @relation(fields: [providerId], references: [id], onDelete: SetNull)
 
   @@index([channel, createdAt])
   @@index([status, createdAt])
   @@index([template, createdAt])
   @@index([requestId])
   @@index([userId])
+  @@index([providerId])
 }
 
 model ServiceRequestAnswer {
@@ -459,6 +471,16 @@ model ProviderProfile {
   approvedAt      DateTime?
   rejectedAt      DateTime?
   suspendedAt     DateTime?
+  /// When a guest application became owned by a platform account through the
+  /// claim flow, and never for any other reason.
+  ///
+  /// NULL therefore means two different things that a reader must not confuse:
+  /// an application nobody owns yet (`userId` is also NULL), or a profile that
+  /// was born owned because a signed-in provider created it (`userId` is set).
+  /// `userId` says who owns it; this says whether a claim is how that happened.
+  ///
+  /// Written once, inside the claim transaction, and never cleared.
+  claimedAt       DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -469,6 +491,8 @@ model ProviderProfile {
   creditTransactions ProviderCreditTransaction[]
   packagePurchases   PackagePurchase[]
   contactRevealEvents ContactRevealEvent[]
+  claimTokens        ProviderClaimToken[]
+  notificationLogs   NotificationLog[]
 
   @@index([status])
   @@index([city])
@@ -685,4 +709,42 @@ model AdminInviteToken {
   @@index([userId])
   @@index([createdById])
   @@index([expiresAt])
+}
+
+/// A one-time invitation to take ownership of a guest provider application.
+///
+/// The token is bound to the application, not to an account: at the moment it
+/// is issued the applicant may have no platform account at all. What ties it to
+/// a person is `emailSnapshot` — the application's contact address as it stood
+/// when the link was mailed. If the address is later corrected, the snapshot no
+/// longer matches and every outstanding link for that application is dead,
+/// which is what stops a link mailed to the wrong address from staying usable.
+///
+/// The raw token is never stored: only `sha256(raw)`, so a database dump cannot
+/// be replayed into an ownership grant. It is single use (`usedAt`), and
+/// issuing a new one closes every older live one, so at most one link per
+/// application is ever valid.
+model ProviderClaimToken {
+  id            String    @id @default(cuid())
+  providerId    String
+  tokenHash     String    @unique
+  /// Lower-cased copy of ProviderProfile.email at issue time. Compared against
+  /// the live value on every use; a mismatch invalidates the token.
+  emailSnapshot String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  /// The admin who re-sent the invitation, or NULL when the application's own
+  /// submission issued it.
+  createdById   String?
+  createdAt     DateTime  @default(now())
+
+  provider  ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  createdBy User?           @relation("ProviderClaimTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([providerId])
+  @@index([createdById])
+  @@index([expiresAt])
+  /// Per-application send budget: "links issued for this application since
+  /// <cutoff>".
+  @@index([providerId, createdAt])
 }

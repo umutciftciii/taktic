@@ -1,10 +1,16 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { apiFetch, Category, getCurrentUser, ProviderDashboard } from '../../../lib/api';
+import { isProviderClaimEnabled } from '../../../lib/provider-claim';
 import { createProviderAction } from '../actions';
 
-export default async function ProviderRegisterPage() {
-  const [categories, user] = await Promise.all([
+type ProviderRegisterPageProps = {
+  searchParams: Promise<{ error?: string }>;
+};
+
+export default async function ProviderRegisterPage({ searchParams }: ProviderRegisterPageProps) {
+  const [{ error }, categories, user] = await Promise.all([
+    searchParams,
     apiFetch<Category[]>('/categories'),
     getCurrentUser(),
   ]);
@@ -20,6 +26,12 @@ export default async function ProviderRegisterPage() {
       redirect('/providers/me');
     }
   }
+
+  // A guest application has to be reachable while the claim flow is on: the
+  // link mailed to this address is the only thing that can hand the application
+  // back to whoever submitted it. A provider who is signed in already owns
+  // whatever they create, so nothing about their form changes.
+  const emailRequired = isProviderClaimEnabled() && user?.role !== 'PROVIDER';
 
   return (
     <div className="provider-apply-shell">
@@ -37,12 +49,30 @@ export default async function ProviderRegisterPage() {
           </p>
         </header>
 
+        {error === 'email' ? (
+          <div className="provider-apply-notice is-warning" role="alert">
+            <span className="provider-apply-notice-icon" aria-hidden="true">!</span>
+            <span>Geçerli bir e-posta adresi girin; başvurunuzu bu adrese bağlayacağız.</span>
+          </div>
+        ) : null}
+
         {!user ? (
           <div className="provider-apply-notice" role="status">
             <span className="provider-apply-notice-icon" aria-hidden="true">i</span>
             <span>
-              Misafir başvuru hâlâ açık. Başvurunuzu hesabınıza bağlamak için önce{' '}
-              <Link href="/register/provider">hizmet veren hesabı oluşturabilirsiniz</Link>.
+              {emailRequired ? (
+                <>
+                  Misafir başvuru hâlâ açık. Başvurunuzu tamamladıktan sonra e-posta adresinize bir
+                  bağlantı göndereceğiz; o bağlantıyla başvurunuzu kendi hesabınıza bağlayabilirsiniz.
+                  Dilerseniz önce{' '}
+                  <Link href="/register/provider">hizmet veren hesabı oluşturabilirsiniz</Link>.
+                </>
+              ) : (
+                <>
+                  Misafir başvuru hâlâ açık. Başvurunuzu hesabınıza bağlamak için önce{' '}
+                  <Link href="/register/provider">hizmet veren hesabı oluşturabilirsiniz</Link>.
+                </>
+              )}
             </span>
           </div>
         ) : null}
@@ -116,13 +146,22 @@ export default async function ProviderRegisterPage() {
                 />
               </label>
               <label className="provider-apply-field">
-                <span className="provider-apply-label">E-posta</span>
+                <span className="provider-apply-label">
+                  E-posta{' '}
+                  {emailRequired ? <span className="provider-apply-required">*</span> : null}
+                </span>
                 <input
                   className="provider-apply-input"
                   name="email"
                   type="email"
+                  required={emailRequired}
                   placeholder="ornek@firma.com"
                 />
+                {emailRequired ? (
+                  <span className="provider-apply-help">
+                    Başvuruyu hesabınıza bağlayan bağlantıyı bu adrese göndereceğiz.
+                  </span>
+                ) : null}
               </label>
             </div>
           </section>

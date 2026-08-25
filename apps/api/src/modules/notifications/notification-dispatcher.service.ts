@@ -9,6 +9,12 @@ import { SmsMessage, SmsPort } from './sms.port';
 export type DispatchContext = {
   requestId?: string | null;
   userId?: string | null;
+  /**
+   * The provider application a message is about. Set on messages that have no
+   * account behind them yet — a claim invitation goes out before anybody owns
+   * the application, so `userId` cannot carry the link.
+   */
+  providerId?: string | null;
 };
 
 export type DispatchOutcome = {
@@ -80,6 +86,7 @@ export class NotificationDispatcher {
         status: NotificationStatus.PENDING,
         requestId: context.requestId ?? null,
         userId: context.userId ?? null,
+        providerId: context.providerId ?? null,
       },
       select: { id: true },
     });

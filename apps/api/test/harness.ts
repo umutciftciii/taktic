@@ -141,6 +141,7 @@ const TRUNCATED_TABLES = [
   'ContactRevealEvent',
   'NotificationLog',
   'PhoneVerification',
+  'ProviderClaimToken',
   'ProviderCreditTransaction',
   'PackagePurchase',
   'Offer',
@@ -238,16 +239,24 @@ export async function createCategory(
 
 export async function createProviderProfile(
   prisma: PrismaClient,
-  overrides: { userId?: string | null; status?: ProviderStatus } = {},
+  overrides: {
+    userId?: string | null;
+    status?: ProviderStatus;
+    /** `null` produces an application with no contact address, which is the
+     * shape of every guest application submitted before the claim flag existed. */
+    email?: string | null;
+    claimedAt?: Date | null;
+  } = {},
 ) {
   const suffix = uniqueSuffix();
   return prisma.providerProfile.create({
     data: {
       userId: overrides.userId ?? null,
+      claimedAt: overrides.claimedAt ?? null,
       businessName: `İşletme ${suffix}`,
       contactName: `Yetkili ${suffix}`,
       phone: `0555111${suffix.padStart(4, '0')}`,
-      email: `provider-${suffix}@example.test`,
+      email: overrides.email === undefined ? `provider-${suffix}@example.test` : overrides.email,
       taxType: 'SAHIS',
       taxNumber: `1234567${suffix.padStart(3, '0')}`,
       city: 'İstanbul',

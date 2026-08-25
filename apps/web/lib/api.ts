@@ -123,6 +123,9 @@ export type ProviderVisibility = 'public' | 'owner' | 'admin';
 export type ProviderProfile = {
   id: string;
   userId?: string | null;
+  /** Set only when a guest application was claimed; that is what freezes the
+   * contact address. A profile a provider created for themselves has none. */
+  claimedAt?: string | null;
   visibility?: ProviderVisibility;
   businessName: string;
   contactName?: string;

@@ -11,7 +11,16 @@
  * and nothing more: it must never claim the request is "verified", and it must
  * never promise that offers are coming.
  */
-export type NotificationTemplate = 'customer-activation' | 'request-expiring';
+/**
+ * `provider-claim` invites the applicant behind a guest provider application to
+ * take ownership of it. It carries the single-use claim URL and nothing about
+ * the moderation outcome: an application that is still under review must not be
+ * described as accepted, and a claim never approves anything.
+ */
+export type NotificationTemplate =
+  | 'customer-activation'
+  | 'request-expiring'
+  | 'provider-claim';
 
 export type NotificationMessage = {
   template: NotificationTemplate;

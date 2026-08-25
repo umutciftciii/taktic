@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
@@ -17,8 +28,17 @@ export class ProvidersController {
 
   @Post()
   @UseGuards(OptionalAuthGuard)
-  createProvider(@Body() dto: CreateProviderDto, @CurrentUser() user: AuthUser | null) {
-    return this.providersService.createProvider(dto, user);
+  createProvider(
+    @Body() dto: CreateProviderDto,
+    @CurrentUser() user: AuthUser | null,
+    @Req() request: any,
+  ) {
+    // The client address is passed through only so the claim invitation this
+    // may trigger can be rate limited. It is never stored.
+    return this.providersService.createProvider(dto, user, {
+      ipAddress: request.ip ?? null,
+      userAgent: request.headers?.['user-agent'] ?? null,
+    });
   }
 
   @Get()
@@ -28,8 +48,9 @@ export class ProvidersController {
     @Query('status') status?: string,
     @Query('city') city?: string,
     @Query('categoryId') categoryId?: string,
+    @Query('ownership') ownership?: string,
   ) {
-    return this.providersService.listProviders({ status, city, categoryId });
+    return this.providersService.listProviders({ status, city, categoryId, ownership });
   }
 
   @Get('me')
@@ -116,6 +137,29 @@ export class ProvidersController {
   @Roles(UserRole.SUPER_ADMIN)
   getAdminProviderDetail(@Param('providerId') providerId: string) {
     return this.providersService.getAdminProviderDetail(providerId);
+  }
+
+  /**
+   * Re-sends the claim invitation for an application nobody owns yet.
+   *
+   * SUPER_ADMIN only, and deliberately the only way to ask for another link:
+   * a public "resend to this address" endpoint would answer whether an address
+   * has an application behind it, which is exactly the enumeration this feature
+   * must not offer. The response carries a status and an expiry — never the
+   * token, the URL or the address.
+   */
+  @Post(':providerId/claim-invitations')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  resendClaimInvitation(
+    @Param('providerId') providerId: string,
+    @CurrentUser() actor: AuthUser,
+    @Req() request: any,
+  ) {
+    return this.providersService.resendClaimInvitation(providerId, actor, {
+      ipAddress: request.ip ?? null,
+      userAgent: request.headers?.['user-agent'] ?? null,
+    });
   }
 
   @Get(':id')

@@ -6151,6 +6151,13 @@ body:has(.pdash-shell) #site-header {
   font-weight: 600;
 }
 
+.provider-apply-help {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  color: #5b6169;
+}
+
 .provider-apply-input,
 .provider-apply-textarea {
   width: 100%;
