@@ -31,8 +31,20 @@ export const LEMON_SQUEEZY_CHECKOUT_TTL_MINUTES = 60;
  * Authorization header, a request body field, or an HMAC key. Checking the
  * shape turns "the variable holds a placeholder, or the whole .env line" into a
  * boot failure instead of a 401 on the first checkout.
+ *
+ * The API key's upper bound is deliberately generous. Lemon Squeezy issues its
+ * keys as JWTs and a real one runs to roughly a thousand characters, so a bound
+ * chosen to look like "a key length" would reject every key the provider
+ * actually hands out — and it would do so with a message pointing at the
+ * operator's paste rather than at the check that is wrong. What the bound is
+ * for is refusing something that is not a credential at all: a whole pasted
+ * .env, a file, an unbounded blob.
  */
-const API_KEY_PATTERN = /^[A-Za-z0-9._~+/=-]{40,512}$/;
+const API_KEY_MIN_LENGTH = 40;
+const API_KEY_MAX_LENGTH = 4096;
+const API_KEY_PATTERN = new RegExp(
+  `^[A-Za-z0-9._~+/=-]{${API_KEY_MIN_LENGTH},${API_KEY_MAX_LENGTH}}$`,
+);
 const NUMERIC_ID_PATTERN = /^[0-9]{1,20}$/;
 const WEBHOOK_SECRET_PATTERN = /^[\x21-\x7e]{16,255}$/;
 const PACKAGE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
