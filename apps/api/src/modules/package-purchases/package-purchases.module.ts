@@ -10,5 +10,6 @@ import { PackagePurchasesService } from './package-purchases.service';
   imports: [PrismaModule, AuthModule, CreditsModule, NumberingModule],
   controllers: [PackagePurchasesController],
   providers: [PackagePurchasesService],
+  exports: [PackagePurchasesService],
 })
 export class PackagePurchasesModule {}

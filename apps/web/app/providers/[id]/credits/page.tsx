@@ -4,6 +4,7 @@ import {
   apiFetch,
   getCurrentUser,
   OfferCreditPackage,
+  PaymentMode,
   ProviderCredits,
   creditTxnTypeLabel,
   formatPrice,
@@ -23,9 +24,10 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
     redirect(`/login?redirectTo=/providers/${id}/credits`);
   }
 
-  const [credits, packages] = await Promise.all([
+  const [credits, packages, paymentMode] = await Promise.all([
     apiFetch<ProviderCredits>(`/providers/${id}/credits`),
     apiFetch<OfferCreditPackage[]>('/credit-packages'),
+    apiFetch<PaymentMode>('/payments/mode'),
   ]);
 
   const activePackages = packages.filter((p) => p.isActive);
@@ -74,9 +76,12 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
         </div>
       </section>
 
-      <div className="pdash-notice">
-        Paket satın alma akışı mock ödeme ile çalışır. Gerçek ödeme sağlayıcısı veya gerçek kart işlemi
-        yoktur.{' '}
+      <div className="pdash-notice" data-testid="payment-mode-notice">
+        <strong>Test ödemesi:</strong>{' '}
+        {paymentMode.provider === 'lemon-squeezy-test'
+          ? 'Paket satın alma akışı Lemon Squeezy sandbox (test) ortamında çalışır. Gerçek bir tahsilat yapılmaz ve kartınızdan para çekilmez; yalnızca test kartları kabul edilir.'
+          : 'Paket satın alma akışı uygulama içi mock ödeme ile çalışır. Gerçek ödeme sağlayıcısı veya gerçek kart işlemi yoktur.'}{' '}
+        Krediler yalnızca doğrulanmış ödeme bildirimi sonrasında hesabınıza yüklenir.{' '}
         <Link href={`/providers/${id}/package-purchases`}>Geçmiş satın almalarımı gör</Link>
       </div>
 
@@ -125,7 +130,7 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
                   <input name="providerNote" placeholder="Satın alma için kısa not" />
                 </label>
                 <button className="pdash-btn pdash-btn-primary pdash-btn-block" type="submit">
-                  Paket Satın Al
+                  Test Ödemesiyle Paket Al
                 </button>
               </form>
             </article>

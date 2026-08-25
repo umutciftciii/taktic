@@ -8,6 +8,7 @@ import {
 import { CreditTransactionType, NumberedEntityType, PackagePurchaseStatus, Prisma } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolvePaymentProviderKind } from '../payments/payment-provider.config';
 import { CreditsService } from '../credits/credits.service';
 import { NumberingService } from '../numbering/numbering.service';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
@@ -28,7 +29,24 @@ export class PackagePurchasesService {
     @Inject(NumberingService) private readonly numbering: NumberingService,
   ) {}
 
-  async createProviderPurchase(providerId: string, dto: CreatePackagePurchaseDto) {
+  /**
+   * Opens a PENDING purchase against an active credit package.
+   *
+   * The package is always resolved server-side and its credit amount, price and
+   * currency are snapshotted onto the row: a client says which package it
+   * wants and nothing about what that package costs or is worth.
+   *
+   * `payment` is supplied only by the checkout flow (payments.service.ts), which
+   * needs the provider kind and its own correlation token written in the same
+   * statement that creates the row — a purchase that briefly exists without a
+   * reference is a purchase a webhook could not match. Callers that omit it get
+   * exactly the behaviour this method has always had.
+   */
+  async createProviderPurchase(
+    providerId: string,
+    dto: CreatePackagePurchaseDto,
+    payment?: { provider: string; reference: string },
+  ) {
     await this.ensureProviderExists(providerId);
     const creditPackage = await this.prisma.offerCreditPackage.findFirst({
       where: { id: normalizeRequiredString(dto.packageId, 'Package ID'), isActive: true },
@@ -54,8 +72,12 @@ export class PackagePurchasesService {
           currencySnapshot: creditPackage.currency,
           packageNameSnapshot: creditPackage.name,
           providerNote: normalizeNullableString(dto.providerNote),
+          ...(payment
+            ? { paymentProvider: payment.provider, paymentReference: payment.reference }
+            : {}),
         },
         include: packagePurchaseInclude,
+        omit: packagePurchaseOmit,
       });
     });
   }
@@ -67,6 +89,7 @@ export class PackagePurchasesService {
       where: { providerId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: packagePurchaseInclude,
+      omit: packagePurchaseOmit,
     });
   }
 
@@ -74,6 +97,7 @@ export class PackagePurchasesService {
     const purchase = await this.prisma.packagePurchase.findFirst({
       where: { id: purchaseId, providerId },
       include: packagePurchaseInclude,
+      omit: packagePurchaseOmit,
     });
 
     if (!purchase) {
@@ -83,7 +107,23 @@ export class PackagePurchasesService {
     return purchase;
   }
 
+  /**
+   * Settles a purchase through the in-app mock form.
+   *
+   * This endpoint hands out credits on nothing but a well-formed card shape, so
+   * it may only ever act on a purchase the mock provider opened. A process
+   * wired to a real payment provider has no business exposing it at all, and a
+   * purchase opened against a hosted checkout must not be settleable from
+   * inside the application while the provider still considers it open — that
+   * would be free credit for anyone who could reach the endpoint.
+   */
   async mockPayProviderPurchase(providerId: string, purchaseId: string, dto: MockPackagePaymentDto) {
+    if (resolvePaymentProviderKind() !== 'mock') {
+      throw new ConflictException(
+        'Mock payment is disabled: this deployment settles credit packages through its payment provider',
+      );
+    }
+
     const payment = normalizeMockPayment(dto);
     const now = new Date();
 
@@ -93,6 +133,7 @@ export class PackagePurchasesService {
         const purchase = await tx.packagePurchase.findFirst({
           where: { id: purchaseId, providerId },
           include: packagePurchaseInclude,
+          omit: packagePurchaseOmit,
         });
 
         if (!purchase) {
@@ -107,6 +148,14 @@ export class PackagePurchasesService {
           throw new ConflictException('Only pending package purchases can be paid');
         }
 
+        // Belt and braces for a deployment that was switched back to `mock`
+        // while purchases opened against a hosted checkout were still pending.
+        if (purchase.paymentProvider !== null && purchase.paymentProvider !== 'mock') {
+          throw new ConflictException(
+            'This purchase was opened with a payment provider and cannot be settled by mock payment',
+          );
+        }
+
         if (payment.shouldFail) {
           return tx.packagePurchase.update({
             where: { id: purchase.id },
@@ -116,6 +165,7 @@ export class PackagePurchasesService {
               mockPaymentFailureReason: 'Mock payment declined: card number ends with 0000',
             },
             include: packagePurchaseInclude,
+            omit: packagePurchaseOmit,
           });
         }
 
@@ -137,6 +187,7 @@ export class PackagePurchasesService {
             creditTransactionId: creditTransaction.id,
           },
           include: packagePurchaseInclude,
+          omit: packagePurchaseOmit,
         });
       },
       { label: 'packagePurchases.mockPayProviderPurchase' },
@@ -156,6 +207,7 @@ export class PackagePurchasesService {
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: packagePurchaseInclude,
+      omit: packagePurchaseOmit,
     });
   }
 
@@ -163,6 +215,7 @@ export class PackagePurchasesService {
     const purchase = await this.prisma.packagePurchase.findUnique({
       where: { id },
       include: packagePurchaseInclude,
+      omit: packagePurchaseOmit,
     });
 
     if (!purchase) {
@@ -197,6 +250,7 @@ export class PackagePurchasesService {
         ...(status === PackagePurchaseStatus.EXPIRED ? { expiredAt: now } : {}),
       },
       include: packagePurchaseInclude,
+      omit: packagePurchaseOmit,
     });
   }
 
@@ -228,6 +282,7 @@ const packagePurchaseInclude = {
     select: {
       id: true,
       name: true,
+      slug: true,
       creditAmount: true,
       priceAmount: true,
       currency: true,
@@ -235,6 +290,19 @@ const packagePurchaseInclude = {
     },
   },
 } satisfies Prisma.PackagePurchaseInclude;
+
+/**
+ * The correlation token never leaves this process.
+ *
+ * It is minted for one purchase, handed to the payment provider as checkout
+ * metadata, and matched back on the webhook. Nothing outside those two places
+ * has a use for it, so no API response — provider's own, admin's, or otherwise
+ * — carries it, and no screen can accidentally put it in a URL or a support
+ * ticket. Every query that projects a purchase drops it here.
+ */
+export const packagePurchaseOmit = {
+  paymentReference: true,
+} satisfies Prisma.PackagePurchaseOmit;
 
 function normalizeMockPayment(dto: MockPackagePaymentDto) {
   normalizeRequiredString(dto.cardholderName, 'Cardholder name');

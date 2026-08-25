@@ -449,6 +449,29 @@ export type ProviderCredits = {
 
 export type PackagePurchaseStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'REFUNDED';
 
+/**
+ * Which payment adapter the API is wired to.
+ *
+ * `mock` is the in-app test checkout; `lemon-squeezy-test` is a Lemon Squeezy
+ * **sandbox** integration. Neither collects real money. Live payment collection
+ * is not part of this build and is blocked at boot — see the payments section
+ * of the README for the approval this is waiting on.
+ */
+export type PaymentProviderKind = 'mock' | 'lemon-squeezy-test';
+
+export type AdminPaymentConfig = {
+  provider: PaymentProviderKind;
+  mode: 'test';
+  liveEnabled: false;
+  configurableKeys: string[];
+  /**
+   * Names of settings that are missing or malformed. The API never returns
+   * their values, and this screen never asks for them.
+   */
+  missingConfig: string[];
+  ready: boolean;
+};
+
 export type PackagePurchase = {
   id: string;
   purchaseNumber: string | null;
@@ -463,6 +486,13 @@ export type PackagePurchase = {
   adminNote: string | null;
   mockPaymentReference: string | null;
   mockPaymentFailureReason: string | null;
+  paymentProvider: PaymentProviderKind | null;
+  providerCheckoutId: string | null;
+  providerCheckoutExpiresAt: string | null;
+  providerOrderId: string | null;
+  paymentFailureCode: string | null;
+  manualReviewReason: string | null;
+  manualReviewAt: string | null;
   paidAt: string | null;
   failedAt: string | null;
   cancelledAt: string | null;
@@ -483,6 +513,7 @@ export type PackagePurchase = {
   package: {
     id: string;
     name: string;
+    slug?: string;
     creditAmount: number;
     priceAmount: number;
     currency: string;

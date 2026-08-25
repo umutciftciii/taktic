@@ -92,10 +92,33 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
           <section className="card" style={{ margin: 0 }}>
             <h2>Notlar ve referanslar</h2>
             <dl className="meta-row">
+              <dt>Ödeme sağlayıcı</dt>
+              <dd>
+                <code>{purchase.paymentProvider ?? 'mock'}</code>{' '}
+                <span className="badge badge-warn">test</span>
+              </dd>
               <dt>Ödeme Referansı</dt>
               <dd>{purchase.mockPaymentReference ?? '-'}</dd>
+              {/*
+                Opaque provider-side identifiers only. The correlation token this
+                application mints is deliberately not shown anywhere: it is the
+                value a webhook has to match, so it stays out of screens, logs
+                and API responses that are not the purchase's own.
+              */}
+              <dt>Sağlayıcı sipariş no</dt>
+              <dd>{purchase.providerOrderId ?? '-'}</dd>
+              <dt>Sağlayıcı ödeme oturumu</dt>
+              <dd>{purchase.providerCheckoutId ?? '-'}</dd>
               <dt>Başarısızlık sebebi</dt>
-              <dd className="muted">{purchase.mockPaymentFailureReason ?? '-'}</dd>
+              <dd className="muted">
+                {purchase.mockPaymentFailureReason ?? purchase.paymentFailureCode ?? '-'}
+              </dd>
+              <dt>Manuel inceleme</dt>
+              <dd className="muted">
+                {purchase.manualReviewAt
+                  ? `${purchase.manualReviewReason ?? 'Gerekli'} · ${formatDateTime(purchase.manualReviewAt)} — sağlayıcıdan iade/ters ibraz bildirimi geldi. Otomatik kredi düşülmedi.`
+                  : '-'}
+              </dd>
               <dt>Kredi işlemi</dt>
               <dd>{purchase.creditTransactionId ?? '-'}</dd>
               <dt>HV notu</dt>

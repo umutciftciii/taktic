@@ -25,6 +25,8 @@ export default async function ProviderPackagePurchaseCheckoutPage({
   }
 
   const purchase = await apiFetch<PackagePurchase>(`/providers/${id}/package-purchases/${purchaseId}`);
+  const hostedCheckoutUrl =
+    purchase.status === 'PENDING' ? purchase.providerCheckoutUrl : null;
 
   return (
     <ProviderShell user={user} providerId={id} active="packages">
@@ -46,7 +48,28 @@ export default async function ProviderPackagePurchaseCheckoutPage({
       <div className="pdash-detail-grid">
         <section className="pdash-detail-card">
           <h2>Kart Bilgileri</h2>
-          {purchase.status === 'PENDING' ? (
+          {hostedCheckoutUrl ? (
+            /*
+             * This purchase was opened against a hosted sandbox checkout, so
+             * the in-app mock form must not be offered for it: paying it here
+             * would settle a purchase the payment provider still considers
+             * open.
+             */
+            <div className="pdash-notice pdash-notice-warn">
+              Bu satın alma sağlayıcının test (sandbox) ödeme sayfası üzerinden başlatıldı. Ödemeyi
+              o sayfada tamamlayın; kredi yalnızca doğrulanmış ödeme bildirimi ulaştığında yüklenir.
+              <p style={{ marginBottom: 0, marginTop: 12 }}>
+                <a className="pdash-btn pdash-btn-primary" href={hostedCheckoutUrl}>
+                  Test Ödeme Sayfasını Aç
+                </a>
+              </p>
+            </div>
+          ) : purchase.paymentProvider === 'lemon-squeezy-test' ? (
+            <div className="pdash-notice pdash-notice-warn">
+              Bu satın alma sağlayıcının test ödeme sayfası üzerinden başlatıldı ve o sayfanın
+              süresi doldu. Kredilerim ekranından yeni bir test ödemesi başlatabilirsiniz.
+            </div>
+          ) : purchase.status === 'PENDING' ? (
             <form action={mockPayPackagePurchaseAction} className="pdash-form">
               <input type="hidden" name="providerId" value={id} />
               <input type="hidden" name="purchaseId" value={purchase.id} />

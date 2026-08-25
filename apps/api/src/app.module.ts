@@ -18,6 +18,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { NotificationLogsModule } from './modules/notification-logs/notification-logs.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -47,6 +48,7 @@ import { PrismaModule } from './prisma/prisma.module';
     DashboardModule,
     FinanceModule,
     PackagePurchasesModule,
+    PaymentsModule,
     UploadsModule,
     ContactSharingModule,
     NotificationLogsModule,

@@ -29,3 +29,15 @@ process.env.AUTH_RATE_LIMIT_WINDOW_SECONDS ??= '60';
 process.env.EMAIL_TRANSPORT = 'console';
 delete process.env.EMAIL_FROM;
 delete process.env.RESEND_API_KEY;
+// The suite never talks to a payment provider. Pinning the switch to the mock
+// adapter and dropping any Lemon Squeezy credential the developer happens to
+// have exported means a stray shell variable cannot point a test run at a real
+// sandbox store. The payment specs set these explicitly, and construct the
+// adapter with a stand-in transport.
+process.env.PAYMENT_PROVIDER = 'mock';
+delete process.env.LEMON_SQUEEZY_API_KEY;
+delete process.env.LEMON_SQUEEZY_STORE_ID;
+delete process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
+delete process.env.LEMON_SQUEEZY_VARIANT_MAP;
+delete process.env.LEMON_SQUEEZY_API_BASE_URL;
+delete process.env.LEMON_SQUEEZY_MODE;

@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
 import { assertEmailTransportConfig } from './modules/notifications/email-transport';
+import { assertPaymentProviderConfig } from './modules/payments/payment-provider.config';
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
@@ -26,7 +27,20 @@ async function bootstrap() {
   // ownership invitations no applicant ever receives, so it must not start.
   assertProviderClaimConfig();
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // The payment provider, before a single checkout can be opened. An
+  // unrecognised PAYMENT_PROVIDER, a sandbox provider in production, or any
+  // environment variable that could only mean "start taking real money" all
+  // stop the process here rather than surfacing as a purchase that loaded
+  // credits nobody paid for.
+  assertPaymentProviderConfig();
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Keeps the untouched request bytes on `req.rawBody`. The payment webhook
+    // verifies an HMAC over exactly those bytes; a re-serialised body would
+    // differ in whitespace and key order and make every genuine delivery look
+    // forged.
+    rawBody: true,
+  });
 
   // Rate limiting keys off req.ip. Express only derives that from
   // X-Forwarded-For when `trust proxy` is on, so it stays off unless the
