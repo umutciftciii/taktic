@@ -138,6 +138,8 @@ type OrderOverrides = {
   storeId?: number | string;
   status?: string;
   total?: number;
+  itemPrice?: number | null;
+  quantity?: number | null;
   currency?: string;
   variantId?: string;
   reference?: string | null;
@@ -161,11 +163,21 @@ function orderPayload(overrides: OrderOverrides = {}) {
       attributes: {
         store_id: overrides.storeId ?? Number(STORE_ID),
         status: overrides.status ?? 'paid',
-        total: overrides.total ?? 49900,
+        // Two kuruş above the line item on purpose. Lemon Squeezy normalises
+        // every order through USD and derives this figure from the rounded
+        // result, so in a store held in any other currency it drifts from the
+        // price the checkout was opened with. Every settlement case below
+        // therefore runs against a total that does *not* match the snapshot,
+        // which is the whole point: the line item is what gets checked.
+        total: overrides.total ?? 49902,
         currency: overrides.currency ?? 'TRY',
         user_name: BUYER_NAME,
         user_email: BUYER_EMAIL,
-        first_order_item: { variant_id: Number(overrides.variantId ?? VARIANT_ID) },
+        first_order_item: {
+          variant_id: Number(overrides.variantId ?? VARIANT_ID),
+          ...(overrides.itemPrice === null ? {} : { price: overrides.itemPrice ?? 49900 }),
+          ...(overrides.quantity === null ? {} : { quantity: overrides.quantity ?? 1 }),
+        },
       },
     },
   };
@@ -285,6 +297,32 @@ describe('a settled order loads credits exactly once', () => {
     expect(audit.purchaseId).toBe(purchase.id);
   });
 
+  /**
+   * The numbers here are the ones a real sandbox order came back with: a
+   * checkout opened at 999,00 TRY settled as an order whose `total` and
+   * `subtotal` both read 99904, two kuruş of rounding introduced by Lemon
+   * Squeezy converting to USD and back for its own accounting. Checking the
+   * order total meant no store held outside USD could ever settle; the line
+   * item still carried the 99900 this application asked for.
+   */
+  it('settles an order whose total drifted from the price the checkout was opened at', async () => {
+    const { provider, reference, purchase } = await pendingPurchaseFixture({
+      creditAmount: 50,
+      priceAmount: 99900,
+    });
+
+    const response = await deliver(
+      orderPayload({ reference, itemPrice: 99900, total: 99904 }),
+    ).expect(200);
+    expect(response.body).toEqual({ status: 'processed' });
+
+    const settled = await ctx.prisma.packagePurchase.findUniqueOrThrow({
+      where: { id: purchase.id },
+    });
+    expect(settled.status).toBe(PackagePurchaseStatus.PAID);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(50);
+  });
+
   it('treats a redelivered event as a no-op', async () => {
     const { provider, reference } = await pendingPurchaseFixture({ creditAmount: 25 });
     const payload = orderPayload({ reference });
@@ -386,7 +424,10 @@ describe('an event that does not agree with this application loads nothing', () 
   const cases: Array<{ name: string; overrides: OrderOverrides; detail: string }> = [
     { name: 'a live-mode delivery', overrides: { testMode: false }, detail: 'LIVE_MODE_EVENT' },
     { name: 'another store', overrides: { storeId: 999999 }, detail: 'STORE_MISMATCH' },
-    { name: 'a different amount', overrides: { total: 100 }, detail: 'AMOUNT_MISMATCH' },
+    { name: 'a different amount', overrides: { itemPrice: 100 }, detail: 'AMOUNT_MISMATCH' },
+    { name: 'more than one of the package', overrides: { quantity: 2 }, detail: 'AMOUNT_MISMATCH' },
+    { name: 'a line item with no price', overrides: { itemPrice: null }, detail: 'AMOUNT_MISMATCH' },
+    { name: 'a line item with no quantity', overrides: { quantity: null }, detail: 'AMOUNT_MISMATCH' },
     { name: 'a different currency', overrides: { currency: 'USD' }, detail: 'CURRENCY_MISMATCH' },
     { name: 'a different variant', overrides: { variantId: '111111' }, detail: 'VARIANT_MISMATCH' },
     { name: 'no correlation token', overrides: { reference: null }, detail: 'MISSING_REFERENCE' },
@@ -606,7 +647,7 @@ describe('what the feature is allowed to write down', () => {
   it('never states what was wrong in a public response', async () => {
     const { reference } = await pendingPurchaseFixture();
 
-    const mismatch = await deliver(orderPayload({ reference, total: 1 })).expect(200);
+    const mismatch = await deliver(orderPayload({ reference, itemPrice: 1 })).expect(200);
 
     expect(Object.keys(mismatch.body)).toEqual(['status']);
     expect(JSON.stringify(mismatch.body)).not.toContain('AMOUNT');
