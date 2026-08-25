@@ -39,6 +39,7 @@ type WebhookOverrides = {
   orderId?: string;
   testMode?: boolean;
   total?: number;
+  itemPrice?: number;
   signature?: string;
 };
 
@@ -59,9 +60,17 @@ async function deliverWebhook(reference: string, overrides: WebhookOverrides = {
       attributes: {
         store_id: Number(E2E_LEMON_STORE_ID),
         status: 'paid',
-        total: overrides.total ?? PRICE_AMOUNT,
+        // Two kuruş above the line item, the way a real order comes back: the
+        // provider derives this figure from a USD-rounded value, so it drifts
+        // in a store held in any other currency. What settles the purchase is
+        // the line item's own price.
+        total: overrides.total ?? PRICE_AMOUNT + 2,
         currency: 'TRY',
-        first_order_item: { variant_id: Number(E2E_LEMON_VARIANT_ID) },
+        first_order_item: {
+          variant_id: Number(E2E_LEMON_VARIANT_ID),
+          price: overrides.itemPrice ?? PRICE_AMOUNT,
+          quantity: 1,
+        },
       },
     },
   });

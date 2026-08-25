@@ -213,7 +213,13 @@ export class PaymentsWebhookService {
     // Compared against the purchase's own snapshot, not against the package
     // row: a package repriced after the checkout was opened must not change
     // what this order is allowed to settle.
-    if (event.totalMinor !== purchase.priceAmountSnapshot) {
+    //
+    // The event side of the comparison is the order line item's price times its
+    // quantity, not the order total — see chargedMinor in lemon-squeezy.webhook.ts.
+    // The equality is exact and stays exact: a tolerance here would be a hole in
+    // the one check that ties a settlement notice to an amount this application
+    // chose.
+    if (event.chargedMinor !== purchase.priceAmountSnapshot) {
       return 'AMOUNT_MISMATCH';
     }
 

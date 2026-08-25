@@ -61,8 +61,19 @@ export type LemonSqueezyEvent = {
   storeId: string | null;
   variantId: string | null;
   orderStatus: string | null;
-  /** Minor units, as the provider reports them. */
-  totalMinor: number | null;
+  /**
+   * What the buyer was charged for the credit package, in minor units:
+   * the order line item's price times its quantity.
+   *
+   * Deliberately not `attributes.total`. Lemon Squeezy normalises every order
+   * through USD for its own accounting and derives the order's `total` and
+   * `subtotal` from that rounded USD figure, so a store in any other currency
+   * reports a total a minor unit or two away from the price the checkout was
+   * opened with — 99900 kuruş comes back as 99904. The line item keeps the
+   * exact `custom_price` this application sent, which is the number worth
+   * checking: it is the one this application chose.
+   */
+  chargedMinor: number | null;
   currency: string | null;
   /** This application's own correlation token, echoed back in custom data. */
   reference: string | null;
@@ -144,7 +155,7 @@ export function readLemonSqueezyEvent(rawBody: Buffer): LemonSqueezyEvent | null
     storeId: readNumericId(attributes.store_id),
     variantId: readNumericId(firstItem?.variant_id),
     orderStatus: readOpaque(attributes.status),
-    totalMinor: readMinorAmount(attributes.total),
+    chargedMinor: readChargedAmount(firstItem),
     currency: readCurrency(attributes.currency),
     reference: readReference(custom.purchase_reference),
   };
@@ -179,6 +190,43 @@ function readNumericId(value: unknown): string | null {
 
   if (typeof value === 'string' && /^[0-9]{1,20}$/.test(value.trim())) {
     return value.trim();
+  }
+
+  return null;
+}
+
+/**
+ * The line item's price times its quantity.
+ *
+ * Both halves are validated and either one being absent or malformed yields
+ * null, which settles nothing. Multiplying rather than assuming a quantity of
+ * one is what stops an order for two of the same package from quietly settling
+ * a single-package purchase: the product simply will not equal the snapshot.
+ */
+function readChargedAmount(item: Record<string, unknown> | undefined): number | null {
+  if (!item) {
+    return null;
+  }
+
+  const price = readMinorAmount(item.price);
+  const quantity = readQuantity(item.quantity);
+
+  if (price === null || quantity === null) {
+    return null;
+  }
+
+  const charged = price * quantity;
+  return Number.isSafeInteger(charged) ? charged : null;
+}
+
+function readQuantity(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string' && /^[0-9]{1,6}$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return parsed > 0 ? parsed : null;
   }
 
   return null;
