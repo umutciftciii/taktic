@@ -1,9 +1,9 @@
 /**
  * Transport-agnostic outbound notification contract.
  *
- * Only the port and a development console adapter exist in this phase; picking
- * and wiring a real provider is a later phase. Call sites depend on this
- * abstract class so swapping the adapter never touches business code.
+ * Call sites depend on this abstract class, so swapping the adapter — console in
+ * development, the recording file outbox in the browser suite, Resend in a
+ * delivering deployment — never touches business code.
  */
 /**
  * `request-expiring` is the day-7 nudge for an approved request that has not
@@ -36,6 +36,17 @@ export type NotificationMessage = {
   data?: Record<string, string | null | undefined>;
 };
 
+/**
+ * Mirrors {@link import('./sms.port').SmsSendResult}: the only thing an adapter
+ * reports back is the provider's own identifier for the accepted message, which
+ * is what support and reconciliation need. Adapters that deliver nothing return
+ * null — there is no id to hand out — and no adapter may return anything else
+ * about the message, because everything else is content.
+ */
+export type NotificationSendResult = {
+  providerMessageId: string | null;
+};
+
 export abstract class NotificationPort {
-  abstract send(message: NotificationMessage): Promise<void>;
+  abstract send(message: NotificationMessage): Promise<NotificationSendResult>;
 }

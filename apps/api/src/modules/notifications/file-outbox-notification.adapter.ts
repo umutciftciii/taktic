@@ -3,7 +3,11 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { maskEmail } from './mask';
 import { notificationOutboxDir } from './notification-outbox';
-import { NotificationMessage, NotificationPort } from './notification.port';
+import {
+  NotificationMessage,
+  NotificationPort,
+  NotificationSendResult,
+} from './notification.port';
 
 const OUTBOX_FILE = 'email.jsonl';
 
@@ -48,7 +52,7 @@ export type EmailOutboxEntry = {
 export class FileOutboxNotificationAdapter extends NotificationPort {
   private readonly logger = new Logger('NotificationOutbox');
 
-  async send(message: NotificationMessage): Promise<void> {
+  async send(message: NotificationMessage): Promise<NotificationSendResult> {
     const dir = notificationOutboxDir();
     if (!dir) {
       throw new Error('The e-mail outbox transport was used without NOTIFICATION_OUTBOX_DIR.');
@@ -67,5 +71,9 @@ export class FileOutboxNotificationAdapter extends NotificationPort {
     // The log line stays as poor in detail as the production one: the file is
     // the test channel, the log is not.
     this.logger.log(`[${message.template}] recorded for ${maskEmail(message.to)}`);
+
+    // Deliberately no provider id: nothing was delivered, and the audit row for
+    // a recorded message must not look like one a provider accepted.
+    return { providerMessageId: null };
   }
 }

@@ -1,0 +1,212 @@
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { renderEmail } from './email-template';
+import { maskEmail } from './mask';
+import { NotificationErrorCode } from './notification-errors';
+import {
+  NotificationMessage,
+  NotificationPort,
+  NotificationSendResult,
+} from './notification.port';
+import { RESEND_EMAILS_ENDPOINT, readResendConfig } from './resend.config';
+
+/** The slice of `fetch` this adapter uses. Kept narrow so a test can stand in. */
+export type ResendFetch = (
+  input: string,
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+    signal: AbortSignal;
+  },
+) => Promise<ResendResponse>;
+
+export type ResendResponse = {
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+};
+
+/** Injection token for the fetch implementation; unbound in the real graph. */
+export const RESEND_FETCH = Symbol('RESEND_FETCH');
+
+/**
+ * The delivering e-mail transport: a typed HTTP client for Resend's
+ * `POST /emails`.
+ *
+ * Written against `fetch` rather than the official SDK on purpose. This
+ * repository carries no HTTP client and no provider SDK; one endpoint, one JSON
+ * body and one header is not enough surface to justify a dependency that would
+ * bring its own retry, logging and error-shape opinions into a path whose whole
+ * design is about what must *not* be logged.
+ *
+ * What this adapter refuses to do is as much of its contract as what it does:
+ *
+ * - The API key exists in one place, the Authorization header. It is never
+ *   logged, never put in an error and never returned.
+ * - A failed response's body is never read. Providers echo the destination
+ *   address, the subject and sometimes the payload back in validation errors,
+ *   and this adapter's errors travel to NotificationLog. Only the HTTP status
+ *   is used, and only to pick one of the closed error classes.
+ * - The recipient appears in a log line only masked, and the rendered bodies —
+ *   which contain the single-use action URL — are never logged at all.
+ *
+ * Open and click tracking are off for this domain in Resend, and nothing here
+ * asks for them: no tracking fields are sent and the action link is a plain
+ * anchor to the application's own URL, so a security link is never rewritten
+ * through a redirector.
+ */
+@Injectable()
+export class ResendNotificationAdapter extends NotificationPort {
+  private readonly logger = new Logger('ResendNotification');
+  private readonly fetchImpl: ResendFetch;
+
+  constructor(@Optional() @Inject(RESEND_FETCH) fetchImpl?: ResendFetch) {
+    super();
+    this.fetchImpl =
+      fetchImpl ??
+      ((input, init) => globalThis.fetch(input, init) as unknown as Promise<ResendResponse>);
+  }
+
+  async send(message: NotificationMessage): Promise<NotificationSendResult> {
+    // Read per send, like every other configuration switch in this module, so a
+    // rotated key takes effect without a redeploy of the process's assumptions.
+    const config = readResendConfig();
+    const rendered = renderEmail(message);
+
+    const response = await this.post(config.apiKey, config.timeoutMs, {
+      from: config.from,
+      to: [message.to],
+      subject: message.subject,
+      text: rendered.text,
+      html: rendered.html,
+    });
+
+    if (!response.ok) {
+      throw new ResendSendError(classifyStatus(response.status), response.status);
+    }
+
+    const providerMessageId = await readMessageId(response);
+
+    this.logger.log(`[${message.template}] accepted by resend for ${maskEmail(message.to)}`);
+
+    return { providerMessageId };
+  }
+
+  private async post(
+    apiKey: string,
+    timeoutMs: number,
+    body: ResendEmailRequest,
+  ): Promise<ResendResponse> {
+    try {
+      return await this.fetchImpl(RESEND_EMAILS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        // A hung socket must not hold a scheduler run or the HTTP request that
+        // triggered the send.
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      throw new ResendSendError(classifyTransportFailure(error));
+    }
+  }
+}
+
+type ResendEmailRequest = {
+  from: string;
+  to: string[];
+  subject: string;
+  text: string;
+  html: string;
+};
+
+/**
+ * Carries a failure class and, when there was one, the HTTP status. Deliberately
+ * nothing else: no recipient, no body, no key. {@link classifyNotificationError}
+ * reads `errorCode` off it and the dispatcher stores only that.
+ */
+export class ResendSendError extends Error {
+  readonly errorCode: NotificationErrorCode;
+  readonly status: number | null;
+
+  constructor(errorCode: NotificationErrorCode, status: number | null = null) {
+    super(status === null ? `Resend send failed (${errorCode})` : `Resend send failed (HTTP ${status})`);
+    this.errorCode = errorCode;
+    this.status = status;
+    this.name = 'ResendSendError';
+  }
+}
+
+/**
+ * Maps a response status onto the closed set of failure classes.
+ *
+ * The mapping is coarse on purpose: it separates "this deployment is
+ * misconfigured or the provider is down" from "this particular address will
+ * never work", because that is the only distinction an operator reading
+ * NotificationLog can act on.
+ */
+function classifyStatus(status: number): NotificationErrorCode {
+  if (status === 408 || status === 504) {
+    return 'TIMEOUT';
+  }
+
+  // 401/403 is a bad or revoked key, 429 is the account's own rate limit, 5xx
+  // is the provider. All three mean "try again once somebody fixes something",
+  // which is what TRANSPORT_UNAVAILABLE tells the operator.
+  if (status === 401 || status === 403 || status === 429 || status >= 500) {
+    return 'TRANSPORT_UNAVAILABLE';
+  }
+
+  // Resend answers 422 for a payload it validated and refused, and the only
+  // caller-supplied field that can be invalid here is the address.
+  if (status === 422) {
+    return 'INVALID_RECIPIENT';
+  }
+
+  if (status >= 400) {
+    return 'REJECTED';
+  }
+
+  return 'UNKNOWN';
+}
+
+function classifyTransportFailure(error: unknown): NotificationErrorCode {
+  const name = (error as { name?: unknown } | null)?.name;
+
+  // AbortSignal.timeout aborts with a TimeoutError; an explicit abort would be
+  // an AbortError. Both mean the send ran out of time.
+  if (name === 'TimeoutError' || name === 'AbortError') {
+    return 'TIMEOUT';
+  }
+
+  // DNS failure, refused connection, TLS problem. Nothing about the message.
+  return 'TRANSPORT_UNAVAILABLE';
+}
+
+/**
+ * Reads the provider's identifier for the accepted message.
+ *
+ * A success body that is missing, malformed or shaped unexpectedly is not a
+ * failure — the mail was accepted — so the send stays SENT with no id rather
+ * than being reported as unsent. Anything that is not a plain opaque identifier
+ * is dropped: the id is stored and later shown to an operator, and a provider
+ * that echoed the address back must not be able to put it there.
+ */
+async function readMessageId(response: ResendResponse): Promise<string | null> {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return null;
+  }
+
+  const id = (payload as { id?: unknown } | null)?.id;
+  if (typeof id !== 'string') {
+    return null;
+  }
+
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id) ? id : null;
+}

@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
+import { assertEmailTransportConfig } from './modules/notifications/email-transport';
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
@@ -12,6 +13,13 @@ async function bootstrap() {
   // URL and version must stop the process rather than degrade into a state
   // where customers are asked to confirm having read nothing.
   assertContactSharingConfig();
+
+  // The outbound transport, before the first message is ever composed. A
+  // production process wired to the console adapter would log "not delivered"
+  // for every activation link while looking perfectly healthy, and one wired to
+  // Resend without a key would discover that on the first send — as a FAILED
+  // audit row nobody is watching at the time.
+  assertEmailTransportConfig();
 
   // Same reasoning, one flag over. A production process that offers to mail
   // claim links while nothing can actually deliver e-mail would hand out

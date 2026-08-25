@@ -97,11 +97,38 @@ pnpm e2e
 
 **Runtimes.** `REQUIRE_PHONE_VERIFICATION` and `CONTACT_SHARING_ENABLED` are read per call, so one API process can only represent one side of either. The suite therefore starts three full stacks — API + web + admin with both flags off on ports 3200-3202, the same code with the phone gate on at 3210-3212, and the same code with contact sharing on at 3220-3222 — and drives the comparisons across them. The ports are clear of `docker compose` (3000-3002), so you can leave the dev stack running. Override them with `E2E_WEB_PORT`, `E2E_API_PORT`, `E2E_ADMIN_PORT` and their `E2E_GATE_*` / `E2E_CONTACT_*` counterparts.
 
-**One-time codes.** The verification scenario needs the code the application sent, which is never returned over HTTP and only reaches the database as a bcrypt hash. `NOTIFICATION_OUTBOX_DIR` (set automatically by the Playwright config) swaps the SMS transport for one that records what it sent to a file the test reads. It cannot be set in production — the API refuses to boot with it.
+**One-time codes.** The verification scenario needs the code the application sent, which is never returned over HTTP and only reaches the database as a bcrypt hash. `NOTIFICATION_OUTBOX_DIR` (set automatically by the Playwright config, together with `EMAIL_TRANSPORT=file-outbox`) swaps the SMS and e-mail transports for ones that record what they sent to a file the test reads. It cannot be set in production — the API refuses to boot with it — and the suite never reaches a real e-mail provider.
 
 Tests run serially in one worker: several assertions are about global state ("no refund transaction exists"), and every actor shares one database.
 
 In CI the suite is its own job, on Chromium only, with its own PostgreSQL service container. Traces, screenshots and videos are captured on failure and uploaded as artifacts.
+
+## Transactional E-mail
+
+Outbound e-mail goes through one port (`NotificationPort`) and one audit path (`NotificationDispatcher`). Which adapter is bound is decided by a single allow-listed setting:
+
+```bash
+EMAIL_TRANSPORT=console        # console | file-outbox | resend
+RESEND_API_KEY=                # required only when EMAIL_TRANSPORT=resend
+EMAIL_FROM="Taktick <noreply@notify.taktick.com.tr>"
+RESEND_TIMEOUT_MS=10000        # optional, 1000-60000
+```
+
+| Transport | Delivers? | Where it runs | Notes |
+| --- | --- | --- | --- |
+| `console` | no | development default | Writes the message and its link to the application log; refuses to print an action URL in production. |
+| `file-outbox` | no | browser suite only | Records what it would have sent to `NOTIFICATION_OUTBOX_DIR`; cannot exist in production. |
+| `resend` | **yes** | staging / production | Real transactional delivery over Resend's `POST /emails`. |
+
+**Boot rules.** An unrecognised `EMAIL_TRANSPORT` fails at boot, and so does a value that contradicts `NOTIFICATION_OUTBOX_DIR`. In production the API refuses to start on `console` or `file-outbox` — either would look healthy while no customer ever receives an activation link. With `EMAIL_TRANSPORT=resend`, `RESEND_API_KEY` is mandatory and `EMAIL_FROM` must be `Taktick <noreply@notify.taktick.com.tr>`: `notify.taktick.com.tr` (region `eu-west-1`) is the verified domain, and an address outside it is not DKIM-signed for this deployment. Outside production `EMAIL_FROM` defaults to that same value, so a local smoke test only needs the key. No boot error ever echoes the key or the sender back.
+
+**The key is a deployment secret.** It exists in the process environment and in one `Authorization` header. It is never committed, never written to `.env.example`, never logged, never stored on a `NotificationLog` row and never included in an error.
+
+**Failures carry a class, not a body.** A failed response's body is deliberately never read: providers echo the destination address and the payload back in validation errors, and an adapter error ends up in the audit table. Only the HTTP status is used, mapped onto the existing closed set — `422` → `INVALID_RECIPIENT`, `401`/`403`/`429`/`5xx` → `TRANSPORT_UNAVAILABLE`, a timed-out or refused connection → `TIMEOUT` / `TRANSPORT_UNAVAILABLE`, any other `4xx` → `REJECTED`. The dispatcher's guarantees are unchanged: it never throws, the `PENDING` audit row is written before the send, and the row becomes `SENT` (with Resend's message id in `providerMessageId`) or `FAILED` with the error class alone.
+
+**Transactional only, and untracked.** The three templates are customer activation, the provider-claim invitation and the day-7 request reminder. Open and click tracking are off for the domain and nothing here asks for them: the action link is a plain anchor to the application's own URL, so a single-use security link is never rewritten through a redirector.
+
+**Turning it on does not turn anything else on.** `PROVIDER_CLAIM_ENABLED` stays `false` until somebody decides otherwise; a configured Resend transport only makes it *possible* to turn on in production.
 
 ## Contact Sharing
 
@@ -166,7 +193,7 @@ Both jobs measure from `ServiceRequest.approvedAt`, which is written in the same
 
 Both jobs are idempotent by construction: every write is a conditional update that still requires the row to be in the state the job found it in. A second run, a second instance, or a request that was matched, cancelled or completed in the meantime changes nothing.
 
-Reminder delivery is best-effort and the claim is not: `reminderSentAt` is committed before the send, so a transport failure leaves a `FAILED` row in `NotificationLog` and never re-mails the customer. With no real e-mail provider wired, production sends are expected to fail visibly — the scheduling logic is still correct.
+Reminder delivery is best-effort and the claim is not: `reminderSentAt` is committed before the send, so a transport failure leaves a `FAILED` row in `NotificationLog` and never re-mails the customer. Without a delivering transport (see [Transactional E-mail](#transactional-e-mail)) sends fail visibly rather than silently — the scheduling logic is still correct.
 
 ## Phase 0 Scope
 

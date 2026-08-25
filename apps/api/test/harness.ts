@@ -13,7 +13,11 @@ import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
 import { SmsTransportUnavailableError } from '../src/modules/notifications/console-sms.adapter';
-import { NotificationMessage, NotificationPort } from '../src/modules/notifications/notification.port';
+import {
+  NotificationMessage,
+  NotificationPort,
+  NotificationSendResult,
+} from '../src/modules/notifications/notification.port';
 import { SmsMessage, SmsPort, SmsSendResult } from '../src/modules/notifications/sms.port';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -27,13 +31,17 @@ export class RecordingNotificationPort extends NotificationPort {
   /** Makes the next send throw, to exercise the FAILED audit branch. */
   failNextSend = false;
 
-  async send(message: NotificationMessage): Promise<void> {
+  async send(message: NotificationMessage): Promise<NotificationSendResult> {
     if (this.failNextSend) {
       this.failNextSend = false;
       throw new EmailTransportUnavailableError();
     }
 
     this.sent.push(message);
+
+    // Mirrors the delivering adapter: an accepted message reports the
+    // provider's own id, which is what the dispatcher stores.
+    return { providerMessageId: `test-email-${this.sent.length}` };
   }
 
   clear() {

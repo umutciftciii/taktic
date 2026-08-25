@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { NotificationMessage, NotificationPort } from './notification.port';
+import { maskEmail } from './mask';
+import {
+  NotificationMessage,
+  NotificationPort,
+  NotificationSendResult,
+} from './notification.port';
 
 /**
  * Development adapter: nothing leaves the process, the message is written to the
@@ -13,14 +18,14 @@ import { NotificationMessage, NotificationPort } from './notification.port';
 export class ConsoleNotificationAdapter extends NotificationPort {
   private readonly logger = new Logger('Notification');
 
-  async send(message: NotificationMessage): Promise<void> {
+  async send(message: NotificationMessage): Promise<NotificationSendResult> {
     const recipient = maskEmail(message.to);
 
     if (process.env.NODE_ENV === 'production') {
       this.logger.warn(
         `[${message.template}] not delivered to ${recipient}: no notification transport is configured.`,
       );
-      return;
+      return { providerMessageId: null };
     }
 
     const lines = [
@@ -44,15 +49,8 @@ export class ConsoleNotificationAdapter extends NotificationPort {
     lines.push('────────────────────────────────────────────────────────────');
 
     this.logger.log(lines.join('\n'));
-  }
-}
 
-function maskEmail(value: string): string {
-  const [local, domain] = value.split('@');
-  if (!local || !domain) {
-    return '***';
+    // Nothing left the process, so there is no provider-side id to report.
+    return { providerMessageId: null };
   }
-
-  const visible = local.slice(0, 1);
-  return `${visible}${'*'.repeat(Math.max(local.length - 1, 1))}@${domain}`;
 }

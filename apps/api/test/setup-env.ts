@@ -21,3 +21,11 @@ process.env.REQUEST_REMINDER_SCHEDULER_ENABLED = 'false';
 // boots its own Nest app, so the in-memory counters never leak between files.
 process.env.AUTH_RATE_LIMIT_MAX ??= '5';
 process.env.AUTH_RATE_LIMIT_WINDOW_SECONDS ??= '60';
+// The suite never talks to an e-mail provider: every case either overrides
+// NotificationPort with the recording double or constructs the Resend adapter
+// with a stand-in transport. Pinning the switch and dropping any key the
+// developer happens to have exported means a stray shell variable cannot turn a
+// test run into real mail.
+process.env.EMAIL_TRANSPORT = 'console';
+delete process.env.EMAIL_FROM;
+delete process.env.RESEND_API_KEY;
