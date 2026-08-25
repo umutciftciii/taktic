@@ -935,7 +935,7 @@ describe('claimed applications — what may still change', () => {
     enableClaim();
   });
 
-  it('refuses to move the contact address of an owned profile, for the owner and the admin alike', async () => {
+  it('refuses to move or clear a claimed address, for the owner and the admin alike', async () => {
     const { providerId } = await submitGuestApplication();
     const claim = await request(ctx.server)
       .post('/auth/provider-claim')
@@ -948,19 +948,41 @@ describe('claimed applications — what may still change', () => {
     const category = await createCategory(ctx.prisma);
 
     for (const cookie of [ownerCookie, adminCookie]) {
-      const response = await request(ctx.server)
-        .patch(`/providers/${providerId}`)
-        .set('Cookie', cookie)
-        .send({ ...providerPayload([category.id]), email: 'yeni@example.test' });
+      // Moving it, and — the same thing by another name — dropping it.
+      for (const email of ['yeni@example.test', null]) {
+        const response = await request(ctx.server)
+          .patch(`/providers/${providerId}`)
+          .set('Cookie', cookie)
+          .send({ ...providerPayload([category.id]), email });
 
-      expect(response.status).toBe(409);
-      expect(response.body.code).toBe('PROVIDER_EMAIL_IMMUTABLE');
+        expect(response.status).toBe(409);
+        expect(response.body.code).toBe('PROVIDER_EMAIL_IMMUTABLE');
+      }
     }
 
     const provider = await ctx.prisma.providerProfile.findUniqueOrThrow({
       where: { id: providerId },
     });
     expect(provider.email).toBe(APPLICANT_EMAIL);
+  });
+
+  it('locks on claimedAt itself, not on the endpoint that set it', async () => {
+    const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createProviderProfile(ctx.prisma, {
+      userId: owner.id,
+      email: 'sahiplenilmis@example.test',
+      claimedAt: new Date(),
+    });
+    const cookie = await loginAs(ctx.prisma, owner.id);
+    const category = await createCategory(ctx.prisma);
+
+    const response = await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({ ...providerPayload([category.id]), email: 'baska@example.test' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('PROVIDER_EMAIL_IMMUTABLE');
   });
 
   it('still lets the owner change the phone number', async () => {
@@ -1025,6 +1047,121 @@ describe('claimed applications — what may still change', () => {
       .send({ token, password: 'Password123!' });
     expect(second.status).toBe(409);
     expect(second.body.code).toBe('CLAIM_ALREADY_COMPLETED');
+  });
+});
+
+/**
+ * The lock is scoped to claimed applications, and this is the boundary.
+ *
+ * A profile a signed-in provider created for themselves was never claimed: no
+ * mailbox was ever vouched for, so there is nothing for the lock to protect and
+ * freezing it would be a retroactive restriction on a flow that predates the
+ * claim feature entirely. These run with the flag ON, so what they show is that
+ * turning the feature on does not reach back into that flow.
+ */
+describe('unclaimed owned profiles — the claim lock does not reach them', () => {
+  beforeEach(() => {
+    enableClaim();
+  });
+
+  async function bFlowProfile(email?: string | null) {
+    const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createProviderProfile(ctx.prisma, {
+      userId: owner.id,
+      ...(email === undefined ? {} : { email }),
+    });
+    const cookie = await loginAs(ctx.prisma, owner.id);
+    const category = await createCategory(ctx.prisma);
+
+    // The precondition every case here depends on.
+    expect(provider.userId).toBe(owner.id);
+    expect(provider.claimedAt).toBeNull();
+
+    return { provider, cookie, category };
+  }
+
+  it('lets the owner change the contact address', async () => {
+    const { provider, cookie, category } = await bFlowProfile();
+
+    await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({ ...providerPayload([category.id]), email: 'Guncel@Example.test' })
+      .expect(200);
+
+    const updated = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: provider.id },
+    });
+    expect(updated.email).toBe('guncel@example.test');
+    expect(updated.claimedAt).toBeNull();
+  });
+
+  it('lets the owner add an address to a profile that had none', async () => {
+    const { provider, cookie, category } = await bFlowProfile(null);
+    expect(provider.email).toBeNull();
+
+    await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({ ...providerPayload([category.id]), email: 'eklendi@example.test' })
+      .expect(200);
+
+    const updated = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: provider.id },
+    });
+    expect(updated.email).toBe('eklendi@example.test');
+  });
+
+  it('lets the owner clear the address again', async () => {
+    const { provider, cookie, category } = await bFlowProfile();
+
+    await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({ ...providerPayload([category.id]), email: null })
+      .expect(200);
+
+    const updated = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: provider.id },
+    });
+    expect(updated.email).toBeNull();
+  });
+
+  it('lets an admin change the address too', async () => {
+    const { provider, category } = await bFlowProfile();
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const adminCookie = await loginAs(ctx.prisma, admin.id);
+
+    await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', adminCookie)
+      .send({ ...providerPayload([category.id]), email: 'admin-duzeltti@example.test' })
+      .expect(200);
+
+    const updated = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: provider.id },
+    });
+    expect(updated.email).toBe('admin-duzeltti@example.test');
+  });
+
+  it('lets the owner change the phone number', async () => {
+    const { provider, cookie, category } = await bFlowProfile();
+
+    await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({
+        ...providerPayload([category.id]),
+        email: provider.email,
+        phone: '05557776655',
+      })
+      .expect(200);
+
+    const updated = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: provider.id },
+    });
+    expect(updated.phone).toBe('05557776655');
+    expect(updated.email).toBe(provider.email);
   });
 });
 

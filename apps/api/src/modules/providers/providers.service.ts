@@ -97,12 +97,16 @@ export const CATEGORY_INACTIVE_CODE = 'CATEGORY_INACTIVE';
 export const PROVIDER_EMAIL_REQUIRED_CODE = 'PROVIDER_EMAIL_REQUIRED';
 
 /**
- * Refused when an owned profile tries to move its contact address.
+ * Refused when a claimed application tries to move its contact address.
  *
  * The account's e-mail and the application's e-mail are set equal at the moment
- * ownership is granted, and nothing afterwards may pull them apart — a profile
- * whose contact address is not the owner's would let a future invitation reach
- * somebody who is not the owner.
+ * a claim grants ownership, and nothing afterwards may pull them apart — an
+ * application whose contact address is not the owner's would let a future
+ * invitation reach somebody who is not the owner.
+ *
+ * Scoped to claimed applications only. A profile a signed-in provider created
+ * for themselves was never claimed, so it carries none of that history and
+ * keeps its ordinary editing behaviour.
  */
 export const PROVIDER_EMAIL_IMMUTABLE_CODE = 'PROVIDER_EMAIL_IMMUTABLE';
 
@@ -948,7 +952,7 @@ export class ProvidersService {
   private async getProviderForUpdate(id: string) {
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id },
-      select: { id: true, userId: true, email: true },
+      select: { id: true, userId: true, email: true, claimedAt: true },
     });
 
     if (!provider) {
@@ -1158,24 +1162,33 @@ function requireClaimableApplicationEmail(email: string | null) {
 }
 
 /**
- * An owned profile's contact address is frozen.
+ * A *claimed* profile's contact address is frozen.
  *
- * Ownership is granted by proving control of exactly this address, and the
- * account's own e-mail is set equal to it at that moment. Letting either side
- * move afterwards would mean a later invitation, or a support conversation
- * driven off the application, reaching somebody who is not the owner. Admins
- * are not exempt: the invariant protects the owner, not the operator.
+ * The lock exists for one reason: a claim grants ownership by proving control
+ * of exactly this address, and the new account's own e-mail is set equal to it
+ * at that moment. Letting either side move afterwards would point a later
+ * invitation — or a support conversation driven off the application — at
+ * somebody who is not the owner. Admins are not exempt; the invariant protects
+ * the owner, not the operator.
  *
- * Unowned applications stay editable, which is the supported way to fix an
- * address that was typed wrong before a fresh invitation is issued. Comparison
- * is case-insensitive so re-submitting an unchanged legacy value is not a
- * change.
+ * `claimedAt`, not `userId`, is what that reasoning is about. A profile created
+ * by a provider who was already signed in was never claimed and never had an
+ * address vouched for, so freezing it would be a rule with no argument behind
+ * it — and a retroactive one: such a profile may legitimately carry no address
+ * at all, and the lock would leave it unable to ever gain one. Those profiles
+ * keep the editing behaviour they have always had.
+ *
+ * Unclaimed applications also stay editable, which is the supported way to fix
+ * an address that was typed wrong before a fresh invitation is issued.
+ *
+ * Comparison is case-insensitive, so re-submitting an unchanged legacy value is
+ * not a change; clearing the address is one, and is refused like any other.
  */
 function ensureContactEmailStable(
-  provider: { userId: string | null; email: string | null },
+  provider: { claimedAt: Date | null; email: string | null },
   nextEmail: string | null,
 ) {
-  if (!provider.userId || sameProviderEmail(provider.email, nextEmail)) {
+  if (!provider.claimedAt || sameProviderEmail(provider.email, nextEmail)) {
     return;
   }
 
@@ -1184,7 +1197,7 @@ function ensureContactEmailStable(
     error: 'Conflict',
     code: PROVIDER_EMAIL_IMMUTABLE_CODE,
     message:
-      'Hesaba bağlı bir profilin e-posta adresi değiştirilemez. Diğer bilgileri güncelleyebilirsiniz.',
+      'Sahiplenilmiş bir başvurunun e-posta adresi değiştirilemez. Diğer bilgileri güncelleyebilirsiniz.',
   });
 }
 

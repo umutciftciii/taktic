@@ -31,6 +31,9 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
   if (provider.visibility === 'public') {
     notFound();
   }
+  // Only a claimed application carries a vouched-for address, and only that
+  // address is frozen — see ensureContactEmailStable on the API side.
+  const emailLocked = Boolean(provider.claimedAt);
   const selectedCategoryIds = new Set(provider.serviceCategories.map((item) => item.category.id));
   const firstArea = provider.serviceAreas[0];
 
@@ -80,16 +83,25 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
             <label className="pdash-form-row">
               <span>E-posta</span>
               {/*
-                Read-only rather than disabled: a disabled field submits nothing,
-                and an absent address reads as a request to clear it — which the
-                API refuses for an owned profile. This address is the one that
-                proved ownership, so it is frozen; every other field here stays
-                editable.
+                Locked only for a claimed application, mirroring the API rule:
+                that address is the one whose mailbox proved ownership. A profile
+                created by an already-signed-in provider was never claimed and
+                stays editable, including going from no address to one.
+
+                Read-only rather than disabled, because a disabled field submits
+                nothing and an absent address reads as a request to clear it.
               */}
-              <input name="email" type="email" defaultValue={provider.email ?? ''} readOnly />
-              <span className="muted" style={{ fontSize: 12 }}>
-                Hesabınıza bağlı e-posta adresi değiştirilemez.
-              </span>
+              <input
+                name="email"
+                type="email"
+                defaultValue={provider.email ?? ''}
+                readOnly={emailLocked}
+              />
+              {emailLocked ? (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Başvuruyu sahiplenirken doğrulanan e-posta adresi değiştirilemez.
+                </span>
+              ) : null}
             </label>
           </div>
         </section>

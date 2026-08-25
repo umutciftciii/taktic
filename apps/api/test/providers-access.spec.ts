@@ -282,20 +282,11 @@ describe('PATCH /providers/:id — unclaimed (guest) profiles', () => {
     await request(ctx.server)
       .patch(`/providers/${provider.id}`)
       .set('Cookie', cookie)
-      // The contact address is echoed back unchanged, which is what the edit
-      // form does: an owned profile's address is frozen (it is the address that
-      // proved ownership), so a payload that silently dropped it would be
-      // asking to move it. Everything else about this case is unchanged.
-      .send({
-        ...providerPayload([category.id]),
-        email: provider.email,
-        businessName: 'Sahibi Düzenledi',
-      })
+      .send({ ...providerPayload([category.id]), businessName: 'Sahibi Düzenledi' })
       .expect(200);
 
     const updated = await ctx.prisma.providerProfile.findUnique({ where: { id: provider.id } });
     expect(updated?.businessName).toBe('Sahibi Düzenledi');
-    expect(updated?.email).toBe(provider.email);
   });
 });
 
