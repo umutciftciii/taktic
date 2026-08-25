@@ -151,14 +151,22 @@ PAYMENT_PROVIDER=mock          # mock | lemon-squeezy-test
 **Sandbox settings.** Required only with `PAYMENT_PROVIDER=lemon-squeezy-test`, all validated at boot, none ever logged, stored or returned:
 
 ```bash
-LEMON_SQUEEZY_API_KEY=              # sandbox key; deployment secret
-LEMON_SQUEEZY_STORE_ID=            # numeric sandbox store id
-LEMON_SQUEEZY_WEBHOOK_SECRET=      # 16-255 printable, non-space characters
-LEMON_SQUEEZY_VARIANT_MAP=baslangic:123456,profesyonel:123457
-LEMON_SQUEEZY_TIMEOUT_MS=10000     # optional, 1000-60000
+LEMON_SQUEEZY_API_KEY=<sandbox key>          # deployment secret; never commit
+LEMON_SQUEEZY_STORE_ID=<numeric store id>    # sandbox store
+LEMON_SQUEEZY_WEBHOOK_SECRET=<secret>        # 16-255 printable, non-space; never commit
+LEMON_SQUEEZY_VARIANT_MAP=starter-20:2058219,pro-50:2058261,business-100:2058269
+LEMON_SQUEEZY_TIMEOUT_MS=10000               # optional, 1000-60000
 ```
 
-`LEMON_SQUEEZY_VARIANT_MAP` maps credit package **slugs** to sandbox variant ids, so the mapping survives a reseed. It is an allow-list in both directions: an unmapped package cannot be checked out, and a variant may stand for exactly one package. A boot failure names the variable and never its value.
+`LEMON_SQUEEZY_VARIANT_MAP` maps credit package **slugs** to sandbox variant ids, so the mapping survives a reseed. It is not JSON — comma-separated `slug:variantId` pairs, with the slugs `prisma/seed.ts` creates (`starter-20`, `pro-50`, `business-100`). It is an allow-list in both directions: an unmapped package cannot be checked out, and a variant may stand for exactly one package. A boot failure names the variable and never its value.
+
+**Running the sandbox provider locally.** `docker-compose.yml` forwards `PAYMENT_PROVIDER`, `LEMON_SQUEEZY_MODE`, `LEMON_SQUEEZY_API_KEY`, `LEMON_SQUEEZY_STORE_ID`, `LEMON_SQUEEZY_WEBHOOK_SECRET`, `LEMON_SQUEEZY_VARIANT_MAP`, `LEMON_SQUEEZY_TIMEOUT_MS` and `LEMON_SQUEEZY_API_BASE_URL` into the **api** container and nowhere else — the web and admin containers open no checkouts and verify no signatures, so they are given none of them. Put the values in your own untracked `.env` (never in `.env.example`, never in `docker-compose.yml`, never in a commit), then recreate just that one service:
+
+```bash
+docker compose up -d api
+```
+
+Every one of them is forwarded as *empty when unset*, which the configuration reader treats exactly like unset: a stack that configures none of this still boots on `mock`, and a stack switched to `lemon-squeezy-test` without them fails at boot naming the variable and never its contents. The live-mode variables are **not** forwarded and must not be set anywhere — there is no live mode to configure, and `PAYMENT_PROVIDER=lemon-squeezy-test` is refused under `NODE_ENV=production` by design.
 
 **Opening a checkout.** `POST /providers/:providerId/checkout-sessions` takes a package id and nothing else. The caller must be the provider's own `PROVIDER` account — a `SUPER_ADMIN` who needs to move a balance has the audited grant endpoint instead. The credit amount, price and currency are read from the active package and snapshotted onto a new `PENDING` `PackagePurchase`, together with an opaque correlation token minted here. Asking again for a package that already has a live checkout hands the same purchase and the same payment link back (`checkout.reused: true`) rather than opening a second one. If the provider cannot open a checkout the purchase is closed as `FAILED` with a short code — never a provider response body — so nothing lingers as an unpayable `PENDING` row.
 

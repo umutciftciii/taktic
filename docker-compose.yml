@@ -58,6 +58,35 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
+      # mock|lemon-squeezy-test. The dev stack keeps the mock provider unless
+      # the host environment says otherwise, which is the historical behaviour:
+      # an in-app checkout form that settles nothing.
+      #
+      # The Lemon Squeezy settings below are read by the API only when
+      # PAYMENT_PROVIDER=lemon-squeezy-test, and they are forwarded here rather
+      # than left out because this service is the only one that may see them —
+      # the web and admin containers deliberately get none of them. Each is
+      # forwarded as "empty when unset", which the configuration reader treats
+      # exactly like unset: an unconfigured stack still boots on `mock`, and a
+      # stack switched to `lemon-squeezy-test` without them fails at boot with
+      # the variable's *name* and never its contents.
+      #
+      # Sandbox credentials only, and only ever from your untracked local .env
+      # or your shell — never from a file that is committed. There is no live
+      # mode to configure: LEMON_SQUEEZY_LIVE_*, PAYMENT_LIVE_ENABLED and a
+      # LEMON_SQUEEZY_MODE other than "test" all stop the API at boot, and none
+      # of them is forwarded here.
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      LEMON_SQUEEZY_MODE: ${LEMON_SQUEEZY_MODE:-}
+      LEMON_SQUEEZY_API_KEY: ${LEMON_SQUEEZY_API_KEY:-}
+      LEMON_SQUEEZY_STORE_ID: ${LEMON_SQUEEZY_STORE_ID:-}
+      LEMON_SQUEEZY_WEBHOOK_SECRET: ${LEMON_SQUEEZY_WEBHOOK_SECRET:-}
+      LEMON_SQUEEZY_VARIANT_MAP: ${LEMON_SQUEEZY_VARIANT_MAP:-}
+      LEMON_SQUEEZY_TIMEOUT_MS: ${LEMON_SQUEEZY_TIMEOUT_MS:-}
+      # A test seam: points the checkout adapter at a stand-in sandbox API. The
+      # configuration reader accepts it only for https or loopback and refuses
+      # it under NODE_ENV=production.
+      LEMON_SQUEEZY_API_BASE_URL: ${LEMON_SQUEEZY_API_BASE_URL:-}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross
       # the Docker Desktop VirtioFS/gRPC-FUSE boundary on macOS.
