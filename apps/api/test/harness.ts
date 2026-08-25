@@ -19,6 +19,7 @@ import {
   NotificationSendResult,
 } from '../src/modules/notifications/notification.port';
 import { SmsMessage, SmsPort, SmsSendResult } from '../src/modules/notifications/sms.port';
+import { PaymentProviderPort } from '../src/modules/payments/payment-provider.port';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -118,18 +119,37 @@ export type TestContext = {
  * production. Only the notification transport is swapped; everything that the
  * authorization tests depend on is the production wiring.
  */
-export async function createTestApp(): Promise<TestContext> {
+export type TestAppOptions = {
+  /**
+   * Stands in for the bound PaymentProviderPort.
+   *
+   * The payment specs pass the real adapter constructed with a stand-in for
+   * `fetch`, so the request this application would have made is asserted on
+   * without a byte reaching a payment provider. Omitted, the application picks
+   * its own adapter from PAYMENT_PROVIDER exactly as a deployment would.
+   */
+  paymentProvider?: PaymentProviderPort;
+};
+
+export async function createTestApp(options: TestAppOptions = {}): Promise<TestContext> {
   const notifications = new RecordingNotificationPort();
   const sms = new RecordingSmsPort();
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+  const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(NotificationPort)
     .useValue(notifications)
     .overrideProvider(SmsPort)
-    .useValue(sms)
-    .compile();
+    .useValue(sms);
 
-  const app = moduleRef.createNestApplication<NestExpressApplication>();
+  if (options.paymentProvider) {
+    builder.overrideProvider(PaymentProviderPort).useValue(options.paymentProvider);
+  }
+
+  const moduleRef = await builder.compile();
+
+  // `rawBody: true` mirrors main.ts: the payment webhook verifies an HMAC over
+  // the untouched request bytes, so the suite has to boot the app the same way.
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true });
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
@@ -146,6 +166,7 @@ export async function createTestApp(): Promise<TestContext> {
 }
 
 const TRUNCATED_TABLES = [
+  'PaymentWebhookEvent',
   'ContactRevealEvent',
   'NotificationLog',
   'PhoneVerification',

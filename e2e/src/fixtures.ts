@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { e2ePrisma } from './database';
+import { E2E_LEMON_PACKAGE_SLUG } from './runtime';
 
 /**
  * Deterministic, collision-free seed data.
@@ -189,6 +190,37 @@ export async function createProvider(options: {
   }
 
   return { id: provider.id, userId: user.id, email, password: FIXTURE_PASSWORD, businessName };
+}
+
+/**
+ * The credit package the payments runtime's variant mapping points at.
+ *
+ * Its slug is fixed because LEMON_SQUEEZY_VARIANT_MAP is fixed: the mapping is
+ * by slug so it survives a reseed, and the stub sandbox only knows one variant.
+ * The database is truncated before each run, so one row per run is enough.
+ */
+export async function createLemonSqueezyCreditPackage(options: {
+  creditAmount: number;
+  priceAmount: number;
+}) {
+  return prisma().offerCreditPackage.upsert({
+    where: { slug: E2E_LEMON_PACKAGE_SLUG },
+    update: {
+      creditAmount: options.creditAmount,
+      priceAmount: options.priceAmount,
+      isActive: true,
+    },
+    create: {
+      name: 'E2E Kredi Paketi',
+      slug: E2E_LEMON_PACKAGE_SLUG,
+      creditAmount: options.creditAmount,
+      priceAmount: options.priceAmount,
+      currency: 'TRY',
+      description: 'Uçtan uca test için yazılım kullanım kredisi paketi',
+      isActive: true,
+      sortOrder: 0,
+    },
+  });
 }
 
 /** Seeds a balance the same way the admin grant does: an ADMIN_GRANT ledger row. */

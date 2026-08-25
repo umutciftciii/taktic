@@ -187,7 +187,25 @@ export async function acceptOffer(
   await expect(customer.page.getByTestId('offer-status')).toHaveText('Kabul edildi');
 }
 
-/** The provider's matching list, as request ids. */
+/**
+ * The provider's matching list, as request ids.
+ *
+ * Two things have to be true before the list can be read, and neither is
+ * implied by the heading being on screen.
+ *
+ * The page catches a failed matching call and renders it as an inline notice
+ * instead of throwing, so a list that never loaded looks exactly like a list
+ * with nothing in it — and assertNoErrorScreen does not see it, because it is
+ * not the error boundary. Reading zero requests has to mean "this provider
+ * matches nothing", never "the answer never arrived", or the strongest claim
+ * this helper supports ("the outsider sees no requests at all") would pass for
+ * the wrong reason.
+ *
+ * And `evaluateAll` takes one non-retrying snapshot of whatever is in the DOM
+ * at that instant. Gating it on the page's own server-rendered count turns that
+ * into a settled read: the number the page reports and the links it rendered
+ * have to agree before either is believed.
+ */
 export async function matchingRequestIds(
   provider: Actor,
   providerId: string,
@@ -195,12 +213,34 @@ export async function matchingRequestIds(
   await provider.gotoWeb(`/providers/${providerId}/requests`);
   await expect(provider.page.getByRole('heading', { name: 'Uygun Talepler' })).toBeVisible();
   await assertNoErrorScreen(provider.page);
+  // toHaveText([]) rather than toHaveCount(0): both assert there is no notice,
+  // but this one prints the notice's own text when there is, so a failure names
+  // the reason the list could not be loaded instead of only its count.
+  await expect(
+    provider.page.locator('.pdash-notice-error'),
+    'the matching list must have loaded, not failed into an inline notice',
+  ).toHaveText([]);
 
-  const hrefs = await provider.page
-    .getByRole('link', { name: 'Detay ve Teklif' })
-    .evaluateAll((links) => links.map((link) => (link as HTMLAnchorElement).getAttribute('href')));
+  const reportedCount = provider.page.getByTestId('matching-request-count');
+  await expect(reportedCount).toBeVisible();
+  const expectedCount = Number((await reportedCount.innerText()).trim());
+  expect(
+    Number.isInteger(expectedCount),
+    'the matching list must report how many requests it rendered',
+  ).toBe(true);
 
-  return hrefs
+  const links = provider.page.getByRole('link', { name: 'Detay ve Teklif' });
+  await expect(links).toHaveCount(expectedCount);
+
+  const hrefs = await links.evaluateAll((elements) =>
+    elements.map((link) => (link as HTMLAnchorElement).getAttribute('href')),
+  );
+
+  const ids = hrefs
     .filter((href): href is string => Boolean(href))
     .map((href) => href.split('/').pop() ?? '');
+
+  expect(ids, 'every rendered match must carry a request id').toHaveLength(expectedCount);
+
+  return ids;
 }

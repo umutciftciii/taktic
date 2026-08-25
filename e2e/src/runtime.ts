@@ -48,6 +48,8 @@ export type ContactSharing =
   | { enabled: false }
   | { enabled: true; disclosureUrl: string; disclosureVersion: string };
 
+export type PaymentProviderKind = 'mock' | 'lemon-squeezy-test';
+
 export type Runtime = {
   name: string;
   ports: RuntimePorts;
@@ -57,7 +59,33 @@ export type Runtime = {
   requirePhoneVerification: boolean;
   contactSharing: ContactSharing;
   providerClaim: boolean;
+  paymentProvider: PaymentProviderKind;
 };
+
+/**
+ * The stand-in for the Lemon Squeezy sandbox API (see lemon-stub.ts).
+ *
+ * The suite never contacts a payment provider. The API process on the payments
+ * runtime is pointed at this loopback server, which the configuration reader
+ * only accepts for loopback and only outside production.
+ */
+export const lemonStubPort = port(process.env.E2E_LEMON_STUB_PORT, 3299);
+export const lemonStubUrl = `http://127.0.0.1:${lemonStubPort}`;
+
+/**
+ * Sandbox settings for the payments runtime.
+ *
+ * Placeholders, deliberately. Every one of them is a syntactically valid value
+ * that was never issued by anybody: the store, the variant and the key exist
+ * only inside the stub above, and the webhook secret is what the suite signs
+ * its own simulated deliveries with. No real credential may ever appear here —
+ * this file is tracked.
+ */
+export const E2E_LEMON_STORE_ID = '424242';
+export const E2E_LEMON_VARIANT_ID = '778899';
+export const E2E_LEMON_PACKAGE_SLUG = 'e2e-kredi-paketi';
+export const E2E_LEMON_API_KEY = `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.${'e2ePlaceholderNotARealCredential'}`;
+export const E2E_LEMON_WEBHOOK_SECRET = 'e2e-placeholder-webhook-secret';
 
 /**
  * A placeholder destination, deliberately not a legal text.
@@ -82,6 +110,7 @@ function buildRuntime(
   requirePhoneVerification: boolean,
   contactSharing: ContactSharing = { enabled: false },
   providerClaim = false,
+  paymentProvider: PaymentProviderKind = 'mock',
 ): Runtime {
   return {
     name,
@@ -92,6 +121,7 @@ function buildRuntime(
     requirePhoneVerification,
     contactSharing,
     providerClaim,
+    paymentProvider,
   };
 }
 
@@ -161,9 +191,35 @@ export const providerClaimRuntime = buildRuntime(
   true,
 );
 
+/**
+ * The same code with PAYMENT_PROVIDER=lemon-squeezy-test.
+ *
+ * A fifth stack for the reason the other three extra ones exist: the switch is
+ * read from the API's environment, so one process cannot represent both sides.
+ * Running them side by side is what lets the suite show that the difference
+ * between the in-app mock checkout and a hosted sandbox one is this variable
+ * and nothing else — the primary runtime keeps the mock provider and the
+ * marketplace journey covers it.
+ *
+ * Its API talks to the loopback stub above, never to Lemon Squeezy.
+ */
+export const lemonSqueezyRuntime = buildRuntime(
+  'lemon-squeezy-test',
+  {
+    api: port(process.env.E2E_PAYMENTS_API_PORT, 3241),
+    web: port(process.env.E2E_PAYMENTS_WEB_PORT, 3240),
+    admin: port(process.env.E2E_PAYMENTS_ADMIN_PORT, 3242),
+  },
+  false,
+  { enabled: false },
+  false,
+  'lemon-squeezy-test',
+);
+
 export const runtimes = [
   primaryRuntime,
   phoneGateRuntime,
   contactSharingRuntime,
   providerClaimRuntime,
+  lemonSqueezyRuntime,
 ];

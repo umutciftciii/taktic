@@ -95,7 +95,7 @@ pnpm e2e
 
 **Database isolation.** The suite runs against its own database, derived from `DATABASE_URL` by appending `_e2e` (`taktic` → `taktic_e2e`), or from `E2E_DATABASE_URL` if you set one. It refuses to start against any database whose name does not end in `_e2e` — including the development database and the integration suite's `taktic_test` — and that check runs before a single server process starts. The database is created and migrated on first run, emptied before each run, and emptied again afterwards.
 
-**Runtimes.** `REQUIRE_PHONE_VERIFICATION` and `CONTACT_SHARING_ENABLED` are read per call, so one API process can only represent one side of either. The suite therefore starts three full stacks — API + web + admin with both flags off on ports 3200-3202, the same code with the phone gate on at 3210-3212, and the same code with contact sharing on at 3220-3222 — and drives the comparisons across them. The ports are clear of `docker compose` (3000-3002), so you can leave the dev stack running. Override them with `E2E_WEB_PORT`, `E2E_API_PORT`, `E2E_ADMIN_PORT` and their `E2E_GATE_*` / `E2E_CONTACT_*` counterparts.
+**Runtimes.** `REQUIRE_PHONE_VERIFICATION`, `CONTACT_SHARING_ENABLED`, `PROVIDER_CLAIM_ENABLED` and `PAYMENT_PROVIDER` are each read per call, so one API process can only represent one side of any of them. The suite therefore starts five full stacks — API + web + admin with everything at its default on ports 3200-3202, the same code with the phone gate on at 3210-3212, with contact sharing on at 3220-3222, with provider claim on at 3230-3232, and with the sandbox payment provider at 3240-3242 — and drives the comparisons across them. A loopback stand-in for the Lemon Squeezy sandbox API runs alongside them on 3299, so the payments runtime never contacts a payment provider. The ports are clear of `docker compose` (3000-3002), so you can leave the dev stack running. Override them with `E2E_WEB_PORT`, `E2E_API_PORT`, `E2E_ADMIN_PORT` and their `E2E_GATE_*` / `E2E_CONTACT_*` / `E2E_CLAIM_*` / `E2E_PAYMENTS_*` counterparts.
 
 **One-time codes.** The verification scenario needs the code the application sent, which is never returned over HTTP and only reaches the database as a bcrypt hash. `NOTIFICATION_OUTBOX_DIR` (set automatically by the Playwright config, together with `EMAIL_TRANSPORT=file-outbox`) swaps the SMS and e-mail transports for ones that record what they sent to a file the test reads. It cannot be set in production — the API refuses to boot with it — and the suite never reaches a real e-mail provider.
 
@@ -129,6 +129,48 @@ RESEND_TIMEOUT_MS=10000        # optional, 1000-60000
 **Transactional only, and untracked.** The three templates are customer activation, the provider-claim invitation and the day-7 request reminder. Open and click tracking are off for the domain and nothing here asks for them: the action link is a plain anchor to the application's own URL, so a single-use security link is never rewritten through a redirector.
 
 **Turning it on does not turn anything else on.** `PROVIDER_CLAIM_ENABLED` stays `false` until somebody decides otherwise; a configured Resend transport only makes it *possible* to turn on in production.
+
+## Credit Package Payments
+
+Providers top their credit balance up by buying a credit package. Which provider settles that purchase is decided by one allow-listed setting:
+
+```bash
+PAYMENT_PROVIDER=mock          # mock | lemon-squeezy-test
+```
+
+| Provider | Collects money? | Where it runs | Notes |
+| --- | --- | --- | --- |
+| `mock` | no | shipped default, development | The in-app checkout form, labelled as a test on screen, settled by `POST /providers/:id/package-purchases/:purchaseId/mock-pay`. |
+| `lemon-squeezy-test` | **no — sandbox only** | opt-in, non-production | Lemon Squeezy hosted checkout in test mode. Credits are loaded only by a signature-verified webhook. |
+
+> **Live payment collection is not part of this build, and cannot be enabled.**
+> Lemon Squeezy has not approved this marketplace's suitability in writing. Until that written approval exists, there is no live mode to switch on — not even one that is off. Setting `LEMON_SQUEEZY_LIVE_ENABLED`, `LEMON_SQUEEZY_LIVE_API_KEY`, `LEMON_SQUEEZY_LIVE_STORE_ID` or `PAYMENT_LIVE_ENABLED` to *anything*, or `LEMON_SQUEEZY_MODE` to anything but `test`, stops the API at boot. `PAYMENT_PROVIDER=lemon-squeezy-test` is additionally refused under `NODE_ENV=production`. Going live is a separate, deliberate piece of work that starts with that approval.
+
+**What is being sold.** Provider software usage credits — *teklif gönderme kullanım kredisi*: the right to send offers inside this application, bought by a provider for its own account. It is not a service sale and no money moves from a customer to a provider. The Lemon Squeezy product name and description say exactly that, and so does the code.
+
+**Sandbox settings.** Required only with `PAYMENT_PROVIDER=lemon-squeezy-test`, all validated at boot, none ever logged, stored or returned:
+
+```bash
+LEMON_SQUEEZY_API_KEY=              # sandbox key; deployment secret
+LEMON_SQUEEZY_STORE_ID=            # numeric sandbox store id
+LEMON_SQUEEZY_WEBHOOK_SECRET=      # 16-255 printable, non-space characters
+LEMON_SQUEEZY_VARIANT_MAP=baslangic:123456,profesyonel:123457
+LEMON_SQUEEZY_TIMEOUT_MS=10000     # optional, 1000-60000
+```
+
+`LEMON_SQUEEZY_VARIANT_MAP` maps credit package **slugs** to sandbox variant ids, so the mapping survives a reseed. It is an allow-list in both directions: an unmapped package cannot be checked out, and a variant may stand for exactly one package. A boot failure names the variable and never its value.
+
+**Opening a checkout.** `POST /providers/:providerId/checkout-sessions` takes a package id and nothing else. The caller must be the provider's own `PROVIDER` account — a `SUPER_ADMIN` who needs to move a balance has the audited grant endpoint instead. The credit amount, price and currency are read from the active package and snapshotted onto a new `PENDING` `PackagePurchase`, together with an opaque correlation token minted here. Asking again for a package that already has a live checkout hands the same purchase and the same payment link back (`checkout.reused: true`) rather than opening a second one. If the provider cannot open a checkout the purchase is closed as `FAILED` with a short code — never a provider response body — so nothing lingers as an unpayable `PENDING` row.
+
+**Only a webhook loads credits.** `POST /payments/lemon-squeezy/webhook` is public and guarded by an HMAC over the exact bytes received (`req.rawBody`; the app boots with `rawBody: true`). Nothing is parsed, stored or logged before that check passes — a bad or missing signature is a `401` with zero database writes. After it passes, the payload is read into a narrow projection that drops every buyer detail, then matched against this application's own records: test mode, store id, correlation token, amount, currency, sandbox variant, and the purchase's own state. A single mismatch loads nothing and leaves an audit row. The effect and its audit row are written in one `Serializable` transaction; unique indexes on `(provider, eventKey)` and on `providerOrderId` make a redelivered event, a re-notified order and two concurrent deliveries collapse into exactly one `PACKAGE_PURCHASE` ledger row and one balance change.
+
+**A redirect is a navigation.** The hosted checkout's return URL points at the purchase's own screen, which re-reads the canonical status from the API. It never says "paid" on its own, it carries no correlation token, and there is no endpoint anywhere that turns a browser landing into credit. The in-app mock payment endpoint refuses purchases opened against a payment provider, and refuses to run at all on a deployment wired to one.
+
+**Refunds and chargebacks move nothing.** `order_refunded` and `subscription_payment_refunded` set a manual-review flag on the purchase and write an audit row; no balance is deducted. Taking credits back automatically would mean reclaiming capacity a provider may already have spent on offers that were sent and answered, so that decision stays with a person. The admin package list surfaces the count and the detail screen shows the flag.
+
+**Nothing sensitive is written down.** No raw payload, no signature, no API key, no webhook secret and no buyer name, address or card detail reaches a log line, a database row or an API response. `PaymentWebhookEvent` stores the provider's opaque event identity, the event name, a status and a short machine code such as `AMOUNT_MISMATCH`. The admin configuration screen lists the **names** of unfilled settings and has no code path that could show a value.
+
+**The browser suite never contacts a payment provider.** A fifth runtime runs the same code with `PAYMENT_PROVIDER=lemon-squeezy-test` (ports 3240-3242), pointed at a loopback stand-in for the sandbox API via `LEMON_SQUEEZY_API_BASE_URL` — a test seam the configuration reader accepts only for loopback and refuses in production. The scenario starts a real checkout, follows the real redirect back, shows the balance still at zero, and only then posts a signed settlement notice.
 
 ## Contact Sharing
 

@@ -109,6 +109,23 @@ enum PackagePurchaseStatus {
   REFUNDED
 }
 
+/**
+ * What a verified payment-provider webhook event was allowed to do.
+ *
+ * The row exists for every event that got past signature verification,
+ * including the ones that changed nothing: "this arrived and was refused" is
+ * the only thing an operator can act on later, and it must not depend on a log
+ * line surviving. No payload, no signature and no customer detail is ever
+ * stored alongside it — see PaymentWebhookEvent.
+ */
+enum PaymentWebhookEventStatus {
+  PROCESSED
+  DUPLICATE
+  IGNORED
+  MISMATCHED
+  MANUAL_REVIEW_REQUIRED
+}
+
 enum NumberedEntityType {
   SERVICE_REQUEST
   OFFER
@@ -610,6 +627,27 @@ model PackagePurchase {
   adminNote                String?
   mockPaymentReference     String?
   mockPaymentFailureReason String?
+  // Which PaymentProviderPort adapter opened this purchase's checkout. Only
+  // ever a kind from the allow-list in payments/payment-provider.config.ts.
+  paymentProvider           String?
+  // This application's own opaque correlation token, handed to the provider as
+  // checkout metadata and matched back on the webhook. Unique so one token can
+  // never stand for two purchases.
+  paymentReference          String?               @unique
+  // Opaque provider-side identifiers. Never a payload, never a customer detail.
+  providerCheckoutId        String?
+  providerCheckoutUrl       String?
+  providerCheckoutExpiresAt DateTime?
+  // The provider's order id, unique across the table: the database-level half of
+  // the guarantee that one paid order loads credits exactly once.
+  providerOrderId           String?               @unique
+  // Why opening a checkout failed, as one of a closed set of short codes. Never
+  // a provider response body.
+  paymentFailureCode        String?
+  // Set by refund/chargeback webhooks, which never move money or credits on
+  // their own in this phase. It is a flag for a human, nothing else.
+  manualReviewReason        String?
+  manualReviewAt            DateTime?
   paidAt                   DateTime?
   failedAt                 DateTime?
   cancelledAt              DateTime?
@@ -627,6 +665,33 @@ model PackagePurchase {
   @@index([status])
   @@index([createdAt])
   @@index([mockPaymentReference])
+  @@index([paymentProvider, status])
+}
+
+/**
+ * One audit row per payment-provider webhook event that passed signature
+ * verification.
+ *
+ * Deliberately narrow. `eventKey` is the provider's own opaque identity for the
+ * event object (never a customer detail), and the unique index on it with the
+ * provider is what makes a redelivered event a no-op rather than a second credit
+ * load. `detail` carries a short machine code such as AMOUNT_MISMATCH — never a
+ * raw payload, a signature, an address or a name.
+ */
+model PaymentWebhookEvent {
+  id         String                    @id @default(cuid())
+  provider   String
+  eventKey   String
+  eventName  String
+  status     PaymentWebhookEventStatus
+  purchaseId String?
+  detail     String?
+  createdAt  DateTime                  @default(now())
+
+  @@unique([provider, eventKey])
+  @@index([status])
+  @@index([purchaseId])
+  @@index([createdAt])
 }
 
 model SequenceCounter {

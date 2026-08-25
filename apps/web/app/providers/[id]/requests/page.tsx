@@ -119,7 +119,9 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
       <div className="pdash-section-head">
         <h2 className="pdash-section-title">
           Eşleşen Talepler
-          <span className="pdash-section-count">{requests.length}</span>
+          <span className="pdash-section-count" data-testid="matching-request-count">
+            {requests.length}
+          </span>
         </h2>
       </div>
 

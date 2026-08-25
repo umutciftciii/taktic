@@ -14,7 +14,18 @@ import { providerStatusBadgeClass } from '../../../provider-ui';
 
 type ProviderPackagePurchaseDetailPageProps = {
   params: Promise<{ id: string; purchaseId: string }>;
+  searchParams: Promise<{ checkout?: string }>;
 };
+
+/**
+ * How the provider got here, as far as the URL is concerned.
+ *
+ * `return` is what the hosted checkout page redirects to and `cancel` is what
+ * it uses when the provider backed out. Both are cosmetic: the screen below
+ * always renders the canonical status the API reports, so a hand-typed
+ * `?checkout=return` shows exactly what the purchase actually is.
+ */
+type CheckoutOutcome = 'return' | 'cancel' | null;
 
 type TimelineTone = 'default' | 'success' | 'warn' | 'danger';
 
@@ -37,8 +48,12 @@ type Notice = {
 
 export default async function ProviderPackagePurchaseDetailPage({
   params,
+  searchParams,
 }: ProviderPackagePurchaseDetailPageProps) {
   const { id, purchaseId } = await params;
+  const { checkout } = await searchParams;
+  const outcome: CheckoutOutcome =
+    checkout === 'return' ? 'return' : checkout === 'cancel' ? 'cancel' : null;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/package-purchases/${purchaseId}`);
@@ -48,6 +63,10 @@ export default async function ProviderPackagePurchaseDetailPage({
 
   const timeline = buildTimeline(purchase);
   const notice = noticeForStatus(purchase.status, purchase.mockPaymentFailureReason);
+  // Read from the purchase the API just returned, never from the query string.
+  const outcomeNotice = checkoutOutcomeNotice(outcome, purchase.status);
+  const hostedCheckoutUrl =
+    purchase.status === 'PENDING' ? purchase.providerCheckoutUrl : null;
   const title = purchase.packageNameSnapshot || 'Paket Satın Alma';
   const referenceText =
     purchase.purchaseNumber ?? purchase.mockPaymentReference ?? '—';
@@ -77,7 +96,10 @@ export default async function ProviderPackagePurchaseDetailPage({
               {title}
             </h1>
           </div>
-          <span className={providerStatusBadgeClass(purchase.status)}>
+          <span
+            className={providerStatusBadgeClass(purchase.status)}
+            data-testid="purchase-status"
+          >
             {statusLabel(purchase.status)}
           </span>
         </div>
@@ -85,6 +107,21 @@ export default async function ProviderPackagePurchaseDetailPage({
           <span aria-hidden="true">📅</span> {formatDateTime(purchase.createdAt)}
         </p>
       </header>
+
+      {outcomeNotice ? (
+        <div
+          className={`pdash-info-banner${outcomeNotice.tone === 'warn' ? ' is-warn' : ''}`}
+          data-testid="checkout-outcome"
+        >
+          <span className="pdash-info-banner-icon" aria-hidden="true">
+            {outcomeNotice.icon}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <p className="pdash-info-banner-title">{outcomeNotice.title}</p>
+            <p className="pdash-info-banner-body">{outcomeNotice.body}</p>
+          </div>
+        </div>
+      ) : null}
 
       <section className="pdash-detail-card">
         <h2>Sipariş Detayları</h2>
@@ -197,9 +234,14 @@ export default async function ProviderPackagePurchaseDetailPage({
           {purchase.status === 'PENDING' ? (
             <Link
               className="pdash-btn pdash-btn-primary"
-              href={`/providers/${id}/package-purchases/${purchase.id}/checkout`}
+              // The hosted page when the purchase was opened against one,
+              // otherwise the in-app mock checkout. Following either changes
+              // nothing on its own.
+              href={
+                hostedCheckoutUrl ?? `/providers/${id}/package-purchases/${purchase.id}/checkout`
+              }
             >
-              Ödemeye Devam Et
+              Test Ödemesine Devam Et
             </Link>
           ) : null}
           {purchase.status === 'FAILED' ||
@@ -340,4 +382,58 @@ function noticeForStatus(
     default:
       return null;
   }
+}
+
+/**
+ * The banner that acknowledges coming back from a hosted checkout page.
+ *
+ * It reports the status the API just returned and nothing else. Returning from
+ * a payment page is a navigation: it proves the provider's browser was
+ * somewhere, not that anybody paid, so this screen must never turn a redirect
+ * into "ödeme başarılı". Credits are loaded by a signature-verified webhook and
+ * only by one, which is why a purchase that is still PENDING here says so.
+ */
+function checkoutOutcomeNotice(
+  outcome: CheckoutOutcome,
+  status: PackagePurchaseStatus,
+): Notice | null {
+  if (!outcome) {
+    return null;
+  }
+
+  if (outcome === 'cancel') {
+    return {
+      tone: 'warn',
+      icon: '↩',
+      title: 'Ödeme tamamlanmadı',
+      body: 'Test ödeme sayfasından ayrıldınız. Bu satın alma için kredi yüklenmedi.',
+    };
+  }
+
+  if (status === 'PAID') {
+    return {
+      tone: 'default',
+      icon: '✓',
+      title: 'Ödeme doğrulandı',
+      body: 'Test ödemesi sağlayıcı bildirimiyle doğrulandı ve krediniz hesabınıza yüklendi.',
+    };
+  }
+
+  if (status === 'PENDING') {
+    return {
+      tone: 'warn',
+      icon: '⏱',
+      title: 'Ödeme doğrulanmayı bekliyor',
+      body:
+        'Ödeme sayfasından döndünüz. Kredi yalnızca sağlayıcının doğrulanmış ödeme bildirimi ' +
+        'ulaştığında yüklenir; bu sayfa durumu her açılışta yeniden okur.',
+    };
+  }
+
+  return {
+    tone: 'warn',
+    icon: 'ⓘ',
+    title: 'Ödeme tamamlanmadı',
+    body: 'Bu satın alma ödeme almadı ve kredi yüklenmedi.',
+  };
 }

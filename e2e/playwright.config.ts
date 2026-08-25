@@ -2,8 +2,16 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { describeDatabase, requireE2eDatabaseUrl } from './src/database-url';
 import {
+  E2E_LEMON_API_KEY,
+  E2E_LEMON_PACKAGE_SLUG,
+  E2E_LEMON_STORE_ID,
+  E2E_LEMON_VARIANT_ID,
+  E2E_LEMON_WEBHOOK_SECRET,
   artifactsDir,
   contactSharingRuntime,
+  lemonSqueezyRuntime,
+  lemonStubPort,
+  lemonStubUrl,
   outboxDir,
   phoneGateRuntime,
   primaryRuntime,
@@ -94,7 +102,41 @@ function apiServer(runtime: Runtime) {
       WEB_ORIGIN: runtime.webUrl,
       ADMIN_ORIGIN: runtime.adminUrl,
       API_PUBLIC_URL: runtime.apiUrl,
+      // Mock for every runtime but the payments one. The sandbox provider
+      // additionally needs its store, variant mapping and secrets — all
+      // placeholders that only mean anything to the loopback stub — and the
+      // API base url that points the adapter at it. The reader refuses that
+      // override outside loopback, and refuses the sandbox provider entirely
+      // under NODE_ENV=production, so no configuration here can reach Lemon
+      // Squeezy.
+      PAYMENT_PROVIDER: runtime.paymentProvider,
+      ...(runtime.paymentProvider === 'lemon-squeezy-test'
+        ? {
+            LEMON_SQUEEZY_API_KEY: E2E_LEMON_API_KEY,
+            LEMON_SQUEEZY_STORE_ID: E2E_LEMON_STORE_ID,
+            LEMON_SQUEEZY_WEBHOOK_SECRET: E2E_LEMON_WEBHOOK_SECRET,
+            LEMON_SQUEEZY_VARIANT_MAP: `${E2E_LEMON_PACKAGE_SLUG}:${E2E_LEMON_VARIANT_ID}`,
+            LEMON_SQUEEZY_API_BASE_URL: lemonStubUrl,
+          }
+        : {}),
     },
+  };
+}
+
+/**
+ * The stand-in sandbox API. Started like any other server in the suite so
+ * Playwright waits for its health endpoint before the first navigation.
+ */
+function lemonSqueezyStubServer() {
+  return {
+    command: 'pnpm exec tsx src/lemon-stub.ts',
+    cwd: resolve(repoRoot, 'e2e'),
+    url: `${lemonStubUrl}/health`,
+    reuseExistingServer: false,
+    timeout: 60_000,
+    stdout: 'pipe' as const,
+    stderr: 'pipe' as const,
+    env: { ...process.env, LEMON_STUB_PORT: String(lemonStubPort) },
   };
 }
 
@@ -180,5 +222,9 @@ export default defineConfig({
     apiServer(providerClaimRuntime),
     nextServer(providerClaimRuntime, 'web'),
     nextServer(providerClaimRuntime, 'admin'),
+    lemonSqueezyStubServer(),
+    apiServer(lemonSqueezyRuntime),
+    nextServer(lemonSqueezyRuntime, 'web'),
+    nextServer(lemonSqueezyRuntime, 'admin'),
   ],
 });

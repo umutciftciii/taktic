@@ -441,6 +441,48 @@ export type ProviderCredits = {
   transactions: ProviderCreditTransaction[];
 };
 
+/**
+ * Which payment adapter the API is wired to.
+ *
+ * `mock` renders the in-app, clearly-labelled test checkout this application
+ * has always had. `lemon-squeezy-test` opens a Lemon Squeezy **sandbox** hosted
+ * page. Neither collects real money, and there is no live value: live payment
+ * collection is not part of this build.
+ */
+export type PaymentProviderKind = 'mock' | 'lemon-squeezy-test';
+
+export type PaymentMode = {
+  provider: PaymentProviderKind;
+  mode: 'test';
+  liveEnabled: false;
+};
+
+export type AdminPaymentConfig = PaymentMode & {
+  configurableKeys: string[];
+  /** Names of unfilled settings. The API never returns their values. */
+  missingConfig: string[];
+  ready: boolean;
+};
+
+/**
+ * What starting a checkout returns.
+ *
+ * `checkout.url` is null when the provider has no hosted page — the mock
+ * adapter — and the web app renders its own checkout screen instead. Nothing in
+ * this response loads credits: the purchase stays PENDING until a
+ * signature-verified webhook says otherwise.
+ */
+export type CheckoutSessionResponse = {
+  purchase: PackagePurchase;
+  checkout: {
+    provider: PaymentProviderKind;
+    mode: 'test';
+    url: string | null;
+    expiresAt: string | null;
+    reused: boolean;
+  };
+};
+
 export type PackagePurchaseStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'REFUNDED';
 
 export type PackagePurchase = {
@@ -457,6 +499,12 @@ export type PackagePurchase = {
   adminNote: string | null;
   mockPaymentReference: string | null;
   mockPaymentFailureReason: string | null;
+  paymentProvider: PaymentProviderKind | null;
+  providerCheckoutUrl: string | null;
+  providerCheckoutExpiresAt: string | null;
+  paymentFailureCode: string | null;
+  manualReviewReason: string | null;
+  manualReviewAt: string | null;
   paidAt: string | null;
   failedAt: string | null;
   cancelledAt: string | null;
@@ -477,6 +525,7 @@ export type PackagePurchase = {
   package?: {
     id: string;
     name: string;
+    slug?: string;
     creditAmount: number;
     priceAmount: number;
     currency: string;
