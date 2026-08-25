@@ -63,6 +63,24 @@ afterEach(() => {
   }
 });
 
+/**
+ * A never-issued key of an exact length, in the shape Lemon Squeezy actually
+ * hands out: a three-segment JWT whose every character is one the reader
+ * allows. Built rather than pasted so the length under test is the point and no
+ * credential-shaped constant has to live in this file.
+ */
+function fakeJwtApiKey(length: number): string {
+  const header = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9';
+  const signature = 'notARealSignature';
+  const payloadLength = length - header.length - signature.length - '..'.length;
+
+  if (payloadLength < 1) {
+    throw new Error(`fakeJwtApiKey cannot build a JWT as short as ${length} characters`);
+  }
+
+  return `${header}.${'a'.repeat(payloadLength)}.${signature}`;
+}
+
 function configureLemonSqueezy() {
   process.env.PAYMENT_PROVIDER = 'lemon-squeezy-test';
   process.env.LEMON_SQUEEZY_API_KEY = PLACEHOLDER_API_KEY;
@@ -222,6 +240,85 @@ describe('Lemon Squeezy credentials', () => {
       const message = (error as Error).message;
       expect(message).toMatch(/16-255 printable/);
       expect(message).not.toContain('too short');
+    }
+  });
+
+  /**
+   * Lemon Squeezy hands out JWTs, and a real sandbox key is around a thousand
+   * characters. A bound that stopped short of that would reject every key the
+   * provider actually issues — a boot failure whose message points at the
+   * operator's paste rather than at the check that is wrong.
+   */
+  it('accepts a JWT-shaped key of the length the provider really issues', () => {
+    configureLemonSqueezy();
+    const key = fakeJwtApiKey(1035);
+
+    expect(key).toMatch(/^eyJ/);
+    expect(key.split('.')).toHaveLength(3);
+    expect(key).toMatch(/^[A-Za-z0-9._~+/=-]+$/);
+
+    process.env.LEMON_SQUEEZY_API_KEY = key;
+
+    // The length, never the value: this assertion proves the key survived the
+    // shape check without writing a credential-shaped string into the report.
+    expect(readLemonSqueezyConfig().apiKey).toHaveLength(1035);
+  });
+
+  it('accepts the longest permitted key and refuses one character more', () => {
+    configureLemonSqueezy();
+    process.env.LEMON_SQUEEZY_API_KEY = fakeJwtApiKey(4096);
+    expect(readLemonSqueezyConfig().apiKey).toHaveLength(4096);
+
+    const overLong = fakeJwtApiKey(4097);
+    configureLemonSqueezy();
+    process.env.LEMON_SQUEEZY_API_KEY = overLong;
+
+    try {
+      readLemonSqueezyConfig();
+      expect.unreachable('a value past the bound must not be accepted');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toMatch(/shape of a Lemon Squeezy API key/);
+      expect(message).not.toContain(overLong);
+      // Not even a fragment: a truncated credential in a boot log is still a
+      // credential in a boot log.
+      expect(message).not.toContain(overLong.slice(0, 32));
+      expect(message).not.toContain(overLong.slice(-32));
+    }
+  });
+
+  it('still refuses a key that is empty, too short, or outside the character set', () => {
+    for (const candidate of ['', 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9', 'a'.repeat(39)]) {
+      configureLemonSqueezy();
+      process.env.LEMON_SQUEEZY_API_KEY = candidate;
+
+      try {
+        readLemonSqueezyConfig();
+        expect.unreachable(`a key of length ${candidate.length} must not be accepted`);
+      } catch (error) {
+        const message = (error as Error).message;
+        expect(message).toMatch(/LEMON_SQUEEZY_API_KEY/);
+        if (candidate) {
+          expect(message).not.toContain(candidate);
+        }
+      }
+    }
+
+    // Long enough, but pasted with the quotes around it — a character no Lemon
+    // Squeezy key contains, and one that surviving whitespace trimming cannot
+    // rescue.
+    const quoted = `"${fakeJwtApiKey(1035)}"`;
+    configureLemonSqueezy();
+    process.env.LEMON_SQUEEZY_API_KEY = quoted;
+
+    try {
+      readLemonSqueezyConfig();
+      expect.unreachable('a key with an illegal character must not be accepted');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toMatch(/shape of a Lemon Squeezy API key/);
+      expect(message).not.toContain(quoted);
+      expect(message).not.toContain(quoted.slice(1, 33));
     }
   });
 
