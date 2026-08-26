@@ -34,11 +34,87 @@ export function uniqueSuffix(): string {
   return randomUUID().slice(0, 8);
 }
 
-/** A Turkish mobile number in the shape the request form expects. */
-function uniquePhone(seed: string): string {
-  const digits = seed.replace(/\D/g, '').padEnd(7, '0').slice(0, 7);
-  return `0555${digits}`;
+/**
+ * A Turkish mobile number in the shape the request form expects — allocated
+ * from a counter, never derived from a fixture's hex suffix.
+ *
+ * Deriving it was the bug. The previous mapping dropped every letter out of
+ * `randomUUID().slice(0, 8)` and right-padded the rest with zeros, which
+ * collapsed a 4.3-billion-value suffix space onto roughly 7e5 reachable
+ * numbers: "1a2b3c4d" and "a1b2c3d4" both became 05551234000, and every suffix
+ * made only of letters became 05550000000. Two fixtures landing on one number
+ * is not a cosmetic clash. `User.phone` is unique, so one of the two inserts
+ * fails outright; and the SMS outbox is matched by subscriber digits, so a
+ * phone-verification test could read another fixture's one-time code and fail
+ * on a wrong code instead of on anything it was written to check. Measured over
+ * this suite's fixture count, that reached a few percent of runs.
+ *
+ * A counter makes the numbers deterministic and reproducible, which random
+ * derivation never was: uniqueness holds by construction rather than by luck,
+ * and run N issues exactly the numbers run N+1 does. Repeating the sequence
+ * from run to run is safe because `prepare-database` truncates before each one.
+ *
+ * Inside a run it is not, and that is what the block is for. The counter lives
+ * in a worker process, but the database outlives every worker: Playwright
+ * starts a fresh process for each `--repeat-each` iteration and for each retry,
+ * so a bare counter would restart at zero against rows the previous process had
+ * already inserted. TEST_WORKER_INDEX is the identifier that does not repeat —
+ * Playwright numbers every worker process it starts, across the whole run —
+ * whereas TEST_PARALLEL_INDEX is only a slot number and is handed straight back
+ * to the replacement worker. Keying the block on the parallel index reproduces
+ * the very collision this fix exists to remove.
+ */
+const PHONE_PREFIX = '0555';
+export const PHONE_WORKER_BLOCKS = 1_000;
+export const PHONE_SERIALS_PER_BLOCK = 10_000;
+
+/**
+ * A private block of numbers, allocated in order.
+ *
+ * A factory rather than one hard-wired counter so the block can be stated
+ * instead of inferred: that is what makes "two worker processes never collide"
+ * something a test can demonstrate rather than something this comment claims.
+ */
+export function createPhoneAllocator(block: number = resolvePhoneBlock()): () => string {
+  if (!Number.isInteger(block) || block < 0 || block >= PHONE_WORKER_BLOCKS) {
+    throw new Error(
+      `Worker ${block} has no phone block: the suite reserves ${PHONE_WORKER_BLOCKS} blocks, ` +
+        'and sharing one would put two worker processes on the same numbers.',
+    );
+  }
+
+  const prefix = `${PHONE_PREFIX}${String(block).padStart(3, '0')}`;
+  let serial = 0;
+
+  return () => {
+    if (serial >= PHONE_SERIALS_PER_BLOCK) {
+      throw new Error(
+        `This worker has allocated all ${PHONE_SERIALS_PER_BLOCK} of its fixture phone numbers. ` +
+          'Widen the block rather than letting the sequence wrap onto numbers already in the database.',
+      );
+    }
+
+    // 0555 + 3 + 4 = the eleven digits of a national-format Turkish mobile number.
+    return `${prefix}${String(serial++).padStart(4, '0')}`;
+  };
 }
+
+function resolvePhoneBlock(): number {
+  const raw = process.env.TEST_WORKER_INDEX;
+  const block = raw === undefined || raw === '' ? 0 : Number(raw);
+
+  if (!Number.isInteger(block) || block < 0 || block >= PHONE_WORKER_BLOCKS) {
+    throw new Error(
+      `TEST_WORKER_INDEX=${raw} has no phone block: the suite reserves ${PHONE_WORKER_BLOCKS} ` +
+        'blocks, and sharing one would put two worker processes on the same numbers.',
+    );
+  }
+
+  return block;
+}
+
+/** This worker process's allocator, so the sequence never restarts mid-process. */
+export const uniquePhone = createPhoneAllocator();
 
 export type SeededCustomer = {
   id: string;
@@ -88,7 +164,7 @@ export async function createCustomer(name = 'E2E Müşteri'): Promise<SeededCust
   const user = await prisma().user.create({
     data: {
       email,
-      phone: uniquePhone(suffix),
+      phone: uniquePhone(),
       name: `${name} ${suffix}`,
       role: 'CUSTOMER',
       isActive: true,
@@ -106,7 +182,7 @@ export async function createAdmin(): Promise<SeededCustomer> {
   const user = await prisma().user.create({
     data: {
       email,
-      phone: uniquePhone(suffix),
+      phone: uniquePhone(),
       name: `E2E Yönetici ${suffix}`,
       role: 'SUPER_ADMIN',
       isActive: true,
@@ -153,11 +229,14 @@ export async function createProvider(options: {
   const suffix = uniqueSuffix();
   const email = `e2e-provider-${suffix}@example.test`;
   const businessName = `E2E İşletme ${suffix}`;
+  // One number for both rows, as before: the account and the profile it owns
+  // belong to the same business, and only the account's copy is unique-indexed.
+  const phone = uniquePhone();
 
   const user = await prisma().user.create({
     data: {
       email,
-      phone: uniquePhone(suffix),
+      phone,
       name: businessName,
       role: 'PROVIDER',
       isActive: true,
@@ -171,7 +250,7 @@ export async function createProvider(options: {
       userId: user.id,
       businessName,
       contactName: `Yetkili ${suffix}`,
-      phone: uniquePhone(suffix),
+      phone,
       email,
       city: options.location.city,
       district: options.location.district,
@@ -264,7 +343,7 @@ export function requestFormValues(location: Location, customerName: string) {
 
   return {
     customerName,
-    customerPhone: uniquePhone(suffix),
+    customerPhone: uniquePhone(),
     customerEmail: `e2e-request-${suffix}@example.test`,
     city: location.city,
     district: location.district,
