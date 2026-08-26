@@ -134,6 +134,7 @@ async function pendingPurchaseFixture(
 type OrderOverrides = {
   eventName?: string;
   orderId?: string;
+  objectType?: string;
   testMode?: boolean;
   storeId?: number | string;
   status?: string;
@@ -158,7 +159,7 @@ function orderPayload(overrides: OrderOverrides = {}) {
         overrides.reference === null ? {} : { purchase_reference: overrides.reference },
     },
     data: {
-      type: 'orders',
+      type: overrides.objectType ?? 'orders',
       id: overrides.orderId ?? 'order-991',
       attributes: {
         store_id: overrides.storeId ?? Number(STORE_ID),
@@ -504,6 +505,219 @@ describe('an event that does not agree with this application loads nothing', () 
 
     const details = (await ctx.prisma.paymentWebhookEvent.findMany()).map((row) => row.detail);
     expect(details.sort()).toEqual(['ORDER_NOT_SETTLED', 'UNHANDLED_EVENT']);
+  });
+});
+
+/**
+ * A refusal this application caused — a variant mapped wrongly, a package
+ * repriced mid-checkout, a comparison reading the wrong field — is fixed by
+ * fixing the deployment and letting the provider send the event again. That
+ * only works if the second delivery is judged on its own merits instead of
+ * colliding with the record of the first refusal.
+ */
+describe('a refused event can still settle when it is delivered again', () => {
+  it('refuses the first delivery, then settles the same event once the mismatch is gone', async () => {
+    const { provider, purchase, reference } = await pendingPurchaseFixture({
+      creditAmount: 25,
+      priceAmount: 49900,
+    });
+
+    // Delivery one: the amount does not agree, so nothing moves.
+    const refused = await deliver(orderPayload({ reference, itemPrice: 49800 })).expect(200);
+    expect(refused.body).toEqual({ status: 'mismatched' });
+
+    const afterRefusal = await ctx.prisma.packagePurchase.findUniqueOrThrow({
+      where: { id: purchase.id },
+    });
+    expect(afterRefusal.status).toBe(PackagePurchaseStatus.PENDING);
+    expect(afterRefusal.paidAt).toBeNull();
+    expect(await packageLedgerRows(provider.id)).toHaveLength(0);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);
+
+    const refusalRow = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow();
+    expect(refusalRow.status).toBe(PaymentWebhookEventStatus.MISMATCHED);
+    expect(refusalRow.detail).toBe('AMOUNT_MISMATCH');
+    expect(refusalRow.attemptCount).toBe(1);
+    expect(refusalRow.resolvedAt).toBeNull();
+    // The refusal is auditable against the purchase it refused.
+    expect(refusalRow.purchaseId).toBe(purchase.id);
+
+    // Delivery two: the same event, now agreeing.
+    const settledResponse = await deliver(orderPayload({ reference })).expect(200);
+    expect(settledResponse.body).toEqual({ status: 'processed' });
+
+    const settled = await ctx.prisma.packagePurchase.findUniqueOrThrow({
+      where: { id: purchase.id },
+    });
+    expect(settled.status).toBe(PackagePurchaseStatus.PAID);
+    expect(settled.paidAt).not.toBeNull();
+    expect(settled.providerOrderId).toBe('order-991');
+
+    const ledger = await packageLedgerRows(provider.id);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.amount).toBe(25);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(25);
+  });
+
+  it('keeps the first refusal on the record after the event resolves', async () => {
+    const { purchase, reference } = await pendingPurchaseFixture({ priceAmount: 49900 });
+
+    await deliver(orderPayload({ reference, itemPrice: 49800 })).expect(200);
+    await deliver(orderPayload({ reference })).expect(200);
+
+    // One event, one row: the redelivery updated the refusal rather than
+    // colliding with it.
+    const rows = await ctx.prisma.paymentWebhookEvent.findMany();
+    expect(rows).toHaveLength(1);
+
+    const row = rows[0]!;
+    expect(row.status).toBe(PaymentWebhookEventStatus.PROCESSED);
+    expect(row.detail).toBeNull();
+    expect(row.attemptCount).toBe(2);
+    expect(row.purchaseId).toBe(purchase.id);
+
+    // What stopped the first delivery survives the one that succeeded.
+    expect(row.firstFailureCode).toBe('AMOUNT_MISMATCH');
+    expect(row.firstFailureAt).not.toBeNull();
+    expect(row.resolvedAt).not.toBeNull();
+    expect(row.resolvedAt!.getTime()).toBeGreaterThanOrEqual(row.firstFailureAt!.getTime());
+    expect(row.lastAttemptAt.getTime()).toBeGreaterThanOrEqual(row.createdAt.getTime());
+  });
+
+  it('loads credits once when the settled event keeps arriving, in sequence and at once', async () => {
+    const { provider, reference } = await pendingPurchaseFixture({
+      creditAmount: 25,
+      priceAmount: 49900,
+    });
+
+    await deliver(orderPayload({ reference, itemPrice: 49800 })).expect(200);
+    await deliver(orderPayload({ reference })).expect(200);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(25);
+
+    // Sequential redeliveries of the settled event.
+    for (const _ of [1, 2]) {
+      const again = await deliver(orderPayload({ reference })).expect(200);
+      expect(again.body).toEqual({ status: 'duplicate' });
+    }
+
+    // And two arriving together.
+    const concurrent = await Promise.all([
+      deliver(orderPayload({ reference })),
+      deliver(orderPayload({ reference })),
+    ]);
+
+    for (const response of concurrent) {
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ status: 'duplicate' });
+    }
+
+    expect(await packageLedgerRows(provider.id)).toHaveLength(1);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(25);
+
+    const row = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow();
+    expect(row.status).toBe(PaymentWebhookEventStatus.PROCESSED);
+    // Every delivery is counted, including the ones that changed nothing.
+    expect(row.attemptCount).toBe(6);
+    expect(row.firstFailureCode).toBe('AMOUNT_MISMATCH');
+  });
+
+  it('keeps refusing an event whose mismatch never goes away', async () => {
+    const { provider, purchase, reference } = await pendingPurchaseFixture({ priceAmount: 49900 });
+
+    for (const _ of [1, 2, 3]) {
+      const response = await deliver(orderPayload({ reference, itemPrice: 100 })).expect(200);
+      expect(response.body).toEqual({ status: 'mismatched' });
+    }
+
+    const stuck = await ctx.prisma.packagePurchase.findUniqueOrThrow({
+      where: { id: purchase.id },
+    });
+    expect(stuck.status).toBe(PackagePurchaseStatus.PENDING);
+    expect(await packageLedgerRows(provider.id)).toHaveLength(0);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);
+
+    const row = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow();
+    expect(row.status).toBe(PaymentWebhookEventStatus.MISMATCHED);
+    expect(row.detail).toBe('AMOUNT_MISMATCH');
+    expect(row.attemptCount).toBe(3);
+    expect(row.resolvedAt).toBeNull();
+    expect(row.firstFailureCode).toBe('AMOUNT_MISMATCH');
+  });
+
+  it('refuses a differently-keyed event that names an order already settled', async () => {
+    const first = await pendingPurchaseFixture({ creditAmount: 25, priceAmount: 49900 });
+    await deliver(orderPayload({ reference: first.reference })).expect(200);
+    expect(await currentCreditBalance(ctx.prisma, first.provider.id)).toBe(25);
+
+    // A second purchase, and a delivery that keys differently — the object type
+    // is not the one Lemon Squeezy sends — while naming the same provider
+    // order. The event key does not catch it; the order does.
+    const second = await pendingPurchaseFixture({ creditAmount: 25, priceAmount: 49900 });
+    configureLemonSqueezy(second.creditPackage.slug);
+
+    const replay = await deliver(
+      orderPayload({ reference: second.reference, objectType: 'order' }),
+    ).expect(200);
+    expect(replay.body).toEqual({ status: 'mismatched' });
+
+    const untouched = await ctx.prisma.packagePurchase.findUniqueOrThrow({
+      where: { id: second.purchase.id },
+    });
+    expect(untouched.status).toBe(PackagePurchaseStatus.PENDING);
+    expect(await packageLedgerRows(second.provider.id)).toHaveLength(0);
+    expect(await currentCreditBalance(ctx.prisma, second.provider.id)).toBe(0);
+
+    const replayRow = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow({
+      where: { eventKey: { contains: ':order:' } },
+    });
+    expect(replayRow.status).toBe(PaymentWebhookEventStatus.MISMATCHED);
+    expect(replayRow.detail).toBe('ORDER_ALREADY_SETTLED');
+
+    // And the order that did settle is still settled exactly once.
+    expect(await currentCreditBalance(ctx.prisma, first.provider.id)).toBe(25);
+  });
+
+  it('shows the attempt history to an admin without showing anything else', async () => {
+    const { purchase, reference } = await pendingPurchaseFixture({ priceAmount: 49900 });
+
+    await deliver(orderPayload({ reference, itemPrice: 49800 })).expect(200);
+    await deliver(orderPayload({ reference })).expect(200);
+
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const adminCookie = await loginAs(ctx.prisma, admin.id);
+
+    const view = await request(ctx.server)
+      .get(`/package-purchases/${purchase.id}`)
+      .set('Cookie', adminCookie)
+      .expect(200);
+
+    expect(view.body.webhookEvents).toHaveLength(1);
+    const attempt = view.body.webhookEvents[0];
+    expect(attempt.status).toBe('PROCESSED');
+    expect(attempt.attemptCount).toBe(2);
+    expect(attempt.firstFailureCode).toBe('AMOUNT_MISMATCH');
+    expect(attempt.firstFailureAt).not.toBeNull();
+    expect(attempt.resolvedAt).not.toBeNull();
+
+    // Codes and times, and nothing that could be read back into a payload.
+    expect(Object.keys(attempt).sort()).toEqual([
+      'attemptCount',
+      'createdAt',
+      'detail',
+      'eventName',
+      'firstFailureAt',
+      'firstFailureCode',
+      'lastAttemptAt',
+      'resolvedAt',
+      'status',
+    ]);
+
+    const serialised = JSON.stringify(view.body);
+    expect(serialised).not.toContain(WEBHOOK_SECRET);
+    expect(serialised).not.toContain(PLACEHOLDER_API_KEY);
+    expect(serialised).not.toContain(BUYER_EMAIL);
+    expect(serialised).not.toContain(BUYER_NAME);
+    expect(serialised).not.toContain(reference);
   });
 });
 

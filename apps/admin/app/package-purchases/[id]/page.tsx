@@ -119,6 +119,40 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
                   ? `${purchase.manualReviewReason ?? 'Gerekli'} · ${formatDateTime(purchase.manualReviewAt)} — sağlayıcıdan iade/ters ibraz bildirimi geldi. Otomatik kredi düşülmedi.`
                   : '-'}
               </dd>
+              {/*
+                The settlement notices themselves. A refusal and the redelivery
+                that later settled it are one event, so an operator otherwise
+                sees only the end state and cannot tell a purchase that
+                recovered from one that never stumbled.
+              */}
+              <dt>Sağlayıcı bildirimleri</dt>
+              <dd className="muted">
+                {purchase.webhookEvents?.length
+                  ? purchase.webhookEvents.map((attempt, index) => (
+                      <div key={`${attempt.eventName}-${index}`}>
+                        <code>{attempt.eventName}</code> · {attempt.status}
+                        {attempt.detail ? ` (${attempt.detail})` : ''} ·{' '}
+                        {attempt.attemptCount === 1
+                          ? '1 teslimat'
+                          : `${attempt.attemptCount} teslimat`}
+                        <br />
+                        İlk hata:{' '}
+                        {attempt.firstFailureCode
+                          ? `${attempt.firstFailureCode}${
+                              attempt.firstFailureAt
+                                ? ` · ${formatDateTime(attempt.firstFailureAt)}`
+                                : ''
+                            }`
+                          : '-'}
+                        <br />
+                        Son deneme: {formatDateTime(attempt.lastAttemptAt)}
+                        <br />
+                        Çözüldü:{' '}
+                        {attempt.resolvedAt ? formatDateTime(attempt.resolvedAt) : 'hayır'}
+                      </div>
+                    ))
+                  : '-'}
+              </dd>
               <dt>Kredi işlemi</dt>
               <dd>{purchase.creditTransactionId ?? '-'}</dd>
               <dt>HV notu</dt>

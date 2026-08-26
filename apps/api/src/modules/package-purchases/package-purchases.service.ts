@@ -222,7 +222,40 @@ export class PackagePurchasesService {
       throw new NotFoundException('Package purchase not found');
     }
 
-    return purchase;
+    return { ...purchase, webhookEvents: await this.readWebhookAttempts(id) };
+  }
+
+  /**
+   * What the provider's settlement notices did to this purchase, for the one
+   * screen that has a use for it.
+   *
+   * A refused delivery and the redelivery that later settled it are the same
+   * row, so the projection carries both ends: what the first refusal was, how
+   * many deliveries it took, and when it resolved. That is the difference
+   * between "this purchase is stuck" and "this purchase recovered", and an
+   * operator cannot tell them apart from the purchase alone.
+   *
+   * Selected field by field on purpose. `eventKey` is left out because the
+   * screen already shows the provider order id and nothing else needs it, and
+   * there is nothing else on the row to leak: no payload, no signature, no
+   * correlation token, no buyer detail — only short machine codes and times.
+   */
+  private readWebhookAttempts(purchaseId: string) {
+    return this.prisma.paymentWebhookEvent.findMany({
+      where: { purchaseId },
+      orderBy: [{ createdAt: 'asc' }],
+      select: {
+        eventName: true,
+        status: true,
+        detail: true,
+        attemptCount: true,
+        firstFailureCode: true,
+        firstFailureAt: true,
+        lastAttemptAt: true,
+        resolvedAt: true,
+        createdAt: true,
+      },
+    });
   }
 
   async updateAdminPurchaseStatus(id: string, dto: UpdatePackagePurchaseStatusDto) {

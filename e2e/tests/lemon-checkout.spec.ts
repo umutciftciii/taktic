@@ -157,7 +157,15 @@ test.describe('test-mode credit package checkout', () => {
       expect(await live.json()).toEqual({ status: 'mismatched' });
       expect(await creditBalance(seeded.id)).toBe(0);
 
-      // The genuine one.
+      // A refusal this deployment caused — the amount does not agree — settles
+      // nothing, and does not close the event to a later delivery.
+      const refused = await deliverWebhook(reference, { itemPrice: PRICE_AMOUNT - 100 });
+      expect(refused.status).toBe(200);
+      expect(await refused.json()).toEqual({ status: 'mismatched' });
+      expect(await creditBalance(seeded.id)).toBe(0);
+
+      // The genuine one: the same event, keyed the same way, now agreeing. This
+      // is how a deployment recovers from its own refusal.
       const settled = await deliverWebhook(reference);
       expect(settled.status).toBe(200);
       expect(await settled.json()).toEqual({ status: 'processed' });
@@ -166,6 +174,15 @@ test.describe('test-mode credit package checkout', () => {
       const redelivered = await deliverWebhook(reference);
       expect(redelivered.status).toBe(200);
       expect(await redelivered.json()).toEqual({ status: 'duplicate' });
+
+      // One row for the one event, carrying both ends of its history.
+      const audit = await prisma().paymentWebhookEvent.findFirstOrThrow({
+        where: { eventName: 'order_created', eventKey: { contains: ':orders:e2e-order-' } },
+      });
+      expect(audit.status).toBe('PROCESSED');
+      expect(audit.firstFailureCode).toBe('AMOUNT_MISMATCH');
+      expect(audit.resolvedAt).not.toBeNull();
+      expect(audit.attemptCount).toBe(3);
 
       expect(await creditBalance(seeded.id)).toBe(CREDIT_AMOUNT);
       expect(
