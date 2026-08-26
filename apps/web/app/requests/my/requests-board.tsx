@@ -197,4 +197,3 @@ function RequestRow({ request }: { request: CustomerServiceRequest }) {
     </article>
   );
 }
-
