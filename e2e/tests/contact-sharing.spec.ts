@@ -13,6 +13,7 @@ import {
   acceptOffer,
   approveRequest,
   createRequest,
+  openRequestFormContactStep,
   readProviderOfferId,
   submitOffer,
 } from '../src/journeys';
@@ -133,7 +134,8 @@ test.describe('contact sharing', () => {
       const values = requestFormValues(location, customerAccount.name);
 
       // ---- the form asks for the acknowledgement, and links the text -----
-      await customer.gotoWeb(`/categories/${category.slug}`);
+      // It lives on the contact step, next to the details it is about.
+      await openRequestFormContactStep(customer, category, values);
       await expect(customer.page.getByTestId('contact-disclosure-accept')).toBeVisible();
       await expect(customer.page.getByTestId('contact-disclosure-link')).toHaveAttribute(
         'href',
@@ -246,14 +248,7 @@ test.describe('contact sharing', () => {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
       const values = requestFormValues(location, customerAccount.name);
 
-      await customer.gotoWeb(`/categories/${category.slug}`);
-      const form = customer.page.locator('form.form-card');
-      await form.locator('input[name="customerName"]').fill(values.customerName);
-      await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
-      await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
-      await form.locator('input[name="city"]').fill(values.city);
-      await form.locator('input[name="district"]').fill(values.district);
-      await form.locator('textarea[name="description"]').fill(values.description);
+      await openRequestFormContactStep(customer, category, values);
 
       // Left unticked on purpose.
       await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();

@@ -161,10 +161,10 @@ export default async function ActivateCustomerPage({ searchParams }: ActivateCus
         </p>
 
         <div className="auth-screen-fields">
-          <div style={{ fontSize: 13, lineHeight: 1.5, color: '#475569' }}>
+          <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--color-neutral-800)' }}>
             {customer.email ? <div>E-posta: {customer.email}</div> : null}
             {customer.phone ? <div>Telefon: {customer.phone}</div> : null}
-            <div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--color-neutral-700)' }}>
               Bağlantı son geçerlilik: {formatExpiry(expiresAt)}
             </div>
           </div>

@@ -6,15 +6,16 @@ import {
   MatchedProviderContact,
   fetchOrNotFound,
   getMatchedContactOrNull,
-  OfferStatus,
   RequestOfferPreview,
   formatDateTime,
-  formatPrice,
   getCurrentUser,
   statusLabel,
 } from '../../../../lib/api';
 import { CustomerShell } from '../../customer-shell';
+import { IconArrowLeft, IconCheck, IconMail, IconPhone } from '../../../landing-icons';
+import { statusPillClass } from '../../../status-pill';
 import { completeRequestAction, sendPhoneCodeAction, verifyPhoneCodeAction } from './actions';
+import { OffersView } from './offers-view';
 
 type RequestOffersPageProps = {
   params: Promise<{ id: string }>;
@@ -51,53 +52,43 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   const sortedOffers = offers
     .filter((offer) => offer.status !== 'WITHDRAWN')
     .sort((a, b) => a.priceAmount - b.priceAmount);
-  const offerCount = sortedOffers.length;
-  const requestReference =
-    summary?.requestNumber ?? `#${id.slice(-6).toUpperCase()}`;
+  const requestReference = summary?.requestNumber ?? `#${id.slice(-6).toUpperCase()}`;
 
   return (
-    <CustomerShell user={user} active="requests">
+    <CustomerShell user={user} active="offers">
       <Link className="cdash-page-back" href="/requests/my">
-        <span aria-hidden="true">←</span>
-        <span>Taleplere Dön</span>
+        <IconArrowLeft size={14} />
+        <span>Taleplerime dön</span>
       </Link>
 
       <section className="cdash-summary">
-        <div className="cdash-summary-head">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-            <span className={requestStatusClass(summary?.status)} data-testid="request-status">
-              <span className="cdash-badge-dot" aria-hidden="true" />
+        <div className="cdash-summary-main">
+          <div className="cdash-summary-head">
+            <span className={statusPillClass(summary?.status ?? 'SUBMITTED')} data-testid="request-status">
               {statusLabel(summary?.status ?? 'SUBMITTED')}
             </span>
-            <h2 className="cdash-summary-title">{summary?.category?.name ?? 'Talep Detayı'}</h2>
-            <div className="cdash-summary-meta">
-              <span>
-                <span aria-hidden="true">📍</span>
-                {summary ? (
-                  <>
-                    {summary.city}
-                    {summary.district ? `, ${summary.district}` : ''}
-                  </>
-                ) : (
-                  '—'
-                )}
-              </span>
-              <span>
-                <span aria-hidden="true">📅</span>
-                {summary ? formatDateTime(summary.submittedAt) : '—'}
-              </span>
-              <span>
-                <span aria-hidden="true">🔖</span>
-                {requestReference}
-              </span>
-            </div>
+            <span className="cdash-offer-sub">{requestReference}</span>
           </div>
-        </div>
 
-        <div className="cdash-summary-divider" />
+          <h2 className="cdash-summary-title">{summary?.category?.name ?? 'Talep detayı'}</h2>
 
-        <div>
-          <span className="cdash-summary-label">Talep Özeti</span>
+          <div className="cdash-summary-meta">
+            <span>
+              {summary ? (
+                <>
+                  {summary.city}
+                  {summary.district ? `, ${summary.district}` : ''}
+                </>
+              ) : (
+                '—'
+              )}
+            </span>
+            <span>{summary ? formatDateTime(summary.submittedAt) : '—'}</span>
+          </div>
+
+          <hr className="cdash-summary-divider" />
+
+          <span className="cdash-summary-label">Talep özeti</span>
           <p className="cdash-summary-body">{summaryBody(summary)}</p>
 
           {summary && !summary.phoneVerifiedAt ? (
@@ -109,7 +100,7 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           ) : null}
 
           {summary?.status === 'MATCHED' ? (
-            <form action={completeRequestAction} style={{ marginTop: 12 }}>
+            <form action={completeRequestAction} style={{ marginTop: 16 }}>
               <input type="hidden" name="requestId" value={id} />
               <button className="cdash-btn cdash-btn-primary" type="submit">
                 Hizmet tamamlandı
@@ -117,48 +108,54 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
             </form>
           ) : null}
         </div>
+
+        <aside className="cdash-summary-rail" aria-label="Talep durumu">
+          <span className="cdash-summary-label">Kalite skoru</span>
+          <div className="quality-head">
+            <span className="quality-score">
+              {summary ? summary.qualityScore : '—'}
+              <sup>/100</sup>
+            </span>
+          </div>
+          {summary ? (
+            <div className="databar" style={{ marginTop: 12 }}>
+              <div className="databar-fill" style={{ width: `${summary.qualityScore}%` }} />
+            </div>
+          ) : null}
+
+          <div style={{ marginTop: 24 }}>
+            <span className="cdash-summary-label">Süreç</span>
+            <ol className="pdash-timeline" style={{ marginTop: 12 }}>
+              <TimelineStep title="Talep alındı" done meta={summary ? formatDateTime(summary.submittedAt) : null} />
+              <TimelineStep
+                title="Ön inceleme"
+                done={Boolean(summary && summary.status !== 'SUBMITTED' && summary.status !== 'IN_REVIEW')}
+              />
+              <TimelineStep
+                title="Teklif toplama"
+                done={Boolean(summary && summary.offersCount > 0)}
+                meta={summary ? `${summary.offersCount} teklif` : null}
+              />
+              <TimelineStep
+                title="Eşleşme"
+                done={summary?.status === 'MATCHED' || summary?.status === 'COMPLETED'}
+              />
+            </ol>
+          </div>
+        </aside>
       </section>
 
-      {matchedContact ? <MatchedContactCard contact={matchedContact} /> : null}
+      {matchedContact ? <MatchedContactSection contact={matchedContact} /> : null}
 
-      <div className="cdash-section-head">
-        <div className="cdash-section-title">
-          <span>Gelen Teklifler</span>
-          <span className="cdash-section-count">{offerCount}</span>
-        </div>
-        <label className="cdash-sort">
-          <span>Sırala:</span>
-          <select aria-label="Teklif sıralama" disabled defaultValue="lowest">
-            <option value="lowest">En Düşük Fiyat</option>
-          </select>
-        </label>
-      </div>
-
-      {offerCount === 0 ? (
-        <div className="cdash-empty">
-          <h3>Henüz teklif gelmedi</h3>
-          <p>
-            Talebiniz hizmet verenlere ulaştı. Teklifler geldikçe burada görüntülenecektir.
-          </p>
-          <Link className="cdash-btn cdash-btn-secondary" href="/requests/my">
-            Taleplere dön
-          </Link>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {sortedOffers.map((offer) => (
-            <OfferCard key={offer.id} offer={offer} requestId={id} />
-          ))}
-        </div>
-      )}
+      <OffersView requestId={id} offers={sortedOffers} />
 
       {withdrawnOffers.length > 0 ? (
         <>
           <div className="cdash-section-head">
-            <div className="cdash-section-title">
+            <h2 className="cdash-section-title">
               <span>Geçmiş</span>
               <span className="cdash-section-count">{withdrawnOffers.length}</span>
-            </div>
+            </h2>
           </div>
           {/*
             Name, date and the fact of the withdrawal — nothing else. The price
@@ -168,7 +165,7 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           <ul className="cdash-history" data-testid="withdrawn-offers">
             {withdrawnOffers.map((offer) => (
               <li className="cdash-history-item" key={offer.id}>
-                <span className="cdash-badge cdash-badge-muted">Teklif geri çekildi</span>
+                <span className="tag tag-neutral">Teklif geri çekildi</span>
                 <span className="cdash-history-name">{offer.provider.businessName}</span>
                 <span className="cdash-history-time">{formatDateTime(offer.submittedAt)}</span>
               </li>
@@ -177,6 +174,25 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
         </>
       ) : null}
     </CustomerShell>
+  );
+}
+
+function TimelineStep({
+  title,
+  done,
+  meta,
+}: {
+  title: string;
+  done: boolean;
+  meta?: string | null;
+}) {
+  return (
+    <li className={`pdash-timeline-item${done ? '' : ' is-idle'}`}>
+      <div>
+        <div className="pdash-timeline-title">{title}</div>
+        {meta ? <div className="pdash-timeline-meta">{meta}</div> : null}
+      </div>
+    </li>
   );
 }
 
@@ -195,7 +211,7 @@ function PhoneVerificationCard({
   state: string | null;
 }) {
   return (
-    <div className="cdash-verify-card" style={{ marginTop: 16 }}>
+    <div className="cdash-verify-card" style={{ marginTop: 24 }}>
       <span className="cdash-summary-label">Telefon Doğrulama</span>
       <p className="cdash-summary-body">
         {maskPhoneForDisplay(customerPhone)} numarasını doğrulayarak talebinizin bize doğru
@@ -205,7 +221,7 @@ function PhoneVerificationCard({
 
       {state ? <p className="cdash-summary-body">{verificationMessage(state)}</p> : null}
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+      <div className="verify-row">
         <form action={sendPhoneCodeAction}>
           <input type="hidden" name="requestId" value={requestId} />
           <button className="cdash-btn cdash-btn-secondary" type="submit">
@@ -213,10 +229,7 @@ function PhoneVerificationCard({
           </button>
         </form>
 
-        <form
-          action={verifyPhoneCodeAction}
-          style={{ display: 'flex', gap: 8, alignItems: 'center' }}
-        >
+        <form action={verifyPhoneCodeAction} className="verify-row">
           <input type="hidden" name="requestId" value={requestId} />
           <label className="cdash-visually-hidden" htmlFor="phone-code">
             Doğrulama kodu
@@ -229,6 +242,7 @@ function PhoneVerificationCard({
             maxLength={6}
             pattern="\d{6}"
             placeholder="6 haneli kod"
+            style={{ maxWidth: 160 }}
             required
           />
           <button className="cdash-btn cdash-btn-primary" type="submit">
@@ -294,124 +308,71 @@ function summaryBody(summary: CustomerServiceRequest | null) {
  * the audit row and the caller before it answers. Nothing on this page reads a
  * contact detail out of an offer, because no offer carries one.
  */
-function MatchedContactCard({ contact }: { contact: MatchedProviderContact }) {
+function MatchedContactSection({ contact }: { contact: MatchedProviderContact }) {
   const { provider } = contact;
 
   return (
-    <section className="cdash-contact-card" data-testid="matched-contact">
-      <div className="cdash-contact-head">
-        <h2 className="cdash-contact-title">İletişime Geç</h2>
-        <span className="cdash-badge cdash-badge-success">Eşleşme tamamlandı</span>
-      </div>
-      <p className="cdash-contact-sub">
-        Teklifini kabul ettiğiniz hizmet verenin iletişim bilgileri aşağıdadır.
-      </p>
-      <dl className="cdash-contact-list">
-        <dt>İşletme</dt>
-        <dd data-testid="matched-contact-name">{provider.businessName}</dd>
-        <dt>Yetkili</dt>
-        <dd>{provider.contactName}</dd>
-        <dt>Telefon</dt>
-        <dd>
-          <a href={`tel:${provider.phone}`} data-testid="matched-contact-phone">
-            {provider.phone}
-          </a>
-        </dd>
-        <dt>E-posta</dt>
-        <dd>
-          {provider.email ? <a href={`mailto:${provider.email}`}>{provider.email}</a> : '-'}
-        </dd>
-        <dt>Konum</dt>
-        <dd>
-          {provider.city}
-          {provider.district ? `, ${provider.district}` : ''}
-        </dd>
-      </dl>
-      <p className="cdash-contact-note">
-        Paylaşım {formatDateTime(contact.revealedAt)} tarihinde kaydedildi.
-      </p>
-    </section>
-  );
-}
+    <>
+      <section className="match-poster" style={{ marginTop: 32 }}>
+        <span className="kicker">Eşleşme tamamlandı</span>
+        <h2>Ustanla iletişime geçebilirsin.</h2>
+        <p>
+          Teklifini kabul ettiğin hizmet verenin iletişim bilgileri aşağıda. Paylaşım kayıt altına
+          alındı.
+        </p>
+      </section>
 
-function OfferCard({ offer, requestId }: { offer: RequestOfferPreview; requestId: string }) {
-  const initials = getInitials(offer.provider.businessName);
-  const offerReference =
-    offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`;
-  return (
-    <article className="cdash-offer">
-      <div className="cdash-offer-head">
-        <span className={offerStatusClass(offer.status)}>{offerStatusLabel(offer.status)}</span>
-        <div className="cdash-offer-provider">
-          <span className="cdash-offer-avatar" aria-hidden="true">
-            {initials}
+      <section className="cdash-contact-card" data-testid="matched-contact" style={{ marginTop: 0 }}>
+        <div className="cdash-contact-head">
+          <h2 className="cdash-contact-title">İletişim bilgileri</h2>
+          <span className="tag tag-ink">
+            <IconCheck size={11} />
+            Eşleşme tamamlandı
           </span>
-          <div style={{ minWidth: 0 }}>
-            <h3 className="cdash-offer-name">{offer.provider.businessName}</h3>
-            <p className="cdash-offer-sub">
-              {offer.provider.city}
-              {offer.provider.district ? `, ${offer.provider.district}` : ''} · {formatDateTime(offer.submittedAt)}
-            </p>
-            <p
-              className="cdash-offer-sub"
-              style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 2 }}
-            >
-              {offerReference}
-            </p>
-          </div>
         </div>
-        {offer.message ? <p className="cdash-offer-message">{offer.message}</p> : null}
-        {offer.warrantyNote ? (
-          <p className="cdash-offer-warranty">Garanti notu: {offer.warrantyNote}</p>
-        ) : null}
-      </div>
 
-      <div className="cdash-offer-side">
-        <span className="cdash-offer-price-label">Teklif Edilen Tutar</span>
-        <span className="cdash-offer-price">{formatPrice(offer.priceAmount, offer.currency)}</span>
-        <div className="cdash-offer-actions">
-          <Link
-            className="cdash-btn cdash-btn-primary"
-            href={`/requests/${requestId}/offers/${offer.id}`}
-          >
-            Teklifi İncele
-          </Link>
+        <dl className="cdash-contact-list">
+          <dt>İşletme</dt>
+          <dd data-testid="matched-contact-name">{provider.businessName}</dd>
+          <dt>Yetkili</dt>
+          <dd>{provider.contactName}</dd>
+          <dt>Telefon</dt>
+          <dd>
+            <a href={`tel:${provider.phone}`} data-testid="matched-contact-phone">
+              {provider.phone}
+            </a>
+          </dd>
+          <dt>E-posta</dt>
+          <dd>{provider.email ? <a href={`mailto:${provider.email}`}>{provider.email}</a> : '-'}</dd>
+          <dt>Konum</dt>
+          <dd>
+            {provider.city}
+            {provider.district ? `, ${provider.district}` : ''}
+          </dd>
+          <dt>Paylaşım zamanı</dt>
+          <dd>{formatDateTime(contact.revealedAt)}</dd>
+        </dl>
+
+        <div className="inline-actions">
+          <a className="cdash-btn cdash-btn-primary" href={`tel:${provider.phone}`}>
+            <IconPhone size={14} />
+            Telefonla ara
+          </a>
+          {provider.email ? (
+            <a className="cdash-btn cdash-btn-secondary" href={`mailto:${provider.email}`}>
+              <IconMail size={14} />
+              E-posta gönder
+            </a>
+          ) : null}
         </div>
-      </div>
-    </article>
+
+        <p className="cdash-contact-note">
+          Güvenli iletişim: bu bilgiler yalnızca eşleşen iki taraf arasında paylaşılır ve paylaşım
+          kaydı tutulur.
+        </p>
+      </section>
+    </>
   );
-}
-
-const OFFER_STATUS_LABELS: Record<OfferStatus, string> = {
-  SUBMITTED: 'Bekliyor',
-  VIEWED: 'Görüntülendi',
-  SHORTLISTED: 'Kısa listede',
-  ACCEPTED: 'Kabul edildi',
-  REJECTED: 'Reddedildi',
-  WITHDRAWN: 'Geri çekildi',
-  EXPIRED: 'Süresi doldu',
-  CANCELLED: 'İptal edildi',
-};
-
-function offerStatusLabel(status: OfferStatus): string {
-  return OFFER_STATUS_LABELS[status] ?? statusLabel(status);
-}
-
-function offerStatusClass(status: OfferStatus): string {
-  switch (status) {
-    case 'ACCEPTED':
-      return 'cdash-badge cdash-badge-success';
-    case 'REJECTED':
-    case 'WITHDRAWN':
-    case 'EXPIRED':
-    case 'CANCELLED':
-      return 'cdash-badge cdash-badge-danger';
-    case 'SUBMITTED':
-    case 'VIEWED':
-    case 'SHORTLISTED':
-    default:
-      return 'cdash-badge cdash-badge-info';
-  }
 }
 
 async function safeFetchMyRequests(): Promise<CustomerServiceRequest[]> {
@@ -420,30 +381,4 @@ async function safeFetchMyRequests(): Promise<CustomerServiceRequest[]> {
   } catch {
     return [];
   }
-}
-
-function requestStatusClass(status: string | undefined): string {
-  switch (status) {
-    case 'APPROVED':
-    case 'MATCHED':
-    case 'COMPLETED':
-      return 'cdash-badge cdash-badge-success';
-    case 'REJECTED':
-    case 'CANCELLED':
-    case 'EXPIRED':
-      return 'cdash-badge cdash-badge-danger';
-    case 'SUBMITTED':
-    case 'IN_REVIEW':
-    case 'PENDING':
-    case 'PENDING_REVIEW':
-    default:
-      return 'cdash-badge cdash-badge-info';
-  }
-}
-
-function getInitials(value: string): string {
-  const cleaned = value.replace(/[^\p{L}\p{N}\s]/gu, ' ').trim();
-  if (!cleaned) return 'H';
-  const parts = cleaned.split(/\s+/).slice(0, 2);
-  return parts.map((p) => p.charAt(0).toLocaleUpperCase('tr-TR')).join('') || 'H';
 }

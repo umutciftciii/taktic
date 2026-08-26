@@ -11,6 +11,7 @@ import {
   statusLabel,
 } from '../../../../../lib/api';
 import { CustomerShell } from '../../../customer-shell';
+import { IconArrowLeft } from '../../../../landing-icons';
 import { customerOfferAction } from './actions';
 
 type RequestOfferDetailPageProps = {
@@ -39,11 +40,12 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
   return (
     <CustomerShell user={user} active="requests">
       <Link className="cdash-page-back" href={`/requests/${id}/offers`}>
-        <span aria-hidden="true">←</span>
-        <span>Tekliflere Dön</span>
+        <IconArrowLeft size={14} />
+        <span>Tekliflere dön</span>
       </Link>
 
       <header className="cdash-page-head">
+        <span className="kicker">Teklif detayı</span>
         <h1 className="cdash-page-title">{offer.provider.businessName}</h1>
         <p className="cdash-page-sub">
           {offer.provider.city}
@@ -79,7 +81,7 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
 
           <section className="cdash-detail-card">
             <h2>Mesaj</h2>
-            <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14, color: 'var(--text-2)' }}>
+            <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14 }}>
               {offer.message}
             </p>
             {offer.warrantyNote ? (
@@ -188,17 +190,17 @@ function ActionButton({
 function offerStatusClass(status: string): string {
   switch (status) {
     case 'ACCEPTED':
-      return 'cdash-badge cdash-badge-success';
+      return 'tag tag-ink';
     case 'REJECTED':
     case 'WITHDRAWN':
     case 'EXPIRED':
     case 'CANCELLED':
-      return 'cdash-badge cdash-badge-danger';
+      return 'tag tag-neutral';
     case 'SHORTLISTED':
-      return 'cdash-badge cdash-badge-info';
+      return 'tag tag-accent';
     case 'SUBMITTED':
     case 'VIEWED':
     default:
-      return 'cdash-badge cdash-badge-warn';
+      return 'tag tag-neutral';
   }
 }

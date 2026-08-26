@@ -21,19 +21,15 @@ export default async function ProviderSuccessPage() {
   return (
     <main>
       <div className="page-narrow">
-        <section className="card" style={{ margin: 0, textAlign: 'center', padding: 32 }}>
-          <span className="badge badge-good" style={{ fontSize: 13, padding: '8px 14px' }}>Başvuru alındı</span>
-          <h1 className="page-title" style={{ marginTop: 14 }}>Başvurunuz ön incelemeye gönderildi</h1>
-          <p className="muted" style={{ marginBottom: 0 }}>
+        <section>
+          <span className="kicker">Başvuru alındı</span>
+          <h1 className="page-title">Başvurunuz ön incelemeye gönderildi</h1>
+          <p className="page-subtitle">
             Onay sonrasında eşleşen taleplere teklif vermeye başlayabilirsiniz.
           </p>
 
           {claimEnabled ? (
-            <div
-              className="card"
-              style={{ marginTop: 20, marginBottom: 0, textAlign: 'left' }}
-              data-testid="claim-mail-notice"
-            >
+            <div className="rail-note" style={{ marginTop: 24 }} data-testid="claim-mail-notice">
               <h2 style={{ fontSize: 16, marginTop: 0 }}>E-postanızı kontrol edin</h2>
               <p className="muted" style={{ marginBottom: 0 }}>
                 {maskedEmail ? (
@@ -52,9 +48,9 @@ export default async function ProviderSuccessPage() {
             </div>
           ) : null}
 
-          <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 18 }}>
+          <div className="inline-actions" style={{ marginTop: 24 }}>
             <Link className="btn btn-primary" href="/providers/me">Hizmet Veren Paneli</Link>
-            <Link className="btn btn-ghost" href="/">Ana sayfa</Link>
+            <Link className="btn btn-secondary" href="/">Ana sayfa</Link>
           </div>
         </section>
       </div>

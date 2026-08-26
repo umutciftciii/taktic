@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AuthFrame } from '../auth-frame';
 import { loginAction } from './actions';
 
 type LoginPageProps = {
@@ -12,10 +13,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const { error, redirectTo } = await searchParams;
 
   return (
-    <main className="auth-screen">
-      <form className="auth-screen-card auth-screen-card-compact" action={loginAction}>
-        <img className="auth-brand-logo" src="/brand/logo.png" alt="TakTick" />
-        <h1 className="auth-screen-title">Giriş</h1>
+    <AuthFrame tab="login">
+      <form action={loginAction} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <h1 className="auth-screen-title">Tekrar hoş geldin</h1>
         <p className="auth-screen-subtitle">
           Müşteri ve hizmet veren hesapları için giriş yapın.
         </p>
@@ -37,7 +37,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               type="email"
               required
               autoComplete="email"
-              placeholder="ornek@email.com"
+              placeholder="ornek@eposta.com"
             />
           </label>
           <label className="auth-screen-field">
@@ -67,11 +67,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             Hizmet Veren Kaydı
           </Link>
         </div>
-      </form>
 
-      <p className="auth-screen-support">
-        Yardıma mı ihtiyacınız var? Destek ile iletişime geçin.
-      </p>
-    </main>
+        <p className="auth-screen-support">
+          Yardıma mı ihtiyacınız var? Destek ile iletişime geçin.
+        </p>
+      </form>
+    </AuthFrame>
   );
 }

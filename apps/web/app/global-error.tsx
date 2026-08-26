@@ -25,18 +25,18 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
           minHeight: '100vh',
           display: 'grid',
           placeItems: 'center',
-          fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',
-          background: '#f8fafc',
-          color: '#0f172a',
+          fontFamily: 'Archivo, system-ui, -apple-system, Segoe UI, sans-serif',
+          background: '#f3f2f2',
+          color: '#201e1d',
         }}
       >
         <div style={{ maxWidth: 420, padding: 32, textAlign: 'center' }}>
           <h1 style={{ fontSize: 20, marginBottom: 8 }}>Bir şeyler ters gitti</h1>
-          <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.6 }}>
+          <p style={{ color: '#605d5d', fontSize: 14, lineHeight: 1.6 }}>
             Uygulama beklenmedik bir hatayla karşılaştı. Lütfen tekrar deneyin.
           </p>
           {error.digest ? (
-            <p style={{ color: '#94a3b8', fontSize: 12 }}>
+            <p style={{ color: '#7d7979', fontSize: 12 }}>
               Destek referansı: <code>{error.digest}</code>
             </p>
           ) : null}
@@ -46,10 +46,10 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
             style={{
               marginTop: 16,
               padding: '10px 18px',
-              borderRadius: 8,
+              borderRadius: 0,
               border: 'none',
-              background: '#2563eb',
-              color: '#fff',
+              background: '#ec3013',
+              color: '#f3f2f2',
               fontSize: 14,
               cursor: 'pointer',
             }}

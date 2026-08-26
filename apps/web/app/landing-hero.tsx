@@ -4,13 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { AuthUser } from '../lib/api';
-import {
-  IconArrowRight,
-  IconCheck,
-  IconPin,
-  IconSearch,
-  IconWallet,
-} from './landing-icons';
+import { IconArrowRight, IconCheck, IconSearch } from './landing-icons';
 import { StartChoiceModal } from './start-choice-modal';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -22,7 +16,13 @@ type CategoryHit = {
   description: string | null;
 };
 
-const quickPicks = ['Klima', 'Kombi', 'Elektrikçi', 'Temizlik', 'Boya Badana'];
+const quickPicks = ['Klima', 'Kombi', 'Elektrikçi', 'Su tesisatı', 'Boya badana', 'Ev temizliği'];
+
+const trustPoints = [
+  'Kategoriye özel talep formu',
+  'Her talebe kalite skoru',
+  'Teklif almak müşteri için ücretsiz',
+];
 
 type LandingHeroProps = {
   isCustomer?: boolean;
@@ -150,20 +150,14 @@ export function LandingHero({
 
   return (
     <section className="lp-hero" id="lp-hero">
-      <div className="lp-hero-bg" aria-hidden="true" />
       <div className="lp-container lp-hero-grid">
         <div className="lp-hero-left">
-          <span className="lp-hero-eyebrow">
-            <span className="lp-tag">Yeni</span>
-            <span>Kategoriye özel talep, adil teklif kredisi</span>
-          </span>
+          <span className="lp-eyebrow">Yerel hizmet pazaryeri</span>
 
-          <h1 className="lp-h1">
-            İhtiyacını anlat, <span className="lp-accent">uygun</span> hizmet verenlerden teklif al.
-          </h1>
+          <h1 className="lp-h1">İhtiyacını tarif et. Doğru usta sana teklif versin.</h1>
           <p className="lp-hero-sub">
-            TakTic&apos;te talebini oluştur, uygun hizmet verenlerden teklifleri karşılaştır. Hizmet
-            verenler için de adil kredi sistemiyle boşa teklif maliyeti yok.
+            Talebin kategoriye özel sorularla netleşir, kalite skoruyla puanlanır ve yalnızca
+            bölgende çalışan onaylı işletmelere iletilir. Teklif almak ücretsiz.
           </p>
 
           <div className="lp-hero-search" ref={wrapperRef}>
@@ -208,7 +202,7 @@ export function LandingHero({
                 <button
                   type="button"
                   key={q}
-                  className="lp-chip"
+                  className="tag-outline"
                   onClick={() => {
                     setQuery(q);
                     setOpen(true);
@@ -249,7 +243,7 @@ export function LandingHero({
                       className="lp-hero-search-all"
                       onClick={() => submitFreeText()}
                     >
-                      Tüm sonuçları gör →
+                      Tüm sonuçları gör
                     </button>
                   </>
                 ) : (
@@ -260,7 +254,7 @@ export function LandingHero({
                       className="lp-hero-search-all"
                       onClick={() => submitFreeText()}
                     >
-                      Yine de tüm kategorilerde ara →
+                      Yine de tüm kategorilerde ara
                     </button>
                   </div>
                 )}
@@ -268,13 +262,24 @@ export function LandingHero({
             ) : null}
           </div>
 
+          <div className="lp-hero-trust">
+            {trustPoints.map((point) => (
+              <span className="lp-hero-trust-item" key={point}>
+                <span className="lp-hero-trust-mark">
+                  <IconCheck size={11} />
+                </span>
+                <span>{point}</span>
+              </span>
+            ))}
+          </div>
+
           <div className="lp-hero-cta">
             {isAuthenticated ? (
-              <Link className="btn btn-primary btn-lg" href="/categories">
+              <Link className="btn btn-secondary btn-lg" href="/categories">
                 {isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al'}
               </Link>
             ) : (
-              <StartChoiceModal user={user} className="btn btn-primary btn-lg" />
+              <StartChoiceModal user={user} className="btn btn-secondary btn-lg" />
             )}
             {isCustomer ? (
               <Link className="btn btn-secondary btn-lg" href="/requests/my">
@@ -282,52 +287,25 @@ export function LandingHero({
               </Link>
             ) : null}
           </div>
-
-          <div className="lp-hero-trust">
-            <span className="lp-hero-trust-item">
-              <span className="lp-hero-trust-mark">
-                <IconCheck size={12} />
-              </span>
-              <span>Kategoriye özel talep formu</span>
-            </span>
-            <span className="lp-hero-trust-item">
-              <span className="lp-hero-trust-mark">
-                <IconCheck size={12} />
-              </span>
-              <span>Talep kalite skoru</span>
-            </span>
-            <span className="lp-hero-trust-item">
-              <span className="lp-hero-trust-mark">
-                <IconCheck size={12} />
-              </span>
-              <span>Şeffaf teklif süreci</span>
-            </span>
-          </div>
         </div>
 
         <div className="lp-hero-right">
           <div className="lp-hero-mockup-wrap">
-            <div className="lp-mockup-bg-blob" aria-hidden="true" />
-            <RequestCard />
+            <RequestAnatomyCard />
 
-            <div className="lp-floating-card lp-fc-top">
-              <span className="lp-floating-ic lp-floating-ic-success">
-                <IconCheck size={14} />
-              </span>
-              <span>
-                <span className="lp-floating-label">Talep</span>
-                <span className="lp-floating-val">İncelendi</span>
-              </span>
-            </div>
-
-            <div className="lp-floating-card lp-fc-bottom">
-              <span className="lp-floating-ic lp-floating-ic-primary">
-                <IconWallet size={14} />
-              </span>
-              <span>
-                <span className="lp-floating-label">Kredi iadesi</span>
-                <span className="lp-floating-val">+3 kredi</span>
-              </span>
+            <div className="lp-hero-cards">
+              <div className="lp-floating-card">
+                <span>
+                  <span className="lp-floating-label">Ön inceleme</span>
+                  <span className="lp-floating-val">Her talep</span>
+                </span>
+              </div>
+              <div className="lp-floating-card">
+                <span>
+                  <span className="lp-floating-label">Kredi iadesi</span>
+                  <span className="lp-floating-val">Otomatik tarama</span>
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -336,34 +314,34 @@ export function LandingHero({
   );
 }
 
-function RequestCard() {
+/**
+ * The anatomy of a request, drawn in the shape the customer will actually see.
+ *
+ * It carries labels only. A score, a budget range or an offer count here would
+ * be invented — this page has no request to read them from — so the card shows
+ * what a request records rather than pretending to be one.
+ */
+function RequestAnatomyCard() {
   return (
-    <div className="lp-request-card">
+    <div className="lp-request-card" aria-hidden="true">
       <div className="lp-rc-head">
         <div>
-          <div className="lp-rc-title">Klima Montajı Talebi</div>
+          <div className="lp-rc-title">Talep kartın</div>
           <div className="lp-rc-loc">
-            <IconPin size={12} />
-            <span>Kadıköy / İstanbul · 2 saat önce</span>
+            <span>Kategori · konum · oluşturma zamanı</span>
           </div>
         </div>
-        <span className="lp-badge lp-badge-success">
-          <IconCheck size={11} />
-          İncelendi
-        </span>
+        <span className="tag tag-accent">Ön inceleme</span>
       </div>
 
       <div className="lp-rc-quality">
-        <div className="lp-rc-quality-score">
-          86<sup>/100</sup>
-        </div>
         <div style={{ flex: 1 }}>
           <div className="lp-rc-quality-label">
-            Talep Kalite Skoru
-            <small>Detaylı brief · konum · zaman · bütçe</small>
+            Talep kalite skoru
+            <small>Detaylı brief · konum · zaman · bütçe · iletişim</small>
           </div>
           <div className="lp-rc-bar">
-            <div className="lp-rc-bar-fill" />
+            <div className="lp-rc-bar-fill" style={{ width: '0%' }} />
           </div>
         </div>
       </div>
@@ -371,32 +349,28 @@ function RequestCard() {
       <div className="lp-rc-meta">
         <div className="lp-rc-meta-cell">
           <div className="lp-rc-meta-label">Bütçe</div>
-          <div className="lp-rc-meta-value">3.000 – 5.000 ₺</div>
+          <div className="lp-rc-meta-value">Senin belirlediğin aralık</div>
         </div>
         <div className="lp-rc-meta-cell">
           <div className="lp-rc-meta-label">Zaman</div>
-          <div className="lp-rc-meta-value">Bu hafta</div>
+          <div className="lp-rc-meta-value">Senin seçtiğin aciliyet</div>
         </div>
       </div>
 
       <div className="lp-rc-offers">
         <div className="lp-rc-offers-head">
           <div className="lp-rc-offers-title">Gelen teklifler</div>
-          <div className="lp-rc-offers-count">son 24 saatte</div>
+          <div className="lp-rc-offers-count">14 gün boyunca</div>
         </div>
         <div className="lp-rc-offers-list">
-          <div className="lp-rc-avatars">
-            <span className="lp-avatar">MK</span>
-            <span className="lp-avatar lp-avatar-2">EY</span>
-            <span className="lp-avatar lp-avatar-3">SD</span>
-            <span className="lp-avatar lp-avatar-4">+1</span>
-          </div>
-          <span className="lp-rc-offers-text">4 hizmet veren teklif verdi</span>
+          <span className="lp-rc-offers-text">
+            Onaylı hizmet verenlerin teklifleri panelinde toplanır.
+          </span>
         </div>
       </div>
 
-      <Link className="btn btn-primary lp-rc-cta" href="/categories">
-        Teklifleri İncele
+      <Link className="btn btn-primary btn-block lp-rc-cta" href="/categories">
+        Talep oluştur
         <IconArrowRight />
       </Link>
     </div>

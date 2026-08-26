@@ -80,9 +80,11 @@ test.describe('marketplace journey', () => {
       expect(await matchingRequestIds(winner, firstProvider.id)).toEqual([requestId]);
       expect(await matchingRequestIds(loser, secondProvider.id)).toEqual([requestId]);
 
-      await expect(
-        winner.page.getByText(`Teklif: ${CATEGORY_COST} kredi`),
-      ).toBeVisible();
+      // The matching row quotes the category's own credit price, read from the
+      // "Teklif kredisi" cell rather than from a sentence.
+      await expect(winner.page.getByTestId('request-offer-credit-cost')).toHaveText(
+        String(CATEGORY_COST),
+      );
 
       // ---- both offer, and both are charged the category price ----------
       await submitOffer(winner, {

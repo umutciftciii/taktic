@@ -1,20 +1,9 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import {
-  apiFetch,
-  getCurrentUser,
-  ProviderOffer,
-  refundActionLabel,
-  formatPrice,
-  formatDateTime,
-} from '../../../../lib/api';
+import { apiFetch, getCurrentUser, ProviderOffer } from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
-import {
-  canWithdrawOffer,
-  providerOfferStatusLabel,
-  providerRefundBadgeClass,
-  providerStatusBadgeClass,
-} from '../../provider-ui';
+import { readCreditBalance } from '../../provider-data';
+import { OffersTable } from './offers-table';
 
 type ProviderOffersPageProps = {
   params: Promise<{ id: string }>;
@@ -27,60 +16,68 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
     redirect(`/login?redirectTo=/providers/${id}/offers`);
   }
 
-  const offers = await apiFetch<ProviderOffer[]>(`/providers/${id}/offers`);
+  const [offers, creditBalance] = await Promise.all([
+    apiFetch<ProviderOffer[]>(`/providers/${id}/offers`),
+    readCreditBalance(id),
+  ]);
 
-  const counts = offers.reduce(
-    (acc, offer) => {
-      acc.total += 1;
-      if (offer.status === 'ACCEPTED') acc.accepted += 1;
-      else if (
-        offer.status === 'SUBMITTED' ||
-        offer.status === 'VIEWED' ||
-        offer.status === 'SHORTLISTED'
-      ) {
-        acc.pending += 1;
-      } else if (
-        offer.status === 'REJECTED' ||
-        offer.status === 'WITHDRAWN' ||
-        offer.status === 'EXPIRED' ||
-        offer.status === 'CANCELLED'
-      ) {
-        acc.closed += 1;
-      }
-      return acc;
-    },
-    { total: 0, pending: 0, accepted: 0, closed: 0 },
-  );
+  /*
+   * Counted from the provider's own offers — there is no summary endpoint, and
+   * a rate is only shown once there is something to divide by.
+   */
+  const total = offers.length;
+  const won = offers.filter((offer) => offer.status === 'ACCEPTED').length;
+  const viewed = offers.filter((offer) => offer.viewedAt !== null).length;
+  const refunded = offers.filter((offer) => offer.creditRefundedAt !== null).length;
+  const pending = offers.filter(
+    (offer) =>
+      offer.status === 'SUBMITTED' || offer.status === 'VIEWED' || offer.status === 'SHORTLISTED',
+  ).length;
 
   return (
-    <ProviderShell user={user} providerId={id} active="offers">
-      <p className="pdash-crumbs">
+    <ProviderShell
+      user={user}
+      providerId={id}
+      active="offers"
+      creditBalance={creditBalance}
+      counts={{ offers: pending }}
+    >
+      <nav className="pdash-crumbs" aria-label="Breadcrumb">
         <Link href="/providers/me">Panelim</Link>
         <span aria-hidden="true">/</span>
         <span>Tekliflerim</span>
-      </p>
+      </nav>
 
       <header className="pdash-page-head">
+        <span className="kicker">Teklif akışı</span>
         <h1 className="pdash-page-title">Tekliflerim</h1>
-        <p className="pdash-page-sub">Gönderdiğiniz tüm teklifleri ve durumlarını buradan izleyin.</p>
+        <p className="pdash-page-sub">
+          Gönderdiğiniz tüm teklifleri, durumlarını ve kredi hareketlerini buradan izleyin.
+        </p>
       </header>
 
-      <section className="pdash-stat-grid" aria-label="Teklif özetleri">
-        <div className="pdash-stat-card">
-          <span className="pdash-stat-label">Toplam Teklif</span>
-          <span className="pdash-stat-value">{counts.total}</span>
+      <section className="metric-strip" aria-label="Teklif özetleri">
+        <div className="metric-cell">
+          <span className="metric-label">Gönderilen</span>
+          <span className="metric-value">{total}</span>
+          <span className="metric-hint">toplam teklif</span>
         </div>
-        <div className="pdash-stat-card">
-          <span className="pdash-stat-label">Bekleyen</span>
-          <span className="pdash-stat-value">{counts.pending}</span>
+        <div className="metric-cell">
+          <span className="metric-label">Kazanılan</span>
+          <span className="metric-value">{won}</span>
+          <span className="metric-hint">{total > 0 ? `%${percent(won, total)}` : 'henüz teklif yok'}</span>
         </div>
-        <div className="pdash-stat-card">
-          <span className="pdash-stat-label">Onaylanan</span>
-          <span className="pdash-stat-value">{counts.accepted}</span>
+        <div className="metric-cell">
+          <span className="metric-label">Görüntülenen</span>
+          <span className="metric-value">{viewed}</span>
+          <span className="metric-hint">
+            {total > 0 ? `%${percent(viewed, total)}` : 'henüz teklif yok'}
+          </span>
         </div>
-        <div className="pdash-stat-card">
-          <span className="pdash-stat-label">Kapanan</span>
-          <span className="pdash-stat-value">{counts.closed}</span>
+        <div className="metric-cell">
+          <span className="metric-label">İade</span>
+          <span className="metric-value">{refunded}</span>
+          <span className="metric-hint">kredi iadesi yapılan teklif</span>
         </div>
       </section>
 
@@ -93,90 +90,18 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
           </Link>
         </div>
       ) : (
-        <>
-          <div className="pdash-section-head">
-            <h2 className="pdash-section-title">
-              Gönderilen Teklifler
-              <span className="pdash-section-count">{offers.length}</span>
-            </h2>
-          </div>
-          <div className="pdash-grid">
-            {offers.map((offer) => (
-              <article className="pdash-card" key={offer.id}>
-                <div className="pdash-card-head">
-                  <div style={{ minWidth: 0 }}>
-                    <h3 className="pdash-card-title">{offer.request.category.name}</h3>
-                    <p className="pdash-card-sub">
-                      {offer.request.city}/{offer.request.district}
-                    </p>
-                    <p
-                      className="pdash-card-sub"
-                      style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 2 }}
-                    >
-                      {offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`}
-                      <span style={{ color: 'var(--muted)' }}> · Talep: </span>
-                      {offer.request.requestNumber ??
-                        `#${offer.request.id.slice(-6).toUpperCase()}`}
-                    </p>
-                  </div>
-                  <span className={providerStatusBadgeClass(offer.status)}>{providerOfferStatusLabel(offer.status)}</span>
-                </div>
-
-                <div className="pdash-card-meta">
-                  <span>📅 Gönderim: {formatDateTime(offer.submittedAt)}</span>
-                  <span>🪙 Kullanılan kredi: {offer.creditCost}</span>
-                  <span>
-                    🔁 İade:{' '}
-                    {offer.creditRefundedAt
-                      ? `${formatDateTime(offer.creditRefundedAt)}`
-                      : 'Henüz yok'}
-                  </span>
-                  <span>
-                    📌 Politika:{' '}
-                    <span className={providerRefundBadgeClass(offer.refundEligibility.recommendedAction)}>
-                      {refundActionLabel(offer.refundEligibility.recommendedAction)}
-                    </span>
-                  </span>
-                </div>
-
-                <div className="pdash-card-foot">
-                  <div>
-                    <div className="pdash-card-price-label">Teklif</div>
-                    <div className="pdash-card-price">{formatPrice(offer.priceAmount, offer.currency)}</div>
-                  </div>
-                  <div className="pdash-actions">
-                    {/*
-                      A link, not the action itself: withdrawing is irreversible
-                      and unrefunded, so it is only ever confirmed on the detail
-                      screen where those consequences are spelled out.
-                    */}
-                    {canWithdrawOffer(offer.status, offer.request.status) ? (
-                      <Link
-                        className="pdash-btn pdash-btn-ghost pdash-btn-sm"
-                        href={`/providers/${id}/offers/${offer.id}#geri-cek`}
-                      >
-                        Teklifi Geri Çek
-                      </Link>
-                    ) : null}
-                    <Link
-                      className="pdash-btn pdash-btn-secondary pdash-btn-sm"
-                      href={`/providers/${id}/requests/${offer.request.id}`}
-                    >
-                      Talep
-                    </Link>
-                    <Link
-                      className="pdash-btn pdash-btn-primary pdash-btn-sm"
-                      href={`/providers/${id}/offers/${offer.id}`}
-                    >
-                      Teklif Detayı
-                    </Link>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </>
+        <OffersTable providerId={id} offers={offers} />
       )}
+
+      <p className="pdash-page-footer">
+        İade politikası: teklifini kendin geri çekersen kredi iadesi yapılmaz. Görüntülenmeyen veya
+        geçersiz hale gelen taleplerde iade uygunluğu otomatik taranır ve sonucu her teklifin
+        satırında görünür.
+      </p>
     </ProviderShell>
   );
+}
+
+function percent(part: number, whole: number): number {
+  return Math.round((part / whole) * 100);
 }

@@ -9,7 +9,7 @@ const cols: Array<{ title: string; links: Array<{ label: string; href: string }>
       { label: 'Kombi', href: '/categories?q=kombi' },
       { label: 'Elektrikçi', href: '/categories?q=elektrik' },
       { label: 'Temizlik', href: '/categories?q=temiz' },
-      { label: 'Nakliyat', href: '/categories?q=nakli' },
+      { label: 'Boya Badana', href: '/categories?q=boya' },
     ],
   },
   {

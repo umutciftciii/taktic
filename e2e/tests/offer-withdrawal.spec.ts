@@ -130,8 +130,10 @@ test.describe('offer withdrawal', () => {
 
       await customer.gotoWeb('/requests/my');
       await expect(
-        customer.page.locator(`[data-testid="request-card"][data-request-id="${requestId}"]`),
-      ).toContainText('1 teklif geldi');
+        customer.page
+          .locator(`[data-testid="request-card"][data-request-id="${requestId}"]`)
+          .getByTestId('request-offers-count'),
+      ).toHaveText('1');
 
       // ---- and the request itself carries on ------------------------------
       await acceptOffer(customer, requestId, survivingOfferId);

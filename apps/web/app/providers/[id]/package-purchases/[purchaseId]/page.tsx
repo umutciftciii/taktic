@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { IconArrowLeft } from '../../../../landing-icons';
 import {
   apiFetch,
   getCurrentUser,
@@ -90,7 +91,7 @@ export default async function ProviderPackagePurchaseDetailPage({
               aria-label="Paket Geçmişine Dön"
               title="Paket Geçmişine Dön"
             >
-              ←
+              <IconArrowLeft size={16} />
             </Link>
             <h1 className="pdash-page-title" style={{ margin: 0 }}>
               {title}
@@ -104,7 +105,7 @@ export default async function ProviderPackagePurchaseDetailPage({
           </span>
         </div>
         <p className="pdash-page-sub" style={{ marginTop: 6 }}>
-          <span aria-hidden="true">📅</span> {formatDateTime(purchase.createdAt)}
+          {formatDateTime(purchase.createdAt)}
         </p>
       </header>
 
@@ -338,14 +339,14 @@ function noticeForStatus(
     case 'PAID':
       return {
         tone: 'default',
-        icon: 'ⓘ',
+        icon: 'i',
         title: 'Bilgilendirme',
         body: 'Bu işleme ait e-fatura, sistemde kayıtlı e-posta adresinize iletilecektir.',
       };
     case 'PENDING':
       return {
         tone: 'warn',
-        icon: '⏱',
+        icon: '·',
         title: 'Ödeme bekleniyor',
         body: 'Ödeme tamamlanmadı. İşleme ödeme ekranından devam edebilirsiniz.',
       };
@@ -361,21 +362,21 @@ function noticeForStatus(
     case 'CANCELLED':
       return {
         tone: 'default',
-        icon: 'ⓘ',
+        icon: 'i',
         title: 'Sipariş iptal edildi',
         body: 'Bu sipariş iptal edilmiştir. Yeni bir paket satın almak için Kredilerim sayfasını ziyaret edebilirsiniz.',
       };
     case 'EXPIRED':
       return {
         tone: 'default',
-        icon: 'ⓘ',
+        icon: 'i',
         title: 'Sipariş süresi doldu',
         body: 'Bu siparişin geçerlilik süresi dolmuştur. Yeni bir paket satın alabilirsiniz.',
       };
     case 'REFUNDED':
       return {
         tone: 'default',
-        icon: 'ⓘ',
+        icon: 'i',
         title: 'İade tamamlandı',
         body: 'Bu satın alma için iade işlemi tamamlanmıştır.',
       };
@@ -422,7 +423,7 @@ function checkoutOutcomeNotice(
   if (status === 'PENDING') {
     return {
       tone: 'warn',
-      icon: '⏱',
+      icon: '·',
       title: 'Ödeme doğrulanmayı bekliyor',
       body:
         'Ödeme sayfasından döndünüz. Kredi yalnızca sağlayıcının doğrulanmış ödeme bildirimi ' +
@@ -432,7 +433,7 @@ function checkoutOutcomeNotice(
 
   return {
     tone: 'warn',
-    icon: 'ⓘ',
+    icon: 'i',
     title: 'Ödeme tamamlanmadı',
     body: 'Bu satın alma ödeme almadı ve kredi yüklenmedi.',
   };

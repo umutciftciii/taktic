@@ -1,9 +1,22 @@
 import type { Metadata } from 'next';
+import { Archivo } from 'next/font/google';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { apiFetch, getCurrentUser, type ProviderDashboard } from '../lib/api';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
+
+/**
+ * Archivo is the system's only family — 400 for body, 600 for labels, 800 for
+ * headings and button labels. Self-hosted through next/font so the design does
+ * not depend on a third-party stylesheet at runtime.
+ */
+const archivo = Archivo({
+  subsets: ['latin', 'latin-ext'],
+  weight: ['400', '600', '800'],
+  display: 'swap',
+  variable: '--font-archivo',
+});
 
 export const metadata: Metadata = {
   title: 'TakTic — Yerel hizmet teklifleri, adil teklif kredisi',
@@ -29,7 +42,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   }
 
   return (
-    <html lang="tr">
+    <html lang="tr" className={archivo.variable}>
       <body>
         <div className="app-shell">
           <SiteHeader user={user} providerId={providerId} />

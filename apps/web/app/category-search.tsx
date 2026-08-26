@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { IconSearch } from './landing-icons';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -141,8 +142,8 @@ export function CategorySearch({
   return (
     <div ref={wrapperRef} className={`category-search category-search-${variant}`}>
       <div className="category-search-input-wrap">
-        <span className="category-search-icon" aria-hidden="true">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <span className="category-search-icon">
+          <IconSearch size={18} />
         </span>
         <input
           ref={inputRef}
@@ -206,14 +207,14 @@ export function CategorySearch({
                 ))}
               </ul>
               <button type="button" className="category-search-all" onClick={submitFreeText}>
-                Tüm sonuçları gör →
+                Tüm sonuçları gör
               </button>
             </>
           ) : (
             <div className="category-search-status category-search-empty">
               <strong>“{query}”</strong> ile eşleşen kategori bulunamadı.
               <button type="button" className="category-search-all" onClick={submitFreeText}>
-                Yine de tüm kategorilerde ara →
+                Yine de tüm kategorilerde ara
               </button>
             </div>
           )}

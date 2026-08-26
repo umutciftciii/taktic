@@ -27,18 +27,19 @@ export default async function RequestSuccessPage({ searchParams }: RequestSucces
   return (
     <main>
       <div className="page-narrow">
-        <section className="card" style={{ margin: 0, textAlign: 'center', padding: 32 }}>
-          <span className="badge badge-good" style={{ fontSize: 13, padding: '8px 14px' }}>Talep alındı</span>
-          <h1 className="page-title" style={{ marginTop: 14 }}>Talebiniz ön incelemeye gönderildi</h1>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Onay sonrasında uygun hizmet verenler teklif gönderebilir.
+        <section>
+          <span className="kicker">Talep alındı</span>
+          <h1 className="page-title">Talebiniz ön incelemeye gönderildi</h1>
+          <p className="page-subtitle">
+            Onay sonrasında uygun hizmet verenler teklif gönderebilir. Talebiniz 14 gün boyunca
+            teklif alır.
           </p>
           {referenceLabel ? (
             <p style={{ marginTop: 14 }}>
               Talep referansı: <code>{referenceLabel}</code>
             </p>
           ) : null}
-          <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 18 }}>
+          <div className="inline-actions" style={{ marginTop: 24 }}>
             {id ? (
               <Link className="btn btn-primary" href={`/requests/${id}/offers`}>
                 Teklifleri görüntüle
@@ -49,7 +50,7 @@ export default async function RequestSuccessPage({ searchParams }: RequestSucces
                 Taleplerim
               </Link>
             ) : null}
-            <Link className="btn btn-ghost" href="/categories">
+            <Link className="btn btn-secondary" href="/categories">
               Kategorilere dön
             </Link>
           </div>
