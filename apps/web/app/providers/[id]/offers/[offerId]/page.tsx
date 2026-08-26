@@ -12,6 +12,7 @@ import {
   formatDateTime,
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
+import { readCreditBalance } from '../../../provider-data';
 import {
   canWithdrawOffer,
   isWithdrawableOfferStatus,
@@ -44,9 +45,12 @@ export default async function ProviderOfferDetailPage({
   // Its own request, and the API answers it for exactly one provider: the one
   // whose offer this request was matched to. A losing offer gets null here, so
   // the section below never renders for it.
-  const matchedContact = await getMatchedContactOrNull<MatchedCustomerContact>(
-    `/providers/${id}/offers/${offerId}/matched-contact`,
-  );
+  const [matchedContact, creditBalance] = await Promise.all([
+    getMatchedContactOrNull<MatchedCustomerContact>(
+      `/providers/${id}/offers/${offerId}/matched-contact`,
+    ),
+    readCreditBalance(id),
+  ]);
 
   const canWithdraw = canWithdrawOffer(offer.status, offer.request.status);
   // Still live, but on a request that no longer takes offers. Worth explaining;
@@ -54,16 +58,17 @@ export default async function ProviderOfferDetailPage({
   const withdrawBlockedByRequest = !canWithdraw && isWithdrawableOfferStatus(offer.status);
 
   return (
-    <ProviderShell user={user} providerId={id} active="offers">
-      <p className="pdash-crumbs">
+    <ProviderShell user={user} providerId={id} active="offers" creditBalance={creditBalance}>
+      <nav className="pdash-crumbs" aria-label="Breadcrumb">
         <Link href="/providers/me">Panelim</Link>
         <span aria-hidden="true">/</span>
         <Link href={`/providers/${id}/offers`}>Tekliflerim</Link>
         <span aria-hidden="true">/</span>
         <span>Teklif Detayı</span>
-      </p>
+      </nav>
 
       <header className="pdash-page-head">
+        <span className="kicker">Teklif</span>
         <h1 className="pdash-page-title">Teklif Detayı</h1>
         <p className="pdash-page-sub">
           {offer.request.category.name} · {offer.request.city}/{offer.request.district}
@@ -111,13 +116,13 @@ export default async function ProviderOfferDetailPage({
 
           <section className="pdash-detail-card">
             <h2>Mesaj</h2>
-            <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14, color: 'var(--text-2)' }}>
+            <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14, }}>
               {offer.message}
             </p>
             {offer.warrantyNote ? (
               <>
                 <h3>Garanti notu</h3>
-                <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14, color: 'var(--text-2)' }}>
+                <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14, }}>
                   {offer.warrantyNote}
                 </p>
               </>

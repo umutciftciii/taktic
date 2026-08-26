@@ -8,6 +8,9 @@ type CategoriesPageProps = {
   searchParams: Promise<{ q?: string }>;
 };
 
+/** Free-text shortcuts; each one really performs the `?q=` search below. */
+const POPULAR_SEARCHES = ['Klima', 'Kombi', 'Elektrikçi', 'Su tesisatı', 'Boya badana', 'Ev temizliği'];
+
 export default async function CategoriesPage({ searchParams }: CategoriesPageProps) {
   const { q } = await searchParams;
   const term = q?.trim() ?? '';
@@ -20,94 +23,149 @@ export default async function CategoriesPage({ searchParams }: CategoriesPagePro
   return (
     <main className="cat-page">
       <div className="cat-page-shell">
+        <nav className="breadcrumbs" aria-label="Breadcrumb">
+          <Link href="/">Ana sayfa</Link>
+          <span aria-hidden="true">/</span>
+          <span>Kategoriler</span>
+        </nav>
+
         <header className="cat-page-head">
-          <h1 className="cat-page-title">Hizmet Kategorileri</h1>
+          <h1 className="cat-page-title">Hizmet kategorileri</h1>
           <p className="cat-page-subtitle">
-            İhtiyacına uygun kategoriyi seç, dakikalar içinde talep oluştur.
+            Kategoriyi seç, o kategoriye özel soruları yanıtla. Talebin incelendikten sonra
+            bölgendeki onaylı hizmet verenlere iletilir.
           </p>
         </header>
 
         <div className="cat-page-search">
           <CategorySearch
             variant="hero"
-            placeholder="Kategori ara (örn. klima, tadilat, temizlik)"
+            placeholder="Kategori ara — örn. klima, boya, tesisat"
           />
         </div>
 
-        {hasSearch ? (
-          <div className="cat-page-meta">
-            <span className="cat-page-meta-text">
-              {isEmpty
-                ? `“${term}” için sonuç bulunamadı`
-                : `“${term}” için ${categories.length} kategori`}
-            </span>
-            <Link className="cat-page-meta-link" href="/categories">
-              Aramayı temizle
+        <div className="cat-page-popular">
+          <span className="cat-page-popular-label">Popüler aramalar:</span>
+          {POPULAR_SEARCHES.map((label) => (
+            <Link
+              className="tag-outline"
+              key={label}
+              href={`/categories?q=${encodeURIComponent(label)}`}
+            >
+              {label}
             </Link>
-          </div>
-        ) : null}
+          ))}
+        </div>
 
-        {isEmpty ? (
-          <div className="cat-page-empty">
-            <h2 className="cat-page-empty-title">
-              {hasSearch ? 'Aramana uygun kategori bulunamadı.' : 'Henüz kategori yok.'}
-            </h2>
-            <p className="cat-page-empty-desc">
-              {hasSearch
-                ? 'Farklı bir anahtar kelime dene veya tüm kategorilere göz at.'
-                : 'Yeni kategoriler eklendiğinde burada listelenecek.'}
-            </p>
-            {hasSearch ? (
-              <Link className="cat-page-empty-cta" href="/categories">
-                Tüm kategorileri göster
+        <div className="cat-page-body">
+          <aside className="cat-page-rail" aria-label="Kategori filtreleri">
+            <div className="cat-rail-group">
+              <span className="cat-rail-title">Arama</span>
+              <p className="lp-muted" style={{ fontSize: 13, margin: 0 }}>
+                {hasSearch ? (
+                  <>
+                    “{term}” için filtrelenmiş liste. <Link href="/categories">Aramayı temizle</Link>
+                  </>
+                ) : (
+                  'Tüm aktif kategoriler listeleniyor.'
+                )}
+              </p>
+            </div>
+
+            {/*
+              Bölge ve grup kırılımı için API tarafında bir uç yok; alan sahte
+              sonuç üretmemek adına pasif "Yakında" olarak duruyor.
+            */}
+            <div className="cat-rail-group">
+              <span className="cat-rail-title">Şehir</span>
+              <select className="sel" aria-label="Şehir (yakında)" disabled defaultValue="">
+                <option value="">Tümü</option>
+              </select>
+              <span className="help-text">Bölgeye göre filtreleme yakında.</span>
+            </div>
+
+            <div className="cat-rail-cta">
+              <p className="lp-muted" style={{ fontSize: 13 }}>
+                Aradığın kategori listede yoksa en yakın kategoriden talep açabilir, iş detayını
+                açıklama alanında anlatabilirsin.
+              </p>
+              <Link className="btn btn-secondary btn-block" href="/#lp-sss">
+                Nasıl çalışır?
+                <IconArrowRight size={12} />
               </Link>
-            ) : null}
-          </div>
-        ) : (
-          <div className="cat-page-grid">
-            {categories.map((category) => {
-              const hasImage = Boolean(category.imageUrl);
-              return (
-                <Link
-                  className={`cat-page-card${hasImage ? ' cat-page-card-with-image' : ''}`}
-                  href={`/categories/${category.slug}`}
-                  key={category.id}
-                >
-                  {hasImage ? (
-                    <span className="cat-page-card-media">
+            </div>
+          </aside>
+
+          <div className="cat-page-results">
+            <div className="cat-page-meta">
+              <span className="cat-page-meta-text">
+                {isEmpty
+                  ? hasSearch
+                    ? `“${term}” için sonuç bulunamadı`
+                    : 'Kategori bulunamadı'
+                  : hasSearch
+                    ? `“${term}” için ${categories.length} kategori`
+                    : `${categories.length} kategori`}
+              </span>
+              {hasSearch ? (
+                <Link className="cat-page-meta-link" href="/categories">
+                  Aramayı temizle
+                </Link>
+              ) : null}
+            </div>
+
+            {isEmpty ? (
+              <div className="cat-page-empty">
+                <h2 className="cat-page-empty-title">
+                  {hasSearch ? 'Aramana uygun kategori bulunamadı.' : 'Henüz kategori yok.'}
+                </h2>
+                <p className="cat-page-empty-desc">
+                  {hasSearch
+                    ? 'Farklı bir anahtar kelime dene veya tüm kategorilere göz at.'
+                    : 'Yeni kategoriler eklendiğinde burada listelenecek.'}
+                </p>
+                {hasSearch ? (
+                  <Link className="cat-page-empty-cta" href="/categories">
+                    Tüm kategorileri göster
+                  </Link>
+                ) : null}
+              </div>
+            ) : (
+              <div className="cat-row-list">
+                {categories.map((category) => (
+                  <Link
+                    className="cat-row"
+                    href={`/categories/${category.slug}`}
+                    key={category.id}
+                  >
+                    <span className="cat-row-media">
                       <CategoryVisual
                         imageUrl={category.imageUrl}
+                        slug={category.slug}
                         iconKey={category.iconKey}
                         name={category.name}
-                        imgClassName="cat-page-card-img"
-                        iconWrapperClassName="cat-page-card-icon"
-                        iconSize={22}
-                        alt={category.name}
+                        iconSize={28}
+                        alt=""
                       />
                     </span>
-                  ) : (
-                    <CategoryVisual
-                      imageUrl={category.imageUrl}
-                      iconKey={category.iconKey}
-                      name={category.name}
-                      iconWrapperClassName="cat-page-card-icon"
-                      iconSize={22}
-                      alt={category.name}
-                    />
-                  )}
-                  <span className="cat-page-card-name">{category.name}</span>
-                  {category.description ? (
-                    <span className="cat-page-card-desc">{category.description}</span>
-                  ) : null}
-                  <span className="cat-page-card-cta">
-                    Talep oluştur
-                    <IconArrowRight size={12} />
-                  </span>
-                </Link>
-              );
-            })}
+                    <span className="cat-row-body">
+                      <span className="cat-row-name">{category.name}</span>
+                      {category.description ? (
+                        <span className="cat-row-desc">{category.description}</span>
+                      ) : null}
+                    </span>
+                    <span className="cat-row-cta">
+                      <span className="btn btn-secondary btn-sm">
+                        Talep oluştur
+                        <IconArrowRight size={12} />
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </main>
   );

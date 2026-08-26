@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { AuthFrame } from '../../auth-frame';
 import { registerCustomerAction } from '../actions';
+import { RoleSwitch } from '../role-switch';
 
 type CustomerRegisterPageProps = {
   searchParams: Promise<{ error?: string; notice?: string }>;
@@ -9,15 +11,17 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
   const { error, notice } = await searchParams;
 
   return (
-    <main className="auth-screen">
-      <form className="auth-screen-card auth-screen-card-compact" action={registerCustomerAction}>
-        <div className="auth-screen-card-head">
-          <img className="auth-brand-logo" src="/brand/logo.png" alt="TakTick" />
-          <h1 className="auth-screen-title">Müşteri Hesabı Oluştur</h1>
-          <p className="auth-screen-subtitle">
-            Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.
-          </p>
-        </div>
+    <AuthFrame tab="register" registerHref="/register/customer">
+      <form
+        action={registerCustomerAction}
+        style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+      >
+        <h1 className="auth-screen-title">Hesap oluştur</h1>
+        <p className="auth-screen-subtitle">
+          Taleplerinizi takip etmek ve teklifleri tek yerde görmek için hesap açın.
+        </p>
+
+        <RoleSwitch active="customer" />
 
         {notice === 'activation-sent' ? (
           <div className="auth-screen-notice" role="status">
@@ -57,6 +61,15 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
             />
           </label>
           <label className="auth-screen-field">
+            <span className="auth-screen-label">Telefon</span>
+            <input
+              className="auth-screen-input"
+              name="phone"
+              autoComplete="tel"
+              placeholder="05XX XXX XX XX"
+            />
+          </label>
+          <label className="auth-screen-field">
             <span className="auth-screen-label">Şifre *</span>
             <input
               className="auth-screen-input"
@@ -67,15 +80,6 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
               autoComplete="new-password"
             />
             <span className="auth-screen-help">En az 8 karakter.</span>
-          </label>
-          <label className="auth-screen-field">
-            <span className="auth-screen-label">Telefon</span>
-            <input
-              className="auth-screen-input"
-              name="phone"
-              autoComplete="tel"
-              placeholder="05XX XXX XX XX"
-            />
           </label>
         </div>
 
@@ -88,6 +92,6 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
           <Link href="/login">Giriş yapın</Link>
         </p>
       </form>
-    </main>
+    </AuthFrame>
   );
 }

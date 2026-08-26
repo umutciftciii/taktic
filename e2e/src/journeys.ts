@@ -42,13 +42,7 @@ export async function createRequest(
   await actor.gotoWeb(`/categories/${category.slug}`);
   await expect(actor.page.getByRole('heading', { name: category.name })).toBeVisible();
 
-  const form = actor.page.locator('form.form-card');
-  await form.locator('input[name="customerName"]').fill(values.customerName);
-  await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
-  await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
-  await form.locator('input[name="city"]').fill(values.city);
-  await form.locator('input[name="district"]').fill(values.district);
-  await form.locator('textarea[name="description"]').fill(values.description);
+  await fillRequestFormUpToContact(actor, values);
 
   // Present only on a runtime with contact sharing on, where it is required:
   // the form cannot be submitted until the customer confirms having read the
@@ -68,6 +62,46 @@ export async function createRequest(
   expect(requestId, 'the success page must carry the new request id').toBeTruthy();
 
   return requestId as string;
+}
+
+/**
+ * Fills the public request form and stops on its last step, with the contact
+ * fields entered and nothing submitted.
+ *
+ * The form is one POST with the same field names as ever, presented in three
+ * steps. Walking them with the page's own "Devam et" button is what a customer
+ * does, and it is what keeps every field visible at the moment it is filled.
+ * Callers that need to assert on the contact step — the disclosure checkbox
+ * lives there — use this and then do their own thing.
+ */
+export async function fillRequestFormUpToContact(
+  actor: Actor,
+  values: RequestFormValues,
+): Promise<void> {
+  const form = actor.page.locator('form.form-card');
+  const nextStep = actor.page.getByRole('button', { name: 'Devam et' });
+
+  await form.locator('textarea[name="description"]').fill(values.description);
+  await nextStep.click();
+
+  await form.locator('input[name="city"]').fill(values.city);
+  await form.locator('input[name="district"]').fill(values.district);
+  await nextStep.click();
+
+  await form.locator('input[name="customerName"]').fill(values.customerName);
+  await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
+  await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
+}
+
+/** Opens the request form and steps straight to its contact step. */
+export async function openRequestFormContactStep(
+  actor: Actor,
+  category: SeededCategory,
+  values: RequestFormValues,
+): Promise<void> {
+  await actor.gotoWeb(`/categories/${category.slug}`);
+  await expect(actor.page.getByRole('heading', { name: category.name })).toBeVisible();
+  await fillRequestFormUpToContact(actor, values);
 }
 
 /**

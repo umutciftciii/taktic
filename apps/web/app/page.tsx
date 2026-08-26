@@ -11,41 +11,24 @@ import {
   IconCompare,
   IconEdit,
   IconShield,
-  IconSnowflake,
   IconThumbsUp,
-  IconTrendingUp,
   IconUsers,
   IconWallet,
   IconX,
 } from './landing-icons';
 import type { IconComponent } from './landing-icons';
 
-type HomePageCategory = {
-  name: string;
-  slug: string;
-  description: string | null;
-  imageUrl?: string | null;
-  iconKey?: string | null;
-};
-
-const fallbackCategories: HomePageCategory[] = [
-  { name: 'Klima Servisi', slug: 'klima-servisi', description: 'Bakım, arıza ve gaz dolumu' },
-  { name: 'Klima Montajı', slug: 'klima-montaji', description: 'Yeni cihaz kurulumu' },
-  { name: 'Kombi Servisi', slug: 'kombi-servisi', description: 'Bakım, arıza tespiti' },
-  { name: 'Elektrikçi', slug: 'elektrikci', description: 'Tesisat ve arıza onarımı' },
-  { name: 'Su Tesisatçısı', slug: 'su-tesisatcisi', description: 'Sızıntı, tıkanıklık, montaj' },
-  { name: 'Boya Badana', slug: 'boya-badana', description: 'Daire, oda ve tavan' },
-  { name: 'Ev Temizliği', slug: 'ev-temizligi', description: 'Genel ve detay temizlik' },
-  { name: 'Nakliyat', slug: 'nakliyat', description: 'Evden eve, ofis taşıma' },
-];
-
 export default async function HomePage() {
-  let categories: HomePageCategory[] = [];
+  /*
+   * Categories are the API's to answer. There is no stand-in list any more: a
+   * fabricated grid would put category names on screen that nothing behind them
+   * can serve, so an unreachable API renders the empty state instead.
+   */
+  let categories: Category[] = [];
   try {
-    const fromApi = await apiFetch<Category[]>('/categories?limit=10');
-    categories = fromApi.length > 0 ? fromApi : fallbackCategories;
+    categories = await apiFetch<Category[]>('/categories?limit=10');
   } catch {
-    categories = fallbackCategories;
+    categories = [];
   }
 
   const user = await getCurrentUser();
@@ -55,11 +38,11 @@ export default async function HomePage() {
   return (
     <>
       <LandingHero isCustomer={isCustomer} isAuthenticated={isAuthenticated} user={user} />
+      <MetricStrip categoryCount={categories.length} />
       <PopularCategories categories={categories} />
       <HowItWorks />
       <ProviderValue />
       <Comparison />
-      <TrustSection />
       <ProviderCTABand />
       <LandingFAQ />
       <FinalCTA isCustomer={isCustomer} isAuthenticated={isAuthenticated} user={user} />
@@ -67,58 +50,100 @@ export default async function HomePage() {
   );
 }
 
-function PopularCategories({ categories }: { categories: HomePageCategory[] }) {
+/**
+ * The metric strip states only what the platform's own rules guarantee, plus
+ * the live category count. Nothing here is a volume claim: there is no marketplace
+ * figure this page could read that would still be true tomorrow.
+ */
+function MetricStrip({ categoryCount }: { categoryCount: number }) {
+  return (
+    <section className="lp-section" style={{ paddingTop: 0, paddingBottom: 0 }}>
+      <div className="lp-container">
+        <div className="metric-strip">
+          <div className="metric-cell">
+            <span className="metric-label">Aktif kategori</span>
+            <span className="metric-value">{categoryCount}</span>
+            <span className="metric-hint">kategoriye özel form</span>
+          </div>
+          <div className="metric-cell">
+            <span className="metric-label">Talep geçerliliği</span>
+            <span className="metric-value">14</span>
+            <span className="metric-hint">gün</span>
+          </div>
+          <div className="metric-cell">
+            <span className="metric-label">Teklif almak</span>
+            <span className="metric-value">0 ₺</span>
+            <span className="metric-hint">müşteri için ücretsiz</span>
+          </div>
+          <div className="metric-cell">
+            <span className="metric-label">Kalite skoru</span>
+            <span className="metric-value">%100</span>
+            <span className="metric-hint">her talep puanlanır</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PopularCategories({ categories }: { categories: Category[] }) {
   return (
     <section className="lp-section" id="kategoriler">
       <div className="lp-container">
         <div className="lp-section-head">
-          <span className="lp-eyebrow">Kategoriler</span>
-          <h2 className="lp-h2">En çok talep edilen hizmetler</h2>
+          <div>
+            <span className="lp-eyebrow">Kategoriler</span>
+            <h2 className="lp-h2">En çok talep edilen hizmetler</h2>
+          </div>
           <p className="lp-section-sub">
             Bir kategori seç, kategoriye özel sorulara yanıt ver ve gelen teklifleri karşılaştır.
           </p>
         </div>
 
-        <div className="lp-cat-grid">
-          {categories.map((c) => {
-            const hasImage = Boolean(c.imageUrl);
-            return (
-              <Link
-                className={`lp-cat-card${hasImage ? ' lp-cat-card-with-image' : ''}`}
-                href={`/categories/${c.slug}`}
-                key={c.slug}
-              >
-                {hasImage ? (
-                  <span className="lp-cat-media">
-                    <CategoryVisual
-                      imageUrl={c.imageUrl}
-                      iconKey={c.iconKey}
-                      name={c.name}
-                      imgClassName="lp-cat-img"
-                      iconWrapperClassName="lp-cat-icon"
-                      iconSize={22}
-                      alt={c.name}
-                    />
-                  </span>
-                ) : (
+        {categories.length === 0 ? (
+          <div className="state-surface">
+            <h3>Kategoriler şu anda listelenemiyor</h3>
+            <p>
+              Kategori listesi birazdan tekrar yüklenecek. Bu sırada tüm kategoriler sayfasından
+              arama yapabilirsiniz.
+            </p>
+            <Link className="btn btn-secondary" href="/categories">
+              Kategorilere git
+            </Link>
+          </div>
+        ) : (
+          <div className="lp-cat-grid">
+            {categories.map((c) => (
+              <Link className="lp-cat-card" href={`/categories/${c.slug}`} key={c.slug}>
+                <span className="lp-cat-media">
                   <CategoryVisual
                     imageUrl={c.imageUrl}
+                    slug={c.slug}
                     iconKey={c.iconKey}
                     name={c.name}
+                    imgClassName="lp-cat-img"
                     iconWrapperClassName="lp-cat-icon"
-                    iconSize={22}
-                    alt={c.name}
+                    iconSize={32}
+                    alt=""
                   />
-                )}
+                </span>
                 <span className="lp-cat-name">{c.name}</span>
                 {c.description ? <span className="lp-cat-desc">{c.description}</span> : null}
                 <span className="lp-cat-link">
                   Talep oluştur <IconArrowRight size={12} />
                 </span>
               </Link>
-            );
-          })}
-        </div>
+            ))}
+
+            <Link className="lp-cat-cta-cell" href="/categories">
+              <span className="lp-cat-name">Tüm kategorileri gör</span>
+              <span className="lp-cat-desc">Arama ve filtrelerle doğru kategoriyi bul.</span>
+              <span className="lp-cat-link">
+                Kategoriler <IconArrowRight size={12} />
+              </span>
+            </Link>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -151,7 +176,7 @@ const steps: Step[] = [
     Icon: IconThumbsUp,
     title: 'Uygun olanı seç',
     desc:
-      'Beğendiğin teklifi kabul et. Ödeme ve iletişim akışı sonraki fazlarda aktif olacaktır.',
+      'Beğendiğin teklifi kabul et; eşleşme kaydedildiğinde iletişim bilgileri karşılıklı paylaşılır.',
   },
 ];
 
@@ -160,10 +185,13 @@ function HowItWorks() {
     <section className="lp-section lp-section-white" id="nasil-calisir">
       <div className="lp-container">
         <div className="lp-section-head">
-          <span className="lp-eyebrow">Müşteri için</span>
-          <h2 className="lp-h2">3 adımda teklif al</h2>
+          <div>
+            <span className="lp-eyebrow">Müşteri için</span>
+            <h2 className="lp-h2">3 adımda teklif al</h2>
+          </div>
           <p className="lp-section-sub">
-            Form doldur, teklifleri karşılaştır, sana uygun olanı seç. Hepsi şeffaf ve takip edilebilir.
+            Form doldur, teklifleri karşılaştır, sana uygun olanı seç. Hepsi şeffaf ve takip
+            edilebilir.
           </p>
         </div>
 
@@ -172,7 +200,7 @@ function HowItWorks() {
             const { Icon: StepIcon } = s;
             return (
               <article className="lp-step-card" key={s.n}>
-                <span className="lp-step-num">{s.n}</span>
+                <span className="lp-step-num">0{s.n}</span>
                 <span className="lp-step-icon">
                   <StepIcon size={20} />
                 </span>
@@ -201,7 +229,7 @@ const providerFeatures: Array<{ title: string; desc: string }> = [
     desc: 'Her teklif için kredi hareketi geçmişe işlenir, anlık olarak görüntülenebilir.',
   },
   {
-    title: 'İade önerisi ve refund scan',
+    title: 'İade önerisi ve iade taraması',
     desc: 'Görüntülenmeyen veya geçersiz talepler için iade uygunluğu otomatik taranır.',
   },
   {
@@ -212,48 +240,62 @@ const providerFeatures: Array<{ title: string; desc: string }> = [
 
 function ProviderValue() {
   return (
-    <section className="lp-section lp-provider-section" id="hizmet-ver">
-      <div className="lp-container lp-pv-grid">
-        <div className="lp-pv-left">
-          <span className="lp-eyebrow">Hizmet verenler için</span>
-          <h2 className="lp-h2">Boşa teklif kredisi yakma.</h2>
-          <p className="lp-section-sub" style={{ textAlign: 'left', margin: '14px 0 24px' }}>
-            TakTic, hizmet verenlerin yalnızca kaliteli ve takip edilebilir taleplere teklif vermesini
-            hedefler. Görüntülenmeyen veya geçersiz talepler için iade politikası şeffaftır.
-          </p>
-
-          <ul className="lp-pv-features">
-            {providerFeatures.map((f) => (
-              <li className="lp-pv-feature" key={f.title}>
-                <span className="lp-pv-check">
-                  <IconCheck size={11} />
-                </span>
-                <span className="lp-pv-feature-text">
-                  <strong>{f.title}.</strong> <span className="lp-muted">{f.desc}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-
-          <div className="lp-pv-cta">
-            <Link className="btn btn-primary btn-lg" href="/providers/register">
-              Hizmet Veren Ol
-            </Link>
-            <Link className="btn btn-secondary btn-lg" href="#nasil-calisir">
-              Nasıl çalışır?
-            </Link>
+    <section className="lp-section" id="hizmet-ver">
+      <div className="lp-container">
+        <div className="lp-section-head">
+          <div>
+            <span className="lp-eyebrow">Hizmet verenler için</span>
+            <h2 className="lp-h2">Boşa teklif kredisi yakma.</h2>
           </div>
         </div>
 
-        <div className="lp-pv-right">
-          <ProviderDashboardMockup />
+        <div className="lp-pv-grid">
+          <div className="lp-pv-left">
+            <p className="lp-section-sub" style={{ marginTop: 0 }}>
+              TakTic, hizmet verenlerin yalnızca kaliteli ve takip edilebilir taleplere teklif
+              vermesini hedefler. Görüntülenmeyen veya geçersiz talepler için iade politikası
+              şeffaftır.
+            </p>
+
+            <ul className="lp-pv-features">
+              {providerFeatures.map((f) => (
+                <li className="lp-pv-feature" key={f.title}>
+                  <span className="lp-pv-check">
+                    <IconCheck size={11} />
+                  </span>
+                  <span className="lp-pv-feature-text">
+                    <strong>{f.title}.</strong> <span className="lp-muted">{f.desc}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="lp-pv-cta">
+              <Link className="btn btn-primary btn-lg" href="/providers/register">
+                Hizmet Veren Ol
+                <IconArrowRight />
+              </Link>
+              <Link className="btn btn-secondary btn-lg" href="#nasil-calisir">
+                Nasıl çalışır?
+              </Link>
+            </div>
+          </div>
+
+          <div className="lp-pv-right">
+            <ProviderPanelPreview />
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function ProviderDashboardMockup() {
+/**
+ * A drawing of the provider panel, not a data readout. It carries labels only —
+ * no counts, balances or prices — because nothing on a public page can know a
+ * provider's real numbers, and a plausible-looking figure here would be a claim.
+ */
+function ProviderPanelPreview() {
   return (
     <div className="lp-dashboard">
       <div className="lp-dash-head">
@@ -263,54 +305,47 @@ function ProviderDashboardMockup() {
         </div>
         <span className="lp-dash-status">
           <span className="lp-dash-dot" />
-          <span>Canlı</span>
+          <span>Önizleme</span>
         </span>
       </div>
 
       <div className="lp-dash-stats">
-        <div className="lp-dash-stat lp-dash-stat-primary">
-          <span className="lp-dash-stat-label">Kalan kredi</span>
-          <span className="lp-dash-stat-value">24</span>
+        <div className="lp-dash-stat">
+          <span className="lp-dash-stat-label">Kredi bakiyesi</span>
+          <span className="lp-dash-stat-delta">panelinde</span>
         </div>
         <div className="lp-dash-stat">
-          <span className="lp-dash-stat-label">Eşleşen talep</span>
-          <span className="lp-dash-stat-value">8</span>
-          <span className="lp-dash-stat-delta">
-            <IconTrendingUp size={10} />
-            <span>+2 bugün</span>
-          </span>
+          <span className="lp-dash-stat-label">Uygun talep</span>
+          <span className="lp-dash-stat-delta">bölgene göre</span>
         </div>
         <div className="lp-dash-stat">
           <span className="lp-dash-stat-label">İade kredi</span>
-          <span className="lp-dash-stat-value">3</span>
-          <span className="lp-dash-stat-delta">son 30 gün</span>
+          <span className="lp-dash-stat-delta">otomatik tarama</span>
         </div>
       </div>
 
       <div className="lp-dash-opp-head">
         <span>Yeni teklif fırsatı</span>
-        <span className="lp-dash-live">
-          <span className="lp-dash-dot lp-dash-dot-primary" />
-          1 dakika önce
-        </span>
       </div>
       <div className="lp-dash-opp">
         <span className="lp-dash-opp-icon">
-          <IconSnowflake size={18} />
+          <IconClipList size={18} />
         </span>
         <div className="lp-dash-opp-body">
-          <div className="lp-dash-opp-title">Klima Servisi · Kadıköy</div>
+          <div className="lp-dash-opp-title">Kategori · İlçe</div>
           <div className="lp-dash-opp-meta">
-            <span className="lp-badge lp-badge-success lp-badge-xs">Skor 86</span>
-            <span>·</span>
-            <span>Bütçe 3.000–5.000 ₺</span>
+            <span>Kalite skoru · bütçe aralığı · aciliyet</span>
           </div>
         </div>
         <div className="lp-dash-opp-cost">
-          <span className="lp-dash-opp-cost-val">2 kredi</span>
-          <span className="lp-dash-opp-cost-label">teklif için</span>
+          <span className="lp-dash-opp-cost-label">kredi bedeli talep detayında</span>
         </div>
       </div>
+
+      <Link className="btn btn-primary btn-block" href="/providers/register">
+        Hizmet veren ol
+        <IconArrowRight />
+      </Link>
     </div>
   );
 }
@@ -322,7 +357,7 @@ const legacyPoints = [
   'Kredi / bakiye nereye gitti belirsiz',
 ];
 
-const tactıcPoints = [
+const takticPoints = [
   'Talep kalite skoru',
   'Görüntülenme takibi',
   'Kredi hareket geçmişi',
@@ -332,14 +367,13 @@ const tactıcPoints = [
 
 function Comparison() {
   return (
-    <section className="lp-section">
+    <section className="lp-section lp-section-white">
       <div className="lp-container">
         <div className="lp-section-head">
-          <span className="lp-eyebrow">Karşılaştırma</span>
-          <h2 className="lp-h2">Eski modelden daha şeffaf.</h2>
-          <p className="lp-section-sub">
-            Geleneksel teklif pazaryerlerinin sıkıntılarına karşılık TakTic&apos;in netliği.
-          </p>
+          <div>
+            <span className="lp-eyebrow">Karşılaştırma</span>
+            <h2 className="lp-h2">Eski modelden daha şeffaf.</h2>
+          </div>
         </div>
 
         <div className="lp-comp-grid">
@@ -362,13 +396,13 @@ function Comparison() {
 
           <div className="lp-comp-card lp-comp-taktic">
             <div className="lp-comp-head">
-              <span className="lp-comp-title lp-comp-title-primary">TakTic modeli</span>
+              <span className="lp-comp-title lp-comp-title-primary">TakTick modeli</span>
               <span className="lp-badge lp-badge-primary">Şeffaf</span>
             </div>
             <div className="lp-comp-list">
-              {tactıcPoints.map((t) => (
+              {takticPoints.map((t) => (
                 <div key={t} className="lp-comp-item">
-                  <span className="lp-comp-mark lp-comp-mark-success">
+                  <span className="lp-comp-mark">
                     <IconCheck size={11} />
                   </span>
                   <span className="lp-comp-item-strong">{t}</span>
@@ -376,6 +410,44 @@ function Comparison() {
               ))}
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const ctaBullets = [
+  'Kategori seç',
+  'Hizmet bölgeni belirle',
+  'Admin onayından sonra talepleri gör',
+  'Krediyle teklif ver',
+];
+
+function ProviderCTABand() {
+  return (
+    <section className="lp-section lp-section-poster">
+      <div className="lp-cta-band">
+        <div>
+          <span className="lp-eyebrow lp-eyebrow-light">Hizmet verenler için</span>
+          <h2 className="lp-h2 lp-cta-band-title">
+            Hizmet veriyorsan, doğru müşteriye teklif ver.
+          </h2>
+          <p className="lp-cta-band-sub">
+            Bölgen ve uzmanlık alanlarınla eşleşen talepleri gör, tekliflerini takip et, kredi
+            hareketlerini şeffaf şekilde izle.
+          </p>
+          <Link className="btn btn-lg lp-cta-band-btn" href="/providers/register">
+            Hizmet Veren Başvurusu Yap
+            <IconArrowRight />
+          </Link>
+        </div>
+        <div className="lp-cta-band-bullets">
+          {ctaBullets.map((b, i) => (
+            <div className="lp-cta-band-bullet" key={b}>
+              <span className="lp-cta-band-bullet-num">{i + 1}</span>
+              <span>{b}</span>
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -409,90 +481,6 @@ const trustCards: Array<{
   },
 ];
 
-const trustStats = [
-  { v: '7', l: 'Aktif kategori' },
-  { v: '100%', l: 'Kalite skorlu talepler' },
-  { v: '0₺', l: 'Görüntülenmeyen teklif maliyeti' },
-  { v: 'Açık', l: 'İade politikası' },
-];
-
-function TrustSection() {
-  return (
-    <section className="lp-section lp-section-white">
-      <div className="lp-container">
-        <div className="lp-section-head">
-          <span className="lp-eyebrow">Güven</span>
-          <h2 className="lp-h2">Daha güvenli hizmet pazaryeri deneyimi</h2>
-          <p className="lp-section-sub">
-            Talep, teklif ve kredi akışını izlenebilir kılan altyapı.
-          </p>
-        </div>
-
-        <div className="lp-trust-grid">
-          {trustCards.map(({ title, desc, Icon: TrustIcon }) => (
-            <article className="lp-trust-card" key={title}>
-              <span className="lp-trust-icon">
-                <TrustIcon size={18} />
-              </span>
-              <h3 className="lp-trust-title">{title}</h3>
-              <p className="lp-trust-desc">{desc}</p>
-            </article>
-          ))}
-        </div>
-
-        <div className="lp-trust-stats">
-          {trustStats.map((s) => (
-            <div className="lp-trust-stat" key={s.l}>
-              <div className="lp-trust-stat-value">{s.v}</div>
-              <div className="lp-trust-stat-label">{s.l}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const ctaBullets = [
-  'Kategori seç',
-  'Hizmet bölgeni belirle',
-  'Admin onayından sonra talepleri gör',
-  'Krediyle teklif ver',
-];
-
-function ProviderCTABand() {
-  return (
-    <section className="lp-section">
-      <div className="lp-container">
-        <div className="lp-cta-band">
-          <div>
-            <span className="lp-eyebrow lp-eyebrow-light">Hizmet verenler için</span>
-            <h2 className="lp-h2 lp-cta-band-title">
-              Hizmet veriyorsan, doğru müşteriye teklif ver.
-            </h2>
-            <p className="lp-cta-band-sub">
-              Bölgen ve uzmanlık alanlarınla eşleşen talepleri gör, tekliflerini takip et, kredi
-              hareketlerini şeffaf şekilde izle.
-            </p>
-            <Link className="btn btn-primary btn-lg lp-cta-band-btn" href="/providers/register">
-              Hizmet Veren Başvurusu Yap
-              <IconArrowRight />
-            </Link>
-          </div>
-          <div className="lp-cta-band-bullets">
-            {ctaBullets.map((b, i) => (
-              <div className="lp-cta-band-bullet" key={b}>
-                <span className="lp-cta-band-bullet-num">{i + 1}</span>
-                <span>{b}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function FinalCTA({
   isCustomer = false,
   isAuthenticated = false,
@@ -507,25 +495,47 @@ function FinalCTA({
     : 'İhtiyacın olan hizmet için ilk talebini oluştur.';
 
   return (
-    <section className="lp-final-cta">
+    <section className="lp-section lp-section-white">
       <div className="lp-container">
-        <h2 className="lp-h2">{heading}</h2>
-        <p className="lp-final-cta-sub">
-          Birkaç dakikada talebini gönder, gelen teklifleri karşılaştır.
-        </p>
-        <div className="lp-final-cta-buttons">
-          {isAuthenticated ? (
-            <Link className="btn btn-primary btn-lg" href="/categories">
-              {isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al'}
-            </Link>
-          ) : (
-            <StartChoiceModal user={user} className="btn btn-primary btn-lg" />
-          )}
-          {isCustomer ? (
-            <Link className="btn btn-secondary btn-lg" href="/requests/my">
-              Taleplerim
-            </Link>
-          ) : null}
+        <div className="lp-section-head">
+          <div>
+            <span className="lp-eyebrow">Güven</span>
+            <h2 className="lp-h2">Daha güvenli hizmet pazaryeri deneyimi</h2>
+          </div>
+        </div>
+
+        <div className="lp-trust-grid">
+          {trustCards.map(({ title, desc, Icon: TrustIcon }) => (
+            <article className="lp-trust-card" key={title}>
+              <span className="lp-trust-icon">
+                <TrustIcon size={18} />
+              </span>
+              <h3 className="lp-trust-title">{title}</h3>
+              <p className="lp-trust-desc">{desc}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="lp-final-cta">
+          <h2 className="lp-h2">{heading}</h2>
+          <p className="lp-final-cta-sub">
+            Birkaç dakikada talebini gönder, gelen teklifleri karşılaştır.
+          </p>
+          <div className="lp-final-cta-buttons">
+            {isAuthenticated ? (
+              <Link className="btn btn-primary btn-lg" href="/categories">
+                {isCustomer ? 'Yeni Talep Oluştur' : 'Hizmet Al'}
+                <IconArrowRight />
+              </Link>
+            ) : (
+              <StartChoiceModal user={user} className="btn btn-primary btn-lg" />
+            )}
+            {isCustomer ? (
+              <Link className="btn btn-secondary btn-lg" href="/requests/my">
+                Taleplerim
+              </Link>
+            ) : null}
+          </div>
         </div>
       </div>
     </section>

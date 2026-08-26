@@ -22,24 +22,24 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
   return (
     <main>
       <div className="page-narrow">
-        <section className="card" style={{ margin: 0, textAlign: 'center', padding: 32 }}>
-          <span className="badge badge-warn" style={{ fontSize: 13, padding: '8px 14px' }}>Hata</span>
-          <h1 className="page-title" style={{ marginTop: 14 }}>Bir şeyler ters gitti</h1>
-          <p className="muted">
-            İşleminiz tamamlanamadı. Tekrar deneyebilir veya ana sayfaya dönebilirsiniz.
+        <span className="kicker">Hata</span>
+        <h1 className="page-title">Bir şeyler ters gitti</h1>
+        <p className="page-subtitle">
+          İşleminiz tamamlanamadı. Tekrar deneyebilir veya ana sayfaya dönebilirsiniz.
+        </p>
+        {error.digest ? (
+          <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+            Destek referansı: <code>{error.digest}</code>
           </p>
-          {error.digest ? (
-            <p className="muted" style={{ fontSize: 12 }}>
-              Destek referansı: <code>{error.digest}</code>
-            </p>
-          ) : null}
-          <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 18 }}>
-            <button className="btn btn-primary" type="button" onClick={reset}>
-              Tekrar dene
-            </button>
-            <Link className="btn btn-ghost" href="/">Ana sayfa</Link>
-          </div>
-        </section>
+        ) : null}
+        <div className="inline-actions" style={{ marginTop: 24 }}>
+          <button className="btn btn-primary" type="button" onClick={reset}>
+            Tekrar dene
+          </button>
+          <Link className="btn btn-secondary" href="/">
+            Ana sayfa
+          </Link>
+        </div>
       </div>
     </main>
   );

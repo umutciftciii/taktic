@@ -9,6 +9,7 @@ import {
 } from '../../../../lib/api';
 import { updateProviderAction } from '../../actions';
 import { ProviderShell } from '../../provider-shell';
+import { readCreditBalance } from '../../provider-data';
 
 type ProviderEditPageProps = {
   params: Promise<{ id: string }>;
@@ -21,9 +22,10 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
     redirect(`/login?redirectTo=/providers/${id}/edit`);
   }
 
-  const [provider, categories] = await Promise.all([
+  const [provider, categories, creditBalance] = await Promise.all([
     fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
     apiFetch<Category[]>('/categories'),
+    readCreditBalance(id),
   ]);
 
   // Editing needs the private projection (phone, e-mail, tax fields). A viewer
@@ -38,17 +40,25 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
   const firstArea = provider.serviceAreas[0];
 
   return (
-    <ProviderShell user={user} providerId={provider.id} businessName={provider.businessName} active="profile">
-      <p className="pdash-crumbs">
+    <ProviderShell
+      user={user}
+      providerId={provider.id}
+      businessName={provider.businessName}
+      active="profile"
+      creditBalance={creditBalance}
+      status={provider.status}
+    >
+      <nav className="pdash-crumbs" aria-label="Breadcrumb">
         <Link href="/providers/me">Panelim</Link>
         <span aria-hidden="true">/</span>
-        <Link href={`/providers/${provider.id}`}>Profil</Link>
+        <Link href={`/providers/${provider.id}`}>İşletme profili</Link>
         <span aria-hidden="true">/</span>
         <span>Düzenle</span>
-      </p>
+      </nav>
 
       <header className="pdash-page-head">
-        <h1 className="pdash-page-title">Profil Düzenle</h1>
+        <span className="kicker">İşletme profili</span>
+        <h1 className="pdash-page-title">Profili düzenle</h1>
         <p className="pdash-page-sub">İşletme bilgilerinizi ve hizmet kapsamınızı güncelleyin.</p>
       </header>
 
@@ -126,28 +136,9 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
 
         <section className="pdash-form-section">
           <h2>Hizmet Kategorileri</h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 8,
-            }}
-          >
+          <div className="provider-apply-categories">
             {categories.map((category) => (
-              <label
-                key={category.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '10px 12px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  fontSize: 13.5,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-              >
+              <label className="check-chip" key={category.id}>
                 <input
                   name="categoryIds"
                   type="checkbox"

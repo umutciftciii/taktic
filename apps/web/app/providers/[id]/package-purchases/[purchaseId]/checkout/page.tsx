@@ -31,7 +31,7 @@ export default async function ProviderPackagePurchaseCheckoutPage({
   return (
     <ProviderShell user={user} providerId={id} active="packages">
       <p className="pdash-crumbs">
-        <Link href={`/providers/${id}/package-purchases/${purchase.id}`}>← İptal Et ve Dön</Link>
+        <Link href={`/providers/${id}/package-purchases/${purchase.id}`}>İptal Et ve Dön</Link>
       </p>
 
       <header className="pdash-page-head">

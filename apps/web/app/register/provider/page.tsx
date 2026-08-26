@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { AuthFrame } from '../../auth-frame';
 import { registerProviderAction } from '../actions';
+import { RoleSwitch } from '../role-switch';
 
 type ProviderRegisterPageProps = {
   searchParams: Promise<{ error?: string }>;
@@ -9,15 +11,17 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
   const { error } = await searchParams;
 
   return (
-    <main className="auth-screen">
-      <form className="auth-screen-card auth-screen-card-compact" action={registerProviderAction}>
-        <div className="auth-screen-card-head">
-          <img className="auth-brand-logo" src="/brand/logo.png" alt="TakTick" />
-          <h1 className="auth-screen-title">Hizmet Veren Hesabı Oluştur</h1>
-          <p className="auth-screen-subtitle">
-            Profilinizi bağlamak ve teklif akışını yönetmek için hesap açın.
-          </p>
-        </div>
+    <AuthFrame tab="register" registerHref="/register/provider">
+      <form
+        action={registerProviderAction}
+        style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+      >
+        <h1 className="auth-screen-title">Hesap oluştur</h1>
+        <p className="auth-screen-subtitle">
+          Profilinizi bağlamak ve teklif akışını yönetmek için hizmet veren hesabı açın.
+        </p>
+
+        <RoleSwitch active="provider" />
 
         {error ? (
           <div className="auth-screen-error" role="alert">
@@ -48,6 +52,15 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
             />
           </label>
           <label className="auth-screen-field">
+            <span className="auth-screen-label">Telefon</span>
+            <input
+              className="auth-screen-input"
+              name="phone"
+              autoComplete="tel"
+              placeholder="05XX XXX XX XX"
+            />
+          </label>
+          <label className="auth-screen-field">
             <span className="auth-screen-label">Şifre *</span>
             <input
               className="auth-screen-input"
@@ -59,15 +72,6 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
             />
             <span className="auth-screen-help">En az 8 karakter.</span>
           </label>
-          <label className="auth-screen-field">
-            <span className="auth-screen-label">Telefon</span>
-            <input
-              className="auth-screen-input"
-              name="phone"
-              autoComplete="tel"
-              placeholder="05XX XXX XX XX"
-            />
-          </label>
         </div>
 
         <button className="auth-screen-submit" type="submit">
@@ -77,13 +81,14 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
         <hr className="auth-screen-divider" />
 
         <p className="auth-screen-hint">
-          Hesap oluşturduktan sonra <Link href="/providers/register">hizmet veren başvurusunu</Link> tamamlayın.
+          Hesap oluşturduktan sonra <Link href="/providers/register">hizmet veren başvurusunu</Link>{' '}
+          tamamlayın.
         </p>
         <p className="auth-screen-bottom-link">
           Zaten hesabınız var mı?
           <Link href="/login">Giriş yapın</Link>
         </p>
       </form>
-    </main>
+    </AuthFrame>
   );
 }

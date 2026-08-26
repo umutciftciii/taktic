@@ -1,10 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { categoryImageSrc } from './category-art';
 import { iconByKey, iconForCategory } from './landing-icons';
 
 type CategoryVisualProps = {
   imageUrl?: string | null;
+  /** Falls back to the packaged handoff illustration for this slug. */
+  slug?: string | null;
   iconKey?: string | null;
   name: string;
   iconSize?: number;
@@ -16,6 +19,7 @@ type CategoryVisualProps = {
 
 export function CategoryVisual({
   imageUrl,
+  slug,
   iconKey,
   name,
   iconSize = 22,
@@ -25,11 +29,12 @@ export function CategoryVisual({
   alt,
 }: CategoryVisualProps) {
   const [imageBroken, setImageBroken] = useState(false);
+  const src = categoryImageSrc(imageUrl, slug);
 
-  if (imageUrl && !imageBroken) {
+  if (src && !imageBroken) {
     return (
       <img
-        src={imageUrl}
+        src={src}
         alt={alt ?? ''}
         className={imgClassName}
         loading="lazy"

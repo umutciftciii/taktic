@@ -1,70 +1,97 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '../../lib/api';
+import {
+  IconBell,
+  IconChevronDown,
+  IconClipList,
+  IconCompare,
+  IconHelp,
+  IconMessage,
+  IconPlus,
+  IconSearch,
+  IconSettings,
+  IconUsers,
+} from '../landing-icons';
 import { customerLogoutAction } from '../login/actions';
 
 type CustomerShellProps = {
   user: AuthUser;
-  active?: 'dashboard' | 'requests' | 'messages' | 'settings';
+  active?: 'requests' | 'offers' | 'compare' | 'matches' | 'messages' | 'settings';
+  /** Live counters, read from the caller's own API data. Never invented here. */
+  counts?: Partial<Record<'requests' | 'offers' | 'matches', number>>;
   children: ReactNode;
 };
 
-const NAV_ITEMS: ReadonlyArray<{
-  key: NonNullable<CustomerShellProps['active']>;
-  label: string;
-  icon: string;
-  href: string | null;
-}> = [
-  { key: 'dashboard', label: 'Dashboard', icon: '▦', href: null },
-  { key: 'requests', label: 'Taleplerim', icon: '📋', href: '/requests/my' },
-  { key: 'messages', label: 'Mesajlar', icon: '💬', href: null },
-  { key: 'settings', label: 'Ayarlar', icon: '⚙', href: null },
-];
-
-export function CustomerShell({ user, active = 'requests', children }: CustomerShellProps) {
+export function CustomerShell({
+  user,
+  active = 'requests',
+  counts = {},
+  children,
+}: CustomerShellProps) {
   const display = displayName(user);
   const initials = getInitials(display);
+
+  const navItems: ReadonlyArray<{
+    key: NonNullable<CustomerShellProps['active']>;
+    label: string;
+    Icon: typeof IconClipList;
+    href: string | null;
+    count?: number | undefined;
+  }> = [
+    {
+      key: 'requests',
+      label: 'Taleplerim',
+      Icon: IconClipList,
+      href: '/requests/my',
+      count: counts.requests,
+    },
+    // Offers, comparison and matches all live on a request: the panel routes to
+    // the list, which is where a request is chosen.
+    { key: 'offers', label: 'Teklifler', Icon: IconCompare, href: '/requests/my', count: counts.offers },
+    { key: 'matches', label: 'Eşleşmelerim', Icon: IconUsers, href: '/requests/my', count: counts.matches },
+    { key: 'messages', label: 'Mesajlar', Icon: IconMessage, href: null },
+    { key: 'settings', label: 'Profil ve ayarlar', Icon: IconSettings, href: '/account/profile' },
+  ];
 
   return (
     <div className="cdash-shell">
       <aside className="cdash-sidebar" aria-label="Müşteri Paneli navigasyonu">
-        <Link className="shell-brand-logo-link" href="/" aria-label="TakTick ana sayfa">
-          <img className="shell-brand-logo" src="/brand/logo.png" alt="TakTick" />
-        </Link>
         <div className="cdash-brand">
-          <span className="cdash-brand-mark" aria-hidden="true">
-            M
-          </span>
-          <div>
-            <div className="cdash-brand-title">Müşteri Paneli</div>
+          <Link href="/" aria-label="TakTick ana sayfa">
+            <img className="brand-mark-img" style={{ height: 38 }} src="/brand/icon.png" alt="TakTick" />
+          </Link>
+          <div style={{ minWidth: 0 }}>
+            <div className="cdash-brand-title">Hizmet Alan Paneli</div>
             <div className="cdash-brand-sub">{display}</div>
           </div>
         </div>
 
         <Link className="cdash-cta" href="/categories">
-          <span className="cdash-cta-plus" aria-hidden="true">
-            +
-          </span>
+          <IconPlus size={14} />
           <span>Yeni Talep Oluştur</span>
         </Link>
 
         <nav className="cdash-nav" aria-label="Bölüm navigasyonu">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const isActive = item.key === active;
-            const isLinkable = !!item.href;
+            const { Icon } = item;
 
-            if (isLinkable) {
+            if (item.href) {
               return (
                 <Link
                   key={item.key}
-                  href={item.href!}
+                  href={item.href}
                   className={`cdash-nav-item${isActive ? ' is-active' : ''}`}
                   aria-current={isActive ? 'page' : undefined}
                 >
-                  <span className="cdash-nav-icon" aria-hidden="true">
-                    {item.icon}
+                  <span className="cdash-nav-icon">
+                    <Icon size={16} />
                   </span>
                   <span>{item.label}</span>
+                  {typeof item.count === 'number' ? (
+                    <span className="cdash-nav-count">{item.count}</span>
+                  ) : null}
                 </Link>
               );
             }
@@ -76,8 +103,8 @@ export function CustomerShell({ user, active = 'requests', children }: CustomerS
                 aria-disabled="true"
                 title="Yakında"
               >
-                <span className="cdash-nav-icon" aria-hidden="true">
-                  {item.icon}
+                <span className="cdash-nav-icon">
+                  <Icon size={16} />
                 </span>
                 <span>{item.label}</span>
                 <span className="cdash-nav-soon">Yakında</span>
@@ -88,8 +115,8 @@ export function CustomerShell({ user, active = 'requests', children }: CustomerS
 
         <div className="cdash-sidebar-footer">
           <span className="cdash-nav-item is-disabled" aria-disabled="true" title="Yakında">
-            <span className="cdash-nav-icon" aria-hidden="true">
-              ⓘ
+            <span className="cdash-nav-icon">
+              <IconHelp size={16} />
             </span>
             <span>Destek</span>
             <span className="cdash-nav-soon">Yakında</span>
@@ -100,8 +127,8 @@ export function CustomerShell({ user, active = 'requests', children }: CustomerS
       <div className="cdash-main">
         <div className="cdash-topbar">
           <div className="cdash-topbar-search" role="search" aria-label="Genel arama (yakında)">
-            <span aria-hidden="true">🔍</span>
-            <input type="search" placeholder="Ara..." disabled aria-disabled="true" />
+            <IconSearch size={16} />
+            <input type="search" placeholder="Talep, teklif veya işletme ara..." disabled aria-disabled="true" />
           </div>
           <div className="cdash-topbar-actions">
             <span
@@ -111,16 +138,7 @@ export function CustomerShell({ user, active = 'requests', children }: CustomerS
               aria-disabled="true"
               title="Yakında"
             >
-              🔔
-            </span>
-            <span
-              className="cdash-icon-btn"
-              role="button"
-              aria-label="Yardım (yakında)"
-              aria-disabled="true"
-              title="Yakında"
-            >
-              ?
+              <IconBell size={16} />
             </span>
             <CustomerUserMenu user={user} display={display} initials={initials} />
           </div>
@@ -145,8 +163,9 @@ function CustomerUserMenu({ user, display, initials }: CustomerUserMenuProps) {
         <span className="cdash-avatar" aria-hidden="true">
           {initials}
         </span>
-        <span className="cdash-user-caret" aria-hidden="true">
-          ▾
+        <span className="lp-user-name">{display}</span>
+        <span className="cdash-user-caret">
+          <IconChevronDown size={12} />
         </span>
       </summary>
       <div className="cdash-user-menu" role="menu">

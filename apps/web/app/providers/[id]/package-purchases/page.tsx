@@ -154,15 +154,13 @@ export default async function ProviderPackagePurchasesPage({
             gap: 8,
             flex: 1,
             minWidth: 220,
-            background: '#f8fafc',
-            border: '1px solid var(--border)',
-            borderRadius: 999,
-            padding: '8px 14px',
-            color: 'var(--muted)',
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-divider)',
+            padding: '10px 14px',
+            color: 'var(--color-neutral-700)',
             fontSize: 13,
           }}
         >
-          <span aria-hidden="true">🔍</span>
           <input
             name="q"
             defaultValue={q ?? ''}
@@ -196,7 +194,7 @@ export default async function ProviderPackagePurchasesPage({
             aria-disabled="true"
             title="Yakında"
           >
-            <span aria-hidden="true">☰</span> Filtrele
+            Filtrele
           </span>
           <span
             className="pdash-btn pdash-btn-secondary pdash-btn-sm"
@@ -204,7 +202,7 @@ export default async function ProviderPackagePurchasesPage({
             aria-disabled="true"
             title="Yakında"
           >
-            <span aria-hidden="true">📅</span> Tarih
+            Tarih
           </span>
         </div>
       </form>
