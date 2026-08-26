@@ -519,6 +519,29 @@ export type PackagePurchase = {
     currency: string;
     isActive: boolean;
   };
+  /**
+   * What the payment provider's settlement notices did to this purchase. Only
+   * present on the detail endpoint.
+   *
+   * Short machine codes and timestamps. There is no payload, signature,
+   * correlation token or buyer detail on this projection, and no endpoint that
+   * could add one.
+   */
+  webhookEvents?: PaymentWebhookAttempt[];
+};
+
+export type PaymentWebhookAttempt = {
+  eventName: string;
+  status: 'PROCESSED' | 'DUPLICATE' | 'IGNORED' | 'MISMATCHED' | 'MANUAL_REVIEW_REQUIRED';
+  detail: string | null;
+  /** How many deliveries of this one event were handled. */
+  attemptCount: number;
+  /** The first refusal, kept even after a later delivery settled the event. */
+  firstFailureCode: string | null;
+  firstFailureAt: string | null;
+  lastAttemptAt: string;
+  resolvedAt: string | null;
+  createdAt: string;
 };
 
 export const CUSTOMER_SORT_FIELDS = [

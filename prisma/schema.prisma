@@ -678,6 +678,19 @@ model PackagePurchase {
  * load. `detail` carries a short machine code such as AMOUNT_MISMATCH — never a
  * raw payload, a signature, an address or a name.
  */
+/// One row per provider event, not per delivery.
+///
+/// The provider re-sends an event when its first delivery did not settle, so
+/// the row carries the outcome of the latest attempt (`status`, `detail`)
+/// alongside the history that outcome would otherwise erase: when the event was
+/// first seen, how many times it arrived, what the first refusal was, and when
+/// it was finally resolved. `PROCESSED` is terminal — a later delivery updates
+/// the attempt counters and nothing else.
+///
+/// Nothing here is a payload. No raw body, no signature, no credential, no
+/// correlation token and no buyer detail: `eventKey` is the provider's own
+/// opaque identity for the event object and the codes are the short machine
+/// strings in payments-webhook.service.ts.
 model PaymentWebhookEvent {
   id         String                    @id @default(cuid())
   provider   String
@@ -687,6 +700,16 @@ model PaymentWebhookEvent {
   purchaseId String?
   detail     String?
   createdAt  DateTime                  @default(now())
+
+  /// How many deliveries of this event have been handled.
+  attemptCount Int @default(1)
+  /// When the most recent delivery was handled.
+  lastAttemptAt DateTime @default(now())
+  /// The first refusal code, kept even after a later delivery settles.
+  firstFailureCode String?
+  firstFailureAt   DateTime?
+  /// When this event settled. Null while it never has.
+  resolvedAt DateTime?
 
   @@unique([provider, eventKey])
   @@index([status])
