@@ -1018,6 +1018,10 @@ export const NOTIFICATION_ERROR_CODES = [
   'REJECTED',
   'TIMEOUT',
   'INVALID_RECIPIENT',
+  // Composed but deliberately not sent: the company footer is unfinished, or
+  // this deployment's public base URL cannot be opened by a recipient.
+  'EMAIL_BRANDING_INCOMPLETE',
+  'EMAIL_PUBLIC_URL_INVALID',
   'UNKNOWN',
 ] as const;
 export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];

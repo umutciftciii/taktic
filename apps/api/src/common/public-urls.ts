@@ -7,29 +7,39 @@
  * fallback, which is how a hard-coded `taktick.com` ends up in a template that
  * a staging deployment then mails out.
  *
- * Two rules:
+ * **Nothing here ever throws, and nothing here stops the process.** That is a
+ * correction, and it is the whole point of this module's shape. This validation
+ * used to run at boot and refuse to start the API when the base URL was not a
+ * public https origin — so a developer whose local stack happened to have a
+ * real transport selected lost the API, and with it authentication, the admin
+ * panel and every request and offer flow, because of a rule about *e-mail*. The
+ * blast radius was wrong by an order of magnitude: an unusable link in a
+ * message is a mail problem, not a reason for a marketplace to be down.
  *
- * 1. **A deployment that delivers must say it.** There is no fallback there. A
- *    deployment that does not declare its own address would mail links to
- *    `localhost`, and the failure would only surface in somebody else's inbox.
- * 2. **https, except on loopback.** A link in a security e-mail is exactly the
- *    thing a recipient is told to check, and a plaintext one can be rewritten
- *    in transit. Loopback is exempted so `http://localhost:3000` keeps working
- *    for development, and that exemption is what rule 1 closes.
+ * So resolution is now a *description* rather than an assertion. Two rules
+ * still decide whether a base may be mailed to a stranger:
  *
- * Rule 1 keys on the transport, not on NODE_ENV. `EMAIL_TRANSPORT=resend` is
- * what decides whether a link this module builds is opened from somebody else's
- * device; whether the process was started as "development" decides nothing.
- * Production remains a second trigger, because a production process is required
- * to deliver anyway.
+ * 1. **It has to exist and be an origin.** A missing, unparseable or
+ *    path-carrying value cannot address anything.
+ * 2. **https, except that loopback is not public at all.** A link in a security
+ *    e-mail is exactly the thing a recipient is told to check, and a plaintext
+ *    one can be rewritten in transit; `http://localhost:3000` is worse still,
+ *    because it resolves to the recipient's own machine.
+ *
+ * Both are reported as an issue, never raised. `readPublicWebBaseUrl()` always
+ * hands back something a URL can be built from — link building happens deep
+ * inside business flows, and an accepted offer must not fail because a footer
+ * would have been wrong — and the delivering transport asks
+ * {@link isPublicUrlDeliverable} before it puts a message on the wire. A
+ * message that would carry an unusable link is refused there and recorded as a
+ * FAILED notification, which is the layer where "this cannot be delivered"
+ * belongs.
  *
  * Read on every call rather than cached, like every other configuration switch
  * in this codebase, so a test sees the environment it actually has.
  */
 
-import { isDeliveringEmailTransportConfigured } from '../modules/notifications/email-transport';
-
-/** The development fallback. Never used once the process can deliver mail. */
+/** The development fallback, and the base used when a value cannot be parsed. */
 export const DEFAULT_PUBLIC_WEB_BASE_URL = 'http://localhost:3000';
 
 /**
@@ -51,27 +61,96 @@ const WEB_BASE_URL_VARIABLES = ['WEB_APP_URL', 'WEB_ORIGIN', 'NEXT_PUBLIC_WEB_UR
  */
 const ASSET_BASE_URL_VARIABLE = 'EMAIL_ASSET_BASE_URL';
 
-export function readPublicWebBaseUrl(): string {
-  const raw = firstConfigured(WEB_BASE_URL_VARIABLES);
+/**
+ * Why a base URL may not be mailed to a stranger.
+ *
+ * A closed set, and every member names a *class* of defect rather than quoting
+ * the value: these travel into log lines next to a masked recipient, and a base
+ * URL that turned out to be a pasted credential must not be echoed there.
+ */
+export const PUBLIC_URL_ISSUES = [
+  'MISSING',
+  'MALFORMED',
+  'NOT_AN_ORIGIN',
+  'INSECURE',
+  'LOOPBACK',
+] as const;
 
-  if (!raw) {
-    if (requiresPublicBaseUrl()) {
-      throw new Error(
-        'WEB_APP_URL is required once e-mail is actually delivered (EMAIL_TRANSPORT=resend, or ' +
-          'NODE_ENV=production): every link this application mails is built from it, and there ' +
-          'is no address it could guess that would not be wrong.',
-      );
-    }
+export type PublicUrlIssue = (typeof PUBLIC_URL_ISSUES)[number];
 
-    return DEFAULT_PUBLIC_WEB_BASE_URL;
+export type PublicUrlResolution = {
+  /** Always usable for building a link. Never empty, never throws. */
+  baseUrl: string;
+  /** Which variable the value came from, so an operator edits the right one. */
+  source: string;
+  /** Null when this base may appear in a message to a stranger. */
+  issue: PublicUrlIssue | null;
+};
+
+export function resolvePublicWebBaseUrl(): PublicUrlResolution {
+  const found = firstConfigured(WEB_BASE_URL_VARIABLES);
+
+  if (!found) {
+    return {
+      baseUrl: DEFAULT_PUBLIC_WEB_BASE_URL,
+      // Nothing is set, so name the variable an operator should set.
+      source: WEB_BASE_URL_VARIABLES[0],
+      issue: 'MISSING',
+    };
   }
 
-  return normalizeBaseUrl(raw, WEB_BASE_URL_VARIABLES[0]);
+  return describeBaseUrl(found.value, found.name);
+}
+
+export function resolveEmailAssetBaseUrl(): PublicUrlResolution {
+  const raw = process.env[ASSET_BASE_URL_VARIABLE]?.trim();
+  // Unset is not a defect: the assets live on the web application by default,
+  // and that base carries its own verdict.
+  return raw ? describeBaseUrl(raw, ASSET_BASE_URL_VARIABLE) : resolvePublicWebBaseUrl();
+}
+
+export function readPublicWebBaseUrl(): string {
+  return resolvePublicWebBaseUrl().baseUrl;
 }
 
 export function readEmailAssetBaseUrl(): string {
-  const raw = process.env[ASSET_BASE_URL_VARIABLE]?.trim();
-  return raw ? normalizeBaseUrl(raw, ASSET_BASE_URL_VARIABLE) : readPublicWebBaseUrl();
+  return resolveEmailAssetBaseUrl().baseUrl;
+}
+
+/**
+ * Whether both bases may appear in a delivered message.
+ *
+ * Asked by the delivering transport, once per send. The asset base is included
+ * because every designed template embeds the logo: a message whose image URL
+ * points at the recipient's own machine is as broken as one whose button does.
+ */
+export function isPublicUrlDeliverable(): boolean {
+  return publicUrlIssues().length === 0;
+}
+
+/**
+ * The issues, for the log line the refusal writes. Named by variable so the
+ * operator is sent to the setting that is actually at fault — this used to say
+ * `WEB_APP_URL` even when the value had come from `WEB_ORIGIN`.
+ *
+ * De-duplicated, because with no CDN configured the asset base *is* the web
+ * base: reporting one misconfigured value twice would read as two problems.
+ */
+export function publicUrlIssues(): { source: string; issue: PublicUrlIssue }[] {
+  const seen = new Set<string>();
+
+  return [resolvePublicWebBaseUrl(), resolveEmailAssetBaseUrl()]
+    .filter((resolution) => resolution.issue !== null)
+    .filter((resolution) => {
+      const key = `${resolution.source}:${resolution.issue}`;
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .map((resolution) => ({ source: resolution.source, issue: resolution.issue as PublicUrlIssue }));
 }
 
 /**
@@ -100,73 +179,51 @@ export function publicAssetUrl(path: string): string {
 }
 
 /**
- * Called once at boot so a missing or malformed base URL stops the process
- * rather than surfacing as a dead link in somebody's inbox a day later.
+ * Classifies one configured value.
+ *
+ * The returned `baseUrl` is always something `new URL()` accepts, including for
+ * a value this function is about to call unusable: callers build links
+ * unconditionally and the verdict is consulted separately, so there is never a
+ * moment where a bad setting turns into an exception in a business flow.
  */
-export function assertPublicUrlConfig(): void {
-  readPublicWebBaseUrl();
-  readEmailAssetBaseUrl();
+function describeBaseUrl(raw: string, name: string): PublicUrlResolution {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { baseUrl: DEFAULT_PUBLIC_WEB_BASE_URL, source: name, issue: 'MALFORMED' };
+  }
+
+  // Everything downstream joins a rooted path onto this, and
+  // "https://host/app" + "/login" would silently drop the "/app".
+  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    return { baseUrl: parsed.origin, source: name, issue: 'NOT_AN_ORIGIN' };
+  }
+
+  if (isLoopback(parsed.hostname)) {
+    return { baseUrl: parsed.origin, source: name, issue: 'LOOPBACK' };
+  }
+
+  if (parsed.protocol !== 'https:') {
+    return { baseUrl: parsed.origin, source: name, issue: 'INSECURE' };
+  }
+
+  return { baseUrl: parsed.origin, source: name, issue: null };
 }
 
-function firstConfigured(names: readonly string[]): string | null {
+function firstConfigured(
+  names: readonly string[],
+): { name: string; value: string } | null {
   for (const name of names) {
     const value = process.env[name]?.trim();
     if (value) {
-      return value;
+      return { name, value };
     }
   }
 
   return null;
 }
 
-function normalizeBaseUrl(raw: string, name: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    // The value is echoed here on purpose: unlike an API key, a base URL is not
-    // a credential, and the operator cannot fix a typo they cannot see.
-    throw new Error(`${name} must be a valid absolute URL (received "${raw}")`);
-  }
-
-  if (parsed.protocol !== 'https:' && !isLoopback(parsed.hostname)) {
-    throw new Error(
-      `${name} must use https unless it points at loopback (received "${parsed.protocol}//${parsed.hostname}")`,
-    );
-  }
-
-  if (requiresPublicBaseUrl() && isLoopback(parsed.hostname)) {
-    throw new Error(
-      `${name} must not point at loopback once e-mail is actually delivered: the links built ` +
-        'from it are opened from other people’s devices.',
-    );
-  }
-
-  // No trailing slash, no path: everything downstream joins a rooted path onto
-  // it, and "https://host/app" + "/login" would silently drop the "/app".
-  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
-    throw new Error(`${name} must be an origin without a path, query or fragment (received "${raw}")`);
-  }
-
-  return parsed.origin;
-}
-
 function isLoopback(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
-}
-
-/**
- * Whether this process may only build links onto a real, public address.
- *
- * True as soon as anything it composes can reach a stranger's inbox — see the
- * module comment. The import points at the notifications module on purpose:
- * that is where the transport switch lives, and nothing there reads this file,
- * so there is no cycle.
- */
-function requiresPublicBaseUrl(): boolean {
-  return isProduction() || isDeliveringEmailTransportConfigured();
-}
-
-function isProduction(): boolean {
-  return process.env.NODE_ENV === 'production';
 }

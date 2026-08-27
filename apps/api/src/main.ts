@@ -3,7 +3,6 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { assertPublicUrlConfig } from './common/public-urls';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
 import { assertEmailBrandingConfig } from './modules/notifications/email-branding.config';
 import { assertEmailTransportConfig } from './modules/notifications/email-transport';
@@ -12,10 +11,14 @@ import { assertProviderClaimConfig } from './modules/provider-claim/provider-cla
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
 async function bootstrap() {
-  // Where this deployment lives, before anything can build a link from it. A
-  // production process without WEB_APP_URL would mail links to localhost, and
-  // that failure only ever surfaces in somebody else's inbox.
-  assertPublicUrlConfig();
+  // The public base URL is deliberately NOT checked here.
+  //
+  // It used to be, and the blast radius was wrong: a base URL that is unusable
+  // in an e-mail took down authentication, the admin panel and every request
+  // and offer flow with it. Whether a link can be clicked by a stranger is a
+  // question about one message, so it is asked once per send by the delivering
+  // transport, which refuses that message and records it as FAILED. See
+  // common/public-urls.ts.
 
   // The company footer is no longer a boot condition. Its three values — legal
   // name, support address, postal address — are business facts an operator

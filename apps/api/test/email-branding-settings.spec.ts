@@ -385,13 +385,173 @@ describe('the footer a send resolves', () => {
   });
 });
 
+/**
+ * The public base URL, at the one layer where it can still stop a message.
+ *
+ * This used to be a boot check, and a loopback base URL therefore took the
+ * whole API down — authentication, the admin panel, request and offer flows —
+ * over a rule about e-mail. The rule itself was right and is unchanged: a
+ * recipient must never be handed a link to their own machine. What moved is
+ * where it is enforced.
+ */
+describe('a delivering send with an unusable public URL', () => {
+  /** Resend selected, and a base URL a recipient could not possibly open. */
+  function selectDeliveringTransportWithLoopbackUrl() {
+    process.env.EMAIL_TRANSPORT = 'resend';
+    process.env.RESEND_API_KEY = PLACEHOLDER_KEY;
+    process.env.EMAIL_FROM = VERIFIED_SENDER;
+    process.env.WEB_ORIGIN = 'http://localhost:3000';
+  }
+
+  it('leaves the API itself completely unaffected', async () => {
+    selectDeliveringTransportWithLoopbackUrl();
+
+    // The boot checks main.ts still performs, none of which reads the base URL.
+    const { assertEmailBrandingConfig } = await import(
+      '../src/modules/notifications/email-branding.config'
+    );
+    const { assertEmailTransportConfig } = await import(
+      '../src/modules/notifications/email-transport'
+    );
+    expect(() => assertEmailBrandingConfig()).not.toThrow();
+    expect(() => assertEmailTransportConfig()).not.toThrow();
+
+    // Health, and the credential endpoint the admin panel's login action calls
+    // — the exact request that failed with "fetch failed" while the API was
+    // refusing to start.
+    await request(ctx.server).get('/health').expect(200);
+    await request(ctx.server)
+      .post('/auth/login')
+      .send({ email: 'yok@example.com', password: 'Yanlis123!' })
+      .expect(401);
+  });
+
+  it('lets an admin sign in and read the settings screen', async () => {
+    selectDeliveringTransportWithLoopbackUrl();
+    const cookie = await adminCookie();
+
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(200);
+    await request(ctx.server).get('/company-settings').set('Cookie', cookie).expect(200);
+  });
+
+  it('records FAILED with EMAIL_PUBLIC_URL_INVALID and sends nothing', async () => {
+    const cookie = await adminCookie();
+    // Settings complete on purpose: this refusal has to be about the URL alone.
+    await saveSettings(cookie, REAL_SETTINGS).expect(200);
+    selectDeliveringTransportWithLoopbackUrl();
+
+    const { requests, dispatcher } = deliveringStack();
+    const outcome = await dispatcher.sendEmail(designedMessage());
+
+    expect(outcome.status).toBe(NotificationStatus.FAILED);
+    expect(outcome.errorCode).toBe('EMAIL_PUBLIC_URL_INVALID');
+    expect(requests).toHaveLength(0);
+
+    const log = await ctx.prisma.notificationLog.findUniqueOrThrow({
+      where: { id: outcome.logId },
+    });
+    expect(log.status).toBe(NotificationStatus.FAILED);
+    expect(log.errorCode).toBe('EMAIL_PUBLIC_URL_INVALID');
+    expect(log.providerMessageId).toBeNull();
+    // The audit row stays as poor in detail as every other one: no recipient,
+    // no URL, no token.
+    expect(log.maskedRecipient).not.toContain('musteri@example.com');
+    expect(JSON.stringify(log)).not.toContain('localhost');
+  });
+
+  it('refuses a single-use link the same way', async () => {
+    selectDeliveringTransportWithLoopbackUrl();
+    const { requests, dispatcher } = deliveringStack();
+
+    // A claim link is exempt from the *branding* gate — it prints no footer —
+    // but not from this one: a localhost claim URL is unusable by definition.
+    const outcome = await dispatcher.sendEmail({
+      template: 'provider-claim',
+      to: 'basvuru@example.com',
+      subject: 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
+      actionUrl: 'http://localhost:3000/claim-provider?token=single-use-secret',
+      data: { businessName: 'Örnek Yapı' },
+    });
+
+    expect(outcome.errorCode).toBe('EMAIL_PUBLIC_URL_INVALID');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('still delivers the one notification that carries no link at all', async () => {
+    selectDeliveringTransportWithLoopbackUrl();
+    const { requests, dispatcher } = deliveringStack();
+
+    // The day-7 reminder has no action URL and no logo, so there is nothing in
+    // it for an unusable base URL to spoil.
+    const outcome = await dispatcher.sendEmail({
+      template: 'request-expiring',
+      to: 'musteri@example.com',
+      subject: 'Talebinizin süresi doluyor',
+      data: { requestNumber: '#T-90412', categoryName: 'Kombi Servisi', remainingDays: '7' },
+    });
+
+    expect(outcome.status).toBe(NotificationStatus.SENT);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('keeps the two refusals distinct', async () => {
+    // URL bad, settings missing: the URL is reported, because a message whose
+    // links cannot be opened is unusable whatever the footer says.
+    selectDeliveringTransportWithLoopbackUrl();
+    const urlFirst = deliveringStack();
+    expect((await urlFirst.dispatcher.sendEmail(designedMessage())).errorCode).toBe(
+      'EMAIL_PUBLIC_URL_INVALID',
+    );
+
+    // URL fixed, settings still missing: the other code, unchanged.
+    delete process.env.WEB_ORIGIN;
+    process.env.WEB_APP_URL = PUBLIC_WEB_URL;
+    const brandingNext = deliveringStack();
+    expect((await brandingNext.dispatcher.sendEmail(designedMessage())).errorCode).toBe(
+      'EMAIL_BRANDING_INCOMPLETE',
+    );
+
+    expect(urlFirst.requests).toHaveLength(0);
+    expect(brandingNext.requests).toHaveLength(0);
+  });
+
+  it('sends normally once the public URL is a real https origin', async () => {
+    const cookie = await adminCookie();
+    await saveSettings(cookie, REAL_SETTINGS).expect(200);
+    selectDeliveringTransport();
+
+    const { requests, dispatcher } = deliveringStack();
+    const outcome = await dispatcher.sendEmail(designedMessage());
+
+    expect(outcome.status).toBe(NotificationStatus.SENT);
+    expect(requests).toHaveLength(1);
+    const body = requests[0] as { html: string };
+    expect(body.html).toContain(`${PUBLIC_WEB_URL}/brand/logo-email.png`);
+    expect(body.html).not.toContain('localhost');
+  });
+
+  it('leaves the transports that deliver nothing exactly as they were', async () => {
+    // console keeps working with the loopback base: it puts nothing in front of
+    // anybody, so there is no unusable link to protect a recipient from.
+    process.env.EMAIL_TRANSPORT = 'console';
+    process.env.WEB_ORIGIN = 'http://localhost:3000';
+
+    const outcome = await ctx.app
+      .get(NotificationDispatcher)
+      .sendEmail(designedMessage());
+
+    expect(outcome.status).toBe(NotificationStatus.SENT);
+    expect(ctx.notifications.sent).toHaveLength(1);
+  });
+});
+
 describe('a delivering send with incomplete settings', () => {
   it('starts the process anyway — a missing footer is not a boot failure', async () => {
     selectDeliveringTransport();
 
     // The application under test is already running with no settings row, and
-    // the checks main.ts performs are these. None of them looks at the footer.
-    const { assertPublicUrlConfig } = await import('../src/common/public-urls');
+    // the checks main.ts performs are these. Neither looks at the footer, and
+    // neither looks at the public base URL any more.
     const { assertEmailBrandingConfig } = await import(
       '../src/modules/notifications/email-branding.config'
     );
@@ -399,7 +559,6 @@ describe('a delivering send with incomplete settings', () => {
       '../src/modules/notifications/email-transport'
     );
 
-    expect(() => assertPublicUrlConfig()).not.toThrow();
     expect(() => assertEmailBrandingConfig()).not.toThrow();
     expect(() => assertEmailTransportConfig()).not.toThrow();
     expect(await ctx.prisma.companySettings.count()).toBe(0);

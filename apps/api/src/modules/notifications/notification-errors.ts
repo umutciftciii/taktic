@@ -19,6 +19,18 @@ export const NOTIFICATION_ERROR_CODES = [
    * records a message that was composed and deliberately not sent.
    */
   'EMAIL_BRANDING_INCOMPLETE',
+  /**
+   * This deployment's public base URL cannot appear in a message a stranger
+   * opens — it is unset, unparseable, carries a path, is plain http, or points
+   * at loopback. Every link and the logo would be built from it, so the message
+   * is refused before it reaches the transport.
+   *
+   * Deliberately distinct from EMAIL_BRANDING_INCOMPLETE: one is a company
+   * detail an operator types into the admin panel, the other is deployment
+   * configuration they set in the environment, and telling them apart is the
+   * difference between fixing it in a minute and hunting for it.
+   */
+  'EMAIL_PUBLIC_URL_INVALID',
   'UNKNOWN',
 ] as const;
 
@@ -36,6 +48,7 @@ export const NOTIFICATION_ERROR_LABELS: Record<NotificationErrorCode, string> = 
   TIMEOUT: 'Zaman aşımı',
   INVALID_RECIPIENT: 'Geçersiz alıcı',
   EMAIL_BRANDING_INCOMPLETE: 'Şirket ve e-posta ayarları eksik',
+  EMAIL_PUBLIC_URL_INVALID: 'Uygulamanın public adresi e-postada kullanılamaz',
   UNKNOWN: 'Bilinmeyen hata',
 };
 

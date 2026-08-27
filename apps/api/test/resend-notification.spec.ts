@@ -105,10 +105,22 @@ beforeEach(() => {
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     EMAIL_FROM: process.env.EMAIL_FROM,
     RESEND_TIMEOUT_MS: process.env.RESEND_TIMEOUT_MS,
+    WEB_APP_URL: process.env.WEB_APP_URL,
+    WEB_ORIGIN: process.env.WEB_ORIGIN,
+    NEXT_PUBLIC_WEB_URL: process.env.NEXT_PUBLIC_WEB_URL,
+    EMAIL_ASSET_BASE_URL: process.env.EMAIL_ASSET_BASE_URL,
   };
 
   process.env.RESEND_API_KEY = TEST_API_KEY;
   process.env.EMAIL_FROM = 'Taktick <noreply@notify.taktick.com.tr>';
+  // A deliverable public origin, so the adapter reaches its HTTP client. These
+  // cases are about the request it builds and the statuses it maps; the gate
+  // that refuses an unusable base URL has its own cases in
+  // email-branding-settings.spec.ts.
+  process.env.WEB_APP_URL = 'https://app.example.test';
+  delete process.env.WEB_ORIGIN;
+  delete process.env.NEXT_PUBLIC_WEB_URL;
+  delete process.env.EMAIL_ASSET_BASE_URL;
 });
 
 afterEach(() => {

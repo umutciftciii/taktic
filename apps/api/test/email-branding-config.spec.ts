@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_PUBLIC_WEB_BASE_URL,
-  assertPublicUrlConfig,
+  isPublicUrlDeliverable,
   publicAssetUrl,
+  publicUrlIssues,
   publicWebUrl,
   readEmailAssetBaseUrl,
   readPublicWebBaseUrl,
+  resolveEmailAssetBaseUrl,
+  resolvePublicWebBaseUrl,
 } from '../src/common/public-urls';
 import { passwordResetUrl } from '../src/common/web-routes';
 import {
@@ -87,73 +90,105 @@ function selectDeliveringTransport() {
 }
 
 describe('public base URL', () => {
-  it('falls back to localhost outside production', () => {
+  /**
+   * Resolution never throws, and never stops the process.
+   *
+   * That is the correction this block exists for. These rules used to run at
+   * boot and refuse to start the API, which meant a base URL that was merely
+   * unusable *in an e-mail* also took down authentication, the admin panel and
+   * every request and offer flow. The verdict is still exactly as strict — the
+   * cases below pin each way a base can be unusable — but it is now a value the
+   * delivering transport reads per send, not an exception at startup.
+   */
+  it('resolves to the localhost fallback when nothing is configured', () => {
     expect(readPublicWebBaseUrl()).toBe(DEFAULT_PUBLIC_WEB_BASE_URL);
-    expect(() => assertPublicUrlConfig()).not.toThrow();
+    // Usable for building a link, and still not something to mail anybody.
+    expect(resolvePublicWebBaseUrl().issue).toBe('MISSING');
+    expect(isPublicUrlDeliverable()).toBe(false);
   });
 
-  it('is mandatory in production', () => {
-    process.env.NODE_ENV = 'production';
-    expect(() => readPublicWebBaseUrl()).toThrowError(/WEB_APP_URL is required/);
+  it('never throws, whatever the value and whatever the transport', () => {
+    // The exact matrix that used to kill the process at boot.
+    for (const value of [undefined, 'http://localhost:3000', '/uygulama', 'https://web.example.test/app', 'http://web.example.test']) {
+      for (const transport of ['console', 'resend'] as const) {
+        delete process.env.WEB_APP_URL;
+        if (value !== undefined) process.env.WEB_APP_URL = value;
+        process.env.EMAIL_TRANSPORT = transport;
+        if (transport === 'resend') {
+          process.env.RESEND_API_KEY = PLACEHOLDER_KEY;
+          process.env.EMAIL_FROM = 'Taktick <noreply@notify.taktick.com.tr>';
+        }
+
+        expect(() => readPublicWebBaseUrl()).not.toThrow();
+        expect(() => readEmailAssetBaseUrl()).not.toThrow();
+        expect(() => publicWebUrl('/requests/abc/offers')).not.toThrow();
+        expect(() => publicAssetUrl('/brand/logo-email.png')).not.toThrow();
+        // Whatever it resolved to, a link can be built from it.
+        expect(() => new URL(readPublicWebBaseUrl())).not.toThrow();
+      }
+    }
   });
 
-  it('is mandatory as soon as a delivering transport is selected', () => {
-    // The reported failure, in one case: NODE_ENV is not production, and mail
-    // still leaves the building. Links built from the localhost fallback would
-    // be opened from the recipient's phone.
-    selectDeliveringTransport();
-    expect(() => readPublicWebBaseUrl()).toThrowError(/WEB_APP_URL is required/);
-    expect(() => assertPublicUrlConfig()).toThrowError(/WEB_APP_URL is required/);
+  it('names each way a base cannot be put in front of a recipient', () => {
+    const cases: [string | undefined, string][] = [
+      [undefined, 'MISSING'],
+      ['not a url', 'MALFORMED'],
+      ['https://web.example.test/uygulama', 'NOT_AN_ORIGIN'],
+      ['https://web.example.test/?a=1', 'NOT_AN_ORIGIN'],
+      ['http://localhost:3000', 'LOOPBACK'],
+      ['http://127.0.0.1:3000', 'LOOPBACK'],
+      // Loopback is reported as loopback rather than as plain http: it is the
+      // more specific truth, and it is what the operator has to change.
+      ['http://web.example.test', 'INSECURE'],
+    ];
 
+    for (const [value, issue] of cases) {
+      delete process.env.WEB_APP_URL;
+      if (value !== undefined) process.env.WEB_APP_URL = value;
+
+      expect(resolvePublicWebBaseUrl().issue).toBe(issue);
+      expect(isPublicUrlDeliverable()).toBe(false);
+    }
+  });
+
+  it('is deliverable only for a plain https origin', () => {
     process.env.WEB_APP_URL = 'https://web.example.test';
+
+    expect(resolvePublicWebBaseUrl().issue).toBeNull();
+    expect(isPublicUrlDeliverable()).toBe(true);
+    expect(publicUrlIssues()).toEqual([]);
     expect(readPublicWebBaseUrl()).toBe('https://web.example.test');
   });
 
-  it('refuses loopback once a delivering transport is selected', () => {
-    selectDeliveringTransport();
+  it('names the variable the value actually came from', () => {
+    // This used to always say WEB_APP_URL, which sent an operator to edit a
+    // variable that was not set while WEB_ORIGIN was the one at fault.
+    process.env.WEB_ORIGIN = 'http://localhost:3000';
+    expect(resolvePublicWebBaseUrl()).toMatchObject({ source: 'WEB_ORIGIN', issue: 'LOOPBACK' });
+    expect(publicUrlIssues()).toEqual([{ source: 'WEB_ORIGIN', issue: 'LOOPBACK' }]);
+
+    delete process.env.WEB_ORIGIN;
     process.env.WEB_APP_URL = 'http://localhost:3000';
-    expect(() => readPublicWebBaseUrl()).toThrowError(/must not point at loopback/);
-  });
-
-  it('keeps the localhost fallback for the transports that deliver nothing', () => {
-    for (const transport of ['console', 'file-outbox'] as const) {
-      process.env.EMAIL_TRANSPORT = transport;
-      if (transport === 'file-outbox') {
-        process.env.NOTIFICATION_OUTBOX_DIR = '/tmp/taktick-e2e-outbox';
-      } else {
-        delete process.env.NOTIFICATION_OUTBOX_DIR;
-      }
-
-      expect(readPublicWebBaseUrl()).toBe(DEFAULT_PUBLIC_WEB_BASE_URL);
-      expect(() => assertPublicUrlConfig()).not.toThrow();
-    }
+    expect(resolvePublicWebBaseUrl()).toMatchObject({ source: 'WEB_APP_URL', issue: 'LOOPBACK' });
   });
 
   it('accepts the historical variable names', () => {
     process.env.WEB_ORIGIN = 'https://web.example.test';
     expect(readPublicWebBaseUrl()).toBe('https://web.example.test');
+    expect(isPublicUrlDeliverable()).toBe(true);
   });
 
-  it('refuses a value that is not an absolute origin', () => {
-    process.env.WEB_APP_URL = '/uygulama';
-    expect(() => readPublicWebBaseUrl()).toThrowError(/must be a valid absolute URL/);
+  it('judges the asset base on its own, and blocks delivery when it is unusable', () => {
+    process.env.WEB_APP_URL = 'https://web.example.test';
+    process.env.EMAIL_ASSET_BASE_URL = 'http://localhost:9000';
 
-    process.env.WEB_APP_URL = 'https://web.example.test/uygulama';
-    expect(() => readPublicWebBaseUrl()).toThrowError(/without a path, query or fragment/);
-  });
-
-  it('requires https unless the host is loopback', () => {
-    process.env.WEB_APP_URL = 'http://web.example.test';
-    expect(() => readPublicWebBaseUrl()).toThrowError(/must use https/);
-
-    process.env.WEB_APP_URL = 'http://localhost:3000';
-    expect(readPublicWebBaseUrl()).toBe('http://localhost:3000');
-  });
-
-  it('refuses loopback in production, where the links are opened elsewhere', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.WEB_APP_URL = 'http://localhost:3000';
-    expect(() => readPublicWebBaseUrl()).toThrowError(/must not point at loopback/);
+    // The page links are fine; the logo would point at the recipient's machine.
+    expect(resolvePublicWebBaseUrl().issue).toBeNull();
+    expect(resolveEmailAssetBaseUrl()).toMatchObject({
+      source: 'EMAIL_ASSET_BASE_URL',
+      issue: 'LOOPBACK',
+    });
+    expect(isPublicUrlDeliverable()).toBe(false);
   });
 
   it('serves assets from the web application unless a CDN is named', () => {
@@ -167,6 +202,7 @@ describe('public base URL', () => {
     expect(publicAssetUrl('/brand/logo-email.png')).toBe(
       'https://cdn.example.test/brand/logo-email.png',
     );
+    expect(isPublicUrlDeliverable()).toBe(true);
   });
 
   it('puts a token in the query rather than in the path it was pasted into', () => {
