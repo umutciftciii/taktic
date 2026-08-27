@@ -84,8 +84,11 @@ export async function fillRequestFormUpToContact(
   await form.locator('textarea[name="description"]').fill(values.description);
   await nextStep.click();
 
-  await form.locator('input[name="city"]').fill(values.city);
-  await form.locator('input[name="district"]').fill(values.district);
+  // Province and district are dependent selects: the district list is empty
+  // until a province is chosen, which is exactly the behaviour being relied on
+  // here — selecting the district at all proves the cascade populated it.
+  await form.locator('select[name="city"]').selectOption(values.city);
+  await form.locator('select[name="district"]').selectOption(values.district);
   await nextStep.click();
 
   await form.locator('input[name="customerName"]').fill(values.customerName);

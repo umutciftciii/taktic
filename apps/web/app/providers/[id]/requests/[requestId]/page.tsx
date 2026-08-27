@@ -10,6 +10,7 @@ import {
   formatDate,
   formatDateTime,
   qualityLabel,
+  qualityBreakdownLabel,
   statusLabel,
   urgencyLabel,
   refundActionLabel,
@@ -390,7 +391,7 @@ function renderBreakdownRows(breakdown: Record<string, RequestQualityBreakdownCo
 
   return Object.entries(breakdown).map(([key, component]) => (
     <tr key={key}>
-      <td>{key}</td>
+      <td>{qualityBreakdownLabel(key)}</td>
       <td>{component.points}</td>
       <td>{component.max}</td>
       <td>

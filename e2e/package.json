@@ -16,6 +16,7 @@
     "@types/node": "^22.10.0",
     "bcryptjs": "^3.0.3",
     "tsx": "^4.19.0",
+    "turkey-neighbourhoods": "4.0.3",
     "typescript": "^5.8.0"
   }
 }

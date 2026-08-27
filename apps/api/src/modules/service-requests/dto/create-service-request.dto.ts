@@ -11,6 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { IsKnownTurkishLocation } from './turkish-location.validator';
 
 export class CreateServiceRequestAnswerDto {
   @IsString()
@@ -46,8 +47,16 @@ export class CreateServiceRequestDto {
   @IsNotEmpty()
   city!: string;
 
+  /**
+   * Carries the relation check for the whole triple: the district has to be a
+   * district of `city`, and `neighborhood` — when one is given — a
+   * neighbourhood of that district. The names themselves are stored
+   * canonically, so a valid spelling variant is accepted and normalised rather
+   * than refused.
+   */
   @IsString()
   @IsNotEmpty()
+  @IsKnownTurkishLocation()
   district!: string;
 
   @IsOptional()

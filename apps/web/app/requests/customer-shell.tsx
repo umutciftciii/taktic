@@ -14,23 +14,32 @@ import {
   IconUsers,
 } from '../landing-icons';
 import { customerLogoutAction } from '../login/actions';
+import { loadCustomerPanelCounts } from './customer-panel-data';
 
 type CustomerShellProps = {
   user: AuthUser;
   active?: 'requests' | 'offers' | 'compare' | 'matches' | 'messages' | 'settings';
-  /** Live counters, read from the caller's own API data. Never invented here. */
-  counts?: Partial<Record<'requests' | 'offers' | 'matches', number>>;
   children: ReactNode;
 };
 
-export function CustomerShell({
+/**
+ * The customer panel frame.
+ *
+ * The sidebar counters are loaded here rather than passed in. As a prop they
+ * were only ever supplied by the requests screen, so every other route in the
+ * panel — profile, password, an offer — rendered the same sidebar with the
+ * numbers missing. Loading them in the frame makes that impossible to forget,
+ * and the loader is memoised for the render, so the screen that also needs the
+ * request list still fetches it once.
+ */
+export async function CustomerShell({
   user,
   active = 'requests',
-  counts = {},
   children,
 }: CustomerShellProps) {
   const display = displayName(user);
   const initials = getInitials(display);
+  const counts = await loadCustomerPanelCounts();
 
   const navItems: ReadonlyArray<{
     key: NonNullable<CustomerShellProps['active']>;
@@ -44,12 +53,21 @@ export function CustomerShell({
       label: 'Taleplerim',
       Icon: IconClipList,
       href: '/requests/my',
-      count: counts.requests,
+      count: counts?.requests,
     },
-    // Offers, comparison and matches all live on a request: the panel routes to
-    // the list, which is where a request is chosen.
-    { key: 'offers', label: 'Teklifler', Icon: IconCompare, href: '/requests/my', count: counts.offers },
-    { key: 'matches', label: 'Eşleşmelerim', Icon: IconUsers, href: '/requests/my', count: counts.matches },
+    // Offers have their own screen. It used to point at /requests/my — the same
+    // href as the item above it — so on the requests screen the link led to the
+    // page already open and appeared to do nothing at all.
+    {
+      key: 'offers',
+      label: 'Teklifler',
+      Icon: IconCompare,
+      href: '/requests/offers',
+      count: counts?.offers,
+    },
+    // Matches are still read on the request they belong to, which is what this
+    // list is.
+    { key: 'matches', label: 'Eşleşmelerim', Icon: IconUsers, href: '/requests/my', count: counts?.matches },
     { key: 'messages', label: 'Mesajlar', Icon: IconMessage, href: null },
     { key: 'settings', label: 'Profil ve ayarlar', Icon: IconSettings, href: '/account/profile' },
   ];
@@ -89,9 +107,18 @@ export function CustomerShell({
                     <Icon size={16} />
                   </span>
                   <span>{item.label}</span>
-                  {typeof item.count === 'number' ? (
-                    <span className="cdash-nav-count">{item.count}</span>
-                  ) : null}
+                  {/*
+                    A number when there is one — zero included, because zero is
+                    an answer. A dash only when the counters could not be read
+                    at all, so an unavailable list never reads as an empty one.
+                  */}
+                  <span
+                    className="cdash-nav-count"
+                    data-testid={`cdash-nav-count-${item.key}`}
+                    title={counts ? undefined : 'Sayılar şu anda getirilemedi'}
+                  >
+                    {typeof item.count === 'number' ? item.count : '—'}
+                  </span>
                 </Link>
               );
             }
