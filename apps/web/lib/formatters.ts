@@ -46,6 +46,39 @@ export function qualityLabel(label: string) {
   return labels[label] ?? label;
 }
 
+/**
+ * The customer-facing name of one quality-score component.
+ *
+ * The API's breakdown is keyed by the identifiers its scoring function uses,
+ * and those keys were being printed straight onto the provider's screen. They
+ * are field names, not language: a provider reading "cityDistrictPresent" is
+ * being shown the implementation. The scores, maximums and pass results are
+ * untouched — only the first column changes, and only in wording.
+ */
+export function qualityBreakdownLabel(key: string): string {
+  const labels: Record<string, string> = {
+    namePresent: 'Ad soyad bilgisi',
+    phonePresent: 'Telefon bilgisi',
+    budgetPresent: 'Bütçe bilgisi',
+    urgencyPresent: 'Aciliyet bilgisi',
+    cityDistrictPresent: 'İl ve ilçe bilgisi',
+    descriptionDetailed: 'İş açıklamasının ayrıntısı',
+    preferredDatePresent: 'Tercih edilen tarih',
+    locationDetailPresent: 'Adres notu',
+    requiredAnswersComplete: 'Zorunlu kategori soruları',
+    optionalAnswersCompleted: 'İsteğe bağlı kategori soruları',
+  };
+
+  const label = labels[key];
+  if (label) return label;
+
+  // A component the API grew after this map was written. Spacing the identifier
+  // out keeps the row readable instead of dropping it, and a new component is a
+  // one-line addition above.
+  const spaced = key.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+  return spaced.charAt(0).toLocaleUpperCase('tr-TR') + spaced.slice(1);
+}
+
 export function qualityBadgeClass(label: string) {
   switch (label) {
     case 'HIGH':

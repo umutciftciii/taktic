@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
+import { PasswordFields } from '../password-criteria';
 import { submitCustomerActivationAction } from './actions';
 
 const apiUrl =
@@ -144,7 +146,7 @@ export default async function ActivateCustomerPage({ searchParams }: ActivateCus
 
   const fieldError =
     error === 'password'
-      ? 'Şifre en az 8 karakter olmalıdır.'
+      ? `Şifre en az ${PASSWORD_MIN_LENGTH} karakter olmalıdır.`
       : error === 'mismatch'
         ? 'Şifreler eşleşmiyor.'
         : error === 'submit'
@@ -179,31 +181,7 @@ export default async function ActivateCustomerPage({ searchParams }: ActivateCus
         <input type="hidden" name="token" value={token} />
 
         <div className="auth-screen-fields">
-          <label className="auth-screen-field">
-            <span className="auth-screen-label">Yeni şifre</span>
-            <input
-              className="auth-screen-input"
-              name="password"
-              type="password"
-              minLength={8}
-              maxLength={128}
-              required
-              autoComplete="new-password"
-              placeholder="En az 8 karakter"
-            />
-          </label>
-          <label className="auth-screen-field">
-            <span className="auth-screen-label">Şifre tekrarı</span>
-            <input
-              className="auth-screen-input"
-              name="passwordConfirm"
-              type="password"
-              minLength={8}
-              maxLength={128}
-              required
-              autoComplete="new-password"
-            />
-          </label>
+          <PasswordFields />
         </div>
 
         <button className="auth-screen-submit" type="submit">

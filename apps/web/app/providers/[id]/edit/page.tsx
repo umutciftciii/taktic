@@ -7,6 +7,8 @@ import {
   getCurrentUser,
   ProviderProfile,
 } from '../../../../lib/api';
+import type { ProvinceWithDistricts } from '../../../../lib/locations';
+import { CityDistrictFields } from '../../city-district-fields';
 import { updateProviderAction } from '../../actions';
 import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
@@ -22,10 +24,13 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
     redirect(`/login?redirectTo=/providers/${id}/edit`);
   }
 
-  const [provider, categories, creditBalance] = await Promise.all([
+  const [provider, categories, creditBalance, provinces] = await Promise.all([
     fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
     apiFetch<Category[]>('/categories'),
     readCreditBalance(id),
+    // The same canonical list the application form offers and the API validates
+    // against, so an existing profile is edited within the same vocabulary.
+    apiFetch<ProvinceWithDistricts[]>('/locations/provinces'),
   ]);
 
   // Editing needs the private projection (phone, e-mail, tax fields). A viewer
@@ -119,14 +124,14 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
         <section className="pdash-form-section">
           <h2>Merkez Adres</h2>
           <div className="pdash-form-grid">
-            <label className="pdash-form-row">
-              <span>İl *</span>
-              <input name="city" required defaultValue={provider.city} />
-            </label>
-            <label className="pdash-form-row">
-              <span>İlçe *</span>
-              <input name="district" required defaultValue={provider.district} />
-            </label>
+            <CityDistrictFields
+              provinces={provinces}
+              cityName="city"
+              districtName="district"
+              defaultCity={provider.city}
+              defaultDistrict={provider.district}
+              labels={{ city: 'İl *', district: 'İlçe *' }}
+            />
           </div>
           <label className="pdash-form-row">
             <span>Adres notu</span>
@@ -154,14 +159,17 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
         <section className="pdash-form-section">
           <h2>Hizmet Bölgesi</h2>
           <div className="pdash-form-grid">
-            <label className="pdash-form-row">
-              <span>İl *</span>
-              <input name="serviceAreaCity" required defaultValue={firstArea?.city ?? provider.city} />
-            </label>
-            <label className="pdash-form-row">
-              <span>İlçe</span>
-              <input name="serviceAreaDistrict" defaultValue={firstArea?.district ?? provider.district} />
-            </label>
+            {/* Optional district, for the reason given on the application form. */}
+            <CityDistrictFields
+              provinces={provinces}
+              cityName="serviceAreaCity"
+              districtName="serviceAreaDistrict"
+              defaultCity={firstArea?.city ?? provider.city}
+              defaultDistrict={firstArea?.district ?? provider.district}
+              districtRequired={false}
+              districtPlaceholder="Tüm il"
+              labels={{ city: 'İl *', district: 'İlçe' }}
+            />
             <label className="pdash-form-row">
               <span>Mahalle</span>
               <input name="serviceAreaNeighborhood" defaultValue={firstArea?.neighborhood ?? ''} />

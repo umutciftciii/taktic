@@ -4354,3 +4354,30 @@ a.seg-opt:hover { text-decoration: none; color: var(--color-text); }
   font-weight: 400;
   color: var(--color-neutral-700);
 }
+
+/*
+ * Password criteria, shown live under a new-password field. The tick reuses the
+ * request form's check-square so "met" reads the same way across the product;
+ * an unmet criterion stays neutral rather than turning into an error, because
+ * a half-typed password is not a mistake.
+ */
+.password-criteria {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.password-criterion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
+.password-criterion.is-met {
+  color: var(--color-ink);
+}

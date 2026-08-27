@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
+import { PasswordFields } from '../password-criteria';
 import { submitAdminInviteAction } from './actions';
 
 const apiUrl =
@@ -134,7 +136,7 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
 
   const fieldError =
     error === 'password'
-      ? 'Şifre en az 8 karakter olmalıdır.'
+      ? `Şifre en az ${PASSWORD_MIN_LENGTH} karakter olmalıdır.`
       : error === 'mismatch'
         ? 'Şifreler eşleşmiyor.'
         : error === 'submit'
@@ -166,29 +168,7 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
         <input type="hidden" name="token" value={token} />
 
         <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
-          <label className="form-row">
-            <span>Yeni şifre</span>
-            <input
-              name="password"
-              type="password"
-              minLength={8}
-              maxLength={128}
-              required
-              autoComplete="new-password"
-              placeholder="En az 8 karakter"
-            />
-          </label>
-          <label className="form-row">
-            <span>Şifre tekrarı</span>
-            <input
-              name="passwordConfirm"
-              type="password"
-              minLength={8}
-              maxLength={128}
-              required
-              autoComplete="new-password"
-            />
-          </label>
+          <PasswordFields />
           <button className="btn btn-primary btn-block" type="submit">
             Şifreyi Kaydet
           </button>

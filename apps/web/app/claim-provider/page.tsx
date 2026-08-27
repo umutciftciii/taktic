@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { CLAIM_TOKEN_COOKIE, isProviderClaimEnabled } from '../../lib/provider-claim';
+import { PasswordFields } from '../password-criteria';
 import { startClaimLoginAction, submitProviderClaimAction } from './actions';
 
 const apiUrl =
@@ -180,29 +181,9 @@ export default async function ClaimProviderPage({ searchParams }: ClaimPageProps
           <form action={submitProviderClaimAction} className="auth-screen-fields">
             <input type="hidden" name="token" value={token} />
             <input type="hidden" name="needsPassword" value="true" />
-            <label className="auth-screen-field">
-              <span className="auth-screen-label">Şifre *</span>
-              <input
-                className="auth-screen-input"
-                name="password"
-                type="password"
-                minLength={8}
-                required
-                autoComplete="new-password"
-              />
-              <span className="auth-screen-help">En az 8 karakter.</span>
-            </label>
-            <label className="auth-screen-field">
-              <span className="auth-screen-label">Şifre (tekrar) *</span>
-              <input
-                className="auth-screen-input"
-                name="passwordConfirm"
-                type="password"
-                minLength={8}
-                required
-                autoComplete="new-password"
-              />
-            </label>
+            <PasswordFields
+              labels={{ password: 'Şifre *', confirm: 'Şifre (tekrar) *' }}
+            />
             <button className="btn btn-primary" type="submit">
               Hesabı oluştur ve başvuruyu bağla
             </button>

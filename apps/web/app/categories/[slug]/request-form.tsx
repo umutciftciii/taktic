@@ -2,6 +2,8 @@
 
 import { useMemo, useRef, useState, type RefObject } from 'react';
 import type { ContactDisclosureConfig, Question } from '../../../lib/api';
+import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { LocationFields } from './location-fields';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
 type RequestFormProps = {
@@ -9,6 +11,8 @@ type RequestFormProps = {
   questions: Question[];
   disclosure: ContactDisclosureConfig;
   showDisclosure: boolean;
+  /** Turkey's provinces with their districts, loaded by the page from the API. */
+  provinces: ProvinceWithDistricts[];
   /** The existing server action; this component only decides what is on screen. */
   action: (formData: FormData) => void | Promise<void>;
 };
@@ -36,6 +40,7 @@ export function RequestForm({
   questions,
   disclosure,
   showDisclosure,
+  provinces,
   action,
 }: RequestFormProps) {
   const [step, setStep] = useState(0);
@@ -204,20 +209,7 @@ export function RequestForm({
           >
             <section className="form-section">
               <h2>Konum</h2>
-              <div className="form-grid">
-                <label className="form-row">
-                  <span>İl *</span>
-                  <input name="city" required />
-                </label>
-                <label className="form-row">
-                  <span>İlçe *</span>
-                  <input name="district" required />
-                </label>
-                <label className="form-row">
-                  <span>Mahalle</span>
-                  <input name="neighborhood" />
-                </label>
-              </div>
+              <LocationFields provinces={provinces} onChange={refreshSignals} />
               <label className="form-row">
                 <span>Adres notu</span>
                 <textarea name="addressNote" placeholder="Ek bilgi / yol tarifi" />

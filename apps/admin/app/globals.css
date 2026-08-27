@@ -3577,3 +3577,60 @@ button:disabled {
   font-size: 0.85rem;
   line-height: 1.5;
 }
+
+/*
+ * Password criteria, shown live under a new-password field. An unmet criterion
+ * stays neutral rather than reading as an error: a half-typed password is not a
+ * mistake. The state word is for screen readers, so the tick and the colour are
+ * not the only thing carrying the meaning.
+ */
+.password-criteria {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.password-criterion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.password-criterion.is-met {
+  color: var(--success);
+}
+
+.password-criterion-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+.password-criterion.is-met .password-criterion-mark {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.password-criterion-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

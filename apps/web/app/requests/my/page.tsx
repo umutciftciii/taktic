@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { apiFetch, CustomerServiceRequest, getCurrentUser } from '../../../lib/api';
+import { getCurrentUser } from '../../../lib/api';
 import { IconPlus } from '../../landing-icons';
 import { CustomerShell } from '../customer-shell';
+import { loadCustomerRequests } from '../customer-panel-data';
 import { RequestsBoard } from './requests-board';
 
 export default async function MyRequestsPage() {
@@ -11,7 +12,9 @@ export default async function MyRequestsPage() {
     redirect('/login?redirectTo=/requests/my');
   }
 
-  const requests = await apiFetch<CustomerServiceRequest[]>('/service-requests/my');
+  // The same memoised load the sidebar counters use, so the panel asks for
+  // this list once per render however many parts of it need the list.
+  const requests = await loadCustomerRequests();
 
   /*
    * Every number on this screen is counted from the customer's own requests.
@@ -23,11 +26,7 @@ export default async function MyRequestsPage() {
   const offers = requests.reduce((total, request) => total + request.offersCount, 0);
 
   return (
-    <CustomerShell
-      user={user}
-      active="requests"
-      counts={{ requests: requests.length, offers, matches: matched }}
-    >
+    <CustomerShell user={user} active="requests">
       <header className="cdash-page-head">
         <div className="panel-head-row">
           <div>

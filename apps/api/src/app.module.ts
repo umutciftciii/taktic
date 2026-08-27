@@ -5,6 +5,7 @@ import { ContactSharingModule } from './modules/contact-sharing/contact-sharing.
 import { CustomerActivationModule } from './modules/customer-activation/customer-activation.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { HealthModule } from './modules/health/health.module';
+import { LocationsModule } from './modules/locations/locations.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
@@ -34,6 +35,7 @@ import { PrismaModule } from './prisma/prisma.module';
     NotificationsModule,
     AuthModule,
     CategoriesModule,
+    LocationsModule,
     QuestionsModule,
     ServiceRequestsModule,
     ProviderClaimModule,

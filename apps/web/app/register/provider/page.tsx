@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { AuthFrame } from '../../auth-frame';
 import { registerProviderAction } from '../actions';
 import { RoleSwitch } from '../role-switch';
+import { PasswordFields } from '../../password-criteria';
 
 type ProviderRegisterPageProps = {
   searchParams: Promise<{ error?: string }>;
@@ -60,18 +61,11 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
               placeholder="05XX XXX XX XX"
             />
           </label>
-          <label className="auth-screen-field">
-            <span className="auth-screen-label">Şifre *</span>
-            <input
-              className="auth-screen-input"
-              name="password"
-              type="password"
-              minLength={8}
-              required
-              autoComplete="new-password"
-            />
-            <span className="auth-screen-help">En az 8 karakter.</span>
-          </label>
+          {/*
+            One field, so no matching criterion — the register endpoint asks for
+            a password once. The length rule shown is the API's own.
+          */}
+          <PasswordFields withConfirm={false} labels={{ password: 'Şifre *' }} />
         </div>
 
         <button className="auth-screen-submit" type="submit">

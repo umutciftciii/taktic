@@ -116,23 +116,24 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
             </dl>
           </section>
 
+          {/*
+            Only the two actions that decide something. Shortlisting was removed:
+            it moved the offer into a state with no product rule behind it —
+            nothing filtered on it, nobody was notified, and the customer could
+            not undo it — so the button promised a decision the platform never
+            made. Accepting and rejecting are unchanged, and so is every state
+            that makes them unavailable.
+          */}
           {actionable ? (
             <section className="cdash-detail-card">
               <h2>Aksiyonlar</h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="offer-actions">
                 <ActionButton
                   requestId={id}
                   offerId={offerId}
                   action="ACCEPT"
                   label="Kabul Et"
                   variant="primary"
-                />
-                <ActionButton
-                  requestId={id}
-                  offerId={offerId}
-                  action="SHORTLIST"
-                  label="Kısa Listeye Al"
-                  variant="secondary"
                 />
                 <ActionButton
                   requestId={id}
@@ -164,16 +165,14 @@ function ActionButton({
 }: {
   requestId: string;
   offerId: string;
-  action: 'SHORTLIST' | 'REJECT' | 'ACCEPT';
+  action: 'REJECT' | 'ACCEPT';
   label: string;
-  variant: 'primary' | 'secondary' | 'danger';
+  variant: 'primary' | 'danger';
 }) {
   const className =
     variant === 'primary'
       ? 'cdash-btn cdash-btn-primary cdash-btn-block'
-      : variant === 'danger'
-        ? 'cdash-btn cdash-btn-danger cdash-btn-block'
-        : 'cdash-btn cdash-btn-secondary cdash-btn-block';
+      : 'cdash-btn cdash-btn-danger cdash-btn-block';
 
   return (
     <form action={customerOfferAction}>

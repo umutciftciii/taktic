@@ -152,3 +152,36 @@ export async function waitForLatestClaimUrl(email: string): Promise<string> {
 export function claimInvitationCount(email: string): number {
   return emailEntriesFor(email).filter((entry) => entry.template === 'provider-claim').length;
 }
+
+/**
+ * Waits for the newest activation link the application mailed to this address.
+ *
+ * Same reasoning as the claim link above: the token is single-use, never
+ * returned over HTTP and never stored in plaintext, so the transport recording
+ * is the only way a browser test can reach the screen a real customer reaches
+ * from their inbox.
+ */
+export async function waitForLatestActivationUrl(email: string): Promise<string> {
+  let entries: EmailOutboxEntry[] = [];
+
+  await expect
+    .poll(
+      () => {
+        entries = emailEntriesFor(email).filter((entry) => entry.template === 'customer-activation');
+        return entries.length;
+      },
+      {
+        message: `no activation link was recorded for ${email}`,
+        timeout: 20_000,
+        intervals: [100, 200, 500],
+      },
+    )
+    .toBeGreaterThan(0);
+
+  const latest = entries[entries.length - 1];
+  if (!latest?.actionUrl) {
+    throw new Error(`no activation link was recorded for ${email}`);
+  }
+
+  return latest.actionUrl;
+}

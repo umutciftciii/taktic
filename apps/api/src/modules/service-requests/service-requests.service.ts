@@ -17,6 +17,7 @@ import {
   readContactSharingConfig,
 } from '../contact-sharing/contact-sharing.config';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
+import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
@@ -121,13 +122,29 @@ export class ServiceRequestsService {
     const answers = validateAnswers(category.questions, dto.answers ?? []);
     const preferredDate = normalizeOptionalDate(dto.preferredDate, 'Preferred date');
     const disclosure = resolveContactDisclosure(dto);
+    // The DTO already refused an impossible triple; this turns the accepted one
+    // into the canonical spelling the rest of the product compares against —
+    // provider service areas are matched on city and district as plain strings,
+    // so "istanbul" and "İstanbul" must not become two different places.
+    const location = resolveLocation({
+      city: normalizeRequiredString(dto.city, 'City'),
+      district: normalizeRequiredString(dto.district, 'District'),
+      neighborhood: normalizeNullableString(dto.neighborhood),
+    });
+
+    if (!location) {
+      throw new BadRequestException(
+        'Seçilen il, ilçe ve mahalle birlikte geçerli bir adres oluşturmuyor.',
+      );
+    }
+
     const requestData = {
       customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
       customerPhone: normalizePhone(dto.customerPhone),
       customerEmail: normalizeRequiredEmail(dto.customerEmail),
-      city: normalizeRequiredString(dto.city, 'City'),
-      district: normalizeRequiredString(dto.district, 'District'),
-      neighborhood: normalizeNullableString(dto.neighborhood),
+      city: location.city,
+      district: location.district,
+      neighborhood: location.neighborhood,
       addressNote: normalizeNullableString(dto.addressNote),
       budgetMin: normalizeOptionalPriceMinor(dto.budgetMin, 'Budget minimum'),
       budgetMax: normalizeOptionalPriceMinor(dto.budgetMax, 'Budget maximum'),

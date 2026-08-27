@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
+import { getCities, getDistrictsOfEachCity } from 'turkey-neighbourhoods';
 import { e2ePrisma } from './database';
 import { E2E_LEMON_PACKAGE_SLUG } from './runtime';
 
@@ -100,13 +101,24 @@ export function createPhoneAllocator(block: number = resolvePhoneBlock()): () =>
 }
 
 function resolvePhoneBlock(): number {
+  return resolveWorkerIndex('phone', PHONE_WORKER_BLOCKS);
+}
+
+/**
+ * This worker process's block number.
+ *
+ * TEST_WORKER_INDEX is the identifier Playwright never reuses within a run —
+ * unlike TEST_PARALLEL_INDEX, which is handed straight back to a replacement
+ * worker — so it is what keeps two processes off the same fixture values.
+ */
+function resolveWorkerIndex(kind: string, blocks: number): number {
   const raw = process.env.TEST_WORKER_INDEX;
   const block = raw === undefined || raw === '' ? 0 : Number(raw);
 
-  if (!Number.isInteger(block) || block < 0 || block >= PHONE_WORKER_BLOCKS) {
+  if (!Number.isInteger(block) || block < 0 || block >= blocks) {
     throw new Error(
-      `TEST_WORKER_INDEX=${raw} has no phone block: the suite reserves ${PHONE_WORKER_BLOCKS} ` +
-        'blocks, and sharing one would put two worker processes on the same numbers.',
+      `TEST_WORKER_INDEX=${raw} has no ${kind} block: the suite reserves ${blocks} ` +
+        'blocks, and sharing one would put two worker processes on the same fixture values.',
     );
   }
 
@@ -148,14 +160,85 @@ export function prisma(): PrismaClient {
 }
 
 /**
- * A district nobody else uses.
+ * How many worker processes may each hold a private range of districts.
+ *
+ * Turkey has 973 of them, so a block is sixty-odd — comfortably more than any
+ * one worker allocates, and the allocator below refuses rather than wraps if
+ * that ever stops being true.
+ */
+export const LOCATION_WORKER_BLOCKS = 16;
+
+/** Every (province, district) pair, in one deterministic order. */
+export function allDistrictPairs(): Location[] {
+  const districtsByCity = getDistrictsOfEachCity() as Record<string, string[]>;
+
+  return getCities()
+    .slice()
+    .sort((a, b) => a.code.localeCompare(b.code))
+    .flatMap((city) =>
+      [...(districtsByCity[city.code] ?? [])]
+        .sort((a, b) => a.localeCompare(b, 'tr-TR'))
+        .map((district) => ({ city: city.name, district })),
+    );
+}
+
+export function createLocationAllocator(
+  block: number = resolveWorkerIndex('location', LOCATION_WORKER_BLOCKS),
+): () => Location {
+  const pairs = allDistrictPairs();
+  const perBlock = Math.floor(pairs.length / LOCATION_WORKER_BLOCKS);
+
+  if (!Number.isInteger(block) || block < 0 || block >= LOCATION_WORKER_BLOCKS) {
+    throw new Error(
+      `Worker ${block} has no location block: the suite reserves ${LOCATION_WORKER_BLOCKS} blocks, ` +
+        'and sharing one would put two worker processes on the same district.',
+    );
+  }
+
+  let serial = 0;
+
+  return () => {
+    if (serial >= perBlock) {
+      throw new Error(
+        `This worker has allocated all ${perBlock} of its fixture districts. ` +
+          'Widen the block rather than letting the sequence wrap onto districts already in the database.',
+      );
+    }
+
+    const pair = pairs[block * perBlock + serial];
+    serial += 1;
+
+    if (!pair) {
+      throw new Error('Fixture district allocation ran past the district list.');
+    }
+
+    return pair;
+  };
+}
+
+/** This worker process's allocator, so the sequence never restarts mid-process. */
+const allocateLocation = createLocationAllocator();
+
+/**
+ * A real province/district pair nobody else in this run uses.
  *
  * Provider discovery matches on city+district, so a per-test district is what
  * lets a test assert "this provider's matching list holds exactly one request"
  * without caring what the rest of the suite created.
+ *
+ * It used to be `Kadıköy-<suffix>`: unique, but not a place. The request form
+ * now offers Turkey's actual districts as a select and the API refuses a
+ * province/district pair that does not exist, so an invented district can no
+ * longer be typed in or posted — a fixture using one would be testing a request
+ * the product cannot create. Uniqueness therefore comes from allocating a
+ * distinct *real* pair instead of decorating one.
+ *
+ * Same allocator shape as {@link createPhoneAllocator} and for the same reason:
+ * a counter is unique by construction, while the database outlives the worker
+ * process that holds it, so each worker takes its own block.
  */
-export function uniqueLocation(suffix = uniqueSuffix()): Location {
-  return { city: 'İstanbul', district: `Kadıköy-${suffix}` };
+export function uniqueLocation(): Location {
+  return allocateLocation();
 }
 
 export async function createCustomer(name = 'E2E Müşteri'): Promise<SeededCustomer> {
