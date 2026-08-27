@@ -36,6 +36,23 @@ export function canWithdrawOffer(offerStatus: string, requestStatus: string): bo
   return isWithdrawableOfferStatus(offerStatus) && requestStatus === 'APPROVED';
 }
 
+/**
+ * Whether the provider panel's request screen will actually open this request.
+ *
+ * That screen is served by the discovery route, and discovery only answers for
+ * a request that is still taking offers: `getMatchingRequest` refuses anything
+ * that is not APPROVED with the same 404 it gives a request outside the
+ * provider's categories, deliberately, so a provider cannot probe for requests
+ * it may not see. The refusal is right; linking to it regardless was not.
+ *
+ * Same predicate `canWithdrawOffer` already uses for the request half of its
+ * rule, named separately because this is a different question about the same
+ * fact — "can this screen be opened", not "may this offer be withdrawn".
+ */
+export function canOpenRequestDetail(requestStatus: string): boolean {
+  return requestStatus === 'APPROVED';
+}
+
 export function providerStatusBadgeClass(status: string): string {
   switch (status) {
     case 'APPROVED':

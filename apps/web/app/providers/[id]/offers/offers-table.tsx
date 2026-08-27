@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import type { ProviderOffer } from '../../../../lib/api';
 import { formatDateTime, formatPrice, refundActionLabel } from '../../../../lib/formatters';
 import {
+  canOpenRequestDetail,
   canWithdrawOffer,
   providerOfferStatusLabel,
   providerRefundBadgeClass,
@@ -149,12 +150,21 @@ export function OffersTable({ providerId, offers }: OffersTableProps) {
                           Geri çek
                         </Link>
                       ) : null}
-                      <Link
-                        className="pdash-btn pdash-btn-secondary pdash-btn-sm"
-                        href={`/providers/${providerId}/requests/${offer.request.id}`}
-                      >
-                        Talep
-                      </Link>
+                      {/*
+                        Only while the request is still open: the provider
+                        panel's request screen is the discovery screen, and
+                        discovery answers 404 for a request that has matched,
+                        completed, expired or been cancelled.
+                      */}
+                      {canOpenRequestDetail(offer.request.status) ? (
+                        <Link
+                          className="pdash-btn pdash-btn-secondary pdash-btn-sm"
+                          href={`/providers/${providerId}/requests/${offer.request.id}`}
+                          data-testid="offer-row-request-link"
+                        >
+                          Talep
+                        </Link>
+                      ) : null}
                       <Link
                         className="pdash-btn pdash-btn-primary pdash-btn-sm"
                         href={`/providers/${providerId}/offers/${offer.id}`}

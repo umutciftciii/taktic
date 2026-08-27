@@ -14,6 +14,7 @@ import {
 import { ProviderShell } from '../../../provider-shell';
 import { readCreditBalance } from '../../../provider-data';
 import {
+  canOpenRequestDetail,
   canWithdrawOffer,
   isWithdrawableOfferStatus,
   providerOfferStatusLabel,
@@ -56,6 +57,11 @@ export default async function ProviderOfferDetailPage({
   // Still live, but on a request that no longer takes offers. Worth explaining;
   // a closed offer needs no explanation because its own status already is one.
   const withdrawBlockedByRequest = !canWithdraw && isWithdrawableOfferStatus(offer.status);
+  // The provider panel's request screen is the discovery screen, and discovery
+  // stops answering for a request that is no longer taking offers. Linking to
+  // it anyway is what put a provider whose offer had just been accepted on a
+  // 404 — the one moment they are most sure the job is theirs.
+  const requestDetailOpens = canOpenRequestDetail(offer.request.status);
 
   return (
     <ProviderShell user={user} providerId={id} active="offers" creditBalance={creditBalance}>
@@ -279,13 +285,22 @@ export default async function ProviderOfferDetailPage({
             </div>
           )}
 
+          {requestDetailOpens ? null : (
+            <p className="pdash-card-sub" data-testid="request-detail-closed">
+              Talep artık teklif almıyor; talep ekranı yalnız açık talepler için görüntülenir.
+            </p>
+          )}
+
           <div className="pdash-actions">
-            <Link
-              className="pdash-btn pdash-btn-secondary"
-              href={`/providers/${id}/requests/${offer.request.id}`}
-            >
-              Talep Detayı
-            </Link>
+            {requestDetailOpens ? (
+              <Link
+                className="pdash-btn pdash-btn-secondary"
+                href={`/providers/${id}/requests/${offer.request.id}`}
+                data-testid="request-detail-link"
+              >
+                Talep Detayı
+              </Link>
+            ) : null}
             <Link className="pdash-btn pdash-btn-ghost" href={`/providers/${id}/offers`}>
               Tüm Tekliflerim
             </Link>
