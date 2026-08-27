@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -22,6 +23,7 @@ import {
   contactDisclosureRequiredException,
   readContactSharingConfig,
 } from '../contact-sharing/contact-sharing.config';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { CUSTOMER_UNACTIONABLE_OFFER_STATUSES } from './offer-transitions';
@@ -45,7 +47,12 @@ type OfferListFilters = {
 
 @Injectable()
 export class OffersService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OffersService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+  ) {}
 
   async listOffers(filters: OfferListFilters) {
     const status = normalizeOptionalOfferStatus(filters.status);
@@ -147,6 +154,20 @@ export class OffersService {
   }
 
   async refundOfferCredit(id: string, dto: RefundOfferCreditDto) {
+    const result = await this.refundOfferCreditRecord(id, dto);
+
+    // After the ledger row is committed, and driven by that row: every figure
+    // in the message is read back from the transaction the refund wrote, never
+    // from a live balance.
+    await this.notify(
+      () => this.mail.sendCreditRefunded(result.refundTransaction.id),
+      `offer ${id}`,
+    );
+
+    return result;
+  }
+
+  private refundOfferCreditRecord(id: string, dto: RefundOfferCreditDto) {
     const reasonCode = normalizeRefundReasonCode(dto.reasonCode);
     const reasonNote = normalizeOptionalReason(dto.reason);
 
@@ -212,6 +233,22 @@ export class OffersService {
       },
       { label: 'offers.refundOfferCredit' },
     );
+  }
+
+  /**
+   * Runs a notification and swallows whatever it throws. Every caller is past
+   * its commit point, so an escaping error could only turn a completed action
+   * into a failed response.
+   */
+  private async notify(run: () => Promise<unknown>, subject: string) {
+    try {
+      await run();
+    } catch (error) {
+      this.logger.error(
+        `Failed to send a notification for ${subject}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   async listRequestOffers(requestId: string, user: AuthUser | null = null) {
@@ -299,7 +336,18 @@ export class OffersService {
     const status = customerActionToStatus(dto.action);
 
     if (status === OfferStatus.ACCEPTED) {
-      return this.acceptRequestOffer(requestId, offerId, existingOffer.viewedAt);
+      const accepted = await this.acceptRequestOffer(requestId, offerId, existingOffer.viewedAt);
+
+      // Both halves of the match, then the offers the cascade closed. All of it
+      // after the transaction committed, and each message keyed on its own
+      // offer, so a retry of this request re-sends nothing.
+      await this.notify(() => this.mail.sendMatchNotifications(offerId), `offer ${offerId}`);
+      await this.notify(
+        () => this.mail.sendOfferNotSelected(accepted.rejectedOfferIds),
+        `request ${requestId}`,
+      );
+
+      return accepted.detail;
     }
 
     const now = new Date();
@@ -330,6 +378,12 @@ export class OffersService {
       where: { id: offerId },
       include: customerOfferInclude,
     });
+
+    // A hand-rejected offer earns the same message the cascade sends. A
+    // shortlisted one does not: nothing has been decided yet.
+    if (status === OfferStatus.REJECTED) {
+      await this.notify(() => this.mail.sendOfferNotSelected([offerId]), `offer ${offerId}`);
+    }
 
     return toCustomerOfferDetail(offer);
   }
@@ -415,10 +469,27 @@ export class OffersService {
 
         // Only offers still in play are closed. WITHDRAWN, CANCELLED, EXPIRED
         // and any already REJECTED offer are terminal and left untouched.
-        await tx.offer.updateMany({
+        //
+        // Read before the update, inside the same Serializable transaction, so
+        // the list is exactly the set this cascade closed — the providers who
+        // are then told they were not selected, and nobody else. A provider who
+        // withdrew is not in it, which is the one mistake that message must not
+        // make.
+        const closing = await tx.offer.findMany({
           where: {
             requestId,
             id: { not: offerId },
+            status: {
+              in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
+            },
+          },
+          select: { id: true },
+        });
+
+        await tx.offer.updateMany({
+          where: {
+            requestId,
+            id: { in: closing.map((entry) => entry.id) },
             status: {
               in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
             },
@@ -446,7 +517,10 @@ export class OffersService {
           });
         }
 
-        return toCustomerOfferDetail(accepted);
+        return {
+          detail: toCustomerOfferDetail(accepted),
+          rejectedOfferIds: closing.map((entry) => entry.id),
+        };
       },
       { label: 'offers.acceptRequestOffer' },
     );

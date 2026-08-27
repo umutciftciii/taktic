@@ -1,18 +1,29 @@
 import { NotificationMessage } from './notification.port';
+import {
+  isTransactionalEmailTemplate,
+  renderTransactionalEmail,
+} from './templates/transactional-templates';
 
 /**
  * Renders the plain-text and HTML bodies a delivering transport sends.
  *
- * Only transactional mail exists here: an activation link, a claim link, and
- * the one reminder an approved request earns. There is no marketing block, no
- * unsubscribe funnel and no tracking pixel — the wording below is the whole
- * message, and both bodies say the same thing so a text-only client is not
- * shown a degraded version.
+ * Two families share this entry point.
  *
- * Every interpolated value is escaped for the HTML body. The values come from
- * customer- and applicant-supplied fields (a business name, a display name), so
- * treating them as markup would be a stored-XSS sink in whatever client renders
- * the mail.
+ * The twelve designed transactional messages are rendered from the TakTick
+ * e-mail design system (see templates/email-design.ts) — a 600px table-based
+ * card with every style inline. They are dispatched first, by identifier.
+ *
+ * Everything below that line is the original plain renderer for the three
+ * templates that predate the design system: an activation link, a claim link,
+ * and the one reminder an approved request earns. Their wording and markup are
+ * unchanged, deliberately — re-skinning them is a product decision rather than
+ * a side effect of adding the new set.
+ *
+ * Both families obey the same two rules. There is no marketing block, no
+ * unsubscribe funnel and no tracking pixel; and every interpolated value is
+ * escaped for the HTML body, because the values come from customer- and
+ * applicant-supplied fields (a business name, an offer note) and treating them
+ * as markup would be a stored-XSS sink in whatever client renders the mail.
  */
 export type RenderedEmail = {
   text: string;
@@ -20,6 +31,11 @@ export type RenderedEmail = {
 };
 
 export function renderEmail(message: NotificationMessage): RenderedEmail {
+  if (isTransactionalEmailTemplate(message.template)) {
+    const rendered = renderTransactionalEmail(message.template, message);
+    return { text: rendered.text, html: rendered.html };
+  }
+
   const paragraphs = bodyParagraphs(message);
   const action = actionFor(message);
 

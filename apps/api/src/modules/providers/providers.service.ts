@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -23,11 +24,16 @@ import {
   normalizeProviderEmail,
   sameProviderEmail,
 } from '../../common/provider-email';
+import {
+  isRequestVisibleToProviders,
+  matchesProviderArea,
+  phoneVerifiedRequestFilter,
+} from '../../common/provider-request-matching';
 import { runSerializable } from '../../common/serializable-transaction';
-import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { resolveArea, resolveLocation } from '../locations/turkey-locations';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
 import {
   offerNotWithdrawableException,
@@ -113,10 +119,13 @@ export const PROVIDER_EMAIL_IMMUTABLE_CODE = 'PROVIDER_EMAIL_IMMUTABLE';
 
 @Injectable()
 export class ProvidersService {
+  private readonly logger = new Logger(ProvidersService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NumberingService) private readonly numbering: NumberingService,
     @Inject(ProviderClaimService) private readonly providerClaim: ProviderClaimService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
   ) {}
 
   async createProvider(
@@ -172,6 +181,11 @@ export class ProvidersService {
       // no-op while the flag is off.
       await this.providerClaim.issueForNewApplication(provider.id, meta);
     }
+
+    // The receipt, which is a different message from the claim invitation
+    // above: one says "we have your application", the other hands over
+    // ownership of it. An owned application gets only this one.
+    await this.notify(() => this.mail.sendProviderApplicationReceived(provider.id), provider.id);
 
     return provider;
   }
@@ -528,7 +542,7 @@ export class ProvidersService {
   }
 
   async updateProviderStatus(id: string, dto: UpdateProviderStatusDto) {
-    await this.ensureProviderExists(id);
+    const existing = await this.ensureProviderExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
 
@@ -538,7 +552,7 @@ export class ProvidersService {
 
     const now = new Date();
 
-    return this.prisma.$transaction(async (tx) => {
+    const provider = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.providerProfile.update({
         where: { id },
         data: {
@@ -563,6 +577,17 @@ export class ProvidersService {
 
       return updated;
     });
+
+    // Only a genuine transition into APPROVED. Re-saving an already-approved
+    // application from the moderation screen rewrites `approvedAt` and tells
+    // nobody anything; a suspension followed by a re-approval is a real second
+    // approval and does mail again. The dedupe key carries `approvedAt`, so the
+    // database enforces the same rule independently.
+    if (dto.status === ProviderStatus.APPROVED && existing.status !== ProviderStatus.APPROVED) {
+      await this.notify(() => this.mail.sendProviderApplicationApproved(id, now), id);
+    }
+
+    return provider;
   }
 
   async listMatchingRequests(providerId: string, filters: RequestDiscoveryFilters) {
@@ -662,6 +687,16 @@ export class ProvidersService {
   }
 
   async createOffer(providerId: string, requestId: string, dto: CreateOfferDto) {
+    const offer = await this.createOfferRecord(providerId, requestId, dto);
+
+    // Outside the transaction that charged the credit, so a mail failure can
+    // never roll back an offer the provider has already paid for and delivered.
+    await this.notify(() => this.mail.sendOfferReceived(offer.id), providerId);
+
+    return offer;
+  }
+
+  private async createOfferRecord(providerId: string, requestId: string, dto: CreateOfferDto) {
     await this.ensureProviderCanSeeRequest(providerId, requestId);
     const payload = normalizeOfferPayload(dto);
 
@@ -1013,11 +1048,34 @@ export class ProvidersService {
   private async ensureProviderExists(id: string) {
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id },
-      select: { id: true },
+      // The status comes back so a caller can tell an actual transition from a
+      // re-save of the state the row already had.
+      select: { id: true, status: true },
     });
 
     if (!provider) {
       throw new NotFoundException('Provider not found');
+    }
+
+    return provider;
+  }
+
+  /**
+   * Runs a notification and swallows whatever it throws.
+   *
+   * Every caller is past its commit point, so an escaping error could only turn
+   * a completed action into a failed response. Transport failures are already
+   * recorded in NotificationLog; this guards against a bug in the composing
+   * code itself.
+   */
+  private async notify(run: () => Promise<unknown>, providerId: string) {
+    try {
+      await run();
+    } catch (error) {
+      this.logger.error(
+        `Failed to send a notification for provider ${providerId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 
@@ -1451,39 +1509,6 @@ function normalizeOptionalQualityLabel(value: string | undefined): QualityLabel 
  * the check is applied in the list query, the detail lookup and the offer path
  * alike: hiding it in the UI only would still leave the id guessable.
  */
-function phoneVerifiedRequestFilter(): Prisma.ServiceRequestWhereInput {
-  return isPhoneVerificationRequired() ? { phoneVerifiedAt: { not: null } } : {};
-}
-
-function isRequestVisibleToProviders(request: { phoneVerifiedAt: Date | null }): boolean {
-  return !isPhoneVerificationRequired() || request.phoneVerifiedAt !== null;
-}
-
-function matchesProviderArea(
-  areas: Array<{ city: string; district: string | null; neighborhood: string | null }>,
-  request: { city: string; district: string; neighborhood: string | null },
-) {
-  return areas.some((area) => {
-    if (!sameText(area.city, request.city)) {
-      return false;
-    }
-
-    if (area.district && !sameText(area.district, request.district)) {
-      return false;
-    }
-
-    if (area.neighborhood && !sameText(area.neighborhood, request.neighborhood)) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
-function sameText(left: string | null, right: string | null) {
-  return (left ?? '').toLocaleLowerCase('tr-TR') === (right ?? '').toLocaleLowerCase('tr-TR');
-}
-
 export type OfferBlockedReason = 'CATEGORY_INACTIVE' | 'CATEGORY_PRICE_UNSET';
 
 /**

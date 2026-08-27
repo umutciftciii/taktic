@@ -1,4 +1,5 @@
 import { NotificationChannel, NotificationStatus, Prisma } from '@prisma/client';
+import { TRANSACTIONAL_EMAIL_TEMPLATES } from '../notifications/templates/transactional-templates';
 import {
   normalizeStoredErrorCode,
   notificationErrorLabel,
@@ -15,6 +16,7 @@ export const NOTIFICATION_TEMPLATES = [
   'request-expiring',
   'phone-verification-code',
   'provider-claim',
+  ...TRANSACTIONAL_EMAIL_TEMPLATES,
 ] as const;
 
 /**

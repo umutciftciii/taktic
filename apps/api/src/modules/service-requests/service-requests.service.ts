@@ -17,6 +17,7 @@ import {
   readContactSharingConfig,
 } from '../contact-sharing/contact-sharing.config';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -97,6 +98,7 @@ export class ServiceRequestsService {
     @Inject(NumberingService) private readonly numbering: NumberingService,
     @Inject(CustomerActivationService)
     private readonly customerActivation: CustomerActivationService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
   ) {}
 
   async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
@@ -205,6 +207,12 @@ export class ServiceRequestsService {
         );
       }
     }
+
+    // The receipt for the request the visitor just submitted. After the commit
+    // and best-effort, for the same reason the activation link above is: the
+    // request exists, and a mail problem must not surface as a failed
+    // submission.
+    await this.notify(() => this.mail.sendRequestReceived(request.id), request.id);
 
     return withQualityLabel(request);
   }
@@ -341,6 +349,18 @@ export class ServiceRequestsService {
         },
       },
     });
+
+    // Only a real transition mails anybody. Re-saving an already-approved
+    // request from the moderation screen rewrites `approvedAt` and nothing
+    // else: the customer is not told twice that their request went live, and no
+    // provider is invited to it a second time. The dedupe key carries
+    // `approvedAt` as a second, database-level guard against the same thing.
+    if (
+      dto.status === ServiceRequestStatus.APPROVED &&
+      existing.status !== ServiceRequestStatus.APPROVED
+    ) {
+      await this.notify(() => this.mail.fanOutApprovedRequest(request.id, now), request.id);
+    }
 
     return withQualityLabel(request);
   }
@@ -492,7 +512,7 @@ export class ServiceRequestsService {
   private async ensureRequestExists(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      select: { id: true, phoneVerifiedAt: true },
+      select: { id: true, status: true, phoneVerifiedAt: true },
     });
 
     if (!request) {
@@ -500,6 +520,25 @@ export class ServiceRequestsService {
     }
 
     return request;
+  }
+
+  /**
+   * Runs a notification and swallows whatever it throws.
+   *
+   * Every caller is past its commit point, so the only thing an escaping error
+   * could do is turn a completed action into a failed response. The service it
+   * calls already records failures in NotificationLog; this is the last guard
+   * against a bug in the composing code rather than in the transport.
+   */
+  private async notify(run: () => Promise<unknown>, requestId: string) {
+    try {
+      await run();
+    } catch (error) {
+      this.logger.error(
+        `Failed to send a notification for request ${requestId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 }
 

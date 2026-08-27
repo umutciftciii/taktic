@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import {
   CreditTransactionType,
   CustomerOrigin,
@@ -165,7 +166,23 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
   };
 }
 
+/**
+ * Empties the in-memory rate-limit counters.
+ *
+ * The credential endpoints share one small budget per process, which is what
+ * makes the limit cheap to test in auth-rate-limit.spec.ts — and what makes any
+ * *other* spec that legitimately calls those endpoints many times run out of it
+ * halfway through. Clearing the counter between cases keeps the limiter itself
+ * exactly as it is in production; only the accumulated history goes.
+ */
+export function resetAuthThrottle(app: INestApplication): void {
+  const storage = app.get<ThrottlerStorageService>(ThrottlerStorage, { strict: false });
+  storage.storage.clear();
+}
+
 const TRUNCATED_TABLES = [
+  'PasswordResetToken',
+  'EmailVerificationToken',
   'PaymentWebhookEvent',
   'ContactRevealEvent',
   'NotificationLog',

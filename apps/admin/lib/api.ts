@@ -992,6 +992,18 @@ export const NOTIFICATION_TEMPLATES = [
   'request-expiring',
   'phone-verification-code',
   'provider-claim',
+  'password-reset',
+  'email-verification',
+  'provider-application-received',
+  'provider-application-approved',
+  'request-received',
+  'request-published',
+  'offer-received',
+  'match-customer',
+  'request-available',
+  'offer-accepted',
+  'offer-not-selected',
+  'credit-refunded',
 ] as const;
 
 /**
@@ -1071,6 +1083,19 @@ export function notificationTemplateLabel(template: string): string {
     'customer-activation': 'Hesap etkinleştirme',
     'request-expiring': 'Talep süresi uyarısı',
     'phone-verification-code': 'Telefon doğrulama kodu',
+    'provider-claim': 'Başvuru sahiplenme daveti',
+    'password-reset': 'Şifre sıfırlama',
+    'email-verification': 'E-posta doğrulama',
+    'provider-application-received': 'Başvuru alındı',
+    'provider-application-approved': 'Başvuru onaylandı',
+    'request-received': 'Talep alındı',
+    'request-published': 'Talep yayında',
+    'offer-received': 'Yeni teklif',
+    'match-customer': 'Eşleşme (müşteri)',
+    'request-available': 'Bölgede yeni talep',
+    'offer-accepted': 'Teklif kabul edildi',
+    'offer-not-selected': 'Teklif seçilmedi',
+    'credit-refunded': 'Kredi iadesi',
   };
 
   return labels[template] ?? template;

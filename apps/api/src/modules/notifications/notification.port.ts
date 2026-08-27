@@ -1,3 +1,5 @@
+import type { TransactionalEmailTemplate } from './templates/transactional-templates';
+
 /**
  * Transport-agnostic outbound notification contract.
  *
@@ -17,10 +19,21 @@
  * the moderation outcome: an application that is still under review must not be
  * described as accepted, and a claim never approves anything.
  */
+/**
+ * The twelve designed transactional messages live in
+ * {@link import('./templates/transactional-templates').TRANSACTIONAL_EMAIL_TEMPLATES}
+ * and are spread in below, so the union and the renderer's switch can never
+ * drift apart: adding an identifier there is what makes it sendable here.
+ *
+ * The three names listed explicitly predate that set. They keep the plain
+ * renderer in email-template.ts — same wording, same behaviour — because
+ * re-skinning them is a product decision, not a side effect of this work.
+ */
 export type NotificationTemplate =
   | 'customer-activation'
   | 'request-expiring'
-  | 'provider-claim';
+  | 'provider-claim'
+  | TransactionalEmailTemplate;
 
 export type NotificationMessage = {
   template: NotificationTemplate;

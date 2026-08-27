@@ -10,6 +10,7 @@ import { isNotificationOutboxEnabled } from './notification-outbox';
 import { resolveEmailTransportKind } from './email-transport';
 import { ResendNotificationAdapter } from './resend-notification.adapter';
 import { SmsPort } from './sms.port';
+import { TransactionalMailService } from './transactional-mail.service';
 
 /**
  * Which e-mail adapter is bound is decided by EMAIL_TRANSPORT, through the same
@@ -42,7 +43,8 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     { provide: NotificationPort, useClass: emailAdapter },
     { provide: SmsPort, useClass: smsAdapter },
     NotificationDispatcher,
+    TransactionalMailService,
   ],
-  exports: [NotificationPort, SmsPort, NotificationDispatcher],
+  exports: [NotificationPort, SmsPort, NotificationDispatcher, TransactionalMailService],
 })
 export class NotificationsModule {}
