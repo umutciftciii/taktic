@@ -16,6 +16,16 @@
  */
 export const DISPLAY_TIME_ZONE = 'Europe/Istanbul';
 
+/**
+ * The one non-locale formatter here: the stored urgency code in words.
+ *
+ * Re-exported rather than defined, because the same table backs the two admin
+ * and customer screens that render this column. A template must never reach for
+ * `data.urgency` directly — that value is `THIS_WEEK`, not something to send
+ * anybody.
+ */
+export { urgencyLabel } from '../../../common/urgency';
+
 const LOCALE = 'tr-TR';
 
 /**

@@ -14,6 +14,7 @@ import {
   formatMoneyMinor,
   nonEmpty,
   truncate,
+  urgencyLabel,
 } from './format';
 
 /**
@@ -795,9 +796,16 @@ function int(value: string | null | undefined): number | null {
 /**
  * The customer's stated timing: the date they chose, the urgency they picked,
  * or both. Null when they gave neither, which drops the row.
+ *
+ * The urgency goes through the label table rather than into the message
+ * verbatim. `data.urgency` carries the storage code the request form wrote —
+ * `THIS_WEEK` — and a recipient must never be shown one; an unknown code
+ * resolves to null and simply disappears, exactly like a missing date. Because
+ * both halves can vanish, the separator only ever appears between two real
+ * values: no dangling "·", no empty parentheses, no "undefined".
  */
 function preferredTime(data: Data): string | null {
-  return joinNonEmpty([formatDate(data.preferredDate), text(data.urgency)], ' · ');
+  return joinNonEmpty([formatDate(data.preferredDate), urgencyLabel(data.urgency)], ' · ');
 }
 
 function joinNonEmpty(parts: (string | null)[], separator: string): string | null {

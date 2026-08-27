@@ -1,3 +1,5 @@
+import { urgencyLabel as sharedUrgencyLabel } from '@taktic/shared';
+
 /**
  * Presentation helpers with no server dependency.
  *
@@ -142,18 +144,17 @@ export function refundActionBadgeClass(action: string) {
   }
 }
 
+/**
+ * The stored urgency code in the words a customer reads.
+ *
+ * The table is @taktic/shared's, not this file's: the admin app and the API's
+ * e-mail templates render the same column, and three private copies is how
+ * `THIS_WEEK` reached an inbox. `-` rather than the raw code for anything the
+ * shared table does not know — an unmapped option is a gap in that table, not
+ * something to show a customer.
+ */
 export function urgencyLabel(urgency: string | null) {
-  if (!urgency) return '-';
-  const labels: Record<string, string> = {
-    ASAP: 'En kısa zamanda',
-    WITHIN_DAYS: 'Birkaç gün içinde',
-    WITHIN_WEEKS: 'Birkaç hafta içinde',
-    FLEXIBLE: 'Esnek',
-    THIS_WEEK: 'Bu hafta',
-    THIS_MONTH: 'Bu ay',
-  };
-
-  return labels[urgency] ?? urgency;
+  return sharedUrgencyLabel(urgency) ?? '-';
 }
 
 export function creditTxnTypeLabel(type: string) {

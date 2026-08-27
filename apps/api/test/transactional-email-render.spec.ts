@@ -6,6 +6,7 @@ import {
   TransactionalEmailTemplate,
   transactionalSubject,
 } from '../src/modules/notifications/templates/transactional-templates';
+import { URGENCY_LABELS, UrgencyCode } from '../src/common/urgency';
 
 /**
  * What the twelve designed messages must look like on the way out.
@@ -51,7 +52,7 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     city: 'Ankara',
     district: 'Çankaya',
     preferredDate: '2026-09-01T09:00:00.000Z',
-    urgency: 'Hafta içi',
+    urgency: 'THIS_WEEK',
     statusLabel: 'İnceleniyor',
     requestUrl: `${WEB}/requests/r1/offers`,
     accountUrl: `${WEB}/account/profile`,
@@ -107,7 +108,7 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     district: 'Çankaya',
     acceptedAmountMinor: '240000',
     preferredDate: '2026-09-01T09:00:00.000Z',
-    urgency: 'Hafta içi',
+    urgency: 'THIS_WEEK',
     requestNumber: '#T-90412',
     offerUrl: `${WEB}/providers/p1/offers/o1`,
     accountUrl: `${WEB}/providers/me`,
@@ -132,6 +133,15 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     accountUrl: `${WEB}/providers/me`,
   },
 };
+
+/**
+ * The two messages that carry the customer's stated timing, and therefore the
+ * two that could ever print a storage code at somebody.
+ */
+const TIMING_TEMPLATES: TransactionalEmailTemplate[] = ['request-received', 'offer-accepted'];
+
+/** Every code the column has ever held, from the one table that names them. */
+const URGENCY_CODES = Object.keys(URGENCY_LABELS) as UrgencyCode[];
 
 /** Templates whose call to action carries a single-use token in the URL. */
 const TOKEN_TEMPLATES: TransactionalEmailTemplate[] = ['password-reset', 'email-verification'];
@@ -296,6 +306,79 @@ describe('transactional e-mail rendering', () => {
       expect(html).not.toContain('undefined');
       expect(html).not.toContain('null');
       expect(html).not.toMatch(/vertical-align:top;">\s*<\/td>/);
+    });
+
+    it('never prints a storage code, with the data present or absent', () => {
+      const blanked = Object.fromEntries(
+        Object.keys(FULL_DATA[template]).map((key) => [key, null]),
+      );
+
+      for (const payload of [{}, blanked]) {
+        const { html, text } = renderEmail(messageFor(template, payload));
+
+        for (const code of URGENCY_CODES) {
+          expect(html).not.toContain(code);
+          expect(text).not.toContain(code);
+        }
+      }
+    });
+  });
+
+  /**
+   * The bug this section exists for: a customer was told their preferred time
+   * was "29 Ağustos 2026 · THIS_WEEK". `ServiceRequest.urgency` holds a storage
+   * code, the template used to interpolate it verbatim, and nothing failed —
+   * so the check has to be per code rather than per template, and it has to
+   * come from the same table the renderer does.
+   */
+  describe.each(TIMING_TEMPLATES)('%s — the customer’s stated timing', (template) => {
+    it.each(URGENCY_CODES)('renders %s in words, never as the code', (code) => {
+      const { html, text } = renderEmail(messageFor(template, { urgency: code }));
+      const label = URGENCY_LABELS[code];
+
+      expect(html).toContain(`1 Eylül 2026 · ${label}`);
+      expect(text).toContain(label);
+
+      // Not the code itself, and not any other code either — a table that maps
+      // two spellings onto one row would still be a leak for the second.
+      for (const other of URGENCY_CODES) {
+        expect(html).not.toContain(other);
+        expect(text).not.toContain(other);
+      }
+    });
+
+    it('prints the date alone when no urgency was chosen', () => {
+      const { html } = renderEmail(messageFor(template, { urgency: null }));
+
+      expect(html).toContain('1 Eylül 2026');
+      // No dangling separator where the second half should have been.
+      expect(html).not.toContain('1 Eylül 2026 ·');
+      expect(html).not.toContain('·</td>');
+    });
+
+    it('prints the urgency alone when no date was chosen', () => {
+      const { html } = renderEmail(
+        messageFor(template, { preferredDate: null, urgency: 'FLEXIBLE' }),
+      );
+
+      expect(html).toContain(URGENCY_LABELS.FLEXIBLE);
+      expect(html).not.toContain(`· ${URGENCY_LABELS.FLEXIBLE}`);
+    });
+
+    it('drops the whole row for a code this build does not know', () => {
+      const { html, text } = renderEmail(
+        messageFor(template, { preferredDate: null, urgency: 'SOME_FUTURE_CODE' }),
+      );
+
+      // Silence rather than an invented label, and above all not the code.
+      expect(html).not.toContain('SOME_FUTURE_CODE');
+      expect(text).not.toContain('SOME_FUTURE_CODE');
+      expect(html).not.toContain('Tercih edilen zaman');
+    });
+
+    it('drops the whole row when the customer gave neither', () => {
+      const { html } = renderEmail(messageFor(template, { preferredDate: null, urgency: null }));
+      expect(html).not.toContain('Tercih edilen zaman');
     });
   });
 

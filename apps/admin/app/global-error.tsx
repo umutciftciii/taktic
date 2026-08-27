@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { recoverFromStaleAction } from '../lib/stale-action-recovery';
 
 type GlobalErrorProps = {
   error: Error & { digest?: string };
@@ -10,10 +11,15 @@ type GlobalErrorProps = {
 /**
  * Last-resort boundary for failures in the root layout itself. Inline styles
  * because the admin stylesheet may not have loaded at this point.
+ *
+ * It carries the same stale-Server-Action recovery as the route boundary: the
+ * logout form lives in the topbar, which is part of the layout, so a stale id
+ * posted from there surfaces here rather than there.
  */
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
   useEffect(() => {
     console.error('Unhandled application error', error.digest ?? '(no digest)');
+    recoverFromStaleAction(error);
   }, [error]);
 
   return (

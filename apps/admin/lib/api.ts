@@ -1,3 +1,4 @@
+import { urgencyLabel as sharedUrgencyLabel } from '@taktic/shared';
 import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 
@@ -1392,18 +1393,15 @@ export function formatBudgetRange(min: number | null, max: number | null, curren
   return `≤ ${formatPrice(max as number, currency)}`;
 }
 
+/**
+ * The stored urgency code in the words an operator reads.
+ *
+ * Same shared table as the web app and the API's e-mail templates — see
+ * @taktic/shared/urgency for why there is only one. `-` for anything it does
+ * not know, never the raw code.
+ */
 export function urgencyLabel(urgency: string | null) {
-  if (!urgency) return '-';
-  const labels: Record<string, string> = {
-    ASAP: 'En kısa zamanda',
-    WITHIN_DAYS: 'Birkaç gün içinde',
-    WITHIN_WEEKS: 'Birkaç hafta içinde',
-    FLEXIBLE: 'Esnek',
-    THIS_WEEK: 'Bu hafta',
-    THIS_MONTH: 'Bu ay',
-  };
-
-  return labels[urgency] ?? urgency;
+  return sharedUrgencyLabel(urgency) ?? '-';
 }
 
 export function creditTxnTypeLabel(type: string) {
