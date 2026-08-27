@@ -290,7 +290,12 @@ export class CustomerActivationService {
             passwordHash: null,
             isActive: true,
           },
-          data: { passwordHash },
+          // Consuming this link is itself proof of mailbox control: it was
+          // delivered to that address, it is single use, and it was never
+          // returned over HTTP. Recording it here is what keeps the separate
+          // verification flow from ever mailing an account that has already
+          // proved the same thing a different way.
+          data: { passwordHash, emailVerifiedAt: now },
         });
 
         if (customerUpdate.count === 0) {

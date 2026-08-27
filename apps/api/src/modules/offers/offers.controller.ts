@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { Roles } from '../auth/auth.decorators';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
+import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
 import { ListOffersQueryDto } from './dto/list-offers-query.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
@@ -58,11 +59,23 @@ export class OffersController {
     return this.offersService.getOffer(id);
   }
 
+  /**
+   * Performs one of the three offer actions on the admin's behalf.
+   *
+   * The caller is passed through because the service routes this onto the same
+   * method the customer screen uses, which authorises against the request's
+   * owner — SUPER_ADMIN included. Nothing here grants an authority the
+   * service-request route did not already grant.
+   */
   @Patch(':id/status')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  updateOfferStatus(@Param('id') id: string, @Body() dto: UpdateOfferStatusDto) {
-    return this.offersService.updateOfferStatus(id, dto.status);
+  updateOfferStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateOfferStatusDto,
+    @CurrentUser() user: AuthUser | null,
+  ) {
+    return this.offersService.updateOfferStatus(id, dto.status, user);
   }
 
   @Post(':id/refund-credit')

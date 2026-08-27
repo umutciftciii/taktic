@@ -3,13 +3,25 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { assertPublicUrlConfig } from './common/public-urls';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
+import { assertEmailBrandingConfig } from './modules/notifications/email-branding.config';
 import { assertEmailTransportConfig } from './modules/notifications/email-transport';
 import { assertPaymentProviderConfig } from './modules/payments/payment-provider.config';
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
 async function bootstrap() {
+  // Where this deployment lives, before anything can build a link from it. A
+  // production process without WEB_APP_URL would mail links to localhost, and
+  // that failure only ever surfaces in somebody else's inbox.
+  assertPublicUrlConfig();
+
+  // The support address and the sender's own name, for the same reason: a
+  // footer that tells customers to write to the development placeholder is not
+  // something to discover from a support ticket.
+  assertEmailBrandingConfig();
+
   // Before anything listens. Turning contact sharing on without a disclosure
   // URL and version must stop the process rather than degrade into a state
   // where customers are asked to confirm having read nothing.

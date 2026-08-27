@@ -56,6 +56,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           Giriş Yap
         </button>
 
+        <p className="auth-screen-support" style={{ marginTop: 0 }}>
+          <Link href="/sifre-unuttum" style={{ textDecoration: 'underline' }}>
+            Şifremi unuttum
+          </Link>
+        </p>
+
         <hr className="auth-screen-divider" />
 
         <p className="auth-screen-alt-title">Henüz hesabınız yok mu?</p>

@@ -185,3 +185,51 @@ export async function waitForLatestActivationUrl(email: string): Promise<string>
 
   return latest.actionUrl;
 }
+
+/**
+ * Waits for the newest link of a given template mailed to this address.
+ *
+ * The generalised form of the two helpers above, for the templates whose link
+ * is the whole point of the message: a password reset and an e-mail
+ * verification. Same reasoning as the claim link — the token is single use,
+ * never returned over HTTP and never stored in plaintext, so the recording
+ * transport is the only way a browser test can reach the URL a real recipient
+ * clicks.
+ */
+async function waitForLatestActionUrl(email: string, template: string): Promise<string> {
+  let entries: EmailOutboxEntry[] = [];
+
+  await expect
+    .poll(
+      () => {
+        entries = emailEntriesFor(email).filter((entry) => entry.template === template);
+        return entries.length;
+      },
+      {
+        message: `no ${template} e-mail was recorded for ${email}`,
+        timeout: 20_000,
+        intervals: [100, 200, 500],
+      },
+    )
+    .toBeGreaterThan(0);
+
+  const latest = entries[entries.length - 1];
+  if (!latest?.actionUrl) {
+    throw new Error(`no ${template} link was recorded for ${email}`);
+  }
+
+  return latest.actionUrl;
+}
+
+export function waitForLatestPasswordResetUrl(email: string): Promise<string> {
+  return waitForLatestActionUrl(email, 'password-reset');
+}
+
+export function waitForLatestEmailVerificationUrl(email: string): Promise<string> {
+  return waitForLatestActionUrl(email, 'email-verification');
+}
+
+/** How many messages of a template this address has received so far. */
+export function emailCountFor(email: string, template: string): number {
+  return emailEntriesFor(email).filter((entry) => entry.template === template).length;
+}

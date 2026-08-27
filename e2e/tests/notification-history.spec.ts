@@ -67,8 +67,18 @@ test.describe('notification delivery history', () => {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
       await admin.gotoAdmin(`/notifications?requestId=${requestId}`);
       await expect(admin.page.getByRole('heading', { name: 'Bildirim Geçmişi' })).toBeVisible();
-      await expect(admin.page.getByTestId('notification-row')).toHaveCount(2);
+      // Three sends belong to this request: the receipt mailed when it was
+      // submitted, the verification code the screen above asked for, and the
+      // failed attempt written just now.
+      await expect(admin.page.getByTestId('notification-row')).toHaveCount(3);
       await assertNoErrorScreen(admin.page);
+
+      await admin.gotoAdmin(`/notifications?requestId=${requestId}&channel=EMAIL`);
+      const emailRows = admin.page.getByTestId('notification-row');
+      await expect(emailRows).toHaveCount(1);
+      await expect(emailRows.first()).toContainText('Talep alındı');
+
+      await admin.gotoAdmin(`/notifications?requestId=${requestId}`);
 
       // ---- filters narrow it, through the URL ---------------------------
       await admin.gotoAdmin(`/notifications?requestId=${requestId}&status=FAILED`);

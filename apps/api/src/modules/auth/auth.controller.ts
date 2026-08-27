@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
+import { EmailVerificationService } from '../email-verification/email-verification.service';
 import { AuthService } from './auth.service';
 import { EmailAlreadyRegisteredException } from './auth.errors';
 import { AuthThrottlerGuard } from './auth.throttler';
@@ -27,6 +28,8 @@ export class AuthController {
     @Inject(AuthService) private readonly authService: AuthService,
     @Inject(CustomerActivationService)
     private readonly activationService: CustomerActivationService,
+    @Inject(EmailVerificationService)
+    private readonly emailVerification: EmailVerificationService,
   ) {}
 
   @Post('login')
@@ -74,6 +77,13 @@ export class AuthController {
 
       throw error;
     }
+
+    // The account exists and the customer is signed in, so proving mailbox
+    // ownership happens alongside — not in front of — the registration. The
+    // call swallows its own failures for the same reason the guest activation
+    // link does: a mail problem must not turn a completed registration into an
+    // error the visitor sees.
+    await this.emailVerification.issueForNewCustomer(result.user.id);
 
     response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
     return result.user;

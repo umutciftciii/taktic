@@ -111,7 +111,6 @@ enum PackagePurchaseStatus {
 
 /**
  * What a verified payment-provider webhook event was allowed to do.
- *
  * The row exists for every event that got past signature verification,
  * including the ones that changed nothing: "this arrived and was refused" is
  * the only thing an operator can act on later, and it must not depend on a log
@@ -133,31 +132,45 @@ enum NumberedEntityType {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  email          String?         @unique
-  phone          String?         @unique
-  name           String?
-  role           UserRole
-  isActive       Boolean         @default(true)
-  passwordHash   String?
-  customerOrigin CustomerOrigin?
-  lastLoginAt    DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id              String          @id @default(cuid())
+  email           String?         @unique
+  phone           String?         @unique
+  name            String?
+  role            UserRole
+  isActive        Boolean         @default(true)
+  passwordHash    String?
+  /// When this account proved control of `email` by following a verification
+  /// link, and never for any other reason.
+  ///
+  /// NULL means "no proof on file" — which is what every account created before
+  /// this column existed carries, deliberately: nobody ever showed them a link,
+  /// so backfilling would record a proof that never happened. Setting a
+  /// password through the activation link counts, because that link is itself
+  /// delivered to the mailbox and consumed once.
+  ///
+  /// Nothing is gated on it today. It records a fact; it does not (yet) grant
+  /// or withhold anything.
+  emailVerifiedAt DateTime?
+  customerOrigin  CustomerOrigin?
+  lastLoginAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
-  serviceRequests           ServiceRequest[]
-  providerProfile           ProviderProfile?
-  creditTransactions        ProviderCreditTransaction[]
-  sessions                  Session[]
-  customerNotes             CustomerNote[]              @relation("CustomerNoteCustomer")
-  createdCustomerNotes      CustomerNote[]              @relation("CustomerNoteCreatedBy")
-  activationTokens          CustomerActivationToken[]   @relation("CustomerActivationTokenCustomer")
-  createdActivationTokens   CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
-  adminInviteTokens         AdminInviteToken[]          @relation("AdminInviteTokenUser")
-  createdAdminInviteTokens  AdminInviteToken[]          @relation("AdminInviteTokenCreatedBy")
-  notificationLogs          NotificationLog[]
-  contactRevealEvents       ContactRevealEvent[]
-  createdProviderClaimTokens ProviderClaimToken[]       @relation("ProviderClaimTokenCreatedBy")
+  serviceRequests            ServiceRequest[]
+  providerProfile            ProviderProfile?
+  creditTransactions         ProviderCreditTransaction[]
+  sessions                   Session[]
+  customerNotes              CustomerNote[]              @relation("CustomerNoteCustomer")
+  createdCustomerNotes       CustomerNote[]              @relation("CustomerNoteCreatedBy")
+  activationTokens           CustomerActivationToken[]   @relation("CustomerActivationTokenCustomer")
+  createdActivationTokens    CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
+  adminInviteTokens          AdminInviteToken[]          @relation("AdminInviteTokenUser")
+  passwordResetTokens        PasswordResetToken[]
+  emailVerificationTokens    EmailVerificationToken[]
+  createdAdminInviteTokens   AdminInviteToken[]          @relation("AdminInviteTokenCreatedBy")
+  notificationLogs           NotificationLog[]
+  contactRevealEvents        ContactRevealEvent[]
+  createdProviderClaimTokens ProviderClaimToken[]        @relation("ProviderClaimTokenCreatedBy")
 
   @@index([role])
   @@index([isActive])
@@ -181,11 +194,11 @@ model Session {
 }
 
 model ServiceCategory {
-  id            String   @id @default(cuid())
-  parentId      String?
-  name          String
-  slug          String   @unique
-  description   String?
+  id              String   @id @default(cuid())
+  parentId        String?
+  name            String
+  slug            String   @unique
+  description     String?
   /// Credits a provider spends to submit one offer on a request in this
   /// category. There is deliberately NO default: a default value would be the
   /// hidden "1 credit" fallback the pricing rules forbid.
@@ -197,13 +210,13 @@ model ServiceCategory {
   /// There is no hierarchical inheritance: a request uses the cost of exactly
   /// the category it is attached to, never a parent's.
   offerCreditCost Int?
-  imageUrl      String?
-  coverImageUrl String?
-  iconKey       String?
-  isActive      Boolean  @default(true)
-  sortOrder     Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  imageUrl        String?
+  coverImageUrl   String?
+  iconKey         String?
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   parent    ServiceCategory?          @relation("ServiceCategoryTree", fields: [parentId], references: [id])
   children  ServiceCategory[]         @relation("ServiceCategoryTree")
@@ -237,32 +250,32 @@ model ServiceRequestQuestion {
 }
 
 model ServiceRequest {
-  id                    String               @id @default(cuid())
-  requestNumber         String?              @unique
-  categoryId            String
-  customerId            String?
-  status                ServiceRequestStatus @default(SUBMITTED)
-  customerName          String
-  customerPhone         String
-  customerEmail         String?
-  city                  String
-  district              String
-  neighborhood          String?
-  addressNote           String?
-  budgetMin             Int?
-  budgetMax             Int?
-  preferredDate         DateTime?
-  urgency               String?
-  description           String?
-  qualityScore          Int                  @default(0)
-  qualityScoreBreakdown Json?
-  moderatedAt           DateTime?
-  moderationNote        String?
-  rejectionReason       String?
+  id                          String               @id @default(cuid())
+  requestNumber               String?              @unique
+  categoryId                  String
+  customerId                  String?
+  status                      ServiceRequestStatus @default(SUBMITTED)
+  customerName                String
+  customerPhone               String
+  customerEmail               String?
+  city                        String
+  district                    String
+  neighborhood                String?
+  addressNote                 String?
+  budgetMin                   Int?
+  budgetMax                   Int?
+  preferredDate               DateTime?
+  urgency                     String?
+  description                 String?
+  qualityScore                Int                  @default(0)
+  qualityScoreBreakdown       Json?
+  moderatedAt                 DateTime?
+  moderationNote              String?
+  rejectionReason             String?
   /// When the customer proved control of customerPhone via a one-time code.
   /// NULL means "not verified" — including every request created before phone
   /// verification existed. What that blocks depends on REQUIRE_PHONE_VERIFICATION.
-  phoneVerifiedAt       DateTime?
+  phoneVerifiedAt             DateTime?
   /// When moderation approved the request — the single clock the expiry and
   /// reminder schedulers run on.
   ///
@@ -274,14 +287,14 @@ model ServiceRequest {
   ///
   /// It is written once, when the status becomes APPROVED, and is never cleared
   /// again — a later MATCHED/COMPLETED/CANCELLED transition keeps it as audit.
-  approvedAt            DateTime?
+  approvedAt                  DateTime?
   /// When the "your request is about to expire" reminder was claimed.
   ///
   /// Written by a conditional update that only matches while it is still NULL,
   /// which is what makes one reminder per request the database-level guarantee.
   /// It records the claim, not the delivery: a failed send stays visible in
   /// NotificationLog and never re-opens the request for a second reminder.
-  reminderSentAt        DateTime?
+  reminderSentAt              DateTime?
   /// Which version of the contact-sharing disclosure the customer confirmed
   /// having read, and when.
   ///
@@ -297,20 +310,20 @@ model ServiceRequest {
   contactDisclosureAcceptedAt DateTime?
   /// The single accepted offer. Unique so the request can never point at two
   /// winners; the accept cascade is what writes it.
-  matchedOfferId        String?              @unique
-  matchedAt             DateTime?
-  completedAt           DateTime?
-  cancelledAt           DateTime?
-  expiredAt             DateTime?
-  submittedAt           DateTime             @default(now())
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  matchedOfferId              String?              @unique
+  matchedAt                   DateTime?
+  completedAt                 DateTime?
+  cancelledAt                 DateTime?
+  expiredAt                   DateTime?
+  submittedAt                 DateTime             @default(now())
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
 
-  category     ServiceCategory        @relation(fields: [categoryId], references: [id])
-  customer     User?                  @relation(fields: [customerId], references: [id])
-  answers      ServiceRequestAnswer[]
-  offers       Offer[]
-  matchedOffer Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
+  category           ServiceCategory        @relation(fields: [categoryId], references: [id])
+  customer           User?                  @relation(fields: [customerId], references: [id])
+  answers            ServiceRequestAnswer[]
+  offers             Offer[]
+  matchedOffer       Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
   phoneVerifications PhoneVerification[]
   notificationLogs   NotificationLog[]
   contactRevealEvent ContactRevealEvent?
@@ -431,6 +444,21 @@ model NotificationLog {
   /// It is an id and nothing else — no address, no token, no action URL — so it
   /// does not widen what this table holds.
   providerId        String?
+  /// The state transition this message belongs to, as a short opaque string —
+  /// "offer-accepted:<offerId>", "request-approved:<requestId>:<approvedAt>".
+  ///
+  /// Unique together with `template`, which is what makes "one mail per real
+  /// transition" a database guarantee rather than an application convention: a
+  /// retry, a second scheduler, or a double-clicked admin action all collide on
+  /// the index and send nothing.
+  ///
+  /// Nullable because it is not a fact about every message. The three templates
+  /// that predate it carry NULL, and PostgreSQL treats NULLs as distinct in a
+  /// unique index, so any number of them coexist.
+  ///
+  /// It is derived from ids and timestamps only. No address, no token, no
+  /// amount — nothing that would widen what this table holds.
+  dedupeKey         String?
   createdAt         DateTime            @default(now())
   sentAt            DateTime?
   failedAt          DateTime?
@@ -439,6 +467,7 @@ model NotificationLog {
   user     User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   provider ProviderProfile? @relation(fields: [providerId], references: [id], onDelete: SetNull)
 
+  @@unique([template, dedupeKey])
   @@index([channel, createdAt])
   @@index([status, createdAt])
   @@index([template, createdAt])
@@ -501,15 +530,15 @@ model ProviderProfile {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user               User?                       @relation(fields: [userId], references: [id])
-  serviceCategories  ProviderServiceCategory[]
-  serviceAreas       ProviderServiceArea[]
-  offers             Offer[]
-  creditTransactions ProviderCreditTransaction[]
-  packagePurchases   PackagePurchase[]
+  user                User?                       @relation(fields: [userId], references: [id])
+  serviceCategories   ProviderServiceCategory[]
+  serviceAreas        ProviderServiceArea[]
+  offers              Offer[]
+  creditTransactions  ProviderCreditTransaction[]
+  packagePurchases    PackagePurchase[]
   contactRevealEvents ContactRevealEvent[]
-  claimTokens        ProviderClaimToken[]
-  notificationLogs   NotificationLog[]
+  claimTokens         ProviderClaimToken[]
+  notificationLogs    NotificationLog[]
 
   @@index([status])
   @@index([city])
@@ -548,36 +577,42 @@ model ProviderServiceArea {
 }
 
 model Offer {
-  id                          String      @id @default(cuid())
-  offerNumber                 String?     @unique
+  id                          String                @id @default(cuid())
+  offerNumber                 String?               @unique
   requestId                   String
   providerId                  String
-  status                      OfferStatus @default(SUBMITTED)
+  status                      OfferStatus           @default(SUBMITTED)
   priceAmount                 Int
-  currency                    String      @default("TRY")
+  currency                    String                @default("TRY")
   estimatedStartDate          DateTime?
   estimatedCompletionDate     DateTime?
   message                     String
   warrantyNote                String?
   internalNote                String?
-  creditCost                  Int         @default(1)
+  creditCost                  Int                   @default(1)
   creditSpentTransactionId    String?
   creditRefundedTransactionId String?
   creditRefundedAt            DateTime?
   creditRefundReason          String?
-  submittedAt                 DateTime    @default(now())
+  submittedAt                 DateTime              @default(now())
   viewedAt                    DateTime?
   acceptedAt                  DateTime?
   rejectedAt                  DateTime?
   rejectionReason             OfferRejectionReason?
   withdrawnAt                 DateTime?
-  createdAt                   DateTime    @default(now())
-  updatedAt                   DateTime    @updatedAt
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
 
-  request       ServiceRequest  @relation(fields: [requestId], references: [id])
-  provider      ProviderProfile @relation(fields: [providerId], references: [id])
-  matchedForRequest ServiceRequest? @relation("ServiceRequestMatchedOffer")
+  request            ServiceRequest      @relation(fields: [requestId], references: [id])
+  provider           ProviderProfile     @relation(fields: [providerId], references: [id])
+  matchedForRequest  ServiceRequest?     @relation("ServiceRequestMatchedOffer")
   contactRevealEvent ContactRevealEvent?
+  // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
+  // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
+  // add_request_matching migration. Prisma cannot express partial indexes in
+  // this schema, so it lives in raw SQL; it is the database-level backstop that
+  // makes a second accepted offer on a request unrepresentable even if the
+  // application guard is bypassed.
 
   @@unique([providerId, requestId])
   @@index([requestId])
@@ -587,12 +622,6 @@ model Offer {
   @@index([creditSpentTransactionId])
   @@index([creditRefundedTransactionId])
   @@index([rejectionReason])
-  // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
-  // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
-  // add_request_matching migration. Prisma cannot express partial indexes in
-  // this schema, so it lives in raw SQL; it is the database-level backstop that
-  // makes a second accepted offer on a request unrepresentable even if the
-  // application guard is bypassed.
 }
 
 model OfferCreditPackage {
@@ -614,19 +643,19 @@ model OfferCreditPackage {
 }
 
 model PackagePurchase {
-  id                       String                @id @default(cuid())
-  purchaseNumber           String?               @unique
-  providerId               String
-  packageId                String
-  status                   PackagePurchaseStatus @default(PENDING)
-  creditAmountSnapshot     Int
-  priceAmountSnapshot      Int
-  currencySnapshot         String                @default("TRY")
-  packageNameSnapshot      String
-  providerNote             String?
-  adminNote                String?
-  mockPaymentReference     String?
-  mockPaymentFailureReason String?
+  id                        String                @id @default(cuid())
+  purchaseNumber            String?               @unique
+  providerId                String
+  packageId                 String
+  status                    PackagePurchaseStatus @default(PENDING)
+  creditAmountSnapshot      Int
+  priceAmountSnapshot       Int
+  currencySnapshot          String                @default("TRY")
+  packageNameSnapshot       String
+  providerNote              String?
+  adminNote                 String?
+  mockPaymentReference      String?
+  mockPaymentFailureReason  String?
   // Which PaymentProviderPort adapter opened this purchase's checkout. Only
   // ever a kind from the allow-list in payments/payment-provider.config.ts.
   paymentProvider           String?
@@ -648,14 +677,14 @@ model PackagePurchase {
   // their own in this phase. It is a flag for a human, nothing else.
   manualReviewReason        String?
   manualReviewAt            DateTime?
-  paidAt                   DateTime?
-  failedAt                 DateTime?
-  cancelledAt              DateTime?
-  expiredAt                DateTime?
-  refundedAt               DateTime?
-  creditTransactionId      String?
-  createdAt                DateTime              @default(now())
-  updatedAt                DateTime              @updatedAt
+  paidAt                    DateTime?
+  failedAt                  DateTime?
+  cancelledAt               DateTime?
+  expiredAt                 DateTime?
+  refundedAt                DateTime?
+  creditTransactionId       String?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
 
   provider ProviderProfile    @relation(fields: [providerId], references: [id])
   package  OfferCreditPackage @relation(fields: [packageId], references: [id])
@@ -671,7 +700,6 @@ model PackagePurchase {
 /**
  * One audit row per payment-provider webhook event that passed signature
  * verification.
- *
  * Deliberately narrow. `eventKey` is the provider's own opaque identity for the
  * event object (never a customer detail), and the unique index on it with the
  * provider is what makes a redelivered event a no-op rather than a second credit
@@ -702,14 +730,14 @@ model PaymentWebhookEvent {
   createdAt  DateTime                  @default(now())
 
   /// How many deliveries of this event have been handled.
-  attemptCount Int @default(1)
+  attemptCount     Int       @default(1)
   /// When the most recent delivery was handled.
-  lastAttemptAt DateTime @default(now())
+  lastAttemptAt    DateTime  @default(now())
   /// The first refusal code, kept even after a later delivery settles.
   firstFailureCode String?
   firstFailureAt   DateTime?
   /// When this event settled. Null while it never has.
-  resolvedAt DateTime?
+  resolvedAt       DateTime?
 
   @@unique([provider, eventKey])
   @@index([status])
@@ -835,4 +863,61 @@ model ProviderClaimToken {
   /// Per-application send budget: "links issued for this application since
   /// <cutoff>".
   @@index([providerId, createdAt])
+}
+
+/// A one-time link that lets somebody who proved mailbox control set a new
+/// password.
+///
+/// The raw token is never stored: only `sha256(raw)`, so a database dump cannot
+/// be replayed into an account takeover. It is single use (`usedAt`), short
+/// lived, and issuing a new one closes every older live one — so at most one
+/// reset link per account is ever valid.
+///
+/// Deliberately separate from CustomerActivationToken. That token sets the
+/// *first* password on an account the platform created on somebody's behalf and
+/// only exists while `passwordHash` is NULL; this one replaces an existing
+/// password on an account that already has one. Two different facts, two
+/// different lifecycles, and no row can ever satisfy both.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  /// Per-account send budget: "reset links issued for this account since
+  /// <cutoff>".
+  @@index([userId, createdAt])
+}
+
+/// A one-time link proving that the person who registered controls the address
+/// they registered with.
+///
+/// Same storage rules as PasswordResetToken: hashed, single use, expiring, and
+/// superseded by the next one issued.
+///
+/// `emailSnapshot` is the address the link was mailed to, lower-cased. It is
+/// compared against the account's live address on use, so a link that went to an
+/// address the account no longer has cannot verify the new one — the same rule
+/// ProviderClaimToken applies for the same reason.
+model EmailVerificationToken {
+  id            String    @id @default(cuid())
+  userId        String
+  emailSnapshot String
+  tokenHash     String    @unique
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  /// Per-account send budget.
+  @@index([userId, createdAt])
 }

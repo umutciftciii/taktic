@@ -1240,9 +1240,15 @@ describe('admin visibility of ownership', () => {
       .set('Cookie', cookie)
       .expect(200);
 
-    expect(response.body.items).toHaveLength(1);
-    expect(response.body.items[0].providerId).toBe(providerId);
-    expect(response.body.items[0].template).toBe('provider-claim');
+    // A guest application produces two messages — the claim invitation and the
+    // "we have your application" receipt — and the filter must return both of
+    // this application's and none of the other's.
+    const items = response.body.items as Array<{ providerId: string; template: string }>;
+    expect(items.every((item) => item.providerId === providerId)).toBe(true);
+    expect(items.map((item) => item.template).sort()).toEqual([
+      'provider-application-received',
+      'provider-claim',
+    ]);
     expect(JSON.stringify(response.body)).not.toContain(APPLICANT_EMAIL);
   });
 });

@@ -4,6 +4,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { ContactSharingModule } from './modules/contact-sharing/contact-sharing.module';
 import { CustomerActivationModule } from './modules/customer-activation/customer-activation.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { EmailVerificationModule } from './modules/email-verification/email-verification.module';
 import { HealthModule } from './modules/health/health.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { QuestionsModule } from './modules/questions/questions.module';
@@ -19,6 +20,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
+import { PasswordResetModule } from './modules/password-reset/password-reset.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { NotificationLogsModule } from './modules/notification-logs/notification-logs.module';
@@ -34,6 +36,8 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     NotificationsModule,
     AuthModule,
+    EmailVerificationModule,
+    PasswordResetModule,
     CategoriesModule,
     LocationsModule,
     QuestionsModule,

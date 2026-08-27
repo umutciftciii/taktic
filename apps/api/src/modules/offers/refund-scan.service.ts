@@ -1,6 +1,7 @@
-import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import { OfferRejectionReason, OfferStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { calculateRefundEligibility } from './refund-policy';
 import { refundOfferCreditInTransaction } from './offers.service';
 
@@ -67,7 +68,12 @@ type RefundScanOffer = Prisma.OfferGetPayload<{ select: typeof refundScanOfferSe
 
 @Injectable()
 export class RefundScanService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(RefundScanService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+  ) {}
 
   async dryRun(options: RefundScanOptions = {}) {
     const normalized = normalizeRefundScanOptions(options);
@@ -143,13 +149,34 @@ export class RefundScanService {
               return { status: 'SKIPPED' as const, reason: eligibility.reason };
             }
 
-            await refundOfferCreditInTransaction(tx, currentOffer, AUTOMATIC_REFUND_REASON, {
-              enforceAutomaticEligibility: true,
-            });
-            return { status: 'REFUNDED' as const, reason: AUTOMATIC_REFUND_REASON };
+            const { refundTransaction } = await refundOfferCreditInTransaction(
+              tx,
+              currentOffer,
+              AUTOMATIC_REFUND_REASON,
+              { enforceAutomaticEligibility: true },
+            );
+            return {
+              status: 'REFUNDED' as const,
+              reason: AUTOMATIC_REFUND_REASON,
+              refundTransactionId: refundTransaction.id,
+            };
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
+
+        // Outside the transaction, and only for a refund that really happened.
+        // The message is keyed on the ledger row, so a re-run of the scan that
+        // finds nothing left to refund also mails nobody.
+        if (result.status === 'REFUNDED') {
+          try {
+            await this.mail.sendCreditRefunded(result.refundTransactionId);
+          } catch (error) {
+            this.logger.error(
+              `Failed to send the refund notification for offer ${offer.id}`,
+              error instanceof Error ? error.stack : String(error),
+            );
+          }
+        }
 
         results.push({ offerId: offer.id, ...result });
       } catch (err) {
