@@ -823,7 +823,75 @@ export class ProvidersService {
       throw new NotFoundException('Offer not found');
     }
 
-    return withRefundEligibility(offer);
+    /*
+     * What the winner needs to actually do the job, and only the winner.
+     *
+     * A provider whose offer was accepted has to carry the work out, and the
+     * two things that say what the work *is* — the customer's description and
+     * the answers to the category's required questions — were reachable only
+     * from the discovery screen, which stops answering once the request leaves
+     * APPROVED. So the provider who won lost sight of the brief at the moment
+     * they needed it.
+     *
+     * Decided here rather than on the screen: the status is the platform's
+     * fact, not the caller's claim. Anything short of ACCEPTED gets null — a
+     * losing offer, a withdrawn one, one still waiting — so no provider learns
+     * anything from this that they did not already have while the request was
+     * open, and a rival learns nothing at all.
+     *
+     * It also stays off the offers *list*, which shares `providerOfferInclude`
+     * with this route: a list is a place to choose from, and it has no reason
+     * to carry a brief for every row.
+     */
+    const acceptedWorkScope =
+      offer.status === OfferStatus.ACCEPTED
+        ? await this.loadAcceptedWorkScope(offer.requestId)
+        : null;
+
+    return { ...withRefundEligibility(offer), acceptedWorkScope };
+  }
+
+  /**
+   * The brief for an accepted offer: what the job is, and nothing about who it
+   * is for.
+   *
+   * Deliberately narrower than the discovery payload. It leaves out the
+   * customer's name, phone and e-mail, and it leaves out the address note and
+   * neighbourhood too: whether a provider may reach the customer, and where
+   * exactly, is what the contact-sharing flow decides — behind its own flag,
+   * its own disclosure and its own audit row. Nothing here may become a second,
+   * quieter way to answer that question, so the location it carries is the
+   * city and district the offer already quoted.
+   *
+   * Only the required questions. The optional ones are the customer's own
+   * discretion and are scored as a bonus rather than as part of the brief.
+   */
+  private async loadAcceptedWorkScope(requestId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        description: true,
+        answers: {
+          where: { question: { isRequired: true } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            questionKey: true,
+            questionLabel: true,
+            questionType: true,
+            value: true,
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      return null;
+    }
+
+    return {
+      description: request.description,
+      requiredAnswers: request.answers,
+    };
   }
 
   /**
@@ -1205,6 +1273,17 @@ function ensureContactEmailStable(
   });
 }
 
+/**
+ * What a provider sees of the request its own offer sits on.
+ *
+ * City and district and no finer: those two are what the offer was priced
+ * against and what discovery matched on, so the provider already had them. The
+ * neighbourhood used to be here too, on every offer of every status, which made
+ * this a second and much quieter answer to a question the contact-sharing flow
+ * is supposed to own — that flow decides whether a provider learns where the
+ * customer actually is, behind its own flag, its own disclosure and its own
+ * audit row. Nothing rendered it, so it left silently.
+ */
 const providerOfferInclude = {
   request: {
     select: {
@@ -1212,7 +1291,6 @@ const providerOfferInclude = {
       requestNumber: true,
       city: true,
       district: true,
-      neighborhood: true,
       budgetMin: true,
       budgetMax: true,
       preferredDate: true,

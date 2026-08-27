@@ -105,7 +105,11 @@ test.describe('provider request link', () => {
       await provider.gotoWeb(`/providers/${providerAccount.id}/offers/${offerId}`);
       await expect(provider.page.getByTestId('request-detail-link')).toHaveCount(0);
       await expect(provider.page.getByRole('link', { name: 'Talep Detayı' })).toHaveCount(0);
-      await expect(provider.page.getByTestId('request-detail-closed')).toBeVisible();
+      // This offer was accepted, so the page now carries the brief itself; the
+      // stand-in note is for a request that closed *without* this provider
+      // winning, which provider-work-scope.spec.ts covers on the rival.
+      await expect(provider.page.getByTestId('work-scope')).toBeVisible();
+      await expect(provider.page.getByTestId('request-detail-closed')).toHaveCount(0);
       await expect(provider.page.getByRole('link', { name: 'Tüm Tekliflerim' })).toBeVisible();
       await expect(provider.page.getByTestId('offer-status')).toHaveText('Kabul edildi');
       await assertNoErrorScreen(provider.page);

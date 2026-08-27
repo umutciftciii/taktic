@@ -280,8 +280,8 @@ export type ProviderOffer = {
     id: string;
     requestNumber: string | null;
     city: string;
+    /** City and district only — see providerOfferInclude on the API side. */
     district: string;
-    neighborhood: string | null;
     budgetMin: number | null;
     budgetMax: number | null;
     preferredDate: string | null;
@@ -294,6 +294,24 @@ export type ProviderOffer = {
       slug: string;
     };
   };
+  /**
+   * The brief, served by the offer-detail route and only for an offer the API
+   * itself sees as ACCEPTED. Null for every other status, and absent from the
+   * offers list entirely — hence optional, and never a source the screen has
+   * to gate on its own. It carries no contact detail and no street-level location: who the
+   * customer is and how to reach them stays with the contact-sharing flow.
+   */
+  acceptedWorkScope?: ProviderAcceptedWorkScope | null;
+};
+
+export type ProviderAcceptedWorkScope = {
+  description: string | null;
+  requiredAnswers: Array<{
+    questionKey: string;
+    questionLabel: string;
+    questionType: string;
+    value: unknown;
+  }>;
 };
 
 export type RequestOfferPreview = {
