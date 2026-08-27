@@ -1,4 +1,4 @@
-import { ConflictException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpStatus } from '@nestjs/common';
 import { OfferStatus } from '@prisma/client';
 
 /**
@@ -45,5 +45,65 @@ export function offerNotWithdrawableException() {
     error: 'Conflict',
     code: OFFER_NOT_WITHDRAWABLE_CODE,
     message: 'Bu teklif artık geri çekilemez.',
+  });
+}
+
+/**
+ * The offer states an admin may ask for, and the canonical action each one is.
+ *
+ * The admin screen used to write `Offer.status` directly, which made it a
+ * second way to reach states the product otherwise only reaches through a
+ * cascade: an acceptance that never matched the request, closed no competing
+ * offer, wrote no ContactRevealEvent and mailed nobody; a rejection that
+ * skipped the "your offer was not selected" message; a WITHDRAWN that recorded
+ * a provider decision the provider never made.
+ *
+ * So the endpoint no longer writes a status at all. It names one of the three
+ * actions the customer path already performs — and which SUPER_ADMIN is already
+ * allowed to perform there — and the same service method runs, with the same
+ * guards, the same cascade and the same messages.
+ *
+ * The three that are absent are absent on purpose:
+ *
+ * - `VIEWED` stamps `viewedAt`, and `viewedAt` is what turns an offer from
+ *   automatically refundable into one needing manual review. An admin marking
+ *   an offer "seen" would be recording something the customer did not do, and
+ *   charging a provider for it.
+ * - `WITHDRAWN` is the provider's own decision, taken through the provider
+ *   endpoint. Forcing it here would both skip that endpoint's guards and file a
+ *   withdrawal against a provider who never withdrew.
+ * - `SUBMITTED`, `EXPIRED` and `CANCELLED` have no writer anywhere in the
+ *   product. Moving an offer back to SUBMITTED would also strand a MATCHED
+ *   request pointing at an offer that is no longer accepted.
+ */
+export const ADMIN_OFFER_ACTIONS = {
+  [OfferStatus.ACCEPTED]: 'ACCEPT',
+  [OfferStatus.REJECTED]: 'REJECT',
+  [OfferStatus.SHORTLISTED]: 'SHORTLIST',
+} as const satisfies Partial<Record<OfferStatus, 'ACCEPT' | 'REJECT' | 'SHORTLIST'>>;
+
+export type AdminSettableOfferStatus = keyof typeof ADMIN_OFFER_ACTIONS;
+
+export function isAdminSettableOfferStatus(
+  status: OfferStatus,
+): status is AdminSettableOfferStatus {
+  return status in ADMIN_OFFER_ACTIONS;
+}
+
+/** Machine-readable code the admin app maps onto a readable refusal. */
+export const OFFER_STATUS_NOT_SETTABLE_CODE = 'OFFER_STATUS_NOT_SETTABLE';
+
+/**
+ * A refusal, never a silent no-op.
+ *
+ * The caller asked for a state change that has no rule behind it; answering 200
+ * with an unchanged offer would let an operator believe they had done something.
+ */
+export function offerStatusNotSettableException(status: OfferStatus) {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: OFFER_STATUS_NOT_SETTABLE_CODE,
+    message: `${status} durumu buradan ayarlanamaz; bu durum kendi akışına aittir.`,
   });
 }

@@ -26,7 +26,12 @@ import {
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
-import { CUSTOMER_UNACTIONABLE_OFFER_STATUSES } from './offer-transitions';
+import {
+  ADMIN_OFFER_ACTIONS,
+  CUSTOMER_UNACTIONABLE_OFFER_STATUSES,
+  isAdminSettableOfferStatus,
+  offerStatusNotSettableException,
+} from './offer-transitions';
 import {
   calculateRefundEligibility,
   isManualRefundReasonCode,
@@ -134,23 +139,44 @@ export class OffersService {
     return withRefundEligibility(offer);
   }
 
-  async updateOfferStatus(id: string, status: OfferStatus) {
-    const existingOffer = await this.ensureOfferExists(id);
-    const now = new Date();
+  /**
+   * The admin offer screen's status control.
+   *
+   * It no longer writes `Offer.status`. It used to, unconditionally and for all
+   * eight states, which made it a second execution path for rules that live in
+   * one place: an ACCEPTED written here left the request unmatched, the
+   * competing offers open, no ContactRevealEvent on file and nobody told; a
+   * REJECTED written here skipped the "your offer was not selected" message
+   * entirely. Two doors to one state change, one of them with no guards behind
+   * it, is the bypass this method exists to close.
+   *
+   * What it does instead is name an action and hand it to
+   * {@link updateRequestOfferAction} — the same method the customer screen
+   * calls, which SUPER_ADMIN is already permitted to call through the
+   * service-request route. So the authority here is unchanged and the cascade,
+   * the concurrency guards and the message matrix are the production ones.
+   *
+   * Statuses outside {@link ADMIN_OFFER_ACTIONS} are refused with a 400 rather
+   * than silently ignored; see that map for why each one is absent.
+   *
+   * The response stays the admin projection it has always been, re-read after
+   * the transition, so the endpoint's contract does not change.
+   */
+  async updateOfferStatus(id: string, status: OfferStatus, user: AuthUser | null = null) {
+    if (!isAdminSettableOfferStatus(status)) {
+      throw offerStatusNotSettableException(status);
+    }
 
-    const updatedOffer = await this.prisma.offer.update({
-      where: { id },
-      data: {
-        status,
-        ...(status === OfferStatus.VIEWED && !existingOffer.viewedAt ? { viewedAt: now } : {}),
-        ...(status === OfferStatus.ACCEPTED ? { acceptedAt: now } : {}),
-        ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
-        ...(status === OfferStatus.WITHDRAWN ? { withdrawnAt: now } : {}),
-      },
-      include: offerInclude,
-    });
+    const offer = await this.ensureOfferExists(id);
 
-    return withRefundEligibility(updatedOffer);
+    await this.updateRequestOfferAction(
+      offer.requestId,
+      id,
+      { action: ADMIN_OFFER_ACTIONS[status] },
+      user,
+    );
+
+    return this.getOffer(id);
   }
 
   async refundOfferCredit(id: string, dto: RefundOfferCreditDto) {
@@ -529,7 +555,9 @@ export class OffersService {
   private async ensureOfferExists(id: string) {
     const offer = await this.prisma.offer.findUnique({
       where: { id },
-      select: { id: true, viewedAt: true },
+      // `requestId` comes back so an admin action can be routed onto the
+      // canonical request-scoped path without the caller having to know it.
+      select: { id: true, requestId: true, viewedAt: true },
     });
 
     if (!offer) {

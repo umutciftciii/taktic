@@ -19,16 +19,18 @@ import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
 
 type StatTone = 'neutral' | 'success' | 'warning' | 'error';
 
-const statuses: OfferStatus[] = [
-  'SUBMITTED',
-  'VIEWED',
-  'SHORTLISTED',
-  'ACCEPTED',
-  'REJECTED',
-  'WITHDRAWN',
-  'EXPIRED',
-  'CANCELLED',
-];
+/**
+ * The three actions this screen can actually perform.
+ *
+ * It used to offer all eight states, because the endpoint behind it wrote
+ * `status` directly. It no longer does: an admin action runs the same cascade a
+ * customer action runs, and only accept, reject and shortlist have one. The
+ * other five are refused by the API — VIEWED and WITHDRAWN because they record
+ * something a customer or a provider did, the rest because nothing in the
+ * product transitions an offer into them — so listing them here would only
+ * invite an error screen.
+ */
+const statuses: OfferStatus[] = ['SHORTLISTED', 'ACCEPTED', 'REJECTED'];
 
 const refundReasonCodes = [
   'NOT_VIEWED_48H',
@@ -428,8 +430,13 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
             <form action={updateOfferStatusAction} style={{ display: 'grid', gap: 12 }}>
               <input type="hidden" name="id" value={offer.id} />
               <label className="form-row">
-                <span>Durum</span>
-                <select name="status" defaultValue={offer.status}>
+                <span>İşlem</span>
+                {/*
+                  Not defaulted to the offer's current status: the list is a set
+                  of actions to take, and several offers are in a state that is
+                  not one of them.
+                */}
+                <select name="status" defaultValue="SHORTLISTED">
                   {statuses.map((status) => (
                     <option key={status} value={status}>
                       {statusLabel(status)}
@@ -437,6 +444,10 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                   ))}
                 </select>
               </label>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                Bu işlem müşteri panelindeki işlemle aynı akışı çalıştırır: kabul, talebi
+                eşleştirir ve diğer teklifleri kapatır; ilgili bildirim e-postaları gönderilir.
+              </p>
               <div>
                 <button className="btn btn-primary btn-block" type="submit">
                   Durumu Kaydet
