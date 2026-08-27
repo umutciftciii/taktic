@@ -12,6 +12,13 @@ export const NOTIFICATION_ERROR_CODES = [
   'REJECTED',
   'TIMEOUT',
   'INVALID_RECIPIENT',
+  /**
+   * The company footer this deployment would have printed is missing or
+   * unusable — no settings row, no legal name, or a support address nobody
+   * could write to. Raised before anything is handed to a provider, so the row
+   * records a message that was composed and deliberately not sent.
+   */
+  'EMAIL_BRANDING_INCOMPLETE',
   'UNKNOWN',
 ] as const;
 
@@ -28,6 +35,7 @@ export const NOTIFICATION_ERROR_LABELS: Record<NotificationErrorCode, string> = 
   REJECTED: 'Alıcı reddedildi',
   TIMEOUT: 'Zaman aşımı',
   INVALID_RECIPIENT: 'Geçersiz alıcı',
+  EMAIL_BRANDING_INCOMPLETE: 'Şirket ve e-posta ayarları eksik',
   UNKNOWN: 'Bilinmeyen hata',
 };
 

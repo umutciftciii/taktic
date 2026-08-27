@@ -43,6 +43,41 @@ export type Category = {
   questions?: Question[];
 };
 
+/**
+ * The company's public details, as an operator maintains them.
+ *
+ * Deliberately narrow. Nothing about the e-mail transport reaches this type —
+ * no key, no sender address, no provider name — because the endpoint behind it
+ * does not return any, and an admin screen that could read a credential would
+ * be a way to take one with an admin session rather than a shell.
+ */
+export type CompanySettingsIssue =
+  | 'NOT_CONFIGURED'
+  | 'LEGAL_NAME_MISSING'
+  | 'SUPPORT_EMAIL_MISSING'
+  | 'SUPPORT_EMAIL_NOT_DELIVERABLE';
+
+export type CompanySettings = {
+  configured: boolean;
+  legalName: string | null;
+  supportEmail: string | null;
+  postalAddress: string | null;
+  updatedAt: string | null;
+  updatedBy: { id: string; name: string | null } | null;
+  /** Why the footer cannot be published yet. Empty means it can. */
+  issues: CompanySettingsIssue[];
+};
+
+/** What each issue means, in the words the operator has to act on. */
+export const COMPANY_SETTINGS_ISSUE_LABELS: Record<CompanySettingsIssue, string> = {
+  NOT_CONFIGURED:
+    'Şirket bilgileri hiç kaydedilmemiş. Gerçek e-posta taşıyıcısı açıkken tasarımlı e-postalar gönderilmez.',
+  LEGAL_NAME_MISSING: 'Yasal unvan eksik veya yalnızca ürün adını içeriyor.',
+  SUPPORT_EMAIL_MISSING: 'Destek e-postası eksik.',
+  SUPPORT_EMAIL_NOT_DELIVERABLE:
+    'Destek e-postası örnek/ayrılmış bir alan adında; bu adrese e-posta ulaşamaz.',
+};
+
 export type QuestionType =
   | 'TEXT'
   | 'TEXTAREA'

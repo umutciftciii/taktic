@@ -171,9 +171,58 @@ model User {
   notificationLogs           NotificationLog[]
   contactRevealEvents        ContactRevealEvent[]
   createdProviderClaimTokens ProviderClaimToken[]        @relation("ProviderClaimTokenCreatedBy")
+  companySettingsUpdates     CompanySettings[]           @relation("CompanySettingsUpdatedBy")
 
   @@index([role])
   @@index([isActive])
+}
+
+/// The company behind the platform, as an operator maintains it.
+///
+/// The legal name, the support address and the postal address are business
+/// facts, not deployment configuration: they change when the company changes,
+/// they are the operator's to correct, and nobody should need a redeploy — or a
+/// shell on the API host — to fix a typo in the footer every customer reads.
+/// They used to live in the environment, which is why a real message once went
+/// out telling a customer to write to a placeholder address.
+///
+/// What stays in the environment is the technical half: which transport is
+/// bound, its credentials, the verified sender address, and the public URL every
+/// link is built from. Those are facts about the deployment, they are secrets or
+/// close to it, and an admin screen has no business editing them.
+///
+/// Exactly one row, forever. `id` defaults to the literal "singleton" and a
+/// CHECK constraint refuses any other value, so "the settings" is a database
+/// guarantee rather than a convention the service is trusted to keep. Nothing is
+/// seeded: the row does not exist until an operator saves one, and until then
+/// the admin screen says so and a delivering transport refuses to compose a
+/// footer it cannot fill.
+model CompanySettings {
+  id            String   @id @default("singleton")
+  /// The sender's legal name, as it appears in the footer. Free text: a legal
+  /// entity is not the product name, and this platform cannot guess it.
+  legalName     String
+  /// Where a customer's reply is actually read. Deliberately unrelated to
+  /// EMAIL_FROM, which is a no-reply mailbox on the verified sending domain.
+  ///
+  /// Saving it is not proof that anybody controls it — there is no ownership
+  /// challenge here, and inventing one would be a product decision of its own.
+  /// What is enforced is that the value is a well-formed address and not the
+  /// development placeholder.
+  supportEmail  String
+  /// Optional, and it stays optional. A wrong postal address is worse than an
+  /// absent one, so the footer drops the line rather than inventing a street.
+  postalAddress String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  /// Who last saved this, for the same reason every other admin-written row in
+  /// this schema records it. Nullable and SetNull: an operator's account may be
+  /// removed long after they corrected the footer.
+  updatedById   String?
+
+  updatedBy User? @relation("CompanySettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById])
 }
 
 model Session {

@@ -1,3 +1,4 @@
+import { EmailBranding } from '../email-branding.config';
 import { NotificationMessage } from '../notification.port';
 import {
   EmailBlock,
@@ -124,8 +125,9 @@ export function transactionalSubject(
 export function renderTransactionalEmail(
   template: TransactionalEmailTemplate,
   message: NotificationMessage,
+  branding: EmailBranding,
 ): RenderedDocument {
-  return renderDocument(buildDocument(template, message));
+  return renderDocument(buildDocument(template, message), branding);
 }
 
 /** Exposed for tests, which assert on the block model as well as the markup. */

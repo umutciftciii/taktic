@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderEmail } from '../src/modules/notifications/email-template';
+import { EmailBranding } from '../src/modules/notifications/email-branding.config';
 import { NotificationMessage } from '../src/modules/notifications/notification.port';
 import {
   TRANSACTIONAL_EMAIL_TEMPLATES,
@@ -20,6 +21,28 @@ import { URGENCY_LABELS, UrgencyCode } from '../src/common/urgency';
 
 const WEB = 'https://app.example.test';
 const ASSETS = 'https://cdn.example.test';
+
+/**
+ * The footer values, passed in rather than read from the environment.
+ *
+ * They are an argument to the renderer now, because they are an argument in
+ * production too: the legal name, the support address and the postal address
+ * come from the admin-managed CompanySettings row, and a transport that cannot
+ * resolve them refuses to send rather than rendering a placeholder. Stating
+ * them here makes every assertion below about the markup rather than about
+ * whichever variables happened to be exported.
+ */
+const BRANDING: EmailBranding = {
+  supportEmail: 'destek@example.test',
+  companyName: 'TakTick Teknoloji A.Ş.',
+  companyAddress: 'Kızılırmak Mah. No:12, Çankaya/Ankara',
+  logoUrl: `${ASSETS}/brand/logo-email.png`,
+};
+
+/** Renders with the branding above. The three legacy templates ignore it. */
+function render(message: NotificationMessage) {
+  return renderEmail(message, BRANDING);
+}
 
 /** A payload with something plausible in every field each template reads. */
 const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null>> = {
@@ -193,7 +216,7 @@ describe('transactional e-mail rendering', () => {
 
   describe.each(TRANSACTIONAL_EMAIL_TEMPLATES)('%s', (template) => {
     it('carries the mandatory salutation and closing in both bodies', () => {
-      const { html, text } = renderEmail(messageFor(template));
+      const { html, text } = render(messageFor(template));
       const fullName = FULL_DATA[template].fullName as string;
 
       // Exactly one salutation, in exactly the form the editorial rules allow.
@@ -208,7 +231,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('renders the design system card', () => {
-      const { html } = renderEmail(messageFor(template));
+      const { html } = render(messageFor(template));
 
       expect(html.startsWith('<!DOCTYPE html>')).toBe(true);
       expect(html).toContain('<html lang="tr">');
@@ -232,7 +255,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('uses one absolute https logo URL from configuration', () => {
-      const { html } = renderEmail(messageFor(template));
+      const { html } = render(messageFor(template));
 
       expect(html).toContain(`<img src="${ASSETS}/brand/logo-email.png" width="140" alt="TakTick"`);
       // Nothing relative survived from the handoff, and no host is hard-coded.
@@ -241,7 +264,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('leaves no placeholder link behind', () => {
-      const { html } = renderEmail(messageFor(template));
+      const { html } = render(messageFor(template));
       const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1] ?? '');
 
       expect(hrefs.length).toBeGreaterThan(0);
@@ -255,7 +278,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('drops the design-only subject caption and the unsubscribe links', () => {
-      const { html } = renderEmail(messageFor(template));
+      const { html } = render(messageFor(template));
 
       // The preview caption under the card existed for the reviewer only.
       expect(html).not.toContain('Konu: ');
@@ -267,7 +290,7 @@ describe('transactional e-mail rendering', () => {
 
     it('escapes every dynamic value', () => {
       const injection = '<img src=x onerror=alert(1)>"\'&';
-      const { html, text } = renderEmail(
+      const { html, text } = render(
         messageFor(template, {
           fullName: injection,
           businessName: injection,
@@ -298,7 +321,7 @@ describe('transactional e-mail rendering', () => {
           .filter((key) => key !== 'fullName')
           .map((key) => [key, null]),
       );
-      const { html } = renderEmail(messageFor(template, blanked));
+      const { html } = render(messageFor(template, blanked));
 
       expect(html).toContain(`Sayın ${FULL_DATA[template].fullName},`);
       expect(html).toContain('Saygılarımızla,<br><strong>TakTick Ekibi</strong>');
@@ -314,7 +337,7 @@ describe('transactional e-mail rendering', () => {
       );
 
       for (const payload of [{}, blanked]) {
-        const { html, text } = renderEmail(messageFor(template, payload));
+        const { html, text } = render(messageFor(template, payload));
 
         for (const code of URGENCY_CODES) {
           expect(html).not.toContain(code);
@@ -333,7 +356,7 @@ describe('transactional e-mail rendering', () => {
    */
   describe.each(TIMING_TEMPLATES)('%s — the customer’s stated timing', (template) => {
     it.each(URGENCY_CODES)('renders %s in words, never as the code', (code) => {
-      const { html, text } = renderEmail(messageFor(template, { urgency: code }));
+      const { html, text } = render(messageFor(template, { urgency: code }));
       const label = URGENCY_LABELS[code];
 
       expect(html).toContain(`1 Eylül 2026 · ${label}`);
@@ -348,7 +371,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('prints the date alone when no urgency was chosen', () => {
-      const { html } = renderEmail(messageFor(template, { urgency: null }));
+      const { html } = render(messageFor(template, { urgency: null }));
 
       expect(html).toContain('1 Eylül 2026');
       // No dangling separator where the second half should have been.
@@ -357,7 +380,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('prints the urgency alone when no date was chosen', () => {
-      const { html } = renderEmail(
+      const { html } = render(
         messageFor(template, { preferredDate: null, urgency: 'FLEXIBLE' }),
       );
 
@@ -366,7 +389,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('drops the whole row for a code this build does not know', () => {
-      const { html, text } = renderEmail(
+      const { html, text } = render(
         messageFor(template, { preferredDate: null, urgency: 'SOME_FUTURE_CODE' }),
       );
 
@@ -377,7 +400,7 @@ describe('transactional e-mail rendering', () => {
     });
 
     it('drops the whole row when the customer gave neither', () => {
-      const { html } = renderEmail(messageFor(template, { preferredDate: null, urgency: null }));
+      const { html } = render(messageFor(template, { preferredDate: null, urgency: null }));
       expect(html).not.toContain('Tercih edilen zaman');
     });
   });
@@ -407,16 +430,16 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('formats money as tr-TR with the sign after a space', () => {
-    const { html } = renderEmail(messageFor('offer-received', { offerAmountMinor: '240000' }));
+    const { html } = render(messageFor('offer-received', { offerAmountMinor: '240000' }));
     expect(html).toContain('2.400 ₺');
 
     // Kuruş survive rather than being rounded into a figure nobody quoted.
-    const withKurus = renderEmail(messageFor('offer-received', { offerAmountMinor: '123450' }));
+    const withKurus = render(messageFor('offer-received', { offerAmountMinor: '123450' }));
     expect(withKurus.html).toContain('1.234,50 ₺');
   });
 
   it('formats a moment as tr-TR long date with a 24-hour clock', () => {
-    const { html } = renderEmail(
+    const { html } = render(
       messageFor('password-reset', { requestedAt: '2026-08-27T11:12:00.000Z' }),
     );
 
@@ -427,7 +450,7 @@ describe('transactional e-mail rendering', () => {
 
   it('keeps a reset token in the URL and out of everything else', () => {
     const token = 'ZmFrZS10b2tlbi12YWx1ZQ';
-    const { html, text } = renderEmail({
+    const { html, text } = render({
       template: 'password-reset',
       to: 'alici@example.test',
       subject: transactionalSubject('password-reset', FULL_DATA['password-reset']),
@@ -442,7 +465,7 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('omits the device row the platform cannot fill', () => {
-    const { html } = renderEmail(messageFor('password-reset'));
+    const { html } = render(messageFor('password-reset'));
 
     expect(html).toContain('Bağlantı geçerliliği');
     expect(html).toContain('Talep zamanı');
@@ -451,35 +474,35 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('omits the figures the platform does not compute', () => {
-    const approved = renderEmail(messageFor('provider-application-approved')).html;
+    const approved = render(messageFor('provider-application-approved')).html;
     expect(approved).not.toContain('Hoş geldin kredisi');
     // No fixed credit promise either — the cost is per category.
     expect(approved).not.toContain('1–3 kredi');
 
-    const received = renderEmail(messageFor('provider-application-received')).html;
+    const received = render(messageFor('provider-application-received')).html;
     expect(received).not.toContain('Başvuru no');
 
-    const published = renderEmail(messageFor('request-published')).html;
+    const published = render(messageFor('request-published')).html;
     expect(published).toContain('Ulaşılan uzman');
     expect(published).not.toContain('Beklenen teklif');
 
-    const offer = renderEmail(messageFor('offer-received')).html;
+    const offer = render(messageFor('offer-received')).html;
     expect(offer).not.toContain('Puan');
 
-    const available = renderEmail(messageFor('request-available')).html;
+    const available = render(messageFor('request-available')).html;
     expect(available).toContain('Teklif maliyeti');
     expect(available).not.toContain('Mevcut teklif');
 
-    const notSelected = renderEmail(messageFor('offer-not-selected')).html;
+    const notSelected = render(messageFor('offer-not-selected')).html;
     expect(notSelected).not.toContain('kabul oranınız');
   });
 
   it('drops the contact rows when the accept did not open them', () => {
-    const withContact = renderEmail(messageFor('match-customer')).html;
+    const withContact = render(messageFor('match-customer')).html;
     expect(withContact).toContain('Telefon');
     expect(withContact).toContain('05320000000');
 
-    const withoutContact = renderEmail(
+    const withoutContact = render(
       messageFor('match-customer', { contactName: null, contactPhone: null }),
     ).html;
     expect(withoutContact).not.toContain('Telefon');
@@ -488,7 +511,7 @@ describe('transactional e-mail rendering', () => {
     expect(withoutContact).toContain('Şahin Isı Sistemleri');
     expect(withoutContact).toContain('2.400 ₺');
 
-    const providerSide = renderEmail(
+    const providerSide = render(
       messageFor('offer-accepted', { customerName: null, customerPhone: null }),
     ).html;
     expect(providerSide).not.toContain('05330000000');
@@ -497,7 +520,7 @@ describe('transactional e-mail rendering', () => {
 
   it('never carries the neighbourhood or an address note to a provider', () => {
     for (const template of ['request-available', 'offer-accepted'] as const) {
-      const { html } = renderEmail(
+      const { html } = render(
         messageFor(template, {
           // Not fields these templates read; the point is that supplying them
           // changes nothing, so a future careless caller cannot leak them.
@@ -513,7 +536,7 @@ describe('transactional e-mail rendering', () => {
 
   it('refuses a call to action that is not an http(s) URL', () => {
     expect(() =>
-      renderEmail({
+      render({
         template: 'password-reset',
         to: 'alici@example.test',
         subject: 'x',
@@ -524,7 +547,7 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('leaves the three older templates on their original plain renderer', () => {
-    const { html } = renderEmail({
+    const { html } = render({
       template: 'customer-activation',
       to: 'alici@example.test',
       subject: 'TakTic hesabınızı etkinleştirin',

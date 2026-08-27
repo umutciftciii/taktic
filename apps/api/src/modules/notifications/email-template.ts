@@ -1,3 +1,4 @@
+import { EmailBranding } from './email-branding.config';
 import { NotificationMessage } from './notification.port';
 import {
   isTransactionalEmailTemplate,
@@ -30,9 +31,29 @@ export type RenderedEmail = {
   html: string;
 };
 
-export function renderEmail(message: NotificationMessage): RenderedEmail {
+/**
+ * `branding` may be null only for the three templates below the line.
+ *
+ * They predate the design system and render no footer at all — an activation
+ * link and a claim link carry no company details — so there is nothing for
+ * missing settings to make half-true, and gating them would take a mailbox-
+ * ownership flow offline over a value it never prints. Every designed template
+ * does print the footer, so for those the caller has to have resolved it; a
+ * null here is a programming error rather than a state to degrade into.
+ */
+export function renderEmail(
+  message: NotificationMessage,
+  branding: EmailBranding | null,
+): RenderedEmail {
   if (isTransactionalEmailTemplate(message.template)) {
-    const rendered = renderTransactionalEmail(message.template, message);
+    if (!branding) {
+      throw new Error(
+        `renderEmail(${message.template}) requires resolved branding: every designed template ` +
+          'prints the company footer.',
+      );
+    }
+
+    const rendered = renderTransactionalEmail(message.template, message, branding);
     return { text: rendered.text, html: rendered.html };
   }
 

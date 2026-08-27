@@ -12,23 +12,30 @@ import {
   DEVELOPMENT_COMPANY_NAME,
   DEVELOPMENT_SUPPORT_EMAIL,
   assertEmailBrandingConfig,
-  readEmailBranding,
+  developmentBranding,
+  readDeprecatedEnvBranding,
 } from '../src/modules/notifications/email-branding.config';
 
 /**
- * What the deployment has to declare before it may send anything.
+ * What is still *deployment* configuration, and what is no longer.
  *
- * The trigger is the transport, not NODE_ENV. A process wired to Resend puts
- * messages in strangers' inboxes whatever it calls itself, and it did: a real,
- * DKIM-signed e-mail went out from a process running as "development" with a
- * footer telling the customer to write to `destek@example.test`. NODE_ENV
- * describes how the process was started; `EMAIL_TRANSPORT=resend` describes
- * whether anybody receives what it composes.
+ * The public base URL is: every link the platform mails is built from it, it is
+ * a fact about where the deployment lives, and a wrong one is a security
+ * problem rather than a cosmetic one. It stays boot-enforced, and the trigger is
+ * the transport rather than NODE_ENV — a process wired to Resend puts messages
+ * in strangers' inboxes whatever it calls itself.
  *
- * So the matrix below is two-dimensional: with a non-delivering transport the
- * safe, obviously-fake defaults stand, and with a delivering one — or under
- * production, kept as a second trigger — every branding value has to be real or
- * the process does not start.
+ * The company's legal name, support address and postal address are not. They
+ * are business facts an operator maintains from the admin panel
+ * (CompanySettings), so nothing here may refuse to boot over them: taking a
+ * marketplace offline because a footer is unfinished is a worse failure than
+ * the one it prevents. What replaces the boot check is a send-time refusal —
+ * see email-branding-settings.spec.ts, which is where "a real transport never
+ * mails a placeholder footer" is now proven end to end.
+ *
+ * The two variables below still work as a fallback for a deployment that had
+ * them before the panel existed. They are deprecated, never required, and a row
+ * in CompanySettings wins over them.
  */
 
 const TRACKED = [
@@ -180,104 +187,70 @@ describe('public base URL', () => {
   });
 });
 
-describe('e-mail branding', () => {
-  it('uses unroutable placeholders outside production', () => {
+describe('deprecated e-mail branding variables', () => {
+  it('are read when they are set, so an existing deployment keeps its footer', () => {
+    process.env.SUPPORT_EMAIL = 'Destek@Taktick.Example';
+    process.env.COMPANY_LEGAL_NAME = 'TakTick Teknoloji A.Ş.';
+    process.env.COMPANY_POSTAL_ADDRESS = 'Bir Cadde No:1, Çankaya/Ankara';
+
+    expect(readDeprecatedEnvBranding()).toEqual({
+      // Normalised the way an address is stored everywhere else here.
+      supportEmail: 'destek@taktick.example',
+      legalName: 'TakTick Teknoloji A.Ş.',
+      postalAddress: 'Bir Cadde No:1, Çankaya/Ankara',
+    });
+  });
+
+  it('are null when unset — absent is not misconfigured', () => {
+    expect(readDeprecatedEnvBranding()).toEqual({
+      supportEmail: null,
+      legalName: null,
+      postalAddress: null,
+    });
+  });
+
+  it('treat a blank value as absent rather than as an empty footer', () => {
+    process.env.SUPPORT_EMAIL = '   ';
+    process.env.COMPANY_LEGAL_NAME = '';
+
+    const values = readDeprecatedEnvBranding();
+    expect(values.supportEmail).toBeNull();
+    expect(values.legalName).toBeNull();
+  });
+
+  it('never stop the process from booting, delivering transport or not', () => {
+    // The rule this replaces refused to start without SUPPORT_EMAIL and
+    // COMPANY_LEGAL_NAME. It no longer does — with Resend selected, with
+    // NODE_ENV=production, and with nothing set at all.
+    expect(() => assertEmailBrandingConfig()).not.toThrow();
+
+    process.env.EMAIL_TRANSPORT = 'resend';
+    process.env.RESEND_API_KEY = 're_TESTKEY_not_a_real_credential';
+    process.env.EMAIL_FROM = 'Taktick <noreply@notify.taktick.com.tr>';
+    expect(() => assertEmailBrandingConfig()).not.toThrow();
+
+    process.env.NODE_ENV = 'production';
+    expect(() => assertEmailBrandingConfig()).not.toThrow();
+  });
+
+  it('still refuse a support value that is not an e-mail address at all', () => {
+    // Deprecated is not the same as ignored. Silently dropping this would leave
+    // an operator convinced they had configured something.
+    process.env.SUPPORT_EMAIL = 'destek sayfası';
+    expect(() => readDeprecatedEnvBranding()).toThrowError(/must be a plain e-mail address/);
+    expect(() => assertEmailBrandingConfig()).toThrowError(/must be a plain e-mail address/);
+  });
+});
+
+describe('the development footer', () => {
+  it('is the unroutable placeholder a preview should show', () => {
     process.env.WEB_APP_URL = 'https://web.example.test';
-    const branding = readEmailBranding();
+    const branding = developmentBranding();
 
     expect(branding.supportEmail).toBe(DEVELOPMENT_SUPPORT_EMAIL);
     expect(branding.companyName).toBe(DEVELOPMENT_COMPANY_NAME);
     // No invented street address: the footer line is dropped instead.
     expect(branding.companyAddress).toBeNull();
-    expect(() => assertEmailBrandingConfig()).not.toThrow();
-  });
-
-  it('demands a real support address and company name in production', () => {
-    process.env.NODE_ENV = 'production';
-    process.env.WEB_APP_URL = 'https://web.example.test';
-
-    expect(() => readEmailBranding()).toThrowError(/SUPPORT_EMAIL is required/);
-
-    process.env.SUPPORT_EMAIL = 'destek@taktick.example';
-    expect(() => readEmailBranding()).toThrowError(/COMPANY_LEGAL_NAME is required/);
-
-    process.env.COMPANY_LEGAL_NAME = 'TakTick Teknoloji A.Ş.';
-    expect(() => readEmailBranding()).not.toThrow();
-  });
-
-  it('demands them as soon as a delivering transport is selected', () => {
-    // This is the case that shipped a footer reading "destek@example.test" to a
-    // real customer: Resend configured, NODE_ENV left at "development".
-    selectDeliveringTransport();
-    process.env.WEB_APP_URL = 'https://web.example.test';
-
-    expect(() => readEmailBranding()).toThrowError(/SUPPORT_EMAIL is required/);
-    expect(() => assertEmailBrandingConfig()).toThrowError(/SUPPORT_EMAIL is required/);
-
-    process.env.SUPPORT_EMAIL = 'destek@taktick.example';
-    expect(() => readEmailBranding()).toThrowError(/COMPANY_LEGAL_NAME is required/);
-
-    process.env.COMPANY_LEGAL_NAME = 'TakTick Teknoloji A.Ş.';
-    const branding = readEmailBranding();
-    expect(branding.supportEmail).toBe('destek@taktick.example');
-    expect(branding.companyName).toBe('TakTick Teknoloji A.Ş.');
-  });
-
-  it('never lets the placeholder reach a delivering transport', () => {
-    selectDeliveringTransport();
-    process.env.WEB_APP_URL = 'https://web.example.test';
-    process.env.COMPANY_LEGAL_NAME = 'TakTick Teknoloji A.Ş.';
-
-    // Spelling the placeholder out explicitly is not a way round the rule: it
-    // is refused whether it was defaulted or configured by hand.
-    process.env.SUPPORT_EMAIL = DEVELOPMENT_SUPPORT_EMAIL;
-    expect(() => assertEmailBrandingConfig()).toThrowError(
-      /SUPPORT_EMAIL must not be the development placeholder/,
-    );
-
-    process.env.SUPPORT_EMAIL = 'destek@taktick.example';
-    process.env.COMPANY_LEGAL_NAME = DEVELOPMENT_COMPANY_NAME;
-    expect(() => assertEmailBrandingConfig()).toThrowError(
-      /COMPANY_LEGAL_NAME must not be the development placeholder/,
-    );
-  });
-
-  it('keeps the placeholders for the transports that deliver nothing', () => {
-    process.env.WEB_APP_URL = 'https://web.example.test';
-
-    for (const transport of ['console', 'file-outbox'] as const) {
-      process.env.EMAIL_TRANSPORT = transport;
-      if (transport === 'file-outbox') {
-        process.env.NOTIFICATION_OUTBOX_DIR = '/tmp/taktick-e2e-outbox';
-      } else {
-        delete process.env.NOTIFICATION_OUTBOX_DIR;
-      }
-
-      const branding = readEmailBranding();
-      expect(branding.supportEmail).toBe(DEVELOPMENT_SUPPORT_EMAIL);
-      expect(branding.companyName).toBe(DEVELOPMENT_COMPANY_NAME);
-      expect(() => assertEmailBrandingConfig()).not.toThrow();
-    }
-  });
-
-  it('does not derive the support address from the sender', () => {
-    // The two are different facts. EMAIL_FROM is a DKIM-signed, no-reply
-    // mailbox on the verified domain; the support address is where a customer's
-    // reply is actually read, and it has to be stated.
-    selectDeliveringTransport();
-    process.env.WEB_APP_URL = 'https://web.example.test';
-    process.env.COMPANY_LEGAL_NAME = 'TakTick Teknoloji A.Ş.';
-
-    expect(() => readEmailBranding()).toThrowError(/SUPPORT_EMAIL is required/);
-
-    process.env.SUPPORT_EMAIL = 'destek@taktick.example';
-    expect(readEmailBranding().supportEmail).toBe('destek@taktick.example');
-    expect(readEmailBranding().supportEmail).not.toContain('noreply');
-  });
-
-  it('refuses a support value that is not an e-mail address', () => {
-    process.env.WEB_APP_URL = 'https://web.example.test';
-    process.env.SUPPORT_EMAIL = 'destek sayfası';
-    expect(() => readEmailBranding()).toThrowError(/must be a plain e-mail address/);
+    expect(branding.logoUrl).toBe('https://web.example.test/brand/logo-email.png');
   });
 });

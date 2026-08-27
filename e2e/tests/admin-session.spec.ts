@@ -8,6 +8,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { createRequest } from '../src/journeys';
+import { prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
 
 /**
@@ -142,6 +143,112 @@ test.describe('admin session', () => {
       await expect(admin.page).toHaveURL(/\/login/);
     } finally {
       await admin.close();
+    }
+  });
+});
+
+/**
+ * Scenario 8 — the company footer, as admin-managed data.
+ *
+ * The legal name, the support address and the postal address printed in every
+ * transactional e-mail used to be environment variables the API refused to boot
+ * without. They are business facts, so they are a form now. What is checked
+ * here is the screen an operator actually uses: that it says when the footer is
+ * unpublishable, that it saves, that it refuses nonsense, and that it exposes
+ * nothing about the transport it is not entitled to see.
+ */
+test.describe('company e-mail settings', () => {
+  test.beforeEach(async () => {
+    // The suite shares one database and this row is a singleton, so each case
+    // starts from "no operator has saved one yet" — which is also the state a
+    // real deployment is in the first time it opens the screen.
+    await prisma().companySettings.deleteMany({});
+  });
+
+  test('an operator fills in a footer that starts out missing', async ({ browser }) => {
+    const adminAccount = await createAdmin();
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+
+    try {
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin('/company-settings');
+
+      // Nothing is seeded, and the screen says so rather than showing blanks
+      // that look like saved empty values.
+      const issues = admin.page.getByTestId('company-settings-issues');
+      await expect(issues).toBeVisible();
+      await expect(issues).toContainText('Şirket bilgileri hiç kaydedilmemiş');
+      await assertNoErrorScreen(admin.page);
+
+      // ---- a value that cannot receive mail is refused ------------------
+      await admin.page.locator('input[name="legalName"]').fill('E2E Örnek Teknoloji A.Ş.');
+      await admin.page.locator('input[name="supportEmail"]').fill('destek@example.test');
+      await admin.page.getByRole('button', { name: 'Kaydet' }).click();
+      // The page's own banner, not Next's route announcer — which also carries
+      // role="alert" and would make a bare role query ambiguous.
+      await expect(admin.page.getByTestId('company-settings-error')).toContainText('placeholder');
+      await assertNoErrorScreen(admin.page);
+      expect(await prisma().companySettings.count()).toBe(0);
+
+      // ---- and so is a legal name that is only the product name ---------
+      await admin.page.locator('input[name="legalName"]').fill('TakTick');
+      await admin.page.locator('input[name="supportEmail"]').fill('destek@e2e-ornek.com.tr');
+      await admin.page.getByRole('button', { name: 'Kaydet' }).click();
+      await expect(admin.page.getByTestId('company-settings-error')).toContainText('ürün adı olamaz');
+      expect(await prisma().companySettings.count()).toBe(0);
+
+      // ---- the real thing saves, and the screen says the footer is usable
+      await admin.page.locator('input[name="legalName"]').fill('E2E Örnek Teknoloji A.Ş.');
+      await admin.page.locator('input[name="supportEmail"]').fill('destek@e2e-ornek.com.tr');
+      await admin.page.locator('textarea[name="postalAddress"]').fill('Bir Cadde No:1, Çankaya');
+      await admin.page.getByRole('button', { name: 'Kaydet' }).click();
+
+      await expect(admin.page.getByTestId('company-settings-complete')).toBeVisible();
+      await expect(admin.page.getByTestId('company-settings-issues')).toHaveCount(0);
+      await assertNoErrorScreen(admin.page);
+
+      const stored = await prisma().companySettings.findMany();
+      expect(stored).toHaveLength(1);
+      expect(stored[0]!.id).toBe('singleton');
+      expect(stored[0]!.legalName).toBe('E2E Örnek Teknoloji A.Ş.');
+      expect(stored[0]!.supportEmail).toBe('destek@e2e-ornek.com.tr');
+      expect(stored[0]!.updatedById).toBe(adminAccount.id);
+
+      // A reload shows the stored values, not the ones still in the form.
+      await admin.gotoAdmin('/company-settings');
+      await expect(admin.page.locator('input[name="supportEmail"]')).toHaveValue(
+        'destek@e2e-ornek.com.tr',
+      );
+
+      // ---- and nothing technical is on the page ------------------------
+      const body = await admin.page.locator('body').innerText();
+      for (const forbidden of ['RESEND', 'resend', 're_', 'noreply@', 'API_KEY']) {
+        expect(body).not.toContain(forbidden);
+      }
+      const html = await admin.page.content();
+      expect(html).not.toContain('RESEND_API_KEY');
+      expect(html).not.toContain('EMAIL_FROM');
+    } finally {
+      await admin.close();
+    }
+  });
+
+  test('a customer cannot reach the settings screen', async ({ browser }) => {
+    const customerAccount = await createCustomer();
+    const intruder = await Actor.open(browser, 'intruder', primaryRuntime);
+
+    try {
+      // A customer session exists, but it is not an admin session: the admin
+      // app checks the role itself and sends them to the login form rather than
+      // rendering a page whose API calls would 403 anyway.
+      await intruder.loginToWeb(customerAccount.email, customerAccount.password);
+      await intruder.gotoAdmin('/company-settings');
+
+      await expect(intruder.page).toHaveURL(/\/login/);
+      await expect(intruder.page.getByTestId('company-settings-form')).toHaveCount(0);
+      await assertNoErrorScreen(intruder.page);
+    } finally {
+      await intruder.close();
     }
   });
 });

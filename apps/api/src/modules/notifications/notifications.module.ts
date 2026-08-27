@@ -4,6 +4,7 @@ import { ConsoleNotificationAdapter } from './console-notification.adapter';
 import { ConsoleSmsAdapter } from './console-sms.adapter';
 import { FileOutboxNotificationAdapter } from './file-outbox-notification.adapter';
 import { FileOutboxSmsAdapter } from './file-outbox-sms.adapter';
+import { EmailBrandingService } from './email-branding.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationPort } from './notification.port';
 import { isNotificationOutboxEnabled } from './notification-outbox';
@@ -42,9 +43,22 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
   providers: [
     { provide: NotificationPort, useClass: emailAdapter },
     { provide: SmsPort, useClass: smsAdapter },
+    // Reads the admin-managed company settings straight from Prisma rather than
+    // through CompanySettingsService: this module is @Global and half the
+    // application depends on it, so it must not acquire an edge to a module
+    // that imports AuthModule. The rules both sides apply are shared as plain
+    // functions instead (company-settings.rules.ts), which is the part that
+    // actually has to agree.
+    EmailBrandingService,
     NotificationDispatcher,
     TransactionalMailService,
   ],
-  exports: [NotificationPort, SmsPort, NotificationDispatcher, TransactionalMailService],
+  exports: [
+    NotificationPort,
+    SmsPort,
+    EmailBrandingService,
+    NotificationDispatcher,
+    TransactionalMailService,
+  ],
 })
 export class NotificationsModule {}
