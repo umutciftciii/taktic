@@ -36,6 +36,21 @@ export type ResolvedLocation = {
 };
 
 /**
+ * The same triple with the district left open.
+ *
+ * A provider's service area may name a province and nothing else, and the
+ * matching rule reads that as "the whole province" — `ProviderServiceArea`
+ * stores a nullable district precisely so it can. Requests have no such shape:
+ * their district is required, which is why {@link resolveLocation} keeps its
+ * narrower return type.
+ */
+export type ResolvedArea = {
+  city: string;
+  district: string | null;
+  neighborhood: string | null;
+};
+
+/**
  * The lookup key for a name the caller typed, pasted or posted.
  *
  * Canonical names are what gets stored, so this only has to absorb the
@@ -138,13 +153,43 @@ export function resolveLocation(input: {
   district: string;
   neighborhood?: string | null;
 }): ResolvedLocation | null {
+  const area = resolveArea(input);
+
+  // A request always names a district, so an area that resolved to a province
+  // alone is not a location a request may be stored at.
+  if (!area || area.district === null) return null;
+
+  return { city: area.city, district: area.district, neighborhood: area.neighborhood };
+}
+
+/**
+ * The same resolution with the district optional, for a provider service area.
+ *
+ * A province on its own resolves — that is how a provider says "all of
+ * İstanbul", and the matching rule already reads a null district that way. A
+ * district that was given still has to belong to the province, and a
+ * neighbourhood still has to belong to the district (and cannot be given
+ * without one: a neighbourhood floating under a whole province names no place).
+ */
+export function resolveArea(input: {
+  city: string;
+  district?: string | null;
+  neighborhood?: string | null;
+}): ResolvedArea | null {
   const entry = provinceIndex.get(foldLocationName(input.city ?? ''));
   if (!entry) return null;
 
-  const district = entry.districts.get(foldLocationName(input.district ?? ''));
+  const rawDistrict = input.district?.trim() ?? '';
+  const rawNeighborhood = input.neighborhood?.trim() ?? '';
+
+  if (!rawDistrict) {
+    if (rawNeighborhood) return null;
+    return { city: entry.province.name, district: null, neighborhood: null };
+  }
+
+  const district = entry.districts.get(foldLocationName(rawDistrict));
   if (!district) return null;
 
-  const rawNeighborhood = input.neighborhood?.trim() ?? '';
   if (!rawNeighborhood) {
     return { city: entry.province.name, district, neighborhood: null };
   }

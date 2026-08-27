@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { apiFetch, Category, getCurrentUser, ProviderDashboard } from '../../../lib/api';
+import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { CityDistrictFields } from '../city-district-fields';
 import { CategoryVisual } from '../../category-visual';
 import { isProviderClaimEnabled } from '../../../lib/provider-claim';
 import { IconArrowRight } from '../../landing-icons';
@@ -26,10 +28,13 @@ const APPROVAL_STEPS = [
 ];
 
 export default async function ProviderApplyPage({ searchParams }: ProviderRegisterPageProps) {
-  const [{ error }, categories, user] = await Promise.all([
+  const [{ error }, categories, user, provinces] = await Promise.all([
     searchParams,
     apiFetch<Category[]>('/categories'),
     getCurrentUser(),
+    // The canonical province/district list, from the same API that validates
+    // the submitted application.
+    apiFetch<ProvinceWithDistricts[]>('/locations/provinces'),
   ]);
 
   // An account owns at most one provider profile, so a provider who already has
@@ -206,18 +211,28 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
                 <p className="provider-apply-card-subtitle">İşletmenin merkez adresi.</p>
               </div>
               <div className="provider-apply-grid">
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">
-                    İl <span className="provider-apply-required">*</span>
-                  </span>
-                  <input className="provider-apply-input" name="city" required />
-                </label>
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">
-                    İlçe <span className="provider-apply-required">*</span>
-                  </span>
-                  <input className="provider-apply-input" name="district" required />
-                </label>
+                <CityDistrictFields
+                  provinces={provinces}
+                  cityName="city"
+                  districtName="district"
+                  labels={{
+                    city: (
+                      <>
+                        İl <span className="provider-apply-required">*</span>
+                      </>
+                    ),
+                    district: (
+                      <>
+                        İlçe <span className="provider-apply-required">*</span>
+                      </>
+                    ),
+                  }}
+                  classNames={{
+                    field: 'provider-apply-field',
+                    label: 'provider-apply-label',
+                    select: 'sel',
+                  }}
+                />
                 <label className="provider-apply-field provider-apply-field-full">
                   <span className="provider-apply-label">Adres notu</span>
                   <textarea
@@ -267,16 +282,33 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
                 </p>
               </div>
               <div className="provider-apply-grid-3">
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">
-                    İl <span className="provider-apply-required">*</span>
-                  </span>
-                  <input className="provider-apply-input" name="serviceAreaCity" required />
-                </label>
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">İlçe</span>
-                  <input className="provider-apply-input" name="serviceAreaDistrict" />
-                </label>
+                {/*
+                  The district stays optional here, unlike the address above: a
+                  service area with no district means the whole province, which
+                  is what `matchesProviderArea` reads a null district as. Making
+                  it mandatory would quietly take province-wide coverage away
+                  from anyone who wanted it.
+                */}
+                <CityDistrictFields
+                  provinces={provinces}
+                  cityName="serviceAreaCity"
+                  districtName="serviceAreaDistrict"
+                  districtRequired={false}
+                  districtPlaceholder="Tüm il"
+                  labels={{
+                    city: (
+                      <>
+                        İl <span className="provider-apply-required">*</span>
+                      </>
+                    ),
+                    district: 'İlçe',
+                  }}
+                  classNames={{
+                    field: 'provider-apply-field',
+                    label: 'provider-apply-label',
+                    select: 'sel',
+                  }}
+                />
                 <label className="provider-apply-field">
                   <span className="provider-apply-label">Mahalle</span>
                   <input className="provider-apply-input" name="serviceAreaNeighborhood" />

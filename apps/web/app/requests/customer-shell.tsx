@@ -65,9 +65,15 @@ export async function CustomerShell({
       href: '/requests/offers',
       count: counts?.offers,
     },
-    // Matches are still read on the request they belong to, which is what this
-    // list is.
-    { key: 'matches', label: 'Eşleşmelerim', Icon: IconUsers, href: '/requests/my', count: counts?.matches },
+    // Matches have their own screen too, and for the same reason: this entry
+    // carried the href of the one above it, so it never went anywhere.
+    {
+      key: 'matches',
+      label: 'Eşleşmelerim',
+      Icon: IconUsers,
+      href: '/requests/matches',
+      count: counts?.matches,
+    },
     { key: 'messages', label: 'Mesajlar', Icon: IconMessage, href: null },
     { key: 'settings', label: 'Profil ve ayarlar', Icon: IconSettings, href: '/account/profile' },
   ];

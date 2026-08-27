@@ -93,3 +93,45 @@ export async function loadCustomerOffers(
     .flat()
     .sort((a, b) => Date.parse(b.offer.submittedAt) - Date.parse(a.offer.submittedAt));
 }
+
+export type CustomerMatchEntry = {
+  request: CustomerServiceRequest;
+  /**
+   * The offer the customer accepted, when it can be read. Null rather than
+   * absent: a match whose offers could not be loaded is still a match, and the
+   * row falls back to the request it belongs to.
+   */
+  acceptedOffer: RequestOfferPreview | null;
+};
+
+/**
+ * The customer's matches: their requests that reached MATCHED, with the offer
+ * each of them accepted.
+ *
+ * MATCHED and nothing else, because that is what the product already counts as
+ * a match — it is the state the sidebar counter is built from, and the state
+ * that opens the matched-contact reveal. Widening it here (to COMPLETED, say)
+ * would put a number in the sidebar and a different number under it, and would
+ * be a new product rule rather than a screen for an existing one.
+ */
+export async function loadCustomerMatches(
+  requests: CustomerServiceRequest[],
+): Promise<CustomerMatchEntry[]> {
+  const matched = requests.filter((request) => request.status === 'MATCHED');
+
+  return Promise.all(
+    matched.map(async (request) => {
+      try {
+        const offers = await apiFetch<RequestOfferPreview[]>(
+          `/service-requests/${request.id}/offers`,
+        );
+        return {
+          request,
+          acceptedOffer: offers.find((offer) => offer.status === 'ACCEPTED') ?? null,
+        };
+      } catch {
+        return { request, acceptedOffer: null };
+      }
+    }),
+  );
+}

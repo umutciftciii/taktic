@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { createAdmin, createCategory, prisma, uniqueSuffix } from '../src/fixtures';
+import { createAdmin, createCategory, prisma, uniqueLocation, uniqueSuffix } from '../src/fixtures';
 import { claimInvitationCount, waitForLatestClaimUrl } from '../src/outbox';
 import { primaryRuntime, providerClaimRuntime } from '../src/runtime';
 
@@ -28,11 +28,15 @@ type ApplicationValues = {
 
 function applicationValues(): ApplicationValues {
   const suffix = uniqueSuffix();
+  // A real province/district pair: the application form offers the canonical
+  // list as dependent selects and the API refuses a pair that does not exist,
+  // so an invented district could no longer be submitted here either.
+  const location = uniqueLocation();
   return {
     email: `e2e-claim-${suffix}@example.test`,
     businessName: `E2E Başvuru ${suffix}`,
-    city: 'İstanbul',
-    district: `Kadıköy-${suffix}`,
+    city: location.city,
+    district: location.district,
   };
 }
 
@@ -50,11 +54,14 @@ async function submitApplication(
   await form.locator('input[name="contactName"]').fill('E2E Yetkili');
   await form.locator('input[name="phone"]').fill('05551112233');
   await form.locator('input[name="email"]').fill(values.email);
-  await form.locator('input[name="city"]').fill(values.city);
-  await form.locator('input[name="district"]').fill(values.district);
+  // Province and district are dependent selects on both blocks: the district
+  // list is empty until a province is chosen, so selecting the district at all
+  // proves the cascade populated it.
+  await form.locator('select[name="city"]').selectOption(values.city);
+  await form.locator('select[name="district"]').selectOption(values.district);
   await form.locator(`input[name="categoryIds"][value="${categorySlugId}"]`).check();
-  await form.locator('input[name="serviceAreaCity"]').fill(values.city);
-  await form.locator('input[name="serviceAreaDistrict"]').fill(values.district);
+  await form.locator('select[name="serviceAreaCity"]').selectOption(values.city);
+  await form.locator('select[name="serviceAreaDistrict"]').selectOption(values.district);
 
   await form.getByRole('button', { name: 'Başvuruyu Gönder' }).click();
   await expect(actor.page).toHaveURL(/\/providers\/success$/);
@@ -325,11 +332,11 @@ test.describe('provider claim', () => {
       await form.locator('input[name="businessName"]').fill(values.businessName);
       await form.locator('input[name="contactName"]').fill('E2E Yetkili');
       await form.locator('input[name="phone"]').fill('05551112233');
-      await form.locator('input[name="city"]').fill(values.city);
-      await form.locator('input[name="district"]').fill(values.district);
+      await form.locator('select[name="city"]').selectOption(values.city);
+      await form.locator('select[name="district"]').selectOption(values.district);
       await form.locator(`input[name="categoryIds"][value="${category.id}"]`).check();
-      await form.locator('input[name="serviceAreaCity"]').fill(values.city);
-      await form.locator('input[name="serviceAreaDistrict"]').fill(values.district);
+      await form.locator('select[name="serviceAreaCity"]').selectOption(values.city);
+      await form.locator('select[name="serviceAreaDistrict"]').selectOption(values.district);
       await form.getByRole('button', { name: 'Başvuruyu Gönder' }).click();
 
       await expect(applicant.page).toHaveURL(/\/providers\/success$/);

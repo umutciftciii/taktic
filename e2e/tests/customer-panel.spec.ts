@@ -172,6 +172,86 @@ test.describe('customer panel', () => {
     }
   });
 
+  test('the Eşleşmelerim sidebar link opens the matches list, by click and by keyboard', async ({
+    browser,
+  }) => {
+    const { customer, admin, provider, requestId, offerId } = await requestWithOneOffer(browser);
+
+    try {
+      await customer.gotoWeb('/requests/my');
+      const sidebar = customer.page.getByRole('navigation', { name: 'Bölüm navigasyonu' });
+      const matchesLink = sidebar.getByRole('link', { name: 'Eşleşmelerim' });
+
+      // The three panel entries are three routes now. Two of them used to be
+      // the third one's href, which is why neither ever went anywhere.
+      await expect(matchesLink).toHaveAttribute('href', '/requests/matches');
+      const hrefs = await Promise.all(
+        ['Taleplerim', 'Teklifler', 'Eşleşmelerim'].map((label) =>
+          sidebar.getByRole('link', { name: label }).getAttribute('href'),
+        ),
+      );
+      expect(new Set(hrefs).size).toBe(3);
+
+      // Nothing has been accepted yet, so the screen says so rather than
+      // showing a row.
+      await matchesLink.click();
+      await expect(customer.page).toHaveURL(/\/requests\/matches$/);
+      await expect(customer.page.getByRole('heading', { name: 'Eşleşmelerim' })).toBeVisible();
+      await expect(customer.page.getByRole('heading', { name: 'Henüz eşleşme yok' })).toBeVisible();
+      await expect(customer.page.getByTestId('customer-match-list')).toHaveCount(0);
+      await assertNoErrorScreen(customer.page);
+
+      await expect(
+        customer.page
+          .getByRole('navigation', { name: 'Bölüm navigasyonu' })
+          .getByRole('link', { name: 'Eşleşmelerim' }),
+      ).toHaveAttribute('aria-current', 'page');
+
+      // ---- accepting one offer is what puts a row here -------------------
+      await acceptOffer(customer, requestId, offerId);
+      await customer.gotoWeb('/requests/matches');
+
+      const rows = customer.page.getByTestId('customer-match-list').locator('li');
+      await expect(rows).toHaveCount(1);
+      // The counter and the list are the same set, so they agree.
+      await expect(customer.page.getByTestId('cdash-nav-count-matches')).toHaveText('1');
+
+      // Both links lead to routes that already existed: the request screen and
+      // the accepted offer's own detail.
+      await expect(rows.getByRole('link', { name: 'Talebi aç' })).toHaveAttribute(
+        'href',
+        `/requests/${requestId}/offers`,
+      );
+      await expect(rows.getByRole('link', { name: 'Kabul edilen teklif' })).toHaveAttribute(
+        'href',
+        `/requests/${requestId}/offers/${offerId}`,
+      );
+
+      // Reachable without a mouse.
+      await customer.gotoWeb('/requests/my');
+      await customer.page
+        .getByRole('navigation', { name: 'Bölüm navigasyonu' })
+        .getByRole('link', { name: 'Eşleşmelerim' })
+        .focus();
+      await customer.page.keyboard.press('Enter');
+      await expect(customer.page).toHaveURL(/\/requests\/matches$/);
+
+      // Signed out, the route keeps the panel's existing auth behaviour.
+      const stranger = await Actor.open(browser, 'stranger', primaryRuntime);
+      try {
+        await stranger.gotoWeb('/requests/matches');
+        await expect(stranger.page).toHaveURL(/\/login\?redirectTo=/);
+        expect(new URL(stranger.page.url()).searchParams.get('redirectTo')).toBe(
+          '/requests/matches',
+        );
+      } finally {
+        await stranger.close();
+      }
+    } finally {
+      await Promise.all([customer.close(), admin.close(), provider.close()]);
+    }
+  });
+
   test('an offer offers only the actions that decide something', async ({ browser }) => {
     const { customer, admin, provider, requestId, offerId } = await requestWithOneOffer(browser);
 

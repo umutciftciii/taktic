@@ -27,6 +27,7 @@ import { runSerializable } from '../../common/serializable-transaction';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { resolveArea, resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import {
   offerNotWithdrawableException,
@@ -901,6 +902,7 @@ export class ProvidersService {
   ): Promise<NormalizedProviderPayload> {
     const categoryIds = normalizeCategoryIds(dto.categoryIds ?? []);
     const serviceAreas = normalizeServiceAreas(dto.serviceAreas ?? []);
+    const address = normalizeBusinessAddress(dto);
 
     await this.ensureActiveCategories(categoryIds);
 
@@ -915,8 +917,10 @@ export class ProvidersService {
       email: normalizeProviderEmail(dto.email),
       taxType: normalizeNullableString(dto.taxType),
       taxNumber: normalizeNullableString(dto.taxNumber),
-      city: normalizeRequiredString(dto.city, 'City'),
-      district: normalizeRequiredString(dto.district, 'District'),
+      // Canonical spelling, for the same reason the service areas above get it:
+      // discovery compares a request's city and district against these as text.
+      city: address.city,
+      district: address.district,
       addressNote: normalizeNullableString(dto.addressNote),
       description: normalizeNullableString(dto.description),
       categoryIds,
@@ -1237,16 +1241,51 @@ function normalizeCategoryIds(categoryIds: string[]) {
   return normalized;
 }
 
+/**
+ * The business address, in the canonical spelling of the shipped location list.
+ *
+ * The DTO already refused a pair that does not exist; this is what stops
+ * "istanbul" and "İstanbul" from becoming two different places on a screen that
+ * lists providers by city.
+ */
+function normalizeBusinessAddress(dto: CreateProviderDto | UpdateProviderDto) {
+  const resolved = resolveLocation({
+    city: normalizeRequiredString(dto.city, 'City'),
+    district: normalizeRequiredString(dto.district, 'District'),
+  });
+
+  if (!resolved) {
+    throw new BadRequestException(
+      'Seçilen il ve ilçe birlikte geçerli bir adres oluşturmuyor.',
+    );
+  }
+
+  return { city: resolved.city, district: resolved.district };
+}
+
 function normalizeServiceAreas(serviceAreas: ProviderServiceAreaDto[]) {
   if (!Array.isArray(serviceAreas) || serviceAreas.length === 0) {
     throw new BadRequestException('At least one service area is required');
   }
 
-  const normalized = serviceAreas.map((area) => ({
-    city: normalizeRequiredString(area.city, 'Service area city'),
-    district: normalizeNullableString(area.district),
-    neighborhood: normalizeNullableString(area.neighborhood),
-  }));
+  const normalized = serviceAreas.map((area) => {
+    // Canonical, because discovery matches these against a request's own
+    // canonical city and district as text. A district left out still means the
+    // whole province, exactly as it did before.
+    const resolved = resolveArea({
+      city: normalizeRequiredString(area.city, 'Service area city'),
+      district: normalizeNullableString(area.district),
+      neighborhood: normalizeNullableString(area.neighborhood),
+    });
+
+    if (!resolved) {
+      throw new BadRequestException(
+        'Seçilen hizmet bölgesi geçerli bir il/ilçe birleşimi değil.',
+      );
+    }
+
+    return resolved;
+  });
   const keys = normalized.map((area) =>
     [area.city.toLocaleLowerCase('tr-TR'), area.district?.toLocaleLowerCase('tr-TR') ?? '', area.neighborhood?.toLocaleLowerCase('tr-TR') ?? ''].join('|'),
   );
