@@ -5,6 +5,11 @@ import {
   notificationErrorLabel,
   type NotificationErrorCode,
 } from '../notifications/notification-errors';
+import {
+  NOTIFICATION_RETRY_BLOCK_LABELS,
+  notificationRetryEligibility,
+  type NotificationRetryBlock,
+} from './notification-retry.rules';
 
 /**
  * The templates this build sends. Used to offer a sensible filter list; the
@@ -46,9 +51,21 @@ export const notificationLogSelect = {
   requestId: true,
   userId: true,
   providerId: true,
+  attemptCount: true,
+  lastAttemptAt: true,
   createdAt: true,
   sentAt: true,
   failedAt: true,
+  /**
+   * Read, never returned.
+   *
+   * The key names the state transition a message belonged to, which is what
+   * decides whether the row can be rebuilt and re-sent. It is derived from ids
+   * and timestamps only — see the schema — but it is an internal handle rather
+   * than something an operator acts on, so it is consumed here to compute
+   * `retryable` and left out of the payload.
+   */
+  dedupeKey: true,
 } satisfies Prisma.NotificationLogSelect;
 
 export type NotificationLogRow = Prisma.NotificationLogGetPayload<{
@@ -70,14 +87,25 @@ export type SafeNotificationLog = {
   requestId: string | null;
   userId: string | null;
   providerId: string | null;
+  /** Attempts against this one message: the first send plus every retry. */
+  attemptCount: number;
+  /** When the latest attempt was claimed, including one still in flight. */
+  lastAttemptAt: Date | null;
   createdAt: Date;
   sentAt: Date | null;
   failedAt: Date | null;
+  /** Whether an operator may re-send this exact row. */
+  retryable: boolean;
+  /** Why not, as a closed code. Null when it is retryable. */
+  retryBlock: NotificationRetryBlock | null;
+  /** The same reason as a sentence, so the screen does not restate the rules. */
+  retryBlockLabel: string | null;
 };
 
 export function toSafeNotificationLog(row: NotificationLogRow): SafeNotificationLog {
   const errorCode = normalizeStoredErrorCode(row.errorCode);
   const providerMessageId = projectProviderMessageId(row.providerMessageId);
+  const retry = notificationRetryEligibility(row);
 
   return {
     id: row.id,
@@ -91,9 +119,14 @@ export function toSafeNotificationLog(row: NotificationLogRow): SafeNotification
     requestId: row.requestId,
     userId: row.userId,
     providerId: row.providerId,
+    attemptCount: row.attemptCount,
+    lastAttemptAt: row.lastAttemptAt,
     createdAt: row.createdAt,
     sentAt: row.sentAt,
     failedAt: row.failedAt,
+    retryable: retry.retryable,
+    retryBlock: retry.block,
+    retryBlockLabel: retry.block ? NOTIFICATION_RETRY_BLOCK_LABELS[retry.block] : null,
   };
 }
 

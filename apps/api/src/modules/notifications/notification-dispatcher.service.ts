@@ -67,11 +67,17 @@ export type DedupedDispatchOutcome =
  * Nothing that could be replayed is stored: no code, token, action URL or
  * message body, and the recipient only ever appears masked.
  *
- * There is deliberately no automatic re-send. A FAILED row stays visible in
+ * There is deliberately no *automatic* re-send. A FAILED row stays visible in
  * NotificationLog and the transition is not re-opened, which is the same choice
  * the request reminder makes and for the same reason: re-mailing on every pass
- * while a transport is broken turns one undelivered message into a flood, and a
- * timeout that actually delivered would be sent twice.
+ * while a transport is broken turns one undelivered message into a flood.
+ *
+ * What does exist is {@link NotificationDispatcher.resendExistingEmail}: one
+ * deliberate admin action, against one existing row, re-sent under that row's
+ * own idempotency key. It creates no notification identity of its own — no new
+ * log row, no new dedupeKey — so "one message per real transition" survives it,
+ * and a timeout that actually delivered is de-duplicated by the provider rather
+ * than delivered twice.
  */
 @Injectable()
 export class NotificationDispatcher {
@@ -93,7 +99,7 @@ export class NotificationDispatcher {
       maskEmail(message.to),
       context,
       null,
-      () => this.email.send(message),
+      (logId) => this.email.send({ ...message, idempotencyKey: notificationIdempotencyKey(logId) }),
     );
 
     // Unreachable without a dedupe key, and narrowed rather than cast so it
@@ -119,7 +125,7 @@ export class NotificationDispatcher {
       maskEmail(message.to),
       context,
       context.dedupeKey,
-      () => this.email.send(message),
+      (logId) => this.email.send({ ...message, idempotencyKey: notificationIdempotencyKey(logId) }),
     );
   }
 
@@ -130,6 +136,8 @@ export class NotificationDispatcher {
       maskPhone(message.to),
       context,
       null,
+      // No SMS provider is wired yet, and none of the stand-ins de-duplicate,
+      // so nothing is derived here rather than passing a key nobody reads.
       () => this.sms.send(message),
     );
 
@@ -146,7 +154,7 @@ export class NotificationDispatcher {
     maskedRecipient: string,
     context: DispatchContext,
     dedupeKey: string | null,
-    send: () => Promise<{ providerMessageId: string | null }>,
+    send: (logId: string) => Promise<{ providerMessageId: string | null }>,
   ): Promise<DedupedDispatchOutcome> {
     let log: { id: string };
 
@@ -161,6 +169,7 @@ export class NotificationDispatcher {
           userId: context.userId ?? null,
           providerId: context.providerId ?? null,
           dedupeKey,
+          lastAttemptAt: new Date(),
         },
         select: { id: true },
       });
@@ -176,18 +185,61 @@ export class NotificationDispatcher {
       throw error;
     }
 
+    return this.attempt(log.id, channel, template, maskedRecipient, send);
+  }
+
+  /**
+   * Re-sends an existing audit row, without creating a second one.
+   *
+   * The caller owns the transition into this method: it has already moved the
+   * row out of FAILED in a single conditional update, so exactly one caller can
+   * be here for a given row at a time and no new notification identity — no new
+   * id, no new dedupeKey — comes into existence. This method only performs the
+   * send and records its outcome on the row it was given.
+   *
+   * The idempotency key is derived from that row's id, so the retry is offered
+   * to the provider under the same name the first attempt used.
+   */
+  resendExistingEmail(
+    logId: string,
+    message: NotificationMessage,
+    maskedRecipient: string,
+  ): Promise<DispatchOutcome> {
+    return this.attempt(logId, NotificationChannel.EMAIL, message.template, maskedRecipient, (id) =>
+      this.email.send({ ...message, idempotencyKey: notificationIdempotencyKey(id) }),
+    );
+  }
+
+  /**
+   * Records the outcome of one attempt against a row that already exists.
+   *
+   * `lastAttemptAt` is not touched here: it marks when the attempt was claimed,
+   * which both callers do before reaching this point, and overwriting it with
+   * the completion time would lose the only timestamp a row stuck in PENDING
+   * carries.
+   */
+  private async attempt(
+    logId: string,
+    channel: NotificationChannel,
+    template: string,
+    maskedRecipient: string,
+    send: (logId: string) => Promise<{ providerMessageId: string | null }>,
+  ): Promise<DispatchOutcome> {
     try {
-      const result = await send();
+      const result = await send(logId);
       await this.prisma.notificationLog.update({
-        where: { id: log.id },
+        where: { id: logId },
         data: {
           status: NotificationStatus.SENT,
           sentAt: new Date(),
           providerMessageId: result.providerMessageId,
+          // Cleared on success so a row that failed and was later re-sent does
+          // not keep advertising a defect that is no longer true.
+          errorCode: null,
         },
       });
 
-      return { logId: log.id, status: NotificationStatus.SENT, errorCode: null };
+      return { logId, status: NotificationStatus.SENT, errorCode: null };
     } catch (error) {
       const errorCode = classifyNotificationError(error);
       // Only the class is recorded and logged. A provider error string can
@@ -195,7 +247,7 @@ export class NotificationDispatcher {
       this.logger.warn(`${template} via ${channel} failed for ${maskedRecipient}: ${errorCode}`);
 
       await this.prisma.notificationLog.update({
-        where: { id: log.id },
+        where: { id: logId },
         data: {
           status: NotificationStatus.FAILED,
           failedAt: new Date(),
@@ -203,7 +255,19 @@ export class NotificationDispatcher {
         },
       });
 
-      return { logId: log.id, status: NotificationStatus.FAILED, errorCode };
+      return { logId, status: NotificationStatus.FAILED, errorCode };
     }
   }
+}
+
+/**
+ * The transport-facing name of one audit row.
+ *
+ * Derived from the row id alone, so it is stable across the first dispatch and
+ * every later retry of the same row — see NotificationMessage.idempotencyKey.
+ * The prefix keeps it recognisable in a provider's dashboard without saying
+ * anything about the message.
+ */
+export function notificationIdempotencyKey(logId: string): string {
+  return `taktic-notification-${logId}`;
 }

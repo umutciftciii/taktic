@@ -508,6 +508,17 @@ model NotificationLog {
   /// It is derived from ids and timestamps only. No address, no token, no
   /// amount — nothing that would widen what this table holds.
   dedupeKey         String?
+  /// How many times this one message has been handed to a transport — the
+  /// first dispatch plus every admin-triggered retry of the same row.
+  ///
+  /// Starts at 1 because a row only exists once a send has been attempted, and
+  /// the default backfills rows written before the column existed with the one
+  /// attempt they really had.
+  attemptCount      Int                 @default(1)
+  /// When the most recent attempt was claimed. Distinct from sentAt/failedAt:
+  /// those record an outcome, this records that the work started, so a row
+  /// stuck in PENDING still says when.
+  lastAttemptAt     DateTime?
   createdAt         DateTime            @default(now())
   sentAt            DateTime?
   failedAt          DateTime?

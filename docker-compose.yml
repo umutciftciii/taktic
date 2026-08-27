@@ -22,7 +22,18 @@ services:
     image: node:22-alpine
     container_name: taktic-api
     working_dir: /app
-    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @taktic/api dev"
+    # Dependencies, then the Prisma client, then the API. The generate step
+    # is not redundant with the host's: /app/node_modules is a named volume,
+    # so a client generated on the host never reaches this container and a
+    # freshly added model reads as `undefined` inside it. Regenerating on
+    # every start makes "recreate the container" the one reliable way to pick
+    # up a schema change.
+    #
+    # This is client generation only. It applies no migration and replaces no
+    # `migrate deploy`; the migration lifecycle is unchanged.
+    #
+    # Only the API gets it — web and admin never import @prisma/client.
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm db:generate && pnpm --filter @taktic/api dev"
     restart: unless-stopped
     depends_on:
       postgres:

@@ -31,14 +31,33 @@ export const NOTIFICATION_ERROR_CODES = [
    * difference between fixing it in a minute and hunting for it.
    */
   'EMAIL_PUBLIC_URL_INVALID',
+  /**
+   * A retry could not rebuild the message. The transition's source row is gone,
+   * no longer in the state the message describes, or the platform no longer
+   * holds an address for its recipient.
+   *
+   * Only ever written by the admin retry path, and never by an adapter: it is a
+   * statement about this deployment's own data, not about a transport. It names
+   * a class and nothing else — which row, and which of those three it was, is
+   * not recorded, because that would start describing the message.
+   */
+  'SOURCE_UNAVAILABLE',
   'UNKNOWN',
 ] as const;
 
 export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];
 
-/** The classes an adapter may raise; UNKNOWN is the dispatcher's own fallback. */
+/**
+ * The classes an adapter may raise.
+ *
+ * UNKNOWN is the dispatcher's own fallback, and SOURCE_UNAVAILABLE is written
+ * directly by the retry path — neither may be claimed by a thrown error, so an
+ * adapter cannot dress a transport failure up as one of them.
+ */
 const RAISABLE_ERROR_CODES: ReadonlySet<string> = new Set(
-  NOTIFICATION_ERROR_CODES.filter((code) => code !== 'UNKNOWN'),
+  NOTIFICATION_ERROR_CODES.filter(
+    (code) => code !== 'UNKNOWN' && code !== 'SOURCE_UNAVAILABLE',
+  ),
 );
 
 /** Operator-facing wording. Says what class of thing went wrong, nothing more. */
@@ -49,6 +68,7 @@ export const NOTIFICATION_ERROR_LABELS: Record<NotificationErrorCode, string> = 
   INVALID_RECIPIENT: 'Geçersiz alıcı',
   EMAIL_BRANDING_INCOMPLETE: 'Şirket ve e-posta ayarları eksik',
   EMAIL_PUBLIC_URL_INVALID: 'Uygulamanın public adresi e-postada kullanılamaz',
+  SOURCE_UNAVAILABLE: 'Kaynak kayıt yeniden oluşturulamıyor',
   UNKNOWN: 'Bilinmeyen hata',
 };
 
@@ -67,8 +87,8 @@ export function classifyNotificationError(error: unknown): NotificationErrorCode
 
 /**
  * Read-side normaliser. A stored value outside the set is reported as UNKNOWN
- * rather than passed through, so the response can only ever carry one of these
- * five constants.
+ * rather than passed through, so the response can only ever carry one of the
+ * constants above.
  */
 export function normalizeStoredErrorCode(stored: string | null): NotificationErrorCode | null {
   if (!stored) {

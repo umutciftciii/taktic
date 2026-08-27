@@ -28,6 +28,7 @@ import {
   DispatchContext,
   NotificationDispatcher,
 } from './notification-dispatcher.service';
+import { NotificationMessage } from './notification.port';
 import {
   TransactionalEmailTemplate,
   transactionalSubject,
@@ -130,7 +131,7 @@ export class TransactionalMailService {
   // ──────────────────── 03 · provider.application_submitted ──────────────────
 
   async sendProviderApplicationReceived(providerId: string) {
-    const provider = await this.loadProvider(providerId);
+    const provider = await loadProvider(this.prisma, providerId);
     if (!provider?.recipient) {
       return;
     }
@@ -138,16 +139,7 @@ export class TransactionalMailService {
     await this.send(
       'provider-application-received',
       provider.recipient,
-      {
-        fullName: provider.contactName,
-        businessName: provider.businessName,
-        categories: provider.categories,
-        areas: provider.areas,
-        statusLabel: providerStatusLabel(provider.status),
-        // Only for an application that already belongs to an account. A guest
-        // application is reached through the claim link, not by editing.
-        profileUrl: provider.userId ? providerProfileUrl(provider.id) : null,
-      },
+      providerApplicationReceivedData(provider),
       {
         providerId: provider.id,
         userId: provider.userId,
@@ -164,7 +156,7 @@ export class TransactionalMailService {
    * twice; the same approval replayed carries the same timestamp and does not.
    */
   async sendProviderApplicationApproved(providerId: string, approvedAt: Date) {
-    const provider = await this.loadProvider(providerId);
+    const provider = await loadProvider(this.prisma, providerId);
     if (!provider?.recipient) {
       return;
     }
@@ -172,14 +164,7 @@ export class TransactionalMailService {
     await this.send(
       'provider-application-approved',
       provider.recipient,
-      {
-        fullName: provider.contactName,
-        businessName: provider.businessName,
-        categories: provider.categories,
-        areas: provider.areas,
-        requestsUrl: providerRequestsUrl(provider.id),
-        accountUrl: providerAccountUrl(),
-      },
+      providerApplicationApprovedData(provider),
       {
         providerId: provider.id,
         userId: provider.userId,
@@ -191,7 +176,7 @@ export class TransactionalMailService {
   // ────────────────────────────── 05 · request.created ───────────────────────
 
   async sendRequestReceived(requestId: string) {
-    const request = await this.loadRequest(requestId);
+    const request = await loadRequest(this.prisma, requestId);
     if (!request?.customerEmail) {
       return;
     }
@@ -199,18 +184,7 @@ export class TransactionalMailService {
     await this.send(
       'request-received',
       request.customerEmail,
-      {
-        fullName: request.customerName,
-        requestNumber: request.requestNumber,
-        categoryName: request.category.name,
-        city: request.city,
-        district: request.district,
-        preferredDate: request.preferredDate?.toISOString() ?? null,
-        urgency: request.urgency,
-        statusLabel: requestStatusLabel(request.status),
-        requestUrl: customerRequestUrl(request.id),
-        accountUrl: customerAccountUrl(),
-      },
+      requestReceivedData(request),
       {
         requestId: request.id,
         userId: request.customerId,
@@ -237,26 +211,18 @@ export class TransactionalMailService {
    * transaction holding locks while a mail provider answers.
    */
   async fanOutApprovedRequest(requestId: string, approvedAt: Date) {
-    const request = await this.loadRequest(requestId);
+    const request = await loadRequest(this.prisma, requestId);
     if (!request || request.status !== ServiceRequestStatus.APPROVED) {
       return { reached: 0, notified: 0 };
     }
 
-    const audience = await this.findMatchingProviders(request);
+    const audience = await findMatchingProviders(this.prisma, request);
 
     if (request.customerEmail) {
       await this.send(
         'request-published',
         request.customerEmail,
-        {
-          fullName: request.customerName,
-          requestNumber: request.requestNumber,
-          categoryName: request.category.name,
-          district: request.district,
-          reachedProviderCount: String(audience.length),
-          requestUrl: customerRequestUrl(request.id),
-          accountUrl: customerAccountUrl(),
-        },
+        requestPublishedData(request, audience.length),
         {
           requestId: request.id,
           userId: request.customerId,
@@ -275,24 +241,7 @@ export class TransactionalMailService {
       const outcome = await this.send(
         'request-available',
         provider.recipient,
-        {
-          fullName: provider.contactName,
-          requestNumber: request.requestNumber,
-          categoryName: request.category.name,
-          // City and district only. The neighbourhood, the address note and
-          // every customer contact field stay out of a message that reaches
-          // everybody who matched.
-          city: request.city,
-          district: request.district,
-          qualityScore: String(request.qualityScore),
-          creditCost:
-            request.category.offerCreditCost === null
-              ? null
-              : String(request.category.offerCreditCost),
-          creditBalance: String(await this.creditBalance(provider.id)),
-          requestUrl: providerRequestUrl(provider.id, request.id),
-          accountUrl: providerAccountUrl(),
-        },
+        requestAvailableData(request, provider, await creditBalance(this.prisma, provider.id)),
         {
           requestId: request.id,
           providerId: provider.id,
@@ -320,7 +269,7 @@ export class TransactionalMailService {
   // ─────────────────────────────── 07 · offer.created ────────────────────────
 
   async sendOfferReceived(offerId: string) {
-    const offer = await this.loadOffer(offerId);
+    const offer = await loadOffer(this.prisma, offerId);
     if (!offer?.request.customerEmail) {
       return;
     }
@@ -334,19 +283,7 @@ export class TransactionalMailService {
     await this.send(
       'offer-received',
       offer.request.customerEmail,
-      {
-        fullName: offer.request.customerName,
-        requestNumber: offer.request.requestNumber,
-        // The public profile field, and only that. There is no rating system to
-        // report and nothing here reveals the provider's contact details.
-        providerName: offer.provider.businessName,
-        offerAmountMinor: String(offer.priceAmount),
-        availability: offer.estimatedStartDate?.toISOString() ?? null,
-        offerNote: offer.message,
-        openOfferCount: String(openOfferCount),
-        offersUrl: customerRequestUrl(offer.requestId),
-        accountUrl: customerAccountUrl(),
-      },
+      offerReceivedData(offer, openOfferCount),
       {
         requestId: offer.requestId,
         userId: offer.request.customerId,
@@ -368,28 +305,18 @@ export class TransactionalMailService {
    * simply not passed and the rows disappear from the design.
    */
   async sendMatchNotifications(offerId: string) {
-    const offer = await this.loadOffer(offerId);
+    const offer = await loadOffer(this.prisma, offerId);
     if (!offer || offer.status !== OfferStatus.ACCEPTED) {
       return;
     }
 
-    const disclosed = await this.contactDisclosureFor(offer.requestId, offer.id, offer.providerId);
+    const disclosed = await contactDisclosureFor(this.prisma, offer.requestId, offer.id, offer.providerId);
 
     if (offer.request.customerEmail) {
       await this.send(
         'match-customer',
         offer.request.customerEmail,
-        {
-          fullName: offer.request.customerName,
-          businessName: offer.provider.businessName,
-          contactName: disclosed ? offer.provider.contactName : null,
-          contactPhone: disclosed ? offer.provider.phone : null,
-          acceptedAmountMinor: String(offer.priceAmount),
-          requestNumber: offer.request.requestNumber,
-          categoryName: offer.request.category.name,
-          requestUrl: customerRequestUrl(offer.requestId),
-          accountUrl: customerAccountUrl(),
-        },
+        matchCustomerData(offer, disclosed),
         {
           requestId: offer.requestId,
           userId: offer.request.customerId,
@@ -404,22 +331,7 @@ export class TransactionalMailService {
       await this.send(
         'offer-accepted',
         providerRecipient,
-        {
-          fullName: offer.provider.contactName,
-          customerName: disclosed ? offer.request.customerName : null,
-          customerPhone: disclosed ? offer.request.customerPhone : null,
-          // District and city — what the offer was quoted for. The
-          // neighbourhood and the address note are not part of the brief the
-          // winning provider receives, on screen or here.
-          city: offer.request.city,
-          district: offer.request.district,
-          acceptedAmountMinor: String(offer.priceAmount),
-          preferredDate: offer.request.preferredDate?.toISOString() ?? null,
-          urgency: offer.request.urgency,
-          requestNumber: offer.request.requestNumber,
-          offerUrl: providerOfferUrl(offer.providerId, offer.id),
-          accountUrl: providerAccountUrl(),
-        },
+        offerAcceptedData(offer, disclosed),
         {
           requestId: offer.requestId,
           providerId: offer.providerId,
@@ -443,7 +355,7 @@ export class TransactionalMailService {
    */
   async sendOfferNotSelected(offerIds: readonly string[]) {
     for (const offerId of offerIds) {
-      const offer = await this.loadOffer(offerId);
+      const offer = await loadOffer(this.prisma, offerId);
       if (!offer || offer.status !== OfferStatus.REJECTED) {
         continue;
       }
@@ -456,14 +368,7 @@ export class TransactionalMailService {
       await this.send(
         'offer-not-selected',
         recipient,
-        {
-          fullName: offer.provider.contactName,
-          requestNumber: offer.request.requestNumber,
-          categoryName: offer.request.category.name,
-          offerAmountMinor: String(offer.priceAmount),
-          requestsUrl: providerRequestsUrl(offer.providerId),
-          accountUrl: providerAccountUrl(),
-        },
+        offerNotSelectedData(offer),
         {
           requestId: offer.requestId,
           providerId: offer.providerId,
@@ -501,30 +406,20 @@ export class TransactionalMailService {
       return;
     }
 
-    const provider = await this.loadProvider(transaction.providerId);
+    const provider = await loadProvider(this.prisma, transaction.providerId);
     if (!provider?.recipient) {
       return;
     }
 
     const offer =
       transaction.referenceType === 'Offer' && transaction.referenceId
-        ? await this.loadOffer(transaction.referenceId)
+        ? await loadOffer(this.prisma, transaction.referenceId)
         : null;
 
     await this.send(
       'credit-refunded',
       provider.recipient,
-      {
-        fullName: provider.contactName,
-        requestNumber: offer?.request.requestNumber ?? null,
-        categoryName: offer?.request.category.name ?? null,
-        refundReason: knownRefundReasonLabel(transaction.reason),
-        refundedCredits: String(transaction.amount),
-        previousBalance: String(transaction.balanceAfter - transaction.amount),
-        currentBalance: String(transaction.balanceAfter),
-        creditsUrl: providerCreditsUrl(provider.id),
-        accountUrl: providerAccountUrl(),
-      },
+      creditRefundedData(provider, offer, transaction),
       {
         providerId: provider.id,
         userId: provider.userId,
@@ -532,6 +427,201 @@ export class TransactionalMailService {
         dedupeKey: `credit-refunded:${transaction.id}`,
       },
     );
+  }
+
+  // ─────────────────────────── admin-triggered retry ─────────────────────────
+
+  /**
+   * Rebuilds one already-logged message from live domain data.
+   *
+   * This is the whole of what a retry is allowed to do. It takes no recipient,
+   * no template variables and no body from its caller — only the template name
+   * and the dedupe key that were written on the audit row when the message was
+   * first attempted. The key names the transition ("offer-accepted:<offerId>"),
+   * the entity behind it is loaded again here, and the payload is composed by
+   * exactly the same builders the first attempt used. An operator therefore
+   * cannot influence what a retried message says, and a retried message cannot
+   * say something the first one would not have.
+   *
+   * "Live data" is deliberate in both directions. The guards each transition
+   * applies are re-applied: an application that is no longer approved, an offer
+   * that is no longer accepted or rejected, a provider who no longer matches
+   * the request all compose to null rather than to a message. And contact
+   * details are resolved from the ContactRevealEvent again, so a match whose
+   * disclosure was never opened — or has since been turned off — is re-rendered
+   * without them.
+   *
+   * Returns null when the message cannot be rebuilt: an unknown or
+   * non-reproducible template, a malformed key, a source row that no longer
+   * exists, or a recipient the platform no longer holds an address for. The
+   * caller records that as a safe failure.
+   */
+  async composeRetryMessage(
+    template: string,
+    dedupeKey: string | null,
+  ): Promise<NotificationMessage | null> {
+    const source = parseRetrySource(template, dedupeKey);
+    if (!source) {
+      return null;
+    }
+
+    const composed = await this.rebuild(source);
+    if (!composed) {
+      return null;
+    }
+
+    return {
+      template: source.template,
+      to: composed.to,
+      subject: transactionalSubject(source.template, composed.data),
+      data: composed.data,
+    };
+  }
+
+  private async rebuild(source: RetrySource): Promise<ComposedMail | null> {
+    switch (source.template) {
+      case 'provider-application-received': {
+        const provider = await loadProvider(this.prisma, source.ids[0]);
+        return provider?.recipient
+          ? { to: provider.recipient, data: providerApplicationReceivedData(provider) }
+          : null;
+      }
+
+      case 'provider-application-approved': {
+        const provider = await loadProvider(this.prisma, source.ids[0]);
+        // The message says the application was approved, so it may only be
+        // rebuilt while that is still true. A suspended or re-rejected
+        // application produces nothing.
+        if (!provider?.recipient || provider.status !== ProviderStatus.APPROVED) {
+          return null;
+        }
+
+        return { to: provider.recipient, data: providerApplicationApprovedData(provider) };
+      }
+
+      case 'request-received': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        return request?.customerEmail
+          ? { to: request.customerEmail, data: requestReceivedData(request) }
+          : null;
+      }
+
+      case 'request-published': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        if (!request?.customerEmail || request.status !== ServiceRequestStatus.APPROVED) {
+          return null;
+        }
+
+        // The reach is counted again rather than remembered: the number in the
+        // message has to be one this platform can stand behind at the moment
+        // it is sent.
+        const audience = await findMatchingProviders(this.prisma, request);
+        return { to: request.customerEmail, data: requestPublishedData(request, audience.length) };
+      }
+
+      case 'request-available': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        if (!request || request.status !== ServiceRequestStatus.APPROVED) {
+          return null;
+        }
+
+        // Membership is re-derived from the same matcher the discovery screen
+        // uses, not taken from the audit row. A provider who has since been
+        // suspended, dropped the category or moved out of the area is no longer
+        // in the audience and gets nothing.
+        const audience = await findMatchingProviders(this.prisma, request);
+        const provider = audience.find((candidate) => candidate.id === source.ids[1]);
+        if (!provider?.recipient) {
+          return null;
+        }
+
+        return {
+          to: provider.recipient,
+          data: requestAvailableData(request, provider, await creditBalance(this.prisma, provider.id)),
+        };
+      }
+
+      case 'offer-received': {
+        const offer = await loadOffer(this.prisma, source.ids[0]);
+        // An offer the provider has since withdrawn is not news the customer
+        // should receive now, however true it was when it was first sent.
+        if (!offer?.request.customerEmail || offer.status === OfferStatus.WITHDRAWN) {
+          return null;
+        }
+
+        return {
+          to: offer.request.customerEmail,
+          data: offerReceivedData(offer, await countOpenOffers(this.prisma, offer.requestId)),
+        };
+      }
+
+      case 'match-customer': {
+        const offer = await loadOffer(this.prisma, source.ids[0]);
+        if (!offer || offer.status !== OfferStatus.ACCEPTED || !offer.request.customerEmail) {
+          return null;
+        }
+
+        return {
+          to: offer.request.customerEmail,
+          data: matchCustomerData(
+            offer,
+            await contactDisclosureFor(this.prisma, offer.requestId, offer.id, offer.providerId),
+          ),
+        };
+      }
+
+      case 'offer-accepted': {
+        const offer = await loadOffer(this.prisma, source.ids[0]);
+        if (!offer || offer.status !== OfferStatus.ACCEPTED) {
+          return null;
+        }
+
+        const recipient = recipientFor(offer.provider);
+        if (!recipient) {
+          return null;
+        }
+
+        return {
+          to: recipient,
+          data: offerAcceptedData(
+            offer,
+            await contactDisclosureFor(this.prisma, offer.requestId, offer.id, offer.providerId),
+          ),
+        };
+      }
+
+      case 'offer-not-selected': {
+        const offer = await loadOffer(this.prisma, source.ids[0]);
+        if (!offer || offer.status !== OfferStatus.REJECTED) {
+          return null;
+        }
+
+        const recipient = recipientFor(offer.provider);
+        return recipient ? { to: recipient, data: offerNotSelectedData(offer) } : null;
+      }
+
+      case 'credit-refunded': {
+        const transaction = await loadRefundTransaction(this.prisma, source.ids[0]);
+        if (!transaction) {
+          return null;
+        }
+
+        const provider = await loadProvider(this.prisma, transaction.providerId);
+        if (!provider?.recipient) {
+          return null;
+        }
+
+        const offer =
+          transaction.referenceType === 'Offer' && transaction.referenceId
+            ? await loadOffer(this.prisma, transaction.referenceId)
+            : null;
+
+        return {
+          to: provider.recipient,
+          data: creditRefundedData(provider, offer, transaction),
+        };
+      }
+    }
   }
 
   // ──────────────────────────────── plumbing ─────────────────────────────────
@@ -573,6 +663,7 @@ export class TransactionalMailService {
       return null;
     }
   }
+}
 
   /**
    * The providers a newly approved request reaches.
@@ -583,7 +674,9 @@ export class TransactionalMailService {
    * Nothing widens it — a provider who could not find this request on their own
    * screen does not receive a mail about it.
    */
-  private async findMatchingProviders(request: {
+async function findMatchingProviders(
+  prisma: PrismaService,
+  request: {
     id: string;
     categoryId: string;
     city: string;
@@ -593,7 +686,7 @@ export class TransactionalMailService {
     // Re-reads the request through the same gate the discovery query applies,
     // so a deployment that requires phone verification does not fan out an
     // unverified request.
-    const visible = await this.prisma.serviceRequest.count({
+    const visible = await prisma.serviceRequest.count({
       where: {
         id: request.id,
         status: ServiceRequestStatus.APPROVED,
@@ -605,7 +698,7 @@ export class TransactionalMailService {
       return [];
     }
 
-    const providers = await this.prisma.providerProfile.findMany({
+    const providers = await prisma.providerProfile.findMany({
       where: {
         status: ProviderStatus.APPROVED,
         serviceCategories: { some: { categoryId: request.categoryId } },
@@ -639,16 +732,17 @@ export class TransactionalMailService {
    * reveal must name this offer and this provider. Anything else is false, and
    * the message goes out without the contact rows.
    */
-  private async contactDisclosureFor(
-    requestId: string,
-    offerId: string,
-    providerId: string,
-  ): Promise<boolean> {
+async function contactDisclosureFor(
+  prisma: PrismaService,
+  requestId: string,
+  offerId: string,
+  providerId: string,
+): Promise<boolean> {
     if (!readContactSharingConfig().enabled) {
       return false;
     }
 
-    const request = await this.prisma.serviceRequest.findUnique({
+    const request = await prisma.serviceRequest.findUnique({
       where: { id: requestId },
       select: { status: true, matchedOfferId: true },
     });
@@ -657,7 +751,7 @@ export class TransactionalMailService {
       return false;
     }
 
-    const reveal = await this.prisma.contactRevealEvent.findUnique({
+    const reveal = await prisma.contactRevealEvent.findUnique({
       where: { requestId },
       select: { offerId: true, providerId: true },
     });
@@ -665,8 +759,8 @@ export class TransactionalMailService {
     return reveal?.offerId === offerId && reveal.providerId === providerId;
   }
 
-  private async creditBalance(providerId: string): Promise<number> {
-    const latest = await this.prisma.providerCreditTransaction.findFirst({
+async function creditBalance(prisma: PrismaService, providerId: string): Promise<number> {
+    const latest = await prisma.providerCreditTransaction.findFirst({
       where: { providerId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: { balanceAfter: true },
@@ -675,8 +769,8 @@ export class TransactionalMailService {
     return latest?.balanceAfter ?? 0;
   }
 
-  private async loadProvider(providerId: string) {
-    const provider = await this.prisma.providerProfile.findUnique({
+async function loadProvider(prisma: PrismaService, providerId: string) {
+    const provider = await prisma.providerProfile.findUnique({
       where: { id: providerId },
       select: {
         id: true,
@@ -713,8 +807,8 @@ export class TransactionalMailService {
     };
   }
 
-  private loadRequest(requestId: string) {
-    return this.prisma.serviceRequest.findUnique({
+function loadRequest(prisma: PrismaService, requestId: string) {
+    return prisma.serviceRequest.findUnique({
       where: { id: requestId },
       select: {
         id: true,
@@ -735,8 +829,8 @@ export class TransactionalMailService {
     });
   }
 
-  private loadOffer(offerId: string) {
-    return this.prisma.offer.findUnique({
+function loadOffer(prisma: PrismaService, offerId: string) {
+    return prisma.offer.findUnique({
       where: { id: offerId },
       select: {
         id: true,
@@ -774,6 +868,309 @@ export class TransactionalMailService {
       },
     });
   }
+
+
+/**
+ * One composed message, before it is handed to the dispatcher.
+ *
+ * The recipient is resolved here rather than carried on the audit row, because
+ * the row deliberately holds only a mask. The retry path re-derives the address
+ * from the same domain data the first attempt read, and the caller checks that
+ * it still masks to what was recorded before anything is sent.
+ */
+export type ComposedMail = {
+  to: string;
+  data: Record<string, string | null | undefined>;
+};
+
+type MailData = ComposedMail['data'];
+
+type LoadedProvider = NonNullable<Awaited<ReturnType<typeof loadProvider>>>;
+type LoadedRequest = NonNullable<Awaited<ReturnType<typeof loadRequest>>>;
+type LoadedOffer = NonNullable<Awaited<ReturnType<typeof loadOffer>>>;
+type MatchedProvider = Awaited<ReturnType<typeof findMatchingProviders>>[number];
+type RefundTransaction = NonNullable<Awaited<ReturnType<typeof loadRefundTransaction>>>;
+
+/**
+ * The payload builders.
+ *
+ * Every one of them is a pure function of already-loaded rows, and every one is
+ * the *only* place its template's variables are assembled. That is what makes a
+ * retry render identical to the first attempt by construction rather than by
+ * review: there is no second copy of these field lists to drift.
+ */
+function providerApplicationReceivedData(provider: LoadedProvider): MailData {
+  return {
+    fullName: provider.contactName,
+    businessName: provider.businessName,
+    categories: provider.categories,
+    areas: provider.areas,
+    statusLabel: providerStatusLabel(provider.status),
+    // Only for an application that already belongs to an account. A guest
+    // application is reached through the claim link, not by editing.
+    profileUrl: provider.userId ? providerProfileUrl(provider.id) : null,
+  };
+}
+
+function providerApplicationApprovedData(provider: LoadedProvider): MailData {
+  return {
+    fullName: provider.contactName,
+    businessName: provider.businessName,
+    categories: provider.categories,
+    areas: provider.areas,
+    requestsUrl: providerRequestsUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+function requestReceivedData(request: LoadedRequest): MailData {
+  return {
+    fullName: request.customerName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    city: request.city,
+    district: request.district,
+    preferredDate: request.preferredDate?.toISOString() ?? null,
+    urgency: request.urgency,
+    statusLabel: requestStatusLabel(request.status),
+    requestUrl: customerRequestUrl(request.id),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+function requestPublishedData(request: LoadedRequest, reachedProviderCount: number): MailData {
+  return {
+    fullName: request.customerName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    district: request.district,
+    reachedProviderCount: String(reachedProviderCount),
+    requestUrl: customerRequestUrl(request.id),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+function requestAvailableData(
+  request: LoadedRequest,
+  provider: MatchedProvider,
+  providerCreditBalance: number,
+): MailData {
+  return {
+    fullName: provider.contactName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    // City and district only. The neighbourhood, the address note and every
+    // customer contact field stay out of a message that reaches everybody who
+    // matched.
+    city: request.city,
+    district: request.district,
+    qualityScore: String(request.qualityScore),
+    creditCost:
+      request.category.offerCreditCost === null
+        ? null
+        : String(request.category.offerCreditCost),
+    creditBalance: String(providerCreditBalance),
+    requestUrl: providerRequestUrl(provider.id, request.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+function offerReceivedData(offer: LoadedOffer, openOfferCount: number): MailData {
+  return {
+    fullName: offer.request.customerName,
+    requestNumber: offer.request.requestNumber,
+    // The public profile field, and only that. There is no rating system to
+    // report and nothing here reveals the provider's contact details.
+    providerName: offer.provider.businessName,
+    offerAmountMinor: String(offer.priceAmount),
+    availability: offer.estimatedStartDate?.toISOString() ?? null,
+    offerNote: offer.message,
+    openOfferCount: String(openOfferCount),
+    offersUrl: customerRequestUrl(offer.requestId),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+function matchCustomerData(offer: LoadedOffer, disclosed: boolean): MailData {
+  return {
+    fullName: offer.request.customerName,
+    businessName: offer.provider.businessName,
+    contactName: disclosed ? offer.provider.contactName : null,
+    contactPhone: disclosed ? offer.provider.phone : null,
+    acceptedAmountMinor: String(offer.priceAmount),
+    requestNumber: offer.request.requestNumber,
+    categoryName: offer.request.category.name,
+    requestUrl: customerRequestUrl(offer.requestId),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+function offerAcceptedData(offer: LoadedOffer, disclosed: boolean): MailData {
+  return {
+    fullName: offer.provider.contactName,
+    customerName: disclosed ? offer.request.customerName : null,
+    customerPhone: disclosed ? offer.request.customerPhone : null,
+    // District and city — what the offer was quoted for. The neighbourhood and
+    // the address note are not part of the brief the winning provider
+    // receives, on screen or here.
+    city: offer.request.city,
+    district: offer.request.district,
+    acceptedAmountMinor: String(offer.priceAmount),
+    preferredDate: offer.request.preferredDate?.toISOString() ?? null,
+    urgency: offer.request.urgency,
+    requestNumber: offer.request.requestNumber,
+    offerUrl: providerOfferUrl(offer.providerId, offer.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+function offerNotSelectedData(offer: LoadedOffer): MailData {
+  return {
+    fullName: offer.provider.contactName,
+    requestNumber: offer.request.requestNumber,
+    categoryName: offer.request.category.name,
+    offerAmountMinor: String(offer.priceAmount),
+    requestsUrl: providerRequestsUrl(offer.providerId),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+function creditRefundedData(
+  provider: LoadedProvider,
+  offer: LoadedOffer | null,
+  transaction: RefundTransaction,
+): MailData {
+  return {
+    fullName: provider.contactName,
+    requestNumber: offer?.request.requestNumber ?? null,
+    categoryName: offer?.request.category.name ?? null,
+    refundReason: knownRefundReasonLabel(transaction.reason),
+    refundedCredits: String(transaction.amount),
+    previousBalance: String(transaction.balanceAfter - transaction.amount),
+    currentBalance: String(transaction.balanceAfter),
+    creditsUrl: providerCreditsUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/** The customer's own count of offers they can still act on. */
+function countOpenOffers(prisma: PrismaService, requestId: string): Promise<number> {
+  return prisma.offer.count({
+    where: { requestId, status: { not: OfferStatus.WITHDRAWN } },
+  });
+}
+
+async function loadRefundTransaction(prisma: PrismaService, transactionId: string) {
+  const transaction = await prisma.providerCreditTransaction.findUnique({
+    where: { id: transactionId },
+    select: {
+      id: true,
+      type: true,
+      amount: true,
+      balanceAfter: true,
+      reason: true,
+      referenceType: true,
+      referenceId: true,
+      providerId: true,
+    },
+  });
+
+  return transaction?.type === CreditTransactionType.OFFER_REFUND ? transaction : null;
+}
+
+/**
+ * The templates a retry may rebuild, and the dedupe-key prefix each one writes.
+ *
+ * Membership of this table *is* the reproducibility rule, and both halves
+ * matter:
+ *
+ * - A template is here only if its message can be composed again from
+ *   persisted domain data. The password reset, the e-mail verification, the
+ *   guest activation and the provider claim are absent and must stay absent:
+ *   each carries a single-use token that exists in memory for the length of
+ *   the issuing transaction and is stored nowhere, so there is nothing to
+ *   rebuild from and a "retry" could only mean minting a new secret — which is
+ *   the user's own request to make, not an operator's.
+ * - The prefix is what turns the audit row back into a source entity. It is
+ *   the key the first attempt wrote, so a row whose key does not match its
+ *   template is not rebuilt at all.
+ */
+const RETRY_DEDUPE_PREFIXES = {
+  'provider-application-received': 'application-received',
+  'provider-application-approved': 'application-approved',
+  'request-received': 'request-received',
+  'request-published': 'request-published',
+  'offer-received': 'offer-received',
+  'match-customer': 'match-customer',
+  'request-available': 'request-available',
+  'offer-accepted': 'offer-accepted',
+  'offer-not-selected': 'offer-not-selected',
+  'credit-refunded': 'credit-refunded',
+} as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
+
+export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
+
+export const RETRYABLE_TRANSACTIONAL_TEMPLATES = Object.keys(
+  RETRY_DEDUPE_PREFIXES,
+) as readonly RetryableTransactionalTemplate[];
+
+export function isRetryableTransactionalTemplate(
+  value: string,
+): value is RetryableTransactionalTemplate {
+  return Object.prototype.hasOwnProperty.call(RETRY_DEDUPE_PREFIXES, value);
+}
+
+type RetrySource = {
+  template: RetryableTransactionalTemplate;
+  /** At least one, and exactly RETRY_SOURCE_ID_COUNT[template] of them. */
+  ids: readonly [string, ...string[]];
+};
+
+/** How many ids each key carries after its prefix. */
+const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
+  'provider-application-received': 1,
+  'provider-application-approved': 1,
+  'request-received': 1,
+  'request-published': 1,
+  'offer-received': 1,
+  'match-customer': 1,
+  'request-available': 2,
+  'offer-accepted': 1,
+  'offer-not-selected': 1,
+  'credit-refunded': 1,
+};
+
+/**
+ * Reads the source entity back out of an audit row.
+ *
+ * Two keys carry a trailing timestamp ("application-approved:<id>:<when>",
+ * "request-published:<id>:<when>") because the transition can legitimately
+ * recur. Only the ids are taken; the timestamp distinguishes rows and never
+ * appears in a message.
+ *
+ * Every segment is checked against the shape this codebase's ids have. The key
+ * comes from the database rather than from a request, but it is the one value
+ * on the path that a much older row could have written under different rules,
+ * and an id is about to be looked up with it.
+ */
+function parseRetrySource(template: string, dedupeKey: string | null): RetrySource | null {
+  if (!dedupeKey || !isRetryableTransactionalTemplate(template)) {
+    return null;
+  }
+
+  const prefix = `${RETRY_DEDUPE_PREFIXES[template]}:`;
+  if (!dedupeKey.startsWith(prefix)) {
+    return null;
+  }
+
+  const expected = RETRY_SOURCE_ID_COUNT[template];
+  const ids = dedupeKey.slice(prefix.length).split(':').slice(0, expected);
+
+  if (ids.length !== expected || !ids.every((id) => /^[A-Za-z0-9_-]{1,64}$/.test(id))) {
+    return null;
+  }
+
+  return { template, ids: ids as [string, ...string[]] };
 }
 
 /**
