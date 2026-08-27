@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { isPublicUrlDeliverable, publicUrlIssues } from '../../common/public-urls';
 import { EmailBrandingService } from './email-branding.service';
 import { renderEmail } from './email-template';
 import { maskEmail } from './mask';
@@ -76,6 +77,10 @@ export class ResendNotificationAdapter extends NotificationPort {
     // Read per send, like every other configuration switch in this module, so a
     // rotated key takes effect without a redeploy of the process's assumptions.
     const config = readResendConfig();
+
+    // Two refusals, in the order the defects nest: a message whose links cannot
+    // be opened is unusable whatever the footer says.
+    this.requireUsablePublicUrls(message);
     const rendered = renderEmail(message, await this.resolveBranding(message.template));
 
     const response = await this.post(config.apiKey, config.timeoutMs, {
@@ -95,6 +100,35 @@ export class ResendNotificationAdapter extends NotificationPort {
     this.logger.log(`[${message.template}] accepted by resend for ${maskEmail(message.to)}`);
 
     return { providerMessageId };
+  }
+
+  /**
+   * Refuses a message whose links a recipient could not open.
+   *
+   * Only messages that actually carry a URL built from the public base are
+   * gated. Every designed template embeds the logo and a call to action, and
+   * the two legacy templates that carry a single-use link are addressed by
+   * `actionUrl`; the day-7 request reminder carries neither, and there is
+   * nothing in it for an unusable base URL to spoil, so it still goes out.
+   *
+   * The log line names the variable and the class of defect and stops there —
+   * no recipient, no token, no URL. A base URL is not a credential, but this
+   * line sits next to a masked recipient in the same stream, and a value that
+   * turned out to be a pasted secret must not be the thing that writes it down.
+   */
+  private requireUsablePublicUrls(message: NotificationMessage): void {
+    if (!carriesPublicUrl(message) || isPublicUrlDeliverable()) {
+      return;
+    }
+
+    const issues = publicUrlIssues();
+    this.logger.error(
+      `[${message.template}] not sent: this deployment's public address cannot be used in a ` +
+        `message (${issues.map(({ source, issue }) => `${source}=${issue}`).join(', ')}). ` +
+        'Set WEB_APP_URL to the https origin the application is served from.',
+    );
+
+    throw new EmailPublicUrlInvalidError(issues.map(({ issue }) => issue));
   }
 
   /**
@@ -165,6 +199,34 @@ type ResendEmailRequest = {
  * nothing else: no recipient, no body, no key. {@link classifyNotificationError}
  * reads `errorCode` off it and the dispatcher stores only that.
  */
+/**
+ * Whether this message would carry a URL built from the public base.
+ *
+ * True for every designed template — they all embed the logo — and for anything
+ * addressed by a single-use action link. False only for the link-free
+ * notification, which is the day-7 request reminder.
+ */
+function carriesPublicUrl(message: NotificationMessage): boolean {
+  return isTransactionalEmailTemplate(message.template) || Boolean(message.actionUrl);
+}
+
+/**
+ * Raised instead of sending, when this deployment's public address cannot be
+ * put in front of a recipient.
+ *
+ * Deliberately a different class and a different code from the branding
+ * refusal: one is fixed in the admin panel, the other in the environment, and
+ * an operator reading NotificationLog should not have to guess which.
+ */
+export class EmailPublicUrlInvalidError extends Error {
+  readonly errorCode: NotificationErrorCode = 'EMAIL_PUBLIC_URL_INVALID';
+
+  constructor(readonly issues: readonly string[]) {
+    super('The public base URL cannot be used in a delivered message; nothing was sent.');
+    this.name = 'EmailPublicUrlInvalidError';
+  }
+}
+
 /**
  * Raised instead of sending, when the company footer cannot be filled in.
  *
