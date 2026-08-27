@@ -7,6 +7,7 @@ import {
   ResendNotificationAdapter,
   ResendResponse,
 } from '../src/modules/notifications/resend-notification.adapter';
+import { notificationIdempotencyKey } from '../src/modules/notifications/notification-dispatcher.service';
 import { RESEND_EMAILS_ENDPOINT } from '../src/modules/notifications/resend.config';
 
 /**
@@ -327,5 +328,68 @@ describe('ResendNotificationAdapter', () => {
 
       expect(bodyReads).toBe(0);
     });
+  });
+});
+
+/**
+ * The provider-side half of the retry guarantee.
+ *
+ * A send that timed out and a send that never left are indistinguishable from
+ * here, so re-offering one under the same name is the only way a retry can be
+ * safe. The key is derived from the audit row's id alone — see
+ * notificationIdempotencyKey — which is why the first attempt and every later
+ * retry of that row carry the same one.
+ */
+describe('Resend idempotency', () => {
+  it('forwards the caller\'s key as Idempotency-Key', async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg-1' }));
+
+    await adapter(fetchImpl).send({
+      ...CLAIM_MESSAGE,
+      idempotencyKey: notificationIdempotencyKey('clog0000000000000000000'),
+    });
+
+    expect(onlyCall(calls).init.headers['idempotency-key']).toBe(
+      'taktic-notification-clog0000000000000000000',
+    );
+  });
+
+  it('offers a retried message under the key its first attempt used', async () => {
+    const logId = 'clog1111111111111111111';
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg-2' }));
+    const subject = adapter(fetchImpl);
+
+    // The same row, attempted twice: a first send that (as far as this process
+    // can tell) failed, and the operator's retry of it.
+    await subject.send({ ...CLAIM_MESSAGE, idempotencyKey: notificationIdempotencyKey(logId) });
+    await subject.send({ ...CLAIM_MESSAGE, idempotencyKey: notificationIdempotencyKey(logId) });
+
+    expect(calls).toHaveLength(2);
+    const keys = calls.map((call) => call.init.headers['idempotency-key']);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[0]).toBe(`taktic-notification-${logId}`);
+  });
+
+  it('omits the header entirely when there is no key', async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg-3' }));
+
+    await adapter(fetchImpl).send(CLAIM_MESSAGE);
+
+    expect(onlyCall(calls).init.headers).not.toHaveProperty('idempotency-key');
+  });
+
+  it('never puts the recipient or the subject in the key', async () => {
+    const logId = 'clog2222222222222222222';
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg-4' }));
+
+    await adapter(fetchImpl).send({
+      ...CLAIM_MESSAGE,
+      idempotencyKey: notificationIdempotencyKey(logId),
+    });
+
+    const key = onlyCall(calls).init.headers['idempotency-key'] ?? '';
+    expect(key).not.toContain(RECIPIENT);
+    expect(key).not.toContain(CLAIM_MESSAGE.subject);
+    expect(key).not.toContain('token');
   });
 });

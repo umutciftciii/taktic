@@ -1022,6 +1022,8 @@ export const NOTIFICATION_ERROR_CODES = [
   // this deployment's public base URL cannot be opened by a recipient.
   'EMAIL_BRANDING_INCOMPLETE',
   'EMAIL_PUBLIC_URL_INVALID',
+  // A retry could not rebuild the message from live data.
+  'SOURCE_UNAVAILABLE',
   'UNKNOWN',
 ] as const;
 export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];
@@ -1068,10 +1070,28 @@ export type NotificationLogEntry = {
   userId: string | null;
   /** The provider application a message was about. An id only — never a join. */
   providerId: string | null;
+  /** Attempts against this one message: the first send plus every retry. */
+  attemptCount: number;
+  /** When the latest attempt was claimed, including one still in flight. */
+  lastAttemptAt: string | null;
   createdAt: string;
   sentAt: string | null;
   failedAt: string | null;
+  /**
+   * Whether this row may be re-sent. Computed by the API from the row itself —
+   * the screen never decides it, and the retry endpoint checks it again.
+   */
+  retryable: boolean;
+  retryBlock: NotificationRetryBlock | null;
+  /** The reason as a sentence, so the screen does not restate the rules. */
+  retryBlockLabel: string | null;
 };
+
+export type NotificationRetryBlock =
+  | 'CHANNEL_NOT_EMAIL'
+  | 'STATUS_NOT_FAILED'
+  | 'TEMPLATE_NOT_REPRODUCIBLE'
+  | 'NO_SOURCE_TRANSITION';
 
 export type NotificationLogResponse = {
   items: NotificationLogEntry[];

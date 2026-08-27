@@ -109,10 +109,73 @@ test.describe('notification delivery history', () => {
       expect(detailBody).not.toContain(values.customerPhone);
       expect(detailBody).not.toContain(values.customerEmail);
 
-      // A read-only screen: nothing here offers to send the message again.
+      // A delivered SMS. Nothing here offers to send it again, or to change it:
+      // the code was never stored, so there is nothing to re-send, and an audit
+      // row that could be edited would stop being one.
       for (const forbidden of ['Yeniden gönder', 'Tekrar dene', 'Sil', 'Düzenle']) {
         await expect(admin.page.getByRole('button', { name: forbidden })).toHaveCount(0);
       }
+    } finally {
+      await Promise.all([customer.close(), admin.close()]);
+    }
+  });
+
+  test('the admin re-sends one failed transactional e-mail, once', async ({ browser }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(CATEGORY_COST);
+    const customerAccount = await createCustomer();
+    const adminAccount = await createAdmin();
+
+    const customer = await Actor.open(browser, 'customer', primaryRuntime);
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+
+    try {
+      await customer.loginToWeb(customerAccount.email, customerAccount.password);
+      const values = requestFormValues(location, customerAccount.name);
+      const requestId = await createRequest(customer, category, values);
+
+      // The receipt really was composed and sent by the real flow. It is then
+      // recorded as the failure this feature exists for — the company footer
+      // was unfinished at the time — because making the live transport refuse
+      // one message mid-suite would need a runtime with a broken adapter, and
+      // what is under test here is the recovery, not the failure.
+      const receipt = await prisma().notificationLog.findFirstOrThrow({
+        where: { requestId, template: 'request-received' },
+      });
+      await prisma().notificationLog.update({
+        where: { id: receipt.id },
+        data: {
+          status: 'FAILED',
+          sentAt: null,
+          failedAt: new Date(),
+          providerMessageId: null,
+          errorCode: 'EMAIL_BRANDING_INCOMPLETE',
+        },
+      });
+
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin(`/notifications/${receipt.id}`);
+      await expect(admin.page.getByTestId('notification-attempt-count')).toHaveText('1');
+
+      await admin.page.getByTestId('notification-retry-button').click();
+
+      await expect(admin.page.getByTestId('notification-retry-result')).toContainText(
+        'yeniden gönderildi',
+      );
+      await expect(admin.page.getByTestId('notification-attempt-count')).toHaveText('2');
+      // Settled and sent, so the control is gone: a second click has nothing to
+      // click, and the same row now reports one delivery rather than two.
+      await expect(admin.page.getByTestId('notification-retry-button')).toHaveCount(0);
+      await assertNoErrorScreen(admin.page);
+
+      expect(
+        await prisma().notificationLog.count({ where: { requestId, template: 'request-received' } }),
+      ).toBe(1);
+
+      // The screen still discloses nothing about the message it just re-sent.
+      const detailBody = await admin.page.locator('body').innerText();
+      expect(detailBody).not.toContain(values.customerEmail);
+      expect(detailBody).not.toContain(values.customerPhone);
     } finally {
       await Promise.all([customer.close(), admin.close()]);
     }

@@ -16,17 +16,23 @@ import {
   requireAdmin,
 } from '../../lib/api';
 import { EmptyState } from '../../components/empty-state';
+import { NotificationRetryButton } from '../../components/notification-retry-button';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 
 /**
- * Read-only delivery history.
+ * Delivery history.
  *
  * The screen answers one question — what did the platform try to send, to whom
- * (masked), when, and how did it end — and offers no way to act on the answer.
- * There is deliberately no resend, retry, delete or status-edit control: a
- * one-time code cannot be re-sent from an audit row (the code is not stored, by
- * design), and a row that could be edited would stop being an audit trail.
+ * (masked), when, and how did it end — and offers exactly one action on the
+ * answer: re-sending a failed message that the server can compose again from
+ * live domain data.
+ *
+ * Everything else it still refuses. Nothing here can be deleted, edited or
+ * re-classified, or an audit trail would stop being one. And the retry control
+ * appears only where the API marked the row retryable: a mail that carried a
+ * one-time token cannot be re-sent from an audit row, because the token was
+ * never stored — the user has to ask for a new one.
  */
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -41,6 +47,9 @@ type RawSearchParams = {
   from?: string;
   to?: string;
   page?: string;
+  /** Set by the retry action's redirect; see app/notifications/actions.ts. */
+  retry?: string;
+  message?: string;
 };
 
 type AdminNotificationsPageProps = {
@@ -156,8 +165,30 @@ export default async function AdminNotificationsPage({
     <main>
       <PageHeader
         title="Bildirim Geçmişi"
-        subtitle="Platformun gönderdiği e-posta ve SMS denemelerinin denetim kaydı. Yalnız görüntülenir."
+        subtitle="Platformun gönderdiği e-posta ve SMS denemelerinin denetim kaydı. Yalnız başarısız ve yeniden oluşturulabilir e-postalar yeniden gönderilebilir."
       />
+
+      {params.retry === 'sent' ? (
+        <div
+          className="notice notice-success"
+          role="status"
+          style={{ marginBottom: 12 }}
+          data-testid="notification-retry-result"
+        >
+          Bildirim yeniden gönderildi.
+        </div>
+      ) : params.retry ? (
+        <div
+          className="notice notice-error"
+          role="alert"
+          style={{ marginBottom: 12 }}
+          data-testid="notification-retry-result"
+        >
+          {params.retry === 'failed'
+            ? 'Yeniden gönderim denendi ancak başarısız oldu. Kaydın hata sınıfına bakın.'
+            : params.message || 'Yeniden gönderim başlatılamadı.'}
+        </div>
+      ) : null}
 
       <form className="admin-toolbar" method="get" action="/notifications">
         <div className="admin-toolbar-field">
@@ -285,6 +316,7 @@ export default async function AdminNotificationsPage({
                   <th>Alıcı (maskeli)</th>
                   <th>Durum</th>
                   <th>Hata sınıfı</th>
+                  <th>Deneme</th>
                   <th>Sonuç zamanı</th>
                   <th />
                 </tr>
@@ -361,11 +393,18 @@ function NotificationRow({ entry }: { entry: NotificationLogEntry }) {
           <span className="cell-muted">-</span>
         )}
       </td>
+      <td>{entry.attemptCount}</td>
       <td>{outcomeAt ? formatDateTime(outcomeAt) : <span className="cell-muted">-</span>}</td>
       <td>
-        <Link className="btn btn-ghost btn-sm" href={`/notifications/${entry.id}`}>
-          Detay
-        </Link>
+        <div className="inline-actions">
+          {/* Only for rows the API itself calls retryable — see the API's rules. */}
+          {entry.retryable ? (
+            <NotificationRetryButton id={entry.id} returnTo="/notifications" />
+          ) : null}
+          <Link className="btn btn-ghost btn-sm" href={`/notifications/${entry.id}`}>
+            Detay
+          </Link>
+        </div>
       </td>
     </tr>
   );

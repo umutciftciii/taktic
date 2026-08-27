@@ -317,6 +317,11 @@ describe('notification log — what the payload may contain', () => {
 
     expect(Object.keys(response.body).sort()).toEqual(
       [
+        // Delivery bookkeeping: how many times this one message was attempted
+        // and when the latest attempt was claimed. A count and a timestamp —
+        // neither says anything about what the message contained.
+        'attemptCount',
+        'lastAttemptAt',
         'channel',
         'createdAt',
         'errorCode',
@@ -331,6 +336,11 @@ describe('notification log — what the payload may contain', () => {
         'providerMessageId',
         'providerMessageIdRedacted',
         'requestId',
+        // Whether this row may be re-sent, and why not. Computed from the row
+        // itself; the dedupe key it is computed from stays inside the API.
+        'retryable',
+        'retryBlock',
+        'retryBlockLabel',
         'sentAt',
         'status',
         'template',

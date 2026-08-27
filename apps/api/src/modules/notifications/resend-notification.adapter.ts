@@ -83,13 +83,18 @@ export class ResendNotificationAdapter extends NotificationPort {
     this.requireUsablePublicUrls(message);
     const rendered = renderEmail(message, await this.resolveBranding(message.template));
 
-    const response = await this.post(config.apiKey, config.timeoutMs, {
-      from: config.from,
-      to: [message.to],
-      subject: message.subject,
-      text: rendered.text,
-      html: rendered.html,
-    });
+    const response = await this.post(
+      config.apiKey,
+      config.timeoutMs,
+      {
+        from: config.from,
+        to: [message.to],
+        subject: message.subject,
+        text: rendered.text,
+        html: rendered.html,
+      },
+      message.idempotencyKey,
+    );
 
     if (!response.ok) {
       throw new ResendSendError(classifyStatus(response.status), response.status);
@@ -163,10 +168,21 @@ export class ResendNotificationAdapter extends NotificationPort {
     return resolution.branding;
   }
 
+  /**
+   * `idempotencyKey` travels as Resend's `Idempotency-Key` header. Resend
+   * answers a repeat of the same key with the original response rather than
+   * sending again, which is what makes a retry of a timed-out send safe: the
+   * one case where "it failed" and "it was delivered" are indistinguishable
+   * locally is resolved by the provider, not guessed at here.
+   *
+   * The header is a plain opaque id (see NotificationMessage.idempotencyKey).
+   * It is omitted rather than invented when the caller has none.
+   */
   private async post(
     apiKey: string,
     timeoutMs: number,
     body: ResendEmailRequest,
+    idempotencyKey?: string,
   ): Promise<ResendResponse> {
     try {
       return await this.fetchImpl(RESEND_EMAILS_ENDPOINT, {
@@ -174,6 +190,7 @@ export class ResendNotificationAdapter extends NotificationPort {
         headers: {
           authorization: `Bearer ${apiKey}`,
           'content-type': 'application/json',
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
         },
         body: JSON.stringify(body),
         // A hung socket must not hold a scheduler run or the HTTP request that

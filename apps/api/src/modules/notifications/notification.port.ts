@@ -47,6 +47,21 @@ export type NotificationMessage = {
    */
   actionUrl?: string;
   data?: Record<string, string | null | undefined>;
+  /**
+   * A stable name for *this message*, handed to transports that can de-duplicate
+   * on one.
+   *
+   * Derived from the NotificationLog row's id and nothing else, so it is the
+   * same string on the first dispatch and on every later admin retry of that
+   * row — which is exactly the property that matters. A send that timed out
+   * after the provider had already accepted it is re-offered under the key it
+   * was accepted with, and the provider answers with the original message
+   * instead of delivering a second copy.
+   *
+   * It is an opaque identifier: no address, no template data, nothing derived
+   * from the body.
+   */
+  idempotencyKey?: string;
 };
 
 /**
