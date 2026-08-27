@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect } from 'react';
+import { recoverFromStaleAction } from '../lib/stale-action-recovery';
 
 type ErrorPageProps = {
   error: Error & { digest?: string };
@@ -14,10 +15,15 @@ type ErrorPageProps = {
  * Backend messages are intentionally not rendered: admin API errors can quote
  * internal identifiers and constraint text. The digest ties the screen to the
  * full server-side log entry.
+ *
+ * The one failure that is not worth showing anybody is a Server Action id from
+ * a previous `next dev` compile — see lib/stale-action-recovery. It is still
+ * logged; it just reloads the page rather than leaving a dead screen behind.
  */
 export default function ErrorPage({ error, reset }: ErrorPageProps) {
   useEffect(() => {
     console.error('Unhandled route error', error.digest ?? '(no digest)');
+    recoverFromStaleAction(error);
   }, [error]);
 
   return (

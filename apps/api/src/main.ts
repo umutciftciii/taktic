@@ -17,9 +17,13 @@ async function bootstrap() {
   // that failure only ever surfaces in somebody else's inbox.
   assertPublicUrlConfig();
 
-  // The support address and the sender's own name, for the same reason: a
-  // footer that tells customers to write to the development placeholder is not
-  // something to discover from a support ticket.
+  // The company footer is no longer a boot condition. Its three values — legal
+  // name, support address, postal address — are business facts an operator
+  // maintains from the admin panel (CompanySettings), so a missing one must not
+  // take a marketplace offline: the delivering transport refuses that one
+  // message with EMAIL_BRANDING_INCOMPLETE instead, and the admin screen says
+  // what is missing. This call only rejects a *deprecated* SUPPORT_EMAIL that
+  // is set to something which is not an address at all.
   assertEmailBrandingConfig();
 
   // Before anything listens. Turning contact sharing on without a disclosure

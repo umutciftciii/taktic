@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EmailBrandingService } from '../src/modules/notifications/email-branding.service';
 import { classifyNotificationError } from '../src/modules/notifications/notification-errors';
 import { NotificationMessage } from '../src/modules/notifications/notification.port';
 import {
@@ -31,6 +32,31 @@ const CLAIM_MESSAGE: NotificationMessage = {
 };
 
 type Call = { input: string; init: Parameters<ResendFetch>[1] };
+
+/**
+ * A branding resolver that always answers "complete".
+ *
+ * Every message in this file is `provider-claim`, one of the three legacy
+ * templates that print no company footer, so the adapter never consults it —
+ * the stub exists so the constructor can be satisfied without a database. The
+ * cases that *do* exercise the branding gate live in
+ * email-branding-settings.spec.ts, against real settings rows.
+ */
+const brandingStub = {
+  resolve: async () => ({
+    complete: true as const,
+    branding: {
+      supportEmail: 'destek@ornek-sirket.example',
+      companyName: 'Örnek Şirket A.Ş.',
+      companyAddress: null,
+      logoUrl: 'https://app.example.test/brand/logo-email.png',
+    },
+  }),
+} as unknown as EmailBrandingService;
+
+function adapter(fetchImpl: ResendFetch) {
+  return new ResendNotificationAdapter(brandingStub, fetchImpl);
+}
 
 function recordingFetch(respond: () => ResendResponse | Promise<ResendResponse>) {
   const calls: Call[] = [];
@@ -101,7 +127,7 @@ describe('ResendNotificationAdapter', () => {
       jsonResponse(200, { id: '4ef9a417-02e9-4d39-ad75-9611e0fcc33c' }),
     );
 
-    const result = await new ResendNotificationAdapter(fetchImpl).send(CLAIM_MESSAGE);
+    const result = await adapter(fetchImpl).send(CLAIM_MESSAGE);
 
     expect(result.providerMessageId).toBe('4ef9a417-02e9-4d39-ad75-9611e0fcc33c');
     expect(calls).toHaveLength(1);
@@ -124,7 +150,7 @@ describe('ResendNotificationAdapter', () => {
   it('escapes applicant-supplied values in the HTML body', async () => {
     const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg_1' }));
 
-    await new ResendNotificationAdapter(fetchImpl).send(CLAIM_MESSAGE);
+    await adapter(fetchImpl).send(CLAIM_MESSAGE);
 
     const body = JSON.parse(onlyCall(calls).init.body) as { html: string };
     expect(body.html).toContain('Örnek &lt;Yapı&gt; &amp; Tesisat');
@@ -134,7 +160,7 @@ describe('ResendNotificationAdapter', () => {
   it('asks for no open or click tracking', async () => {
     const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg_1' }));
 
-    await new ResendNotificationAdapter(fetchImpl).send(CLAIM_MESSAGE);
+    await adapter(fetchImpl).send(CLAIM_MESSAGE);
 
     const body = JSON.parse(onlyCall(calls).init.body) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(['from', 'html', 'subject', 'text', 'to']);
@@ -143,7 +169,7 @@ describe('ResendNotificationAdapter', () => {
   it('keeps the send SENT when the success body carries no usable id', async () => {
     for (const payload of [{}, { id: 42 }, { id: `${RECIPIENT} queued` }]) {
       const { fetchImpl } = recordingFetch(() => jsonResponse(200, payload));
-      const result = await new ResendNotificationAdapter(fetchImpl).send(CLAIM_MESSAGE);
+      const result = await adapter(fetchImpl).send(CLAIM_MESSAGE);
 
       expect(result.providerMessageId).toBeNull();
     }
@@ -157,7 +183,7 @@ describe('ResendNotificationAdapter', () => {
     };
 
     const { fetchImpl } = recordingFetch(() => unparsable);
-    await expect(new ResendNotificationAdapter(fetchImpl).send(CLAIM_MESSAGE)).resolves.toEqual({
+    await expect(adapter(fetchImpl).send(CLAIM_MESSAGE)).resolves.toEqual({
       providerMessageId: null,
     });
   });
@@ -179,7 +205,7 @@ describe('ResendNotificationAdapter', () => {
       it(`maps HTTP ${status} to ${expected}`, async () => {
         const { fetchImpl } = recordingFetch(() => leakyErrorResponse(status));
 
-        const error = await new ResendNotificationAdapter(fetchImpl)
+        const error = await adapter(fetchImpl)
           .send(CLAIM_MESSAGE)
           .then(
             () => null,
@@ -200,7 +226,7 @@ describe('ResendNotificationAdapter', () => {
         throw timeout;
       });
 
-      const error = await new ResendNotificationAdapter(fetchImpl)
+      const error = await adapter(fetchImpl)
         .send(CLAIM_MESSAGE)
         .then(
           () => null,
@@ -215,7 +241,7 @@ describe('ResendNotificationAdapter', () => {
         throw new TypeError('fetch failed');
       });
 
-      const error = await new ResendNotificationAdapter(fetchImpl)
+      const error = await adapter(fetchImpl)
         .send(CLAIM_MESSAGE)
         .then(
           () => null,
@@ -229,7 +255,7 @@ describe('ResendNotificationAdapter', () => {
       process.env.RESEND_TIMEOUT_MS = '1500';
       const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg_1' }));
 
-      await new ResendNotificationAdapter(fetchImpl).send(CLAIM_MESSAGE);
+      await adapter(fetchImpl).send(CLAIM_MESSAGE);
 
       const { signal } = onlyCall(calls).init;
       expect(signal).toBeInstanceOf(AbortSignal);
@@ -245,7 +271,7 @@ describe('ResendNotificationAdapter', () => {
     it('leaks neither the key, the recipient, the body nor the provider text', async () => {
       const { fetchImpl } = recordingFetch(() => leakyErrorResponse(422));
 
-      const error = (await new ResendNotificationAdapter(fetchImpl)
+      const error = (await adapter(fetchImpl)
         .send(CLAIM_MESSAGE)
         .then(
           () => null,
@@ -285,7 +311,7 @@ describe('ResendNotificationAdapter', () => {
         },
       }));
 
-      await new ResendNotificationAdapter(fetchImpl).send(CLAIM_MESSAGE).catch(() => undefined);
+      await adapter(fetchImpl).send(CLAIM_MESSAGE).catch(() => undefined);
 
       expect(bodyReads).toBe(0);
     });

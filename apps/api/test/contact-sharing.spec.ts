@@ -574,6 +574,68 @@ describe('contact sharing — who may read the details', () => {
       .expect(401);
   });
 
+  it('refuses a provider whose offer was withdrawn before the match', async () => {
+    const fixture = await matchingFixture();
+    const winner = await addOffer(fixture.category.id, fixture.serviceRequest.id);
+    const quitter = await addOffer(fixture.category.id, fixture.serviceRequest.id);
+    await acceptDisclosure(fixture.serviceRequest.id);
+    enableContactSharing();
+
+    // Through the real endpoint: a withdrawn offer leaves the running entirely
+    // and is not swept into REJECTED by the accept cascade.
+    await request(ctx.server)
+      .post(`/providers/${quitter.provider.id}/offers/${quitter.offerId}/withdraw`)
+      .set('Cookie', quitter.cookie)
+      .expect(201);
+
+    await request(ctx.server)
+      .post(acceptUrl(fixture.serviceRequest.id, winner.offerId))
+      .set('Cookie', fixture.customerCookie)
+      .send({ action: 'ACCEPT' })
+      .expect(201);
+
+    expect(
+      (await ctx.prisma.offer.findUniqueOrThrow({ where: { id: quitter.offerId } })).status,
+    ).toBe(OfferStatus.WITHDRAWN);
+
+    // The reveal names one offer and one provider. Everybody else is a 404,
+    // and the provider who walked away is nobody special.
+    await request(ctx.server)
+      .get(providerContactUrl(quitter.provider.id, quitter.offerId))
+      .set('Cookie', quitter.cookie)
+      .expect(404);
+    await request(ctx.server)
+      .get(providerContactUrl(quitter.provider.id, winner.offerId))
+      .set('Cookie', quitter.cookie)
+      .expect(404);
+  });
+
+  it('refuses a provider whose offer is still pending on a matched request', async () => {
+    const fixture = await matchingFixture();
+    const winner = await addOffer(fixture.category.id, fixture.serviceRequest.id);
+    const waiting = await addOffer(fixture.category.id, fixture.serviceRequest.id);
+    await acceptDisclosure(fixture.serviceRequest.id);
+    enableContactSharing();
+
+    // Read before the accept, while the request is APPROVED and nothing is
+    // open at all: a pending offer is not a match, on its own or later.
+    await request(ctx.server)
+      .get(providerContactUrl(waiting.provider.id, waiting.offerId))
+      .set('Cookie', waiting.cookie)
+      .expect(404);
+
+    await request(ctx.server)
+      .post(acceptUrl(fixture.serviceRequest.id, winner.offerId))
+      .set('Cookie', fixture.customerCookie)
+      .send({ action: 'ACCEPT' })
+      .expect(201);
+
+    await request(ctx.server)
+      .get(providerContactUrl(waiting.provider.id, waiting.offerId))
+      .set('Cookie', waiting.cookie)
+      .expect(404);
+  });
+
   it('lets SUPER_ADMIN see both sides with the audit row', async () => {
     const { serviceRequest, winner, customer } = await matchedFixture();
 

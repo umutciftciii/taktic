@@ -1,6 +1,11 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { formatDateTime, formatPrice, getCurrentUser } from '../../../lib/api';
+import {
+  formatDateTime,
+  formatPrice,
+  getContactDisclosure,
+  getCurrentUser,
+} from '../../../lib/api';
 import { IconArrowRight, IconPlus } from '../../landing-icons';
 import { CustomerShell } from '../customer-shell';
 import { loadCustomerMatches, loadCustomerRequests } from '../customer-panel-data';
@@ -25,6 +30,12 @@ export default async function CustomerMatchesPage() {
 
   const requests = await loadCustomerRequests();
   const matches = await loadCustomerMatches(requests);
+  // The empty state below describes what accepting an offer will do, so it has
+  // to describe what this deployment actually does. Contact sharing is off by
+  // default; promising a contact card that will never appear is the same false
+  // CTA as putting a "get in touch" button on a screen that has no details
+  // behind it.
+  const { enabled: contactSharingEnabled } = await getContactDisclosure();
 
   return (
     <CustomerShell user={user} active="matches">
@@ -48,8 +59,9 @@ export default async function CustomerMatchesPage() {
         <div className="cdash-empty">
           <h3>Henüz eşleşme yok</h3>
           <p>
-            Bir teklifi kabul ettiğinizde talebiniz eşleşir ve hizmet verenin iletişim bilgileri
-            talep ekranınızda görünür.
+            {contactSharingEnabled
+              ? 'Bir teklifi kabul ettiğinizde talebiniz eşleşir ve hizmet verenin iletişim bilgileri talep ekranınızda görünür.'
+              : 'Bir teklifi kabul ettiğinizde talebiniz eşleşir ve kabul ettiğiniz teklif talep ekranınızda işaretlenir.'}
           </p>
           <Link className="cdash-btn cdash-btn-secondary" href="/requests/offers">
             Gelen teklifleri gör

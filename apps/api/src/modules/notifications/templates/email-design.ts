@@ -1,4 +1,4 @@
-import { readEmailBranding, EMAIL_LOGO_WIDTH } from '../email-branding.config';
+import { EmailBranding, EMAIL_LOGO_WIDTH } from '../email-branding.config';
 import { escapeHtml } from './format';
 
 /**
@@ -89,9 +89,16 @@ const GHOST_FILL = '#fbfafa';
 
 const FONT = 'Arial, Helvetica, sans-serif';
 
-export function renderDocument(document: EmailDocument): RenderedDocument {
-  const branding = readEmailBranding();
-
+/**
+ * `branding` is passed in rather than read here.
+ *
+ * It used to be an ambient environment read, which is how a footer naming a
+ * placeholder support address reached a real customer: nothing in the call
+ * chain had to acknowledge that the values might not be publishable. Now the
+ * caller resolves them — from the admin-managed settings — and a caller that
+ * cannot is expected to refuse the send instead of rendering.
+ */
+export function renderDocument(document: EmailDocument, branding: EmailBranding): RenderedDocument {
   return {
     subject: document.subject,
     html: renderHtml(document, branding),
@@ -104,7 +111,7 @@ export function salutation(fullName: string): string {
   return `Sayın ${fullName.trim()},`;
 }
 
-function renderHtml(document: EmailDocument, branding: ReturnType<typeof readEmailBranding>): string {
+function renderHtml(document: EmailDocument, branding: EmailBranding): string {
   const body = [
     kickerHtml(document.kicker),
     headingHtml(document.heading),
@@ -165,7 +172,7 @@ function renderHtml(document: EmailDocument, branding: ReturnType<typeof readEma
  */
 function renderFooter(
   document: EmailDocument,
-  branding: ReturnType<typeof readEmailBranding>,
+  branding: EmailBranding,
 ): string {
   const support = escapeHtml(branding.supportEmail);
   const company = [branding.companyName, branding.companyAddress]
@@ -283,7 +290,7 @@ function assertSafeUrl(url: string): string {
  * that shows text-only must not present a worse message, and a security link
  * that only exists in the HTML half is a link half the recipients cannot use.
  */
-function renderText(document: EmailDocument, branding: ReturnType<typeof readEmailBranding>): string {
+function renderText(document: EmailDocument, branding: EmailBranding): string {
   const lines: string[] = [document.heading, '', salutation(document.fullName)];
 
   for (const block of document.blocks) {

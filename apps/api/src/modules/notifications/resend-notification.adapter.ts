@@ -1,7 +1,9 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { EmailBrandingService } from './email-branding.service';
 import { renderEmail } from './email-template';
 import { maskEmail } from './mask';
 import { NotificationErrorCode } from './notification-errors';
+import { isTransactionalEmailTemplate } from './templates/transactional-templates';
 import {
   NotificationMessage,
   NotificationPort,
@@ -60,7 +62,10 @@ export class ResendNotificationAdapter extends NotificationPort {
   private readonly logger = new Logger('ResendNotification');
   private readonly fetchImpl: ResendFetch;
 
-  constructor(@Optional() @Inject(RESEND_FETCH) fetchImpl?: ResendFetch) {
+  constructor(
+    @Inject(EmailBrandingService) private readonly branding: EmailBrandingService,
+    @Optional() @Inject(RESEND_FETCH) fetchImpl?: ResendFetch,
+  ) {
     super();
     this.fetchImpl =
       fetchImpl ??
@@ -71,7 +76,7 @@ export class ResendNotificationAdapter extends NotificationPort {
     // Read per send, like every other configuration switch in this module, so a
     // rotated key takes effect without a redeploy of the process's assumptions.
     const config = readResendConfig();
-    const rendered = renderEmail(message);
+    const rendered = renderEmail(message, await this.resolveBranding(message.template));
 
     const response = await this.post(config.apiKey, config.timeoutMs, {
       from: config.from,
@@ -90,6 +95,38 @@ export class ResendNotificationAdapter extends NotificationPort {
     this.logger.log(`[${message.template}] accepted by resend for ${maskEmail(message.to)}`);
 
     return { providerMessageId };
+  }
+
+  /**
+   * The footer, or a refusal.
+   *
+   * This is the last point at which a half-filled message can still be stopped.
+   * The three legacy templates print no company details, so they resolve to
+   * null and go out unchanged; every designed template prints the footer, and
+   * for those an unpublishable settings row ends the send here — before the
+   * request body is built, before anything reaches Resend, and therefore before
+   * anybody can receive an e-mail telling them to write to a placeholder.
+   *
+   * The thrown error carries only the class and the named issues. Those are a
+   * closed vocabulary about this deployment's own configuration — no address,
+   * no company value, nothing a recipient supplied — so they are safe to record
+   * on the audit row the dispatcher is about to mark FAILED.
+   */
+  private async resolveBranding(template: NotificationMessage['template']) {
+    if (!isTransactionalEmailTemplate(template)) {
+      return null;
+    }
+
+    const resolution = await this.branding.resolve();
+    if (!resolution.complete) {
+      this.logger.error(
+        `[${template}] not sent: company e-mail settings are incomplete (${resolution.issues.join(', ')}). ` +
+          'Set them in the admin panel under Şirket ve E-posta Ayarları.',
+      );
+      throw new EmailBrandingIncompleteError(resolution.issues);
+    }
+
+    return resolution.branding;
   }
 
   private async post(
@@ -128,6 +165,23 @@ type ResendEmailRequest = {
  * nothing else: no recipient, no body, no key. {@link classifyNotificationError}
  * reads `errorCode` off it and the dispatcher stores only that.
  */
+/**
+ * Raised instead of sending, when the company footer cannot be filled in.
+ *
+ * `errorCode` is what NotificationLog records, so the audit row names the cause
+ * an operator can actually fix rather than a generic UNKNOWN. `issues` is the
+ * same closed vocabulary the admin screen shows, kept on the error for the log
+ * line — it is never returned over HTTP and never reaches a recipient.
+ */
+export class EmailBrandingIncompleteError extends Error {
+  readonly errorCode: NotificationErrorCode = 'EMAIL_BRANDING_INCOMPLETE';
+
+  constructor(readonly issues: readonly string[]) {
+    super('Company e-mail settings are incomplete; nothing was sent.');
+    this.name = 'EmailBrandingIncompleteError';
+  }
+}
+
 export class ResendSendError extends Error {
   readonly errorCode: NotificationErrorCode;
   readonly status: number | null;
