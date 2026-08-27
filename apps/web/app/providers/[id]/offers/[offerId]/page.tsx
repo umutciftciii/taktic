@@ -6,15 +6,20 @@ import {
   getCurrentUser,
   getMatchedContactOrNull,
   MatchedCustomerContact,
+  ProviderAcceptedWorkScope,
   ProviderOffer,
   refundActionLabel,
+  formatDate,
   formatPrice,
   formatDateTime,
+  urgencyLabel,
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
 import { readCreditBalance } from '../../../provider-data';
 import {
+  canOpenRequestDetail,
   canWithdrawOffer,
+  formatBudgetRange,
   isWithdrawableOfferStatus,
   providerOfferStatusLabel,
   providerRefundBadgeClass,
@@ -56,6 +61,15 @@ export default async function ProviderOfferDetailPage({
   // Still live, but on a request that no longer takes offers. Worth explaining;
   // a closed offer needs no explanation because its own status already is one.
   const withdrawBlockedByRequest = !canWithdraw && isWithdrawableOfferStatus(offer.status);
+  // The provider panel's request screen is the discovery screen, and discovery
+  // stops answering for a request that is no longer taking offers. Linking to
+  // it anyway is what put a provider whose offer had just been accepted on a
+  // 404 — the one moment they are most sure the job is theirs.
+  const requestDetailOpens = canOpenRequestDetail(offer.request.status);
+  // Served only for an offer the API itself sees as ACCEPTED, and only to the
+  // provider that owns it. The screen renders what it was given; it does not
+  // decide who may see a brief.
+  const workScope = offer.acceptedWorkScope ?? null;
 
   return (
     <ProviderShell user={user} providerId={id} active="offers" creditBalance={creditBalance}>
@@ -143,6 +157,10 @@ export default async function ProviderOfferDetailPage({
               </>
             ) : null}
           </section>
+
+          {workScope ? (
+            <WorkScopeCard offer={offer} workScope={workScope} />
+          ) : null}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -279,13 +297,27 @@ export default async function ProviderOfferDetailPage({
             </div>
           )}
 
+          {/*
+            Only where there is nothing better to say. A won offer carries the
+            brief further up this page, so telling its provider that a screen
+            they no longer need will not open would be noise.
+          */}
+          {requestDetailOpens || workScope ? null : (
+            <p className="pdash-card-sub" data-testid="request-detail-closed">
+              Talep artık teklif almıyor; talep ekranı yalnız açık talepler için görüntülenir.
+            </p>
+          )}
+
           <div className="pdash-actions">
-            <Link
-              className="pdash-btn pdash-btn-secondary"
-              href={`/providers/${id}/requests/${offer.request.id}`}
-            >
-              Talep Detayı
-            </Link>
+            {requestDetailOpens ? (
+              <Link
+                className="pdash-btn pdash-btn-secondary"
+                href={`/providers/${id}/requests/${offer.request.id}`}
+                data-testid="request-detail-link"
+              >
+                Talep Detayı
+              </Link>
+            ) : null}
             <Link className="pdash-btn pdash-btn-ghost" href={`/providers/${id}/offers`}>
               Tüm Tekliflerim
             </Link>
@@ -294,4 +326,106 @@ export default async function ProviderOfferDetailPage({
       </div>
     </ProviderShell>
   );
+}
+
+/**
+ * What the job is, for the provider that won it.
+ *
+ * Every field here is one the platform already showed this provider while the
+ * request was open — it is the same brief, kept reachable after the request
+ * closed, not a new disclosure. What it deliberately does not carry is anyone's
+ * name, telephone or e-mail, the address note, or the neighbourhood: whether a
+ * provider may reach the customer, and where exactly, is the contact-sharing
+ * flow's decision, made behind its own flag and its own disclosure and written
+ * to its own audit row. The section above this one is where that answer
+ * appears, when it has been given.
+ *
+ * The location is the city and district the offer itself already quoted.
+ */
+function WorkScopeCard({
+  offer,
+  workScope,
+}: {
+  offer: ProviderOffer;
+  workScope: ProviderAcceptedWorkScope;
+}) {
+  return (
+    <section className="pdash-detail-card" data-testid="work-scope">
+      <h2>İş kapsamı</h2>
+      <p className="pdash-card-sub" style={{ marginTop: -4 }}>
+        Teklifiniz kabul edildi. İşin kapsamı, müşterinin talebinde bildirdiği şekliyle aşağıdadır.
+      </p>
+
+      <dl className="pdash-info-grid">
+        <div className="pdash-info-row">
+          <dt>Kategori</dt>
+          <dd>{offer.request.category.name}</dd>
+        </div>
+        <div className="pdash-info-row">
+          <dt>Konum</dt>
+          <dd data-testid="work-scope-location">
+            {offer.request.city}/{offer.request.district}
+          </dd>
+        </div>
+        <div className="pdash-info-row">
+          <dt>Tercih edilen tarih</dt>
+          <dd>{offer.request.preferredDate ? formatDate(offer.request.preferredDate) : '-'}</dd>
+        </div>
+        <div className="pdash-info-row">
+          <dt>Aciliyet</dt>
+          <dd>{offer.request.urgency ? urgencyLabel(offer.request.urgency) : '-'}</dd>
+        </div>
+        {/* Only when the customer gave one: an absent budget is not a zero. */}
+        {offer.request.budgetMin !== null || offer.request.budgetMax !== null ? (
+          <div className="pdash-info-row">
+            <dt>Bütçe</dt>
+            <dd data-testid="work-scope-budget">
+              {formatBudgetRange(offer.request.budgetMin, offer.request.budgetMax, (amount) =>
+                formatPrice(amount),
+              )}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      <h3>Müşterinin açıklaması</h3>
+      <p
+        style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 14 }}
+        data-testid="work-scope-description"
+      >
+        {workScope.description?.trim() ? workScope.description : 'Müşteri açıklama yazmadı.'}
+      </p>
+
+      {workScope.requiredAnswers.length > 0 ? (
+        <>
+          <h3>Zorunlu kategori soruları</h3>
+          <dl className="pdash-info-grid" data-testid="work-scope-answers">
+            {workScope.requiredAnswers.map((answer) => (
+              <div className="pdash-info-row" key={answer.questionKey}>
+                <dt>{answer.questionLabel}</dt>
+                <dd>{formatAnswerValue(answer.value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** Mirrors the discovery screen's rendering, so one brief reads the same twice. */
+function formatAnswerValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'Evet' : 'Hayır';
+  }
+
+  if (value === null || value === undefined) {
+    return '-';
+  }
+
+  return String(value);
 }
