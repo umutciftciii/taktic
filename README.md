@@ -83,14 +83,23 @@ Authentication uses an HTTP-only cookie session named `taktic_session` by defaul
 
 Two independent clocks end a session, and neither extends the other:
 
-- **Idle** — the session is refused once 30 minutes have passed since its last request (`Session.lastSeenAt`). Activity slides this window and nothing else, and the mark is written at most once every five minutes so an active session is not a write hot spot.
-- **Absolute** — the session dies 8 hours after it was created (`Session.expiresAt`), whatever happened in between. It is fixed at creation and never moved forward: there is no sliding session and no session that renews itself forever.
+- **Idle** — the session is refused once its inactivity window has passed since its last request (`Session.lastSeenAt`). Activity slides this window and nothing else, and the mark is written at most once every five minutes so an active session is not a write hot spot.
+- **Absolute** — the session dies a fixed time after it was created (`Session.expiresAt`), whatever happened in between. It is set at creation and never moved forward: there is no sliding session and no session that renews itself forever.
 
-**"Beni hatırla"**, on all three sign-in surfaces, swaps the absolute lifetime for 30 days and makes the cookie persistent so it survives closing the browser. It deliberately does *not* relax the idle window — a remembered session left alone still ends after the same half hour. Nothing about it is written to `localStorage`: no password, no token, no identity. The cookie is the whole mechanism and stays `HttpOnly`.
+**"Beni hatırla"**, on all three sign-in surfaces, chooses between two policies of that shape. It is a policy, not a longer cookie:
 
-Both clocks are checked on the server against the database, so a browser whose clock has been moved cannot change the answer. The panels poll `GET /auth/session` — a read that deliberately does *not* record activity, so an open tab cannot keep an unattended browser signed in — and offer to extend the session shortly before the idle cut-off via `POST /auth/session/touch`. Signing out revokes the session row, so the cookie stops working everywhere it exists, and other tabs of the same panel leave the signed-in screen within one poll.
+| | Idle | Absolute | Cookie |
+|---|---|---|---|
+| Ordinary | 30 minutes | 8 hours | session cookie — dies with the browser |
+| Remembered | 30 days | 30 days | persistent |
 
-Every duration is configurable (`SESSION_IDLE_TIMEOUT_SECONDS`, `SESSION_ABSOLUTE_TTL_SECONDS`, `SESSION_REMEMBER_ME_TTL_SECONDS`, `SESSION_TOUCH_INTERVAL_SECONDS`, `SESSION_IDLE_WARNING_SECONDS`) and a value that is not a positive whole number of seconds stops the API at boot. `SESSION_TTL_DAYS` is gone: it expressed one clock where there are two and had no inactivity rule at all.
+The remembered idle window is separate on purpose. Sharing the ordinary one made the box nearly meaningless: a remembered session was indistinguishable from an ordinary one after half an hour of quiet, so the persistent cookie bought only the first thirty minutes after a browser restart. What somebody ticking it is asking for is "do not make me sign in again on this device", and that is a longer idle window.
+
+Both policies are enforced on the server from `Session.rememberMe` — `sessionIdleTimeoutSecondsFor()` is the single place that maps the column to a window, so a longer one is never something a browser can claim for itself. Nothing about "remember me" is written to `localStorage`: no password, no token, no identity. The cookie is the whole mechanism and stays `HttpOnly`. Signing out, or any server-side revoke, ends either kind immediately.
+
+Both clocks are checked on the server against the database, so a browser whose clock has been moved cannot change the answer. The panels poll `GET /auth/session` — a read that deliberately does *not* record activity, so an open tab cannot keep an unattended browser signed in — and offer to extend the session before the cut-off via `POST /auth/session/touch`. The warning fires two minutes out for an ordinary session and a day out for a remembered one: a month-long session reaches its last two minutes at an hour nobody is watching, so a two-minute warning there would fire into an empty room. It is a courtesy either way — the server ends the session whether or not anybody saw it.
+
+Every duration is configurable (`SESSION_IDLE_TIMEOUT_SECONDS`, `SESSION_ABSOLUTE_TTL_SECONDS`, `SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS`, `SESSION_REMEMBER_ME_TTL_SECONDS`, `SESSION_TOUCH_INTERVAL_SECONDS`, `SESSION_IDLE_WARNING_SECONDS`, `SESSION_REMEMBER_ME_IDLE_WARNING_SECONDS`) and a value that is not a positive whole number of seconds stops the API at boot. `SESSION_TTL_DAYS` is gone: it expressed one clock where there are two and had no inactivity rule at all.
 
 ## Post-match messaging
 

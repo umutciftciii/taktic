@@ -17,6 +17,11 @@ import { primaryRuntime } from '../src/runtime';
  * must NOT matter. A tab whose `Date` is years out is still signed in, because
  * the server is what decides and the countdown in the page is measured on a
  * monotonic clock rather than a wall one.
+ *
+ * "Beni hatırla" is a policy here, not a longer cookie: it has its own idle
+ * window as well as its own lifetime. The case that matters most is the crossed
+ * one — two accounts, the same silence, the same instant, and two different
+ * answers, with `Session.rememberMe` the only difference between the rows.
  */
 
 const AUTH_COOKIE = 'taktic_session';
@@ -35,6 +40,24 @@ async function idleFor(sessionId: string, seconds: number): Promise<void> {
     where: { id: sessionId },
     data: { lastSeenAt: new Date(Date.now() - seconds * 1000) },
   });
+}
+
+const MINUTE = 60;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/** Signs in with the box ticked, through the real form. */
+async function loginRemembered(
+  actor: Actor,
+  account: { email: string; password: string },
+): Promise<string> {
+  await actor.gotoWeb('/login');
+  await actor.page.locator('input[name="email"]').fill(account.email);
+  await actor.page.locator('input[name="password"]').fill(account.password);
+  await actor.page.locator('input[name="rememberMe"]').check();
+  await actor.page.getByRole('button', { name: 'Giriş Yap' }).click();
+  await expect(actor.page).not.toHaveURL(/\/login/);
+  return sessionIdOf(actor.page);
 }
 
 test.describe('session lifecycle', () => {
@@ -86,7 +109,8 @@ test.describe('session lifecycle', () => {
         where: { id: decodeURIComponent(rememberedCookie!.value) },
       });
       expect(rememberedSession.rememberMe).toBe(true);
-      // A month, not eight hours.
+      // A month, not eight hours. The column is what the server reads to pick
+      // this session's idle window too — see the crossed case below.
       const lifetimeDays =
         (rememberedSession.expiresAt.getTime() - rememberedSession.createdAt.getTime()) /
         (24 * 60 * 60 * 1000);
@@ -106,7 +130,9 @@ test.describe('session lifecycle', () => {
     }
   });
 
-  test('inactivity ends both an ordinary and a remembered session', async ({ browser }) => {
+  test('inactivity ends an ordinary session and leaves a remembered one alone', async ({
+    browser,
+  }) => {
     const plain = await createCustomer();
     const remembered = await createCustomer();
 
@@ -116,44 +142,127 @@ test.describe('session lifecycle', () => {
     try {
       await first.loginToWeb(plain.email, plain.password);
       const plainSessionId = await sessionIdOf(first.page);
+      const rememberedSessionId = await loginRemembered(second, remembered);
 
-      await second.gotoWeb('/login');
-      await second.page.locator('input[name="email"]').fill(remembered.email);
-      await second.page.locator('input[name="password"]').fill(remembered.password);
-      await second.page.locator('input[name="rememberMe"]').check();
-      await second.page.getByRole('button', { name: 'Giriş Yap' }).click();
-      await expect(second.page).not.toHaveURL(/\/login/);
-      const rememberedSessionId = await sessionIdOf(second.page);
-
-      // Twenty-nine minutes of silence: still inside the window, for both.
-      await idleFor(plainSessionId, 29 * 60);
-      await idleFor(rememberedSessionId, 29 * 60);
+      // Twenty-nine minutes of silence: inside the ordinary window, so both
+      // are still signed in and the two policies have not diverged yet.
+      await idleFor(plainSessionId, 29 * MINUTE);
+      await idleFor(rememberedSessionId, 29 * MINUTE);
       await first.gotoWeb('/requests/my');
       await expect(first.page).not.toHaveURL(/\/login/);
       await second.gotoWeb('/requests/my');
       await expect(second.page).not.toHaveURL(/\/login/);
 
-      // Thirty-one is not — and "beni hatırla" buys a longer maximum, never a
-      // longer silence.
-      await idleFor(plainSessionId, 31 * 60);
-      await idleFor(rememberedSessionId, 31 * 60);
+      // Thirty-one minutes, and they part company. The same silence, the same
+      // instant, two different answers — and the only difference between the
+      // rows is `rememberMe`. Before this, both were signed out here, which is
+      // what made the box nearly pointless.
+      await idleFor(plainSessionId, 31 * MINUTE);
+      await idleFor(rememberedSessionId, 31 * MINUTE);
 
       await first.gotoWeb('/requests/my');
       await expect(first.page).toHaveURL(/\/login/);
-      await second.gotoWeb('/requests/my');
-      await expect(second.page).toHaveURL(/\/login/);
 
-      // The remembered session still has weeks of absolute life left, and none
-      // of it is reachable.
-      const stillFuture = await prisma().session.findUniqueOrThrow({
+      await second.gotoWeb('/requests/my');
+      await expect(second.page).not.toHaveURL(/\/login/);
+      await assertNoErrorScreen(second.page);
+
+      // Still remembered, and its lifetime untouched by any of this.
+      const stored = await prisma().session.findUniqueOrThrow({
         where: { id: rememberedSessionId },
       });
-      expect(stillFuture.expiresAt.getTime()).toBeGreaterThan(Date.now());
-
-      await assertNoErrorScreen(first.page);
-      await assertNoErrorScreen(second.page);
+      expect(stored.rememberMe).toBe(true);
+      expect(stored.revokedAt).toBeNull();
     } finally {
       await Promise.all([first.close(), second.close()]);
+    }
+  });
+
+  test('a remembered session ends at its own window, not at no window', async ({ browser }) => {
+    const account = await createCustomer();
+    const actor = await Actor.open(browser, 'remembered', primaryRuntime);
+
+    try {
+      const sessionId = await loginRemembered(actor, account);
+
+      // Twenty-nine days of silence is what the box promised, and it holds.
+      await idleFor(sessionId, 29 * DAY);
+      await actor.gotoWeb('/requests/my');
+      await expect(actor.page).not.toHaveURL(/\/login/);
+
+      // Thirty-one is not. "Beni hatırla" is a longer promise, not an
+      // unlimited one, and the cookie the browser still holds is worthless.
+      await idleFor(sessionId, 31 * DAY);
+      await actor.gotoWeb('/requests/my');
+      await expect(actor.page).toHaveURL(/\/login/);
+      await assertNoErrorScreen(actor.page);
+    } finally {
+      await actor.close();
+    }
+  });
+
+  test('a remembered session is warned a day out, not two minutes out', async ({ browser }) => {
+    const account = await createCustomer();
+    const actor = await Actor.open(browser, 'remembered', primaryRuntime);
+
+    try {
+      const sessionId = await loginRemembered(actor, account);
+
+      await actor.gotoWeb('/requests/my');
+      await expect(actor.page.getByTestId('session-warning')).toHaveCount(0);
+
+      // Twenty-three hours short of a thirty-day cut-off. Two minutes out would
+      // be an alarm nobody is awake for; a day out is one somebody who uses the
+      // device that week actually sees.
+      await idleFor(sessionId, 30 * DAY - 23 * HOUR);
+
+      const warning = actor.page.getByTestId('session-warning');
+      await expect(warning).toBeVisible({ timeout: 45_000 });
+      // And the countdown reads as a duration a person recognises — "22 saat",
+      // not "1320 dakika".
+      await expect(actor.page.getByTestId('session-warning-countdown')).toContainText('saat');
+
+      const before = await prisma().session.findUniqueOrThrow({ where: { id: sessionId } });
+      await actor.page.getByTestId('session-warning-extend').click();
+      await expect(warning).toHaveCount(0, { timeout: 20_000 });
+
+      const after = await prisma().session.findUniqueOrThrow({ where: { id: sessionId } });
+      expect(after.lastSeenAt.getTime()).toBeGreaterThan(before.lastSeenAt.getTime());
+      // Extending slides the idle window and nothing else, here as everywhere.
+      expect(after.expiresAt.getTime()).toBe(before.expiresAt.getTime());
+      expect(after.rememberMe).toBe(true);
+
+      await actor.gotoWeb('/requests/my');
+      await expect(actor.page).not.toHaveURL(/\/login/);
+      await assertNoErrorScreen(actor.page);
+    } finally {
+      await actor.close();
+    }
+  });
+
+  test('signing out ends a remembered session immediately', async ({ browser }) => {
+    const account = await createCustomer();
+    const actor = await Actor.open(browser, 'remembered', primaryRuntime);
+
+    try {
+      const sessionId = await loginRemembered(actor, account);
+
+      await actor.gotoWeb('/requests/my');
+      await actor.page.locator('.cdash-user-summary').click();
+      await actor.page.getByTestId('customer-logout').click();
+      await expect(actor.page).toHaveURL(new RegExp(`^${primaryRuntime.webUrl}/$`));
+
+      // A month of idle window and a month of lifetime, both irrelevant: the
+      // row is revoked, so neither clock is ever consulted again.
+      const revoked = await prisma().session.findUniqueOrThrow({ where: { id: sessionId } });
+      expect(revoked.revokedAt).not.toBeNull();
+      expect(revoked.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+      await actor.gotoWeb('/requests/my');
+      await expect(actor.page).toHaveURL(/\/login/);
+      await assertNoErrorScreen(actor.page);
+    } finally {
+      await actor.close();
     }
   });
 

@@ -187,10 +187,19 @@ export class AuthService {
       return null;
     }
 
-    // Idle timeout. `lastSeenAt` has a database default, so it is always set;
-    // falling back to createdAt costs nothing and cannot read as "never idle".
+    // Idle timeout, under this session's own policy. `Session.rememberMe` is
+    // what selects it, so a remembered session is never measured against the
+    // ordinary window and an ordinary one is never given the remembered one.
+    // `lastSeenAt` has a database default, so it is always set; falling back to
+    // createdAt costs nothing and cannot read as "never idle".
     const lastSeenAt = session.lastSeenAt ?? session.createdAt;
-    if (effectiveExpiry({ expiresAt: session.expiresAt, lastSeenAt }).getTime() <= now) {
+    if (
+      effectiveExpiry({
+        expiresAt: session.expiresAt,
+        lastSeenAt,
+        rememberMe: session.rememberMe,
+      }).getTime() <= now
+    ) {
       return null;
     }
 

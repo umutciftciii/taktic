@@ -14,15 +14,20 @@ import {
  *
  * Two clocks end a session and neither extends the other: an inactivity window
  * that activity slides, and an absolute lifetime that nothing does. "Beni
- * hatırla" changes the second one and the cookie's persistence, and is not
- * allowed to touch the first.
+ * hatırla" selects a different pair of durations for both — it is a policy, not
+ * a longer cookie — and `Session.rememberMe` is what the server reads to decide
+ * which pair a given session runs under.
  *
- * Every case here drives the real endpoints and then reads or rewrites the
- * `Session` row directly to move time. That is deliberate: waiting thirty real
- * minutes is not a test, and a fake timer would only prove that this process
- * believes its own clock. Rewriting `lastSeenAt` reproduces exactly the state a
- * genuinely idle session is in, and the decision under test is then made by the
- * production code path against the database.
+ * The pair of cases that matter most are the crossed ones: an ordinary session
+ * must never be granted the remembered window, and a remembered one must never
+ * be measured against the ordinary one. Everything else here is a clock.
+ *
+ * Every case drives the real endpoints and then reads or rewrites the `Session`
+ * row directly to move time. That is deliberate: waiting thirty real minutes is
+ * not a test — and waiting thirty days is not a suite — while a fake timer would
+ * only prove that this process believes its own clock. Rewriting `lastSeenAt`
+ * reproduces exactly the state a genuinely idle session is in, and the decision
+ * under test is then made by the production code path against the database.
  */
 
 let ctx: TestContext;
@@ -50,10 +55,16 @@ afterEach(() => {
 function restoreDefaults() {
   delete process.env.SESSION_IDLE_TIMEOUT_SECONDS;
   delete process.env.SESSION_ABSOLUTE_TTL_SECONDS;
+  delete process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS;
   delete process.env.SESSION_REMEMBER_ME_TTL_SECONDS;
   delete process.env.SESSION_TOUCH_INTERVAL_SECONDS;
   delete process.env.SESSION_IDLE_WARNING_SECONDS;
+  delete process.env.SESSION_REMEMBER_ME_IDLE_WARNING_SECONDS;
 }
+
+const MINUTE = 60;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 async function createLoginUser(role: UserRole = UserRole.CUSTOMER) {
   return createUser(ctx.prisma, { role, password: PASSWORD });
@@ -162,18 +173,52 @@ describe('idle timeout', () => {
     expect(session.revokedAt).toBeNull();
   });
 
-  it('applies to a remembered session exactly as it does to any other', async () => {
-    process.env.SESSION_IDLE_TIMEOUT_SECONDS = '1800';
+  it('does not apply the ordinary window to a remembered session', async () => {
+    process.env.SESSION_IDLE_TIMEOUT_SECONDS = String(30 * MINUTE);
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
+
+    const ordinary = await createLoginUser();
+    const remembered = await createLoginUser();
+    const plain = await login(ordinary.email!);
+    const kept = await login(remembered.email!, { rememberMe: true });
+
+    // The same silence, the same moment, two different answers — and the only
+    // thing that differs between the two rows is `rememberMe`. This is the
+    // whole point of the feature: without it, the box changed nothing anybody
+    // would notice after half an hour.
+    await ageSession(plain.sessionId, 31 * MINUTE);
+    await ageSession(kept.sessionId, 31 * MINUTE);
+
+    await request(ctx.server).get('/auth/me').set('Cookie', plain.cookie).expect(401);
+    await request(ctx.server).get('/auth/me').set('Cookie', kept.cookie).expect(200);
+  });
+
+  it('ends a remembered session at its own, longer window', async () => {
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
     const user = await createLoginUser();
     const { cookie, sessionId } = await login(user.email!, { rememberMe: true });
 
-    await ageSession(sessionId, 31 * 60);
-    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
+    // Twenty-nine days of silence is still inside it.
+    await ageSession(sessionId, 29 * DAY);
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(200);
 
-    // Thirty days of absolute life left, and none of it reachable: "remember
-    // me" buys a longer maximum, never a longer silence.
-    const session = await ctx.prisma.session.findUniqueOrThrow({ where: { id: sessionId } });
-    expect(session.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    // Thirty-one is not. A remembered session is a longer promise, not an
+    // unlimited one.
+    await ageSession(sessionId, 31 * DAY);
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
+  });
+
+  it('does not give an ordinary session the remembered window', async () => {
+    process.env.SESSION_IDLE_TIMEOUT_SECONDS = String(30 * MINUTE);
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
+
+    const user = await createLoginUser();
+    const { cookie, sessionId } = await login(user.email!);
+
+    // The mirror of the case above: the longer window must not leak the other
+    // way either, however the row is read.
+    await ageSession(sessionId, 31 * MINUTE);
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
   });
 
   it('slides on real activity, and only past the touch interval', async () => {
@@ -231,6 +276,22 @@ describe('absolute lifetime', () => {
     await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
   });
 
+  it('ends a remembered session too, however recently it was used', async () => {
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
+    const user = await createLoginUser();
+    const { cookie, sessionId } = await login(user.email!, { rememberMe: true });
+
+    // Its idle window is nowhere near spent — activity is as recent as it gets
+    // — and the session is over anyway. A longer idle window is not a way
+    // around the absolute one.
+    await ctx.prisma.session.update({
+      where: { id: sessionId },
+      data: { expiresAt: new Date(Date.now() - 1000), lastSeenAt: new Date() },
+    });
+
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
+  });
+
   it('cannot be pushed forward by touching the session', async () => {
     process.env.SESSION_ABSOLUTE_TTL_SECONDS = '3600';
     const user = await createLoginUser();
@@ -262,6 +323,7 @@ describe('GET /auth/session', () => {
 
     expect(response.body.rememberMe).toBe(false);
     expect(response.body.idleTimeoutSeconds).toBe(1800);
+    expect(response.body.idleWarningSeconds).toBe(120);
     expect(typeof response.body.serverTime).toBe('string');
 
     // The idle expiry is five minutes out — 25 of the 30 are gone.
@@ -275,6 +337,47 @@ describe('GET /auth/session', () => {
     // unattended browser signed in forever.
     const after = await ctx.prisma.session.findUniqueOrThrow({ where: { id: sessionId } });
     expect(after.lastSeenAt.getTime()).toBe(before.lastSeenAt.getTime());
+  });
+
+  it('reports the remembered policy for a remembered session', async () => {
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
+    process.env.SESSION_REMEMBER_ME_IDLE_WARNING_SECONDS = String(DAY);
+
+    const user = await createLoginUser();
+    const { cookie } = await login(user.email!, { rememberMe: true });
+
+    const response = await request(ctx.server)
+      .get('/auth/session')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    // The window this session is actually running under, not the deployment's
+    // ordinary one. A client told 30 minutes here would warn — and give up —
+    // at entirely the wrong moment.
+    expect(response.body.rememberMe).toBe(true);
+    expect(response.body.idleTimeoutSeconds).toBe(30 * DAY);
+    expect(response.body.idleWarningSeconds).toBe(DAY);
+
+    const remaining =
+      (Date.parse(response.body.idleExpiresAt) - Date.parse(response.body.serverTime)) / 1000;
+    expect(remaining).toBeGreaterThan(29 * DAY);
+  });
+
+  it('clamps a warning that is longer than the window it belongs to', async () => {
+    process.env.SESSION_IDLE_TIMEOUT_SECONDS = String(10 * MINUTE);
+    // A warning longer than the whole window would be on screen from the moment
+    // of login, which is not a warning.
+    process.env.SESSION_IDLE_WARNING_SECONDS = String(HOUR);
+
+    const user = await createLoginUser();
+    const { cookie } = await login(user.email!);
+
+    const response = await request(ctx.server)
+      .get('/auth/session')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(response.body.idleWarningSeconds).toBe(10 * MINUTE);
   });
 
   it('is 401 for an idle-expired session, so a polling client learns it is over', async () => {
@@ -308,6 +411,20 @@ describe('POST /auth/session/touch', () => {
     expect(Date.now() - session.lastSeenAt.getTime()).toBeLessThan(5_000);
   });
 
+  it('slides a remembered session\'s window without extending its lifetime', async () => {
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
+    const user = await createLoginUser();
+    const { cookie, sessionId } = await login(user.email!, { rememberMe: true });
+    const issued = await ctx.prisma.session.findUniqueOrThrow({ where: { id: sessionId } });
+
+    await ageSession(sessionId, 10 * DAY);
+    await request(ctx.server).post('/auth/session/touch').set('Cookie', cookie).expect(201);
+
+    const touched = await ctx.prisma.session.findUniqueOrThrow({ where: { id: sessionId } });
+    expect(Date.now() - touched.lastSeenAt.getTime()).toBeLessThan(5_000);
+    expect(touched.expiresAt.getTime()).toBe(issued.expiresAt.getTime());
+  });
+
   it('cannot revive a session the idle window already ended', async () => {
     process.env.SESSION_IDLE_TIMEOUT_SECONDS = '1800';
     const user = await createLoginUser();
@@ -333,6 +450,38 @@ describe('revocation', () => {
     // in one tab" safe for every other tab holding the same cookie.
     await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
     await request(ctx.server).get('/auth/session').set('Cookie', cookie).expect(401);
+  });
+
+  it('logout ends a remembered session as immediately as any other', async () => {
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
+    const user = await createLoginUser();
+    const { cookie, sessionId } = await login(user.email!, { rememberMe: true });
+
+    await request(ctx.server).post('/auth/logout').set('Cookie', cookie).expect(201);
+
+    // A month of idle window and a month of absolute life, both irrelevant: a
+    // revoked session is refused before either clock is consulted.
+    const session = await ctx.prisma.session.findUniqueOrThrow({ where: { id: sessionId } });
+    expect(session.revokedAt).not.toBeNull();
+    expect(session.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
+    await request(ctx.server).get('/auth/session').set('Cookie', cookie).expect(401);
+  });
+
+  it('a server-side revoke ends a remembered session with no client involved', async () => {
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = String(30 * DAY);
+    const user = await createLoginUser();
+    const { cookie, sessionId } = await login(user.email!, { rememberMe: true });
+
+    // What "log out everywhere", a password reset and a deactivation all do.
+    await ctx.prisma.session.update({
+      where: { id: sessionId },
+      data: { revokedAt: new Date() },
+    });
+
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
+    await request(ctx.server).post('/auth/session/touch').set('Cookie', cookie).expect(401);
   });
 
   it('logging in revokes the session the browser arrived with', async () => {
@@ -367,5 +516,24 @@ describe('policy configuration', () => {
     // in-process shape of what `assertSessionPolicyConfig` turns into a refusal
     // to boot.
     await request(ctx.server).get('/auth/session').set('Cookie', cookie).expect(500);
+  });
+
+  it('refuses a bad remembered duration too, on the session it belongs to', async () => {
+    const user = await createLoginUser();
+    const { cookie } = await login(user.email!, { rememberMe: true });
+
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = 'yarım saat';
+    await request(ctx.server).get('/auth/session').set('Cookie', cookie).expect(500);
+  });
+
+  it('leaves an ordinary session alone when only the remembered policy is broken', async () => {
+    const user = await createLoginUser();
+    const { cookie } = await login(user.email!);
+
+    // The two policies are read independently, so a typo in one is not an
+    // outage for people running under the other. (At boot the assertion checks
+    // both, so this state does not survive a restart.)
+    process.env.SESSION_REMEMBER_ME_IDLE_TIMEOUT_SECONDS = '-1';
+    await request(ctx.server).get('/auth/session').set('Cookie', cookie).expect(200);
   });
 });

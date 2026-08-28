@@ -108,6 +108,10 @@ export function SessionGuard({
       // the browser's own clock plays no part in.
       remainingMs: Number.isFinite(remainingMs) ? remainingMs : 0,
       at: performance.now(),
+      // The server's figure for *this* session's policy: two minutes for an
+      // ordinary one, a day for a remembered one. Never a constant here — a
+      // month-long session warned two minutes out would be warning an empty
+      // room.
       warnAtMs: status.idleWarningSeconds * 1000,
     };
   }, []);
@@ -178,8 +182,16 @@ export function SessionGuard({
       }
 
       const left = current.remainingMs - (performance.now() - current.at);
-      setRemainingSeconds(Math.max(0, Math.ceil(left / 1000)));
-      setWarning(left <= current.warnAtMs);
+      const shouldWarn = left <= current.warnAtMs;
+
+      // State is only written while the warning is up, or as it appears and
+      // disappears. A remembered session is a month long, and re-rendering the
+      // whole panel once a second for four weeks to update a number nobody is
+      // being shown is a cost with no reader.
+      setWarning((was) => (was === shouldWarn ? was : shouldWarn));
+      if (shouldWarn) {
+        setRemainingSeconds(Math.max(0, Math.ceil(left / 1000)));
+      }
 
       // The countdown reaching zero is a prompt to ask, never the answer. The
       // server is what says the session is over, so the tab confirms before it
@@ -291,10 +303,29 @@ export function SessionGuard({
   );
 }
 
+/**
+ * The time left, in the largest unit that is still meaningful.
+ *
+ * A remembered session is warned about a day before it ends, so this has to be
+ * able to say "1 gün" as well as "45 saniye" — "1440 dakika" is a number nobody
+ * reads as a day. Only the top two units are shown: at that distance the seconds
+ * are noise, and at the very end they are the whole message.
+ */
 function formatCountdown(seconds: number): string {
-  if (seconds >= 60) {
-    const minutes = Math.floor(seconds / 60);
-    const rest = seconds % 60;
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const rest = seconds % 60;
+
+  if (days > 0) {
+    return hours === 0 ? `${days} gün` : `${days} gün ${hours} saat`;
+  }
+
+  if (hours > 0) {
+    return minutes === 0 ? `${hours} saat` : `${hours} saat ${minutes} dk`;
+  }
+
+  if (minutes > 0) {
     return rest === 0 ? `${minutes} dakika` : `${minutes} dk ${rest} sn`;
   }
 

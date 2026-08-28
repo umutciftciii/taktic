@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import {
-  sessionIdleTimeoutSeconds,
-  sessionIdleWarningSeconds,
+  sessionIdleTimeoutSecondsFor,
+  sessionIdleWarningSecondsFor,
   sessionTtlSecondsFor,
 } from './auth.constants';
 
@@ -21,17 +21,30 @@ export function sessionExpiry(rememberMe = false, now: Date = new Date()) {
   return new Date(now.getTime() + sessionTtlSecondsFor(rememberMe) * 1000);
 }
 
-/** When inactivity alone would end a session whose last activity was `lastSeenAt`. */
-export function idleExpiry(lastSeenAt: Date) {
-  return new Date(lastSeenAt.getTime() + sessionIdleTimeoutSeconds() * 1000);
+/**
+ * When inactivity alone would end this session.
+ *
+ * `rememberMe` is a parameter rather than a lookup because the two policies have
+ * different windows, and the caller always knows which kind of session it is
+ * holding — it is a column on the row. Defaulting it would let a remembered
+ * session be measured against the ordinary window by a caller that simply
+ * forgot to pass it, which is exactly the mistake this signature exists to make
+ * impossible.
+ */
+export function idleExpiry(lastSeenAt: Date, rememberMe: boolean) {
+  return new Date(lastSeenAt.getTime() + sessionIdleTimeoutSecondsFor(rememberMe) * 1000);
 }
 
 /**
  * The moment a session actually ends: whichever of the two clocks runs out
  * first. Both are the server's, read from the row.
  */
-export function effectiveExpiry(session: { expiresAt: Date; lastSeenAt: Date }) {
-  const idle = idleExpiry(session.lastSeenAt);
+export function effectiveExpiry(session: {
+  expiresAt: Date;
+  lastSeenAt: Date;
+  rememberMe: boolean;
+}) {
+  const idle = idleExpiry(session.lastSeenAt, session.rememberMe);
   return idle < session.expiresAt ? idle : session.expiresAt;
 }
 
@@ -53,10 +66,12 @@ export function toSessionStatus(session: {
   return {
     rememberMe: session.rememberMe,
     absoluteExpiresAt: session.expiresAt.toISOString(),
-    idleExpiresAt: idleExpiry(session.lastSeenAt).toISOString(),
+    idleExpiresAt: idleExpiry(session.lastSeenAt, session.rememberMe).toISOString(),
     expiresAt: effectiveExpiry(session).toISOString(),
-    idleTimeoutSeconds: sessionIdleTimeoutSeconds(),
-    idleWarningSeconds: sessionIdleWarningSeconds(),
+    // This session's own policy, not the deployment's default one — the client
+    // needs the window it is actually running under to know when to warn.
+    idleTimeoutSeconds: sessionIdleTimeoutSecondsFor(session.rememberMe),
+    idleWarningSeconds: sessionIdleWarningSecondsFor(session.rememberMe),
     serverTime: new Date().toISOString(),
   };
 }
