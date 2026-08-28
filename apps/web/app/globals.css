@@ -4381,3 +4381,19 @@ a.seg-opt:hover { text-decoration: none; color: var(--color-text); }
 .password-criterion.is-met {
   color: var(--color-ink);
 }
+
+/* The contact-sharing acknowledgement above the accept button. */
+.cdash-consent {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft, #4a5568);
+}
+
+.cdash-consent input[type='checkbox'] {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}

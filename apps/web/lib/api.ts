@@ -402,26 +402,78 @@ export async function getContactDisclosure(): Promise<ContactDisclosureConfig> {
 }
 
 /**
- * Loads matched contact details, returning null for every expected refusal.
+ * Why a matched party cannot be shown the other side's details right now.
  *
- * A 409 means the feature is off, a 404 that this request has no reveal, a 403
- * that this caller is not one of the two parties. None of those is an error the
- * screen should apologise for — the section simply does not appear.
+ * A closed set, and each member is a different sentence on screen. Collapsing
+ * them into "no data" is what made a failed match look like an empty one: the
+ * customer had accepted an offer, the platform had told them the match was
+ * complete, and the section that was supposed to carry the phone number simply
+ * was not rendered — with nothing anywhere saying why.
  */
-export async function getMatchedContactOrNull<T>(path: string): Promise<T | null> {
+export type MatchedContactUnavailableReason =
+  /** The deployment has contact sharing switched off. */
+  | 'sharing-off'
+  /** Matched, but no reveal is on record — the match predates the sharing. */
+  | 'not-recorded'
+  /** The API could not be reached, or answered in a way this screen cannot use. */
+  | 'unreachable';
+
+export type MatchedContactResult<T> =
+  | { state: 'ready'; contact: T }
+  /** The viewer is not one of the two parties. Nothing is rendered, by design. */
+  | { state: 'hidden' }
+  | { state: 'unavailable'; reason: MatchedContactUnavailableReason };
+
+/**
+ * Loads matched contact details, and says which kind of "no" it got.
+ *
+ * 403 and 401 stay silent: the caller is not a party to this match, and a
+ * screen that explained itself there would be telling a stranger that a match
+ * exists. Everything else is a state a party is entitled to an explanation
+ * for — the screens above decide whether the viewer is one.
+ */
+export async function loadMatchedContact<T>(path: string): Promise<MatchedContactResult<T>> {
   try {
-    return await apiFetch<T>(path);
+    return { state: 'ready', contact: await apiFetch<T>(path) };
   } catch (error) {
-    if (
-      error instanceof ApiError &&
-      (error.status === 409 || error.status === 404 || error.status === 403 || error.status === 401)
-    ) {
-      return null;
+    if (!(error instanceof ApiError)) {
+      return { state: 'unavailable', reason: 'unreachable' };
     }
 
-    throw error;
+    if (error.status === 403 || error.status === 401) {
+      return { state: 'hidden' };
+    }
+
+    if (error.status === 409) {
+      return { state: 'unavailable', reason: 'sharing-off' };
+    }
+
+    if (error.status === 404) {
+      return { state: 'unavailable', reason: 'not-recorded' };
+    }
+
+    return { state: 'unavailable', reason: 'unreachable' };
   }
 }
+
+/**
+ * What to tell a matched party when the details cannot be shown.
+ *
+ * Says what happened and what to do, and nothing about the other party — these
+ * render on a screen that was supposed to be carrying a phone number, so the
+ * one thing they must not do is leak a fragment of it.
+ */
+export const MATCHED_CONTACT_UNAVAILABLE_MESSAGES: Record<
+  MatchedContactUnavailableReason,
+  string
+> = {
+  'sharing-off':
+    'İletişim bilgisi paylaşımı bu kurulumda kapalı olduğu için karşı tarafın bilgileri gösterilemiyor. Eşleşmeniz geçerlidir; destek ekibiyle iletişime geçebilirsiniz.',
+  'not-recorded':
+    'Bu eşleşme için iletişim paylaşımı kaydı bulunmuyor, bu yüzden bilgiler gösterilemiyor. Eşleşmeniz geçerlidir; destek ekibiyle iletişime geçebilirsiniz.',
+  unreachable:
+    'İletişim bilgileri şu anda yüklenemedi. Eşleşmeniz duruyor; lütfen sayfayı yenileyin, sorun sürerse destek ekibiyle iletişime geçin.',
+};
 
 export type CreditTransactionType =
   | 'ADMIN_GRANT'

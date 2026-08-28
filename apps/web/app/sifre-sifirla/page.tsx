@@ -1,3 +1,4 @@
+import { formatDateTime } from '@taktic/shared';
 import Link from 'next/link';
 import { AuthFrame } from '../auth-frame';
 import { apiUrl, readApiMessage } from '../api-base';
@@ -37,19 +38,11 @@ async function validateResetToken(token: string): Promise<ValidateResult> {
   }
 }
 
-function formatExpiry(value: string): string {
-  try {
-    return new Date(value).toLocaleString('tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return value;
-  }
-}
+/**
+ * The product's own zone, never the process's. A server running in UTC must not
+ * tell an Istanbul visitor their link expires three hours earlier than it does.
+ */
+const formatExpiry = formatDateTime;
 
 export default async function ResetPasswordPage({ searchParams }: ResetPasswordPageProps) {
   const { token, success, error, errorMessage } = await searchParams;

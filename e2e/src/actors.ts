@@ -19,8 +19,22 @@ export class Actor {
     readonly runtime: Runtime,
   ) {}
 
-  static async open(browser: Browser, name: string, runtime: Runtime): Promise<Actor> {
-    const context = await browser.newContext();
+  /**
+   * `options` exists for one case: emulating a visitor's time zone.
+   *
+   * The application servers in this suite run in the host's zone (UTC in CI),
+   * and a browser that reports a different one is exactly the arrangement that
+   * used to make server-rendered HTML and the first client render disagree.
+   * Being able to say so explicitly is what makes the hydration check a test
+   * rather than a coincidence.
+   */
+  static async open(
+    browser: Browser,
+    name: string,
+    runtime: Runtime,
+    options: Parameters<Browser['newContext']>[0] = {},
+  ): Promise<Actor> {
+    const context = await browser.newContext(options);
     const page = await context.newPage();
     return new Actor(name, context, page, runtime);
   }

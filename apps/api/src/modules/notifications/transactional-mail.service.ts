@@ -1174,18 +1174,36 @@ function parseRetrySource(template: string, dedupeKey: string | null): RetrySour
 }
 
 /**
- * Where a provider's mail goes: the application's own contact address, falling
- * back to the owning account's.
+ * Where a provider's mail goes: the owning account's address, falling back to
+ * the application's own contact field only when there is no account.
  *
- * The application address leads because it is the one the applicant typed and
- * the one the claim flow pins to the owner's address once ownership is granted
- * — so for a claimed profile the two are the same value anyway.
+ * This order is a correction, and the reason is worth stating.
+ *
+ * It used to be the other way round, on the documented assumption that "the
+ * claim flow pins the application address to the owner's address once ownership
+ * is granted — so for a claimed profile the two are the same value anyway".
+ * That is true only of profiles that arrived through the claim flow. A provider
+ * who registers directly owns their profile from the first moment and never
+ * passes through it, so the two fields are simply two independent values: the
+ * address they sign in with, and whatever they typed into a form field once.
+ * Preferring the form field meant the platform mailed an address the provider
+ * may never read, had never confirmed, and cannot correct by fixing their
+ * account — while NotificationLog recorded the send as successful.
+ *
+ * The account address is the one the platform actually knows to be theirs: it
+ * is unique across accounts, it is what a password reset and an e-mail
+ * verification go to, and it is what they use to log in and read the panel the
+ * message links to.
+ *
+ * The application address still leads for a *guest* application, because there
+ * is no account behind it yet and it is the only address there is. That is the
+ * case the claim invitation is for, and it is unchanged.
  */
 function recipientFor(provider: {
   email: string | null;
   user?: { email: string | null } | null;
 }): string | null {
-  const candidate = provider.email?.trim() || provider.user?.email?.trim();
+  const candidate = provider.user?.email?.trim() || provider.email?.trim();
   return candidate ? candidate : null;
 }
 

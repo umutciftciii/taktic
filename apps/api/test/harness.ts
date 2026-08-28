@@ -380,6 +380,22 @@ export async function createApprovedRequest(
 }
 
 /** Shifts a Date `days` into the past; the lifecycle specs' whole vocabulary. */
+/**
+ * The body a customer's accept carries.
+ *
+ * Accepting an offer is what opens the two parties' contact details to each
+ * other, so with contact sharing on the API requires the customer's
+ * confirmation of the current disclosure in the same request — see
+ * OffersService.acceptRequestOffer. The web accept screen collects it with a
+ * required checkbox and posts exactly this shape.
+ *
+ * Specs whose subject is not contact sharing use this so they exercise the
+ * accept a real client performs. With the feature off the field is ignored, so
+ * it is safe everywhere. Specs that are *about* the rule send their own body:
+ * the refusals are the thing they assert.
+ */
+export const ACCEPT_OFFER = { action: 'ACCEPT' as const, contactDisclosureAccepted: true };
+
 export function daysAgo(days: number): Date {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 }

@@ -19,6 +19,7 @@ import {
   offerPayload,
   resetDatabase,
   type TestContext,
+  ACCEPT_OFFER,
 } from './harness';
 
 let ctx: TestContext;
@@ -309,7 +310,7 @@ describe('provider offer withdrawal — concurrency', () => {
       request(ctx.server)
         .post(acceptUrl(serviceRequest.id, offerId))
         .set('Cookie', customerCookie)
-        .send({ action: 'ACCEPT' }),
+        .send(ACCEPT_OFFER),
       request(ctx.server).post(withdrawUrl(provider.id, offerId)).set('Cookie', cookie),
     ]);
 
@@ -484,7 +485,7 @@ describe('provider offer withdrawal — refunds', () => {
     await request(ctx.server)
       .post(acceptUrl(serviceRequest.id, winner.offerId))
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const withdrawnOffer = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: offerId } });

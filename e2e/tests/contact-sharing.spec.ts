@@ -88,15 +88,19 @@ test.describe('contact sharing', () => {
       expect(await prisma().contactRevealEvent.count({ where: { requestId } })).toBe(0);
 
       // Neither screen grows a contact section, and neither leaks the other
-      // side's details in passing.
+      // side's details in passing. But both matched parties are told why the
+      // details are missing: a matched customer who is shown nothing at all
+      // cannot tell a switched-off feature from a broken page.
       await customer.gotoWeb(`/requests/${requestId}/offers`);
       await expect(customer.page.getByTestId('matched-contact')).toHaveCount(0);
+      await expect(customer.page.getByTestId('matched-contact-unavailable')).toBeVisible();
       const customerBody = await customer.page.locator('body').innerText();
       expect(customerBody).not.toContain(providerAccount.email);
       await assertNoErrorScreen(customer.page);
 
       await provider.gotoWeb(`/providers/${providerAccount.id}/offers/${offerId}`);
       await expect(provider.page.getByTestId('matched-contact')).toHaveCount(0);
+      await expect(provider.page.getByTestId('matched-contact-unavailable')).toBeVisible();
       const providerBody = await provider.page.locator('body').innerText();
       expect(providerBody).not.toContain(values.customerPhone);
       expect(providerBody).not.toContain(values.customerEmail);
@@ -237,6 +241,99 @@ test.describe('contact sharing', () => {
     }
   });
 
+  test('flag on: an accept without the acknowledgement is refused by the API too', async ({
+    browser,
+  }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(CATEGORY_COST);
+    const customerAccount = await createCustomer();
+    const adminAccount = await createAdmin();
+    const providerAccount = await createProvider({
+      categoryId: category.id,
+      location,
+      credits: STARTING_CREDITS,
+    });
+
+    const customer = await Actor.open(browser, 'customer', contactSharingRuntime);
+    const admin = await Actor.open(browser, 'admin', contactSharingRuntime);
+    const provider = await Actor.open(browser, 'provider', contactSharingRuntime);
+
+    try {
+      await customer.loginToWeb(customerAccount.email, customerAccount.password);
+      const values = requestFormValues(location, customerAccount.name);
+      const requestId = await createRequest(customer, category, values);
+
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await approveRequest(admin, requestId);
+
+      await provider.loginToWeb(providerAccount.email, providerAccount.password);
+      await submitOffer(provider, {
+        providerId: providerAccount.id,
+        requestId,
+        expectedCreditCost: CATEGORY_COST,
+        priceAmount: '1900.00',
+        message: 'Yarın başlayabilirim.',
+      });
+      const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);
+
+      // Clear the acknowledgement the request form recorded, so the accept is
+      // the only place it could come from — which is the case a request created
+      // before the wording existed, or through a guest form, is in.
+      await prisma().serviceRequest.update({
+        where: { id: requestId },
+        data: { contactDisclosureAcceptedAt: null, contactDisclosureVersion: null },
+      });
+
+      // ---- the screen asks, and will not submit unticked -------------------
+      await customer.gotoWeb(`/requests/${requestId}/offers/${offerId}`);
+      const consent = customer.page.getByTestId('contact-disclosure-consent');
+      await expect(consent).toBeVisible();
+      await expect(consent.locator('input[type="checkbox"]')).not.toBeChecked();
+
+      await customer.page.getByRole('button', { name: 'Kabul Et' }).click();
+      await expect(customer.page.getByTestId('offer-status')).not.toHaveText('Kabul edildi');
+      await assertNoErrorScreen(customer.page);
+
+      // ---- and the server refuses it once the markup is defeated ----------
+      // The `required` attribute is a convenience, not the rule. Removing it in
+      // the page is the closest thing to a client that never rendered the box:
+      // the same form, the same server action, the same API call — and the
+      // refusal has to come from the server this time.
+      await consent
+        .locator('input[type="checkbox"]')
+        .evaluate((element) => element.removeAttribute('required'));
+      await customer.page.getByRole('button', { name: 'Kabul Et' }).click();
+
+      const refusal = customer.page.getByTestId('offer-accept-error');
+      await expect(refusal).toBeVisible();
+      await expect(refusal).toContainText('bilgilendirmeyi onaylayın');
+      await assertNoErrorScreen(customer.page);
+
+      // Nothing moved.
+      const untouched = await prisma().serviceRequest.findUniqueOrThrow({
+        where: { id: requestId },
+      });
+      expect(untouched.status).toBe('APPROVED');
+      expect(untouched.matchedOfferId).toBeNull();
+      expect(await prisma().contactRevealEvent.count({ where: { requestId } })).toBe(0);
+
+      // ---- ticking it completes the match and records the consent ----------
+      await acceptOffer(customer, requestId, offerId);
+
+      const matched = await prisma().serviceRequest.findUniqueOrThrow({
+        where: { id: requestId },
+      });
+      expect(matched.status).toBe('MATCHED');
+      expect(matched.contactDisclosureAcceptedAt).not.toBeNull();
+      expect(await prisma().contactRevealEvent.count({ where: { requestId } })).toBe(1);
+
+      await customer.gotoWeb(`/requests/${requestId}/offers`);
+      await expect(customer.page.getByTestId('matched-contact')).toBeVisible();
+    } finally {
+      await Promise.all([customer.close(), admin.close(), provider.close()]);
+    }
+  });
+
   test('flag on: a request cannot be sent without the acknowledgement', async ({ browser }) => {
     const location = uniqueLocation();
     const category = await createCategory(CATEGORY_COST);
@@ -253,8 +350,10 @@ test.describe('contact sharing', () => {
       // Left unticked on purpose.
       await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
 
-      // Refused in place, with the checkbox still on screen — not a crash, and
-      // not a request that quietly went through.
+      // Refused in place by the form's own required checkbox, with it still on
+      // screen — not a crash, and not a request that quietly went through. The
+      // rule that actually protects the customer is at the accept (see the case
+      // above); this one keeps the guided path honest about what is coming.
       await expect(customer.page).not.toHaveURL(/\/requests\/success/);
       await expect(customer.page.getByTestId('contact-disclosure-accept')).toBeVisible();
       await assertNoErrorScreen(customer.page);

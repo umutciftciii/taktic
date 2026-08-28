@@ -5,7 +5,8 @@ import {
   CustomerServiceRequest,
   MatchedProviderContact,
   fetchOrNotFound,
-  getMatchedContactOrNull,
+  loadMatchedContact,
+  MATCHED_CONTACT_UNAVAILABLE_MESSAGES,
   RequestOfferPreview,
   formatDateTime,
   getCurrentUser,
@@ -38,10 +39,10 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   const [offers, myRequests, matchedContact] = await Promise.all([
     fetchOrNotFound(() => apiFetch<RequestOfferPreview[]>(`/service-requests/${id}/offers`)),
     safeFetchMyRequests(),
-    // Its own request, never part of the offer payload. Null whenever the
-    // feature is off, the request is not matched, or no reveal was recorded —
-    // in all three cases the section below simply does not render.
-    getMatchedContactOrNull<MatchedProviderContact>(`/service-requests/${id}/matched-contact`),
+    // Its own request, never part of the offer payload. The result says which
+    // kind of "no" came back, because a customer looking at their own matched
+    // request is entitled to know why the details are missing.
+    loadMatchedContact<MatchedProviderContact>(`/service-requests/${id}/matched-contact`),
   ]);
 
   const summary = myRequests.find((request) => request.id === id) ?? null;
@@ -53,6 +54,9 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
     .filter((offer) => offer.status !== 'WITHDRAWN')
     .sort((a, b) => a.priceAmount - b.priceAmount);
   const requestReference = summary?.requestNumber ?? `#${id.slice(-6).toUpperCase()}`;
+  // Whether this customer has a match at all decides whether an unavailable
+  // contact card is worth explaining or simply is not their business.
+  const isMatched = summary?.status === 'MATCHED' || summary?.status === 'COMPLETED';
 
   return (
     <CustomerShell user={user} active="offers">
@@ -145,7 +149,24 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
         </aside>
       </section>
 
-      {matchedContact ? <MatchedContactSection contact={matchedContact} /> : null}
+      {matchedContact.state === 'ready' ? (
+        <MatchedContactSection contact={matchedContact.contact} />
+      ) : isMatched && matchedContact.state === 'unavailable' ? (
+        /*
+          Matched, and the details did not load. This customer accepted an offer
+          and was told the match was complete, so the section that should carry
+          the provider's number must not just be absent. The sentence names the
+          cause and nothing about the other party.
+        */
+        <section
+          className="cdash-notice cdash-notice-error"
+          role="status"
+          data-testid="matched-contact-unavailable"
+          style={{ marginTop: 24 }}
+        >
+          {MATCHED_CONTACT_UNAVAILABLE_MESSAGES[matchedContact.reason]}
+        </section>
+      ) : null}
 
       <OffersView requestId={id} offers={sortedOffers} />
 

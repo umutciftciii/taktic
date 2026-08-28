@@ -681,27 +681,24 @@ function qualityLabel(score: number): QualityLabel {
 /**
  * What the request should record about the contact-sharing disclosure.
  *
- * With the feature off this returns nothing at all, so request creation behaves
- * exactly as it did before the columns existed and both stay NULL. With it on,
- * the customer must confirm having read the linked text before the request can
- * be created — because accepting an offer on that request is what opens their
- * details, and by then it is too late to ask.
+ * Creation *records* an acceptance; it no longer *demands* one. The demand
+ * moved to the moment it is about — accepting an offer, which is the act that
+ * opens the two parties' details to each other (see
+ * OffersService.acceptRequestOffer). Asking at creation was both too early and
+ * too coarse: too early because nothing is shared by submitting a request, and
+ * too coarse because a customer who accepted months ago, before the wording
+ * changed, would have their accept refused with nowhere to re-confirm.
+ *
+ * Requests created before this — and every guest request submitted by a form
+ * that never showed the box — therefore stay acceptable: their customer is
+ * asked at the accept screen instead, which is where the answer matters.
  *
  * The stored version always comes from configuration, never from the client.
  */
 function resolveContactDisclosure(dto: CreateServiceRequestDto) {
   const config = readContactSharingConfig();
-  if (!config.enabled) {
+  if (!config.enabled || dto.contactDisclosureAccepted !== true) {
     return {};
-  }
-
-  if (dto.contactDisclosureAccepted !== true) {
-    throw new BadRequestException({
-      statusCode: HttpStatus.BAD_REQUEST,
-      error: 'Bad Request',
-      code: CONTACT_DISCLOSURE_REQUIRED_CODE,
-      message: 'Talebi göndermek için bilgilendirme metnini okuduğunuzu onaylayın.',
-    });
   }
 
   const shown = dto.contactDisclosureVersion?.trim().toLowerCase();
