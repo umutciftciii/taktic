@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@taktic/shared';
 import { useState, useTransition } from 'react';
 import type { RefundScanExecuteResponse, RefundScanResponse } from '../../lib/api';
 
@@ -239,9 +240,6 @@ async function readApiResponse<T>(response: Response) {
   return response.json() as Promise<T>;
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
-}
+// Was `dateStyle`/`timeStyle` with no zone, so this client component rendered
+// the scan window in the visitor's zone while the server had picked it in UTC.
+const formatDate = formatDateTime;

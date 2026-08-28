@@ -3,12 +3,14 @@ import { redirect } from 'next/navigation';
 import {
   apiFetch,
   fetchOrNotFound,
+  getContactDisclosure,
   RequestOfferDetail,
   formatDate,
   formatDateTime,
   formatPrice,
   getCurrentUser,
   statusLabel,
+  type ContactDisclosureConfig,
 } from '../../../../../lib/api';
 import { CustomerShell } from '../../../customer-shell';
 import { IconArrowLeft } from '../../../../landing-icons';
@@ -16,10 +18,15 @@ import { customerOfferAction } from './actions';
 
 type RequestOfferDetailPageProps = {
   params: Promise<{ id: string; offerId: string }>;
+  searchParams: Promise<{ accept?: string; message?: string }>;
 };
 
-export default async function RequestOfferDetailPage({ params }: RequestOfferDetailPageProps) {
+export default async function RequestOfferDetailPage({
+  params,
+  searchParams,
+}: RequestOfferDetailPageProps) {
   const { id, offerId } = await params;
+  const { accept: acceptOutcome, message: acceptMessage } = await searchParams;
 
   const user = await getCurrentUser();
   if (!user || user.role !== 'CUSTOMER') {
@@ -36,6 +43,11 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
 
   const actionable =
     offer.status !== 'ACCEPTED' && offer.status !== 'REJECTED' && offer.status !== 'WITHDRAWN';
+
+  // Read from the API so the screen and the rule that guards the accept agree
+  // about which text is current. With sharing off there is nothing to confirm
+  // and the acknowledgement is not rendered at all.
+  const disclosure = await getContactDisclosure();
 
   return (
     <CustomerShell user={user} active="requests">
@@ -127,14 +139,18 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
           {actionable ? (
             <section className="cdash-detail-card">
               <h2>Aksiyonlar</h2>
+              {acceptOutcome === 'error' ? (
+                <div
+                  className="cdash-notice cdash-notice-error"
+                  role="alert"
+                  data-testid="offer-accept-error"
+                  style={{ marginBottom: 12 }}
+                >
+                  {acceptMessage || 'Teklif kabul edilemedi. Lütfen tekrar deneyin.'}
+                </div>
+              ) : null}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="offer-actions">
-                <ActionButton
-                  requestId={id}
-                  offerId={offerId}
-                  action="ACCEPT"
-                  label="Kabul Et"
-                  variant="primary"
-                />
+                <AcceptForm requestId={id} offerId={offerId} disclosure={disclosure} />
                 <ActionButton
                   requestId={id}
                   offerId={offerId}
@@ -147,12 +163,83 @@ export default async function RequestOfferDetailPage({ params }: RequestOfferDet
           ) : null}
 
           <div className="cdash-notice">
-            Ödeme ve doğrudan iletişim akışı henüz aktif değildir. Teklifi kabul ettiğinizde hizmet
-            veren bilgilendirilir.
+            {disclosure.enabled
+              ? 'Teklifi kabul ettiğinizde eşleşme tamamlanır ve iletişim bilgileriniz yalnızca kabul ettiğiniz hizmet verenle karşılıklı olarak paylaşılır.'
+              : 'Teklifi kabul ettiğinizde hizmet veren bilgilendirilir.'}
           </div>
         </div>
       </div>
     </CustomerShell>
+  );
+}
+
+/**
+ * The accept control, and the acknowledgement it is not allowed to skip.
+ *
+ * The checkbox is `required`, so the browser refuses the submit without it, and
+ * the confirmation travels in the same request as the action. That is a
+ * convenience and not the rule: the API re-checks it inside the accept
+ * transaction and refuses a match that carries no current-version consent, so a
+ * client that posts around this form gets the same answer.
+ *
+ * The version the screen actually rendered goes along too. If the wording has
+ * been replaced since this page was served the API says so rather than filing
+ * the answer against a text the customer never saw.
+ */
+function AcceptForm({
+  requestId,
+  offerId,
+  disclosure,
+}: {
+  requestId: string;
+  offerId: string;
+  disclosure: ContactDisclosureConfig;
+}) {
+  const checkboxId = `contact-disclosure-${offerId}`;
+
+  return (
+    <form action={customerOfferAction}>
+      <input type="hidden" name="requestId" value={requestId} />
+      <input type="hidden" name="offerId" value={offerId} />
+      <input type="hidden" name="action" value="ACCEPT" />
+      {disclosure.enabled ? (
+        <>
+          <input
+            type="hidden"
+            name="contactDisclosureVersion"
+            value={disclosure.disclosureVersion ?? ''}
+          />
+          <label
+            className="cdash-consent"
+            htmlFor={checkboxId}
+            data-testid="contact-disclosure-consent"
+          >
+            <input
+              id={checkboxId}
+              type="checkbox"
+              name="contactDisclosureAccepted"
+              value="true"
+              required
+            />
+            <span>
+              Teklifi kabul ettiğimde ad, telefon ve e-posta bilgilerimin yalnızca bu hizmet verenle
+              paylaşılacağını{' '}
+              {disclosure.disclosureUrl ? (
+                <a href={disclosure.disclosureUrl} target="_blank" rel="noreferrer">
+                  aydınlatma metninde
+                </a>
+              ) : (
+                'aydınlatma metninde'
+              )}{' '}
+              okudum ve onaylıyorum.
+            </span>
+          </label>
+        </>
+      ) : null}
+      <button className="cdash-btn cdash-btn-primary cdash-btn-block" type="submit">
+        Kabul Et
+      </button>
+    </form>
   );
 }
 
@@ -165,7 +252,7 @@ function ActionButton({
 }: {
   requestId: string;
   offerId: string;
-  action: 'REJECT' | 'ACCEPT';
+  action: 'REJECT';
   label: string;
   variant: 'primary' | 'danger';
 }) {

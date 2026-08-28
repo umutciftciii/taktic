@@ -24,33 +24,17 @@ export function statusLabel(status: string): string {
   return labels[status] ?? status;
 }
 
-export function formatDate(value: string | null | undefined): string {
-  if (!value) return '-';
-  try {
-    return new Date(value).toLocaleDateString('tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  } catch {
-    return value;
-  }
-}
-
-export function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '-';
-  try {
-    return new Date(value).toLocaleString('tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return value;
-  }
-}
+/**
+ * Re-exported from @taktic/shared rather than reimplemented.
+ *
+ * These used to call `toLocaleDateString('tr-TR', …)` with no `timeZone`, which
+ * means "whatever zone this process is in". The server renders in the
+ * container's UTC and the browser re-renders in the visitor's UTC+3, so the two
+ * produced different text for the same instant and React tore the tree down on
+ * hydration. The shared implementation pins both the zone and the locale, so
+ * SSR and the first client render agree by construction.
+ */
+export { formatDate, formatDateTime, formatTime } from '@taktic/shared';
 
 export function formatPrice(amount: number, currency: string = 'TRY'): string {
   try {

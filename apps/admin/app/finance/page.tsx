@@ -1,3 +1,4 @@
+import { formatIsoDay } from '@taktic/shared';
 import Link from 'next/link';
 import {
   apiFetch,
@@ -92,13 +93,7 @@ function normalizeIsoDate(value: string | undefined): string | undefined {
 }
 
 function istanbulTodayParts(): { year: number; month: number; day: number } {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Istanbul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const [year = '1970', month = '01', day = '01'] = formatter.format(new Date()).split('-');
+  const [year = '1970', month = '01', day = '01'] = formatIsoDay(new Date()).split('-');
   return {
     year: Number.parseInt(year, 10),
     month: Number.parseInt(month, 10),

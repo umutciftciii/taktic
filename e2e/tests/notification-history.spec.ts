@@ -92,6 +92,12 @@ test.describe('notification delivery history', () => {
       const sentRows = admin.page.getByTestId('notification-row');
       await expect(sentRows).toHaveCount(1);
       await expect(sentRows.first()).toHaveAttribute('data-status', 'SENT');
+      // SENT means the transport accepted the request, and nothing more. This
+      // platform stores no delivery callback, so the screen must not read as a
+      // delivery confirmation — an accepted-then-bounced provider invitation
+      // looked like a success for exactly that reason.
+      await expect(sentRows.first()).toContainText('Gönderim sağlayıcısına iletildi');
+      await expect(sentRows.first()).not.toContainText('Teslim edildi');
 
       // ---- and it discloses nothing about the message -------------------
       const listBody = await admin.page.locator('body').innerText();
@@ -102,6 +108,11 @@ test.describe('notification delivery history', () => {
       // ---- the same holds on the detail screen --------------------------
       await sentRows.first().getByRole('link', { name: 'Detay' }).click();
       await expect(admin.page.getByTestId('notification-masked-recipient')).toBeVisible();
+      // And the detail screen spells the distinction out rather than leaving an
+      // operator to infer it from a badge.
+      await expect(admin.page.getByTestId('notification-status-meaning')).toContainText(
+        'alıcının kutusuna ulaştığı anlamına gelmez',
+      );
       await assertNoErrorScreen(admin.page);
 
       const detailBody = await admin.page.locator('body').innerText();

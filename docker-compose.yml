@@ -55,10 +55,17 @@ services:
       REQUEST_REMINDER_SCHEDULER_ENABLED: ${REQUEST_REMINDER_SCHEDULER_ENABLED:-false}
       REQUEST_REMINDER_SCHEDULER_CRON: ${REQUEST_REMINDER_SCHEDULER_CRON:-45 * * * *}
       REQUEST_LIFECYCLE_SCAN_LIMIT: ${REQUEST_LIFECYCLE_SCAN_LIMIT:-200}
-      # Off unless the host environment says otherwise. With it on the two
-      # disclosure settings are mandatory and the API refuses to boot without
-      # them — see the Contact Sharing section of the README.
-      CONTACT_SHARING_ENABLED: ${CONTACT_SHARING_ENABLED:-false}
+      # On unless the host environment says otherwise. Opening the two parties'
+      # details to each other is the outcome a match exists to produce, and a
+      # stack that configures nothing should run the product rather than a
+      # version of it with the result switched off. This default used to be
+      # `false`, which is why an accepted offer left both screens blank.
+      #
+      # The two settings below stay empty here. Empty means unset, and unset
+      # means the API links its own disclosure page — the one this repository
+      # serves and versions in code. A deployment with its own published legal
+      # text sets *both* of them; setting one alone is still a boot failure.
+      CONTACT_SHARING_ENABLED: ${CONTACT_SHARING_ENABLED:-true}
       CONTACT_DISCLOSURE_URL: ${CONTACT_DISCLOSURE_URL:-}
       CONTACT_DISCLOSURE_VERSION: ${CONTACT_DISCLOSURE_VERSION:-}
       # console|file-outbox|resend. The dev stack keeps the console adapter:

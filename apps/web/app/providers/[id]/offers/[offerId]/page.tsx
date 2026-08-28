@@ -4,7 +4,8 @@ import {
   apiFetch,
   fetchOrNotFound,
   getCurrentUser,
-  getMatchedContactOrNull,
+  loadMatchedContact,
+  MATCHED_CONTACT_UNAVAILABLE_MESSAGES,
   MatchedCustomerContact,
   ProviderAcceptedWorkScope,
   ProviderOffer,
@@ -48,10 +49,11 @@ export default async function ProviderOfferDetailPage({
   );
 
   // Its own request, and the API answers it for exactly one provider: the one
-  // whose offer this request was matched to. A losing offer gets null here, so
-  // the section below never renders for it.
+  // whose offer this request was matched to. A losing offer is answered with
+  // "hidden" and renders nothing at all — the explanation below is only for the
+  // provider whose own offer was accepted.
   const [matchedContact, creditBalance] = await Promise.all([
-    getMatchedContactOrNull<MatchedCustomerContact>(
+    loadMatchedContact<MatchedCustomerContact>(
       `/providers/${id}/offers/${offerId}/matched-contact`,
     ),
     readCreditBalance(id),
@@ -164,7 +166,7 @@ export default async function ProviderOfferDetailPage({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          {matchedContact ? (
+          {matchedContact.state === 'ready' ? (
             <section className="pdash-detail-card" data-testid="matched-contact">
               <h2>Müşteri İletişim</h2>
               <p className="pdash-card-sub" style={{ marginTop: -4 }}>
@@ -173,25 +175,25 @@ export default async function ProviderOfferDetailPage({
               <dl className="pdash-info-grid">
                 <div className="pdash-info-row">
                   <dt>Ad Soyad</dt>
-                  <dd data-testid="matched-contact-name">{matchedContact.customer.customerName}</dd>
+                  <dd data-testid="matched-contact-name">{matchedContact.contact.customer.customerName}</dd>
                 </div>
                 <div className="pdash-info-row">
                   <dt>Telefon</dt>
                   <dd>
                     <a
-                      href={`tel:${matchedContact.customer.customerPhone}`}
+                      href={`tel:${matchedContact.contact.customer.customerPhone}`}
                       data-testid="matched-contact-phone"
                     >
-                      {matchedContact.customer.customerPhone}
+                      {matchedContact.contact.customer.customerPhone}
                     </a>
                   </dd>
                 </div>
                 <div className="pdash-info-row">
                   <dt>E-posta</dt>
                   <dd>
-                    {matchedContact.customer.customerEmail ? (
-                      <a href={`mailto:${matchedContact.customer.customerEmail}`}>
-                        {matchedContact.customer.customerEmail}
+                    {matchedContact.contact.customer.customerEmail ? (
+                      <a href={`mailto:${matchedContact.contact.customer.customerEmail}`}>
+                        {matchedContact.contact.customer.customerEmail}
                       </a>
                     ) : (
                       '-'
@@ -200,7 +202,7 @@ export default async function ProviderOfferDetailPage({
                 </div>
                 <div className="pdash-info-row">
                   <dt>Paylaşım</dt>
-                  <dd>{formatDateTime(matchedContact.revealedAt)}</dd>
+                  <dd>{formatDateTime(matchedContact.contact.revealedAt)}</dd>
                 </div>
               </dl>
             </section>
@@ -291,7 +293,21 @@ export default async function ProviderOfferDetailPage({
             </div>
           ) : null}
 
-          {matchedContact ? null : (
+          {matchedContact.state === 'unavailable' && offer.status === 'ACCEPTED' ? (
+            /*
+              This provider's own offer was accepted, so they are one of the two
+              parties and the customer's details were supposed to be here. Say
+              why they are not, rather than leaving the page looking like a
+              screen for somebody who did not win.
+            */
+            <div
+              className="pdash-notice pdash-notice-warn"
+              role="status"
+              data-testid="matched-contact-unavailable"
+            >
+              {MATCHED_CONTACT_UNAVAILABLE_MESSAGES[matchedContact.reason]}
+            </div>
+          ) : matchedContact.state === 'ready' ? null : (
             <div className="pdash-notice">
               Bu fazda müşteriyle iletişim ve ödeme akışı henüz aktif değildir.
             </div>

@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@taktic/shared';
 import { useMemo, useState } from 'react';
 
 type CreditTransactionType =
@@ -63,20 +64,9 @@ const FILTERS: { value: FilterValue; label: string; matches: (t: CreditTransacti
   { value: 'REFUND', label: 'İade', matches: (t) => t.type === 'OFFER_REFUND' },
 ];
 
-function formatDateTime(value: string) {
-  try {
-    return new Date(value).toLocaleString('tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Europe/Istanbul',
-    });
-  } catch {
-    return value;
-  }
-}
+// Pinned zone and locale, from the one shared implementation. This file used
+// to carry its own correct copy of the rules, which is how the other copies
+// drifted out of agreement with it.
 
 function typeLabel(type: CreditTransactionType) {
   return TYPE_LABELS[type] ?? type;

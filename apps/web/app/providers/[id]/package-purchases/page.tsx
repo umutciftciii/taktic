@@ -8,6 +8,7 @@ import {
   statusLabel,
   formatPrice,
   formatDate,
+  formatTime,
 } from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
 import { providerStatusBadgeClass } from '../../provider-ui';
@@ -313,9 +314,8 @@ export default async function ProviderPackagePurchasesPage({
 }
 
 function splitDateAndTime(iso: string): { date: string; time: string } {
-  const d = new Date(iso);
   return {
     date: formatDate(iso),
-    time: d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+    time: formatTime(iso),
   };
 }

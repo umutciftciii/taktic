@@ -206,13 +206,27 @@ export async function readProviderOfferId(
   return offerId as string;
 }
 
-/** Accepts an offer from the customer's offer screen. */
+/**
+ * Accepts an offer from the customer's offer screen.
+ *
+ * The contact-sharing acknowledgement is ticked where the screen asks for it.
+ * That box is `required`, so a stack with sharing on cannot be accepted through
+ * without it — which is the point — and a stack with sharing off never renders
+ * it. Checking for its presence rather than assuming either way is what lets
+ * this one helper drive both runtimes.
+ */
 export async function acceptOffer(
   customer: Actor,
   requestId: string,
   offerId: string,
 ): Promise<void> {
   await customer.gotoWeb(`/requests/${requestId}/offers/${offerId}`);
+
+  const consent = customer.page.getByTestId('contact-disclosure-consent');
+  if ((await consent.count()) > 0) {
+    await consent.locator('input[type="checkbox"]').check();
+  }
+
   await customer.page.getByRole('button', { name: 'Kabul Et' }).click();
 
   // In place first — see approveRequest for why navigating early would cancel

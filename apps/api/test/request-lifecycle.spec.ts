@@ -27,6 +27,7 @@ import {
   offerPayload,
   resetDatabase,
   type TestContext,
+  ACCEPT_OFFER,
 } from './harness';
 
 let ctx: TestContext;
@@ -165,7 +166,7 @@ describe('approval timestamp', () => {
     await request(ctx.server)
       .post(`/service-requests/${serviceRequest.id}/offers/${winner.offerId}/action`)
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const matched = await storedRequest(serviceRequest.id);

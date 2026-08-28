@@ -1,7 +1,11 @@
 import { OfferStatus, ServiceRequestStatus, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { readContactSharingConfig } from '../src/modules/contact-sharing/contact-sharing.config';
+import {
+  BUILT_IN_DISCLOSURE_VERSION,
+  CONTACT_DISCLOSURE_PATH,
+  readContactSharingConfig,
+} from '../src/modules/contact-sharing/contact-sharing.config';
 import {
   createApprovedRequest,
   createCategory,
@@ -50,7 +54,10 @@ function enableContactSharing(overrides: { url?: string; version?: string } = {}
 }
 
 function disableContactSharing() {
-  delete process.env.CONTACT_SHARING_ENABLED;
+  // Explicit rather than deleted: the flag now defaults to on, so removing it
+  // would turn "disabled" into "enabled" and quietly invert what these cases
+  // assert.
+  process.env.CONTACT_SHARING_ENABLED = 'false';
   delete process.env.CONTACT_DISCLOSURE_URL;
   delete process.env.CONTACT_DISCLOSURE_VERSION;
 }
@@ -111,16 +118,45 @@ async function adminCookie() {
 }
 
 describe('contact sharing — configuration', () => {
-  it('is off by default and needs no other setting', () => {
+  it('is on by default, pointing at the disclosure this build serves', () => {
+    // Nothing configured at all — the state a fresh deployment is in. Opening
+    // the two parties' details is the outcome a match exists to produce, so the
+    // default runs the product rather than a version of it with the result
+    // switched off.
+    delete process.env.CONTACT_SHARING_ENABLED;
+    delete process.env.CONTACT_DISCLOSURE_URL;
+    delete process.env.CONTACT_DISCLOSURE_VERSION;
+
+    const config = readContactSharingConfig();
+    expect(config.enabled).toBe(true);
+    expect(config).toMatchObject({
+      enabled: true,
+      disclosureVersion: BUILT_IN_DISCLOSURE_VERSION,
+    });
+    // A page this repository serves, so the text a customer confirms cannot be
+    // missing: it is in the build.
+    expect(config.enabled && config.disclosureUrl).toContain(CONTACT_DISCLOSURE_PATH);
+  });
+
+  it('can still be switched off deliberately', () => {
+    delete process.env.CONTACT_DISCLOSURE_URL;
+    delete process.env.CONTACT_DISCLOSURE_VERSION;
+    process.env.CONTACT_SHARING_ENABLED = 'false';
     expect(readContactSharingConfig()).toEqual({ enabled: false });
   });
 
-  it('refuses to be enabled without a disclosure URL and version', () => {
+  it('refuses a half-configured disclosure', () => {
+    // Either you use the built-in text or you supply both halves of your own.
+    // A version that names no text refers to nothing, and a URL with no version
+    // produces acceptances that cannot say what was accepted.
     process.env.CONTACT_SHARING_ENABLED = 'true';
-    expect(() => readContactSharingConfig()).toThrowError(/CONTACT_DISCLOSURE_URL is required/);
-
+    delete process.env.CONTACT_DISCLOSURE_VERSION;
     process.env.CONTACT_DISCLOSURE_URL = DISCLOSURE_URL;
     expect(() => readContactSharingConfig()).toThrowError(/CONTACT_DISCLOSURE_VERSION is required/);
+
+    delete process.env.CONTACT_DISCLOSURE_URL;
+    process.env.CONTACT_DISCLOSURE_VERSION = DISCLOSURE_VERSION;
+    expect(() => readContactSharingConfig()).toThrowError(/CONTACT_DISCLOSURE_URL is required/);
   });
 
   it('refuses a non-https URL and a malformed version', () => {
@@ -152,6 +188,7 @@ describe('contact sharing — configuration', () => {
   });
 
   it('publishes the disclosure link only while the feature is on', async () => {
+    // disableContactSharing() has pinned the flag to false for this case.
     const off = await request(ctx.server).get('/contact-sharing/disclosure').expect(200);
     expect(off.body).toEqual({ enabled: false, disclosureUrl: null, disclosureVersion: null });
 
@@ -262,6 +299,165 @@ describe('contact sharing — off (the shipped default)', () => {
   });
 });
 
+describe('contact sharing — the acknowledgement given at the accept', () => {
+  /**
+   * The consent the accept screen collects.
+   *
+   * It belongs here rather than at request creation because this is the moment
+   * it is about: submitting a request shares nothing, accepting an offer is what
+   * opens both parties' details. A request created before the wording existed —
+   * or by a guest form that never showed a box — is therefore still acceptable,
+   * and its customer is asked here.
+   */
+  it('records the acknowledgement and reveals, when the accept carries it', async () => {
+    const { category, customer, customerCookie, serviceRequest } = await matchingFixture();
+    const winner = await addOffer(category.id, serviceRequest.id);
+    enableContactSharing();
+
+    // Nothing on file: this request was never asked at creation.
+    const before = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    expect(before.contactDisclosureAcceptedAt).toBeNull();
+
+    await request(ctx.server)
+      .post(acceptUrl(serviceRequest.id, winner.offerId))
+      .set('Cookie', customerCookie)
+      .send({
+        action: 'ACCEPT',
+        contactDisclosureAccepted: true,
+        contactDisclosureVersion: DISCLOSURE_VERSION,
+      })
+      .expect(201);
+
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    expect(stored.status).toBe(ServiceRequestStatus.MATCHED);
+    expect(stored.matchedOfferId).toBe(winner.offerId);
+    // Recorded from configuration, never from the client.
+    expect(stored.contactDisclosureVersion).toBe(DISCLOSURE_VERSION);
+    expect(stored.contactDisclosureAcceptedAt).not.toBeNull();
+
+    const reveal = await ctx.prisma.contactRevealEvent.findUniqueOrThrow({
+      where: { requestId: serviceRequest.id },
+    });
+    expect(reveal.offerId).toBe(winner.offerId);
+    expect(reveal.providerId).toBe(winner.provider.id);
+    expect(reveal.customerUserId).toBe(customer.id);
+    expect(reveal.disclosureVersion).toBe(DISCLOSURE_VERSION);
+
+    // And both sides can now read the other, which is the point of all of it.
+    const forCustomer = await request(ctx.server)
+      .get(customerContactUrl(serviceRequest.id))
+      .set('Cookie', customerCookie)
+      .expect(200);
+    expect(forCustomer.body.provider.businessName).toBeTruthy();
+    expect(forCustomer.body.provider.phone).toBeTruthy();
+
+    const forProvider = await request(ctx.server)
+      .get(providerContactUrl(winner.provider.id, winner.offerId))
+      .set('Cookie', winner.cookie)
+      .expect(200);
+    expect(forProvider.body.customer.customerPhone).toBe(stored.customerPhone);
+  });
+
+  it('refuses an accept that declines the acknowledgement', async () => {
+    const { category, customerCookie, serviceRequest } = await matchingFixture();
+    const winner = await addOffer(category.id, serviceRequest.id);
+    enableContactSharing();
+
+    const response = await request(ctx.server)
+      .post(acceptUrl(serviceRequest.id, winner.offerId))
+      .set('Cookie', customerCookie)
+      .send({ action: 'ACCEPT', contactDisclosureAccepted: false })
+      .expect(409);
+    expect(response.body.code).toBe('CONTACT_DISCLOSURE_REQUIRED');
+
+    // The accept did not half-happen: no match, no consent on file, no reveal.
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    expect(stored.status).toBe(ServiceRequestStatus.APPROVED);
+    expect(stored.contactDisclosureAcceptedAt).toBeNull();
+    expect(await ctx.prisma.contactRevealEvent.count()).toBe(0);
+  });
+
+  it('refuses an accept that confirms superseded wording', async () => {
+    const { category, customerCookie, serviceRequest } = await matchingFixture();
+    const winner = await addOffer(category.id, serviceRequest.id);
+    enableContactSharing();
+
+    const response = await request(ctx.server)
+      .post(acceptUrl(serviceRequest.id, winner.offerId))
+      .set('Cookie', customerCookie)
+      .send({
+        action: 'ACCEPT',
+        contactDisclosureAccepted: true,
+        contactDisclosureVersion: 'v0',
+      })
+      .expect(409);
+    expect(response.body.code).toBe('CONTACT_DISCLOSURE_REQUIRED');
+    // Not filed against the current version, which the customer never saw.
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    expect(stored.contactDisclosureAcceptedAt).toBeNull();
+    expect(await ctx.prisma.contactRevealEvent.count()).toBe(0);
+  });
+
+  it('accepts on an acknowledgement already on file, without asking twice', async () => {
+    const { category, customerCookie, serviceRequest } = await matchingFixture();
+    const winner = await addOffer(category.id, serviceRequest.id);
+    enableContactSharing();
+    await acceptDisclosure(serviceRequest.id);
+
+    await request(ctx.server)
+      .post(acceptUrl(serviceRequest.id, winner.offerId))
+      .set('Cookie', customerCookie)
+      .send({ action: 'ACCEPT' })
+      .expect(201);
+
+    expect(await ctx.prisma.contactRevealEvent.count()).toBe(1);
+  });
+
+  it('does not let an admin supply the customer\'s acknowledgement', async () => {
+    const { category, serviceRequest } = await matchingFixture();
+    const winner = await addOffer(category.id, serviceRequest.id);
+    enableContactSharing();
+    const admin = await adminCookie();
+
+    // Consent is the customer's to give, and the admin route has nowhere to put
+    // it: the status DTO carries a status and nothing else, so an attempt to
+    // send one is refused by validation rather than partially honoured.
+    await request(ctx.server)
+      .patch(`/offers/${winner.offerId}/status`)
+      .set('Cookie', admin)
+      .send({ status: OfferStatus.ACCEPTED, contactDisclosureAccepted: true })
+      .expect(400);
+
+    // And the transition itself runs the same accept, so with nothing on file
+    // it is refused rather than matching a request whose customer was never
+    // asked.
+    const response = await request(ctx.server)
+      .patch(`/offers/${winner.offerId}/status`)
+      .set('Cookie', admin)
+      .send({ status: OfferStatus.ACCEPTED })
+      .expect(409);
+    expect(response.body.code).toBe('CONTACT_DISCLOSURE_REQUIRED');
+    expect(await ctx.prisma.contactRevealEvent.count()).toBe(0);
+
+    // With the customer's own acceptance on file it goes through.
+    await acceptDisclosure(serviceRequest.id);
+    await request(ctx.server)
+      .patch(`/offers/${winner.offerId}/status`)
+      .set('Cookie', admin)
+      .send({ status: OfferStatus.ACCEPTED })
+      .expect(200);
+    expect(await ctx.prisma.contactRevealEvent.count()).toBe(1);
+  });
+});
+
 describe('contact sharing — on, and what it demands first', () => {
   it('refuses to accept an offer on a request with no disclosure acceptance', async () => {
     const { category, customerCookie, serviceRequest } = await matchingFixture();
@@ -302,18 +498,26 @@ describe('contact sharing — on, and what it demands first', () => {
     expect(await ctx.prisma.contactRevealEvent.count()).toBe(0);
   });
 
-  it('requires the acknowledgement when the request is created', async () => {
+  it('records an acknowledgement given at creation, and no longer demands one there', async () => {
     const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: CATEGORY_COST });
     enableContactSharing();
 
-    const refused = await request(ctx.server)
+    // Submitting a request shares nothing, so it no longer refuses one that
+    // carries no acknowledgement. The demand moved to the accept, which is the
+    // act that actually opens the details — and is covered by the two cases
+    // above and the accept-screen case below.
+    const plain = await request(ctx.server)
       .post('/service-requests')
       .send(serviceRequestPayload(category.slug))
-      .expect(400);
-    expect(refused.body.code).toBe('CONTACT_DISCLOSURE_REQUIRED');
-    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+      .expect(201);
 
-    // A form filled in before a version bump is refused too, rather than being
+    const withoutAcceptance = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: plain.body.id },
+    });
+    expect(withoutAcceptance.contactDisclosureAcceptedAt).toBeNull();
+    expect(withoutAcceptance.contactDisclosureVersion).toBeNull();
+
+    // A form filled in before a version bump is still refused, rather than
     // recorded as an acceptance of text the customer never saw.
     const stale = await request(ctx.server)
       .post('/service-requests')
@@ -325,7 +529,6 @@ describe('contact sharing — on, and what it demands first', () => {
       )
       .expect(409);
     expect(stale.body.code).toBe('CONTACT_DISCLOSURE_REQUIRED');
-    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
 
     const created = await request(ctx.server)
       .post('/service-requests')

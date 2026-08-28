@@ -7,6 +7,7 @@ import {
   notificationChannelLabel,
   notificationStatusBadgeClass,
   notificationStatusLabel,
+  notificationStatusMeaning,
   notificationTemplateLabel,
   requireAdmin,
 } from '../../../lib/api';
@@ -114,6 +115,17 @@ export default async function NotificationDetailPage({
               <dt>Başarısızlık</dt>
               <dd>
                 {entry.failedAt ? formatDateTime(entry.failedAt) : <span className="muted">-</span>}
+              </dd>
+              <dt>Durum</dt>
+              <dd>
+                <span className={notificationStatusBadgeClass(entry.status)}>
+                  {notificationStatusLabel(entry.status)}
+                </span>
+                {notificationStatusMeaning(entry.status) ? (
+                  <p className="muted" style={{ marginTop: 6 }} data-testid="notification-status-meaning">
+                    {notificationStatusMeaning(entry.status)}
+                  </p>
+                ) : null}
               </dd>
               <dt>Deneme sayısı</dt>
               <dd>

@@ -1110,14 +1110,42 @@ export function notificationChannelLabel(channel: NotificationChannel | string):
   return labels[channel] ?? channel;
 }
 
+/**
+ * What each audit status actually means, in the words an operator can act on.
+ *
+ * SENT is deliberately *not* "Gönderildi". The dispatcher writes it the moment
+ * the transport accepts the request — for Resend, an HTTP 2xx on POST /emails —
+ * and acceptance is not delivery. A message can be accepted and then bounce, be
+ * suppressed, or sit in a delayed queue, and this platform stores no delivery
+ * callback, so nothing in this table can ever say a message arrived. Reading
+ * SENT as "delivered" is what turned a bounced provider invitation into a
+ * successful-looking row, so the label now says exactly what the row knows.
+ */
 export function notificationStatusLabel(status: NotificationStatus | string): string {
   const labels: Record<string, string> = {
     PENDING: 'Sırada',
-    SENT: 'Gönderildi',
+    SENT: 'Gönderim sağlayıcısına iletildi',
     FAILED: 'Başarısız',
   };
 
   return labels[status] ?? status;
+}
+
+/**
+ * The one-line explanation the detail screen prints under the status, so the
+ * distinction above survives outside this file.
+ */
+export function notificationStatusMeaning(status: NotificationStatus | string): string | null {
+  switch (status) {
+    case 'SENT':
+      return 'Sağlayıcı gönderim isteğini kabul etti. Bu, alıcının kutusuna ulaştığı anlamına gelmez; teslim, sıçrama (bounce) ve şikâyet bilgisi bu kayıtta tutulmaz.';
+    case 'PENDING':
+      return 'Gönderim başlatıldı ve sonucu henüz kaydedilmedi.';
+    case 'FAILED':
+      return 'Sağlayıcı gönderimi kabul etmedi veya mesaj gönderilmeden önce reddedildi.';
+    default:
+      return null;
+  }
 }
 
 export function notificationStatusBadgeClass(status: NotificationStatus | string): string {
@@ -1539,33 +1567,17 @@ export function formatMinorAsInput(amountMinor: number | null | undefined): stri
   return (amountMinor / 100).toFixed(2);
 }
 
-export function formatDate(value: string | null | undefined) {
-  if (!value) return '-';
-  try {
-    return new Date(value).toLocaleDateString('tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  } catch {
-    return value;
-  }
-}
-
-export function formatDateTime(value: string | null | undefined) {
-  if (!value) return '-';
-  try {
-    return new Date(value).toLocaleString('tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return value;
-  }
-}
+/**
+ * Re-exported from @taktic/shared rather than reimplemented.
+ *
+ * These used to call `toLocaleDateString('tr-TR', …)` with no `timeZone`, which
+ * means "whatever zone this process is in". The server renders in the
+ * container's UTC and the browser re-renders in the visitor's UTC+3, so the two
+ * produced different text for the same instant and React tore the tree down on
+ * hydration. The shared implementation pins both the zone and the locale, so
+ * SSR and the first client render agree by construction.
+ */
+export { formatDate, formatDateTime, formatTime } from '@taktic/shared';
 
 /**
  * Carries the HTTP status so callers can map an upstream 404 onto Next's

@@ -24,6 +24,7 @@ import {
   serviceRequestPayload,
   uniqueSuffix,
   type TestContext,
+  ACCEPT_OFFER,
 } from './harness';
 
 /**
@@ -65,7 +66,10 @@ function enableContactSharing() {
 }
 
 function disableContactSharing() {
-  delete process.env.CONTACT_SHARING_ENABLED;
+  // Explicit rather than deleted: the flag now defaults to on, so removing it
+  // would turn "disabled" into "enabled" and quietly invert what these cases
+  // assert.
+  process.env.CONTACT_SHARING_ENABLED = 'false';
   delete process.env.CONTACT_DISCLOSURE_URL;
   delete process.env.CONTACT_DISCLOSURE_VERSION;
 }
@@ -276,17 +280,17 @@ describe('offer notifications', () => {
     await request(ctx.server)
       .post(`/service-requests/${serviceRequest.id}/offers/${winner.offerId}/action`)
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     expect(sentTo('match-customer', serviceRequest.customerEmail!)).toHaveLength(1);
-    expect(sentTo('offer-accepted', winner.provider.email!)).toHaveLength(1);
-    expect(sentTo('offer-not-selected', loser.provider.email!)).toHaveLength(1);
+    expect(sentTo('offer-accepted', winner.ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('offer-not-selected', loser.ownerUser.email!)).toHaveLength(1);
 
     // The provider who pulled their own offer is not "not selected".
-    expect(sentTo('offer-not-selected', withdrawn.provider.email!)).toHaveLength(0);
-    expect(sentTo('offer-accepted', loser.provider.email!)).toHaveLength(0);
-    expect(sentTo('match-customer', loser.provider.email!)).toHaveLength(0);
+    expect(sentTo('offer-not-selected', withdrawn.ownerUser.email!)).toHaveLength(0);
+    expect(sentTo('offer-accepted', loser.ownerUser.email!)).toHaveLength(0);
+    expect(sentTo('match-customer', loser.ownerUser.email!)).toHaveLength(0);
   });
 
   it('mails a hand-rejected provider once and nobody else', async () => {
@@ -302,8 +306,8 @@ describe('offer notifications', () => {
       .send({ action: 'REJECT' })
       .expect(201);
 
-    expect(sentTo('offer-not-selected', rejected.provider.email!)).toHaveLength(1);
-    expect(sentTo('offer-not-selected', untouched.provider.email!)).toHaveLength(0);
+    expect(sentTo('offer-not-selected', rejected.ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('offer-not-selected', untouched.ownerUser.email!)).toHaveLength(0);
   });
 
   it('says nothing when an offer is only shortlisted', async () => {
@@ -330,7 +334,7 @@ describe('offer notifications', () => {
     await request(ctx.server)
       .post(`/service-requests/${serviceRequest.id}/offers/${winner.offerId}/action`)
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const toCustomer = only(sentTo('match-customer', serviceRequest.customerEmail!));
@@ -338,7 +342,7 @@ describe('offer notifications', () => {
     expect(toCustomer.data?.contactName ?? null).toBeNull();
     expect(bodyOf(toCustomer)).not.toContain(winner.provider.phone);
 
-    const toProvider = only(sentTo('offer-accepted', winner.provider.email!));
+    const toProvider = only(sentTo('offer-accepted', winner.ownerUser.email!));
     expect(toProvider.data?.customerPhone ?? null).toBeNull();
     expect(bodyOf(toProvider)).not.toContain(serviceRequest.customerPhone);
     // Still says what the job is worth and where it is.
@@ -366,14 +370,14 @@ describe('offer notifications', () => {
     await request(ctx.server)
       .post(`/service-requests/${serviceRequest.id}/offers/${winner.offerId}/action`)
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const toCustomer = only(sentTo('match-customer', serviceRequest.customerEmail!));
     expect(toCustomer.data?.contactPhone).toBe(winner.provider.phone);
     expect(toCustomer.data?.contactName).toBe(winner.provider.contactName);
 
-    const toProvider = only(sentTo('offer-accepted', winner.provider.email!));
+    const toProvider = only(sentTo('offer-accepted', winner.ownerUser.email!));
     expect(toProvider.data?.customerPhone).toBe(serviceRequest.customerPhone);
     expect(toProvider.data?.customerName).toBe(serviceRequest.customerName);
     // The reveal opens a phone number, not a doorstep.
@@ -406,7 +410,14 @@ describe('provider application notifications', () => {
     const providerId = created.body.id as string;
     const applicationEmail = created.body.email as string;
 
-    expect(sentTo('provider-application-received', applicationEmail)).toHaveLength(1);
+    // The account's address, not the one typed into the form. This applicant is
+    // signed in, so the platform already knows an address that is verifiably
+    // theirs; the form field is a business detail they may have mistyped, may
+    // not read, and cannot correct by fixing their account. Preferring it is
+    // what let a bounced invitation be recorded as a successful send.
+    expect(applicationEmail).not.toBe(ownerUser.email);
+    expect(sentTo('provider-application-received', ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('provider-application-received', applicationEmail)).toHaveLength(0);
 
     const admin = await adminCookie();
     const approve = () =>
@@ -419,7 +430,7 @@ describe('provider application notifications', () => {
     await approve();
     await approve();
 
-    expect(sentTo('provider-application-approved', applicationEmail)).toHaveLength(1);
+    expect(sentTo('provider-application-approved', ownerUser.email!)).toHaveLength(1);
 
     // A suspension and a genuine second approval is a second announcement.
     await request(ctx.server)
@@ -429,7 +440,7 @@ describe('provider application notifications', () => {
       .expect(200);
     await approve();
 
-    expect(sentTo('provider-application-approved', applicationEmail)).toHaveLength(2);
+    expect(sentTo('provider-application-approved', ownerUser.email!)).toHaveLength(2);
   });
 });
 
@@ -464,7 +475,7 @@ describe('credit refund notifications', () => {
       .send({ reasonCode: 'INVALID_REQUEST', reason: 'Dahili not: müşteri ulaşılamadı', override: true })
       .expect(201);
 
-    const messages = sentTo('credit-refunded', provider.email!);
+    const messages = sentTo('credit-refunded', ownerUser.email!);
     expect(messages).toHaveLength(1);
     expect(messages[0]!.data?.refundedCredits).toBe(String(CATEGORY_COST));
     expect(messages[0]!.data?.previousBalance).toBe(String(10 - CATEGORY_COST));

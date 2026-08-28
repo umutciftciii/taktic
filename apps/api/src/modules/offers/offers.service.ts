@@ -21,6 +21,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
   contactDisclosureRequiredException,
+  contactDisclosureSupersededException,
   readContactSharingConfig,
 } from '../contact-sharing/contact-sharing.config';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
@@ -362,7 +363,10 @@ export class OffersService {
     const status = customerActionToStatus(dto.action);
 
     if (status === OfferStatus.ACCEPTED) {
-      const accepted = await this.acceptRequestOffer(requestId, offerId, existingOffer.viewedAt);
+      const accepted = await this.acceptRequestOffer(requestId, offerId, existingOffer.viewedAt, {
+        accepted: dto.contactDisclosureAccepted === true,
+        version: dto.contactDisclosureVersion?.trim().toLowerCase() || null,
+      });
 
       // Both halves of the match, then the offers the cascade closed. All of it
       // after the transaction committed, and each message keyed on its own
@@ -426,12 +430,18 @@ export class OffersService {
    * (Offer_one_accepted_per_request) is the database-level backstop.
    *
    * When contact sharing is on, the same transaction also carries the reveal:
-   * the request must already hold an acceptance of the current disclosure
-   * version, and the audit row is written before the transaction commits. Both
-   * halves therefore succeed together or not at all — there is no matched
-   * request whose contact details are open without a record of why.
+   * the customer's confirmation of the current disclosure version is required
+   * and recorded, and the audit row is written before the transaction commits.
+   * All of it therefore succeeds together or not at all — there is no matched
+   * request whose contact details are open without a record of why, and no
+   * recorded consent for a match that did not happen.
    */
-  private acceptRequestOffer(requestId: string, offerId: string, viewedAt: Date | null) {
+  private acceptRequestOffer(
+    requestId: string,
+    offerId: string,
+    viewedAt: Date | null,
+    disclosure: { accepted: boolean; version: string | null },
+  ) {
     const now = new Date();
     const contactSharing = readContactSharingConfig();
 
@@ -439,20 +449,43 @@ export class OffersService {
       this.prisma,
       async (tx) => {
         if (contactSharing.enabled) {
-          // Read inside the transaction, before anything is written: a request
-          // whose customer never confirmed reading the current disclosure must
-          // not be matched at all while the feature is on, because matching is
-          // what opens the details.
-          const disclosure = await tx.serviceRequest.findUnique({
+          // A client that confirms wording this deployment has since replaced is
+          // sent back to read the current text, rather than having its answer
+          // filed against a version it never saw. Checked before the stored
+          // acceptance so a stale screen gets the accurate message.
+          if (disclosure.accepted && disclosure.version && disclosure.version !== contactSharing.disclosureVersion) {
+            throw contactDisclosureSupersededException();
+          }
+
+          // Read inside the transaction, before anything is written. Either the
+          // customer confirmed on the accept screen just now, or the request
+          // already carries an acceptance of this exact version from when it was
+          // submitted. Without one of the two the request is not matched at all,
+          // because matching is what opens the details.
+          const stored = await tx.serviceRequest.findUnique({
             where: { id: requestId },
             select: { contactDisclosureVersion: true, contactDisclosureAcceptedAt: true },
           });
 
-          if (
-            !disclosure?.contactDisclosureAcceptedAt ||
-            disclosure.contactDisclosureVersion !== contactSharing.disclosureVersion
-          ) {
+          const alreadyOnFile =
+            Boolean(stored?.contactDisclosureAcceptedAt) &&
+            stored?.contactDisclosureVersion === contactSharing.disclosureVersion;
+
+          if (!disclosure.accepted && !alreadyOnFile) {
             throw contactDisclosureRequiredException();
+          }
+
+          if (disclosure.accepted && !alreadyOnFile) {
+            // Recorded from configuration, never from the client, and inside the
+            // accept transaction — so a consent on file always belongs to a
+            // match that really happened.
+            await tx.serviceRequest.update({
+              where: { id: requestId },
+              data: {
+                contactDisclosureVersion: contactSharing.disclosureVersion,
+                contactDisclosureAcceptedAt: now,
+              },
+            });
           }
         }
 

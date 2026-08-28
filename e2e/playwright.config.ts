@@ -45,6 +45,12 @@ const adminDir = resolve(repoRoot, 'apps/admin');
  */
 const sharedEnv = {
   NODE_ENV: 'test',
+  // The servers run in UTC, as a container does, whatever zone the developer's
+  // machine is in. Without this the suite only reproduces the server/browser
+  // zone split on a CI box that happens to be in UTC — and the hydration check
+  // in offer-detail-hydration.spec.ts would quietly prove nothing on a laptop
+  // in Istanbul.
+  TZ: 'UTC',
   DATABASE_URL: databaseUrl,
   AUTH_COOKIE_NAME: 'taktic_session',
   // Both schedulers stay off: a cron firing mid-run could expire a fixture

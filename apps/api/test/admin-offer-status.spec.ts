@@ -57,7 +57,10 @@ function enableContactSharing() {
 }
 
 function disableContactSharing() {
-  delete process.env.CONTACT_SHARING_ENABLED;
+  // Explicit rather than deleted: the flag now defaults to on, so removing it
+  // would turn "disabled" into "enabled" and quietly invert what these cases
+  // assert.
+  process.env.CONTACT_SHARING_ENABLED = 'false';
   delete process.env.CONTACT_DISCLOSURE_URL;
   delete process.env.CONTACT_DISCLOSURE_VERSION;
 }
@@ -66,6 +69,12 @@ function statusUrl(offerId: string) {
   return `/offers/${offerId}/status`;
 }
 
+// The provider's account address, not the address typed into the application
+// form. A profile that belongs to an account is reached at that account's
+// e-mail: it is the one the platform verified, the one they sign in with, and
+// the one they read the panel these messages link to from. See recipientFor in
+// transactional-mail.service.ts for why the order was the other way round and
+// what that cost.
 function sentTo(template: string, to: string) {
   return ctx.notifications.sent.filter(
     (message) => message.template === template && message.to.toLowerCase() === to.toLowerCase(),
@@ -135,8 +144,8 @@ describe('admin offer status — rejection', () => {
     // refund behaviour. The admin path must not change that either.
     expect(stored.rejectionReason).toBeNull();
 
-    expect(sentTo('offer-not-selected', target.provider.email!)).toHaveLength(1);
-    expect(sentTo('offer-not-selected', bystander.provider.email!)).toHaveLength(0);
+    expect(sentTo('offer-not-selected', target.ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('offer-not-selected', bystander.ownerUser.email!)).toHaveLength(0);
 
     // Nothing about the request moved: rejecting one offer is not a match.
     const storedRequest = await ctx.prisma.serviceRequest.findUniqueOrThrow({
@@ -163,7 +172,7 @@ describe('admin offer status — rejection', () => {
     await reject();
     await reject();
 
-    expect(sentTo('offer-not-selected', target.provider.email!)).toHaveLength(1);
+    expect(sentTo('offer-not-selected', target.ownerUser.email!)).toHaveLength(1);
     expect(
       await ctx.prisma.notificationLog.count({
         where: { template: 'offer-not-selected', providerId: target.provider.id },
@@ -226,10 +235,10 @@ describe('admin offer status — acceptance', () => {
 
     // The full message matrix, and nothing crossed over.
     expect(sentTo('match-customer', serviceRequest.customerEmail!)).toHaveLength(1);
-    expect(sentTo('offer-accepted', winner.provider.email!)).toHaveLength(1);
-    expect(sentTo('offer-not-selected', loser.provider.email!)).toHaveLength(1);
-    expect(sentTo('offer-not-selected', winner.provider.email!)).toHaveLength(0);
-    expect(sentTo('offer-accepted', loser.provider.email!)).toHaveLength(0);
+    expect(sentTo('offer-accepted', winner.ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('offer-not-selected', loser.ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('offer-not-selected', winner.ownerUser.email!)).toHaveLength(0);
+    expect(sentTo('offer-accepted', loser.ownerUser.email!)).toHaveLength(0);
   });
 
   it('writes the contact reveal when contact sharing is on', async () => {
@@ -331,7 +340,7 @@ describe('admin offer status — acceptance', () => {
     await accept().expect(409);
 
     expect(sentTo('match-customer', serviceRequest.customerEmail!)).toHaveLength(1);
-    expect(sentTo('offer-accepted', winner.provider.email!)).toHaveLength(1);
+    expect(sentTo('offer-accepted', winner.ownerUser.email!)).toHaveLength(1);
   });
 });
 

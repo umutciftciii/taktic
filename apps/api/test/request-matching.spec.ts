@@ -19,6 +19,7 @@ import {
   offerPayload,
   resetDatabase,
   type TestContext,
+  ACCEPT_OFFER,
 } from './harness';
 
 let ctx: TestContext;
@@ -86,11 +87,11 @@ describe('offer acceptance — one winner per request', () => {
       request(ctx.server)
         .post(actionUrl(serviceRequest.id, first.offerId))
         .set('Cookie', customerCookie)
-        .send({ action: 'ACCEPT' }),
+        .send(ACCEPT_OFFER),
       request(ctx.server)
         .post(actionUrl(serviceRequest.id, second.offerId))
         .set('Cookie', customerCookie)
-        .send({ action: 'ACCEPT' }),
+        .send(ACCEPT_OFFER),
     ]);
 
     for (const result of results) {
@@ -141,7 +142,7 @@ describe('offer acceptance — one winner per request', () => {
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     for (const closed of [submitted, viewed, shortlisted]) {
@@ -169,7 +170,7 @@ describe('offer acceptance — credits', () => {
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const refunds = await ctx.prisma.providerCreditTransaction.count({
@@ -188,7 +189,7 @@ describe('offer acceptance — credits', () => {
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     // The loser was never viewed, so without the policy rule it would look like
@@ -248,7 +249,7 @@ describe('offer acceptance — credits', () => {
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
@@ -303,7 +304,7 @@ describe('matched requests are closed to new offers', () => {
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const after = await request(ctx.server)
@@ -361,7 +362,7 @@ describe('request completion', () => {
     await request(ctx.server)
       .post(actionUrl(fixture.serviceRequest.id, winner.offerId))
       .set('Cookie', fixture.customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     return { ...fixture, winner };
@@ -486,7 +487,7 @@ describe('matching leaks no contact details', () => {
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
       .set('Cookie', customerCookie)
-      .send({ action: 'ACCEPT' })
+      .send(ACCEPT_OFFER)
       .expect(201);
 
     const customerView = await request(ctx.server)

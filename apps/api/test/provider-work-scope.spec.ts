@@ -12,6 +12,7 @@ import {
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
+  ACCEPT_OFFER,
 } from './harness';
 
 /**
@@ -138,7 +139,7 @@ async function acceptAsCustomer(requestId: string, offerId: string) {
   await request(ctx.server)
     .post(`/service-requests/${requestId}/offers/${offerId}/action`)
     .set('Cookie', cookie)
-    .send({ action: 'ACCEPT' })
+    .send(ACCEPT_OFFER)
     .expect(201);
 }
 

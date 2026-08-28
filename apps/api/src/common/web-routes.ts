@@ -20,6 +20,21 @@ export const PASSWORD_RESET_PATH = '/sifre-sifirla';
 /** Where a verification link lands. `apps/web/app/e-posta-dogrula`. */
 export const EMAIL_VERIFICATION_PATH = '/e-posta-dogrula';
 
+/**
+ * The contact-sharing disclosure this repository serves itself.
+ * `apps/web/app/sozlesmeler/iletisim-paylasimi`.
+ *
+ * It exists so the platform's own default is a text that provably exists: the
+ * page is in the repository, versioned with it, and served by the same origin
+ * the customer is already on. A deployment with its own published legal page
+ * points CONTACT_DISCLOSURE_URL at it instead.
+ */
+export const CONTACT_DISCLOSURE_PATH = '/sozlesmeler/iletisim-paylasimi';
+
+export function contactDisclosureUrl(): string {
+  return publicWebUrl(CONTACT_DISCLOSURE_PATH);
+}
+
 export function passwordResetUrl(rawToken: string): string {
   return publicWebUrl(PASSWORD_RESET_PATH, { token: rawToken });
 }
