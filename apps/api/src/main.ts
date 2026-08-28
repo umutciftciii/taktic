@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { assertSessionPolicyConfig } from './modules/auth/auth.constants';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
 import { assertEmailBrandingConfig } from './modules/notifications/email-branding.config';
 import { assertEmailTransportConfig } from './modules/notifications/email-transport';
@@ -28,6 +29,12 @@ async function bootstrap() {
   // what is missing. This call only rejects a *deprecated* SUPPORT_EMAIL that
   // is set to something which is not an address at all.
   assertEmailBrandingConfig();
+
+  // The session policy, before anything can sign in. A duration that is not a
+  // positive whole number of seconds is a security decision made by accident —
+  // a typo reading as zero would end every session on the next request — so it
+  // stops the process rather than silently restoring a default nobody chose.
+  assertSessionPolicyConfig();
 
   // Before anything listens. Turning contact sharing on without a disclosure
   // URL and version must stop the process rather than degrade into a state

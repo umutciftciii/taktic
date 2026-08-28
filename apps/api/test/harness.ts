@@ -182,6 +182,8 @@ export function resetAuthThrottle(app: INestApplication): void {
 
 const TRUNCATED_TABLES = [
   'CompanySettings',
+  'Message',
+  'MessageThread',
   'PasswordResetToken',
   'EmailVerificationToken',
   'PaymentWebhookEvent',

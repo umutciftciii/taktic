@@ -162,6 +162,27 @@ export default async function RequestOfferDetailPage({
             </section>
           ) : null}
 
+          {/*
+            Only on the offer that was actually accepted. Messaging follows the
+            match, so putting this on a pending or rejected offer would promise
+            a conversation that cannot be opened.
+          */}
+          {offer.status === 'ACCEPTED' ? (
+            <section className="cdash-detail-card">
+              <h2>Mesajlaşma</h2>
+              <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--muted)' }}>
+                Bu iş için hizmet verenle uygulama içinden yazışabilirsiniz.
+              </p>
+              <Link
+                className="cdash-btn cdash-btn-primary cdash-btn-block"
+                href={`/mesajlar/talep/${id}`}
+                data-testid="offer-message-cta"
+              >
+                Mesaj gönder
+              </Link>
+            </section>
+          ) : null}
+
           <div className="cdash-notice">
             {disclosure.enabled
               ? 'Teklifi kabul ettiğinizde eşleşme tamamlanır ve iletişim bilgileriniz yalnızca kabul ettiğiniz hizmet verenle karşılıklı olarak paylaşılır.'

@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, navGroups } from '../lib/nav';
 import { logoutAction } from '../app/login/actions';
+import { LogoutButton } from '../app/session/logout-button';
 
 type TopbarProps = {
   onToggleSidebar: () => void;
@@ -36,9 +37,14 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
         </div>
 
         <form action={logoutAction} className="admin-topbar-actions">
-          <button className="btn btn-secondary btn-sm" type="submit">
+          {/*
+            Announces the logout to this panel's other tabs before the form
+            posts; the server-side revoke inside the action is what actually
+            ends the session.
+          */}
+          <LogoutButton className="btn btn-secondary btn-sm" testId="admin-logout">
             Çıkış
-          </button>
+          </LogoutButton>
         </form>
       </div>
     </header>

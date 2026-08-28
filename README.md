@@ -79,6 +79,28 @@ Seeding creates a local development admin if it does not already exist:
 
 Authentication uses an HTTP-only cookie session named `taktic_session` by default. The seed does not overwrite an existing admin password.
 
+### Session policy
+
+Two independent clocks end a session, and neither extends the other:
+
+- **Idle** — the session is refused once 30 minutes have passed since its last request (`Session.lastSeenAt`). Activity slides this window and nothing else, and the mark is written at most once every five minutes so an active session is not a write hot spot.
+- **Absolute** — the session dies 8 hours after it was created (`Session.expiresAt`), whatever happened in between. It is fixed at creation and never moved forward: there is no sliding session and no session that renews itself forever.
+
+**"Beni hatırla"**, on all three sign-in surfaces, swaps the absolute lifetime for 30 days and makes the cookie persistent so it survives closing the browser. It deliberately does *not* relax the idle window — a remembered session left alone still ends after the same half hour. Nothing about it is written to `localStorage`: no password, no token, no identity. The cookie is the whole mechanism and stays `HttpOnly`.
+
+Both clocks are checked on the server against the database, so a browser whose clock has been moved cannot change the answer. The panels poll `GET /auth/session` — a read that deliberately does *not* record activity, so an open tab cannot keep an unattended browser signed in — and offer to extend the session shortly before the idle cut-off via `POST /auth/session/touch`. Signing out revokes the session row, so the cookie stops working everywhere it exists, and other tabs of the same panel leave the signed-in screen within one poll.
+
+Every duration is configurable (`SESSION_IDLE_TIMEOUT_SECONDS`, `SESSION_ABSOLUTE_TTL_SECONDS`, `SESSION_REMEMBER_ME_TTL_SECONDS`, `SESSION_TOUCH_INTERVAL_SECONDS`, `SESSION_IDLE_WARNING_SECONDS`) and a value that is not a positive whole number of seconds stops the API at boot. `SESSION_TTL_DAYS` is gone: it expressed one clock where there are two and had no inactivity rule at all.
+
+## Post-match messaging
+
+Once a customer accepts an offer, they and that one provider can write to each other inside the application. There is no switch that turns it on — it follows contact sharing: a conversation exists only where a `ContactRevealEvent` does, so with `CONTACT_SHARING_ENABLED=false` no thread can be opened at all.
+
+Authorization is the relation chain, never the thread id. Every call re-derives it: the request is `MATCHED`, `matchedOfferId` names one `ACCEPTED` offer, a reveal for exactly that pair is on file, the request belongs to a signed-in customer, the winning profile belongs to a platform account, and the caller is one of those two accounts. A losing, withdrawn, rejected or still-pending offer therefore has no conversation to find, and knowing an id buys a stranger nothing.
+
+The first version is plain text only: no attachments, no editing, no deleting, no search, no group threads. Messages are immutable, capped at 2,000 characters, rate-limited per account, and rendered as text on every surface. A thread carries the counterpart's display name and the job it belongs to — never a telephone number, an e-mail address, an address note, a credit fact, or anything about a competing offer. Admins do not see message content; moderation is separate work.
+
+
 ## End-to-End Tests
 
 `pnpm test` runs the API integration suite (Vitest + supertest). The browser suite is separate and lives in `e2e/`.

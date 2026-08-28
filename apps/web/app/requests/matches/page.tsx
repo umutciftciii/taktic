@@ -99,6 +99,20 @@ export default async function CustomerMatchesPage() {
                   Kabul edilen teklif
                 </Link>
               ) : null}
+              {/*
+                Straight to the conversation for this match. The link goes to
+                the request rather than to a thread id because the thread is
+                created the first time somebody opens it — and that page is also
+                where a match that cannot carry a conversation says why, rather
+                than this row having to work it out for every row it renders.
+              */}
+              <Link
+                className="cdash-btn cdash-btn-secondary"
+                href={`/mesajlar/talep/${request.id}`}
+                data-testid="match-message-cta"
+              >
+                Mesaj gönder
+              </Link>
             </li>
           ))}
         </ul>

@@ -38,9 +38,13 @@ export class AuthController {
     const result = await this.authService.login(dto, {
       ipAddress: request.ip ?? null,
       userAgent: request.headers?.['user-agent'] ?? null,
+      currentSessionId: getSessionIdFromRequest(request),
     });
 
-    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+    response.setHeader(
+      'Set-Cookie',
+      sessionCookie(result.sessionId, result.expiresAt, result.rememberMe),
+    );
     return result.user;
   }
 
@@ -56,6 +60,7 @@ export class AuthController {
       result = await this.authService.registerCustomer(dto, {
         ipAddress: request.ip ?? null,
         userAgent: request.headers?.['user-agent'] ?? null,
+        currentSessionId: getSessionIdFromRequest(request),
       });
     } catch (error) {
       if (error instanceof EmailAlreadyRegisteredException) {
@@ -85,7 +90,10 @@ export class AuthController {
     // error the visitor sees.
     await this.emailVerification.issueForNewCustomer(result.user.id);
 
-    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+    response.setHeader(
+      'Set-Cookie',
+      sessionCookie(result.sessionId, result.expiresAt, result.rememberMe),
+    );
     return result.user;
   }
 
@@ -99,9 +107,13 @@ export class AuthController {
     const result = await this.authService.registerProvider(dto, {
       ipAddress: request.ip ?? null,
       userAgent: request.headers?.['user-agent'] ?? null,
+      currentSessionId: getSessionIdFromRequest(request),
     });
 
-    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+    response.setHeader(
+      'Set-Cookie',
+      sessionCookie(result.sessionId, result.expiresAt, result.rememberMe),
+    );
     return result.user;
   }
 
@@ -120,5 +132,44 @@ export class AuthController {
     }
 
     return user;
+  }
+
+  /**
+   * How much life this session has left, and by which clock.
+   *
+   * A read, and only a read: it deliberately does not record activity, so a tab
+   * polling it cannot keep an unattended browser signed in. That is what makes
+   * the idle warning possible at all — the countdown has to be able to reach
+   * zero while somebody is away from the keyboard.
+   *
+   * It carries no personal data: two timestamps, the policy's own durations and
+   * the server's clock. The clock is the point — the client measures against
+   * the clock that will actually decide, not against its own.
+   */
+  @Get('session')
+  async session(@Req() request: any) {
+    const status = await this.authService.getSessionStatus(getSessionIdFromRequest(request));
+    if (!status) {
+      throw new UnauthorizedException('Authentication required');
+    }
+
+    return status;
+  }
+
+  /**
+   * Records activity, and returns the window that was just extended.
+   *
+   * Behind the "stay signed in" button and behind the throttled heartbeat real
+   * interaction produces. It can only move the idle mark; the absolute expiry
+   * is never rewritten, so no amount of calling this makes a session immortal.
+   */
+  @Post('session/touch')
+  async touchSession(@Req() request: any) {
+    const status = await this.authService.touchSession(getSessionIdFromRequest(request));
+    if (!status) {
+      throw new UnauthorizedException('Authentication required');
+    }
+
+    return status;
   }
 }

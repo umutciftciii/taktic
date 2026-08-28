@@ -6,11 +6,16 @@ type LoginPageProps = {
   searchParams: Promise<{
     error?: string;
     redirectTo?: string;
+    reason?: string;
   }>;
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const { error, redirectTo } = await searchParams;
+  const { error, redirectTo, reason } = await searchParams;
+  // Somebody who was signed in a moment ago and is suddenly back here deserves
+  // to know why. Without it, an idle timeout is indistinguishable from being
+  // logged out at random, and the natural conclusion is that the site broke.
+  const sessionEnded = reason === 'session-expired';
 
   return (
     <AuthFrame tab="login">
@@ -23,6 +28,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         {error ? (
           <div className="auth-screen-error" role="alert">
             E-posta veya şifre hatalı. Lütfen tekrar deneyin.
+          </div>
+        ) : null}
+
+        {sessionEnded && !error ? (
+          <div className="auth-screen-notice" role="status" data-testid="session-expired-notice">
+            Güvenliğiniz için, bir süre işlem yapılmadığından oturumunuz sonlandırıldı. Kaldığınız
+            yerden devam etmek için tekrar giriş yapın.
           </div>
         ) : null}
 
@@ -51,6 +63,23 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             />
           </label>
         </div>
+
+        {/*
+          "Beni hatırla" changes how long the session may live and whether its
+          cookie survives closing the browser — nothing more. Nothing is written
+          to the browser's own storage: no password, no token, no identity. The
+          session stays an HttpOnly cookie the page cannot read, and an idle
+          half hour still ends it whether this is ticked or not.
+        */}
+        <label className="auth-screen-remember" htmlFor="rememberMe">
+          <input id="rememberMe" type="checkbox" name="rememberMe" value="true" />
+          <span>
+            Beni hatırla
+            <small>
+              Bu cihazda 30 gün açık kalır. Uzun süre işlem yapılmazsa oturum yine kapanır.
+            </small>
+          </span>
+        </label>
 
         <button className="auth-screen-submit" type="submit">
           Giriş Yap

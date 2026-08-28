@@ -131,6 +131,16 @@ enum NumberedEntityType {
   PACKAGE_PURCHASE
 }
 
+/// Which side of a matched pair wrote a message.
+///
+/// Stored on the row rather than derived from the sender's current UserRole:
+/// the role on the account can change, and a two-year-old message must still
+/// read as having come from the customer or from the provider it came from.
+enum MessageSenderRole {
+  CUSTOMER
+  PROVIDER
+}
+
 model User {
   id              String          @id @default(cuid())
   email           String?         @unique
@@ -172,6 +182,9 @@ model User {
   contactRevealEvents        ContactRevealEvent[]
   createdProviderClaimTokens ProviderClaimToken[]        @relation("ProviderClaimTokenCreatedBy")
   companySettingsUpdates     CompanySettings[]           @relation("CompanySettingsUpdatedBy")
+  customerMessageThreads     MessageThread[]             @relation("MessageThreadCustomer")
+  providerMessageThreads     MessageThread[]             @relation("MessageThreadProviderUser")
+  sentMessages               Message[]                   @relation("MessageSender")
 
   @@index([role])
   @@index([isActive])
@@ -225,6 +238,17 @@ model CompanySettings {
   @@index([updatedById])
 }
 
+/// One signed-in session, and the two independent clocks that end it.
+///
+/// `expiresAt` is the **absolute** lifetime, fixed when the session is created
+/// and never moved forward. `lastSeenAt` is the **idle** clock: a session whose
+/// last activity is older than the inactivity window is refused, however much
+/// absolute time it has left. Neither extends the other — there is no sliding
+/// session — and both are checked on the server against the database, so a
+/// browser clock has no say in whether a session is still valid.
+///
+/// `lastSeenAt` is touched at most once per touch interval rather than on every
+/// request, so an active user does not turn one row into a write hot spot.
 model Session {
   id         String    @id
   userId     String
@@ -234,12 +258,24 @@ model Session {
   userAgent  String?
   createdAt  DateTime  @default(now())
   lastSeenAt DateTime  @default(now())
+  /// Whether the person ticked "Beni hatırla" when this session was issued.
+  ///
+  /// It changes exactly two things: the absolute lifetime above, and whether
+  /// the cookie is persistent or dies with the browser. It never relaxes the
+  /// idle window — a remembered session left alone still ends after the same
+  /// inactivity as any other.
+  ///
+  /// `false` for every session issued before this column existed, which is what
+  /// those sessions actually were.
+  rememberMe Boolean   @default(false)
 
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([expiresAt])
   @@index([revokedAt])
+  /// The idle sweep and the "is this session still alive" read both key on it.
+  @@index([lastSeenAt])
 }
 
 model ServiceCategory {
@@ -376,6 +412,7 @@ model ServiceRequest {
   phoneVerifications PhoneVerification[]
   notificationLogs   NotificationLog[]
   contactRevealEvent ContactRevealEvent?
+  messageThread      MessageThread?
 
   @@index([categoryId])
   @@index([customerId])
@@ -599,6 +636,7 @@ model ProviderProfile {
   contactRevealEvents ContactRevealEvent[]
   claimTokens         ProviderClaimToken[]
   notificationLogs    NotificationLog[]
+  messageThreads      MessageThread[]
 
   @@index([status])
   @@index([city])
@@ -667,6 +705,7 @@ model Offer {
   provider           ProviderProfile     @relation(fields: [providerId], references: [id])
   matchedForRequest  ServiceRequest?     @relation("ServiceRequestMatchedOffer")
   contactRevealEvent ContactRevealEvent?
+  messageThread      MessageThread?
   // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
   // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
   // add_request_matching migration. Prisma cannot express partial indexes in
@@ -980,4 +1019,97 @@ model EmailVerificationToken {
   @@index([expiresAt])
   /// Per-account send budget.
   @@index([userId, createdAt])
+}
+
+/// The one conversation a match is allowed to have.
+///
+/// A thread is not a container somebody opens; it is the shadow of a completed
+/// match. It exists only where the whole chain holds — the request is MATCHED,
+/// `matchedOfferId` names this offer, a ContactRevealEvent for that pair is on
+/// file, the request belongs to a signed-in customer and the winning provider
+/// profile belongs to a platform account — and it is created lazily the first
+/// time one of those two people opens messaging. Nothing else can bring one
+/// into existence, so a losing, withdrawn, rejected or pending offer has no
+/// thread to find and no id to guess.
+///
+/// `requestId` and `offerId` are both unique. One customer match, one thread,
+/// forever: a second conversation on the same job is unrepresentable rather
+/// than merely refused, and the offer key means a thread can never be
+/// re-pointed at a different winner.
+///
+/// The two participant columns are denormalised copies of what the chain
+/// already says, and they are what every authorization query keys on. That is
+/// deliberate: authorization asks "is the caller this thread's customer or this
+/// thread's provider account", never "does the caller know the thread id".
+model MessageThread {
+  id             String @id @default(cuid())
+  requestId      String @unique
+  offerId        String @unique
+  /// The customer's account. Not nullable: a guest request has nobody to sign
+  /// in as, so it gets no thread at all rather than a half of one.
+  customerUserId String
+  providerId     String
+  /// The account that owns the winning provider profile. Not nullable for the
+  /// same reason: an unclaimed profile has no person behind it to message.
+  providerUserId String
+
+  /// When the last message landed. NULL for a thread nobody has written in yet,
+  /// which is a real state and reads as an empty conversation, not a missing one.
+  lastMessageAt      DateTime?
+  /// Per-participant read marks. The counterpart is shown only whether their
+  /// last message has been read — never when, from where, or on what device.
+  customerLastReadAt DateTime?
+  providerLastReadAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  request      ServiceRequest  @relation(fields: [requestId], references: [id])
+  offer        Offer           @relation(fields: [offerId], references: [id])
+  customer     User            @relation("MessageThreadCustomer", fields: [customerUserId], references: [id])
+  provider     ProviderProfile @relation(fields: [providerId], references: [id])
+  providerUser User            @relation("MessageThreadProviderUser", fields: [providerUserId], references: [id])
+  messages     Message[]
+
+  /// Both inbox queries: "my threads, most recent first".
+  @@index([customerUserId, lastMessageAt])
+  @@index([providerUserId, lastMessageAt])
+  @@index([providerId])
+}
+
+/// One plain-text message. Immutable: there is no edit and no delete in this
+/// version, so a row here is the permanent record of what was actually said.
+///
+/// `body` is stored exactly as the sender typed it (trimmed, length-capped) and
+/// is never HTML. Every surface renders it as text.
+model Message {
+  id           String            @id @default(cuid())
+  threadId     String
+  senderUserId String
+  senderRole   MessageSenderRole
+  body         String
+  /// The client's idempotency key for this send.
+  ///
+  /// A double-submitted form — the second click, the retried action, the
+  /// refreshed tab — carries the key the first one did, and the unique index
+  /// below turns the duplicate into "you already sent this" rather than a
+  /// second identical message. NULL is allowed and PostgreSQL treats NULLs as
+  /// distinct, so a caller that supplies no key simply gets no protection
+  /// rather than colliding with every other keyless message.
+  ///
+  /// The key is scoped to the sender as well as the thread. Two people writing
+  /// in one conversation pick their keys independently, so a shared value has
+  /// to mean two different messages — scoping it to the thread alone would let
+  /// one party's send silently return the other party's message.
+  clientToken  String?
+  createdAt    DateTime          @default(now())
+
+  thread MessageThread @relation(fields: [threadId], references: [id])
+  sender User          @relation("MessageSender", fields: [senderUserId], references: [id])
+
+  @@unique([threadId, senderUserId, clientToken])
+  /// The only ordering this feature has, and the cursor pagination that reads
+  /// it: (createdAt, id) ascending, so two messages written in the same
+  /// millisecond still have exactly one order.
+  @@index([threadId, createdAt, id])
+  @@index([senderUserId, createdAt])
 }
