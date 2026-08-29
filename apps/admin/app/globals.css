@@ -3770,3 +3770,40 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/*
+ * The provider's service list, as an operator manages it.
+ *
+ * A row rather than a badge because each binding now carries a verdict — which
+ * category, what state it is in, whether it moves the release counter — and a
+ * remove button that has to be reachable without hovering the right badge.
+ */
+
+.provider-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.provider-category-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.provider-category-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13.5px;
+}

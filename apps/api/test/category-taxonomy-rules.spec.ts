@@ -7,10 +7,12 @@ import {
 } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 import {
+  canBeAssignedByAdmin,
   canBeSelectedByProviders,
   canEnterFlow,
   canReceiveRequests,
   isActiveFor,
+  isLiveProviderBinding,
   isPubliclyListable,
   isPubliclyReachable,
 } from '../src/modules/categories/category-taxonomy';
@@ -81,6 +83,30 @@ describe('category access matrix', () => {
         expect(canBeSelectedByProviders({ kind, status })).toBe(kind === LEAF && status === ACTIVE);
       }
     }
+  });
+
+  it('lets an operator assign an ACTIVE or a DRAFT leaf, and nothing else', () => {
+    for (const kind of ALL_KINDS) {
+      for (const status of ALL_STATUSES) {
+        expect(canBeAssignedByAdmin({ kind, status })).toBe(
+          kind === LEAF && status !== INACTIVE,
+        );
+      }
+    }
+
+    // The one place the operator's reach is wider than a provider's, stated as
+    // the difference between the two rules rather than as a second matrix.
+    expect(canBeAssignedByAdmin({ kind: LEAF, status: DRAFT })).toBe(true);
+    expect(canBeSelectedByProviders({ kind: LEAF, status: DRAFT })).toBe(false);
+  });
+
+  it('counts every binding as live supply except a draft one', () => {
+    expect(isLiveProviderBinding({ status: ACTIVE })).toBe(true);
+    // Not excluded: closing a category is already handled by the rules that
+    // refuse new requests and new offers, and rewriting what an existing
+    // binding means would change behaviour nothing asked to change.
+    expect(isLiveProviderBinding({ status: INACTIVE })).toBe(true);
+    expect(isLiveProviderBinding({ status: DRAFT })).toBe(false);
   });
 
   it('keeps the legacy isActive boolean in step with the status', () => {

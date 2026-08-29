@@ -16,6 +16,7 @@ import {
   OfferStatus,
   Prisma,
   ProviderStatus,
+  ServiceCategoryStatus,
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
@@ -32,7 +33,11 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
-import { canBeSelectedByProviders } from '../categories/category-taxonomy';
+import {
+  canBeAssignedByAdmin,
+  canBeSelectedByProviders,
+  isLiveProviderBinding,
+} from '../categories/category-taxonomy';
 import { resolveArea, resolveLocation } from '../locations/turkey-locations';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
@@ -46,6 +51,7 @@ import {
   isProviderClaimEnabled,
 } from '../provider-claim/provider-claim.config';
 import { ProviderClaimService } from '../provider-claim/provider-claim.service';
+import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
@@ -96,6 +102,16 @@ type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 export const CATEGORY_PRICE_UNSET_CODE = 'CATEGORY_PRICE_UNSET';
 export const CREDIT_COST_CHANGED_CODE = 'CREDIT_COST_CHANGED';
 export const CATEGORY_INACTIVE_CODE = 'CATEGORY_INACTIVE';
+
+/**
+ * Refused when an operator tries to bind a provider to something that is not a
+ * service: a group, a router, or a category the marketplace has closed.
+ *
+ * A code rather than a bare message because the admin screen explains each of
+ * the three in the operator's own words, and a screen that has to match on a
+ * sentence is a screen that breaks when the sentence is reworded.
+ */
+export const CATEGORY_NOT_ASSIGNABLE_CODE = 'CATEGORY_NOT_ASSIGNABLE';
 
 /**
  * Refused when a guest application arrives without a usable contact address
@@ -188,7 +204,7 @@ export class ProvidersService {
     // ownership of it. An owned application gets only this one.
     await this.notify(() => this.mail.sendProviderApplicationReceived(provider.id), provider.id);
 
-    return provider;
+    return withVisibleServiceCategories(provider);
   }
 
   private createProviderRecord(
@@ -306,6 +322,14 @@ export class ProvidersService {
       return toPublicProvider(provider);
     }
 
+    // The owner is not an operator. A provider reading their own profile sees
+    // the categories they chose and can act on; a DRAFT binding is an admin's
+    // release preparation, and its name and slug are exactly what the
+    // unreleased catalogue must not leak.
+    if (visibility === 'owner') {
+      return { ...withVisibleServiceCategories(provider), visibility };
+    }
+
     return { ...provider, visibility };
   }
 
@@ -391,6 +415,134 @@ export class ProvidersService {
   }
 
   /**
+   * Binds a provider to a category, by hand, as an operator.
+   *
+   * The one path that may reach a DRAFT category, and the reason it exists:
+   * before releasing an unreleased service somebody has to be able to say
+   * "these are the businesses that will answer its requests", and there is no
+   * way for the businesses themselves to say it — the category is invisible to
+   * them by design.
+   *
+   * What it deliberately is not: a way to widen anything else. The binding is
+   * inert until the category is released (see isLiveProviderBinding), and a
+   * provider who is not APPROVED does not count towards readiness however many
+   * bindings they carry — the count is computed from the provider's status at
+   * read time, so approving them later is what makes them count, not a
+   * re-binding.
+   *
+   * Idempotent: the same pair a second time is the same one row, and the unique
+   * index on (providerId, categoryId) is what makes that true — including for
+   * two operators pressing the button at the same moment, which a read-then-
+   * write check would let through.
+   */
+  async addServiceCategory(providerId: string, dto: AddProviderServiceCategoryDto) {
+    await this.ensureProviderExists(providerId);
+
+    const category = await this.prisma.serviceCategory.findUnique({
+      where: { id: dto.categoryId },
+      select: { id: true, kind: true, status: true },
+    });
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    if (!canBeAssignedByAdmin(category)) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        code: CATEGORY_NOT_ASSIGNABLE_CODE,
+        message:
+          'Yalnızca yayında veya taslak durumdaki hizmet kategorileri bir hizmet verene bağlanabilir.',
+      });
+    }
+
+    let created = true;
+
+    try {
+      await this.prisma.providerServiceCategory.create({
+        data: { providerId, categoryId: category.id },
+      });
+    } catch (error) {
+      // P2002 is the unique index on (providerId, categoryId) doing the job the
+      // idempotency promise is made of. Two operators pressing the same button
+      // is a duplicate request, not a failure.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        created = false;
+      } else {
+        throw error;
+      }
+    }
+
+    return { ...(await this.getAdminServiceCategories(providerId)), created };
+  }
+
+  /**
+   * Removes a binding, whatever the category's status.
+   *
+   * Unrestricted by kind or status on purpose: removal can only ever narrow
+   * supply, and a binding to a category that has since been closed is exactly
+   * the row an operator most needs to be able to clear.
+   *
+   * Idempotent in the same sense as the add: removing what is not there is a
+   * completed request, and `removed` says which of the two happened.
+   */
+  async removeServiceCategory(providerId: string, categoryId: string) {
+    await this.ensureProviderExists(providerId);
+
+    const { count } = await this.prisma.providerServiceCategory.deleteMany({
+      where: { providerId, categoryId },
+    });
+
+    return { ...(await this.getAdminServiceCategories(providerId)), removed: count > 0 };
+  }
+
+  /**
+   * The operator's view of a provider's service list: every binding, drafts
+   * included, each one saying whether it is currently doing anything.
+   *
+   * `countsForRelease` is the honest answer to the question the readiness panel
+   * asks, restated per binding so the screen can say *why* a category the
+   * operator just attached somebody to still reads as having nobody: the count
+   * behind the release decision only ever counts APPROVED providers, and this
+   * provider is not one.
+   */
+  async getAdminServiceCategories(providerId: string) {
+    const provider = await this.prisma.providerProfile.findUnique({
+      where: { id: providerId },
+      select: {
+        id: true,
+        status: true,
+        serviceCategories: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            categoryId: true,
+            createdAt: true,
+            category: {
+              select: { id: true, name: true, slug: true, kind: true, status: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!provider) {
+      throw new NotFoundException('Provider not found');
+    }
+
+    const countsForRelease = provider.status === ProviderStatus.APPROVED;
+
+    return {
+      providerId: provider.id,
+      providerStatus: provider.status,
+      serviceCategories: provider.serviceCategories.map((binding) => ({
+        ...binding,
+        countsForRelease,
+      })),
+    };
+  }
+
+  /**
    * Re-sends the claim invitation for an application nobody owns yet.
    *
    * The result carries a status and an expiry and nothing else. Handing the
@@ -467,7 +619,7 @@ export class ProvidersService {
       throw new NotFoundException('Provider profile not found');
     }
 
-    return provider;
+    return withVisibleServiceCategories(provider);
   }
 
   async getProviderDashboardForUser(userId: string) {
@@ -497,7 +649,7 @@ export class ProvidersService {
       ]);
 
     return {
-      provider,
+      provider: withVisibleServiceCategories(provider),
       creditBalance,
       activeOffersCount,
       recentOffersCount,
@@ -512,10 +664,24 @@ export class ProvidersService {
     ensureContactEmailStable(existingProvider, payload.email);
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.providerServiceCategory.deleteMany({ where: { providerId: id } });
+      // A profile save replaces the categories the *saver* can see, and DRAFT
+      // bindings are not among them: the form the provider submitted never
+      // offered one, so an absent draft id means "I was never shown this",
+      // never "remove it". Deleting them here would let any profile edit
+      // silently undo an operator's release preparation — and the operator
+      // would find out from a readiness count that quietly went back to zero.
+      //
+      // Nothing recreated below can collide with a surviving row:
+      // normalizeAndValidatePayload refuses a DRAFT id whoever is asking.
+      await tx.providerServiceCategory.deleteMany({
+        where: {
+          providerId: id,
+          category: { status: { not: ServiceCategoryStatus.DRAFT } },
+        },
+      });
       await tx.providerServiceArea.deleteMany({ where: { providerId: id } });
 
-      return tx.providerProfile.update({
+      const updated = await tx.providerProfile.update({
         where: { id },
         data: {
           businessName: payload.businessName,
@@ -539,6 +705,14 @@ export class ProvidersService {
         },
         include: providerInclude,
       });
+
+      // The operator's screens read the bindings from the admin detail
+      // endpoint, which keeps the drafts. Everybody else — the provider saving
+      // their own profile — gets the same narrowed shape every other read
+      // hands them.
+      return user?.role === UserRole.SUPER_ADMIN
+        ? updated
+        : withVisibleServiceCategories(updated);
     });
   }
 
@@ -1109,6 +1283,12 @@ export class ProvidersService {
       where: { id: providerId },
       include: {
         serviceCategories: {
+          // The single choke point for discovery, request detail and offering:
+          // a DRAFT binding is release preparation, not supply, so it must not
+          // put an admin's smoke-test request in front of a provider or let one
+          // spend a credit on it. When the category is released the same row
+          // starts matching here with nothing to migrate.
+          where: { category: { status: { not: ServiceCategoryStatus.DRAFT } } },
           select: { categoryId: true },
         },
         serviceAreas: {
@@ -1177,7 +1357,12 @@ const providerInclude = {
   serviceCategories: {
     include: {
       category: {
-        select: { id: true, name: true, slug: true },
+        // kind and status travel with every binding because the operator's
+        // screens are the only place a DRAFT binding is legible, and "which of
+        // these is not released yet" is the question that screen answers.
+        // Every non-admin projection narrows this back down — see
+        // visibleServiceCategories.
+        select: { id: true, name: true, slug: true, kind: true, status: true },
       },
     },
     orderBy: { createdAt: 'asc' },
@@ -1186,6 +1371,51 @@ const providerInclude = {
     orderBy: [{ city: 'asc' }, { district: 'asc' }, { neighborhood: 'asc' }],
   },
 } satisfies Prisma.ProviderProfileInclude;
+
+/**
+ * The binding shape everyone who is not an operator sees.
+ *
+ * Two jobs in one function, and they belong together: DRAFT bindings are
+ * dropped, and the surviving ones are narrowed back to the exact
+ * `{ id, category: { id, name, slug } }` shape every caller written before this
+ * change already speaks. The narrowing is not cosmetic — `status` on a category
+ * would newly tell a stranger that a service has been closed, which the public
+ * catalogue does not say either.
+ *
+ * Applied on the way out of the service rather than in each query, so a future
+ * read path that forgets it is a path that returns *more* rows than it should
+ * and is caught by the leak tests, instead of one that silently omits the
+ * filter in a `where` nobody reviews.
+ */
+type ProviderCategoryBinding = {
+  id: string;
+  category: { id: string; name: string; slug: string; status: ServiceCategoryStatus };
+};
+
+function visibleServiceCategories(
+  bindings: readonly ProviderCategoryBinding[],
+): Array<{ id: string; category: { id: string; name: string; slug: string } }> {
+  return bindings
+    .filter((binding) => isLiveProviderBinding(binding.category))
+    .map((binding) => ({
+      id: binding.id,
+      category: {
+        id: binding.category.id,
+        name: binding.category.name,
+        slug: binding.category.slug,
+      },
+    }));
+}
+
+/** The same narrowing, over a whole provider record. */
+function withVisibleServiceCategories<
+  T extends { serviceCategories: readonly ProviderCategoryBinding[] },
+>(provider: T) {
+  return {
+    ...provider,
+    serviceCategories: visibleServiceCategories(provider.serviceCategories),
+  };
+}
 
 export type ProviderVisibility = 'public' | 'owner' | 'admin';
 
@@ -1242,7 +1472,9 @@ function toPublicProvider(
     description: provider.description,
     status: provider.status,
     createdAt: provider.createdAt,
-    serviceCategories: provider.serviceCategories,
+    // Narrowed here as well as at the owner branch: this function is the
+    // allow-list for the public shape, so the rule has to be readable in it.
+    serviceCategories: visibleServiceCategories(provider.serviceCategories),
     serviceAreas: provider.serviceAreas,
     visibility: 'public' as const,
   };

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
@@ -16,6 +17,7 @@ import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateProviderDto } from './dto/create-provider.dto';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
@@ -137,6 +139,50 @@ export class ProvidersController {
   @Roles(UserRole.SUPER_ADMIN)
   getAdminProviderDetail(@Param('providerId') providerId: string) {
     return this.providersService.getAdminProviderDetail(providerId);
+  }
+
+  /**
+   * The operator's view of a provider's service list, drafts included.
+   *
+   * SUPER_ADMIN only, and for the same reason `includeInactive` is: a DRAFT
+   * category's name and slug are the unreleased catalogue, and this is the one
+   * response body where a provider's bindings to one are visible at all. Every
+   * other read of the same provider narrows them away.
+   */
+  @Get(':providerId/service-categories')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  listProviderServiceCategories(@Param('providerId') providerId: string) {
+    return this.providersService.getAdminServiceCategories(providerId);
+  }
+
+  /**
+   * Binds this provider to a category.
+   *
+   * Deliberately its own endpoint rather than a widening of `PATCH /providers/:id`:
+   * that route is the profile form, it is reachable by the provider themselves,
+   * and it replaces the whole list. Adding a draft to *it* would have made the
+   * privilege a property of a payload field on a route a provider can call. One
+   * binding, one route, one role.
+   */
+  @Post(':providerId/service-categories')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  addProviderServiceCategory(
+    @Param('providerId') providerId: string,
+    @Body() dto: AddProviderServiceCategoryDto,
+  ) {
+    return this.providersService.addServiceCategory(providerId, dto);
+  }
+
+  @Delete(':providerId/service-categories/:categoryId')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  removeProviderServiceCategory(
+    @Param('providerId') providerId: string,
+    @Param('categoryId') categoryId: string,
+  ) {
+    return this.providersService.removeServiceCategory(providerId, categoryId);
   }
 
   /**

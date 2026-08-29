@@ -4,6 +4,7 @@ import {
   NotificationStatus,
   OfferStatus,
   ProviderStatus,
+  ServiceCategoryStatus,
   ServiceRequestStatus,
 } from '@prisma/client';
 import {
@@ -701,7 +702,16 @@ async function findMatchingProviders(
     const providers = await prisma.providerProfile.findMany({
       where: {
         status: ProviderStatus.APPROVED,
-        serviceCategories: { some: { categoryId: request.categoryId } },
+        // The binding has to be live supply, not release preparation. A DRAFT
+        // category's requests are the admin's own smoke tests, and mailing them
+        // out would both hand a provider a request they cannot open and put an
+        // unreleased service's name in their inbox.
+        serviceCategories: {
+          some: {
+            categoryId: request.categoryId,
+            category: { status: { not: ServiceCategoryStatus.DRAFT } },
+          },
+        },
       },
       orderBy: { id: 'asc' },
       select: {
@@ -781,6 +791,10 @@ async function loadProvider(prisma: PrismaService, providerId: string) {
         status: true,
         user: { select: { email: true } },
         serviceCategories: {
+          // Same rule, on the way out: the category list printed in a
+          // provider's own e-mail is their service list, and a draft they were
+          // attached to in preparation is not part of it.
+          where: { category: { status: { not: ServiceCategoryStatus.DRAFT } } },
           orderBy: { createdAt: 'asc' },
           select: { category: { select: { name: true } } },
         },

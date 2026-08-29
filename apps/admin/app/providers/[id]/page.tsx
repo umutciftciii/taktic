@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  AdminProviderServiceCategories,
+  Category,
   fetchOrNotFound,
   ProviderProfile,
   ProviderRecentPackagePurchase,
@@ -9,16 +11,55 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
+import {
+  KIND_LABELS,
+  STATUS_LABELS as CATEGORY_STATUS_LABELS,
+  statusBadgeClass as categoryStatusBadgeClass,
+} from '../../categories/category-taxonomy';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
 import { EmptyState } from '../../../components/empty-state';
 import { ModerationDialog } from '../../../components/moderation-dialog';
-import { sendProviderClaimInviteAction, updateProviderStatusAction } from '../actions';
+import {
+  addProviderServiceCategoryAction,
+  removeProviderServiceCategoryAction,
+  sendProviderClaimInviteAction,
+  updateProviderStatusAction,
+} from '../actions';
 
 type ProviderDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ claimInvite?: string }>;
+  searchParams: Promise<{
+    claimInvite?: string;
+    categoryQuery?: string;
+    categoryNotice?: string;
+  }>;
+};
+
+/**
+ * How many search hits the "add a category" list offers at once.
+ *
+ * The catalogue is a few dozen rows and the operator is looking for one of
+ * them, so a bounded list plus a "narrow your search" line is more useful than
+ * every remaining category rendered as a button. The cap is announced whenever
+ * it bites — a silently truncated list is how somebody concludes a category
+ * does not exist.
+ */
+const CATEGORY_SUGGESTION_LIMIT = 12;
+
+/** What the operator is told after attaching or detaching a category. */
+const CATEGORY_NOTICES: Record<string, { tone: 'good' | 'warn'; text: string }> = {
+  added: { tone: 'good', text: 'Kategori bu hizmet verene bağlandı.' },
+  already: { tone: 'good', text: 'Bu kategori zaten bağlıydı; ikinci bir kayıt oluşmadı.' },
+  removed: { tone: 'good', text: 'Kategori bağı kaldırıldı.' },
+  'not-assignable': {
+    tone: 'warn',
+    text:
+      'Yalnızca yayında veya taslak durumdaki hizmet kategorileri bağlanabilir. Grup, yönlendirici ve kapalı kategoriler bağlanamaz.',
+  },
+  'not-found': { tone: 'warn', text: 'Kategori bulunamadı.' },
+  error: { tone: 'warn', text: 'Kategori bağı güncellenemedi. Lütfen tekrar deneyin.' },
 };
 
 /**
@@ -88,12 +129,22 @@ export default async function ProviderDetailPage({
   searchParams,
 }: ProviderDetailPageProps) {
   const { id } = await params;
-  const { claimInvite } = await searchParams;
+  const { claimInvite, categoryQuery: rawCategoryQuery, categoryNotice } = await searchParams;
   // An unknown id — including a path like /providers/new that falls through to
   // this dynamic route — renders the 404 screen instead of a server error.
   const provider = await fetchOrNotFound(() =>
     apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`),
   );
+
+  // Two reads rather than one: the bindings come from the endpoint that owns
+  // the "does this count for release" answer, and the catalogue is the same
+  // operator's view the categories screen uses. Neither is reachable without a
+  // SUPER_ADMIN session, which is what makes drafts nameable here and nowhere
+  // else.
+  const [serviceCategories, categories] = await Promise.all([
+    apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`),
+    apiFetch<Category[]>('/categories?includeInactive=true'),
+  ]);
 
   const claim = provider.claim ?? null;
   const inviteNotice = claimInvite ? CLAIM_INVITE_MESSAGES[claimInvite] : undefined;
@@ -106,6 +157,41 @@ export default async function ProviderDetailPage({
   const recentPackagePurchases = provider.recentPackagePurchases ?? [];
 
   const hasTaxInfo = Boolean(provider.taxType || provider.taxNumber);
+
+  const categoryQuery = (rawCategoryQuery ?? '').trim();
+  const categoryNoticeMessage = categoryNotice ? CATEGORY_NOTICES[categoryNotice] : undefined;
+  const bindings = serviceCategories.serviceCategories;
+  const boundCategoryIds = new Set(bindings.map((binding) => binding.categoryId));
+
+  // The same rule the API enforces, restated so the screen never offers a
+  // button that would be refused: an ACTIVE or DRAFT service, and nothing that
+  // is already attached. Groups, routers and closed categories are absent
+  // rather than disabled — an operator should not have to discover by clicking
+  // that a folder is not a service.
+  const assignable = categories.filter(
+    (category) =>
+      category.kind === 'LEAF' &&
+      (category.status === 'ACTIVE' || category.status === 'DRAFT') &&
+      !boundCategoryIds.has(category.id),
+  );
+
+  const normalizedCategoryQuery = categoryQuery.toLocaleLowerCase('tr-TR');
+  const matches = normalizedCategoryQuery
+    ? assignable.filter((category) =>
+        `${category.name} ${category.slug}`
+          .toLocaleLowerCase('tr-TR')
+          .includes(normalizedCategoryQuery),
+      )
+    : assignable;
+  const suggestions = matches.slice(0, CATEGORY_SUGGESTION_LIMIT);
+
+  // Said out loud on the screen, because it is the difference between "this
+  // provider will make a draft releasable" and "this provider changes nothing
+  // until somebody approves them".
+  const countsForRelease = provider.status === 'APPROVED';
+  const draftBindingCount = bindings.filter(
+    (binding) => binding.category.status === 'DRAFT',
+  ).length;
 
   return (
     <main className="provider-detail-page">
@@ -219,18 +305,147 @@ export default async function ProviderDetailPage({
           </dl>
         </SectionCard>
 
-        <SectionCard title="Hizmet kategorileri">
-          {provider.serviceCategories.length === 0 ? (
-            <span className="muted">Kategori seçilmemiş.</span>
-          ) : (
-            <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
-              {provider.serviceCategories.map((item) => (
-                <span className="badge badge-info" key={item.id}>
-                  {item.category.name}
-                </span>
-              ))}
+        <SectionCard
+          className="card-wide"
+          title="Hizmet kategorileri"
+          subtitle={
+            <>
+              Taslak hizmetler yalnızca burada görünür: hizmet veren onları kendi panelinde
+              göremez, keşif ve teklif akışına girmez. Kategori{' '}
+              <strong>{CATEGORY_STATUS_LABELS.ACTIVE}</strong> olduğunda buradaki bağ ek bir
+              işlem gerekmeden geçerli arz sayılır.
+            </>
+          }
+          id="hizmet-kategorileri"
+        >
+          {categoryNoticeMessage ? (
+            <p
+              className={
+                categoryNoticeMessage.tone === 'good' ? 'badge badge-good' : 'badge badge-warn'
+              }
+              role="status"
+              style={{ display: 'inline-block', marginBottom: 12 }}
+              data-testid="provider-category-notice"
+            >
+              {categoryNoticeMessage.text}
+            </p>
+          ) : null}
+
+          {!countsForRelease && bindings.length > 0 ? (
+            <p
+              className="badge badge-warn"
+              style={{ display: 'inline-block', marginBottom: 12 }}
+              data-testid="provider-category-not-counted"
+            >
+              Bu hizmet veren <strong>{statusLabel(provider.status)}</strong> durumda. Bağlı
+              kategoriler yayın hazırlığı sayacında <strong>sayılmaz</strong>; sayaç yalnızca
+              onaylı hizmet verenleri sayar.
+            </p>
+          ) : null}
+
+          <div data-testid="provider-category-list">
+            {bindings.length === 0 ? (
+              <span className="muted">Kategori seçilmemiş.</span>
+            ) : (
+              <ul className="provider-category-list">
+                {bindings.map((binding) => (
+                  <li key={binding.id} data-testid={`provider-category-${binding.category.slug}`}>
+                    <span className="provider-category-name">
+                      <Link href={`/categories/${binding.category.slug}`}>
+                        {binding.category.name}
+                      </Link>
+                      <span className={categoryStatusBadgeClass(binding.category.status)}>
+                        {CATEGORY_STATUS_LABELS[binding.category.status]}
+                      </span>
+                      <span className="badge badge-muted">
+                        {KIND_LABELS[binding.category.kind]}
+                      </span>
+                      {binding.countsForRelease ? (
+                        <span className="badge badge-good">Hazırlık sayacına dahil</span>
+                      ) : (
+                        <span className="badge badge-warn">Sayaca dahil değil</span>
+                      )}
+                    </span>
+                    <form action={removeProviderServiceCategoryAction}>
+                      <input type="hidden" name="id" value={provider.id} />
+                      <input type="hidden" name="categoryId" value={binding.categoryId} />
+                      <input type="hidden" name="categoryQuery" value={categoryQuery} />
+                      <button className="btn btn-ghost btn-sm" type="submit">
+                        Kaldır
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {draftBindingCount > 0 ? (
+            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              Bu hizmet veren {draftBindingCount} taslak kategoriye bağlı. Taslak bağlar yalnızca
+              yayın hazırlığı panelinde görünür.
+            </p>
+          ) : null}
+
+          <form className="admin-toolbar" method="get" style={{ marginTop: 16 }}>
+            <div className="admin-toolbar-field admin-toolbar-search">
+              <label htmlFor="provider-category-search">Kategori ara</label>
+              <input
+                id="provider-category-search"
+                name="categoryQuery"
+                type="search"
+                placeholder="Kategori adı veya slug"
+                defaultValue={categoryQuery}
+                autoComplete="off"
+                data-testid="provider-category-search"
+              />
             </div>
-          )}
+            <div className="admin-toolbar-actions">
+              <button className="btn btn-secondary btn-sm" type="submit">
+                Ara
+              </button>
+              {categoryQuery ? (
+                <Link className="btn btn-ghost btn-sm" href={`/providers/${provider.id}`}>
+                  Sıfırla
+                </Link>
+              ) : null}
+            </div>
+          </form>
+
+          <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+            {suggestions.length === 0 ? (
+              <span className="muted">
+                {categoryQuery
+                  ? 'Bu aramayla eşleşen, bağlanabilir bir kategori yok.'
+                  : 'Bağlanabilecek başka kategori yok.'}
+              </span>
+            ) : (
+              suggestions.map((category) => (
+                <form
+                  action={addProviderServiceCategoryAction}
+                  key={category.id}
+                  data-testid={`provider-category-add-${category.slug}`}
+                >
+                  <input type="hidden" name="id" value={provider.id} />
+                  <input type="hidden" name="categoryId" value={category.id} />
+                  <input type="hidden" name="categoryQuery" value={categoryQuery} />
+                  <button className="btn btn-secondary btn-sm" type="submit">
+                    + {category.name}
+                    <span className={categoryStatusBadgeClass(category.status)}>
+                      {CATEGORY_STATUS_LABELS[category.status]}
+                    </span>
+                  </button>
+                </form>
+              ))
+            )}
+          </div>
+
+          {matches.length > suggestions.length ? (
+            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              {matches.length} sonuçtan ilk {suggestions.length} tanesi gösteriliyor. Aramayı
+              daraltın.
+            </p>
+          ) : null}
         </SectionCard>
 
         <SectionCard title="Hizmet bölgeleri">
