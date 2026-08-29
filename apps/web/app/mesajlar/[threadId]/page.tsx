@@ -1,14 +1,17 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 import {
   apiFetch,
   fetchOrNotFound,
   getCurrentUser,
+  type AuthUser,
   type MessageThreadDetail,
 } from '../../../lib/api';
 import { IconArrowLeft } from '../../landing-icons';
 import { markThreadRead } from '../mark-read';
 import { MessagingFrame } from '../panel-frame';
+import { ThreadSkeleton } from '../skeletons';
 import { ThreadView } from '../thread-view';
 
 type ThreadPageProps = {
@@ -18,12 +21,9 @@ type ThreadPageProps = {
 /**
  * One conversation.
  *
- * The whole screen is served from a single API call that already refused
- * anybody who is not one of the two parties — a stranger, a losing provider,
- * another customer — so this page never has to decide who may read it.
- * `fetchOrNotFound` turns that refusal into the shared 404, which says the same
- * thing to somebody who guessed an id as to somebody whose thread really is
- * gone: nothing.
+ * The sign-in check runs before the Suspense boundary below, so an anonymous
+ * request never reaches the skeleton: it is answered with a 307 to `/login`
+ * carrying this thread's path, exactly like every other protected route.
  */
 export default async function ThreadPage({ params }: ThreadPageProps) {
   const { threadId } = await params;
@@ -33,6 +33,25 @@ export default async function ThreadPage({ params }: ThreadPageProps) {
     redirect(`/login?redirectTo=/mesajlar/${threadId}`);
   }
 
+  return (
+    <Suspense fallback={<ThreadSkeleton />}>
+      <Conversation user={user} threadId={threadId} />
+    </Suspense>
+  );
+}
+
+/**
+ * The conversation itself.
+ *
+ * The whole screen is served from a single API call that already refused
+ * anybody who is not one of the two parties — a stranger, a losing provider,
+ * another customer — so this page never has to decide who may read it. Being
+ * signed in is a different question, and answered above; this is the one the
+ * API owns. `fetchOrNotFound` turns that refusal into the shared 404, which
+ * says the same thing to somebody who guessed an id as to somebody whose thread
+ * really is gone: nothing.
+ */
+async function Conversation({ user, threadId }: { user: AuthUser; threadId: string }) {
   const thread = await fetchOrNotFound(() =>
     apiFetch<MessageThreadDetail>(`/messages/threads/${threadId}`),
   );

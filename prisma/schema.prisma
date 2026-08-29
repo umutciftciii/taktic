@@ -243,9 +243,15 @@ model CompanySettings {
 /// `expiresAt` is the **absolute** lifetime, fixed when the session is created
 /// and never moved forward. `lastSeenAt` is the **idle** clock: a session whose
 /// last activity is older than the inactivity window is refused, however much
-/// absolute time it has left. Neither extends the other — there is no sliding
-/// session — and both are checked on the server against the database, so a
-/// browser clock has no say in whether a session is still valid.
+/// absolute time it has left. Activity slides the idle window and nothing else
+/// — it never buys absolute time — so there is no sliding session, and both
+/// clocks are checked on the server against the database, so a browser clock
+/// has no say in whether a session is still valid.
+///
+/// Both windows come from `rememberMe` below. The shipped defaults are 30
+/// minutes idle and 8 hours absolute for an ordinary session, and 30 days idle
+/// and 30 days absolute for a remembered one; `auth.constants.ts` is where they
+/// live and where an operator can change them.
 ///
 /// `lastSeenAt` is touched at most once per touch interval rather than on every
 /// request, so an active user does not turn one row into a write hot spot.
@@ -260,10 +266,15 @@ model Session {
   lastSeenAt DateTime  @default(now())
   /// Whether the person ticked "Beni hatırla" when this session was issued.
   ///
-  /// It changes exactly two things: the absolute lifetime above, and whether
-  /// the cookie is persistent or dies with the browser. It never relaxes the
-  /// idle window — a remembered session left alone still ends after the same
-  /// inactivity as any other.
+  /// It selects a whole policy, not a longer cookie: this session's own idle
+  /// window *and* its own absolute lifetime, both enforced on the server from
+  /// this column. A remembered session is given 30 days of each; an ordinary
+  /// one 30 minutes of idle and 8 hours absolute. Only the durations differ —
+  /// the shape is the same either way, and activity still slides only the idle
+  /// clock.
+  ///
+  /// The one client-side thing it also decides is whether the cookie is
+  /// persistent or dies with the browser.
   ///
   /// `false` for every session issued before this column existed, which is what
   /// those sessions actually were.
