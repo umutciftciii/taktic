@@ -1,12 +1,24 @@
 import Link from 'next/link';
 import { createCategoryAction } from '../actions';
 import { CategoryImageUploader } from '../category-image-uploader';
-import { CATEGORY_ICON_KEYS, requireAdmin } from '../../../lib/api';
+import { apiFetch, CATEGORY_ICON_KEYS, Category, requireAdmin } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
+import {
+  CATEGORY_KINDS,
+  CATEGORY_STATUSES,
+  KIND_HINTS,
+  KIND_LABELS,
+  STATUS_HINTS,
+  STATUS_LABELS,
+} from '../category-taxonomy';
 
 export default async function NewCategoryPage() {
   await requireAdmin();
+  const categories = await apiFetch<Category[]>('/categories?includeInactive=true');
+  // Only a GROUP can be a parent — a service is not a folder — so the picker
+  // offers exactly what the API will accept.
+  const groups = categories.filter((category) => category.kind === 'GROUP');
 
   return (
     <main className="categories-page">
@@ -38,10 +50,46 @@ export default async function NewCategoryPage() {
                 </label>
                 <label className="field field-4">
                   <span>Teklif kredisi *</span>
-                  <input name="offerCreditCost" type="number" min="1" step="1" required />
+                  <input name="offerCreditCost" type="number" min="1" step="1" defaultValue="1" required />
                   <span className="help-text">
-                    Bu kategoride bir teklifin maliyeti. Yalnız bundan sonraki teklifleri etkiler;
-                    geçmiş teklif ve iadeleri değiştirmez.
+                    Bu kategoride bir teklifin maliyeti. Yalnız hizmet tipinde kullanılır; grup ve
+                    yönlendirici kategorilerde teklif verilemediği için yok sayılır.
+                  </span>
+                </label>
+                <label className="field field-4">
+                  <span>Tip *</span>
+                  <select name="kind" defaultValue="LEAF">
+                    {CATEGORY_KINDS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {KIND_LABELS[kind]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">{KIND_HINTS.LEAF}</span>
+                </label>
+                <label className="field field-4">
+                  <span>Durum *</span>
+                  <select name="status" defaultValue="DRAFT">
+                    {CATEGORY_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {STATUS_LABELS[status]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">{STATUS_HINTS.DRAFT}</span>
+                </label>
+                <label className="field field-4">
+                  <span>Üst kategori</span>
+                  <select name="parentId" defaultValue="">
+                    <option value="">— (üst seviye)</option>
+                    {groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">
+                    Yalnızca grup tipindeki kategoriler üst kategori olabilir.
                   </span>
                 </label>
                 <label className="field field-12">
@@ -90,8 +138,6 @@ export default async function NewCategoryPage() {
                 </label>
               </div>
 
-              <input type="hidden" name="isActive" value="true" />
-
               <div className="compact-actions">
                 <button className="btn btn-primary btn-sm" type="submit">
                   Kategoriyi oluştur
@@ -114,7 +160,8 @@ export default async function NewCategoryPage() {
             <ul>
               <li>Slug değiştirildiğinde mevcut linkler kırılır.</li>
               <li>Soru sırası, müşteri formundaki gösterim sırasını belirler.</li>
-              <li>Pasif kategoriler müşteri akışında görünmez.</li>
+              <li>{STATUS_HINTS.DRAFT}</li>
+              <li>{KIND_HINTS.ROUTER}</li>
             </ul>
           </div>
 

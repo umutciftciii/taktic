@@ -1,12 +1,50 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { apiFetch, parseDecimalToMinor, QuestionType, ServiceRequest } from '../../lib/api';
+import {
+  apiFetch,
+  parseDecimalToMinor,
+  QuestionType,
+  RoutingResolution,
+  ServiceRequest,
+} from '../../lib/api';
+import { decodeRouterSelections, encodeRouterSelections } from '../../lib/request-flow';
 
 type QuestionMeta = {
   key: string;
   type: QuestionType;
 };
+
+/**
+ * One step of a routed flow.
+ *
+ * The browser posts the option the customer clicked; the API alone turns it
+ * into a category and says where the flow stands. Nothing about the
+ * destination is decided here — this action only forwards the answer and
+ * navigates to whatever the API named, which may be another router.
+ */
+export async function resolveRouterStepAction(formData: FormData) {
+  const entryCategorySlug = readFormString(formData, 'entryCategorySlug');
+  const questionKey = readFormString(formData, 'routerQuestionKey');
+  const optionKey = readFormString(formData, 'routerOptionKey');
+
+  const selections = [
+    ...decodeRouterSelections(readOptionalFormString(formData, 'routerSelections')),
+    { questionKey, optionKey },
+  ];
+
+  const resolution = await apiFetch<RoutingResolution>('/categories/routing/resolve', {
+    method: 'POST',
+    body: JSON.stringify({ entryCategorySlug, selections }),
+  });
+
+  const query = new URLSearchParams({
+    entry: resolution.entryCategorySlug,
+    r: encodeRouterSelections(selections),
+  });
+
+  redirect(`/categories/${resolution.categorySlug}?${query.toString()}`);
+}
 
 export async function submitServiceRequestAction(formData: FormData) {
   const categorySlug = readFormString(formData, 'categorySlug');
@@ -15,6 +53,11 @@ export async function submitServiceRequestAction(formData: FormData) {
     method: 'POST',
     body: JSON.stringify({
       categorySlug,
+      // The steps that led here, replayed for the API to re-walk. Empty for an
+      // ordinary service, which is what every request was before routing.
+      routerSelections: decodeRouterSelections(
+        readOptionalFormString(formData, 'routerSelections'),
+      ),
       customerName: readFormString(formData, 'customerName'),
       customerPhone: readFormString(formData, 'customerPhone'),
       customerEmail: readFormString(formData, 'customerEmail'),

@@ -1,5 +1,7 @@
+import { ServiceCategoryKind, ServiceCategoryStatus } from '@prisma/client';
 import {
   IsBoolean,
+  IsEnum,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -58,6 +60,15 @@ export class UpdateCategoryDto {
   @IsIn([...CATEGORY_ICON_KEYS, '', null])
   iconKey?: CategoryIconKey | '' | null;
 
+  @IsOptional()
+  @IsEnum(ServiceCategoryKind)
+  kind?: ServiceCategoryKind;
+
+  @IsOptional()
+  @IsEnum(ServiceCategoryStatus)
+  status?: ServiceCategoryStatus;
+
+  /** See CreateCategoryDto.isActive: kept so pre-taxonomy clients still work. */
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;

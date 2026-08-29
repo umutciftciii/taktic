@@ -1,5 +1,7 @@
 import {
   createQuestionAction,
+  replaceQuestionConditionsAction,
+  replaceRouterRulesAction,
   updateCategoryAction,
   updateCategoryStatusAction,
   updateQuestionAction,
@@ -12,12 +14,22 @@ import {
   Category,
   Question,
   QuestionOption,
+  QuestionSystemField,
   QuestionType,
   requireAdmin,
 } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { EmptyState } from '../../../components/empty-state';
+import {
+  CATEGORY_KINDS,
+  CATEGORY_STATUSES,
+  KIND_HINTS,
+  KIND_LABELS,
+  STATUS_HINTS,
+  STATUS_LABELS,
+  statusBadgeClass,
+} from '../category-taxonomy';
 
 const questionTypes: QuestionType[] = [
   'TEXT',
@@ -30,6 +42,25 @@ const questionTypes: QuestionType[] = [
   'IMAGE',
 ];
 
+/**
+ * The request field each binding stands in for, and the question type it has to
+ * carry. Mirrors question-system-fields.ts in the API, which refuses anything
+ * else — this is the same table, written so an admin can read it.
+ */
+const SYSTEM_FIELDS: { value: QuestionSystemField; label: string; type: QuestionType }[] = [
+  { value: 'ADDRESS', label: 'Adres (il / ilçe / mahalle)', type: 'TEXT' },
+  { value: 'BUDGET', label: 'Bütçe aralığı', type: 'NUMBER' },
+  { value: 'DESCRIPTION', label: 'İş açıklaması', type: 'TEXTAREA' },
+  { value: 'PREFERRED_DATE', label: 'Tercih edilen tarih', type: 'DATE' },
+];
+
+const SYSTEM_FIELD_LABELS: Record<QuestionSystemField, string> = {
+  ADDRESS: 'Adres',
+  BUDGET: 'Bütçe',
+  DESCRIPTION: 'Açıklama',
+  PREFERRED_DATE: 'Tarih',
+};
+
 type CategoryDetailPageProps = {
   params: Promise<{ slug: string }>;
 };
@@ -38,12 +69,27 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
   await requireAdmin();
   const { slug } = await params;
   const category = await apiFetch<Category>(`/categories/${slug}?includeInactive=true`);
-  const questions = await apiFetch<Question[]>(`/categories/${category.id}/questions`);
+  const [questions, allCategories] = await Promise.all([
+    apiFetch<Question[]>(`/categories/${category.id}/questions`),
+    apiFetch<Category[]>('/categories?includeInactive=true'),
+  ]);
 
   const sortedQuestions = [...questions].sort((a, b) => {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
     return a.label.localeCompare(b.label, 'tr-TR');
   });
+
+  const groups = allCategories.filter(
+    (candidate) => candidate.kind === 'GROUP' && candidate.id !== category.id,
+  );
+  // A router may send the customer on to a service or to another router, never
+  // to a group and never to itself. The picker offers exactly that.
+  const routableTargets = allCategories.filter(
+    (candidate) => candidate.kind !== 'GROUP' && candidate.id !== category.id,
+  );
+
+  const routerQuestion = sortedQuestions.find((question) => question.isRouter);
+  const isRouter = category.kind === 'ROUTER';
 
   return (
     <main className="categories-page">
@@ -54,16 +100,20 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
           { label: category.name },
         ]}
         title={category.name}
-        subtitle="Kategori bilgilerini, durumunu ve müşteri formundaki soruları yönetin."
+        subtitle="Kategori bilgilerini, ağaçtaki yerini, durumunu ve müşteri formundaki soruları yönetin."
       />
 
       <div className="admin-meta-pills">
-        <span className={category.isActive ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}>
-          {category.isActive ? 'Aktif' : 'Pasif'}
-        </span>
+        <span className={statusBadgeClass(category.status)}>{STATUS_LABELS[category.status]}</span>
+        <span className="meta-pill">{KIND_LABELS[category.kind]}</span>
         <span className="meta-pill">
           slug <code>{category.slug}</code>
         </span>
+        {category.parent ? (
+          <span className="meta-pill">üst: {category.parent.name}</span>
+        ) : (
+          <span className="meta-pill">üst seviye</span>
+        )}
         <span className="meta-pill">{questions.length} soru</span>
         <span className="meta-pill">sıra {category.sortOrder}</span>
       </div>
@@ -72,7 +122,7 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
         <div className="admin-main-column">
           <SectionCard
             title="Kategori bilgileri"
-            subtitle="Müşteri akışında görünen temel alanlar."
+            subtitle="Müşteri akışında görünen temel alanlar ve ağaçtaki yeri."
           >
             <form action={updateCategoryAction} className="compact-form">
               <input type="hidden" name="id" value={category.id} />
@@ -90,23 +140,61 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                     defaultValue={category.slug}
                   />
                 </label>
+                <label className="field field-4">
+                  <span>Tip *</span>
+                  <select name="kind" defaultValue={category.kind}>
+                    {CATEGORY_KINDS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {KIND_LABELS[kind]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">{KIND_HINTS[category.kind]}</span>
+                </label>
+                <label className="field field-4">
+                  <span>Durum *</span>
+                  <select name="status" defaultValue={category.status}>
+                    {CATEGORY_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {STATUS_LABELS[status]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">{STATUS_HINTS[category.status]}</span>
+                </label>
+                <label className="field field-4">
+                  <span>Üst kategori</span>
+                  <select name="parentId" defaultValue={category.parentId ?? ''}>
+                    <option value="">— (üst seviye)</option>
+                    {groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">
+                    Yalnızca grup tipindeki kategoriler üst kategori olabilir.
+                  </span>
+                </label>
                 <label className="field field-3">
                   <span>Sıralama</span>
                   <input name="sortOrder" type="number" min="0" defaultValue={category.sortOrder} />
                 </label>
                 <label className="field field-3">
-                  <span>Teklif kredisi *</span>
+                  <span>Teklif kredisi{category.kind === 'LEAF' ? ' *' : ''}</span>
                   <input
                     name="offerCreditCost"
                     type="number"
                     min="1"
                     step="1"
-                    required
+                    required={category.kind === 'LEAF'}
+                    disabled={category.kind !== 'LEAF'}
                     defaultValue={category.offerCreditCost ?? ''}
                   />
                   <span className="help-text">
-                    Yalnız bundan sonraki teklifleri etkiler; geçmiş teklif ve iadeleri
-                    değiştirmez.
+                    {category.kind === 'LEAF'
+                      ? 'Yalnız bundan sonraki teklifleri etkiler; geçmiş teklif ve iadeleri değiştirmez.'
+                      : 'Bu tipte teklif verilemediği için kredi maliyeti kullanılmaz.'}
                   </span>
                 </label>
                 <label className="field field-12">
@@ -139,11 +227,10 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                   </select>
                   <span className="help-text">
                     Görsel verilmediğinde kullanılacak ikon. Boş bırakılırsa kategori adına göre
-                    otomatik fallback ikon kullanılır. Upload sistemi ayrı fazda eklenecek.
+                    otomatik fallback ikon kullanılır.
                   </span>
                 </label>
               </div>
-              <input type="hidden" name="isActive" value={String(category.isActive)} />
               <div className="compact-actions">
                 <button className="btn btn-primary btn-sm" type="submit">
                   Kategoriyi kaydet
@@ -154,6 +241,65 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
               </div>
             </form>
           </SectionCard>
+
+          {isRouter ? (
+            <SectionCard
+              title="Yönlendirme hedefleri"
+              subtitle="Yönlendirme sorusunun her seçeneği hangi hizmete gider."
+            >
+              {routerQuestion ? (
+                <form action={replaceRouterRulesAction} className="compact-form">
+                  <input type="hidden" name="id" value={routerQuestion.id} />
+                  <input type="hidden" name="categorySlug" value={category.slug} />
+                  <p className="help-text" style={{ marginBottom: 12 }}>
+                    Yönlendirme sorusu: <strong>{routerQuestion.label}</strong>. Hedefi boş bırakılan
+                    seçenek kaydedilmez ve müşteriyi hiçbir yere taşımaz.
+                  </p>
+                  <div className="compact-field-grid">
+                    {(routerQuestion.options ?? []).map((option) => {
+                      const existing = (routerQuestion.routerRules ?? []).find(
+                        (rule) => rule.optionKey === option.key,
+                      );
+
+                      return (
+                        <label className="field field-12" key={option.key}>
+                          <span>{option.label}</span>
+                          <input type="hidden" name="routerOptionKey" value={option.key} />
+                          <select
+                            name="routerTargetSlug"
+                            defaultValue={existing?.targetCategorySlug ?? ''}
+                          >
+                            <option value="">— (hedef yok)</option>
+                            {routableTargets.map((target) => (
+                              <option key={target.id} value={target.slug}>
+                                {target.name} · {KIND_LABELS[target.kind]} ·{' '}
+                                {STATUS_LABELS[target.status]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="compact-actions">
+                    <button className="btn btn-primary btn-sm" type="submit">
+                      Yönlendirmeyi kaydet
+                    </button>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      Hedef yayında bir hizmet değilse müşteri talebi tamamlayamaz.
+                    </span>
+                  </div>
+                </form>
+              ) : (
+                <div style={{ padding: 18 }}>
+                  <EmptyState
+                    title="Yönlendirme sorusu yok."
+                    description="Aşağıdan SELECT tipinde bir soru ekleyip “Yönlendirme sorusu” alanını Evet yapın."
+                  />
+                </div>
+              )}
+            </SectionCard>
+          ) : null}
 
           <SectionCard
             title="Soru seti"
@@ -183,7 +329,28 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                     <details className="question-row" key={question.id}>
                       <summary>
                         <span className="q-order">{question.sortOrder}</span>
-                        <span className="q-label">{question.label}</span>
+                        <span className="q-label">
+                          {question.label}
+                          {question.systemField ? (
+                            <span
+                              className="meta-pill"
+                              style={{ marginLeft: 8 }}
+                              title="Bu soru talebin kendi alanına bağlı; cevap olarak ikinci kez saklanmaz."
+                            >
+                              {SYSTEM_FIELD_LABELS[question.systemField]} alanı
+                            </span>
+                          ) : null}
+                          {question.isRouter ? (
+                            <span className="meta-pill" style={{ marginLeft: 8 }}>
+                              yönlendirme
+                            </span>
+                          ) : null}
+                          {(question.conditions ?? []).length > 0 ? (
+                            <span className="meta-pill" style={{ marginLeft: 8 }}>
+                              koşullu
+                            </span>
+                          ) : null}
+                        </span>
                         <span className="q-key">
                           <code>{question.key}</code>
                         </span>
@@ -208,13 +375,20 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                         <form action={updateQuestionAction} className="compact-form compact-form-wide">
                           <input type="hidden" name="id" value={question.id} />
                           <input type="hidden" name="categorySlug" value={category.slug} />
-                          <QuestionFields question={question} />
+                          <QuestionFields question={question} allowRouter={isRouter} />
                           <div className="panel-footer">
                             <button className="btn btn-primary btn-sm" type="submit">
                               Soruyu kaydet
                             </button>
                           </div>
                         </form>
+
+                        <ConditionEditor
+                          question={question}
+                          categorySlug={category.slug}
+                          siblings={sortedQuestions}
+                        />
+
                         <form
                           action={updateQuestionStatusAction}
                           className="status-form"
@@ -251,13 +425,14 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                   <form action={createQuestionAction} className="compact-form compact-form-wide">
                     <input type="hidden" name="categoryId" value={category.id} />
                     <input type="hidden" name="categorySlug" value={category.slug} />
-                    <QuestionFields />
+                    <QuestionFields allowRouter={isRouter} />
                     <div className="compact-actions">
                       <button className="btn btn-primary btn-sm" type="submit">
                         Soruyu oluştur
                       </button>
                       <span className="muted" style={{ fontSize: 12 }}>
-                        Oluşturulan soru varsayılan olarak aktif olur.
+                        Oluşturulan soru varsayılan olarak aktif olur. Koşul ve yönlendirme hedefi
+                        soru kaydedildikten sonra tanımlanır.
                       </span>
                     </div>
                   </form>
@@ -268,25 +443,61 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
         </div>
 
         <aside className="admin-side-column">
-          <div className={category.isActive ? 'admin-action-panel is-warning' : 'admin-action-panel'}>
+          <div
+            className={
+              category.status === 'ACTIVE' ? 'admin-action-panel is-warning' : 'admin-action-panel'
+            }
+          >
             <h3>Kategori durumu</h3>
-            <p>
-              {category.isActive
-                ? 'Kategori şu anda aktif. Müşteri akışında listelenir ve talep alabilir.'
-                : 'Kategori şu anda pasif. Müşteri akışında görünmez.'}
-            </p>
+            <p>{STATUS_HINTS[category.status]}</p>
             <form action={updateCategoryStatusAction} className="panel-row">
               <input type="hidden" name="id" value={category.id} />
               <input type="hidden" name="slug" value={category.slug} />
-              <input type="hidden" name="isActive" value={String(!category.isActive)} />
-              <button
-                className={category.isActive ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm'}
-                type="submit"
-              >
-                {category.isActive ? 'Pasifleştir' : 'Aktifleştir'}
+              <label className="field field-12">
+                <span>Yeni durum</span>
+                <select name="status" defaultValue={category.status}>
+                  {CATEGORY_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {STATUS_LABELS[status]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="btn btn-primary btn-sm" type="submit">
+                Durumu güncelle
               </button>
             </form>
           </div>
+
+          {category.status === 'DRAFT' ? (
+            <div className="admin-action-panel" data-testid="draft-explainer">
+              <h3>Bu kategori neden yayında değil?</h3>
+              <p>
+                Taslak kategoriler yalnızca bu panelde görünür. Müşteri kataloğunda listelenmez,
+                hizmet verenlerin keşif ekranına düşmez ve seçilebilir hizmet listesine eklenemez.
+              </p>
+              <p style={{ fontSize: 12 }}>
+                Yayına almadan önce şunları kontrol edin: soru seti tamam mı, zorunlu alanlar doğru
+                mu, hizmet tipindeyse teklif kredisi tanımlı mı? Hazır olduğunda durumu{' '}
+                <strong>{STATUS_LABELS.ACTIVE}</strong> yapmanız yeterli.
+              </p>
+            </div>
+          ) : null}
+
+          {isRouter ? (
+            <div className="admin-action-panel is-warning" data-testid="router-explainer">
+              <h3>Yönlendirici kategori</h3>
+              <p>
+                Bu kategori <strong>hizmet verene doğrudan atanamaz</strong>. Hizmet veren kayıt ve
+                düzenleme ekranlarında seçilemez, keşif listesinde çıkmaz ve üzerine teklif verilemez.
+              </p>
+              <p style={{ fontSize: 12 }}>
+                Müşteri buradaki soruyu yanıtlar, sunucu cevabı yönlendirme kuralında arar ve talebi
+                gerçek hizmet kategorisine taşır. Eşleştirme, teklif kredisi ve iş kapsamı yalnız o
+                hizmet üzerinden çalışır.
+              </p>
+            </div>
+          ) : null}
 
           <div className="admin-action-panel">
             <h3>Hızlı bilgi</h3>
@@ -295,9 +506,9 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
               tiplerinde <code>options</code> JSON alanı zorunludur.
             </p>
             <p style={{ fontSize: 12 }}>
-              <strong>Slug:</strong> <code>{category.slug}</code>
-              <br />
-              <strong>Soru sayısı:</strong> {questions.length}
+              Koşullu bir soru, kaynak sorudan <strong>sonra</strong> sıralanmalıdır. Sistem alanına
+              bağlı sorular ayrı bir alan açmaz; talebin adres, bütçe, açıklama veya tarih alanını
+              adlandırır ve gerektiğinde zorunlu kılar.
             </p>
           </div>
         </aside>
@@ -306,7 +517,113 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
   );
 }
 
-function QuestionFields({ question }: { question?: Question }) {
+/**
+ * The visibility rule for one question.
+ *
+ * One rule per question in this form on purpose: a single "shown when X is one
+ * of these" is what the expansion actually needs, and it fits on a screen an
+ * admin can read at a glance. The API accepts several ANDed rules, so a
+ * second one is a form change rather than a data-model change.
+ */
+function ConditionEditor({
+  question,
+  categorySlug,
+  siblings,
+}: {
+  question: Question;
+  categorySlug: string;
+  siblings: Question[];
+}) {
+  // Only an earlier SELECT/MULTI_SELECT question can be a source: that ordering
+  // is what keeps the dependency graph acyclic, and the API refuses anything
+  // else.
+  const sources = siblings.filter(
+    (candidate) =>
+      candidate.id !== question.id &&
+      candidate.sortOrder < question.sortOrder &&
+      (candidate.type === 'SELECT' || candidate.type === 'MULTI_SELECT'),
+  );
+
+  const current = (question.conditions ?? [])[0];
+
+  /*
+   * Every candidate source's options in one list, grouped by question and
+   * qualified with the source's key.
+   *
+   * A plain list of option keys would be ambiguous — two questions can both
+   * offer `evet` — and rendering only the chosen source's options would need
+   * either JavaScript or a first save that stores nothing. Qualifying the value
+   * lets the whole rule be set and saved in one submission, with no script on
+   * the page; the action keeps the entries whose prefix matches the chosen
+   * source and drops the rest.
+   */
+  const qualify = (sourceKey: string, optionKey: string) => `${sourceKey}${'::'}${optionKey}`;
+
+  return (
+    <form action={replaceQuestionConditionsAction} className="compact-form compact-form-wide">
+      <input type="hidden" name="id" value={question.id} />
+      <input type="hidden" name="categorySlug" value={categorySlug} />
+      <div className="compact-field-grid">
+        <label className="field field-6">
+          <span>Koşul: kaynak soru</span>
+          <select name="sourceQuestionKey" defaultValue={current?.sourceQuestionKey ?? ''}>
+            <option value="">— (her zaman görünsün)</option>
+            {sources.map((source) => (
+              <option key={source.id} value={source.key}>
+                {source.label}
+              </option>
+            ))}
+          </select>
+          <span className="help-text">
+            {sources.length === 0
+              ? 'Bu sorudan önce sıralanmış bir seçim sorusu yok; koşul tanımlanamaz.'
+              : 'Yalnızca bu sorudan önce sıralanan seçim soruları kaynak olabilir.'}
+          </span>
+        </label>
+        <label className="field field-6">
+          <span>Beklenen cevaplar</span>
+          <select
+            name="expectedValues"
+            multiple
+            defaultValue={(current?.expectedValues ?? []).map((value) =>
+              qualify(current?.sourceQuestionKey ?? '', value),
+            )}
+          >
+            {sources.map((source) => (
+              <optgroup key={source.id} label={source.label}>
+                {(source.options ?? []).map((option) => (
+                  <option key={option.key} value={qualify(source.key, option.key)}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <span className="help-text">
+            Kaynak sorunun seçeneklerinden birini işaretleyin; o cevap verildiğinde bu soru
+            görünür. Başka bir sorunun altındaki seçenekler yok sayılır.
+          </span>
+        </label>
+      </div>
+      <div className="compact-actions">
+        <button className="btn btn-secondary btn-sm" type="submit">
+          Koşulu kaydet
+        </button>
+        <span className="muted" style={{ fontSize: 12 }}>
+          Koşul sağlanmadığında soru müşteriye gösterilmez ve cevabı kabul edilmez.
+        </span>
+      </div>
+    </form>
+  );
+}
+
+function QuestionFields({
+  question,
+  allowRouter,
+}: {
+  question?: Question;
+  allowRouter: boolean;
+}) {
   return (
     <>
       <div className="compact-field-grid">
@@ -349,6 +666,37 @@ function QuestionFields({ question }: { question?: Question }) {
             defaultValue={question?.sortOrder ?? 0}
           />
         </label>
+        <label className="field field-6">
+          <span>Sistem alanı bağı</span>
+          <select name="systemField" defaultValue={question?.systemField ?? ''}>
+            <option value="">— (normal soru)</option>
+            {SYSTEM_FIELDS.map((field) => (
+              <option key={field.value} value={field.value}>
+                {field.label} · {field.type}
+              </option>
+            ))}
+          </select>
+          <span className="help-text">
+            Bağlı soru yeni bir alan açmaz: talebin mevcut alanını adlandırır ve zorunlu kılabilir.
+            Soru tipi listedeki tiple aynı olmalıdır.
+          </span>
+        </label>
+        <label className="field field-6">
+          <span>Yönlendirme sorusu</span>
+          <select
+            name="isRouter"
+            defaultValue={String(question?.isRouter ?? false)}
+            disabled={!allowRouter}
+          >
+            <option value="false">Hayır</option>
+            <option value="true">Evet</option>
+          </select>
+          <span className="help-text">
+            {allowRouter
+              ? 'Kategori başına yalnız bir yönlendirme sorusu olabilir ve SELECT tipinde olmalıdır.'
+              : 'Yalnızca yönlendirici tipindeki kategorilerde kullanılabilir.'}
+          </span>
+        </label>
         <label className="field field-12">
           <span>Yardım metni</span>
           <input name="helpText" defaultValue={question?.helpText ?? ''} />
@@ -362,6 +710,12 @@ function QuestionFields({ question }: { question?: Question }) {
         </label>
       </div>
       <input type="hidden" name="isActive" value={String(question?.isActive ?? true)} />
+      {/*
+        A disabled control posts nothing, so a non-router category would submit
+        an absent field and the payload would read it as "false" — which is what
+        it must be. Stated rather than relied on.
+      */}
+      {allowRouter ? null : <input type="hidden" name="isRouter" value="false" />}
     </>
   );
 }

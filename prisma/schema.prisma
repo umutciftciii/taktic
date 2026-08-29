@@ -20,6 +20,61 @@ enum CustomerOrigin {
   IMPORTED
 }
 
+/// What a category *is* in the tree, as opposed to whether it is visible.
+///
+/// GROUP is navigation only: it holds children, never questions, never requests
+/// and never a provider. LEAF is the only kind a request, an offer, a credit
+/// charge or a provider's service list may point at. ROUTER is an entry point
+/// that owns exactly one question whose options each name the LEAF (or further
+/// ROUTER) the customer really meant.
+///
+/// LEAF is the default so every category that existed before this enum — all of
+/// which take requests — keeps behaving exactly as it did.
+enum ServiceCategoryKind {
+  GROUP
+  LEAF
+  ROUTER
+}
+
+/// Operational readiness, kept apart from public visibility on purpose.
+///
+/// DRAFT   — visible in admin, invisible to the public and to provider
+///           discovery. An admin may open a request against it to smoke-test
+///           the form; nobody else may.
+/// ACTIVE  — public, matchable, open for new requests.
+/// INACTIVE— closed for new requests and for new provider selections, for
+///           everyone including admins. Existing requests, offers and answers
+///           stay readable; nothing about the past is rewritten.
+///
+/// The legacy `isActive` boolean is kept and mirrored (ACTIVE ⇔ true) so every
+/// response body and every query written before this enum keeps working.
+enum ServiceCategoryStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+/// The request column a question is bound to, instead of an answer row.
+///
+/// A bound question is a *label and a requirement* placed on a field the
+/// request already has — it is never stored a second time in
+/// ServiceRequestAnswer, and the API refuses an answer sent for one. That is
+/// the whole point: the address a customer types must stay the address provider
+/// matching reads, not a copy of it that can drift.
+///
+/// NULL — the default and what every question written before this column
+/// carries — means an ordinary question answered into ServiceRequestAnswer.
+enum ServiceRequestQuestionSystemField {
+  /// ServiceRequest.city / district / neighborhood
+  ADDRESS
+  /// ServiceRequest.budgetMin / budgetMax
+  BUDGET
+  /// ServiceRequest.description
+  DESCRIPTION
+  /// ServiceRequest.preferredDate
+  PREFERRED_DATE
+}
+
 enum ServiceRequestQuestionType {
   TEXT
   TEXTAREA
@@ -290,10 +345,10 @@ model Session {
 }
 
 model ServiceCategory {
-  id              String   @id @default(cuid())
+  id              String                @id @default(cuid())
   parentId        String?
   name            String
-  slug            String   @unique
+  slug            String                @unique
   description     String?
   /// Credits a provider spends to submit one offer on a request in this
   /// category. There is deliberately NO default: a default value would be the
@@ -309,46 +364,147 @@ model ServiceCategory {
   imageUrl        String?
   coverImageUrl   String?
   iconKey         String?
-  isActive        Boolean  @default(true)
-  sortOrder       Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  /// What this category is in the tree. See ServiceCategoryKind.
+  kind            ServiceCategoryKind   @default(LEAF)
+  /// Operational readiness. See ServiceCategoryStatus.
+  ///
+  /// `isActive` below is the same fact in the shape every existing caller and
+  /// response body already speaks, and the two are written together by
+  /// CategoriesService — never one without the other.
+  status          ServiceCategoryStatus @default(ACTIVE)
+  isActive        Boolean               @default(true)
+  sortOrder       Int                   @default(0)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 
-  parent    ServiceCategory?          @relation("ServiceCategoryTree", fields: [parentId], references: [id])
-  children  ServiceCategory[]         @relation("ServiceCategoryTree")
-  questions ServiceRequestQuestion[]
-  requests  ServiceRequest[]
-  providers ProviderServiceCategory[]
+  /// Restrict, not the implicit SetNull: silently orphaning a subtree is how a
+  /// category tree loses a whole branch without anybody being told. A parent
+  /// with children cannot be deleted — the API says so with a 409, and the
+  /// database says so even if something bypasses the API.
+  parent        ServiceCategory?            @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children      ServiceCategory[]           @relation("ServiceCategoryTree")
+  questions     ServiceRequestQuestion[]
+  requests      ServiceRequest[]
+  entryRequests ServiceRequest[]            @relation("ServiceRequestEntryCategory")
+  providers     ProviderServiceCategory[]
+  routerRulesIn ServiceCategoryRouterRule[] @relation("ServiceCategoryRouterTarget")
 
   @@index([parentId])
   @@index([isActive, sortOrder])
+  /// The public listing: "ACTIVE leaves, in order".
+  @@index([status, kind, sortOrder])
 }
 
 model ServiceRequestQuestion {
-  id         String                     @id @default(cuid())
-  categoryId String
-  key        String
-  label      String
-  helpText   String?
-  type       ServiceRequestQuestionType
-  isRequired Boolean                    @default(false)
-  options    Json?
-  sortOrder  Int                        @default(0)
-  isActive   Boolean                    @default(true)
-  createdAt  DateTime                   @default(now())
-  updatedAt  DateTime                   @updatedAt
+  id          String                             @id @default(cuid())
+  categoryId  String
+  key         String
+  label       String
+  helpText    String?
+  type        ServiceRequestQuestionType
+  isRequired  Boolean                            @default(false)
+  options     Json?
+  /// When set, this question does not produce an answer row: it labels and
+  /// constrains the request column named by the enum. See
+  /// ServiceRequestQuestionSystemField.
+  systemField ServiceRequestQuestionSystemField?
+  /// Whether this is the routing question of a ROUTER category — the one whose
+  /// options carry ServiceCategoryRouterRule rows.
+  ///
+  /// At most one active router question per category; that is enforced by
+  /// QuestionsService rather than by a partial index, so `prisma migrate dev`
+  /// keeps reporting no drift.
+  isRouter    Boolean                            @default(false)
+  sortOrder   Int                                @default(0)
+  isActive    Boolean                            @default(true)
+  createdAt   DateTime                           @default(now())
+  updatedAt   DateTime                           @updatedAt
 
-  category ServiceCategory        @relation(fields: [categoryId], references: [id])
-  answers  ServiceRequestAnswer[]
+  category       ServiceCategory                   @relation(fields: [categoryId], references: [id])
+  answers        ServiceRequestAnswer[]
+  /// Conditions that govern *this* question's visibility.
+  conditions     ServiceRequestQuestionCondition[] @relation("QuestionConditionTarget")
+  /// Conditions on other questions that read *this* question's answer.
+  dependentRules ServiceRequestQuestionCondition[] @relation("QuestionConditionSource")
+  routerRules    ServiceCategoryRouterRule[]
 
   @@unique([categoryId, key])
   @@index([categoryId, isActive, sortOrder])
 }
 
+/// One option of a ROUTER category's routing question, and the category it
+/// means.
+///
+/// The customer never picks a category directly in a routed flow: they answer a
+/// question, and the API turns that answer into the category. A target may
+/// itself be a ROUTER, which is what makes a two-stage flow (router → router →
+/// leaf) expressible without a second concept.
+///
+/// `questionId` and `targetCategoryId` are checked against each other by
+/// CategoriesService: the question must belong to a ROUTER category, and the
+/// option key must be one the question actually offers.
+model ServiceCategoryRouterRule {
+  id               String   @id @default(cuid())
+  questionId       String
+  /// A key from the routing question's own `options` array.
+  optionKey        String
+  targetCategoryId String
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  question       ServiceRequestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  targetCategory ServiceCategory        @relation("ServiceCategoryRouterTarget", fields: [targetCategoryId], references: [id], onDelete: Restrict)
+
+  /// One destination per option: a router that could go two ways for one answer
+  /// is not a router.
+  @@unique([questionId, optionKey])
+  @@index([targetCategoryId])
+}
+
+/// "Show `question` only when `sourceQuestion` was answered with one of
+/// `expectedValues`."
+///
+/// Normalised rather than a JSON blob so it can be validated at write time and
+/// joined at read time: the source has to be a SELECT or MULTI_SELECT question
+/// of the *same* category, and every expected value has to be one of its option
+/// keys. Several rows on one question are combined with AND.
+///
+/// The source must also sort before its target. That single rule is what makes
+/// the graph acyclic by construction, so evaluating visibility is one ordered
+/// pass and never a cycle search.
+model ServiceRequestQuestionCondition {
+  id               String   @id @default(cuid())
+  questionId       String
+  sourceQuestionId String
+  /// One or many. A SELECT source matches when its answer is in the list; a
+  /// MULTI_SELECT source matches when the two intersect.
+  expectedValues   String[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  question       ServiceRequestQuestion @relation("QuestionConditionTarget", fields: [questionId], references: [id], onDelete: Cascade)
+  sourceQuestion ServiceRequestQuestion @relation("QuestionConditionSource", fields: [sourceQuestionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, sourceQuestionId])
+  @@index([sourceQuestionId])
+}
+
 model ServiceRequest {
   id                          String               @id @default(cuid())
   requestNumber               String?              @unique
+  /// The category the request really belongs to — always a LEAF, and the only
+  /// one provider matching, the offer credit cost and the accepted work scope
+  /// ever read. A routed flow resolves to it on the server; an unrouted one
+  /// simply starts there.
   categoryId                  String
+  /// The category the customer picked first, when that is not the same one.
+  ///
+  /// NULL means "the entry was the category" — which is what every request
+  /// created before routing existed carries, and what an unrouted request still
+  /// carries today. It is analytics and audit only: nothing about matching,
+  /// pricing or scope reads it.
+  entryCategoryId             String?
   customerId                  String?
   status                      ServiceRequestStatus @default(SUBMITTED)
   customerName                String
@@ -416,6 +572,7 @@ model ServiceRequest {
   updatedAt                   DateTime             @updatedAt
 
   category           ServiceCategory        @relation(fields: [categoryId], references: [id])
+  entryCategory      ServiceCategory?       @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
   customer           User?                  @relation(fields: [customerId], references: [id])
   answers            ServiceRequestAnswer[]
   offers             Offer[]
@@ -426,6 +583,7 @@ model ServiceRequest {
   messageThread      MessageThread?
 
   @@index([categoryId])
+  @@index([entryCategoryId])
   @@index([customerId])
   @@index([status])
   @@index([city, district])

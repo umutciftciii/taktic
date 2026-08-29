@@ -32,6 +32,7 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { canBeSelectedByProviders } from '../categories/category-taxonomy';
 import { resolveArea, resolveLocation } from '../locations/turkey-locations';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
@@ -1031,16 +1032,27 @@ export class ProvidersService {
     };
   }
 
+  /**
+   * A provider may only newly select a category the marketplace actually sells:
+   * an ACTIVE leaf.
+   *
+   * Kind matters as much as status. A GROUP is a folder and a ROUTER is a
+   * question — neither describes work anybody performs, so neither may end up
+   * in a provider's service list, where it would silently never match a
+   * request. Providers already attached to a category that later leaves ACTIVE
+   * keep their row; only new selections are refused.
+   */
   private async ensureActiveCategories(categoryIds: string[]) {
     const categories = await this.prisma.serviceCategory.findMany({
-      where: {
-        id: { in: categoryIds },
-        isActive: true,
-      },
-      select: { id: true },
+      where: { id: { in: categoryIds } },
+      select: { id: true, kind: true, status: true },
     });
 
     if (categories.length !== categoryIds.length) {
+      throw new BadRequestException('Category IDs must reference active categories');
+    }
+
+    if (!categories.every((category) => canBeSelectedByProviders(category))) {
       throw new BadRequestException('Category IDs must reference active categories');
     }
   }

@@ -1,18 +1,39 @@
 import Link from 'next/link';
-import { apiFetch, Category, getContactDisclosure, getCurrentUser } from '../../../lib/api';
+import {
+  apiFetch,
+  Category,
+  fetchOrNotFound,
+  getContactDisclosure,
+  getCurrentUser,
+} from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { decodeRouterSelections } from '../../../lib/request-flow';
 import { CategoryVisual } from '../../category-visual';
 import { submitServiceRequestAction } from '../actions';
 import { RequestForm } from './request-form';
+import { RouterStep } from './router-step';
 
 type CategoryPageProps = {
   params: Promise<{ slug: string }>;
+  /**
+   * `entry` and `r` carry a routed flow across screens: where the customer
+   * started, and the options they picked getting here. Both are re-validated by
+   * the API on every step and again at submission, so neither is authority —
+   * they are how the browser remembers, not how the category is decided.
+   */
+  searchParams: Promise<{ entry?: string; r?: string }>;
 };
 
-export default async function CategoryPage({ params }: CategoryPageProps) {
+export default async function CategoryPage({ params, searchParams }: CategoryPageProps) {
   const { slug } = await params;
+  const { entry, r } = await searchParams;
   const [category, user, disclosure, provinces] = await Promise.all([
-    apiFetch<Category>(`/categories/${slug}`),
+    // A slug the public may not reach — a draft, a closed category, a group, or
+    // simply one that never existed — is a 404 page rather than an error
+    // screen. The API already answers 404 for all four, and the reason it does
+    // is the same one this page must not undo: "you may not see it" and "it is
+    // not there" have to look identical from outside.
+    fetchOrNotFound(() => apiFetch<Category>(`/categories/${slug}`)),
     getCurrentUser(),
     getContactDisclosure(),
     // The canonical province/district list, from the same API that validates a
@@ -22,6 +43,13 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
   ]);
   const questions = category.questions ?? [];
   const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
+
+  const isRouter = category.kind === 'ROUTER';
+  // A router that arrives without an entry is itself the entry: it is the first
+  // screen of its own flow.
+  const entryCategorySlug = entry ?? slug;
+  const routerSelections = decodeRouterSelections(r);
+  const routerQuestion = questions.find((question) => question.isRouter);
 
   return (
     <main className="req-page">
@@ -46,23 +74,27 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
             </p>
 
             <div className="req-head-tags">
-              <span className="tag tag-neutral">Kategoriye özel form</span>
+              <span className="tag tag-neutral">
+                {isRouter ? 'Doğru hizmeti bulalım' : 'Kategoriye özel form'}
+              </span>
               <span className="tag tag-neutral">14 gün geçerlilik</span>
               <span className="tag tag-accent">Teklif almak ücretsiz</span>
             </div>
 
-            <div style={{ marginTop: 24 }}>
-              {user?.role === 'CUSTOMER' ? (
-                <div className="notice">Bu talep müşteri hesabınıza bağlanacak.</div>
-              ) : (
-                <div className="notice">
-                  <span>
-                    Misafir talep oluşturuyorsunuz. Hesap oluşturursanız taleplerinizi daha sonra
-                    takip edebilirsiniz. <Link href="/register/customer">Hesap oluştur</Link>
-                  </span>
-                </div>
-              )}
-            </div>
+            {isRouter ? null : (
+              <div style={{ marginTop: 24 }}>
+                {user?.role === 'CUSTOMER' ? (
+                  <div className="notice">Bu talep müşteri hesabınıza bağlanacak.</div>
+                ) : (
+                  <div className="notice">
+                    <span>
+                      Misafir talep oluşturuyorsunuz. Hesap oluşturursanız taleplerinizi daha sonra
+                      takip edebilirsiniz. <Link href="/register/customer">Hesap oluştur</Link>
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="req-head-media">
@@ -79,14 +111,34 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
       </section>
 
       <div className="lp-container">
-        <RequestForm
-          categorySlug={category.slug}
-          questions={questions}
-          disclosure={disclosure}
-          showDisclosure={showDisclosure}
-          provinces={provinces}
-          action={submitServiceRequestAction}
-        />
+        {isRouter ? (
+          routerQuestion ? (
+            <RouterStep
+              entryCategorySlug={entryCategorySlug}
+              selections={routerSelections}
+              question={routerQuestion}
+            />
+          ) : (
+            // A router with no routing question is a misconfiguration, not a
+            // dead end for the customer: send them back to the catalogue rather
+            // than to a form that cannot go anywhere.
+            <div className="notice">
+              Bu hizmet için yönlendirme henüz hazır değil.{' '}
+              <Link href="/categories">Kategorilere dön</Link>
+            </div>
+          )
+        ) : (
+          <RequestForm
+            categorySlug={category.slug}
+            entryCategorySlug={entryCategorySlug}
+            routerSelections={routerSelections}
+            questions={questions}
+            disclosure={disclosure}
+            showDisclosure={showDisclosure}
+            provinces={provinces}
+            action={submitServiceRequestAction}
+          />
+        )}
       </div>
     </main>
   );

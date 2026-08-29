@@ -8,6 +8,17 @@ type LocationFieldsProps = {
   provinces: ProvinceWithDistricts[];
   /** Told when a value changed, so the form can refresh its own signals. */
   onChange?: () => void;
+  /**
+   * Whether the neighbourhood has to be chosen.
+   *
+   * Off by default, which is what it has always been. A category whose form
+   * binds a required ADDRESS question turns it on: the work needs the finer
+   * level, and the API refuses the request without it, so the field says so
+   * before the customer submits.
+   */
+  neighborhoodRequired?: boolean;
+  /** Category-specific wording for the neighbourhood field, when there is any. */
+  neighborhoodHelpText?: string | null;
 };
 
 type NeighborhoodState =
@@ -34,7 +45,12 @@ type NeighborhoodState =
  * type-ahead searchable in the browser's own locale-aware way, which is what a
  * list of Turkish place names needs.
  */
-export function LocationFields({ provinces, onChange }: LocationFieldsProps) {
+export function LocationFields({
+  provinces,
+  onChange,
+  neighborhoodRequired = false,
+  neighborhoodHelpText,
+}: LocationFieldsProps) {
   const [city, setCity] = useState('');
   const [district, setDistrict] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
@@ -138,9 +154,10 @@ export function LocationFields({ provinces, onChange }: LocationFieldsProps) {
       </label>
 
       <label className="form-row">
-        <span>Mahalle</span>
+        <span>Mahalle{neighborhoodRequired ? ' *' : ''}</span>
         <select
           name="neighborhood"
+          required={neighborhoodRequired}
           value={neighborhood}
           disabled={!district || neighborhoodOptions.length === 0}
           onChange={(event) => setNeighborhood(event.target.value)}
@@ -155,8 +172,9 @@ export function LocationFields({ provinces, onChange }: LocationFieldsProps) {
         </select>
         <span className="help-text">
           {neighborhoods.status === 'unavailable'
-            ? 'Mahalle listesi şu anda getirilemedi. Mahalle isteğe bağlıdır; adres notuna yazabilirsiniz.'
-            : 'İsteğe bağlı.'}
+            ? 'Mahalle listesi şu anda getirilemedi. Adres notuna yazabilirsiniz.'
+            : (neighborhoodHelpText ??
+              (neighborhoodRequired ? 'Bu hizmet için mahalle gereklidir.' : 'İsteğe bağlı.'))}
         </span>
       </label>
     </div>
@@ -168,5 +186,5 @@ function neighborhoodPlaceholder(district: string, state: NeighborhoodState): st
   if (state.status === 'loading') return 'Yükleniyor...';
   if (state.status === 'unavailable') return 'Liste getirilemedi';
   if (state.status === 'ready' && state.names.length === 0) return 'Kayıtlı mahalle yok';
-  return 'Mahalle seçiniz (isteğe bağlı)';
+  return 'Mahalle seçiniz';
 }

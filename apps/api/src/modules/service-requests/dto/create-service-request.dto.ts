@@ -1,5 +1,6 @@
 import {
   Allow,
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -22,10 +23,48 @@ export class CreateServiceRequestAnswerDto {
   value!: unknown;
 }
 
+/**
+ * One step of a routed flow. See RouterSelectionDto in the categories module —
+ * this is the same shape, repeated here so the request payload stays a single
+ * self-describing DTO.
+ */
+export class CreateServiceRequestRouterSelectionDto {
+  @IsString()
+  @IsNotEmpty()
+  questionKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  optionKey!: string;
+}
+
 export class CreateServiceRequestDto {
+  /**
+   * The category the customer started from.
+   *
+   * For an ordinary service that is also the category the request lands on, and
+   * the field means exactly what it has always meant — every client written
+   * before routing existed keeps working unchanged. For a router it is the
+   * entry point, and `routerSelections` below say which way the customer went.
+   */
   @IsString()
   @IsNotEmpty()
   categorySlug!: string;
+
+  /**
+   * The option keys the customer picked at each routing step, in order.
+   *
+   * They are not a destination: the API looks each one up in the stored router
+   * rules and derives the final category itself. Omitted — which is what an
+   * unrouted request sends, and what every existing client sends — the entry
+   * category is the final one.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => CreateServiceRequestRouterSelectionDto)
+  routerSelections?: CreateServiceRequestRouterSelectionDto[];
 
   @IsString()
   @IsNotEmpty()

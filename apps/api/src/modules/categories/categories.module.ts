@@ -7,5 +7,9 @@ import { CategoriesService } from './categories.service';
   imports: [AuthModule],
   controllers: [CategoriesController],
   providers: [CategoriesService],
+  // Request creation resolves its category through the same router walk the
+  // public endpoint uses, so there is exactly one definition of where a routed
+  // request lands.
+  exports: [CategoriesService],
 })
 export class CategoriesModule {}

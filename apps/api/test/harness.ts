@@ -7,6 +7,8 @@ import {
   CustomerOrigin,
   PrismaClient,
   ProviderStatus,
+  ServiceCategoryKind,
+  ServiceCategoryStatus,
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
@@ -182,6 +184,8 @@ export function resetAuthThrottle(app: INestApplication): void {
 
 const TRUNCATED_TABLES = [
   'CompanySettings',
+  'ServiceCategoryRouterRule',
+  'ServiceRequestQuestionCondition',
   'Message',
   'MessageThread',
   'PasswordResetToken',
@@ -268,20 +272,73 @@ export async function loginAs(prisma: PrismaClient, userId: string): Promise<str
  * blocks offering. That is deliberate: a fixture default of 1 would quietly
  * recreate the hidden fallback the pricing rules forbid, so any test that needs
  * to submit an offer has to state the price it expects to be charged.
+ *
+ * `kind` defaults to LEAF and `status` to ACTIVE, which is what every category
+ * in this suite was before the taxonomy existed. `status` and `isActive` are
+ * written together here for the same reason the application writes them
+ * together: they are one fact, and a fixture that let them disagree would be
+ * testing a state no code path can produce. A caller that passes `isActive`
+ * alone still gets the matching status.
  */
 export async function createCategory(
   prisma: PrismaClient,
   name = 'Klima',
-  options: { offerCreditCost?: number | null; isActive?: boolean } = {},
+  options: {
+    offerCreditCost?: number | null;
+    isActive?: boolean;
+    kind?: ServiceCategoryKind;
+    status?: ServiceCategoryStatus;
+    parentId?: string | null;
+    sortOrder?: number;
+  } = {},
 ) {
   const suffix = uniqueSuffix();
+  const status =
+    options.status ??
+    (options.isActive === false ? ServiceCategoryStatus.INACTIVE : ServiceCategoryStatus.ACTIVE);
+
   return prisma.serviceCategory.create({
     data: {
       name: `${name} ${suffix}`,
       slug: `kategori-${suffix}`,
-      isActive: options.isActive ?? true,
-      sortOrder: 0,
+      kind: options.kind ?? ServiceCategoryKind.LEAF,
+      status,
+      isActive: status === ServiceCategoryStatus.ACTIVE,
+      parentId: options.parentId ?? null,
+      sortOrder: options.sortOrder ?? 0,
       offerCreditCost: options.offerCreditCost ?? null,
+    },
+  });
+}
+
+/**
+ * A SELECT question, with options, in one call — the shape almost every
+ * taxonomy case needs.
+ */
+export async function createSelectQuestion(
+  prisma: PrismaClient,
+  options: {
+    categoryId: string;
+    key: string;
+    label?: string;
+    options: { key: string; label: string }[];
+    isRequired?: boolean;
+    sortOrder?: number;
+    isRouter?: boolean;
+    multi?: boolean;
+  },
+) {
+  return prisma.serviceRequestQuestion.create({
+    data: {
+      categoryId: options.categoryId,
+      key: options.key,
+      label: options.label ?? `Soru ${options.key}`,
+      type: options.multi ? 'MULTI_SELECT' : 'SELECT',
+      isRequired: options.isRequired ?? false,
+      options: options.options,
+      sortOrder: options.sortOrder ?? 0,
+      isRouter: options.isRouter ?? false,
+      isActive: true,
     },
   });
 }

@@ -20,9 +20,31 @@ export const CATEGORY_ICON_KEYS = [
 
 export type CategoryIconKey = (typeof CATEGORY_ICON_KEYS)[number];
 
+/**
+ * What a category is in the tree.
+ *
+ * GROUP is navigation: it holds children and nothing else. LEAF is a service —
+ * the only kind a request, an offer or a provider's service list may point at.
+ * ROUTER is an entry point whose single question sends the customer on to the
+ * leaf they actually meant.
+ */
+export type CategoryKind = 'GROUP' | 'LEAF' | 'ROUTER';
+
+/**
+ * Operational readiness, which is not the same thing as visibility.
+ *
+ * DRAFT is visible here and nowhere else. ACTIVE is public and matchable.
+ * INACTIVE is closed to new requests and new provider selections while
+ * everything already recorded stays readable.
+ */
+export type CategoryStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+
 export type Category = {
   id: string;
   parentId: string | null;
+  parent?: { id: string; name: string; slug: string } | null;
+  kind: CategoryKind;
+  status: CategoryStatus;
   name: string;
   slug: string;
   description: string | null;
@@ -39,6 +61,7 @@ export type Category = {
   offerCreditCost: number | null;
   _count?: {
     questions: number;
+    children?: number;
   };
   questions?: Question[];
 };
@@ -93,6 +116,30 @@ export type QuestionOption = {
   label: string;
 };
 
+/**
+ * The request column a question is bound to instead of an answer row.
+ *
+ * A bound question does not add a field to the form: it labels one the request
+ * already has and can make it mandatory for this category. Nothing is stored
+ * twice, so the address provider matching reads is the address the customer
+ * typed — not a copy that can drift from it.
+ */
+export type QuestionSystemField = 'ADDRESS' | 'BUDGET' | 'DESCRIPTION' | 'PREFERRED_DATE';
+
+/** "Show this question only when <sourceQuestionKey> answered one of these." */
+export type QuestionCondition = {
+  sourceQuestionKey: string;
+  sourceQuestionLabel: string;
+  expectedValues: string[];
+};
+
+/** One option of a routing question, and the service it leads to. */
+export type QuestionRouterRule = {
+  optionKey: string;
+  targetCategoryName: string;
+  targetCategorySlug: string;
+};
+
 export type Question = {
   id: string;
   categoryId: string;
@@ -102,6 +149,10 @@ export type Question = {
   type: QuestionType;
   isRequired: boolean;
   options: QuestionOption[] | null;
+  systemField: QuestionSystemField | null;
+  isRouter: boolean;
+  conditions?: QuestionCondition[];
+  routerRules?: QuestionRouterRule[];
   sortOrder: number;
   isActive: boolean;
 };
