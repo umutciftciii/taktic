@@ -11,14 +11,19 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
+import {
+  assertElevatedQueryAccess,
+  type CredentialCarryingRequest,
+} from '../auth/elevated-query';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthUser } from '../auth/auth.types';
-import { CategoriesService } from './categories.service';
+import { CategoriesService, type CategoryViewOptions } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { ResolveRoutingDto } from './dto/resolve-routing.dto';
 import {
@@ -31,13 +36,26 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 export class CategoriesController {
   constructor(@Inject(CategoriesService) private readonly categoriesService: CategoriesService) {}
 
+  /**
+   * The catalogue, in one of its two views.
+   *
+   * Optionally authenticated rather than guarded: signed out this is the public
+   * listing and has to stay reachable. `includeInactive=true` asks for the
+   * operator's view instead, and {@link resolveView} is where that request is
+   * granted or refused — before the service is called, on the session rather
+   * than on anything the caller can write into the URL.
+   */
   @Get()
+  @UseGuards(OptionalAuthGuard)
   listCategories(
+    @Req() request: CredentialCarryingRequest,
+    @CurrentUser() user: AuthUser | null,
     @Query('includeInactive') includeInactive?: string,
     @Query('q') q?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.categoriesService.listCategories(includeInactive === 'true', {
+    return this.categoriesService.listCategories({
+      ...this.resolveView(request, user, includeInactive),
       q,
       limit: limit ? Number(limit) : undefined,
     });
@@ -72,9 +90,19 @@ export class CategoriesController {
     };
   }
 
+  /** Same two views, same gate, one category. */
   @Get(':slug')
-  getCategoryBySlug(@Param('slug') slug: string, @Query('includeInactive') includeInactive?: string) {
-    return this.categoriesService.getCategoryBySlug(slug, includeInactive === 'true');
+  @UseGuards(OptionalAuthGuard)
+  getCategoryBySlug(
+    @Param('slug') slug: string,
+    @Req() request: CredentialCarryingRequest,
+    @CurrentUser() user: AuthUser | null,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    return this.categoriesService.getCategoryBySlug(
+      slug,
+      this.resolveView(request, user, includeInactive),
+    );
   }
 
   @Post()
@@ -110,5 +138,28 @@ export class CategoriesController {
   @Roles(UserRole.SUPER_ADMIN)
   deleteCategory(@Param('id') id: string) {
     return this.categoriesService.deleteCategory(id);
+  }
+
+  /**
+   * Reads `includeInactive` and decides, once, who is allowed to mean it.
+   *
+   * A caller who does not ask for the wide view is never challenged — that is
+   * the whole public catalogue and it must not require a session. A caller who
+   * does is held to SUPER_ADMIN here, and the refusal distinguishes a credential
+   * that could not be resolved (401) from one that simply is not an operator's
+   * (403). See assertElevatedQueryAccess.
+   */
+  private resolveView(
+    request: CredentialCarryingRequest,
+    user: AuthUser | null,
+    includeInactive: string | undefined,
+  ): CategoryViewOptions {
+    if (includeInactive !== 'true') {
+      return { includeInactive: false, isSuperAdmin: user?.role === UserRole.SUPER_ADMIN };
+    }
+
+    assertElevatedQueryAccess(request, user);
+
+    return { includeInactive: true, isSuperAdmin: true };
   }
 }
