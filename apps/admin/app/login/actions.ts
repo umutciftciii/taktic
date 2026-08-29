@@ -2,7 +2,7 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { parseSetCookie, sessionCookieOptions } from '../session-cookie';
+import { persistSessionCookie } from '../session-cookie';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const authCookieName = process.env.AUTH_COOKIE_NAME ?? 'taktic_session';
@@ -23,14 +23,13 @@ export async function loginAction(formData: FormData) {
     redirect('/login?error=1');
   }
 
-  const session = parseSetCookie(response.headers.get('set-cookie'));
-  if (session) {
-    // The API decided how long this session lives and whether its cookie
-    // survives the browser closing; this only re-issues that decision on this
-    // origin. Re-issuing every cookie with an expiry — which is what this used
-    // to do — would turn "Beni hatırla" on for everybody. See session-cookie.ts.
-    (await cookies()).set(session.name, session.value, sessionCookieOptions(session));
-  }
+  // The API decided how long this session lives, whether its cookie survives
+  // the browser closing and whether it requires TLS; this only re-issues that
+  // decision on this origin. Re-issuing every cookie with an expiry — which is
+  // what this used to do — would turn "Beni hatırla" on for everybody, and
+  // marking every cookie `Secure` cost Safari the session outright. See
+  // session-cookie.ts.
+  await persistSessionCookie(response);
 
   redirect('/');
 }

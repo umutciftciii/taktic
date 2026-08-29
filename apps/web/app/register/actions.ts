@@ -1,7 +1,7 @@
 'use server';
 
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { persistSessionCookie } from '../session-cookie';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -39,16 +39,10 @@ async function register(path: string, formData: FormData, redirectTo: string) {
   }
 
   await response.json();
-  const session = parseSetCookie(response.headers.get('set-cookie'));
-  if (session) {
-    (await cookies()).set(session.name, session.value, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      expires: session.expires,
-    });
-  }
+  // Registering signs the new account in, so the API's session cookie is
+  // re-issued on this origin — with the API's own attributes, not a second
+  // guess at them. See session-cookie.ts.
+  await persistSessionCookie(response);
 
   redirect(redirectTo);
 }
@@ -74,28 +68,4 @@ function readFormString(formData: FormData, key: string) {
 function readOptionalFormString(formData: FormData, key: string) {
   const value = readFormString(formData, key).trim();
   return value ? value : null;
-}
-
-function parseSetCookie(value: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  const [nameValue, ...attributes] = value.split(';').map((part) => part.trim());
-  if (!nameValue) {
-    return null;
-  }
-
-  const [name, ...rawValue] = nameValue.split('=');
-  if (!name) {
-    return null;
-  }
-
-  const expiresAttribute = attributes.find((attribute) => attribute.toLowerCase().startsWith('expires='));
-
-  return {
-    name,
-    value: decodeURIComponent(rawValue.join('=')),
-    expires: expiresAttribute ? new Date(expiresAttribute.slice('expires='.length)) : undefined,
-  };
 }

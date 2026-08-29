@@ -181,13 +181,21 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
 /**
  * The WebKit project, when it has been asked for.
  *
- * Opt-in rather than always-on, and deliberately narrow. Every other scenario
- * in this suite is about server actions, sessions and pricing rules — none of
- * which differ by browser engine — so running them twice would double the cost
- * of every pull request to re-test the same API. The sign-in spec is the one
- * exception: the failure it guards was reported from Safari and only a WebKit
- * build can say whether it is back, so a Chromium-only pass would be answering
- * a different question.
+ * Opt-in rather than always-on, and deliberately narrow. Most of this suite is
+ * about server actions, pricing rules and database state — none of which differ
+ * by browser engine — so running all of it twice would double the cost of every
+ * pull request to re-test the same API.
+ *
+ * What is here instead is every flow that hands the browser a cookie, because
+ * that is the one thing an engine really does decide. Chromium accepts a
+ * `Secure` cookie on loopback; WebKit refuses it, and refusing it is what made
+ * signing in, registering, activating a guest account and claiming a guest
+ * application all appear to work and leave the person signed out on Safari. A
+ * Chromium-only pass answers a different question.
+ *
+ *   login-screen         the sign-in screens and where they land
+ *   auth-session-cookie  the cookie each auth flow leaves the browser holding
+ *   provider-claim       the claim, which needs two cookies to survive at once
  *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
@@ -202,7 +210,7 @@ function webkitProject() {
   return [
     {
       name: 'webkit',
-      testMatch: /login-screen\.spec\.ts/,
+      testMatch: /(login-screen|auth-session-cookie|provider-claim)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];
