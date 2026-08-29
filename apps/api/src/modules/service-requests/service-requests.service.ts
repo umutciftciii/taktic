@@ -9,23 +9,42 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
-import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
   CONTACT_DISCLOSURE_REQUIRED_CODE,
   readContactSharingConfig,
 } from '../contact-sharing/contact-sharing.config';
+import { CategoriesService, RoutingResolution } from '../categories/categories.service';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
+import { resolveVisibleQuestionIds } from '../questions/question-visibility';
+import {
+  hasSystemFieldValue,
+  SystemFieldRequestValues,
+  systemFieldLabel,
+} from '../questions/question-system-fields';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
 type QuestionOption = {
   key: string;
   label: string;
+};
+
+/**
+ * A question with everything answer validation needs: the question row itself
+ * plus the visibility rules that decide whether it was ever on screen.
+ */
+type QuestionForValidation = ServiceRequestQuestion & {
+  conditions: {
+    sourceQuestionId: string;
+    expectedValues: string[];
+    matchMode: QuestionConditionMatchMode;
+  }[];
 };
 
 type ValidatedAnswer = {
@@ -99,6 +118,7 @@ export class ServiceRequestsService {
     @Inject(CustomerActivationService)
     private readonly customerActivation: CustomerActivationService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(CategoriesService) private readonly categories: CategoriesService,
   ) {}
 
   async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
@@ -107,21 +127,40 @@ export class ServiceRequestsService {
     }
 
     const categorySlug = normalizeRequiredString(dto.categorySlug, 'Category slug');
-    const category = await this.prisma.serviceCategory.findUnique({
-      where: { slug: categorySlug },
+    // The client posts the option keys it was shown; the API alone turns them
+    // into a category. An unrouted request sends no selections and the walk
+    // returns the entry category itself, which is exactly the behaviour every
+    // client written before routing existed relies on.
+    const routing = await this.categories.walkRouting(
+      categorySlug,
+      (dto.routerSelections ?? []).map((selection) => ({
+        questionKey: normalizeRequiredString(selection.questionKey, 'Question key'),
+        optionKey: normalizeRequiredString(selection.optionKey, 'Option key'),
+      })),
+      user?.role === UserRole.SUPER_ADMIN,
+    );
+
+    if (routing.pendingRouterQuestionKey !== null) {
+      throw new BadRequestException(
+        `Yönlendirme tamamlanmadı: ${routing.pendingRouterQuestionKey} sorusu yanıtlanmalı.`,
+      );
+    }
+
+    const category = await this.prisma.serviceCategory.findUniqueOrThrow({
+      where: { id: routing.category.id },
       include: {
         questions: {
           where: { isActive: true },
           orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+          include: {
+            conditions: {
+              select: { sourceQuestionId: true, expectedValues: true, matchMode: true },
+            },
+          },
         },
       },
     });
 
-    if (!category || !category.isActive) {
-      throw new NotFoundException('Category not found');
-    }
-
-    const answers = validateAnswers(category.questions, dto.answers ?? []);
     const preferredDate = normalizeOptionalDate(dto.preferredDate, 'Preferred date');
     const disclosure = resolveContactDisclosure(dto);
     // The DTO already refused an impossible triple; this turns the accepted one
@@ -154,9 +193,21 @@ export class ServiceRequestsService {
       urgency: normalizeNullableString(dto.urgency),
       description: normalizeNullableString(dto.description),
     };
+
+    // Answers are validated after the request fields are normalised, because a
+    // system-bound question is a rule *about* those fields: "this category
+    // requires a neighbourhood", "this one requires a budget". The bound
+    // question never produces an answer row — the value stays in the column
+    // provider matching and pricing already read.
+    const answers = validateAnswers(category.questions, dto.answers ?? [], requestData);
+
     const quality = calculateQualityScore({
       ...requestData,
-      questions: category.questions,
+      // System-bound questions are excluded: the fields they name — address,
+      // budget, description, preferred date — are already scored by name in the
+      // breakdown, and counting them again as unanswered questions would make a
+      // category that binds them score lower for exactly the data it demands.
+      questions: category.questions.filter((question) => question.systemField === null),
       answers,
     });
 
@@ -170,6 +221,11 @@ export class ServiceRequestsService {
       return tx.serviceRequest.create({
         data: {
           categoryId: category.id,
+          // Only when routing actually moved the request. NULL keeps meaning
+          // "the entry was the category", which is what every unrouted request
+          // — past and present — carries.
+          entryCategoryId:
+            routing.entryCategory.id === category.id ? null : routing.entryCategory.id,
           customerId,
           requestNumber,
           ...requestData,
@@ -177,7 +233,12 @@ export class ServiceRequestsService {
           qualityScore: quality.score,
           qualityScoreBreakdown: quality.breakdown,
           answers: {
-            create: answers,
+            // The router steps are stored alongside the leaf's own answers.
+            // They are real answers to real questions, and a provider pricing a
+            // routed request needs to see the choice that put it in front of
+            // them. Quality scoring above deliberately ignores them: it grades
+            // how completely the customer filled in *this* category's form.
+            create: [...routerAnswerRows(routing.routerAnswers), ...answers],
           },
         },
         include: {
@@ -724,17 +785,56 @@ function withQualityLabel<T extends { qualityScore: number }>(request: T): T & {
   };
 }
 
+/**
+ * The router steps, in the shape an answer row takes.
+ *
+ * `value` is the option key, exactly as a SELECT answer to that question would
+ * be — so a routed request's answers read like any other request's, and nothing
+ * downstream needs to know a router was involved.
+ */
+function routerAnswerRows(
+  routerAnswers: RoutingResolution['routerAnswers'],
+): ValidatedAnswer[] {
+  return routerAnswers.map((answer) => ({
+    questionId: answer.questionId,
+    questionKey: answer.questionKey,
+    questionLabel: answer.questionLabel,
+    questionType: answer.questionType,
+    value: answer.value,
+  }));
+}
+
+/**
+ * Validates the submitted answers against the category's question set — and,
+ * just as importantly, against which of those questions were actually on
+ * screen.
+ *
+ * Three refusals live here, and each is a rule the client cannot be trusted
+ * with:
+ *
+ *  - an answer for a question this category does not have;
+ *  - an answer for a question whose visibility condition does not hold, so it
+ *    was never shown and can carry no meaning;
+ *  - an answer for a system-bound question, whose value belongs in the request
+ *    column and must never be written a second time into an answer row.
+ *
+ * Visibility is re-derived here from the stored rules rather than taken from
+ * the payload. The browser evaluates the same rules to decide what to render,
+ * but a client that hid a condition, or invented one, changes nothing.
+ */
 function validateAnswers(
-  questions: ServiceRequestQuestion[],
+  questions: QuestionForValidation[],
   rawAnswers: CreateServiceRequestAnswerDto[],
+  requestValues: SystemFieldRequestValues,
 ): ValidatedAnswer[] {
   const questionsByKey = new Map(questions.map((question) => [question.key, question]));
   const answersByKey = new Map<string, unknown>();
 
   for (const answer of rawAnswers) {
     const questionKey = normalizeRequiredString(answer.questionKey, 'Question key');
+    const question = questionsByKey.get(questionKey);
 
-    if (!questionsByKey.has(questionKey)) {
+    if (!question) {
       throw new BadRequestException(`Unknown questionKey: ${questionKey}`);
     }
 
@@ -742,14 +842,53 @@ function validateAnswers(
       throw new BadRequestException(`Duplicate answer for questionKey: ${questionKey}`);
     }
 
+    if (question.systemField) {
+      throw new BadRequestException(
+        `${questionKey} sorusu talebin ${systemFieldLabel(question.systemField)} alanına bağlı; ` +
+          'cevap olarak gönderilemez.',
+      );
+    }
+
     answersByKey.set(questionKey, answer.value);
   }
+
+  const answersByQuestionId = new Map<string, unknown>(
+    questions
+      .filter((question) => answersByKey.has(question.key))
+      .map((question) => [question.id, answersByKey.get(question.key)]),
+  );
+
+  const visibleIds = resolveVisibleQuestionIds(questions, answersByQuestionId);
 
   const validatedAnswers: ValidatedAnswer[] = [];
 
   for (const question of questions) {
+    const visible = visibleIds.has(question.id);
     const rawValue = answersByKey.get(question.key);
     const hasValue = hasSubmittedValue(question.type, rawValue);
+
+    if (!visible) {
+      if (answersByKey.has(question.key)) {
+        throw new BadRequestException(
+          `${question.key} sorusu bu cevaplarla görünmüyor; yanıtlanamaz.`,
+        );
+      }
+
+      continue;
+    }
+
+    // A bound question does not produce a row. Being required means the
+    // built-in field it names has to carry a value — that is the only thing it
+    // checks, and the value itself stays where it already is.
+    if (question.systemField) {
+      if (question.isRequired && !hasSystemFieldValue(question.systemField, requestValues)) {
+        throw new BadRequestException(
+          `${question.label} zorunlu: talebin ${systemFieldLabel(question.systemField)} alanı doldurulmalı.`,
+        );
+      }
+
+      continue;
+    }
 
     if (question.isRequired && !hasValue) {
       throw new BadRequestException(`Missing required answer: ${question.key}`);

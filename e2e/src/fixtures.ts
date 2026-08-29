@@ -150,6 +150,15 @@ export type SeededCategory = {
   offerCreditCost: number;
 };
 
+export type CategoryKind = 'GROUP' | 'LEAF' | 'ROUTER';
+export type CategoryStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+
+export type SeededQuestion = {
+  id: string;
+  key: string;
+  label: string;
+};
+
 export type Location = {
   city: string;
   district: string;
@@ -283,14 +292,29 @@ export async function createAdmin(): Promise<SeededCustomer> {
  * There is no default: the schema treats "unpriced" as a real state that blocks
  * offering, so every test states the number it expects to be charged.
  */
-export async function createCategory(offerCreditCost: number): Promise<SeededCategory> {
+export async function createCategory(
+  offerCreditCost: number,
+  options: {
+    /** Defaults to LEAF and ACTIVE — a plain, live service, as before. */
+    kind?: CategoryKind;
+    status?: CategoryStatus;
+    namePrefix?: string;
+  } = {},
+): Promise<SeededCategory> {
   const suffix = uniqueSuffix();
+  const status = options.status ?? 'ACTIVE';
+  const prefix = options.namePrefix ?? 'E2E Klima';
   const category = await prisma().serviceCategory.create({
     data: {
-      name: `E2E Klima ${suffix}`,
-      slug: `e2e-klima-${suffix}`,
+      name: `${prefix} ${suffix}`,
+      slug: `${slugify(prefix)}-${suffix}`,
       description: 'Uçtan uca test kategorisi',
-      isActive: true,
+      kind: options.kind ?? 'LEAF',
+      status,
+      // One fact, two columns: written together here exactly as the
+      // application writes them, so a fixture can never produce a state no code
+      // path can.
+      isActive: status === 'ACTIVE',
       sortOrder: 0,
       offerCreditCost,
     },
@@ -298,6 +322,65 @@ export async function createCategory(offerCreditCost: number): Promise<SeededCat
   });
 
   return { ...category, offerCreditCost };
+}
+
+function slugify(value: string): string {
+  return value
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[çğıöşü]/g, (char) => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u' })[char] ?? char)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/** A SELECT (or MULTI_SELECT) question on a category, with its options. */
+export async function createSelectQuestion(options: {
+  categoryId: string;
+  key: string;
+  label: string;
+  options: { key: string; label: string }[];
+  isRequired?: boolean;
+  sortOrder?: number;
+  isRouter?: boolean;
+  multi?: boolean;
+}): Promise<SeededQuestion> {
+  return prisma().serviceRequestQuestion.create({
+    data: {
+      categoryId: options.categoryId,
+      key: options.key,
+      label: options.label,
+      type: options.multi ? 'MULTI_SELECT' : 'SELECT',
+      isRequired: options.isRequired ?? false,
+      options: options.options,
+      sortOrder: options.sortOrder ?? 0,
+      isRouter: options.isRouter ?? false,
+      isActive: true,
+    },
+    select: { id: true, key: true, label: true },
+  });
+}
+
+/**
+ * "Show `questionId` only when `sourceQuestionId` answered these."
+ *
+ * `matchMode` left out means ANY — the column default, and what every rule
+ * written before the mode existed means.
+ */
+export async function createQuestionCondition(options: {
+  questionId: string;
+  sourceQuestionId: string;
+  expectedValues: string[];
+  matchMode?: 'ANY' | 'ALL';
+}): Promise<void> {
+  await prisma().serviceRequestQuestionCondition.create({ data: options });
+}
+
+/** One option of a routing question, and the category it leads to. */
+export async function createRouterRule(options: {
+  questionId: string;
+  optionKey: string;
+  targetCategoryId: string;
+}): Promise<void> {
+  await prisma().serviceCategoryRouterRule.create({ data: options });
 }
 
 /**

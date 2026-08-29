@@ -1,11 +1,30 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { Roles } from '../auth/auth.decorators';
-import { AuthGuard } from '../auth/auth.guard';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { AuthUser } from '../auth/auth.types';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
-import { UpdateCategoryStatusDto } from './dto/update-category-status.dto';
+import { ResolveRoutingDto } from './dto/resolve-routing.dto';
+import {
+  resolveRequestedStatus,
+  UpdateCategoryStatusDto,
+} from './dto/update-category-status.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @Controller('categories')
@@ -22,6 +41,35 @@ export class CategoriesController {
       q,
       limit: limit ? Number(limit) : undefined,
     });
+  }
+
+  /**
+   * Resolves a routed flow.
+   *
+   * Optionally authenticated for the same reason request creation is: a signed
+   * in SUPER_ADMIN may walk a DRAFT category to check its wiring, and everybody
+   * else gets the public answer. It is a POST because the selections are a
+   * structured body, not because it writes — nothing here changes a row.
+   */
+  @Post('routing/resolve')
+  @UseGuards(OptionalAuthGuard)
+  async resolveRouting(@Body() dto: ResolveRoutingDto, @CurrentUser() user: AuthUser | null) {
+    const resolution = await this.categoriesService.resolveRouting(
+      dto,
+      user?.role === UserRole.SUPER_ADMIN,
+    );
+
+    // Deliberately narrow: slugs, kind and the next question — never ids, never
+    // the target's status. What a client needs to render the next step and
+    // nothing it could use to enumerate unreleased categories.
+    return {
+      entryCategorySlug: resolution.entryCategory.slug,
+      categorySlug: resolution.category.slug,
+      categoryName: resolution.category.name,
+      kind: resolution.category.kind,
+      pendingRouterQuestionKey: resolution.pendingRouterQuestionKey,
+      isFinal: resolution.pendingRouterQuestionKey === null,
+    };
   }
 
   @Get(':slug')
@@ -47,6 +95,20 @@ export class CategoriesController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   updateCategoryStatus(@Param('id') id: string, @Body() dto: UpdateCategoryStatusDto) {
-    return this.categoriesService.updateCategoryStatus(id, dto.isActive);
+    const status = resolveRequestedStatus(dto);
+
+    if (status === undefined) {
+      throw new BadRequestException('status veya isActive alanlarından biri gereklidir');
+    }
+
+    return this.categoriesService.updateCategoryStatus(id, status);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  deleteCategory(@Param('id') id: string) {
+    return this.categoriesService.deleteCategory(id);
   }
 }

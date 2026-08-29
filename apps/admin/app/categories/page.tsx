@@ -1,16 +1,26 @@
 import Link from 'next/link';
-import { apiFetch, Category, requireAdmin } from '../../lib/api';
+import { apiFetch, Category, CategoryStatus, requireAdmin } from '../../lib/api';
 import { PageHeader } from '../../components/page-header';
 import { EmptyState } from '../../components/empty-state';
+import {
+  KIND_LABELS,
+  STATUS_LABELS,
+  statusBadgeClass,
+  toTreeRows,
+} from './category-taxonomy';
 
-type StatusFilter = 'all' | 'active' | 'inactive';
+type StatusFilter = 'all' | CategoryStatus;
 
 type AdminCategoriesPageProps = {
   searchParams: Promise<{ q?: string; status?: string }>;
 };
 
 function normalizeStatus(value: string | undefined): StatusFilter {
-  if (value === 'active' || value === 'inactive') return value;
+  if (value === 'DRAFT' || value === 'ACTIVE' || value === 'INACTIVE') return value;
+  // `active` / `inactive` are what the pre-taxonomy links carried; a bookmarked
+  // filter should keep meaning what it meant.
+  if (value === 'active') return 'ACTIVE';
+  if (value === 'inactive') return 'INACTIVE';
   return 'all';
 }
 
@@ -24,12 +34,15 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
 
   const normalizedQuery = query.toLocaleLowerCase('tr-TR');
   const filtered = categories.filter((category) => {
-    if (status === 'active' && !category.isActive) return false;
-    if (status === 'inactive' && category.isActive) return false;
+    if (status !== 'all' && category.status !== status) return false;
     if (!normalizedQuery) return true;
     const haystack = `${category.name} ${category.slug}`.toLocaleLowerCase('tr-TR');
     return haystack.includes(normalizedQuery);
   });
+
+  // Children follow their parent, indented. The search and status filters run
+  // first, so a filtered list is a filtered tree rather than a tree with holes.
+  const rows = toTreeRows(filtered);
 
   const hasFilters = query.length > 0 || status !== 'all';
 
@@ -61,8 +74,9 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
           <label htmlFor="category-status">Durum</label>
           <select id="category-status" name="status" defaultValue={status}>
             <option value="all">Tümü</option>
-            <option value="active">Aktif</option>
-            <option value="inactive">Pasif</option>
+            <option value="DRAFT">{STATUS_LABELS.DRAFT}</option>
+            <option value="ACTIVE">{STATUS_LABELS.ACTIVE}</option>
+            <option value="INACTIVE">{STATUS_LABELS.INACTIVE}</option>
           </select>
         </div>
         <div className="admin-toolbar-actions">
@@ -80,8 +94,10 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
       <div className="table-card">
         <div className="table-header">
           <div className="table-header-text">
-            <h2>Kategori listesi</h2>
-            <p className="table-header-sub">Toplam kategori ve soru setlerini yönetin.</p>
+            <h2>Kategori ağacı</h2>
+            <p className="table-header-sub">
+              Grup, hizmet ve yönlendirici kategorileri ile soru setlerini yönetin.
+            </p>
           </div>
           <span className="admin-toolbar-summary">
             {filtered.length} / {categories.length} kayıt
@@ -119,6 +135,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                   <th className="cat-list-thumb-cell" aria-label="Görsel" />
                   <th>Kategori adı</th>
                   <th>Slug</th>
+                  <th>Tip</th>
                   <th>Durum</th>
                   <th className="col-num">Teklif Kredisi</th>
                   <th className="col-num">Soru sayısı</th>
@@ -127,7 +144,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((category) => (
+                {rows.map(({ category, depth }) => (
                   <tr key={category.id}>
                     <td className="cat-list-thumb-cell">
                       {category.imageUrl ? (
@@ -143,19 +160,26 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td style={{ paddingLeft: 12 + depth * 18 }}>
                       <Link href={`/categories/${category.slug}`}>{category.name}</Link>
                     </td>
                     <td>
                       <code style={{ fontSize: 12 }}>{category.slug}</code>
                     </td>
                     <td>
-                      <span className={category.isActive ? 'badge badge-good' : 'badge badge-muted'}>
-                        {category.isActive ? 'Aktif' : 'Pasif'}
+                      <span className="meta-pill">{KIND_LABELS[category.kind]}</span>
+                    </td>
+                    <td>
+                      <span className={statusBadgeClass(category.status)}>
+                        {STATUS_LABELS[category.status]}
                       </span>
                     </td>
                     <td className="col-num">
-                      {category.offerCreditCost === null ? (
+                      {category.kind !== 'LEAF' ? (
+                        <span className="muted" title="Yalnız hizmet kategorilerinde teklif verilir.">
+                          —
+                        </span>
+                      ) : category.offerCreditCost === null ? (
                         <span
                           className="badge badge-bad"
                           title="Fiyat tanımlı olmadığı için bu kategoride teklif verilemez."

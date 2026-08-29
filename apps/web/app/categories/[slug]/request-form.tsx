@@ -1,13 +1,26 @@
 'use client';
 
 import { useMemo, useRef, useState, type RefObject } from 'react';
-import type { ContactDisclosureConfig, Question } from '../../../lib/api';
+import type { ContactDisclosureConfig, Question, RouterSelection } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
 import { LocationFields } from './location-fields';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
 type RequestFormProps = {
+  /**
+   * The leaf this form belongs to. When the customer arrived through a router
+   * it is *not* what the request is posted under — see `entryCategorySlug`.
+   */
   categorySlug: string;
+  /**
+   * The category the customer started from, when routing brought them here.
+   * The API re-walks the selections from this slug and derives the leaf itself;
+   * the form never posts a destination.
+   */
+  entryCategorySlug?: string;
+  /** The routing steps taken to reach this form, in order. */
+  routerSelections?: RouterSelection[];
   questions: Question[];
   disclosure: ContactDisclosureConfig;
   showDisclosure: boolean;
@@ -37,6 +50,8 @@ const STEPS = [
  */
 export function RequestForm({
   categorySlug,
+  entryCategorySlug,
+  routerSelections = [],
   questions,
   disclosure,
   showDisclosure,
@@ -65,6 +80,32 @@ export function RequestForm({
     contact: false,
   });
 
+  /*
+   * What has been answered so far, keyed by question key.
+   *
+   * Only conditional visibility reads it — the values themselves are still
+   * posted by the controls, exactly as before. Keeping it in state rather than
+   * re-reading the DOM on render is what makes a dependent question appear the
+   * moment its trigger is chosen.
+   */
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+
+  const shown = useMemo(() => visibleQuestions(questions, answers), [questions, answers]);
+
+  /*
+   * A bound question is not an input of its own: it renames the built-in field
+   * it names and can make it mandatory for this category. The value goes on
+   * living in the request column the rest of the product already reads, which
+   * is why nothing below ever posts an answer for one.
+   */
+  const descriptionQuestion = boundQuestion(shown, 'DESCRIPTION');
+  const budgetQuestion = boundQuestion(shown, 'BUDGET');
+  const preferredDateQuestion = boundQuestion(shown, 'PREFERRED_DATE');
+  const addressQuestion = boundQuestion(shown, 'ADDRESS');
+
+  /** The questions that are actually rendered as inputs. */
+  const answerableQuestions = shown.filter((question) => !question.systemField);
+
   const checklist = useMemo(
     () => [
       { label: 'İş detayı yazıldı', done: signals.detail },
@@ -90,6 +131,30 @@ export function RequestForm({
       }
       return '';
     };
+
+    const nextAnswers: Record<string, string | string[]> = {};
+    for (const question of questions) {
+      if (question.systemField) {
+        continue;
+      }
+
+      const element = form.elements.namedItem(`answer_${question.key}`);
+
+      if (element instanceof HTMLSelectElement && element.multiple) {
+        nextAnswers[question.key] = Array.from(element.selectedOptions).map(
+          (option) => option.value,
+        );
+      } else if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+        nextAnswers[question.key] = element.checked ? 'true' : 'false';
+      } else if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement
+      ) {
+        nextAnswers[question.key] = element.value;
+      }
+    }
+    setAnswers(nextAnswers);
 
     setSignals({
       detail: value('description').length >= 40,
@@ -141,11 +206,28 @@ export function RequestForm({
 
   return (
     <form action={action} className="form-card" onChange={refreshSignals}>
-      <input type="hidden" name="categorySlug" value={categorySlug} />
+      {/*
+        The category the request is posted under is the *entry* one. For an
+        ordinary service that is this leaf and nothing changed; for a routed
+        flow it is where the customer started, and the API derives the leaf
+        again from the selections below. The form never names a destination.
+      */}
+      <input type="hidden" name="categorySlug" value={entryCategorySlug ?? categorySlug} />
+      <input
+        type="hidden"
+        name="routerSelections"
+        value={encodeRouterSelections(routerSelections)}
+      />
+      {/*
+        Only the questions that are on screen. A hidden one carries no answer,
+        and the API refuses one that arrives anyway.
+      */}
       <input
         type="hidden"
         name="questionMeta"
-        value={JSON.stringify(questions.map((question) => ({ key: question.key, type: question.type })))}
+        value={JSON.stringify(
+          answerableQuestions.map((question) => ({ key: question.key, type: question.type })),
+        )}
       />
 
       <div className="req-body">
@@ -173,14 +255,14 @@ export function RequestForm({
             className="step-panel"
             hidden={step !== 0}
           >
-            {questions.length > 0 ? (
+            {answerableQuestions.length > 0 ? (
               <section className="form-section">
                 <h2>Talep detayları</h2>
                 <p className="form-section-subtitle">
                   Hizmet verenlerin doğru teklif verebilmesi için kategoriye özel soruları
                   yanıtlayın.
                 </p>
-                {questions.map((question) => (
+                {answerableQuestions.map((question) => (
                   <RequestField key={question.id} question={question} />
                 ))}
               </section>
@@ -189,13 +271,19 @@ export function RequestForm({
             <section className="form-section">
               <h2>İş açıklaması</h2>
               <label className="form-row">
-                <span>Açıklama</span>
+                <span>
+                  {descriptionQuestion?.label ?? 'Açıklama'}
+                  {descriptionQuestion?.isRequired ? ' *' : ''}
+                </span>
                 <textarea
                   name="description"
+                  required={descriptionQuestion?.isRequired ?? false}
+                  data-testid="request-description"
                   placeholder="Yapılacak işi kısaca anlatın: ne, nerede, hangi durumda."
                 />
                 <span className="help-text">
-                  Detay yazdıkça talebin kalite skoru yükselir ve daha isabetli teklif alırsınız.
+                  {descriptionQuestion?.helpText ??
+                    'Detay yazdıkça talebin kalite skoru yükselir ve daha isabetli teklif alırsınız.'}
                 </span>
               </label>
             </section>
@@ -209,7 +297,12 @@ export function RequestForm({
           >
             <section className="form-section">
               <h2>Konum</h2>
-              <LocationFields provinces={provinces} onChange={refreshSignals} />
+              <LocationFields
+                provinces={provinces}
+                onChange={refreshSignals}
+                neighborhoodRequired={addressQuestion?.isRequired ?? false}
+                neighborhoodHelpText={addressQuestion?.helpText}
+              />
               <label className="form-row">
                 <span>Adres notu</span>
                 <textarea name="addressNote" placeholder="Ek bilgi / yol tarifi" />
@@ -229,20 +322,41 @@ export function RequestForm({
                   </select>
                 </label>
                 <label className="form-row">
-                  <span>Tercih edilen tarih</span>
-                  <input name="preferredDate" type="date" />
+                  <span>
+                    {preferredDateQuestion?.label ?? 'Tercih edilen tarih'}
+                    {preferredDateQuestion?.isRequired ? ' *' : ''}
+                  </span>
+                  <input
+                    name="preferredDate"
+                    type="date"
+                    required={preferredDateQuestion?.isRequired ?? false}
+                    data-testid="request-preferred-date"
+                  />
+                  {preferredDateQuestion?.helpText ? (
+                    <span className="help-text">{preferredDateQuestion.helpText}</span>
+                  ) : null}
                 </label>
                 <label className="form-row">
-                  <span>Minimum bütçe</span>
+                  <span>
+                    {budgetQuestion?.label ?? 'Minimum bütçe'}
+                    {budgetQuestion?.isRequired ? ' *' : ''}
+                  </span>
                   <input
                     name="budgetMin"
                     type="number"
                     step="0.01"
                     min="1"
                     inputMode="decimal"
+                    required={budgetQuestion?.isRequired ?? false}
+                    data-testid="request-budget-min"
                     placeholder="Örn. 1500.00"
                   />
-                  <span className="help-text">İsteğe bağlı. Ondalıklı tutar girebilirsiniz.</span>
+                  <span className="help-text">
+                    {budgetQuestion?.helpText ??
+                      (budgetQuestion?.isRequired
+                        ? 'Bu hizmet için bütçe aralığı gerekiyor.'
+                        : 'İsteğe bağlı. Ondalıklı tutar girebilirsiniz.')}
+                  </span>
                 </label>
                 <label className="form-row">
                   <span>Maksimum bütçe</span>

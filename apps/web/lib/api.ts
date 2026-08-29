@@ -20,6 +20,39 @@ export type QuestionOption = {
   label: string;
 };
 
+/**
+ * The request column a question is bound to, when it is bound to one.
+ *
+ * A bound question is not rendered as its own input: it renames the built-in
+ * field it names, and can make it mandatory for this category. The answer stays
+ * in the column the rest of the product already reads.
+ */
+export type QuestionSystemField = 'ADDRESS' | 'BUDGET' | 'DESCRIPTION' | 'PREFERRED_DATE';
+
+/**
+ * How a condition compares the expected values against the answer.
+ *
+ * ANY — at least one of them was chosen. ALL — every one of them was. They
+ * differ only for a multi-select source; the API refuses ALL anywhere else.
+ */
+export type QuestionConditionMatchMode = 'ANY' | 'ALL';
+
+/** "Show this question only when <sourceQuestionKey> answered these." */
+export type QuestionCondition = {
+  sourceQuestionKey: string;
+  sourceQuestionLabel: string;
+  expectedValues: string[];
+  /** Absent means ANY — what every rule stored before the mode existed meant. */
+  matchMode?: QuestionConditionMatchMode;
+};
+
+/** One option of a routing question, and the service it leads to. */
+export type QuestionRouterRule = {
+  optionKey: string;
+  targetCategoryName: string;
+  targetCategorySlug: string;
+};
+
 export type Question = {
   id: string;
   key: string;
@@ -28,6 +61,10 @@ export type Question = {
   type: QuestionType;
   isRequired: boolean;
   options: QuestionOption[] | null;
+  systemField?: QuestionSystemField | null;
+  isRouter?: boolean;
+  conditions?: QuestionCondition[];
+  routerRules?: QuestionRouterRule[];
   sortOrder: number;
 };
 
@@ -47,6 +84,8 @@ export const CATEGORY_ICON_KEYS = [
 
 export type CategoryIconKey = (typeof CATEGORY_ICON_KEYS)[number];
 
+export type CategoryKind = 'GROUP' | 'LEAF' | 'ROUTER';
+
 export type Category = {
   id: string;
   name: string;
@@ -55,8 +94,30 @@ export type Category = {
   imageUrl?: string | null;
   coverImageUrl?: string | null;
   iconKey?: CategoryIconKey | string | null;
+  /**
+   * LEAF for every category the public catalogue lists. A ROUTER is reachable
+   * by slug — it is the question that decides which leaf the customer meant —
+   * and is never listed.
+   */
+  kind?: CategoryKind;
   sortOrder: number;
   questions?: Question[];
+};
+
+/** One step of a routed flow, as the customer's browser carries it. */
+export type RouterSelection = {
+  questionKey: string;
+  optionKey: string;
+};
+
+/** What POST /categories/routing/resolve answers. */
+export type RoutingResolution = {
+  entryCategorySlug: string;
+  categorySlug: string;
+  categoryName: string;
+  kind: CategoryKind;
+  pendingRouterQuestionKey: string | null;
+  isFinal: boolean;
 };
 
 export type ServiceRequest = {

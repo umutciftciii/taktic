@@ -1,4 +1,7 @@
-import { ServiceRequestQuestionType } from '@prisma/client';
+import {
+  ServiceRequestQuestionSystemField,
+  ServiceRequestQuestionType,
+} from '@prisma/client';
 import {
   IsArray,
   IsBoolean,
@@ -34,6 +37,20 @@ export class CreateQuestionDto {
   @IsOptional()
   @IsArray()
   options?: unknown[] | null;
+
+
+  /**
+   * Binds the question to a request column instead of an answer row. NULL — the
+   * default — is an ordinary question. See question-system-fields.ts.
+   */
+  @IsOptional()
+  @IsEnum(ServiceRequestQuestionSystemField)
+  systemField?: ServiceRequestQuestionSystemField | null;
+
+  /** Marks this as the routing question of a ROUTER category. */
+  @IsOptional()
+  @IsBoolean()
+  isRouter?: boolean;
 
   @IsInt()
   @Min(0)
