@@ -14,6 +14,9 @@ import {
   IconUsers,
 } from '../landing-icons';
 import { customerLogoutAction } from '../login/actions';
+import { loadUnreadMessageCount } from '../../lib/api';
+import { LogoutButton } from '../session/logout-button';
+import { SessionGuard } from '../session/session-guard';
 import { loadCustomerPanelCounts } from './customer-panel-data';
 
 type CustomerShellProps = {
@@ -39,7 +42,14 @@ export async function CustomerShell({
 }: CustomerShellProps) {
   const display = displayName(user);
   const initials = getInitials(display);
-  const counts = await loadCustomerPanelCounts();
+  // Both loaded here rather than passed in, for the reason the counters already
+  // were: they describe the account, not the screen, and a sidebar that only
+  // knew them on one route showed every other route a panel with the numbers
+  // missing.
+  const [counts, unread] = await Promise.all([
+    loadCustomerPanelCounts(),
+    loadUnreadMessageCount(),
+  ]);
 
   const navItems: ReadonlyArray<{
     key: NonNullable<CustomerShellProps['active']>;
@@ -74,7 +84,15 @@ export async function CustomerShell({
       href: '/requests/matches',
       count: counts?.matches,
     },
-    { key: 'messages', label: 'Mesajlar', Icon: IconMessage, href: null },
+    // No longer "Yakında": a matched customer can now write to the provider
+    // they chose, and the number here is unread messages rather than threads.
+    {
+      key: 'messages',
+      label: 'Mesajlar',
+      Icon: IconMessage,
+      href: '/mesajlar',
+      count: unread?.total,
+    },
     { key: 'settings', label: 'Profil ve ayarlar', Icon: IconSettings, href: '/account/profile' },
   ];
 
@@ -179,6 +197,14 @@ export async function CustomerShell({
 
         {children}
       </div>
+
+      {/*
+        Watches the session and offers to extend it before inactivity ends it.
+        It decides nothing — the API refuses the next request either way — but
+        it is the difference between being told and finding out as a form that
+        would not submit.
+      */}
+      <SessionGuard />
     </div>
   );
 }
@@ -215,9 +241,15 @@ function CustomerUserMenu({ user, display, initials }: CustomerUserMenuProps) {
           Şifre Değiştir
         </Link>
         <form action={customerLogoutAction}>
-          <button type="submit" className="cdash-user-link cdash-user-logout" role="menuitem">
+          {/*
+            The button announces the logout to this application's other tabs
+            before the form posts, so a second tab does not sit on a signed-in
+            screen until its own next poll. The server-side revoke inside the
+            action is what actually ends the session.
+          */}
+          <LogoutButton className="cdash-user-link cdash-user-logout" testId="customer-logout">
             Çıkış Yap
-          </button>
+          </LogoutButton>
         </form>
       </div>
     </details>

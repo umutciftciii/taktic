@@ -671,3 +671,162 @@ export async function getCurrentUser() {
     return null;
   }
 }
+
+/* ── Post-match messaging ──────────────────────────────────────────────────
+ *
+ * Everything below describes what the API actually returns to one of the two
+ * matched parties. It is deliberately narrow: a counterpart's display name, the
+ * job the conversation belongs to, and message bodies. No telephone number, no
+ * e-mail address, no address note or neighbourhood, no credit or payment fact,
+ * and nothing at all about a competing offer — those live behind the
+ * matched-contact routes and stay there.
+ */
+
+export type MessageSenderRole = 'CUSTOMER' | 'PROVIDER';
+
+export type ThreadMessage = {
+  id: string;
+  threadId: string;
+  senderUserId: string;
+  senderRole: MessageSenderRole;
+  body: string;
+  createdAt: string;
+  /** Opaque paging position. Only ever handed back to the API. */
+  cursor: string;
+};
+
+export type MessageThreadSummary = {
+  id: string;
+  requestId: string;
+  offerId: string;
+  /** Which side of this conversation the signed-in person is. */
+  viewerRole: MessageSenderRole;
+  counterpart: { name: string };
+  request: {
+    id: string;
+    requestNumber: string | null;
+    city: string;
+    district: string;
+    category: { id: string; name: string; slug: string };
+  };
+  lastMessageAt: string | null;
+  /** Whether the other party has seen everything in the thread. */
+  counterpartHasRead: boolean;
+  createdAt: string;
+};
+
+export type MessageThreadListEntry = MessageThreadSummary & {
+  unreadCount: number;
+  lastMessage: ThreadMessage | null;
+};
+
+export type MessageThreadDetail = MessageThreadSummary & {
+  unreadCount: number;
+  messages: ThreadMessage[];
+  hasMoreBefore: boolean;
+  olderCursor: string | null;
+  latestCursor: string | null;
+};
+
+export type MessagePage = {
+  messages: ThreadMessage[];
+  hasMoreBefore: boolean;
+  olderCursor: string | null;
+  latestCursor: string | null;
+};
+
+export type MessageUnreadCount = {
+  total: number;
+  threads: number;
+};
+
+/**
+ * Why a matched party has no conversation to open.
+ *
+ * A closed set, and each member is a different sentence on screen. It mirrors
+ * MatchedContactUnavailableReason above and exists for the same reason: a match
+ * that cannot carry a message screen must say so, rather than rendering an
+ * empty one that reads as "nobody has written yet".
+ */
+export type ThreadUnavailableReason =
+  | 'sharing-off'
+  | 'not-recorded'
+  | 'customer-not-registered'
+  | 'provider-not-registered';
+
+export const THREAD_UNAVAILABLE_MESSAGES: Record<ThreadUnavailableReason, string> = {
+  'sharing-off':
+    'İletişim paylaşımı bu kurulumda kapalı olduğu için mesajlaşma açılamıyor. Eşleşmeniz geçerlidir; destek ekibiyle iletişime geçebilirsiniz.',
+  'not-recorded':
+    'Bu eşleşme için iletişim paylaşımı kaydı bulunmuyor, bu yüzden mesajlaşma açılamıyor. Eşleşmeniz geçerlidir; destek ekibiyle iletişime geçebilirsiniz.',
+  'customer-not-registered':
+    'Bu talep bir kullanıcı hesabına bağlı olmadığı için mesajlaşma açılamıyor. Müşteriye iletişim bilgilerinden ulaşabilirsiniz.',
+  'provider-not-registered':
+    'Hizmet verenin işletme profili henüz bir hesaba bağlı olmadığı için mesajlaşma açılamıyor. İletişim bilgilerinden ulaşabilirsiniz.',
+};
+
+/**
+ * The unread badge, or null when it could not be read.
+ *
+ * Null is not zero and is never rendered as one: a badge that says "0" because
+ * the API was unreachable tells somebody there is nothing waiting for them when
+ * there may well be. The sidebars render a dash instead.
+ */
+export async function loadUnreadMessageCount(): Promise<MessageUnreadCount | null> {
+  try {
+    return await apiFetch<MessageUnreadCount>('/messages/unread-count');
+  } catch {
+    return null;
+  }
+}
+
+export type ResolveThreadResult =
+  | { state: 'ready'; thread: MessageThreadSummary }
+  /** The viewer is not a party to this match. Nothing is rendered, by design. */
+  | { state: 'hidden' }
+  | { state: 'unavailable'; reason: ThreadUnavailableReason }
+  | { state: 'error' };
+
+/**
+ * Opens the conversation for a match, and says which kind of "no" it got.
+ *
+ * 404 and 403 stay silent for the same reason the matched-contact loader's do:
+ * the caller is not one of the two parties, and a screen that explained itself
+ * there would be telling a stranger that a match exists.
+ */
+export async function resolveMessageThread(requestId: string): Promise<ResolveThreadResult> {
+  try {
+    const thread = await apiFetch<MessageThreadSummary>('/messages/threads/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ requestId }),
+    });
+    return { state: 'ready', thread };
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      return { state: 'error' };
+    }
+
+    if (error.status === 404 || error.status === 403 || error.status === 401) {
+      return { state: 'hidden' };
+    }
+
+    if (error.status === 409) {
+      const reason = readThreadUnavailableReason(error.body);
+      return reason ? { state: 'unavailable', reason } : { state: 'error' };
+    }
+
+    return { state: 'error' };
+  }
+}
+
+function readThreadUnavailableReason(body: string): ThreadUnavailableReason | null {
+  try {
+    const parsed = JSON.parse(body) as { reason?: unknown };
+    const reason = parsed?.reason;
+    return typeof reason === 'string' && reason in THREAD_UNAVAILABLE_MESSAGES
+      ? (reason as ThreadUnavailableReason)
+      : null;
+  } catch {
+    return null;
+  }
+}

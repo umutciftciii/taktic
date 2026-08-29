@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { Sidebar } from '../components/sidebar';
 import { Topbar } from '../components/topbar';
+import { SessionGuard } from './session/session-guard';
 
 type AdminShellProps = {
   children: ReactNode;
@@ -42,6 +43,13 @@ export function AdminShell({ children }: AdminShellProps) {
         <Topbar onToggleSidebar={toggleSidebar} />
         <div className="admin-content">{children}</div>
       </div>
+
+      {/*
+        Mounted here rather than in the layout, so it is absent from /login and
+        /admin-invite — the two screens that are reached without a session and
+        where a "your session ended" redirect would be a loop.
+      */}
+      <SessionGuard />
     </div>
   );
 }

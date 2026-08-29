@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import type { AuthUser, ProviderStatus } from '../../lib/api';
+import { loadUnreadMessageCount, type AuthUser, type ProviderStatus } from '../../lib/api';
 import { statusLabel } from '../../lib/request-formatters';
 import {
   IconBell,
@@ -10,13 +10,23 @@ import {
   IconGrid,
   IconHelp,
   IconPackage,
+  IconMessage,
   IconProfile,
   IconSearch,
   IconSend,
 } from '../landing-icons';
 import { providerDashboardLogoutAction } from '../login/actions';
+import { LogoutButton } from '../session/logout-button';
+import { SessionGuard } from '../session/session-guard';
 
-type ProviderShellActive = 'dashboard' | 'requests' | 'offers' | 'credits' | 'packages' | 'profile';
+type ProviderShellActive =
+  | 'dashboard'
+  | 'requests'
+  | 'offers'
+  | 'messages'
+  | 'credits'
+  | 'packages'
+  | 'profile';
 
 type ProviderShellProps = {
   user: AuthUser;
@@ -33,7 +43,15 @@ type ProviderShellProps = {
   children: ReactNode;
 };
 
-export function ProviderShell({
+/**
+ * `async` because of one number: the unread message badge.
+ *
+ * It is loaded here rather than passed in, for the reason the customer panel's
+ * counters already are — it describes the account, not the screen, and a
+ * sidebar that only knew it on the routes that remembered to pass it would show
+ * every other route a panel with nothing waiting.
+ */
+export async function ProviderShell({
   user,
   providerId,
   businessName,
@@ -51,6 +69,7 @@ export function ProviderShell({
   const creditsHref = providerId ? `/providers/${providerId}/credits` : null;
   const packagesHref = providerId ? `/providers/${providerId}/package-purchases` : null;
   const profileHref = providerId ? `/providers/${providerId}` : null;
+  const unread = await loadUnreadMessageCount();
 
   const navItems: ReadonlyArray<{
     key: ProviderShellActive;
@@ -68,6 +87,10 @@ export function ProviderShell({
       count: counts.requests,
     },
     { key: 'offers', label: 'Tekliflerim', Icon: IconSend, href: offersHref, count: counts.offers },
+    // New, and deliberately not gated on the provider profile: a provider who
+    // won a job can write to that customer, and the entry has to be reachable
+    // from every screen in the panel rather than only from the offer they won.
+    { key: 'messages', label: 'Mesajlar', Icon: IconMessage, href: '/mesajlar', count: unread?.total },
     { key: 'credits', label: 'Krediler', Icon: IconCoins, href: creditsHref },
     { key: 'packages', label: 'Paket geçmişim', Icon: IconPackage, href: packagesHref },
     { key: 'profile', label: 'İşletme profili', Icon: IconProfile, href: profileHref },
@@ -203,6 +226,9 @@ export function ProviderShell({
 
         {children}
       </div>
+
+      {/* See the customer panel: it warns, the server decides. */}
+      <SessionGuard />
     </div>
   );
 }
@@ -243,9 +269,14 @@ function ProviderUserMenu({ user, display, initials, creditsHref, profileHref }:
           </Link>
         ) : null}
         <form action={providerDashboardLogoutAction}>
-          <button type="submit" className="pdash-user-link pdash-user-logout" role="menuitem">
+          {/*
+            Announces the logout to this application's other tabs before the
+            form posts; the server-side revoke inside the action is what
+            actually ends the session.
+          */}
+          <LogoutButton className="pdash-user-link pdash-user-logout" testId="provider-logout">
             Çıkış Yap
-          </button>
+          </LogoutButton>
         </form>
       </div>
     </details>

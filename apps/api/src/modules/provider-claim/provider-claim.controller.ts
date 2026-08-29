@@ -50,7 +50,7 @@ export class ProviderClaimController {
 
     // Claiming signs the provider in, so they land on their own panel instead
     // of being bounced to a login screen holding a token they just spent.
-    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt, false));
 
     return {
       success: result.success,

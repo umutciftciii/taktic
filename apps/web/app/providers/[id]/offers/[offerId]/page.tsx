@@ -208,6 +208,27 @@ export default async function ProviderOfferDetailPage({
             </section>
           ) : null}
 
+          {/*
+            Only for the provider whose own offer was accepted. `matchedContact`
+            already answers "hidden" for everybody else, so this reuses the
+            decision the API made rather than making a second, weaker one here.
+          */}
+          {offer.status === 'ACCEPTED' && matchedContact.state === 'ready' ? (
+            <section className="pdash-detail-card">
+              <h2>Mesajlaşma</h2>
+              <p className="pdash-card-sub" style={{ marginTop: -4 }}>
+                Bu iş için müşteriyle uygulama içinden yazışabilirsiniz.
+              </p>
+              <Link
+                className="pdash-btn pdash-btn-primary pdash-btn-block"
+                href={`/mesajlar/talep/${offer.request.id}`}
+                data-testid="offer-message-cta"
+              >
+                Mesaj gönder
+              </Link>
+            </section>
+          ) : null}
+
           <section className="pdash-detail-card">
             <h2>Kredi ve İade</h2>
             <dl className="pdash-info-grid">

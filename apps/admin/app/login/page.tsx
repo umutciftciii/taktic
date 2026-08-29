@@ -1,11 +1,15 @@
 import { loginAction } from './actions';
 
 type LoginPageProps = {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; reason?: string }>;
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const { error } = await searchParams;
+  const { error, reason } = await searchParams;
+  // An operator who was working a moment ago and is suddenly back here deserves
+  // to know why. Without it, an idle timeout is indistinguishable from the
+  // panel breaking.
+  const sessionEnded = reason === 'session-expired';
 
   return (
     <main className="auth-page">
@@ -16,6 +20,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         {error ? (
           <div className="error-message">Giriş başarısız. E-posta ve şifrenizi kontrol edin.</div>
         ) : null}
+        {sessionEnded && !error ? (
+          <div className="admin-session-notice" role="status" data-testid="session-expired-notice">
+            Güvenliğiniz için, bir süre işlem yapılmadığından oturumunuz sonlandırıldı. Devam etmek
+            için tekrar giriş yapın.
+          </div>
+        ) : null}
         <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
           <label className="form-row">
             <span>E-posta</span>
@@ -24,6 +34,19 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <label className="form-row">
             <span>Şifre</span>
             <input name="password" type="password" required autoComplete="current-password" />
+          </label>
+          {/*
+            Changes how long the session may live and whether its cookie
+            survives closing the browser — nothing more. Nothing is written to
+            the browser's own storage: no password, no token, no identity. An
+            idle half hour still ends the session either way.
+          */}
+          <label className="admin-remember" htmlFor="rememberMe">
+            <input id="rememberMe" type="checkbox" name="rememberMe" value="true" />
+            <span>
+              Beni hatırla
+              <small>Bu cihazda 30 gün açık kalır; işlem yapılmazsa oturum yine kapanır.</small>
+            </span>
           </label>
           <button className="btn btn-primary btn-block" type="submit">Giriş Yap</button>
         </div>

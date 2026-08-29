@@ -2,6 +2,11 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import {
+  parseSetCookie,
+  sessionCookieOptions,
+  type ParsedSessionCookie,
+} from '../session-cookie';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const authCookieName = process.env.AUTH_COOKIE_NAME ?? 'taktic_session';
@@ -11,21 +16,17 @@ type LoggedInUser = {
   role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
 };
 
-type ParsedSessionCookie = {
-  name: string;
-  value: string;
-  expires: Date | undefined;
-};
-
 export async function loginAction(formData: FormData) {
   const email = readFormString(formData, 'email');
   const password = readFormString(formData, 'password');
   const explicitRedirect = readFormString(formData, 'redirectTo').trim();
+  // An unticked checkbox posts nothing at all, which is the "no" this reads.
+  const rememberMe = formData.get('rememberMe') === 'true';
 
   const response = await fetch(`${apiUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, rememberMe }),
   });
 
   if (!response.ok) {
@@ -38,13 +39,10 @@ export async function loginAction(formData: FormData) {
 
   const session = parseSetCookie(response.headers.get('set-cookie'));
   if (session) {
-    (await cookies()).set(session.name, session.value, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      expires: session.expires,
-    });
+    // The API decided how long this session lives and whether its cookie
+    // survives the browser closing; this only re-issues that decision on this
+    // origin. See session-cookie.ts.
+    (await cookies()).set(session.name, session.value, sessionCookieOptions(session));
   }
 
   let user: LoggedInUser | null = null;
@@ -99,45 +97,54 @@ async function fetchProviderId(session: ParsedSessionCookie | null): Promise<str
 }
 
 export async function logoutAction() {
-  (await cookies()).delete(authCookieName);
+  await endSession();
   redirect('/login');
 }
 
 export async function customerLogoutAction() {
-  (await cookies()).delete(authCookieName);
+  await endSession();
   redirect('/');
 }
 
 export async function providerDashboardLogoutAction() {
-  (await cookies()).delete(authCookieName);
+  await endSession();
   redirect('/');
+}
+
+/**
+ * Ends the session on the server, then drops the cookie.
+ *
+ * Both halves matter, and the order is the point. Deleting the cookie alone —
+ * which is all this used to do — leaves the session row alive and usable: a
+ * second tab, another device, or anybody holding a copy of that cookie stays
+ * signed in after the person believes they signed out. Revoking it server-side
+ * is what makes "çıkış yap" mean it, and it is what lets every other tab find
+ * out within one poll.
+ *
+ * A failed revoke still clears the cookie. Leaving somebody signed in on this
+ * browser because the API was briefly unreachable would be the worse of the two
+ * outcomes, and the session's own idle and absolute clocks still end it.
+ */
+async function endSession() {
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore.toString();
+
+  if (cookieHeader) {
+    try {
+      await fetch(`${apiUrl}/auth/logout`, {
+        method: 'POST',
+        headers: { cookie: cookieHeader },
+        cache: 'no-store',
+      });
+    } catch {
+      // Deliberately swallowed — see above.
+    }
+  }
+
+  cookieStore.delete(authCookieName);
 }
 
 function readFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === 'string' ? value : '';
-}
-
-function parseSetCookie(value: string | null): ParsedSessionCookie | null {
-  if (!value) {
-    return null;
-  }
-
-  const [nameValue, ...attributes] = value.split(';').map((part) => part.trim());
-  if (!nameValue) {
-    return null;
-  }
-
-  const [name, ...rawValue] = nameValue.split('=');
-  if (!name) {
-    return null;
-  }
-
-  const expiresAttribute = attributes.find((attribute) => attribute.toLowerCase().startsWith('expires='));
-
-  return {
-    name,
-    value: decodeURIComponent(rawValue.join('=')),
-    expires: expiresAttribute ? new Date(expiresAttribute.slice('expires='.length)) : undefined,
-  };
 }

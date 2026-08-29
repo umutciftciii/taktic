@@ -42,7 +42,7 @@ export class CustomerActivationController {
 
     // Setting the password logs the customer straight in, so they land on their
     // own requests/offers instead of being bounced to a login screen.
-    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt));
+    response.setHeader('Set-Cookie', sessionCookie(result.sessionId, result.expiresAt, false));
 
     return { success: result.success, user: result.user };
   }
