@@ -141,3 +141,71 @@ jobs:
             e2e/.artifacts/report
           retention-days: 7
           if-no-files-found: ignore
+
+  e2e-webkit:
+    name: e2e (webkit · sign-in only)
+    runs-on: ubuntu-latest
+
+    # Its own job rather than a second project on the one above, for the reason
+    # that one is Chromium-only: a second engine over the whole suite would
+    # double every pull request to re-test the same API. What WebKit is here for
+    # is the one thing an engine can decide — the sign-in screens and the route
+    # a customer lands on afterwards, where the reported Safari failure was — so
+    # this runs that spec and nothing else, in parallel with the job above and
+    # without adding a browser download to it.
+    services:
+      postgres:
+        image: postgres:16.6-alpine
+        env:
+          POSTGRES_DB: taktic
+          POSTGRES_USER: taktic_user
+          POSTGRES_PASSWORD: taktic_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taktic_user -d taktic"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Same derivation and same refusal as the job above: the suite appends
+      # _e2e and will not start against anything else. The two jobs get separate
+      # service containers, so they do not share the database either.
+      DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
+      AUTH_COOKIE_NAME: taktic_session
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Install WebKit
+        run: pnpm e2e:install:webkit
+
+      - name: Sign-in screens (WebKit)
+        run: pnpm e2e:webkit
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-webkit-artifacts
+          path: |
+            e2e/.artifacts/test-results
+            e2e/.artifacts/report
+          retention-days: 7
+          if-no-files-found: ignore

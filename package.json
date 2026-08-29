@@ -12,6 +12,8 @@
     "e2e": "pnpm build && pnpm --filter @taktic/e2e e2e",
     "e2e:ui": "pnpm build && pnpm --filter @taktic/e2e e2e:ui",
     "e2e:install": "pnpm --filter @taktic/e2e e2e:install",
+    "e2e:install:webkit": "pnpm --filter @taktic/e2e e2e:install:webkit",
+    "e2e:webkit": "pnpm build && pnpm --filter @taktic/e2e e2e:webkit",
     "e2e:report": "pnpm --filter @taktic/e2e e2e:report",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

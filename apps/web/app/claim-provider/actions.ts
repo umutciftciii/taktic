@@ -3,6 +3,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { CLAIM_TOKEN_COOKIE } from '../../lib/provider-claim';
+import { appCookieOptions, persistSessionCookie } from '../session-cookie';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -19,13 +20,12 @@ const apiUrl =
  * a business's application.
  */
 async function rememberToken(token: string) {
-  (await cookies()).set(CLAIM_TOKEN_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: 900,
-  });
+  // This app's own cookie rather than one of the API's, so its options come
+  // from the shared helper too — including whether the connection it is being
+  // set over actually requires TLS. Marking it `Secure` on a plain-HTTP origin
+  // is how Safari came to drop it, and an applicant who loses this cookie
+  // loses the token and with it the claim. See session-cookie.ts.
+  (await cookies()).set(CLAIM_TOKEN_COOKIE, token, await appCookieOptions({ maxAge: 900 }));
 }
 
 /**
@@ -86,49 +86,14 @@ export async function submitProviderClaimAction(formData: FormData) {
     redirect('/claim-provider');
   }
 
-  const session = parseSetCookie(response.headers.get('set-cookie'));
-  const store = await cookies();
-
   // The token is spent; nothing may still be holding it.
-  store.delete(CLAIM_TOKEN_COOKIE);
+  (await cookies()).delete(CLAIM_TOKEN_COOKIE);
 
-  if (session) {
-    store.set(session.name, session.value, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      expires: session.expires,
-    });
-  }
+  // The claim signs the applicant in, so the API's session cookie is re-issued
+  // on this origin with the API's own attributes. See session-cookie.ts.
+  await persistSessionCookie(response);
 
   redirect('/providers/me');
-}
-
-function parseSetCookie(value: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  const [nameValue, ...attributes] = value.split(';').map((part) => part.trim());
-  if (!nameValue) {
-    return null;
-  }
-
-  const [name, ...rawValue] = nameValue.split('=');
-  if (!name) {
-    return null;
-  }
-
-  const expiresAttribute = attributes.find((attribute) =>
-    attribute.toLowerCase().startsWith('expires='),
-  );
-
-  return {
-    name,
-    value: decodeURIComponent(rawValue.join('=')),
-    expires: expiresAttribute ? new Date(expiresAttribute.slice('expires='.length)) : undefined,
-  };
 }
 
 function readFormString(formData: FormData, key: string) {

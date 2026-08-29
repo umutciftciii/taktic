@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, ProviderProfile } from '../../lib/api';
 import { APPLY_HINT_COOKIE, isProviderClaimEnabled, maskEmail } from '../../lib/provider-claim';
+import { appCookieOptions } from '../session-cookie';
 
 export async function createProviderAction(formData: FormData) {
   const payload = providerPayload(formData);
@@ -29,13 +30,15 @@ export async function createProviderAction(formData: FormData) {
   // cookie rather than a query string, so no address of any form ends up in a
   // URL, a browser history or a server log.
   if (isProviderClaimEnabled() && payload.email) {
-    (await cookies()).set(APPLY_HINT_COOKIE, maskEmail(payload.email), {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/providers/success',
-      maxAge: 600,
-    });
+    (await cookies()).set(
+      APPLY_HINT_COOKIE,
+      maskEmail(payload.email),
+      // Scoped to the one screen that reads it. The options — `Secure`
+      // included — come from the shared helper, so this cookie is not a second
+      // place deciding whether the connection requires TLS. See
+      // session-cookie.ts.
+      await appCookieOptions({ path: '/providers/success', maxAge: 600 }),
+    );
   }
 
   redirect('/providers/success');
