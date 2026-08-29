@@ -26,6 +26,9 @@ import {
   CATEGORY_STATUSES,
   KIND_HINTS,
   KIND_LABELS,
+  RELEASE_BLOCKER_HINTS,
+  RELEASE_BLOCKER_LABELS,
+  releaseBlockers,
   STATUS_HINTS,
   STATUS_LABELS,
   statusBadgeClass,
@@ -90,6 +93,10 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
 
   const routerQuestion = sortedQuestions.find((question) => question.isRouter);
   const isRouter = category.kind === 'ROUTER';
+  // The same two checks the release checklist on /categories runs, on the one
+  // screen where somebody actually flips the status to ACTIVE.
+  const blockers = releaseBlockers(category);
+  const approvedProviders = category._count?.providers ?? 0;
 
   return (
     <main className="categories-page">
@@ -484,6 +491,65 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 mu, hizmet tipindeyse teklif kredisi tanımlı mı? Hazır olduğunda durumu{' '}
                 <strong>{STATUS_LABELS.ACTIVE}</strong> yapmanız yeterli.
               </p>
+
+              {category.kind === 'LEAF' ? (
+                <dl className="release-checklist" data-testid="release-checklist">
+                  <div>
+                    <dt>Teklif kredisi</dt>
+                    <dd>
+                      {category.offerCreditCost === null ? (
+                        <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_PRICE}>
+                          {RELEASE_BLOCKER_LABELS.NO_PRICE}
+                        </span>
+                      ) : (
+                        <strong>{category.offerCreditCost}</strong>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Onaylı hizmet veren</dt>
+                    <dd>
+                      {approvedProviders === 0 ? (
+                        <span
+                          className="badge badge-bad"
+                          title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}
+                        >
+                          0
+                        </span>
+                      ) : (
+                        <strong>{approvedProviders}</strong>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Soru sayısı</dt>
+                    <dd>
+                      <strong>{questions.length}</strong>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Yayına hazır mı?</dt>
+                    <dd>
+                      {blockers.length === 0 ? (
+                        <span className="badge badge-good">Hazır</span>
+                      ) : (
+                        <span className="badge badge-warn">Hazır değil</span>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              ) : null}
+
+              {blockers.length > 0 ? (
+                <ul className="release-blocker-reasons" data-testid="release-blockers">
+                  {blockers.map((blocker) => (
+                    <li key={blocker}>
+                      <strong>{RELEASE_BLOCKER_LABELS[blocker]}.</strong>{' '}
+                      {RELEASE_BLOCKER_HINTS[blocker]}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
 

@@ -38,6 +38,65 @@ export const STATUS_HINTS: Record<CategoryStatus, string> = {
     'Yeni talep ve yeni hizmet veren seçimi kapalıdır. Geçmiş talepler, teklifler ve cevaplar okunmaya devam eder.',
 };
 
+/**
+ * What stands between a draft service and the catalogue.
+ *
+ * Two things, and deliberately only two, because each of them makes a released
+ * category *silently* broken rather than visibly wrong:
+ *
+ *   price missing        A provider is charged per offer, and a category with
+ *                        no price refuses every offer. The category would look
+ *                        live and take requests no one could answer.
+ *   no approved provider The request would be published to an empty room. A
+ *                        pending or suspended profile does not count — neither
+ *                        is ever shown a request.
+ *
+ * An empty question set is *not* on the list. A service whose base form is
+ * enough is a real thing — several of the founding categories are exactly that
+ * — so the question count is shown as information and never as a verdict.
+ *
+ * Only services can be released in this sense. A group is a folder and a router
+ * is a question; neither takes a request or carries a price.
+ */
+export type ReleaseBlocker = 'NO_PRICE' | 'NO_APPROVED_PROVIDER';
+
+export const RELEASE_BLOCKER_LABELS: Record<ReleaseBlocker, string> = {
+  NO_PRICE: 'Teklif kredisi tanımsız',
+  NO_APPROVED_PROVIDER: 'Onaylı hizmet veren yok',
+};
+
+export const RELEASE_BLOCKER_HINTS: Record<ReleaseBlocker, string> = {
+  NO_PRICE:
+    'Teklif kredisi tanımlı olmayan bir kategoride hizmet veren teklif veremez. Yayına alınırsa talep alır ama hiçbir teklif ulaşmaz.',
+  NO_APPROVED_PROVIDER:
+    'Bu kategoriye bağlı onaylı hizmet veren yok. Yayına alınırsa açılan talepler kimseye ulaşmaz.',
+};
+
+export function releaseBlockers(category: Category): ReleaseBlocker[] {
+  if (category.kind !== 'LEAF') return [];
+
+  const blockers: ReleaseBlocker[] = [];
+  if (category.offerCreditCost === null) blockers.push('NO_PRICE');
+  if ((category._count?.providers ?? 0) === 0) blockers.push('NO_APPROVED_PROVIDER');
+  return blockers;
+}
+
+export function isReleaseReady(category: Category): boolean {
+  return category.kind === 'LEAF' && releaseBlockers(category).length === 0;
+}
+
+/**
+ * The drafts a release checklist is about: services, not the groups they hang
+ * under. A group carries no price, no provider and no request — releasing one
+ * is bookkeeping, and putting five of them on the checklist would bury the
+ * fifteen rows somebody actually has to act on.
+ */
+export function draftServices(categories: readonly Category[]): Category[] {
+  return categories.filter(
+    (category) => category.status === 'DRAFT' && category.kind === 'LEAF',
+  );
+}
+
 export function statusBadgeClass(status: CategoryStatus): string {
   if (status === 'ACTIVE') return 'badge badge-good';
   if (status === 'DRAFT') return 'badge badge-warn';

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   Prisma,
+  ProviderStatus,
   ServiceCategory,
   ServiceCategoryKind,
   ServiceCategoryStatus,
@@ -69,6 +70,37 @@ export type CategoryListOptions = CategoryViewOptions & {
   q?: string;
   limit?: number;
 };
+
+/**
+ * The providers a category's count means: approved ones, and nobody else.
+ *
+ * A pending application and a suspended profile are both rows in
+ * ProviderServiceCategory, and neither can be shown a request or submit an
+ * offer. Counting them would make an empty category look staffed, which is the
+ * one mistake this number exists to prevent: a released category with no
+ * approved provider behind it publishes requests nobody will ever see.
+ *
+ * It is attached only to the operator's view. Not because a headcount is a
+ * secret — it is not — but because "how many businesses have signed up for
+ * this" is an operational figure with no reader on the public catalogue, and
+ * the narrow response is the one that cannot leak a number somebody later
+ * decides was sensitive.
+ */
+const approvedProviderCount = {
+  where: { provider: { status: ProviderStatus.APPROVED } },
+} satisfies Prisma.ServiceCategoryCountOutputTypeSelect['providers'];
+
+/** What every reader of a category listing gets. */
+const publicCategoryCounts = {
+  questions: true,
+  children: true,
+} satisfies Prisma.ServiceCategoryCountOutputTypeSelect;
+
+/** That, plus the figure a release decision is made on. */
+const operatorCategoryCounts = {
+  ...publicCategoryCounts,
+  providers: approvedProviderCount,
+} satisfies Prisma.ServiceCategoryCountOutputTypeSelect;
 
 export type RouterSelection = {
   questionKey: string;
@@ -136,15 +168,30 @@ export class CategoriesService {
         : {}),
     };
 
-    return this.prisma.serviceCategory.findMany({
+    const query = {
       where,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       take: limit,
+    } satisfies Prisma.ServiceCategoryFindManyArgs;
+
+    // Two shapes rather than one filtered afterwards: the public response never
+    // computes the provider count, so there is no field for a later change to
+    // forget to strip.
+    if (!includeInactive) {
+      return this.prisma.serviceCategory.findMany({
+        ...query,
+        include: {
+          parent: { select: { id: true, name: true, slug: true } },
+          _count: { select: publicCategoryCounts },
+        },
+      });
+    }
+
+    return this.prisma.serviceCategory.findMany({
+      ...query,
       include: {
         parent: { select: { id: true, name: true, slug: true } },
-        _count: {
-          select: { questions: true, children: true },
-        },
+        _count: { select: operatorCategoryCounts },
       },
     });
   }
@@ -152,18 +199,26 @@ export class CategoriesService {
   async getCategoryBySlug(slug: string, options: CategoryViewOptions) {
     const includeInactive = this.resolveIncludeInactive(options);
 
-    const category = await this.prisma.serviceCategory.findUnique({
-      where: { slug },
-      include: {
-        parent: { select: { id: true, name: true, slug: true } },
-        questions: {
-          where: includeInactive ? {} : { isActive: true },
-          orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
-          include: questionWithRulesInclude,
-        },
-        _count: { select: { children: true } },
+    const include = {
+      parent: { select: { id: true, name: true, slug: true } },
+      questions: {
+        where: includeInactive ? {} : { isActive: true },
+        orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+        include: questionWithRulesInclude,
       },
-    });
+    } satisfies Prisma.ServiceCategoryInclude;
+
+    // Same split as the listing: the release figures are part of the operator's
+    // view of a category and of no other.
+    const category = includeInactive
+      ? await this.prisma.serviceCategory.findUnique({
+          where: { slug },
+          include: { ...include, _count: { select: operatorCategoryCounts } },
+        })
+      : await this.prisma.serviceCategory.findUnique({
+          where: { slug },
+          include: { ...include, _count: { select: { children: true } } },
+        });
 
     if (!category) {
       throw new NotFoundException('Category not found');
