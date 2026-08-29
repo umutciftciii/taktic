@@ -26,6 +26,12 @@ type RequestThreadPageProps = {
  * customer with no idea whether messaging exists; here each refusal has a
  * sentence, and the ones that must stay silent — a caller who is not a party —
  * become the shared 404 that reveals nothing.
+ *
+ * Nothing above this page opens a Suspense boundary, deliberately: a page whose
+ * whole job is to resolve into a redirect has to be able to answer with a real
+ * one. So the sign-in redirect is a 307 to `/login`, the success case is a 307
+ * to the thread, and the hidden case is a genuine 404 — none of them a status
+ * the response already committed to and then took back in the markup.
  */
 export default async function RequestThreadPage({ params }: RequestThreadPageProps) {
   const { requestId } = await params;

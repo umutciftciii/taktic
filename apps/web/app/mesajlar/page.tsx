@@ -1,20 +1,24 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 import {
   apiFetch,
   formatDateTime,
   getCurrentUser,
+  type AuthUser,
   type MessageThreadListEntry,
 } from '../../lib/api';
 import { IconArrowRight } from '../landing-icons';
 import { MessagingFrame } from './panel-frame';
+import { ThreadListSkeleton } from './skeletons';
 
 /**
  * The conversations this account is a party to.
  *
- * Nothing here filters: the API returns exactly the threads whose customer or
- * provider column names the caller, so "only my conversations" is a property of
- * the query rather than of this page remembering to check.
+ * Who may be here is settled first, and settled before anything is streamed:
+ * the sign-in check sits above the Suspense boundary below, so an anonymous
+ * request is answered with the same 307 to `/login` as every other protected
+ * route rather than with a skeleton that would have to take it back.
  */
 export default async function MessagesPage() {
   const user = await getCurrentUser();
@@ -22,6 +26,21 @@ export default async function MessagesPage() {
     redirect('/login?redirectTo=/mesajlar');
   }
 
+  return (
+    <Suspense fallback={<ThreadListSkeleton />}>
+      <Inbox user={user} />
+    </Suspense>
+  );
+}
+
+/**
+ * The list itself, read once we know whose list it is.
+ *
+ * Nothing here filters: the API returns exactly the threads whose customer or
+ * provider column names the caller, so "only my conversations" is a property of
+ * the query rather than of this page remembering to check.
+ */
+async function Inbox({ user }: { user: AuthUser }) {
   let threads: MessageThreadListEntry[] | null = null;
   try {
     threads = await apiFetch<MessageThreadListEntry[]>('/messages/threads');

@@ -223,8 +223,34 @@ test.describe('post-match messaging', () => {
       }
 
       // ---- and an anonymous visitor is sent to sign in --------------------
+      //
+      // Checked at the HTTP level, not only by where the browser ends up. Both
+      // used to end up at /login, but the messaging routes got there the wrong
+      // way: a `loading.tsx` opened a Suspense boundary above the page's own
+      // sign-in check, so the server committed a 200 and streamed the
+      // "Mesajlar yükleniyor" skeleton to a stranger before redirecting from
+      // inside the markup. The status code is the part that says the request
+      // was refused rather than served, so that is what is asserted.
       const anonymous = await Actor.open(browser, 'anonymous', contactSharingRuntime);
       try {
+        for (const path of ['/mesajlar', `/mesajlar/${threadId}`, `/mesajlar/talep/${requestId}`]) {
+          const response = await anonymous.page.request.get(anonymous.webUrl(path), {
+            maxRedirects: 0,
+          });
+
+          expect(response.status(), `${path} must refuse an anonymous request`).toBe(307);
+          expect(response.headers()['location']).toBe(
+            `/login?redirectTo=${path}`,
+          );
+
+          // Nothing of the signed-in screen — not even its skeleton — was sent.
+          const body = await response.text();
+          expect(body).not.toContain('Mesajlar yükleniyor');
+          expect(body).not.toContain('Konuşma yükleniyor');
+          expect(body).not.toContain('http-equiv="refresh"');
+        }
+
+        // And the browser really does land on the sign-in form.
         await anonymous.gotoWeb(`/mesajlar/${threadId}`);
         await expect(anonymous.page).toHaveURL(/\/login/);
 
