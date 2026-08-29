@@ -12,6 +12,7 @@ import { MessagingModule } from './modules/messaging/messaging.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
+import { ProviderInvitesModule } from './modules/provider-invites/provider-invites.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { OffersModule } from './modules/offers/offers.module';
 import { PhoneVerificationModule } from './modules/phone-verification/phone-verification.module';
@@ -46,6 +47,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ServiceRequestsModule,
     ProviderClaimModule,
     ProvidersModule,
+    ProviderInvitesModule,
     OffersModule,
     PhoneVerificationModule,
     RefundSchedulerModule,

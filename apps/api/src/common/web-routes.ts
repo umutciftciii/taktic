@@ -1,3 +1,4 @@
+import { PROVIDER_INVITE_PATH } from '../modules/provider-invites/provider-invites.constants';
 import { publicWebUrl } from './public-urls';
 
 /**
@@ -33,6 +34,21 @@ export const CONTACT_DISCLOSURE_PATH = '/sozlesmeler/iletisim-paylasimi';
 
 export function contactDisclosureUrl(): string {
   return publicWebUrl(CONTACT_DISCLOSURE_PATH);
+}
+
+/**
+ * Where a provider application invitation lands.
+ * `apps/web/app/provider-invite/[token]`.
+ *
+ * The only link in this file whose secret is a *path segment* rather than a
+ * query value. That is a deliberate difference from the reset and verification
+ * links: this URL is handed to a business by an operator — pasted into a
+ * message, read aloud, retyped — and a path reads as an address while a query
+ * string reads as machinery somebody may helpfully trim. It is encoded here so
+ * a token can no more break out of its segment than out of a parameter.
+ */
+export function providerInviteUrl(rawToken: string): string {
+  return publicWebUrl(`${PROVIDER_INVITE_PATH}/${encodeURIComponent(rawToken)}`);
 }
 
 export function passwordResetUrl(rawToken: string): string {

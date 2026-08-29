@@ -249,6 +249,7 @@ model User {
   notificationLogs           NotificationLog[]
   contactRevealEvents        ContactRevealEvent[]
   createdProviderClaimTokens ProviderClaimToken[]        @relation("ProviderClaimTokenCreatedBy")
+  createdProviderInvites     ProviderInviteToken[]       @relation("ProviderInviteTokenCreatedBy")
   companySettingsUpdates     CompanySettings[]           @relation("CompanySettingsUpdatedBy")
   customerMessageThreads     MessageThread[]             @relation("MessageThreadCustomer")
   providerMessageThreads     MessageThread[]             @relation("MessageThreadProviderUser")
@@ -394,13 +395,14 @@ model ServiceCategory {
   /// category tree loses a whole branch without anybody being told. A parent
   /// with children cannot be deleted — the API says so with a 409, and the
   /// database says so even if something bypasses the API.
-  parent        ServiceCategory?            @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children      ServiceCategory[]           @relation("ServiceCategoryTree")
-  questions     ServiceRequestQuestion[]
-  requests      ServiceRequest[]
-  entryRequests ServiceRequest[]            @relation("ServiceRequestEntryCategory")
-  providers     ProviderServiceCategory[]
-  routerRulesIn ServiceCategoryRouterRule[] @relation("ServiceCategoryRouterTarget")
+  parent          ServiceCategory?            @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children        ServiceCategory[]           @relation("ServiceCategoryTree")
+  questions       ServiceRequestQuestion[]
+  requests        ServiceRequest[]
+  entryRequests   ServiceRequest[]            @relation("ServiceRequestEntryCategory")
+  providers       ProviderServiceCategory[]
+  routerRulesIn   ServiceCategoryRouterRule[] @relation("ServiceCategoryRouterTarget")
+  providerInvites ProviderInviteToken[]
 
   @@index([parentId])
   @@index([isActive, sortOrder])
@@ -1300,4 +1302,56 @@ model Message {
   /// millisecond still have exactly one order.
   @@index([threadId, createdAt, id])
   @@index([senderUserId, createdAt])
+}
+
+/// A single-use invitation to apply as a provider for one specific service.
+///
+/// It exists because the marketplace has to be able to recruit supply for a
+/// service it has not released yet. A DRAFT category is invisible everywhere a
+/// business could find it — the public catalogue, the application form's
+/// category list, provider discovery — so before this the only way to put a
+/// provider behind an unreleased service was for an operator to create the
+/// application themselves and bind it by hand. This is the applicant-facing
+/// half of that: the operator produces a link, hands it to one business, and
+/// that business fills in its own application.
+///
+/// What the link is NOT is a widening of the catalogue. It names exactly one
+/// category, to exactly one holder, once. Nothing about it makes a DRAFT
+/// category public: the only fact it discloses is that category's name, and
+/// only to whoever holds the link.
+///
+/// The raw token is never stored — only `sha256(raw)` — so a database dump
+/// cannot be replayed into an application against an unreleased service. It is
+/// single use (`usedAt`), revocable (`revokedAt`) and short lived
+/// (`expiresAt`); those three plus "no such row" are one indistinguishable
+/// answer to whoever holds the URL, because distinguishing them would turn the
+/// public route into an oracle for guessed tokens.
+///
+/// Deliberately unlike ProviderClaimToken in one respect: issuing a new
+/// invitation does NOT close the older live ones. A claim token is the single
+/// key to one application's ownership, so at most one may live; an invitation
+/// is a recruiting link, and an operator sending one to five businesses for the
+/// same draft is the ordinary case rather than a mistake.
+model ProviderInviteToken {
+  id          String    @id @default(cuid())
+  categoryId  String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  /// When an operator withdrew the link, and never for any other reason.
+  /// Separate from `usedAt` on purpose: "somebody applied with this" and "we
+  /// changed our mind" are different facts, and collapsing them would make the
+  /// admin list unable to say which happened.
+  revokedAt   DateTime?
+  /// The SUPER_ADMIN who issued it. NULL only if that account is later deleted.
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  category  ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdBy User?           @relation("ProviderInviteTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  /// The admin list: "this category's invitations, newest first".
+  @@index([categoryId, createdAt])
+  @@index([createdById])
+  @@index([expiresAt])
 }

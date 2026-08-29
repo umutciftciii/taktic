@@ -1,4 +1,10 @@
-import type { Category, CategoryKind, CategoryStatus } from '../../lib/api';
+import type {
+  Category,
+  CategoryKind,
+  CategoryStatus,
+  IssuedProviderInvite,
+  ProviderInviteState,
+} from '../../lib/api';
 
 /**
  * The words the admin app uses for the taxonomy, in one place, plus the small
@@ -147,3 +153,50 @@ export function toTreeRows(categories: readonly Category[]): TreeRow[] {
 
   return rows;
 }
+
+/**
+ * The words the invitation panel uses for a link's state.
+ *
+ * They live here rather than in lib/api.ts for a mechanical reason worth
+ * knowing: that module reads `next/headers`, so importing a *value* from it
+ * into a client component pulls server-only code into the browser bundle and
+ * the build refuses it. Types are erased and travel fine; constants and
+ * functions belong in this file, with the rest of the admin app's vocabulary.
+ */
+export const PROVIDER_INVITE_STATE_LABELS: Record<ProviderInviteState, string> = {
+  ACTIVE: 'Geçerli',
+  USED: 'Kullanıldı',
+  REVOKED: 'İptal edildi',
+  EXPIRED: 'Süresi doldu',
+};
+
+export function providerInviteStateBadgeClass(state: ProviderInviteState): string {
+  if (state === 'ACTIVE') return 'badge badge-good';
+  // Spent is not a failure — somebody applied, which is what the link was for.
+  if (state === 'USED') return 'badge badge-muted';
+  return 'badge badge-warn';
+}
+
+/**
+ * What the invitation panel renders after an operator presses a button.
+ *
+ * A discriminated result rather than a redirect, and that is the whole reason
+ * the actions behind it return one. The successful issue carries the link, and
+ * the link is the credential: putting it in a redirect URL would write it into
+ * browser history, into the `Referer` of every asset the next page loads and
+ * into every access log between the server and the browser. Handing it back as
+ * the form's *result* keeps it in one server-rendered response — visible once,
+ * gone on the next navigation, and unrecoverable by refreshing, because no
+ * endpoint can produce it again.
+ *
+ * Here rather than beside the actions for the same bundling reason as above: a
+ * `'use server'` module may export nothing but async functions, so its initial
+ * state cannot live there.
+ */
+export type ProviderInviteFormState =
+  | { kind: 'idle' }
+  | { kind: 'issued'; invite: IssuedProviderInvite }
+  | { kind: 'revoked'; alreadyDead: boolean }
+  | { kind: 'error'; message: string };
+
+export const PROVIDER_INVITE_IDLE: ProviderInviteFormState = { kind: 'idle' };

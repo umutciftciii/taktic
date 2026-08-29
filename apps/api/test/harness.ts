@@ -195,6 +195,7 @@ const TRUNCATED_TABLES = [
   'NotificationLog',
   'PhoneVerification',
   'ProviderClaimToken',
+  'ProviderInviteToken',
   'ProviderCreditTransaction',
   'PackagePurchase',
   'Offer',

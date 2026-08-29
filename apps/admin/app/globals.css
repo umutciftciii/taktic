@@ -3807,3 +3807,29 @@ button:disabled {
   min-width: 0;
   font-size: 13.5px;
 }
+
+/*
+ * The one field in the admin app that shows a credential.
+ *
+ * Read-only and full width because the value is a long URL that has to be
+ * copied exactly: an operator who cannot see all of it, or who has to scroll a
+ * truncated line, is an operator who pastes half a link into a message. It is
+ * an input rather than a paragraph so selecting it works with the keyboard on
+ * every browser — which is the fallback whenever the clipboard API is
+ * unavailable, as it is on any non-secure origin.
+ */
+.provider-invite-url {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, var(--surface));
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  text-overflow: ellipsis;
+}

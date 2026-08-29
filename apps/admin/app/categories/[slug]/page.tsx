@@ -8,10 +8,12 @@ import {
   updateQuestionStatusAction,
 } from '../actions';
 import { CategoryImageUploader } from '../category-image-uploader';
+import { ProviderInvitePanel } from '../provider-invite-panel';
 import {
   apiFetch,
   CATEGORY_ICON_KEYS,
   Category,
+  ProviderInviteList,
   Question,
   QuestionOption,
   QuestionSystemField,
@@ -77,6 +79,20 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
     apiFetch<Category[]>('/categories?includeInactive=true'),
   ]);
 
+  /*
+   * The invitation history, but only for the categories that can have one.
+   *
+   * A group is a folder and a router is a question, so neither can be invited
+   * to and the API refuses both — asking anyway would spend a request to be
+   * told what the taxonomy already says. A closed service is refused for the
+   * same reason, but its *past* invitations are still worth reading: they are
+   * how an operator sees who was approached before the service was withdrawn.
+   */
+  const invitable = category.kind === 'LEAF';
+  const invites = invitable
+    ? await apiFetch<ProviderInviteList>(`/categories/${category.id}/provider-invites`)
+    : null;
+
   const sortedQuestions = [...questions].sort((a, b) => {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
     return a.label.localeCompare(b.label, 'tr-TR');
@@ -97,6 +113,7 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
   // screen where somebody actually flips the status to ACTIVE.
   const blockers = releaseBlockers(category);
   const approvedProviders = category._count?.providers ?? 0;
+  const activeInvites = category._count?.providerInvites ?? 0;
 
   return (
     <main className="categories-page">
@@ -479,6 +496,17 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
             </form>
           </div>
 
+          {invites ? (
+            <ProviderInvitePanel
+              activeCount={invites.activeCount}
+              canIssue={category.status !== 'INACTIVE'}
+              categoryId={category.id}
+              categoryName={category.name}
+              categorySlug={category.slug}
+              invites={invites.invites}
+            />
+          ) : null}
+
           {category.status === 'DRAFT' ? (
             <div className="admin-action-panel" data-testid="draft-explainer">
               <h3>Bu kategori neden yayında değil?</h3>
@@ -525,6 +553,24 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                     <dt>Soru sayısı</dt>
                     <dd>
                       <strong>{questions.length}</strong>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Geçerli davet</dt>
+                    <dd data-testid="release-active-invites">
+                      {/*
+                        Shown next to the blockers and deliberately not one of
+                        them. A live invitation means a business has been
+                        approached, which is progress towards supply and not
+                        supply: until one of them applies and is approved, the
+                        approved-provider figure above is still zero and this
+                        service is still not ready.
+                      */}
+                      <strong>{activeInvites}</strong>
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {' '}
+                        · hazır sayılmaz
+                      </span>
                     </dd>
                   </div>
                   <div>

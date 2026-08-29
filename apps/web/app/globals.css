@@ -2937,6 +2937,42 @@ input[readonly] {
 
 .provider-apply-hero p { max-width: 56ch; color: var(--color-neutral-300); margin: 0; }
 
+/*
+ * The invited service, named in the hero.
+ *
+ * It gets its own line, in the accent colour and at heading weight, because it
+ * is the single fact this page discloses and the only thing on it the invited
+ * business has to recognise. Everything else on the screen is a form they have
+ * seen the shape of before.
+ */
+.provider-apply-invited-service {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: clamp(22px, 2.6vw, 30px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--color-accent-400);
+}
+
+/*
+ * The same name restated where the open form puts its category checkboxes.
+ *
+ * A paragraph rather than a disabled control on purpose: a greyed-out checkbox
+ * reads as "you could change this if you were allowed to", and nobody is. The
+ * binding is derived from the invitation on the server, so there is no field
+ * here at all.
+ */
+.provider-apply-invited-scope {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+  font-family: var(--font-heading);
+  font-size: 15px;
+}
+
 .provider-apply-container {
   max-width: var(--wrap);
   margin: 0 auto;
