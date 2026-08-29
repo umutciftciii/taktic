@@ -62,6 +62,13 @@ export type Category = {
   _count?: {
     questions: number;
     children?: number;
+    /**
+     * Approved providers attached to this category — never pending or suspended
+     * ones, which cannot be shown a request. Zero means a released category
+     * would publish requests nobody can answer, which is why the release
+     * readiness rules treat it as a blocker.
+     */
+    providers?: number;
   };
   questions?: Question[];
 };

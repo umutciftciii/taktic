@@ -1,9 +1,14 @@
 import Link from 'next/link';
 import { apiFetch, Category, CategoryStatus, requireAdmin } from '../../lib/api';
 import { PageHeader } from '../../components/page-header';
+import { SectionCard } from '../../components/section-card';
 import { EmptyState } from '../../components/empty-state';
 import {
+  draftServices,
   KIND_LABELS,
+  RELEASE_BLOCKER_HINTS,
+  RELEASE_BLOCKER_LABELS,
+  releaseBlockers,
   STATUS_LABELS,
   statusBadgeClass,
   toTreeRows,
@@ -46,6 +51,21 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
 
   const hasFilters = query.length > 0 || status !== 'all';
 
+  // Built from the whole catalogue rather than from `filtered`: this is a
+  // standing list of what is waiting to be released, not a view of the table
+  // below it. A status filter set to "Yayında" must not make the drafts that
+  // still need work disappear.
+  const drafts = draftServices(categories);
+  const categoriesById = new Map(categories.map((category) => [category.id, category]));
+  const draftReadiness = drafts
+    .map((category) => ({ category, blockers: releaseBlockers(category) }))
+    .sort((a, b) => {
+      // Ready first: those are the rows somebody can act on today.
+      if (a.blockers.length !== b.blockers.length) return a.blockers.length - b.blockers.length;
+      return a.category.name.localeCompare(b.category.name, 'tr-TR');
+    });
+  const readyCount = draftReadiness.filter((entry) => entry.blockers.length === 0).length;
+
   return (
     <main className="categories-page">
       <PageHeader
@@ -57,6 +77,106 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
           </Link>
         }
       />
+
+      {draftReadiness.length > 0 ? (
+        <SectionCard
+          className="category-release-card"
+          title="Yayın hazırlığı"
+          subtitle={
+            <>
+              Taslak hizmetler yalnızca bu panelde görünür. Bir hizmeti{' '}
+              <strong>{STATUS_LABELS.ACTIVE}</strong> yapmadan önce teklif kredisinin tanımlı ve
+              kategoriye bağlı onaylı bir hizmet verenin var olduğundan emin olun.
+            </>
+          }
+          actions={
+            <span className="admin-toolbar-summary" data-testid="release-readiness-summary">
+              {readyCount} / {draftReadiness.length} hizmet hazır
+            </span>
+          }
+          padded={false}
+        >
+          <div className="table-scroll">
+            <table className="data-table" data-testid="release-readiness-table">
+              <thead>
+                <tr>
+                  <th>Hizmet</th>
+                  <th>Üst grup</th>
+                  <th className="col-num">Soru</th>
+                  <th className="col-num">Teklif kredisi</th>
+                  <th className="col-num">Onaylı hizmet veren</th>
+                  <th>Yayına hazır mı?</th>
+                </tr>
+              </thead>
+              <tbody>
+                {draftReadiness.map(({ category, blockers }) => {
+                  const parent = category.parentId
+                    ? categoriesById.get(category.parentId)
+                    : undefined;
+                  const providers = category._count?.providers ?? 0;
+
+                  return (
+                    <tr key={category.id} data-testid={`release-row-${category.slug}`}>
+                      <td>
+                        <Link href={`/categories/${category.slug}`}>{category.name}</Link>
+                        <div>
+                          <code style={{ fontSize: 11 }}>{category.slug}</code>
+                        </div>
+                      </td>
+                      <td>
+                        {parent ? (
+                          <Link href={`/categories/${parent.slug}`}>{parent.name}</Link>
+                        ) : (
+                          <span className="muted">üst seviye</span>
+                        )}
+                      </td>
+                      <td className="col-num">{category._count?.questions ?? 0}</td>
+                      <td className="col-num">
+                        {category.offerCreditCost === null ? (
+                          <span
+                            className="badge badge-bad"
+                            title={RELEASE_BLOCKER_HINTS.NO_PRICE}
+                          >
+                            {RELEASE_BLOCKER_LABELS.NO_PRICE}
+                          </span>
+                        ) : (
+                          <strong>{category.offerCreditCost}</strong>
+                        )}
+                      </td>
+                      <td className="col-num">
+                        {providers === 0 ? (
+                          <span
+                            className="badge badge-bad"
+                            title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}
+                          >
+                            0
+                          </span>
+                        ) : (
+                          <strong>{providers}</strong>
+                        )}
+                      </td>
+                      <td>
+                        {blockers.length === 0 ? (
+                          <span className="badge badge-good">Hazır</span>
+                        ) : (
+                          <span className="release-blocker-list">
+                            <span className="badge badge-warn">Hazır değil</span>
+                            <span className="muted" style={{ fontSize: 12 }}>
+                              {blockers
+                                .map((blocker) => RELEASE_BLOCKER_LABELS[blocker])
+                                .join(' · ')}
+                            </span>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      ) : null}
 
       <form className="admin-toolbar" method="get" action="/categories">
         <div className="admin-toolbar-field admin-toolbar-search">
@@ -129,7 +249,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
           </div>
         ) : (
           <div className="table-scroll">
-            <table className="data-table">
+            <table className="data-table" data-testid="category-tree-table">
               <thead>
                 <tr>
                   <th className="cat-list-thumb-cell" aria-label="Görsel" />
@@ -139,6 +259,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                   <th>Durum</th>
                   <th className="col-num">Teklif Kredisi</th>
                   <th className="col-num">Soru sayısı</th>
+                  <th className="col-num">Onaylı hizmet veren</th>
                   <th className="col-num">Sıra</th>
                   <th className="col-actions">İşlem</th>
                 </tr>
@@ -191,6 +312,25 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                       )}
                     </td>
                     <td className="col-num">{category._count?.questions ?? 0}</td>
+                    <td className="col-num">
+                      {category.kind !== 'LEAF' ? (
+                        <span
+                          className="muted"
+                          title="Yalnız hizmet kategorilerine hizmet veren bağlanır."
+                        >
+                          —
+                        </span>
+                      ) : (category._count?.providers ?? 0) === 0 ? (
+                        <span
+                          className="badge badge-bad"
+                          title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}
+                        >
+                          0
+                        </span>
+                      ) : (
+                        <strong>{category._count?.providers}</strong>
+                      )}
+                    </td>
                     <td className="col-num">{category.sortOrder}</td>
                     <td className="col-actions">
                       <Link className="btn-pill" href={`/categories/${category.slug}`}>

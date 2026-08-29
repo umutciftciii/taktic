@@ -703,10 +703,14 @@ test.describe('the operator view of the taxonomy', () => {
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
 
-      // The tree, which is the screen that reads the guarded listing.
+      // The tree, which is the screen that reads the guarded listing. Scoped to
+      // the tree itself: an unreleased service is also listed by the release
+      // checklist above it, and "it is in the tree" is what this asserts.
       await admin.gotoAdmin('/categories');
       await assertNoErrorScreen(admin.page);
-      await expect(admin.page.getByRole('link', { name: draft.name })).toBeVisible();
+      await expect(
+        admin.page.getByTestId('category-tree-table').getByRole('link', { name: draft.name }),
+      ).toBeVisible();
 
       // The detail, which reads the guarded detail: the draft explainer is the
       // publication-readiness panel, and the question came with it.
