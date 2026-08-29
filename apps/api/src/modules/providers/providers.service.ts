@@ -94,6 +94,26 @@ type NormalizedProviderPayload = {
   }>;
 };
 
+/**
+ * The application fields an invitation carries: every field a guest application
+ * has, except the one the invitation itself decides.
+ *
+ * `categoryIds` is absent rather than optional on purpose. The invitation names
+ * the service, and a client that could name one too would be a client that
+ * decides which unreleased category it is applying for — so there is no field
+ * for it to send, and the global ValidationPipe refuses a body that invents
+ * one.
+ */
+export type ProviderInviteApplicationFields = Omit<CreateProviderDto, 'categoryIds'>;
+
+/** What the payload normaliser reads, whichever of the three forms it came as. */
+type ProviderApplicationInput = ProviderInviteApplicationFields & {
+  categoryIds?: string[];
+};
+
+/** The client address, carried only so a claim invitation can be rate limited. */
+type ApplicationRequestMeta = { ipAddress?: string | null; userAgent?: string | null };
+
 type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 /**
  * Machine-readable codes for the offer-pricing conflicts, so the web app can
@@ -148,8 +168,39 @@ export class ProvidersService {
   async createProvider(
     dto: CreateProviderDto,
     user: AuthUser | null = null,
-    meta: { ipAddress?: string | null; userAgent?: string | null } = {},
+    meta: ApplicationRequestMeta = {},
   ) {
+    const payload = await this.prepareApplication(dto, user);
+
+    let provider: Awaited<ReturnType<ProvidersService['createApplicationRecord']>>;
+
+    try {
+      provider = await this.createApplicationRecord(this.prisma, payload, user);
+    } catch (error) {
+      throw translateApplicationWriteError(error);
+    }
+
+    await this.announceNewApplication(provider.id, user, meta);
+
+    return withVisibleServiceCategories(provider);
+  }
+
+  /**
+   * Everything that has to be true before an application may be written, and
+   * the normalised payload that survives it.
+   *
+   * Split out of {@link createProvider} so the invitation flow runs the same
+   * checks rather than a second, drifting copy of them: who may apply at all,
+   * whether this account already owns a profile, whether the address is
+   * reachable, and what the submitted values normalise to. The invitation adds
+   * exactly one thing on top — which category the application is bound to — and
+   * takes nothing away.
+   */
+  async prepareApplication(
+    dto: CreateProviderDto | ProviderInviteApplicationFields,
+    user: AuthUser | null,
+    serverChosenCategoryIds?: string[],
+  ): Promise<NormalizedProviderPayload> {
     if (user?.role === UserRole.CUSTOMER) {
       throw new ForbiddenException('Customers cannot create provider profiles');
     }
@@ -157,7 +208,7 @@ export class ProvidersService {
     // An account owns at most one provider profile. Checked here so the caller
     // gets an explanatory 409 rather than a raw constraint violation; the unique
     // index on ProviderProfile.userId is still the source of truth and is
-    // handled below for the concurrent-request case.
+    // handled by translateApplicationWriteError for the concurrent-request case.
     if (user?.role === UserRole.PROVIDER) {
       const existing = await this.prisma.providerProfile.findFirst({
         where: { userId: user.id },
@@ -169,49 +220,38 @@ export class ProvidersService {
       }
     }
 
-    const payload = await this.normalizeAndValidatePayload(dto);
+    const payload = await this.normalizeAndValidatePayload(dto, serverChosenCategoryIds);
 
     // An application nobody is signed in for is the one the claim flow exists
     // for, and it is the only one that needs a reachable address. A provider
     // creating their own profile is already the owner, so their address stays
     // as optional as it has always been.
-    const willBeUnowned = user?.role !== UserRole.PROVIDER;
-    if (willBeUnowned && isProviderClaimEnabled()) {
+    if (willBeUnownedApplication(user) && isProviderClaimEnabled()) {
       requireClaimableApplicationEmail(payload.email);
     }
 
-    let provider: Awaited<ReturnType<ProvidersService['createProviderRecord']>>;
-
-    try {
-      provider = await this.createProviderRecord(payload, user);
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Bu hesap için zaten bir hizmet veren profili var.');
-      }
-
-      throw error;
-    }
-
-    if (willBeUnowned) {
-      // Best-effort and outside the write above: a transport failure must not
-      // undo an application the visitor already completed. The service is a
-      // no-op while the flag is off.
-      await this.providerClaim.issueForNewApplication(provider.id, meta);
-    }
-
-    // The receipt, which is a different message from the claim invitation
-    // above: one says "we have your application", the other hands over
-    // ownership of it. An owned application gets only this one.
-    await this.notify(() => this.mail.sendProviderApplicationReceived(provider.id), provider.id);
-
-    return withVisibleServiceCategories(provider);
+    return payload;
   }
 
-  private createProviderRecord(
-    payload: Awaited<ReturnType<ProvidersService['normalizeAndValidatePayload']>>,
+  /**
+   * Writes the application row on whatever client the caller hands it.
+   *
+   * The client is a parameter rather than `this.prisma` because the invitation
+   * flow has to create the application and spend the invitation in one
+   * transaction — an application that exists against an invitation still marked
+   * unused is a link that can be redeemed twice.
+   *
+   * Which categories the row is bound to was decided in
+   * {@link ProvidersService.prepareApplication} and is already in the payload —
+   * so there is no second place, and no caller-supplied list, that could put an
+   * application against a category the checks above never saw.
+   */
+  createApplicationRecord(
+    client: Pick<Prisma.TransactionClient, 'providerProfile'>,
+    payload: NormalizedProviderPayload,
     user: AuthUser | null,
   ) {
-    return this.prisma.providerProfile.create({
+    return client.providerProfile.create({
       data: {
         userId: user?.role === UserRole.PROVIDER ? user.id : undefined,
         businessName: payload.businessName,
@@ -235,6 +275,31 @@ export class ProvidersService {
       },
       include: providerInclude,
     });
+  }
+
+  /**
+   * The two messages every new application triggers, after it is safely stored.
+   *
+   * Both are best-effort and both are outside the write, deliberately: a
+   * transport failure must not undo an application the applicant already
+   * completed. An invited application is a guest application like any other, so
+   * it gets exactly these two and nothing extra — the invitation itself is not
+   * mailed by this platform in this round.
+   */
+  async announceNewApplication(
+    providerId: string,
+    user: AuthUser | null,
+    meta: ApplicationRequestMeta = {},
+  ): Promise<void> {
+    if (willBeUnownedApplication(user)) {
+      // A no-op while the claim flag is off.
+      await this.providerClaim.issueForNewApplication(providerId, meta);
+    }
+
+    // The receipt, which is a different message from the claim invitation
+    // above: one says "we have your application", the other hands over
+    // ownership of it. An owned application gets only this one.
+    await this.notify(() => this.mail.sendProviderApplicationReceived(providerId), providerId);
   }
 
   async listProviders(filters: ProviderListFilters) {
@@ -1175,14 +1240,32 @@ export class ProvidersService {
     );
   }
 
+  /**
+   * `serverChosenCategoryIds`, when supplied, replaces the list the body
+   * carries — and skips {@link ProvidersService.ensureActiveCategories} with
+   * it.
+   *
+   * Only the invitation flow supplies it, and both halves of that are
+   * deliberate. Replacing rather than merging is what makes "which service is
+   * this application for" a fact the server derives; skipping the check is
+   * because that check asks whether a *provider* may select the category, and
+   * the answer for a draft is no by design. What may be invited to is a
+   * different and stricter question, already answered against the stored row on
+   * every single use of the link — see ProviderInvitesService.resolveLiveInvite,
+   * which re-reads the category's kind and status rather than trusting what
+   * they were when the link was issued.
+   */
   private async normalizeAndValidatePayload(
-    dto: CreateProviderDto | UpdateProviderDto,
+    dto: ProviderApplicationInput,
+    serverChosenCategoryIds?: string[],
   ): Promise<NormalizedProviderPayload> {
-    const categoryIds = normalizeCategoryIds(dto.categoryIds ?? []);
+    const categoryIds = normalizeCategoryIds(serverChosenCategoryIds ?? dto.categoryIds ?? []);
     const serviceAreas = normalizeServiceAreas(dto.serviceAreas ?? []);
     const address = normalizeBusinessAddress(dto);
 
-    await this.ensureActiveCategories(categoryIds);
+    if (!serverChosenCategoryIds) {
+      await this.ensureActiveCategories(categoryIds);
+    }
 
     return {
       businessName: normalizeRequiredString(dto.businessName, 'Business name'),
@@ -1509,6 +1592,37 @@ function ensureProviderUpdateAccess(
 }
 
 /**
+ * Whether the application about to be written will have no owning account.
+ *
+ * A signed-in PROVIDER owns whatever they create; everybody else — an
+ * anonymous visitor, and an operator submitting on somebody's behalf — produces
+ * an application nobody owns yet, which is exactly what the claim flow hands
+ * over later. The rule is stated once here because it decides two things that
+ * must never disagree: whether a contact address is mandatory, and whether a
+ * claim invitation is issued.
+ */
+function willBeUnownedApplication(user: AuthUser | null): boolean {
+  return user?.role !== UserRole.PROVIDER;
+}
+
+/**
+ * The one write failure an application has that is not a programming error.
+ *
+ * P2002 here can only be the unique index on ProviderProfile.userId — two
+ * requests from the same provider account racing each other past the read in
+ * {@link ProvidersService.prepareApplication}. The database is the source of
+ * truth for that rule; this turns its refusal into the same 409 the read
+ * produces, rather than a 500.
+ */
+function translateApplicationWriteError(error: unknown): unknown {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+    return new ConflictException('Bu hesap için zaten bir hizmet veren profili var.');
+  }
+
+  return error;
+}
+
+/**
  * A guest application must be reachable, or nobody can ever be given it.
  *
  * Only enforced while PROVIDER_CLAIM_ENABLED is on and only for applications
@@ -1628,7 +1742,7 @@ function normalizeCategoryIds(categoryIds: string[]) {
  * "istanbul" and "İstanbul" from becoming two different places on a screen that
  * lists providers by city.
  */
-function normalizeBusinessAddress(dto: CreateProviderDto | UpdateProviderDto) {
+function normalizeBusinessAddress(dto: Pick<CreateProviderDto, 'city' | 'district'>) {
   const resolved = resolveLocation({
     city: normalizeRequiredString(dto.city, 'City'),
     district: normalizeRequiredString(dto.district, 'District'),

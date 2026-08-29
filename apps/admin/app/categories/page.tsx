@@ -105,6 +105,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                   <th className="col-num">Soru</th>
                   <th className="col-num">Teklif kredisi</th>
                   <th className="col-num">Onaylı hizmet veren</th>
+                  <th className="col-num">Geçerli davet</th>
                   <th>Yayına hazır mı?</th>
                 </tr>
               </thead>
@@ -114,6 +115,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                     ? categoriesById.get(category.parentId)
                     : undefined;
                   const providers = category._count?.providers ?? 0;
+                  const activeInvites = category._count?.providerInvites ?? 0;
 
                   return (
                     <tr key={category.id} data-testid={`release-row-${category.slug}`}>
@@ -153,6 +155,21 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                           </span>
                         ) : (
                           <strong>{providers}</strong>
+                        )}
+                      </td>
+                      {/*
+                        Sourcing progress, sitting next to the verdict and
+                        deliberately not part of it. "Three businesses have been
+                        approached" is a different sentence from "three
+                        businesses can answer a request", and only the second
+                        one releases a service — so this column never turns a
+                        row green, and the readiness rules never read it.
+                      */}
+                      <td className="col-num" data-testid={`release-invites-${category.slug}`}>
+                        {activeInvites === 0 ? (
+                          <span className="muted">0</span>
+                        ) : (
+                          <strong>{activeInvites}</strong>
                         )}
                       </td>
                       <td>

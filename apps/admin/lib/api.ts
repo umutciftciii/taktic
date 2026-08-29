@@ -69,6 +69,17 @@ export type Category = {
      * readiness rules treat it as a blocker.
      */
     providers?: number;
+    /**
+     * Provider application invitations for this category that are still usable
+     * — not spent, not withdrawn, not expired.
+     *
+     * Deliberately **not** a readiness criterion. It says somebody has been
+     * approached about this service, which is progress towards supply and not
+     * supply: a draft with three live invitations and no approved provider is
+     * exactly as unready as one with none. {@link releaseBlockers} never reads
+     * it, and the screens that show it say so in as many words.
+     */
+    providerInvites?: number;
   };
   questions?: Question[];
 };
@@ -416,6 +427,48 @@ export type ProviderClaimInviteResult = {
   status: 'ISSUED';
   expiresAt: string;
   delivery: 'PENDING' | 'SENT' | 'FAILED';
+};
+
+/**
+ * Why an operator may no longer act on a provider application invitation.
+ *
+ * ACTIVE is the only state the link works in. The other three are how it
+ * stopped working, and they are an operator's to see — whoever holds the link
+ * is told nothing but "not found", whichever of the three it is.
+ */
+export type ProviderInviteState = 'ACTIVE' | 'USED' | 'REVOKED' | 'EXPIRED';
+
+/**
+ * One row of a category's invitation history.
+ *
+ * Note what is absent, and note that no other type in this file can supply it:
+ * the token and the URL that contains it. The API returns those exactly once,
+ * in the response to the request that created the invitation, and no later read
+ * of any endpoint can produce them again — so this screen cannot show an
+ * operator a link they have lost, and neither can a page refresh.
+ */
+export type ProviderInvite = {
+  id: string;
+  state: ProviderInviteState;
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
+  revokedAt: string | null;
+  createdBy: { id: string; name: string | null } | null;
+};
+
+export type ProviderInviteList = {
+  categoryId: string;
+  activeCount: number;
+  invites: ProviderInvite[];
+};
+
+/** The one shape that carries a link. Held in memory, never re-fetched. */
+export type IssuedProviderInvite = ProviderInvite & { url: string };
+
+export type ProviderInviteRevokeResult = {
+  revoked: boolean;
+  invite: ProviderInvite;
 };
 
 export type OfferStatus =

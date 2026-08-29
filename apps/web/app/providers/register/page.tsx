@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { apiFetch, Category, getCurrentUser, ProviderDashboard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
-import { CityDistrictFields } from '../city-district-fields';
+import { ProviderApplicationFields } from '../provider-application-fields';
 import { CategoryVisual } from '../../category-visual';
 import { isProviderClaimEnabled } from '../../../lib/provider-claim';
 import { IconArrowRight } from '../../landing-icons';
@@ -117,204 +117,38 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
 
         <div className="provider-apply-body">
           <form action={createProviderAction} className="provider-apply-form">
-            <section className="provider-apply-card">
-              <div className="provider-apply-card-head">
-                <h2 className="provider-apply-card-title">
-                  <span className="provider-apply-card-num">01</span>
-                  İşletme bilgileri
-                </h2>
-                <p className="provider-apply-card-subtitle">İşletmenizi tanıtacak temel bilgiler.</p>
-              </div>
-              <div className="provider-apply-grid">
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">
-                    İşletme adı <span className="provider-apply-required">*</span>
-                  </span>
-                  <input
-                    className="provider-apply-input"
-                    name="businessName"
-                    required
-                    placeholder="Örn. Yıldız Klima"
-                  />
-                </label>
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">
-                    Yetkili kişi <span className="provider-apply-required">*</span>
-                  </span>
-                  <input
-                    className="provider-apply-input"
-                    name="contactName"
-                    required
-                    placeholder="Ad Soyad"
-                  />
-                </label>
-                <label className="provider-apply-field provider-apply-field-full">
-                  <span className="provider-apply-label">Açıklama</span>
-                  <textarea
-                    className="provider-apply-textarea"
-                    name="description"
-                    placeholder="Müşterilerinize işletmenizden kısaca bahsedin."
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="provider-apply-card">
-              <div className="provider-apply-card-head">
-                <h2 className="provider-apply-card-title">
-                  <span className="provider-apply-card-num">02</span>
-                  İletişim
-                </h2>
-                <p className="provider-apply-card-subtitle">
-                  Onay ve talep bildirimleri bu bilgilere gider.
-                </p>
-              </div>
-              <div className="provider-apply-grid">
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">
-                    Telefon <span className="provider-apply-required">*</span>
-                  </span>
-                  <input
-                    className="provider-apply-input"
-                    name="phone"
-                    required
-                    placeholder="05XX XXX XX XX"
-                  />
-                </label>
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">
-                    E-posta{' '}
-                    {emailRequired ? <span className="provider-apply-required">*</span> : null}
-                  </span>
-                  <input
-                    className="provider-apply-input"
-                    name="email"
-                    type="email"
-                    required={emailRequired}
-                    placeholder="ornek@firma.com"
-                  />
-                  {emailRequired ? (
-                    <span className="provider-apply-help">
-                      Başvuruyu hesabınıza bağlayan bağlantıyı bu adrese göndereceğiz.
-                    </span>
-                  ) : null}
-                </label>
-              </div>
-            </section>
-
-            <section className="provider-apply-card">
-              <div className="provider-apply-card-head">
-                <h2 className="provider-apply-card-title">
-                  <span className="provider-apply-card-num">03</span>
-                  Adres
-                </h2>
-                <p className="provider-apply-card-subtitle">İşletmenin merkez adresi.</p>
-              </div>
-              <div className="provider-apply-grid">
-                <CityDistrictFields
-                  provinces={provinces}
-                  cityName="city"
-                  districtName="district"
-                  labels={{
-                    city: (
-                      <>
-                        İl <span className="provider-apply-required">*</span>
-                      </>
-                    ),
-                    district: (
-                      <>
-                        İlçe <span className="provider-apply-required">*</span>
-                      </>
-                    ),
-                  }}
-                  classNames={{
-                    field: 'provider-apply-field',
-                    label: 'provider-apply-label',
-                    select: 'sel',
-                  }}
-                />
-                <label className="provider-apply-field provider-apply-field-full">
-                  <span className="provider-apply-label">Adres notu</span>
-                  <textarea
-                    className="provider-apply-textarea"
-                    name="addressNote"
-                    placeholder="Müşterilerin sizi bulması için ek bilgi"
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="provider-apply-card">
-              <div className="provider-apply-card-head">
-                <h2 className="provider-apply-card-title">
-                  <span className="provider-apply-card-num">04</span>
-                  Hizmet kapsamı
-                </h2>
-                <p className="provider-apply-card-subtitle">
-                  Teklif verebileceğiniz kategorileri seçin.
-                </p>
-              </div>
-              {categories.length === 0 ? (
-                <div className="state-surface">
-                  <h3>Kategori listesi yüklenemedi</h3>
-                  <p>Kategoriler gelmeden hizmet kapsamı seçilemiyor. Sayfayı yenileyin.</p>
-                </div>
-              ) : (
-                <div className="provider-apply-categories">
-                  {categories.map((category) => (
-                    <label className="check-chip" key={category.id}>
-                      <input name="categoryIds" type="checkbox" value={category.id} />
-                      <span>{category.name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="provider-apply-card">
-              <div className="provider-apply-card-head">
-                <h2 className="provider-apply-card-title">
-                  <span className="provider-apply-card-num">05</span>
-                  Hizmet bölgesi
-                </h2>
-                <p className="provider-apply-card-subtitle">
-                  İlk hizmet vermek istediğiniz bölgeyi belirtin. Onay sonrası genişletebilirsiniz.
-                </p>
-              </div>
-              <div className="provider-apply-grid-3">
-                {/*
-                  The district stays optional here, unlike the address above: a
-                  service area with no district means the whole province, which
-                  is what `matchesProviderArea` reads a null district as. Making
-                  it mandatory would quietly take province-wide coverage away
-                  from anyone who wanted it.
-                */}
-                <CityDistrictFields
-                  provinces={provinces}
-                  cityName="serviceAreaCity"
-                  districtName="serviceAreaDistrict"
-                  districtRequired={false}
-                  districtPlaceholder="Tüm il"
-                  labels={{
-                    city: (
-                      <>
-                        İl <span className="provider-apply-required">*</span>
-                      </>
-                    ),
-                    district: 'İlçe',
-                  }}
-                  classNames={{
-                    field: 'provider-apply-field',
-                    label: 'provider-apply-label',
-                    select: 'sel',
-                  }}
-                />
-                <label className="provider-apply-field">
-                  <span className="provider-apply-label">Mahalle</span>
-                  <input className="provider-apply-input" name="serviceAreaNeighborhood" />
-                </label>
-              </div>
-            </section>
+            <ProviderApplicationFields
+              emailRequired={emailRequired}
+              provinces={provinces}
+              serviceScope={
+                <section className="provider-apply-card">
+                  <div className="provider-apply-card-head">
+                    <h2 className="provider-apply-card-title">
+                      <span className="provider-apply-card-num">04</span>
+                      Hizmet kapsamı
+                    </h2>
+                    <p className="provider-apply-card-subtitle">
+                      Teklif verebileceğiniz kategorileri seçin.
+                    </p>
+                  </div>
+                  {categories.length === 0 ? (
+                    <div className="state-surface">
+                      <h3>Kategori listesi yüklenemedi</h3>
+                      <p>Kategoriler gelmeden hizmet kapsamı seçilemiyor. Sayfayı yenileyin.</p>
+                    </div>
+                  ) : (
+                    <div className="provider-apply-categories">
+                      {categories.map((category) => (
+                        <label className="check-chip" key={category.id}>
+                          <input name="categoryIds" type="checkbox" value={category.id} />
+                          <span>{category.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              }
+            />
 
             <div className="provider-apply-actions">
               <button className="provider-apply-submit" type="submit">

@@ -3,15 +3,19 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
+  ApiError,
   apiFetch,
   Category,
   CategoryKind,
   CategoryStatus,
+  IssuedProviderInvite,
+  ProviderInviteRevokeResult,
   Question,
   QuestionConditionMatchMode,
   QuestionSystemField,
   QuestionType,
 } from '../../lib/api';
+import type { ProviderInviteFormState } from './category-taxonomy';
 
 const optionQuestionTypes = new Set<QuestionType>(['SELECT', 'MULTI_SELECT']);
 
@@ -176,6 +180,81 @@ export async function updateQuestionStatusAction(formData: FormData) {
   });
 
   revalidatePath(`/categories/${categorySlug}`);
+}
+
+/**
+ * Issuing and withdrawing an invitation, behind one action.
+ *
+ * One rather than two because the panel shows one result, and two independent
+ * `useActionState` hooks cannot say which of them fired last: an issue would
+ * keep its "here is the link" panel on screen while a later withdrawal
+ * silently produced no message at all. Sharing the state makes the newest
+ * outcome the only outcome — and it makes withdrawing an invitation clear the
+ * link from the screen, which is exactly the right thing for it to do.
+ *
+ * `revalidatePath` refreshes the list and the readiness panel around it, but
+ * the issued link is *not* part of that refreshed data and never could be — it
+ * comes back in the returned state and lives only there.
+ */
+export async function providerInviteAction(
+  _previous: ProviderInviteFormState,
+  formData: FormData,
+): Promise<ProviderInviteFormState> {
+  const categoryId = readFormString(formData, 'categoryId');
+  const categorySlug = readFormString(formData, 'categorySlug');
+  const inviteId = readFormString(formData, 'inviteId');
+  // Which button was pressed, read from the submitted form rather than from
+  // which handler was bound — there is only one handler now.
+  const revoking = readFormString(formData, 'intent') === 'revoke';
+
+  try {
+    if (revoking) {
+      const result = await apiFetch<ProviderInviteRevokeResult>(
+        `/categories/${categoryId}/provider-invites/${inviteId}/revoke`,
+        { method: 'POST' },
+      );
+
+      revalidatePath('/categories');
+      revalidatePath(`/categories/${categorySlug}`);
+
+      // "Withdrawn" and "was already dead" are different sentences: the second
+      // is what an operator sees when somebody applied through the link while
+      // they were reaching for the button, and it has to read as a completed
+      // request rather than as a silent no-op.
+      return { kind: 'revoked', alreadyDead: !result.revoked };
+    }
+
+    const invite = await apiFetch<IssuedProviderInvite>(
+      `/categories/${categoryId}/provider-invites`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+
+    revalidatePath('/categories');
+    revalidatePath(`/categories/${categorySlug}`);
+
+    return { kind: 'issued', invite };
+  } catch (error) {
+    return { kind: 'error', message: inviteFailureMessage(error) };
+  }
+}
+
+/**
+ * Turns a refusal into a sentence, without carrying the API's own text through.
+ *
+ * The only refusal an operator can provoke here on purpose is the category
+ * one — a group, a router or a closed service — so that is the only one worth
+ * explaining in its own words.
+ */
+function inviteFailureMessage(error: unknown): string {
+  if (error instanceof ApiError && error.body.includes('PROVIDER_INVITE_CATEGORY_NOT_INVITABLE')) {
+    return 'Yalnızca yayında veya taslak durumdaki hizmet kategorileri için davet bağlantısı üretilebilir.';
+  }
+
+  if (error instanceof ApiError && error.status === 404) {
+    return 'Davet bağlantısı bulunamadı. Sayfayı yenileyin.';
+  }
+
+  return 'İşlem tamamlanamadı. Lütfen tekrar deneyin.';
 }
 
 function categoryPayload(formData: FormData) {

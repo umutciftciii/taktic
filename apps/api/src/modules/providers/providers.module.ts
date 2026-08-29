@@ -10,5 +10,8 @@ import { ProvidersService } from './providers.service';
   imports: [PrismaModule, AuthModule, NumberingModule, ProviderClaimModule],
   controllers: [ProvidersController],
   providers: [ProvidersService],
+  // The invitation flow writes its applications through this service rather
+  // than through a second copy of the same rules. See ProviderInvitesModule.
+  exports: [ProvidersService],
 })
 export class ProvidersModule {}

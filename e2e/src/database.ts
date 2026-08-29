@@ -28,6 +28,7 @@ const TRUNCATED_TABLES = [
   'ProviderServiceArea',
   'ProviderServiceCategory',
   'ProviderProfile',
+  'ProviderInviteToken',
   'OfferCreditPackage',
   'ServiceCategory',
   'CustomerNote',

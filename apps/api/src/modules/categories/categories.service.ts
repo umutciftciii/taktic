@@ -15,6 +15,7 @@ import {
   ServiceCategoryStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { activeProviderInviteFilter } from '../provider-invites/provider-invites.constants';
 import {
   canEnterFlow,
   canReceiveRequests,
@@ -96,11 +97,29 @@ const publicCategoryCounts = {
   children: true,
 } satisfies Prisma.ServiceCategoryCountOutputTypeSelect;
 
-/** That, plus the figure a release decision is made on. */
-const operatorCategoryCounts = {
-  ...publicCategoryCounts,
-  providers: approvedProviderCount,
-} satisfies Prisma.ServiceCategoryCountOutputTypeSelect;
+/**
+ * That, plus the two figures a release decision is made on.
+ *
+ * A function rather than a constant because one of the two is a question about
+ * the clock: an invitation is live until it expires, so "how many are live" has
+ * to be evaluated per request. Pinning `now` once per call rather than letting
+ * each row re-read it keeps a listing internally consistent.
+ *
+ * `activeProviderInvites` deliberately counts something that is **not** a
+ * readiness criterion. It is sourcing progress — "somebody has been approached
+ * about this service" — and an operator looking at a draft with three live
+ * invitations and no approved provider has to read that as still not ready. The
+ * screens say so; {@link releaseBlockers} in the admin app never consults it.
+ */
+function operatorCategoryCounts(
+  now: Date = new Date(),
+): Prisma.ServiceCategoryCountOutputTypeSelect {
+  return {
+    ...publicCategoryCounts,
+    providers: approvedProviderCount,
+    providerInvites: { where: activeProviderInviteFilter(now) },
+  };
+}
 
 export type RouterSelection = {
   questionKey: string;
@@ -191,7 +210,7 @@ export class CategoriesService {
       ...query,
       include: {
         parent: { select: { id: true, name: true, slug: true } },
-        _count: { select: operatorCategoryCounts },
+        _count: { select: operatorCategoryCounts() },
       },
     });
   }
@@ -213,7 +232,7 @@ export class CategoriesService {
     const category = includeInactive
       ? await this.prisma.serviceCategory.findUnique({
           where: { slug },
-          include: { ...include, _count: { select: operatorCategoryCounts } },
+          include: { ...include, _count: { select: operatorCategoryCounts() } },
         })
       : await this.prisma.serviceCategory.findUnique({
           where: { slug },
