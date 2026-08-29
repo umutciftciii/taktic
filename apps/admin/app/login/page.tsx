@@ -43,10 +43,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           */}
           <label className="admin-remember" htmlFor="rememberMe">
             <input id="rememberMe" type="checkbox" name="rememberMe" value="true" />
-            <span>
-              Beni hatırla
-              <small>Bu cihazda 30 gün açık kalır; işlem yapılmazsa oturum yine kapanır.</small>
-            </span>
+            <span>Beni hatırla</span>
           </label>
           <button className="btn btn-primary btn-block" type="submit">Giriş Yap</button>
         </div>

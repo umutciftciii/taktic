@@ -6,6 +6,8 @@
     "e2e": "tsx src/prepare-database.ts && playwright test",
     "e2e:ui": "tsx src/prepare-database.ts && playwright test --ui",
     "e2e:install": "playwright install --with-deps chromium",
+    "e2e:install:webkit": "playwright install --with-deps webkit",
+    "e2e:webkit": "tsx src/prepare-database.ts && E2E_WEBKIT=1 playwright test --project=webkit",
     "e2e:report": "playwright show-report",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

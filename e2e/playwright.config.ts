@@ -38,10 +38,18 @@ const adminDir = resolve(repoRoot, 'apps/admin');
 /**
  * Environment shared by every application process in the suite.
  *
- * NODE_ENV stays "test": it keeps cookies non-secure over plain HTTP (the login
- * server action marks the session cookie `secure` in production, which a
- * headless browser on http:// would silently drop) and it is what the outbox
- * transport refuses to run without.
+ * NODE_ENV stays "test": it is what the outbox transport refuses to run
+ * without, and it is what keeps the API's session cookie non-secure over plain
+ * HTTP — the API reads it at runtime, so a `Secure` cookie no browser on
+ * http:// may keep is never issued in the first place.
+ *
+ * It does not do that for the Next apps, and used not to. `next build` folds
+ * `process.env.NODE_ENV` away at compile time, so setting it here could not
+ * reach them: they re-issued the API's cookie with `Secure` regardless, and a
+ * WebKit browser dropped it. Chromium accepts a `Secure` cookie on loopback,
+ * which is why this suite could not see that until the webkit project existed.
+ * The apps now copy the flag from the API instead of guessing it, so what this
+ * variable is doing here is setting the API's answer — for both of them.
  */
 const sharedEnv = {
   NODE_ENV: 'test',
@@ -170,6 +178,36 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
   };
 }
 
+/**
+ * The WebKit project, when it has been asked for.
+ *
+ * Opt-in rather than always-on, and deliberately narrow. Every other scenario
+ * in this suite is about server actions, sessions and pricing rules — none of
+ * which differ by browser engine — so running them twice would double the cost
+ * of every pull request to re-test the same API. The sign-in spec is the one
+ * exception: the failure it guards was reported from Safari and only a WebKit
+ * build can say whether it is back, so a Chromium-only pass would be answering
+ * a different question.
+ *
+ * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
+ * add it. Unset, the run is exactly the Chromium suite it was before, which is
+ * what keeps the existing CI job's browser download and wall clock unchanged;
+ * WebKit gets its own job instead.
+ */
+function webkitProject() {
+  if (process.env.E2E_WEBKIT !== '1') {
+    return [];
+  }
+
+  return [
+    {
+      name: 'webkit',
+      testMatch: /login-screen\.spec\.ts/,
+      use: { ...devices['Desktop Safari'] },
+    },
+  ];
+}
+
 export default defineConfig({
   testDir: './tests',
   outputDir: resolve(artifactsDir, 'test-results'),
@@ -213,6 +251,7 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    ...webkitProject(),
   ],
 
   webServer: [

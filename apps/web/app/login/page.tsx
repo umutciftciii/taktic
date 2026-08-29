@@ -73,12 +73,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         */}
         <label className="auth-screen-remember" htmlFor="rememberMe">
           <input id="rememberMe" type="checkbox" name="rememberMe" value="true" />
-          <span>
-            Beni hatırla
-            <small>
-              Bu cihazda 30 gün açık kalır. Uzun süre işlem yapılmazsa oturum yine kapanır.
-            </small>
-          </span>
+          <span>Beni hatırla</span>
         </label>
 
         <button className="auth-screen-submit" type="submit">
