@@ -105,6 +105,52 @@ export function canBeSelectedByProviders(category: CategoryTaxonomyFacts): boole
   return isPubliclyListable(category);
 }
 
+/**
+ * Whether a SUPER_ADMIN may bind a provider to this category by hand.
+ *
+ * Wider than {@link canBeSelectedByProviders} in exactly one direction: a DRAFT
+ * leaf is assignable. That is what makes "does this unreleased service have
+ * anybody behind it" a question an operator can answer *before* releasing it,
+ * instead of a chicken-and-egg where the category must go live to collect the
+ * providers that justify going live.
+ *
+ * Everything else is unchanged and deliberately so. A GROUP is a folder and a
+ * ROUTER is a question — neither describes work, so neither may sit in a
+ * provider's list whatever the caller's role. An INACTIVE category is one the
+ * marketplace has stopped selling; binding a provider to it would be building
+ * supply for something nobody may request.
+ */
+export function canBeAssignedByAdmin(category: CategoryTaxonomyFacts): boolean {
+  return (
+    isLeafCategory(category) &&
+    (category.status === ServiceCategoryStatus.ACTIVE ||
+      category.status === ServiceCategoryStatus.DRAFT)
+  );
+}
+
+/**
+ * Whether an existing provider↔category binding is part of the running
+ * marketplace — the one rule that decides what a DRAFT binding is *for*.
+ *
+ * A DRAFT binding is a release-preparation fact and nothing else. It feeds the
+ * operator's readiness count, and it is invisible everywhere else: it does not
+ * put requests in front of the provider, does not let them offer, does not
+ * appear in the provider's own profile or e-mails, and does not appear on the
+ * public profile. The moment the category becomes ACTIVE the same row starts
+ * counting for everything, with no data migration — which is the whole reason
+ * this is a rule read at query time rather than a column on the binding.
+ *
+ * INACTIVE is deliberately *not* excluded here: closing a category is already
+ * handled by the rules that refuse new requests and new offers, and rewriting
+ * what an existing binding means would change behaviour this change is not
+ * about.
+ */
+export function isLiveProviderBinding(
+  category: Pick<CategoryTaxonomyFacts, 'status'>,
+): boolean {
+  return category.status !== ServiceCategoryStatus.DRAFT;
+}
+
 /** Turkish copy for the admin surfaces, so the same words appear everywhere. */
 export const CATEGORY_STATUS_LABELS: Record<ServiceCategoryStatus, string> = {
   [ServiceCategoryStatus.DRAFT]: 'Taslak',

@@ -7,6 +7,8 @@ type SectionCardProps = {
   children: ReactNode;
   padded?: boolean;
   className?: string;
+  /** Anchor target, so an action can send the operator back to this card. */
+  id?: string;
 };
 
 export function SectionCard({
@@ -16,13 +18,14 @@ export function SectionCard({
   children,
   padded = true,
   className,
+  id,
 }: SectionCardProps) {
   const rootClass = ['section-card', padded ? 'is-padded' : '', className]
     .filter(Boolean)
     .join(' ');
 
   return (
-    <section className={rootClass}>
+    <section className={rootClass} id={id}>
       {title || actions ? (
         <header className="section-card-header">
           <div className="section-card-text">

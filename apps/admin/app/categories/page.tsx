@@ -159,13 +159,23 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                         {blockers.length === 0 ? (
                           <span className="badge badge-good">Hazır</span>
                         ) : (
+                          // Label *and* reason, in the row itself. The reason
+                          // used to live in a title attribute, which a mouse
+                          // reveals and a keyboard, a phone and a screenshot in
+                          // a release meeting do not — and "why is this not
+                          // ready" is the only question this table is asked.
                           <span className="release-blocker-list">
                             <span className="badge badge-warn">Hazır değil</span>
-                            <span className="muted" style={{ fontSize: 12 }}>
-                              {blockers
-                                .map((blocker) => RELEASE_BLOCKER_LABELS[blocker])
-                                .join(' · ')}
-                            </span>
+                            {blockers.map((blocker) => (
+                              <span
+                                className="muted"
+                                key={blocker}
+                                style={{ fontSize: 12 }}
+                              >
+                                <strong>{RELEASE_BLOCKER_LABELS[blocker]}.</strong>{' '}
+                                {RELEASE_BLOCKER_HINTS[blocker]}
+                              </span>
+                            ))}
                           </span>
                         )}
                       </td>

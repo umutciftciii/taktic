@@ -273,7 +273,36 @@ export type ProviderServiceCategory = {
     id: string;
     name: string;
     slug: string;
+    /**
+     * Carried only on the operator's reads of a provider. A binding to a DRAFT
+     * category exists solely so the release readiness count is real before the
+     * category is released, and this screen is the only one that may name it —
+     * every other projection of a provider drops those bindings entirely.
+     */
+    kind: CategoryKind;
+    status: CategoryStatus;
   };
+};
+
+/**
+ * One row of the service list an operator manages, with the one fact the
+ * screen cannot derive on its own.
+ *
+ * `countsForRelease` is false whenever the provider is not APPROVED. The
+ * readiness figure behind a release decision counts approved providers only, so
+ * an operator who attaches a pending application to a draft has to be told, on
+ * the spot, that the number they were trying to move did not move.
+ */
+export type AdminProviderServiceCategory = ProviderServiceCategory & {
+  categoryId: string;
+  createdAt: string;
+  countsForRelease: boolean;
+};
+
+export type AdminProviderServiceCategories = {
+  providerId: string;
+  providerStatus: ProviderStatus;
+  serviceCategories: AdminProviderServiceCategory[];
 };
 
 export type ProviderServiceArea = {
