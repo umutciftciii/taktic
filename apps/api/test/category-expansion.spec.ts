@@ -1,4 +1,5 @@
 import {
+  QuestionConditionMatchMode,
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestQuestionSystemField,
@@ -981,6 +982,425 @@ describe('provider matching uses the final leaf only', () => {
         .send(providerPayload([categoryId]))
         .expect(400);
     }
+  });
+});
+
+describe('status ⇔ isActive parity', () => {
+  it('creates a draft with both columns saying draft', async () => {
+    const cookie = await adminCookie();
+
+    const response = await request(ctx.server)
+      .post('/categories')
+      .set('Cookie', cookie)
+      .send({
+        name: 'Taslak hizmet',
+        slug: 'taslak-hizmet',
+        offerCreditCost: 2,
+        status: ServiceCategoryStatus.DRAFT,
+      })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      status: ServiceCategoryStatus.DRAFT,
+      isActive: false,
+    });
+  });
+
+  it('keeps the two in step across draft → active → inactive', async () => {
+    const cookie = await adminCookie();
+    const category = await createCategory(ctx.prisma, 'Yaşam döngüsü', {
+      status: ServiceCategoryStatus.DRAFT,
+      offerCreditCost: 2,
+    });
+
+    const readBack = async () =>
+      ctx.prisma.serviceCategory.findUniqueOrThrow({
+        where: { id: category.id },
+        select: { status: true, isActive: true },
+      });
+
+    expect(await readBack()).toEqual({ status: ServiceCategoryStatus.DRAFT, isActive: false });
+
+    await request(ctx.server)
+      .patch(`/categories/${category.id}/status`)
+      .set('Cookie', cookie)
+      .send({ status: ServiceCategoryStatus.ACTIVE })
+      .expect(200);
+    expect(await readBack()).toEqual({ status: ServiceCategoryStatus.ACTIVE, isActive: true });
+
+    await request(ctx.server)
+      .patch(`/categories/${category.id}/status`)
+      .set('Cookie', cookie)
+      .send({ status: ServiceCategoryStatus.INACTIVE })
+      .expect(200);
+    expect(await readBack()).toEqual({ status: ServiceCategoryStatus.INACTIVE, isActive: false });
+  });
+
+  it('keeps them in step when the whole category is saved, not just its status', async () => {
+    const cookie = await adminCookie();
+    const category = await createCategory(ctx.prisma, 'Tam kayıt', { offerCreditCost: 2 });
+
+    await request(ctx.server)
+      .patch(`/categories/${category.id}`)
+      .set('Cookie', cookie)
+      .send({ name: 'Tam kayıt', status: ServiceCategoryStatus.DRAFT })
+      .expect(200);
+
+    const saved = await ctx.prisma.serviceCategory.findUniqueOrThrow({
+      where: { id: category.id },
+      select: { status: true, isActive: true },
+    });
+    expect(saved).toEqual({ status: ServiceCategoryStatus.DRAFT, isActive: false });
+  });
+
+  it('refuses a divergent row at the database, not just by convention', async () => {
+    const category = await createCategory(ctx.prisma, 'Bütünlük', { offerCreditCost: 2 });
+
+    // Straight past every service and DTO, the way a stray script or a psql
+    // session would. An ACTIVE category that is invisible is a service nobody
+    // can find; a DRAFT one that is visible is an unreleased service on the
+    // public catalogue. Neither is representable.
+    await expect(
+      ctx.prisma.serviceCategory.update({
+        where: { id: category.id },
+        data: { isActive: false },
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      ctx.prisma.serviceCategory.update({
+        where: { id: category.id },
+        data: { status: ServiceCategoryStatus.DRAFT },
+      }),
+    ).rejects.toThrow();
+
+    // And the row is untouched by either attempt.
+    const unchanged = await ctx.prisma.serviceCategory.findUniqueOrThrow({
+      where: { id: category.id },
+      select: { status: true, isActive: true },
+    });
+    expect(unchanged).toEqual({ status: ServiceCategoryStatus.ACTIVE, isActive: true });
+  });
+
+  it('maps the legacy boolean onto both columns, in both directions', async () => {
+    const cookie = await adminCookie();
+    const category = await createCategory(ctx.prisma, 'Eski istemci', { offerCreditCost: 2 });
+
+    await request(ctx.server)
+      .patch(`/categories/${category.id}/status`)
+      .set('Cookie', cookie)
+      .send({ isActive: false })
+      .expect(200);
+    expect(
+      await ctx.prisma.serviceCategory.findUniqueOrThrow({
+        where: { id: category.id },
+        select: { status: true, isActive: true },
+      }),
+    ).toEqual({ status: ServiceCategoryStatus.INACTIVE, isActive: false });
+
+    await request(ctx.server)
+      .patch(`/categories/${category.id}/status`)
+      .set('Cookie', cookie)
+      .send({ isActive: true })
+      .expect(200);
+    expect(
+      await ctx.prisma.serviceCategory.findUniqueOrThrow({
+        where: { id: category.id },
+        select: { status: true, isActive: true },
+      }),
+    ).toEqual({ status: ServiceCategoryStatus.ACTIVE, isActive: true });
+  });
+
+  it('never lets a legacy boolean resurrect a draft as merely "not inactive"', async () => {
+    const cookie = await adminCookie();
+    const draft = await createCategory(ctx.prisma, 'Taslak', {
+      status: ServiceCategoryStatus.DRAFT,
+      offerCreditCost: 2,
+    });
+
+    // `false` cannot mean DRAFT — a boolean has no third value — so it means
+    // INACTIVE, and the draft is closed rather than left in a state where the
+    // two columns disagree about what it is.
+    await request(ctx.server)
+      .patch(`/categories/${draft.id}/status`)
+      .set('Cookie', cookie)
+      .send({ isActive: false })
+      .expect(200);
+
+    expect(
+      await ctx.prisma.serviceCategory.findUniqueOrThrow({
+        where: { id: draft.id },
+        select: { status: true, isActive: true },
+      }),
+    ).toEqual({ status: ServiceCategoryStatus.INACTIVE, isActive: false });
+  });
+});
+
+describe('condition match modes', () => {
+  /**
+   * A multi-select source and a question that depends on it, with the match
+   * mode left to the caller.
+   */
+  async function multiSourceFixture(matchMode?: QuestionConditionMatchMode) {
+    const category = await createCategory(ctx.prisma, 'Banyo', { offerCreditCost: 1 });
+    const source = await createSelectQuestion(ctx.prisma, {
+      categoryId: category.id,
+      key: 'yapilacak_isler',
+      sortOrder: 10,
+      isRequired: true,
+      multi: true,
+      options: [
+        { key: 'tesisat', label: 'Tesisat' },
+        { key: 'dolap', label: 'Dolap' },
+        { key: 'kapi', label: 'Kapı' },
+      ],
+    });
+    const dependent = await createSelectQuestion(ctx.prisma, {
+      categoryId: category.id,
+      key: 'proje_detayi',
+      sortOrder: 20,
+      isRequired: true,
+      options: [{ key: 'var', label: 'Var' }],
+    });
+
+    await ctx.prisma.serviceRequestQuestionCondition.create({
+      data: {
+        questionId: dependent.id,
+        sourceQuestionId: source.id,
+        expectedValues: ['tesisat', 'dolap'],
+        // Left unset on purpose when the caller says nothing: that is the shape
+        // of a rule written before the mode existed.
+        ...(matchMode ? { matchMode } : {}),
+      },
+    });
+
+    return { category, source, dependent };
+  }
+
+  it('ANY shows the dependent question on one of the expected answers', async () => {
+    const { category } = await multiSourceFixture(QuestionConditionMatchMode.ANY);
+
+    // Visible, so its own required answer is demanded.
+    const missing = await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [{ questionKey: 'yapilacak_isler', value: ['tesisat'] }],
+        }),
+      )
+      .expect(400);
+    expect(missing.body.message).toContain('proje_detayi');
+
+    await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [
+            { questionKey: 'yapilacak_isler', value: ['tesisat'] },
+            { questionKey: 'proje_detayi', value: 'var' },
+          ],
+        }),
+      )
+      .expect(201);
+  });
+
+  it('ANY keeps it hidden when nothing expected was chosen', async () => {
+    const { category } = await multiSourceFixture(QuestionConditionMatchMode.ANY);
+
+    await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [{ questionKey: 'yapilacak_isler', value: ['kapi'] }],
+        }),
+      )
+      .expect(201);
+  });
+
+  it('ALL keeps it hidden until every expected answer is chosen', async () => {
+    const { category } = await multiSourceFixture(QuestionConditionMatchMode.ALL);
+
+    // One of the two is not both of them: the question does not apply, so its
+    // required answer is not demanded.
+    await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [{ questionKey: 'yapilacak_isler', value: ['tesisat'] }],
+        }),
+      )
+      .expect(201);
+
+    const complete = await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [{ questionKey: 'yapilacak_isler', value: ['tesisat', 'dolap'] }],
+        }),
+      )
+      .expect(400);
+    expect(complete.body.message).toContain('proje_detayi');
+  });
+
+  it('ALL tolerates extra answers beyond the expected set', async () => {
+    const { category } = await multiSourceFixture(QuestionConditionMatchMode.ALL);
+
+    await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [
+            { questionKey: 'yapilacak_isler', value: ['tesisat', 'dolap', 'kapi'] },
+            { questionKey: 'proje_detayi', value: 'var' },
+          ],
+        }),
+      )
+      .expect(201);
+  });
+
+  it('refuses an answer to a question an ALL rule keeps off screen', async () => {
+    const { category } = await multiSourceFixture(QuestionConditionMatchMode.ALL);
+
+    const response = await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [
+            { questionKey: 'yapilacak_isler', value: ['tesisat'] },
+            { questionKey: 'proje_detayi', value: 'var' },
+          ],
+        }),
+      )
+      .expect(400);
+
+    expect(response.body.message).toContain('görünmüyor');
+  });
+
+  it('reads a rule with no stored mode as ANY', async () => {
+    const { category, dependent } = await multiSourceFixture();
+
+    const stored = await ctx.prisma.serviceRequestQuestionCondition.findFirstOrThrow({
+      where: { questionId: dependent.id },
+      select: { matchMode: true },
+    });
+    // The column default, not something the fixture wrote.
+    expect(stored.matchMode).toBe(QuestionConditionMatchMode.ANY);
+
+    // And it behaves as ANY: one expected answer is enough to reveal it.
+    const response = await request(ctx.server)
+      .post('/service-requests')
+      .send(
+        serviceRequestPayload(category.slug, {
+          answers: [{ questionKey: 'yapilacak_isler', value: ['dolap'] }],
+        }),
+      )
+      .expect(400);
+    expect(response.body.message).toContain('proje_detayi');
+  });
+
+  it('stores the mode an admin chooses and hands it back', async () => {
+    const cookie = await adminCookie();
+    const { category, dependent } = await multiSourceFixture();
+
+    await request(ctx.server)
+      .put(`/questions/${dependent.id}/conditions`)
+      .set('Cookie', cookie)
+      .send({
+        conditions: [
+          {
+            sourceQuestionKey: 'yapilacak_isler',
+            expectedValues: ['tesisat', 'dolap'],
+            matchMode: QuestionConditionMatchMode.ALL,
+          },
+        ],
+      })
+      .expect(200);
+
+    const listed = await request(ctx.server)
+      .get(`/categories/${category.id}/questions`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    const question = listed.body.find((entry: { key: string }) => entry.key === 'proje_detayi');
+    expect(question.conditions[0]).toMatchObject({
+      sourceQuestionKey: 'yapilacak_isler',
+      matchMode: QuestionConditionMatchMode.ALL,
+    });
+  });
+
+  it('defaults a rule the admin saves without a mode to ANY', async () => {
+    const cookie = await adminCookie();
+    const { dependent } = await multiSourceFixture();
+
+    await request(ctx.server)
+      .put(`/questions/${dependent.id}/conditions`)
+      .set('Cookie', cookie)
+      .send({
+        conditions: [
+          { sourceQuestionKey: 'yapilacak_isler', expectedValues: ['tesisat', 'dolap'] },
+        ],
+      })
+      .expect(200);
+
+    const stored = await ctx.prisma.serviceRequestQuestionCondition.findFirstOrThrow({
+      where: { questionId: dependent.id },
+      select: { matchMode: true },
+    });
+    expect(stored.matchMode).toBe(QuestionConditionMatchMode.ANY);
+  });
+
+  it('refuses ALL on a source the customer can only answer once', async () => {
+    const cookie = await adminCookie();
+    const category = await createCategory(ctx.prisma, 'Tek seçim', { offerCreditCost: 1 });
+    await createSelectQuestion(ctx.prisma, {
+      categoryId: category.id,
+      key: 'tadilat_tipi',
+      sortOrder: 10,
+      isRequired: true,
+      options: [
+        { key: 'komple', label: 'Komple' },
+        { key: 'fayans', label: 'Fayans' },
+      ],
+    });
+    const dependent = await createSelectQuestion(ctx.prisma, {
+      categoryId: category.id,
+      key: 'detay',
+      sortOrder: 20,
+      options: [{ key: 'var', label: 'Var' }],
+    });
+
+    // On a single-choice source the two modes are the same test, so storing the
+    // distinction would put a setting on screen that changes nothing.
+    const response = await request(ctx.server)
+      .put(`/questions/${dependent.id}/conditions`)
+      .set('Cookie', cookie)
+      .send({
+        conditions: [
+          {
+            sourceQuestionKey: 'tadilat_tipi',
+            expectedValues: ['komple'],
+            matchMode: QuestionConditionMatchMode.ALL,
+          },
+        ],
+      })
+      .expect(400);
+
+    expect(response.body.message).toContain('MULTI_SELECT');
+    expect(
+      await ctx.prisma.serviceRequestQuestionCondition.count({
+        where: { questionId: dependent.id },
+      }),
+    ).toBe(0);
+
+    // ANY on the same source is accepted, so the refusal is about the mode and
+    // not about the rule.
+    await request(ctx.server)
+      .put(`/questions/${dependent.id}/conditions`)
+      .set('Cookie', cookie)
+      .send({
+        conditions: [{ sourceQuestionKey: 'tadilat_tipi', expectedValues: ['komple'] }],
+      })
+      .expect(200);
   });
 });
 

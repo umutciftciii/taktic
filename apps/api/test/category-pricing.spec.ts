@@ -1,4 +1,4 @@
-import { CreditTransactionType, UserRole } from '@prisma/client';
+import { CreditTransactionType, ServiceCategoryStatus, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -398,10 +398,16 @@ describe('inactive category', () => {
     );
 
     // The request was created while the category was live; the category is
-    // deactivated afterwards.
+    // closed afterwards.
+    //
+    // Both columns, because they are one fact: `status` is the canonical
+    // publication state and `isActive` is the same thing in the shape the
+    // pricing rules read, and a database CHECK constraint refuses a row where
+    // they disagree. Writing only one would make this fixture a state the
+    // application can never produce.
     await ctx.prisma.serviceCategory.update({
       where: { id: categories[0]!.id },
-      data: { isActive: false },
+      data: { status: ServiceCategoryStatus.INACTIVE, isActive: false },
     });
 
     const response = await request(ctx.server)

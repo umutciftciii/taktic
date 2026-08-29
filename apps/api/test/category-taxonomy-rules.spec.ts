@@ -1,4 +1,5 @@
 import {
+  QuestionConditionMatchMode,
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestQuestionSystemField,
@@ -17,7 +18,10 @@ import {
   assertSystemFieldTypeMatches,
   hasSystemFieldValue,
 } from '../src/modules/questions/question-system-fields';
-import { resolveVisibleQuestionIds } from '../src/modules/questions/question-visibility';
+import {
+  conditionHolds,
+  resolveVisibleQuestionIds,
+} from '../src/modules/questions/question-visibility';
 
 /**
  * The permission matrix and the visibility engine, with no database and no HTTP
@@ -181,6 +185,87 @@ describe('question visibility', () => {
     const visible = resolveVisibleQuestionIds([source, dependent, chained], stale);
     expect(visible.has('q-dependent')).toBe(false);
     expect(visible.has('q-chained')).toBe(false);
+  });
+});
+
+describe('condition match modes', () => {
+  const expected = ['tesisat', 'dolap'];
+
+  it('defaults to ANY when the rule does not say, which is what every legacy rule means', () => {
+    // No `matchMode` at all: the shape of every condition stored before the
+    // column existed, and of one a caller builds by hand.
+    const legacy = { sourceQuestionId: 'q', expectedValues: expected };
+
+    expect(conditionHolds(legacy, ['tesisat'])).toBe(true);
+    expect(conditionHolds(legacy, ['dolap'])).toBe(true);
+    expect(conditionHolds(legacy, ['kapi'])).toBe(false);
+  });
+
+  it('ANY is satisfied by one of the expected answers', () => {
+    const any = {
+      sourceQuestionId: 'q',
+      expectedValues: expected,
+      matchMode: QuestionConditionMatchMode.ANY,
+    };
+
+    expect(conditionHolds(any, ['tesisat', 'kapi'])).toBe(true);
+    expect(conditionHolds(any, [])).toBe(false);
+    expect(conditionHolds(any, ['kapi'])).toBe(false);
+  });
+
+  it('ALL needs every expected answer, and tolerates extra ones', () => {
+    const all = {
+      sourceQuestionId: 'q',
+      expectedValues: expected,
+      matchMode: QuestionConditionMatchMode.ALL,
+    };
+
+    expect(conditionHolds(all, ['tesisat', 'dolap'])).toBe(true);
+    // Extra choices do not spoil it: the rule is about what is present.
+    expect(conditionHolds(all, ['tesisat', 'dolap', 'kapi'])).toBe(true);
+    // One of the two is not both of them.
+    expect(conditionHolds(all, ['tesisat'])).toBe(false);
+    expect(conditionHolds(all, [])).toBe(false);
+  });
+
+  it('reads a single-value answer as the one-element set it is', () => {
+    const oneExpected = {
+      sourceQuestionId: 'q',
+      expectedValues: ['komple'],
+      matchMode: QuestionConditionMatchMode.ALL,
+    };
+
+    expect(conditionHolds(oneExpected, 'komple')).toBe(true);
+    expect(conditionHolds(oneExpected, 'fayans')).toBe(false);
+  });
+
+  it('drives the visibility pass, so an ALL rule hides its question until the set is complete', () => {
+    const source = {
+      id: 'q-source',
+      key: 'isler',
+      type: ServiceRequestQuestionType.MULTI_SELECT,
+      sortOrder: 10,
+      conditions: [],
+    };
+    const dependent = {
+      id: 'q-dependent',
+      key: 'detay',
+      type: ServiceRequestQuestionType.TEXT,
+      sortOrder: 20,
+      conditions: [
+        {
+          sourceQuestionId: 'q-source',
+          expectedValues: expected,
+          matchMode: QuestionConditionMatchMode.ALL,
+        },
+      ],
+    };
+
+    const partial = new Map<string, unknown>([['q-source', ['tesisat']]]);
+    expect(resolveVisibleQuestionIds([source, dependent], partial).has('q-dependent')).toBe(false);
+
+    const complete = new Map<string, unknown>([['q-source', ['tesisat', 'dolap']]]);
+    expect(resolveVisibleQuestionIds([source, dependent], complete).has('q-dependent')).toBe(true);
   });
 });
 

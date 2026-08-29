@@ -1,4 +1,4 @@
-import { ServiceRequestQuestionType } from '@prisma/client';
+import { QuestionConditionMatchMode, ServiceRequestQuestionType } from '@prisma/client';
 
 /**
  * Which of a category's questions are actually on screen, given the answers so
@@ -15,8 +15,17 @@ import { ServiceRequestQuestionType } from '@prisma/client';
 
 export type VisibilityCondition = {
   sourceQuestionId: string;
-  /** One or many; matching any single value satisfies the condition. */
+  /** One or many. `matchMode` says how the answer is compared against them. */
   expectedValues: string[];
+  /**
+   * ANY — at least one of the expected values was chosen.
+   * ALL — every one of them was.
+   *
+   * Optional here, and absent means ANY, because that is what every rule stored
+   * before the column existed meant. The database default says the same thing;
+   * this is the same statement for a caller that builds a condition by hand.
+   */
+  matchMode?: QuestionConditionMatchMode;
 };
 
 export type VisibilityQuestion = {
@@ -37,10 +46,21 @@ export type AnswerLookup = Map<string, unknown>;
  * Whether one condition holds.
  *
  * A SELECT answer is a single option key and matches when it is one of the
- * expected values. A MULTI_SELECT answer is a list and matches when the two
- * lists intersect — "the customer ticked at least one of the things this
- * question cares about". Every other answer shape is compared as text, which
- * makes a BOOLEAN source usable ("true"/"false") without a special case.
+ * expected values. A MULTI_SELECT answer is a list, and `matchMode` decides how
+ * the two lists are compared:
+ *
+ *   ANY  the lists intersect — "the customer ticked at least one of the things
+ *        this question cares about". The default, and what every rule written
+ *        before the mode existed meant.
+ *   ALL  the answer covers every expected value — "the customer ticked all of
+ *        them". Extra choices beyond the expected set do not spoil it; the rule
+ *        is about what is present, not about what is absent.
+ *
+ * Every other answer shape is compared as text, which makes a BOOLEAN source
+ * usable ("true"/"false") without a special case. A single value can only
+ * satisfy ALL when exactly one value was expected — which is also why the admin
+ * endpoint refuses ALL on a source that is not MULTI_SELECT: anywhere else the
+ * two modes are the same rule under two names.
  */
 export function conditionHolds(condition: VisibilityCondition, answer: unknown): boolean {
   if (condition.expectedValues.length === 0) {
@@ -51,21 +71,39 @@ export function conditionHolds(condition: VisibilityCondition, answer: unknown):
     return false;
   }
 
-  const expected = new Set(condition.expectedValues);
+  const requireAll = condition.matchMode === QuestionConditionMatchMode.ALL;
+  const chosen = toChosenValues(answer);
 
+  if (chosen === null) {
+    return false;
+  }
+
+  return requireAll
+    ? condition.expectedValues.every((value) => chosen.has(value))
+    : condition.expectedValues.some((value) => chosen.has(value));
+}
+
+/**
+ * The answer as a set of chosen option keys, or null when it is not an answer
+ * a condition can read at all.
+ *
+ * Collapsing every shape to one set is what lets ANY and ALL be a single line
+ * each rather than a matrix of type × mode.
+ */
+function toChosenValues(answer: unknown): Set<string> | null {
   if (Array.isArray(answer)) {
-    return answer.some((item) => typeof item === 'string' && expected.has(item));
+    return new Set(answer.filter((item): item is string => typeof item === 'string'));
   }
 
   if (typeof answer === 'string') {
-    return expected.has(answer);
+    return new Set([answer]);
   }
 
   if (typeof answer === 'boolean' || typeof answer === 'number') {
-    return expected.has(String(answer));
+    return new Set([String(answer)]);
   }
 
-  return false;
+  return null;
 }
 
 /**

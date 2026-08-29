@@ -162,6 +162,90 @@ test.describe('conditional questions', () => {
       await visitor.close();
     }
   });
+
+  test('an ALL rule waits for every expected answer, and the API agrees', async ({ browser }) => {
+    const category = await createCategory(2, { namePrefix: 'E2E Tam Eslesme' });
+    const source = await createSelectQuestion({
+      categoryId: category.id,
+      key: 'yapilacak_isler',
+      label: 'Hangi işler yapılacak?',
+      sortOrder: 10,
+      isRequired: true,
+      multi: true,
+      options: [
+        { key: 'tesisat', label: 'Tesisat' },
+        { key: 'dolap', label: 'Dolap' },
+        { key: 'kapi', label: 'Kapı' },
+      ],
+    });
+    const dependent = await createSelectQuestion({
+      categoryId: category.id,
+      key: 'proje_detayi',
+      label: 'Proje çizimi var mı?',
+      sortOrder: 20,
+      isRequired: true,
+      options: [{ key: 'var', label: 'Var' }],
+    });
+    await createQuestionCondition({
+      questionId: dependent.id,
+      sourceQuestionId: source.id,
+      expectedValues: ['tesisat', 'dolap'],
+      matchMode: 'ALL',
+    });
+
+    const location = uniqueLocation();
+    const values = requestFormValues(location, 'E2E Tam Eşleşme Müşterisi');
+    const visitor = await Actor.open(browser, 'visitor', primaryRuntime);
+
+    try {
+      await visitor.gotoWeb(`/categories/${category.slug}`);
+      const form = visitor.page.locator('form.form-card');
+      const sourceField = form.locator('select[name="answer_yapilacak_isler"]');
+      const dependentField = form.locator('select[name="answer_proje_detayi"]');
+
+      // One of the two expected answers is not both of them.
+      await sourceField.selectOption(['tesisat']);
+      await expect(dependentField).toHaveCount(0);
+
+      // A different answer entirely is no closer.
+      await sourceField.selectOption(['kapi']);
+      await expect(dependentField).toHaveCount(0);
+
+      // Both, and it appears.
+      await sourceField.selectOption(['tesisat', 'dolap']);
+      await expect(dependentField).toBeVisible();
+
+      // Extra choices do not take it away again.
+      await sourceField.selectOption(['tesisat', 'dolap', 'kapi']);
+      await expect(dependentField).toBeVisible();
+
+      await dependentField.selectOption('var');
+      await fillRequestFormUpToContact(visitor, values);
+      const disclosure = visitor.page.getByTestId('contact-disclosure-accept');
+      if ((await disclosure.count()) > 0) {
+        await disclosure.check();
+      }
+      await visitor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
+
+      // The API re-derives the same visibility from the stored rule, so the
+      // answer to a question the browser showed is the answer it accepts.
+      await expect(visitor.page).toHaveURL(/\/requests\/success\?id=/);
+      await assertNoErrorScreen(visitor.page);
+
+      const requestId = new URL(visitor.page.url()).searchParams.get('id');
+      const answers = await prisma().serviceRequestAnswer.findMany({
+        where: { requestId: requestId as string },
+        select: { questionKey: true },
+        orderBy: { questionKey: 'asc' },
+      });
+      expect(answers.map((answer) => answer.questionKey)).toEqual([
+        'proje_detayi',
+        'yapilacak_isler',
+      ]);
+    } finally {
+      await visitor.close();
+    }
+  });
 });
 
 test.describe('routed categories', () => {
@@ -346,6 +430,7 @@ test.describe('admin category management', () => {
         { key: 'hayir', label: 'Hayır' },
       ],
     });
+
     await createSelectQuestion({
       categoryId: category.id,
       key: 'hedef',
@@ -397,8 +482,93 @@ test.describe('admin category management', () => {
 
       expect(condition.sourceQuestion.id).toBe(source.id);
       expect(condition.expectedValues).toEqual(['evet']);
+      // No mode chosen means ANY, on the screen as in the database.
+      expect(condition.matchMode).toBe('ANY');
+
+      // The source is single-choice, so "tamamı" would be the same test under a
+      // second name — the screen says so by refusing to offer it.
+      //
+      // The DOM property rather than `toBeDisabled`: that matcher reports an
+      // <option> as enabled whatever its attribute says, so it would pass here
+      // for the wrong reason and keep passing if the option were ever offered.
+      await expect(
+        conditionForm.locator('select[name="matchMode"] option[value="ALL"]'),
+      ).toHaveJSProperty('disabled', true);
     } finally {
       await admin.close();
+    }
+  });
+
+  test('an admin sets a multi-select rule to “tamamı” and the customer form obeys it', async ({
+    browser,
+  }) => {
+    const category = await createCategory(2, { namePrefix: 'E2E Tamami Yonetimi' });
+    await createSelectQuestion({
+      categoryId: category.id,
+      key: 'isler',
+      label: 'Yapılacak işler',
+      sortOrder: 10,
+      isRequired: true,
+      multi: true,
+      options: [
+        { key: 'tesisat', label: 'Tesisat' },
+        { key: 'dolap', label: 'Dolap' },
+      ],
+    });
+    await createSelectQuestion({
+      categoryId: category.id,
+      key: 'detay',
+      label: 'Detay sorusu',
+      sortOrder: 20,
+      options: [{ key: 'var', label: 'Var' }],
+    });
+
+    const adminAccount = await createAdmin();
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+    const visitor = await Actor.open(browser, 'visitor', primaryRuntime);
+
+    try {
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin(`/categories/${category.slug}`);
+
+      const targetRow = admin.page
+        .locator('details.question-row')
+        .filter({ hasText: 'Detay sorusu' });
+      await targetRow.locator('summary').click();
+
+      const conditionForm = targetRow
+        .locator('form')
+        .filter({ has: admin.page.getByRole('button', { name: 'Koşulu kaydet' }) });
+      await conditionForm.locator('select[name="sourceQuestionKey"]').selectOption('isler');
+      await conditionForm
+        .locator('select[name="expectedValues"]')
+        .selectOption(['isler::tesisat', 'isler::dolap']);
+      await conditionForm.locator('select[name="matchMode"]').selectOption('ALL');
+      await conditionForm.getByRole('button', { name: 'Koşulu kaydet' }).click();
+      await assertNoErrorScreen(admin.page);
+
+      await expect
+        .poll(async () =>
+          prisma().serviceRequestQuestionCondition.count({
+            where: { question: { key: 'detay', categoryId: category.id }, matchMode: 'ALL' },
+          }),
+        )
+        .toBe(1);
+
+      // What the admin wired up is what the customer meets: one of the two
+      // answers is not enough, both are.
+      await visitor.gotoWeb(`/categories/${category.slug}`);
+      const form = visitor.page.locator('form.form-card');
+      const dependentField = form.locator('select[name="answer_detay"]');
+
+      await form.locator('select[name="answer_isler"]').selectOption(['tesisat']);
+      await expect(dependentField).toHaveCount(0);
+
+      await form.locator('select[name="answer_isler"]').selectOption(['tesisat', 'dolap']);
+      await expect(dependentField).toBeVisible();
+    } finally {
+      await admin.close();
+      await visitor.close();
     }
   });
 });

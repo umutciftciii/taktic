@@ -190,7 +190,14 @@ export async function importCategoryWave(
         }
 
         await prisma.serviceRequestQuestionCondition.create({
-          data: { questionId: id, sourceQuestionId: sourceId, expectedValues: condition.expectedValues },
+          data: {
+            questionId: id,
+            sourceQuestionId: sourceId,
+            expectedValues: condition.expectedValues,
+            // Omitted means ANY, which is both the column default and what a
+            // wave written before the mode existed meant.
+            ...(condition.matchMode ? { matchMode: condition.matchMode } : {}),
+          },
         });
         summary.conditionsWritten += 1;
       }
@@ -299,6 +306,15 @@ function assertQuestionsAreCoherent(definition: CategoryDefinition) {
       if (source.sortOrder >= question.sortOrder) {
         throw new Error(
           `${definition.slug}/${question.key}: koşul kaynağı (${source.key}) daha önce sıralanmalı`,
+        );
+      }
+
+      // The same rule the admin endpoint enforces, checked before the first
+      // row is written: ALL is a distinction only a multi-answer source can
+      // carry.
+      if (condition.matchMode === 'ALL' && source.type !== 'MULTI_SELECT') {
+        throw new Error(
+          `${definition.slug}/${question.key}: ALL eşleşmesi için kaynak soru (${source.key}) MULTI_SELECT olmalı`,
         );
       }
 

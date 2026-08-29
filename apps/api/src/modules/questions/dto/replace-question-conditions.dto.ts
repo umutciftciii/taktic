@@ -1,8 +1,10 @@
+import { QuestionConditionMatchMode } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -28,6 +30,19 @@ export class QuestionConditionDto {
   @ArrayMaxSize(50)
   @IsString({ each: true })
   expectedValues!: string[];
+
+  /**
+   * How the expected values are compared against the answer.
+   *
+   * Omitted means ANY, which is what every rule written before this field
+   * existed meant — so an old client's payload keeps producing exactly the rule
+   * it used to. ALL is only accepted when the source is a MULTI_SELECT
+   * question; anywhere else the two modes are the same rule under two names,
+   * and the endpoint says so rather than storing a distinction that is not one.
+   */
+  @IsOptional()
+  @IsEnum(QuestionConditionMatchMode)
+  matchMode?: QuestionConditionMatchMode;
 }
 
 export class ReplaceQuestionConditionsDto {

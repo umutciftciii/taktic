@@ -54,6 +54,19 @@ enum ServiceCategoryStatus {
   INACTIVE
 }
 
+/// How a conditional question reads a multi-answer source.
+///
+/// ANY — the default, and the only behaviour that existed before this enum —
+/// means "the customer ticked at least one of these". ALL means "the customer
+/// ticked all of these". They differ only for a MULTI_SELECT source, which is
+/// why ALL is refused on any other kind: on a single-choice question the two
+/// would be the same rule wearing two names, and an admin choosing between them
+/// would be choosing nothing.
+enum QuestionConditionMatchMode {
+  ANY
+  ALL
+}
+
 /// The request column a question is bound to, instead of an answer row.
 ///
 /// A bound question is a *label and a requirement* placed on a field the
@@ -474,14 +487,20 @@ model ServiceCategoryRouterRule {
 /// the graph acyclic by construction, so evaluating visibility is one ordered
 /// pass and never a cycle search.
 model ServiceRequestQuestionCondition {
-  id               String   @id @default(cuid())
+  id               String                     @id @default(cuid())
   questionId       String
   sourceQuestionId String
-  /// One or many. A SELECT source matches when its answer is in the list; a
-  /// MULTI_SELECT source matches when the two intersect.
+  /// One or many. A SELECT source matches when its answer is in the list; how a
+  /// MULTI_SELECT source is read is what `matchMode` decides.
   expectedValues   String[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  /// ANY (default) or ALL — see QuestionConditionMatchMode.
+  ///
+  /// The default is what makes this column additive in meaning as well as in
+  /// shape: every rule written before it existed meant "any of these", and
+  /// still does.
+  matchMode        QuestionConditionMatchMode @default(ANY)
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
 
   question       ServiceRequestQuestion @relation("QuestionConditionTarget", fields: [questionId], references: [id], onDelete: Cascade)
   sourceQuestion ServiceRequestQuestion @relation("QuestionConditionSource", fields: [sourceQuestionId], references: [id], onDelete: Cascade)

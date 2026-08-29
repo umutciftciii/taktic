@@ -9,7 +9,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
-import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
@@ -40,7 +40,11 @@ type QuestionOption = {
  * plus the visibility rules that decide whether it was ever on screen.
  */
 type QuestionForValidation = ServiceRequestQuestion & {
-  conditions: { sourceQuestionId: string; expectedValues: string[] }[];
+  conditions: {
+    sourceQuestionId: string;
+    expectedValues: string[];
+    matchMode: QuestionConditionMatchMode;
+  }[];
 };
 
 type ValidatedAnswer = {
@@ -148,7 +152,11 @@ export class ServiceRequestsService {
         questions: {
           where: { isActive: true },
           orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
-          include: { conditions: { select: { sourceQuestionId: true, expectedValues: true } } },
+          include: {
+            conditions: {
+              select: { sourceQuestionId: true, expectedValues: true, matchMode: true },
+            },
+          },
         },
       },
     });

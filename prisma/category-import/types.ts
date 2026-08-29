@@ -1,4 +1,5 @@
 import type {
+  QuestionConditionMatchMode,
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestQuestionSystemField,
@@ -26,6 +27,12 @@ export type QuestionOptionDefinition = {
 export type QuestionConditionDefinition = {
   sourceQuestionKey: string;
   expectedValues: string[];
+  /**
+   * ANY (the default) or ALL. ALL is only valid when the source question is a
+   * MULTI_SELECT; the importer refuses a wave that says otherwise, with the
+   * same reason the admin endpoint gives.
+   */
+  matchMode?: QuestionConditionMatchMode;
 };
 
 export type RouterRuleDefinition = {

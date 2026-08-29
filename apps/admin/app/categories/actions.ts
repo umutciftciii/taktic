@@ -8,6 +8,7 @@ import {
   CategoryKind,
   CategoryStatus,
   Question,
+  QuestionConditionMatchMode,
   QuestionSystemField,
   QuestionType,
 } from '../../lib/api';
@@ -89,12 +90,17 @@ export async function replaceQuestionConditionsAction(formData: FormData) {
       return source === sourceQuestionKey && optionKey !== '' ? [optionKey] : [];
     });
 
+  // Omitted or unrecognised means ANY, which is both the API default and what
+  // every rule saved before this control existed means.
+  const rawMode = readFormString(formData, 'matchMode');
+  const matchMode: QuestionConditionMatchMode = rawMode === 'ALL' ? 'ALL' : 'ANY';
+
   await apiFetch<Question>(`/questions/${id}/conditions`, {
     method: 'PUT',
     body: JSON.stringify({
       conditions:
         sourceQuestionKey && expectedValues.length > 0
-          ? [{ sourceQuestionKey, expectedValues }]
+          ? [{ sourceQuestionKey, expectedValues, matchMode }]
           : [],
     }),
   });

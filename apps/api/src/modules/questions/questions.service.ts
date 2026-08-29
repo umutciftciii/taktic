@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   Prisma,
+  QuestionConditionMatchMode,
   ServiceCategoryKind,
   ServiceRequestQuestion,
   ServiceRequestQuestionSystemField,
@@ -200,6 +201,23 @@ export class QuestionsService {
 
       const optionKeys = optionKeysOf(source.options);
       const expectedValues = normalizeExpectedValues(condition.expectedValues);
+      const matchMode = condition.matchMode ?? QuestionConditionMatchMode.ANY;
+
+      // ALL only means something when the customer can choose more than one
+      // answer. On a single-choice source "all of these were chosen" and "one
+      // of these was chosen" are the same test whenever the rule is satisfiable
+      // at all, so storing the distinction would put a setting on the admin
+      // screen that changes nothing — and quietly imply a behaviour that is not
+      // there. Refused with the reason rather than silently normalised.
+      if (
+        matchMode === QuestionConditionMatchMode.ALL &&
+        source.type !== ServiceRequestQuestionType.MULTI_SELECT
+      ) {
+        throw new BadRequestException(
+          `ALL eşleşmesi yalnızca çok seçimli (MULTI_SELECT) bir kaynak soruda kullanılabilir; ` +
+            `${source.key} sorusu ${source.type} tipinde.`,
+        );
+      }
 
       for (const value of expectedValues) {
         if (!optionKeys.has(value)) {
@@ -209,7 +227,7 @@ export class QuestionsService {
         }
       }
 
-      return { questionId, sourceQuestionId: source.id, expectedValues };
+      return { questionId, sourceQuestionId: source.id, expectedValues, matchMode };
     });
 
     await this.prisma.$transaction(async (tx) => {

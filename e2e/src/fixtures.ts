@@ -359,11 +359,17 @@ export async function createSelectQuestion(options: {
   });
 }
 
-/** "Show `questionId` only when `sourceQuestionId` answered one of these." */
+/**
+ * "Show `questionId` only when `sourceQuestionId` answered these."
+ *
+ * `matchMode` left out means ANY — the column default, and what every rule
+ * written before the mode existed means.
+ */
 export async function createQuestionCondition(options: {
   questionId: string;
   sourceQuestionId: string;
   expectedValues: string[];
+  matchMode?: 'ANY' | 'ALL';
 }): Promise<void> {
   await prisma().serviceRequestQuestionCondition.create({ data: options });
 }

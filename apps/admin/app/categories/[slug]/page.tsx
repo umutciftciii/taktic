@@ -347,7 +347,10 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                           ) : null}
                           {(question.conditions ?? []).length > 0 ? (
                             <span className="meta-pill" style={{ marginLeft: 8 }}>
-                              koşullu
+                              koşullu ·{' '}
+                              {question.conditions?.[0]?.matchMode === 'ALL'
+                                ? 'tamamı'
+                                : 'herhangi biri'}
                             </span>
                           ) : null}
                         </span>
@@ -559,6 +562,17 @@ function ConditionEditor({
    */
   const qualify = (sourceKey: string, optionKey: string) => `${sourceKey}${'::'}${optionKey}`;
 
+  /*
+   * "Tamamı" is only offered when it could mean something.
+   *
+   * ANY and ALL differ only for a source the customer can give several answers
+   * to; on a single-choice question they are the same test, and the API refuses
+   * the distinction rather than storing one that changes nothing. Disabling the
+   * option here says that on the screen instead of letting an admin pick it and
+   * meet a 400.
+   */
+  const multiSelectSourceExists = sources.some((source) => source.type === 'MULTI_SELECT');
+
   return (
     <form action={replaceQuestionConditionsAction} className="compact-form compact-form-wide">
       <input type="hidden" name="id" value={question.id} />
@@ -600,8 +614,24 @@ function ConditionEditor({
             ))}
           </select>
           <span className="help-text">
-            Kaynak sorunun seçeneklerinden birini işaretleyin; o cevap verildiğinde bu soru
-            görünür. Başka bir sorunun altındaki seçenekler yok sayılır.
+            Kaynak sorunun seçeneklerini işaretleyin. Başka bir sorunun altındaki seçenekler yok
+            sayılır.
+          </span>
+        </label>
+        <label className="field field-12">
+          <span>Eşleşme kuralı</span>
+          <select name="matchMode" defaultValue={current?.matchMode ?? 'ANY'}>
+            <option value="ANY">
+              Herhangi biri — işaretlenen cevaplardan en az biri seçilirse görünür
+            </option>
+            <option value="ALL" disabled={!multiSelectSourceExists}>
+              Tamamı — işaretlenen cevapların hepsi seçilirse görünür
+            </option>
+          </select>
+          <span className="help-text">
+            {multiSelectSourceExists
+              ? 'İkisi yalnızca çok seçimli bir kaynak soruda farklıdır; tek seçimli soruda “tamamı” kabul edilmez.'
+              : 'Bu sorunun kaynak adaylarının hiçbiri çok seçimli değil; yalnızca “herhangi biri” kullanılabilir.'}
           </span>
         </label>
       </div>

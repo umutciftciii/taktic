@@ -29,11 +29,21 @@ export type QuestionOption = {
  */
 export type QuestionSystemField = 'ADDRESS' | 'BUDGET' | 'DESCRIPTION' | 'PREFERRED_DATE';
 
-/** "Show this question only when <sourceQuestionKey> answered one of these." */
+/**
+ * How a condition compares the expected values against the answer.
+ *
+ * ANY — at least one of them was chosen. ALL — every one of them was. They
+ * differ only for a multi-select source; the API refuses ALL anywhere else.
+ */
+export type QuestionConditionMatchMode = 'ANY' | 'ALL';
+
+/** "Show this question only when <sourceQuestionKey> answered these." */
 export type QuestionCondition = {
   sourceQuestionKey: string;
   sourceQuestionLabel: string;
   expectedValues: string[];
+  /** Absent means ANY — what every rule stored before the mode existed meant. */
+  matchMode?: QuestionConditionMatchMode;
 };
 
 /** One option of a routing question, and the service it leads to. */

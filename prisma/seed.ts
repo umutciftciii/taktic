@@ -1,4 +1,9 @@
-import { PrismaClient, ServiceRequestQuestionType, UserRole } from '@prisma/client';
+import {
+  PrismaClient,
+  ServiceCategoryStatus,
+  ServiceRequestQuestionType,
+  UserRole,
+} from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -216,6 +221,11 @@ async function main() {
         name: category.name,
         description: category.description,
         sortOrder: category.sortOrder,
+        // `status` and `isActive` are one fact in two columns and are written
+        // together, always. A database CHECK constraint enforces the equality,
+        // so setting one alone here would not quietly diverge — it would fail
+        // the seed, which is the right outcome and the reason both are stated.
+        status: ServiceCategoryStatus.ACTIVE,
         isActive: true,
         // Only fill the price when it has never been set, so re-seeding a local
         // database does not silently revert a price an admin changed.
@@ -228,6 +238,7 @@ async function main() {
         name: category.name,
         description: category.description,
         sortOrder: category.sortOrder,
+        status: ServiceCategoryStatus.ACTIVE,
         isActive: true,
         offerCreditCost: category.offerCreditCost,
       },

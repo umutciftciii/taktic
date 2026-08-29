@@ -126,11 +126,23 @@ export type QuestionOption = {
  */
 export type QuestionSystemField = 'ADDRESS' | 'BUDGET' | 'DESCRIPTION' | 'PREFERRED_DATE';
 
-/** "Show this question only when <sourceQuestionKey> answered one of these." */
+/**
+ * How a condition compares the expected answers against what the customer
+ * chose.
+ *
+ * ANY — at least one of them. ALL — every one of them. The two differ only when
+ * the source question lets the customer choose more than one answer, which is
+ * why the API refuses ALL on any other kind of source.
+ */
+export type QuestionConditionMatchMode = 'ANY' | 'ALL';
+
+/** "Show this question only when <sourceQuestionKey> answered these." */
 export type QuestionCondition = {
   sourceQuestionKey: string;
   sourceQuestionLabel: string;
   expectedValues: string[];
+  /** Absent means ANY — what every rule stored before the mode existed meant. */
+  matchMode?: QuestionConditionMatchMode;
 };
 
 /** One option of a routing question, and the service it leads to. */

@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, QuestionConditionMatchMode } from '@prisma/client';
 
 /**
  * How a category's question set reaches a client.
@@ -35,6 +35,8 @@ export type SerializedQuestionCondition = {
   sourceQuestionKey: string;
   sourceQuestionLabel: string;
   expectedValues: string[];
+  /** ANY or ALL — see QuestionConditionMatchMode. */
+  matchMode: QuestionConditionMatchMode;
 };
 
 /**
@@ -82,6 +84,10 @@ export function serializeQuestion(
         sourceQuestionKey: condition.sourceQuestion.key,
         sourceQuestionLabel: condition.sourceQuestion.label,
         expectedValues: condition.expectedValues,
+        // Travels publicly with the rest of the rule: the browser evaluates the
+        // same comparison to decide what to render, and without the mode it
+        // would read an ALL rule as an ANY one and show a question early.
+        matchMode: condition.matchMode,
       }),
     ),
     routerRules: options.exposeRouterTargets

@@ -1,4 +1,9 @@
-import type { Question, QuestionSystemField, RouterSelection } from './api';
+import type {
+  Question,
+  QuestionCondition,
+  QuestionSystemField,
+  RouterSelection,
+} from './api';
 
 /**
  * The browser's copy of two rules the API owns: which questions are on screen,
@@ -11,13 +16,38 @@ import type { Question, QuestionSystemField, RouterSelection } from './api';
  */
 
 /**
+ * Whether one condition holds, given what has been answered.
+ *
+ * ANY (the default) is satisfied by one of the expected values; ALL needs every
+ * one of them. Extra choices beyond the expected set never spoil a match — the
+ * rule is about what is present, not about what is absent. Deliberately the
+ * same comparison as conditionHolds in the API.
+ */
+function conditionHolds(
+  condition: QuestionCondition,
+  answer: string | string[] | undefined,
+): boolean {
+  if (condition.expectedValues.length === 0) {
+    return false;
+  }
+
+  const chosen = new Set(
+    Array.isArray(answer) ? answer : typeof answer === 'string' && answer !== '' ? [answer] : [],
+  );
+
+  return condition.matchMode === 'ALL'
+    ? condition.expectedValues.every((value) => chosen.has(value))
+    : condition.expectedValues.some((value) => chosen.has(value));
+}
+
+/**
  * Whether a question is visible given the answers so far.
  *
- * Conditions are ANDed, a SELECT answer matches by equality and a MULTI_SELECT
- * one by intersection, and a question whose source is itself hidden is hidden
- * too. Deliberately the same shape as resolveVisibleQuestionIds in the API — if
- * these two ever disagree, the API wins and the customer gets a validation
- * error, which is the safe direction for them to disagree in.
+ * Conditions are ANDed, each one is read through {@link conditionHolds}, and a
+ * question whose source is itself hidden is hidden too. Deliberately the same
+ * shape as resolveVisibleQuestionIds in the API — if these two ever disagree,
+ * the API wins and the customer gets a validation error, which is the safe
+ * direction for them to disagree in.
  */
 export function visibleQuestions(
   questions: readonly Question[],
@@ -31,20 +61,11 @@ export function visibleQuestions(
   const result: Question[] = [];
 
   for (const question of ordered) {
-    const shown = (question.conditions ?? []).every((condition) => {
-      if (!visibleKeys.has(condition.sourceQuestionKey)) {
-        return false;
-      }
-
-      const answer = answers[condition.sourceQuestionKey];
-      if (Array.isArray(answer)) {
-        return answer.some((value) => condition.expectedValues.includes(value));
-      }
-
-      return typeof answer === 'string' && answer !== ''
-        ? condition.expectedValues.includes(answer)
-        : false;
-    });
+    const shown = (question.conditions ?? []).every(
+      (condition) =>
+        visibleKeys.has(condition.sourceQuestionKey) &&
+        conditionHolds(condition, answers[condition.sourceQuestionKey]),
+    );
 
     if (shown) {
       visibleKeys.add(question.key);
