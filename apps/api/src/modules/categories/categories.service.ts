@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpStatus,
   Inject,
   Injectable,
@@ -45,6 +46,30 @@ const MAX_ROUTER_DEPTH = 5;
 /** The code a client reads to tell "wrong answer" from "this route is closed". */
 export const ROUTER_TARGET_UNAVAILABLE_CODE = 'ROUTER_TARGET_UNAVAILABLE';
 
+/**
+ * What a reader asked for, and what they are entitled to.
+ *
+ * The two travel together on purpose. `includeInactive` is a *request* for the
+ * privileged view — it arrives from the query string, so it is never evidence
+ * of anything — and `isSuperAdmin` is the answer the controller derived from
+ * the session. A caller cannot supply the second, and the service refuses to
+ * honour the first without it.
+ */
+export type CategoryViewOptions = {
+  /**
+   * The operator's view: drafts, closed categories, groups, routers, inactive
+   * questions and the destinations a router's options lead to.
+   */
+  includeInactive?: boolean;
+  /** Decided from the session by the controller. Never read from the request. */
+  isSuperAdmin: boolean;
+};
+
+export type CategoryListOptions = CategoryViewOptions & {
+  q?: string;
+  limit?: number;
+};
+
 export type RouterSelection = {
   questionKey: string;
   optionKey: string;
@@ -83,15 +108,16 @@ export class CategoriesService {
    *
    * Without `includeInactive` this is the public listing and returns ACTIVE
    * leaves only: a draft is not on sale, a closed category is no longer on
-   * sale, a group is a folder and a router is a question. With it — the admin
-   * app is the only caller that sends it, behind the SUPER_ADMIN guard on every
-   * screen that renders the result — the whole tree comes back so the taxonomy
-   * can be managed.
+   * sale, a group is a folder and a router is a question. With it the whole
+   * tree comes back so the taxonomy can be managed — and that view belongs to a
+   * signed-in SUPER_ADMIN, which {@link resolveIncludeInactive} is what
+   * enforces.
    */
-  async listCategories(includeInactive: boolean, options?: { q?: string; limit?: number }) {
-    const q = options?.q?.trim();
+  async listCategories(options: CategoryListOptions) {
+    const includeInactive = this.resolveIncludeInactive(options);
+    const q = options.q?.trim();
     const limit =
-      options?.limit !== undefined && Number.isFinite(options.limit) && options.limit > 0
+      options.limit !== undefined && Number.isFinite(options.limit) && options.limit > 0
         ? Math.min(Math.floor(options.limit), 100)
         : undefined;
 
@@ -123,7 +149,9 @@ export class CategoriesService {
     });
   }
 
-  async getCategoryBySlug(slug: string, includeInactive: boolean) {
+  async getCategoryBySlug(slug: string, options: CategoryViewOptions) {
+    const includeInactive = this.resolveIncludeInactive(options);
+
     const category = await this.prisma.serviceCategory.findUnique({
       where: { slug },
       include: {
@@ -150,12 +178,36 @@ export class CategoriesService {
 
     return {
       ...category,
-      // `includeInactive` is the admin path — it is what the SUPER_ADMIN-guarded
-      // screens send — and the only one that may see where a router leads.
+      // `includeInactive` is the admin path, and the only one that may see
+      // where a router leads.
       questions: category.questions.map((question) =>
         serializeQuestion(question, { exposeRouterTargets: includeInactive }),
       ),
     };
+  }
+
+  /**
+   * Turns "the caller asked for the privileged view" into "the caller gets it",
+   * or into a 403.
+   *
+   * The controller already refuses an unelevated `includeInactive=true` — and
+   * it is the layer that can tell a broken credential (401) from one that is
+   * simply not an operator's (403). This check exists anyway, because the rule
+   * being enforced is *what this data is*, not *what one route does with it*:
+   * every reader of a draft category goes through here, so no future caller can
+   * reach the wide view by passing a boolean the old signature made it easy to
+   * pass by accident.
+   */
+  private resolveIncludeInactive(options: CategoryViewOptions): boolean {
+    if (!options.includeInactive) {
+      return false;
+    }
+
+    if (!options.isSuperAdmin) {
+      throw new ForbiddenException('Insufficient role');
+    }
+
+    return true;
   }
 
   /**

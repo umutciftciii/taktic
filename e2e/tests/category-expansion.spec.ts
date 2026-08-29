@@ -3,6 +3,8 @@ import { Actor, assertNoErrorScreen } from '../src/actors';
 import {
   createAdmin,
   createCategory,
+  createCustomer,
+  createProvider,
   createQuestionCondition,
   createRouterRule,
   createSelectQuestion,
@@ -23,6 +25,21 @@ import { primaryRuntime } from '../src/runtime';
  * whether an admin can wire all of that up from the screens rather than from a
  * database client.
  */
+
+/**
+ * The browser's real session cookie, as a header for a direct API call.
+ *
+ * The API sits on its own port and Playwright's request context does not carry
+ * the page's cookie jar across it, so the cookie is attached by hand — the one
+ * the sign-in actually left the browser holding, not a fabricated equivalent.
+ */
+async function sessionCookieHeader(actor: Actor): Promise<string> {
+  const cookie = (await actor.context.cookies()).find(
+    (candidate) => candidate.name === 'taktic_session',
+  );
+  expect(cookie, `${actor.name} must be holding a session cookie`).toBeTruthy();
+  return `${cookie!.name}=${cookie!.value}`;
+}
 
 test.describe('draft categories', () => {
   test('a draft is missing from the catalogue and its page 404s', async ({ browser }) => {
@@ -569,6 +586,136 @@ test.describe('admin category management', () => {
     } finally {
       await admin.close();
       await visitor.close();
+    }
+  });
+});
+
+test.describe('the operator view of the taxonomy', () => {
+  /**
+   * `includeInactive=true` is what the admin screens send to see the whole
+   * tree — every unreleased service, its questions and its wiring. It is a
+   * query parameter on two otherwise public endpoints, so the only thing
+   * standing between a stranger and the unreleased catalogue is the check these
+   * scenarios exercise from the outside.
+   */
+  test('nobody but an admin can ask for the unreleased catalogue', async ({ browser }) => {
+    const draft = await createCategory(2, {
+      status: 'DRAFT',
+      namePrefix: 'E2E Gizli Taslak',
+    });
+    const draftQuestion = await createSelectQuestion({
+      categoryId: draft.id,
+      key: 'gizli_soru',
+      label: 'Yayınlanmamış hizmetin sorusu',
+      options: [{ key: 'a', label: 'A' }],
+    });
+    const live = await createCategory(2, { namePrefix: 'E2E Yayindaki Hizmet' });
+
+    const customerAccount = await createCustomer('E2E Gizlilik Müşterisi');
+    const providerAccount = await createProvider({
+      categoryId: live.id,
+      location: uniqueLocation(),
+      credits: 5,
+    });
+    const adminAccount = await createAdmin();
+
+    const paths = [
+      '/categories?includeInactive=true',
+      `/categories/${draft.slug}?includeInactive=true`,
+    ];
+
+    const visitor = await Actor.open(browser, 'visitor', primaryRuntime);
+    const customer = await Actor.open(browser, 'customer', primaryRuntime);
+    const provider = await Actor.open(browser, 'provider', primaryRuntime);
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+
+    async function expectRefused(actor: Actor, headers: Record<string, string> = {}) {
+      for (const path of paths) {
+        const response = await actor.page.request.get(`${primaryRuntime.apiUrl}${path}`, {
+          headers,
+        });
+        expect(response.status(), `${actor.name} asked for ${path}`).toBe(403);
+
+        // Not one word of the unreleased service, not even in the refusal.
+        const body = await response.text();
+        expect(body).not.toContain(draft.slug);
+        expect(body).not.toContain(draft.name);
+        expect(body).not.toContain(draftQuestion.key);
+      }
+    }
+
+    try {
+      // Signed out.
+      await expectRefused(visitor);
+
+      // Signed in as a customer.
+      await customer.loginToWeb(customerAccount.email, customerAccount.password);
+      await expectRefused(customer, { cookie: await sessionCookieHeader(customer) });
+
+      // Signed in as a provider — the role with the most to gain from reading
+      // the categories the marketplace has not launched yet.
+      await provider.loginToWeb(providerAccount.email, providerAccount.password);
+      await expectRefused(provider, { cookie: await sessionCookieHeader(provider) });
+
+      // And the same question, from the one account it belongs to.
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      const adminCookie = await sessionCookieHeader(admin);
+
+      const listing = await admin.page.request.get(
+        `${primaryRuntime.apiUrl}/categories?includeInactive=true`,
+        { headers: { cookie: adminCookie } },
+      );
+      expect(listing.status()).toBe(200);
+      expect(
+        (await listing.json()).map((category: { slug: string }) => category.slug),
+      ).toContain(draft.slug);
+
+      const detail = await admin.page.request.get(
+        `${primaryRuntime.apiUrl}/categories/${draft.slug}?includeInactive=true`,
+        { headers: { cookie: adminCookie } },
+      );
+      expect(detail.status()).toBe(200);
+      expect((await detail.json()).questions).toHaveLength(1);
+    } finally {
+      await visitor.close();
+      await customer.close();
+      await provider.close();
+      await admin.close();
+    }
+  });
+
+  test('the admin screens still show the draft, its questions and its readiness panel', async ({
+    browser,
+  }) => {
+    const draft = await createCategory(2, {
+      status: 'DRAFT',
+      namePrefix: 'E2E Hazirlik Taslagi',
+    });
+    await createSelectQuestion({
+      categoryId: draft.id,
+      key: 'hazirlik_sorusu',
+      label: 'Hazırlık sorusu',
+      options: [{ key: 'a', label: 'A' }],
+    });
+    const adminAccount = await createAdmin();
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+
+    try {
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+
+      // The tree, which is the screen that reads the guarded listing.
+      await admin.gotoAdmin('/categories');
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.getByRole('link', { name: draft.name })).toBeVisible();
+
+      // The detail, which reads the guarded detail: the draft explainer is the
+      // publication-readiness panel, and the question came with it.
+      await admin.gotoAdmin(`/categories/${draft.slug}`);
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.getByTestId('draft-explainer')).toBeVisible();
+      await expect(admin.page.getByText('Hazırlık sorusu')).toBeVisible();
+    } finally {
+      await admin.close();
     }
   });
 });
