@@ -91,6 +91,17 @@ export class CreateCategoryDto {
   @IsBoolean()
   isActive?: boolean;
 
+  /**
+   * Whether providers may sign themselves up for this service.
+   *
+   * Only meaningful on a DRAFT leaf — see isProviderEnrollmentOpen — and
+   * CategoriesService refuses it on anything else rather than storing a value
+   * nothing reads.
+   */
+  @IsOptional()
+  @IsBoolean()
+  providerEnrollmentOpen?: boolean;
+
   @IsOptional()
   @IsInt()
   @Min(0)
