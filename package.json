@@ -19,6 +19,7 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:import:categories": "tsx prisma/import-draft-categories.ts",
+    "db:import:categories:wave-2": "tsx prisma/import-draft-categories-wave-2.ts",
     "db:studio": "prisma studio"
   },
   "devDependencies": {

@@ -589,7 +589,7 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
               {blockers.length > 0 ? (
                 <ul className="release-blocker-reasons" data-testid="release-blockers">
                   {blockers.map((blocker) => (
-                    <li key={blocker}>
+                    <li data-testid={`release-blocker-${blocker}`} key={blocker}>
                       <strong>{RELEASE_BLOCKER_LABELS[blocker]}.</strong>{' '}
                       {RELEASE_BLOCKER_HINTS[blocker]}
                     </li>
