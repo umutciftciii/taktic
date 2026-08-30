@@ -275,14 +275,63 @@ describe('selecting a category as a provider', () => {
       .expect(400);
   });
 
-  it('keeps a live service selectable even with the column off', async () => {
+  /**
+   * The column is deliberately powerless over a released service, and this is
+   * the assertion that keeps it that way.
+   *
+   * A migration backfilled the live categories that existed when the column
+   * arrived, so today they all read `true`. That backfill is convenience, not
+   * the rule — one released tomorrow starts at `false` — and if the rule ever
+   * came to depend on the stored value, every profile save against such a
+   * category would start failing for a reason nobody could see. So the fixture
+   * here says `false` on purpose, and both halves are checked: the catalogue
+   * offers it, and the API accepts it.
+   */
+  it('keeps a live service listed and selectable even with the column off', async () => {
     const live = await createCategory(ctx.prisma, 'Yayinda', { offerCreditCost: 3 });
     expect(live.providerEnrollmentOpen).toBe(false);
+
+    const catalogue = await request(ctx.server).get('/categories/provider-enrollment').expect(200);
+    const row = (catalogue.body as Array<{ slug: string; availability: string }>).find(
+      (entry) => entry.slug === live.slug,
+    );
+    expect(row?.availability).toBe('LIVE');
 
     await request(ctx.server)
       .post('/providers')
       .send(providerPayload([live.id]))
       .expect(201);
+  });
+
+  /**
+   * The mirror image, stated as one test rather than inferred from two: an open
+   * draft is offered and accepted, a closed one is neither.
+   */
+  it('offers and accepts an open draft, and does neither for a closed one', async () => {
+    const open = await createCategory(ctx.prisma, 'Acik Taslak', {
+      status: ServiceCategoryStatus.DRAFT,
+      offerCreditCost: 3,
+      providerEnrollmentOpen: true,
+    });
+    const closed = await createCategory(ctx.prisma, 'Kapali Taslak', {
+      status: ServiceCategoryStatus.DRAFT,
+      offerCreditCost: 3,
+    });
+
+    const catalogue = await request(ctx.server).get('/categories/provider-enrollment').expect(200);
+    const rows = catalogue.body as Array<{ slug: string; availability: string }>;
+
+    expect(rows.find((entry) => entry.slug === open.slug)?.availability).toBe('UPCOMING');
+    expect(rows.some((entry) => entry.slug === closed.slug)).toBe(false);
+
+    await request(ctx.server)
+      .post('/providers')
+      .send(providerPayload([open.id]))
+      .expect(201);
+    await request(ctx.server)
+      .post('/providers')
+      .send(providerPayload([closed.id]))
+      .expect(400);
   });
 
   /**

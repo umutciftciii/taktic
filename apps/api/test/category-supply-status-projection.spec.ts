@@ -7,11 +7,14 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  createApprovedRequest,
   createCategory,
   createProviderProfile,
   createTestApp,
   createUser,
+  grantCredits,
   loginAs,
+  offerPayload,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -260,5 +263,70 @@ describe('a LAUNCH_READY draft is still a draft', () => {
     // No request means no matching, no offer and no fan-out. The mail spy is
     // the honest check that the last one did not happen.
     expect(ctx.notifications.sent).toHaveLength(0);
+  });
+
+  /**
+   * The same closure from the other side: not "no request could be made", but
+   * "a request that exists reaches nobody".
+   *
+   * provider-draft-category-binding.spec.ts pins this for a draft an operator
+   * bound somebody to. This is the case that is new — a provider who signed
+   * *themselves* up, to a draft that is open, priced and staffed — and the
+   * answer has to be identical, because enrollment is recruitment and never
+   * release.
+   */
+  it('reaches no provider even when one joined it and an admin opened a request on it', async () => {
+    const category = await createCategory(ctx.prisma, 'Acik Taslak', {
+      status: ServiceCategoryStatus.DRAFT,
+      offerCreditCost: 4,
+      providerEnrollmentOpen: true,
+    });
+
+    const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const cookie = await loginAs(ctx.prisma, owner.id);
+    const provider = await createProviderProfile(ctx.prisma, {
+      userId: owner.id,
+      status: ProviderStatus.APPROVED,
+    });
+    await ctx.prisma.providerServiceArea.create({
+      data: { providerId: provider.id, city: 'İstanbul', district: 'Kadıköy' },
+    });
+    await ctx.prisma.providerServiceCategory.create({
+      data: { providerId: provider.id, categoryId: category.id },
+    });
+    await grantCredits(ctx.prisma, provider.id, 10);
+
+    const serviceRequest = await createApprovedRequest(ctx.prisma, { categoryId: category.id });
+    ctx.notifications.clear();
+
+    const list = await request(ctx.server)
+      .get(`/providers/${provider.id}/requests`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(list.body).toEqual([]);
+
+    // 404 rather than 403, like every other request a provider may not see: a
+    // refusal that distinguished them would confirm the request exists.
+    await request(ctx.server)
+      .get(`/providers/${provider.id}/requests/${serviceRequest.id}`)
+      .set('Cookie', cookie)
+      .expect(404);
+
+    await request(ctx.server)
+      .post(`/providers/${provider.id}/requests/${serviceRequest.id}/offers`)
+      .set('Cookie', cookie)
+      .send(offerPayload())
+      .expect(404);
+
+    expect(await ctx.prisma.offer.count({ where: { providerId: provider.id } })).toBe(0);
+    expect(ctx.notifications.sent).toHaveLength(0);
+
+    // And the public profile still says nothing about the service they joined.
+    const publicProfile = await request(ctx.server)
+      .get(`/providers/${provider.id}`)
+      .expect(200);
+    expect(publicProfile.body.visibility).toBe('public');
+    expect(publicProfile.body).not.toHaveProperty('upcomingServiceCategories');
+    expect(JSON.stringify(publicProfile.body)).not.toContain(category.slug);
   });
 });
