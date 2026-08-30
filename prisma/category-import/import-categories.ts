@@ -20,6 +20,11 @@ import type { CategoryDefinition, CategoryWave, QuestionDefinition } from './typ
  *                       anybody should be comfortable running twice.
  *   offerCreditCost     Set once, on creation, and never rewritten. Same rule
  *                       the seed already applies to the founding categories.
+ *   providerEnrollmentOpen
+ *                       Set once, on creation. Closing a draft to provider
+ *                       applications is a decision somebody makes — a regulated
+ *                       service is the obvious case — and reopening it on the
+ *                       next run would undo that silently.
  *   unknown questions   A question somebody added by hand is left alone. This
  *                       import adds and updates; it never sweeps.
  *
@@ -99,6 +104,9 @@ export async function importCategoryWave(
             status: definition.status,
             isActive: definition.status === 'ACTIVE',
             offerCreditCost: definition.offerCreditCost ?? null,
+            // Set once, like the price above. An operator who closed a draft to
+            // applications keeps it closed through the next import.
+            providerEnrollmentOpen: definition.providerEnrollmentOpen ?? false,
           },
         });
 

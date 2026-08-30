@@ -386,6 +386,18 @@ model ServiceCategory {
   /// response body already speaks, and the two are written together by
   /// CategoriesService — never one without the other.
   status          ServiceCategoryStatus @default(ACTIVE)
+  /// Whether a provider may put this category in their own service list.
+  ///
+  /// Only ever consulted for a DRAFT leaf. An ACTIVE leaf is always open — see
+  /// isProviderEnrollmentOpen — because closing a live category to provider
+  /// selection would refuse every profile save against it, and that is one
+  /// misclick away from an outage nobody would attribute to a checkbox.
+  ///
+  /// Defaults to false so a category never starts recruiting by accident: a
+  /// newly created or newly imported draft is invisible to applicants until an
+  /// operator opens it. The migration backfills ACTIVE leaves to true, which is
+  /// what keeps enrollment open if one of them is later pulled back to DRAFT.
+  providerEnrollmentOpen Boolean          @default(false)
   isActive        Boolean               @default(true)
   sortOrder       Int                   @default(0)
   createdAt       DateTime              @default(now())

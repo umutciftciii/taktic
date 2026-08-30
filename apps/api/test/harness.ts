@@ -291,6 +291,8 @@ export async function createCategory(
     status?: ServiceCategoryStatus;
     parentId?: string | null;
     sortOrder?: number;
+    /** Defaults to false, exactly as the column does. */
+    providerEnrollmentOpen?: boolean;
   } = {},
 ) {
   const suffix = uniqueSuffix();
@@ -308,6 +310,7 @@ export async function createCategory(
       parentId: options.parentId ?? null,
       sortOrder: options.sortOrder ?? 0,
       offerCreditCost: options.offerCreditCost ?? null,
+      providerEnrollmentOpen: options.providerEnrollmentOpen ?? false,
     },
   });
 }

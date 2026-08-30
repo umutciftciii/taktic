@@ -161,6 +161,10 @@ const renovation: CategoryDefinition[] = [
     description:
       'Konut veya işyerinin tesisattan boyaya kadar tek elden yenilenmesi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: RENOVATION_GROUP,
     sortOrder: 124,
@@ -266,6 +270,10 @@ const renovation: CategoryDefinition[] = [
     name: 'Banyo Dolabı Üretimi',
     description: 'Ölçüye göre banyo dolabı üretimi ve isteğe bağlı montajı.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: RENOVATION_GROUP,
     sortOrder: 125,
@@ -351,6 +359,10 @@ const installation: CategoryDefinition[] = [
     name: 'Çelik Kapı Montajı',
     description: 'Çelik kapının yerine takılması, eski kapının sökülmesi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: INSTALLATION_GROUP,
     sortOrder: 142,
@@ -415,6 +427,10 @@ const installation: CategoryDefinition[] = [
     name: 'Duşakabin Montajı',
     description: 'Duşakabinin kurulumu, değişimi veya sızdırmazlık onarımı.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: INSTALLATION_GROUP,
     sortOrder: 143,
@@ -482,6 +498,10 @@ const education: CategoryDefinition[] = [
     name: 'Direksiyon Dersi',
     description: 'Sınav öncesi veya sonrası birebir direksiyon pratiği.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'egitim',
     sortOrder: 151,
@@ -558,6 +578,10 @@ const education: CategoryDefinition[] = [
     name: 'Gitar Dersi',
     description: 'Her seviyeye birebir gitar dersi; adreste, eğitmende veya çevrimiçi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'egitim',
     sortOrder: 152,
@@ -651,6 +675,10 @@ const events: CategoryDefinition[] = [
     name: 'Etkinlik Yemek Servisi',
     description: 'Davet, tören ve kurumsal etkinlikler için yemek ve ikram servisi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'etkinlik',
     sortOrder: 161,
@@ -739,6 +767,10 @@ const events: CategoryDefinition[] = [
     name: 'Düğün Fotoğrafçılığı',
     description: 'Nişan, dış çekim ve düğün günü fotoğraf çekimi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'etkinlik',
     sortOrder: 162,
@@ -810,6 +842,10 @@ const wellness: CategoryDefinition[] = [
     name: 'Beslenme Danışmanlığı',
     description: 'Kişiye özel beslenme planı ve düzenli takip görüşmeleri.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'saglik-ve-wellness',
     sortOrder: 171,
@@ -888,6 +924,10 @@ const business: CategoryDefinition[] = [
     name: 'Ön Muhasebe Hizmeti',
     description: 'Fatura, cari ve mutabakat gibi günlük muhasebe işlerinin yürütülmesi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'kurumsal-ve-danismanlik',
     sortOrder: 181,
@@ -971,6 +1011,10 @@ const business: CategoryDefinition[] = [
     name: 'Marka Tescil Danışmanlığı',
     description: 'Marka araştırması, başvuru dosyalama ve süreç takibi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'kurumsal-ve-danismanlik',
     sortOrder: 182,
@@ -1038,6 +1082,10 @@ const business: CategoryDefinition[] = [
     name: 'Şirket Kuruluş Danışmanlığı',
     description: 'Şirket türü seçimi, kuruluş işlemleri ve ilk dönem yönlendirmesi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'kurumsal-ve-danismanlik',
     sortOrder: 183,
@@ -1106,6 +1154,10 @@ const business: CategoryDefinition[] = [
     name: 'İSG Danışmanlığı',
     description: 'İş sağlığı ve güvenliği süreçlerinin kurulması ve yürütülmesi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'kurumsal-ve-danismanlik',
     sortOrder: 184,
@@ -1190,6 +1242,10 @@ const digital: CategoryDefinition[] = [
     name: 'Arama Motoru Optimizasyonu',
     description: 'Web sitesinin arama sonuçlarındaki görünürlüğünü artırma çalışması.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'dijital-ve-yaratici',
     sortOrder: 191,
@@ -1271,6 +1327,10 @@ const digital: CategoryDefinition[] = [
     name: 'Sosyal Medya Yönetimi',
     description: 'İçerik planlama, paylaşım ve topluluk yönetimi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'dijital-ve-yaratici',
     sortOrder: 192,
@@ -1355,6 +1415,10 @@ const digital: CategoryDefinition[] = [
     name: 'Mobil Uygulama Geliştirme',
     description: 'Mobil uygulamanın sıfırdan geliştirilmesi veya mevcut uygulamanın büyütülmesi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'dijital-ve-yaratici',
     sortOrder: 193,
@@ -1440,6 +1504,10 @@ const digital: CategoryDefinition[] = [
     name: 'Ürün Fotoğraf Çekimi',
     description: 'Satış ve katalog için ürün fotoğrafı çekimi ve retuşu.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'dijital-ve-yaratici',
     sortOrder: 194,
