@@ -187,6 +187,11 @@ describe('category supply status over HTTP', () => {
     for (const row of list.body as Array<Record<string, unknown>>) {
       expect(row).not.toHaveProperty('supplyStatus');
       expect(row).not.toHaveProperty('approvedProviderCount');
+      // Whether the marketplace is recruiting for a service is an operational
+      // decision with no reader on the customer catalogue. It reached the wire
+      // once because the public query returns every scalar column, which is a
+      // way for a schema change to publish a field nobody chose to publish.
+      expect(row).not.toHaveProperty('providerEnrollmentOpen');
       expect((row._count as Record<string, unknown> | undefined) ?? {}).not.toHaveProperty(
         'providers',
       );
@@ -195,7 +200,15 @@ describe('category supply status over HTTP', () => {
     const detail = await request(ctx.server).get(`/categories/${category.slug}`).expect(200);
     expect(detail.body).not.toHaveProperty('supplyStatus');
     expect(detail.body).not.toHaveProperty('approvedProviderCount');
+    expect(detail.body).not.toHaveProperty('providerEnrollmentOpen');
     expect(detail.body._count ?? {}).not.toHaveProperty('providers');
+
+    // The fields a client written before any of this already reads are still
+    // there. The narrowing removes one column and must not become a rewrite of
+    // the public shape.
+    for (const kept of ['id', 'name', 'slug', 'kind', 'status', 'isActive', 'sortOrder']) {
+      expect(detail.body, kept).toHaveProperty(kept);
+    }
 
     // A signed-in customer is still the public projection.
     const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });

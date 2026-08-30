@@ -100,6 +100,28 @@ const approvedProviderCount = {
   where: { provider: { status: ProviderStatus.APPROVED } },
 } satisfies Prisma.ServiceCategoryCountOutputTypeSelect['providers'];
 
+/**
+ * The operator-only columns, stripped on the way out of a public response.
+ *
+ * `providerEnrollmentOpen` is a recruiting decision — "are we taking
+ * applications for this yet" — and it has no reader on the customer catalogue.
+ * It rides along by default because the public queries return every scalar
+ * column, which is how it reached the wire in the first place: nobody adds a
+ * field to that response, the schema does, and a `select` big enough to list
+ * every public column is a list somebody has to remember to extend.
+ *
+ * So the narrowing is stated as a removal rather than an allow-list. It says
+ * exactly one thing — this column is not public — and every existing field of
+ * the response is untouched, which is what keeps a client written before this
+ * change working.
+ */
+function withoutOperatorColumns<T extends { providerEnrollmentOpen: boolean }>(
+  category: T,
+): Omit<T, 'providerEnrollmentOpen'> {
+  const { providerEnrollmentOpen: _providerEnrollmentOpen, ...rest } = category;
+  return rest;
+}
+
 /** What every reader of a category listing gets. */
 const publicCategoryCounts = {
   questions: true,
@@ -290,13 +312,15 @@ export class CategoriesService {
     // computes the provider count, so there is no field for a later change to
     // forget to strip.
     if (!includeInactive) {
-      return this.prisma.serviceCategory.findMany({
+      const publicCategories = await this.prisma.serviceCategory.findMany({
         ...query,
         include: {
           parent: { select: { id: true, name: true, slug: true } },
           _count: { select: publicCategoryCounts },
         },
       });
+
+      return publicCategories.map(withoutOperatorColumns);
     }
 
     const categories = await this.prisma.serviceCategory.findMany({
@@ -404,7 +428,10 @@ export class CategoriesService {
       throw new NotFoundException('Category not found');
     }
 
-    return { ...category, questions: serializeQuestions(category.questions) };
+    return withoutOperatorColumns({
+      ...category,
+      questions: serializeQuestions(category.questions),
+    });
   }
 
   /**
