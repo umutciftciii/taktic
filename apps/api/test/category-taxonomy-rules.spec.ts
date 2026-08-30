@@ -77,10 +77,15 @@ describe('category access matrix', () => {
     expect(canReceiveRequests({ kind: LEAF, status: DRAFT }, true)).toBe(true);
   });
 
-  it('lets a provider select nothing but an ACTIVE leaf', () => {
+  it('lets a provider select nothing but an ACTIVE leaf while enrollment is closed', () => {
     for (const kind of ALL_KINDS) {
       for (const status of ALL_STATUSES) {
-        expect(canBeSelectedByProviders({ kind, status })).toBe(kind === LEAF && status === ACTIVE);
+        // A live service is selectable whatever the enrollment column says; a
+        // draft only once an operator opens it. The full matrix lives in
+        // category-supply-status.spec.ts.
+        expect(canBeSelectedByProviders({ kind, status, providerEnrollmentOpen: false })).toBe(
+          kind === LEAF && status === ACTIVE,
+        );
       }
     }
   });
@@ -97,7 +102,14 @@ describe('category access matrix', () => {
     // The one place the operator's reach is wider than a provider's, stated as
     // the difference between the two rules rather than as a second matrix.
     expect(canBeAssignedByAdmin({ kind: LEAF, status: DRAFT })).toBe(true);
-    expect(canBeSelectedByProviders({ kind: LEAF, status: DRAFT })).toBe(false);
+    expect(
+      canBeSelectedByProviders({ kind: LEAF, status: DRAFT, providerEnrollmentOpen: false }),
+    ).toBe(false);
+    // The operator's reach is wider only while the draft is closed. Opening it
+    // is what lets a business reach the same category on its own.
+    expect(
+      canBeSelectedByProviders({ kind: LEAF, status: DRAFT, providerEnrollmentOpen: true }),
+    ).toBe(true);
   });
 
   it('counts every binding as live supply except a draft one', () => {

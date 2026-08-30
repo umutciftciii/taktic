@@ -1,4 +1,4 @@
-import { ServiceCategoryKind, ServiceCategoryStatus } from '@prisma/client';
+import { Prisma, ServiceCategoryKind, ServiceCategoryStatus } from '@prisma/client';
 
 /**
  * The rules that turn a category's `kind` and `status` into permissions — in
@@ -6,9 +6,9 @@ import { ServiceCategoryKind, ServiceCategoryStatus } from '@prisma/client';
  * the router walk and provider onboarding cannot drift into three slightly
  * different answers to "may this category be used".
  *
- * Nothing here touches Prisma. Every function takes the two columns it reads
- * and nothing else, which is what lets the whole matrix be tested without a
- * database.
+ * Nothing here runs a query. The functions take the columns they read and
+ * nothing else, and the one Prisma value below is a plain `where` object — so
+ * the whole matrix, that fragment included, is tested without a database.
  */
 
 /** The smallest shape any rule below needs. */
@@ -92,17 +92,69 @@ export function canReceiveRequests(category: CategoryTaxonomyFacts, isAdmin: boo
   return isLeafCategory(category) && canEnterFlow(category, isAdmin);
 }
 
+/** The columns an enrollment decision reads. */
+export type CategoryEnrollmentFacts = CategoryTaxonomyFacts & {
+  providerEnrollmentOpen: boolean;
+};
+
 /**
- * Whether a provider may newly select this category.
+ * Whether a provider may put this category in their own service list.
  *
- * ACTIVE leaves only, whoever is asking. A DRAFT category is not a service the
- * marketplace sells yet, and an INACTIVE one is one it has stopped selling —
- * neither is something to put in a provider's list. Providers already attached
- * to a category that later leaves ACTIVE keep the row: the past is readable,
- * and only *new* selections are refused.
+ * An ACTIVE leaf is always open, and the stored column cannot close it. That is
+ * not an oversight: provider selection is what every profile save and every new
+ * application writes, so a checkbox able to close a live category would be one
+ * misclick away from refusing saves nobody could explain. Closing a service is
+ * done by closing the service — INACTIVE — which this rule already refuses.
+ *
+ * A DRAFT leaf is open only when an operator has opened it, and that is the
+ * whole point of the column. It is how a business that signs itself up can join
+ * a service the marketplace has not put in front of customers yet — the
+ * repairer whose trade is in the next wave — without every unfinished draft
+ * quietly collecting applications.
+ *
+ * GROUP is a folder and ROUTER is a question; neither describes work anybody
+ * performs. INACTIVE is a service the marketplace has stopped selling. None of
+ * the three is ever selectable, whatever the column says.
+ *
+ * Providers already attached to a category that later leaves this set keep the
+ * row: the past is readable, and only *new* selections are refused.
  */
-export function canBeSelectedByProviders(category: CategoryTaxonomyFacts): boolean {
-  return isPubliclyListable(category);
+export function isProviderEnrollmentOpen(category: CategoryEnrollmentFacts): boolean {
+  if (!isLeafCategory(category)) {
+    return false;
+  }
+
+  if (category.status === ServiceCategoryStatus.ACTIVE) {
+    return true;
+  }
+
+  return category.status === ServiceCategoryStatus.DRAFT && category.providerEnrollmentOpen;
+}
+
+/**
+ * The same rule, as a Prisma filter.
+ *
+ * It exists so the enrollment catalogue and the selection gate cannot describe
+ * two different sets. A filter that admits one row the predicate refuses is a
+ * picker offering a category the API rejects; one that admits one fewer is a
+ * category a provider may select and can never find. The unit test asserts the
+ * two against each other for exactly that reason.
+ */
+export const providerEnrollmentCategoryWhere: Prisma.ServiceCategoryWhereInput = {
+  kind: ServiceCategoryKind.LEAF,
+  OR: [
+    { status: ServiceCategoryStatus.ACTIVE },
+    { status: ServiceCategoryStatus.DRAFT, providerEnrollmentOpen: true },
+  ],
+};
+
+/**
+ * Whether a provider may newly select this category — one name for the rule the
+ * application form and the profile form are both held to. See
+ * {@link isProviderEnrollmentOpen} for why it says what it says.
+ */
+export function canBeSelectedByProviders(category: CategoryEnrollmentFacts): boolean {
+  return isProviderEnrollmentOpen(category);
 }
 
 /**

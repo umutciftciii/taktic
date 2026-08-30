@@ -1302,7 +1302,7 @@ export class ProvidersService {
   private async ensureActiveCategories(categoryIds: string[]) {
     const categories = await this.prisma.serviceCategory.findMany({
       where: { id: { in: categoryIds } },
-      select: { id: true, kind: true, status: true },
+      select: { id: true, kind: true, status: true, providerEnrollmentOpen: true },
     });
 
     if (categories.length !== categoryIds.length) {
