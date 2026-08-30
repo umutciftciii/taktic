@@ -16,6 +16,7 @@ import {
   OfferStatus,
   Prisma,
   ProviderStatus,
+  ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestStatus,
   UserRole,
@@ -36,6 +37,8 @@ import { AuthUser } from '../auth/auth.types';
 import {
   canBeAssignedByAdmin,
   canBeSelectedByProviders,
+  isProviderEnrollmentOpen,
+  providerEnrollmentCategoryWhere,
   isLiveProviderBinding,
 } from '../categories/category-taxonomy';
 import { resolveArea, resolveLocation } from '../locations/turkey-locations';
@@ -737,11 +740,14 @@ export class ProvidersService {
       // would find out from a readiness count that quietly went back to zero.
       //
       // Nothing recreated below can collide with a surviving row:
-      // normalizeAndValidatePayload refuses a DRAFT id whoever is asking.
+      // Replace exactly what the provider can manage. A draft they signed
+      // themselves up for is on their form, so a save must be able to drop it;
+      // a draft an operator bound them to behind a closed enrollment is not on
+      // their form, so a save must not be able to lose it.
       await tx.providerServiceCategory.deleteMany({
         where: {
           providerId: id,
-          category: { status: { not: ServiceCategoryStatus.DRAFT } },
+          category: providerEnrollmentCategoryWhere,
         },
       });
       await tx.providerServiceArea.deleteMany({ where: { providerId: id } });
@@ -1290,19 +1296,20 @@ export class ProvidersService {
   }
 
   /**
-   * A provider may only newly select a category the marketplace actually sells:
-   * an ACTIVE leaf.
+   * A provider may only newly select a category enrollment is open on: a live
+   * service, or a draft an operator has opened to applications. See
+   * isProviderEnrollmentOpen.
    *
    * Kind matters as much as status. A GROUP is a folder and a ROUTER is a
    * question — neither describes work anybody performs, so neither may end up
    * in a provider's service list, where it would silently never match a
-   * request. Providers already attached to a category that later leaves ACTIVE
-   * keep their row; only new selections are refused.
+   * request. Providers already attached to a category that later closes keep
+   * their row; only new selections are refused.
    */
   private async ensureActiveCategories(categoryIds: string[]) {
     const categories = await this.prisma.serviceCategory.findMany({
       where: { id: { in: categoryIds } },
-      select: { id: true, kind: true, status: true },
+      select: { id: true, kind: true, status: true, providerEnrollmentOpen: true },
     });
 
     if (categories.length !== categoryIds.length) {
@@ -1440,12 +1447,18 @@ const providerInclude = {
   serviceCategories: {
     include: {
       category: {
-        // kind and status travel with every binding because the operator's
-        // screens are the only place a DRAFT binding is legible, and "which of
-        // these is not released yet" is the question that screen answers.
-        // Every non-admin projection narrows this back down — see
-        // visibleServiceCategories.
-        select: { id: true, name: true, slug: true, kind: true, status: true },
+        // kind, status and the enrollment switch travel with every binding
+        // because they are what decides which of the two lists a binding lands
+        // in — see visibleServiceCategories and upcomingServiceCategories.
+        // Every non-admin projection narrows this back down.
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          kind: true,
+          status: true,
+          providerEnrollmentOpen: true,
+        },
       },
     },
     orderBy: { createdAt: 'asc' },
@@ -1472,7 +1485,14 @@ const providerInclude = {
  */
 type ProviderCategoryBinding = {
   id: string;
-  category: { id: string; name: string; slug: string; status: ServiceCategoryStatus };
+  category: {
+    id: string;
+    name: string;
+    slug: string;
+    kind: ServiceCategoryKind;
+    status: ServiceCategoryStatus;
+    providerEnrollmentOpen: boolean;
+  };
 };
 
 function visibleServiceCategories(
@@ -1490,13 +1510,60 @@ function visibleServiceCategories(
     }));
 }
 
-/** The same narrowing, over a whole provider record. */
+/**
+ * The DRAFT half of the same bindings, in the same narrowed shape.
+ *
+ * Its own list rather than a flag on the one above, and that separation is the
+ * contract: everything downstream — matching, offering, e-mail — reads
+ * `serviceCategories`, and a draft appearing there would put a provider in
+ * front of requests for a service that takes none. This list is read by a panel
+ * and by nothing else.
+ *
+ * It exists because a provider can now make this binding themselves. Before,
+ * only an operator could, so hiding it cost the provider nothing; now a
+ * category that vanished the moment it was chosen would read as a bug rather
+ * than as a release process.
+ *
+ * Which is exactly why it is bounded by enrollment rather than by DRAFT alone.
+ * A draft an operator opened is one this provider could have chosen and can
+ * already see on their own application form — naming it back to them discloses
+ * nothing. A draft still closed to applications is the unreleased catalogue:
+ * the operator bound them to it while preparing a service nobody has announced,
+ * and it stays as invisible to them as it was before any of this.
+ */
+function upcomingServiceCategories(
+  bindings: readonly ProviderCategoryBinding[],
+): Array<{ id: string; category: { id: string; name: string; slug: string } }> {
+  return bindings
+    .filter(
+      (binding) =>
+        !isLiveProviderBinding(binding.category) && isProviderEnrollmentOpen(binding.category),
+    )
+    .map((binding) => ({
+      id: binding.id,
+      category: {
+        id: binding.category.id,
+        name: binding.category.name,
+        slug: binding.category.slug,
+      },
+    }));
+}
+
+/**
+ * The same narrowing, over a whole provider record, plus the drafts in their
+ * own list.
+ *
+ * Used for the owner and the operator, and never for the public shape — which
+ * toPublicProvider builds as its own allow-list and which carries no draft at
+ * all.
+ */
 function withVisibleServiceCategories<
   T extends { serviceCategories: readonly ProviderCategoryBinding[] },
 >(provider: T) {
   return {
     ...provider,
     serviceCategories: visibleServiceCategories(provider.serviceCategories),
+    upcomingServiceCategories: upcomingServiceCategories(provider.serviceCategories),
   };
 }
 

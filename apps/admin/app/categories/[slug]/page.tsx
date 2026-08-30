@@ -32,7 +32,10 @@ import {
   RELEASE_BLOCKER_LABELS,
   releaseBlockers,
   STATUS_HINTS,
+  enrollmentSentence,
   STATUS_LABELS,
+  SUPPLY_STATUS_LABELS,
+  supplyStatusBadgeClass,
   statusBadgeClass,
 } from '../category-taxonomy';
 
@@ -140,6 +143,18 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
         )}
         <span className="meta-pill">{questions.length} soru</span>
         <span className="meta-pill">sıra {category.sortOrder}</span>
+        {/*
+          The supply reading, beside the publishing one and never instead of it.
+          A LIVE service says "Yayında" in both, which is the point: a released
+          category has an answer to "is it published" and the supply question is
+          then somebody else's — the release checklist below still says whether
+          anybody stands behind it.
+        */}
+        {category.supplyStatus ? (
+          <span className={supplyStatusBadgeClass(category.supplyStatus)} data-testid="supply-status">
+            {SUPPLY_STATUS_LABELS[category.supplyStatus]}
+          </span>
+        ) : null}
       </div>
 
       <div className="admin-module-layout">
@@ -203,6 +218,35 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 <label className="field field-3">
                   <span>Sıralama</span>
                   <input name="sortOrder" type="number" min="0" defaultValue={category.sortOrder} />
+                </label>
+                {/*
+                  Editable on a draft service and nowhere else. A live service is
+                  always open to applications — closing one would refuse every
+                  profile save against it — so the box is shown ticked and
+                  disabled rather than hidden, because "why can I not change
+                  this" is a question the screen should answer where it is asked.
+                */}
+                <label className="field field-6">
+                  <span>Hizmet veren başvurusu</span>
+                  <input
+                    name="providerEnrollmentOpen"
+                    type="checkbox"
+                    data-testid="provider-enrollment-open"
+                    defaultChecked={
+                      category.kind === 'LEAF' &&
+                      (category.status === 'ACTIVE' || category.providerEnrollmentOpen)
+                    }
+                    disabled={!(category.kind === 'LEAF' && category.status === 'DRAFT')}
+                  />
+                  <span className="help-text">
+                    {category.kind !== 'LEAF'
+                      ? 'Yalnızca hizmet tipindeki kategoriler için geçerlidir.'
+                      : category.status === 'ACTIVE'
+                        ? 'Yayındaki hizmetlerde başvuru her zaman açıktır.'
+                        : category.status === 'INACTIVE'
+                          ? 'Kapalı hizmetler başvuruya açılamaz.'
+                          : 'Açıkken hizmet verenler bu taslak hizmeti kendi profillerine ekleyebilir. Müşteri tarafı kapalı kalır.'}
+                  </span>
                 </label>
                 <label className="field field-3">
                   <span>Teklif kredisi{category.kind === 'LEAF' ? ' *' : ''}</span>
@@ -571,6 +615,29 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                         {' '}
                         · hazır sayılmaz
                       </span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Hizmet veren başvurusu</dt>
+                    <dd data-testid="enrollment-note">
+                      {/*
+                        "Nobody has applied" and "nobody may apply" look
+                        identical in the count above and are entirely different
+                        problems. This row is the one that tells them apart.
+                      */}
+                      {category.providerEnrollmentOpen ? (
+                        <span className="badge badge-good">Başvuruya açık</span>
+                      ) : (
+                        <span className="badge badge-muted">
+                          Yeni hizmet veren başvurusu kapalı
+                        </span>
+                      )}
+                      {enrollmentSentence(category) ? (
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {' '}
+                          · {enrollmentSentence(category)}
+                        </span>
+                      ) : null}
                     </dd>
                   </div>
                   <div>

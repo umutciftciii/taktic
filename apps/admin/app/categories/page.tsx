@@ -8,7 +8,10 @@ import {
   KIND_LABELS,
   RELEASE_BLOCKER_HINTS,
   RELEASE_BLOCKER_LABELS,
+  enrollmentSentence,
   releaseBlockers,
+  SUPPLY_STATUS_LABELS,
+  supplyStatusBadgeClass,
   STATUS_LABELS,
   statusBadgeClass,
   toTreeRows,
@@ -62,6 +65,12 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
     .sort((a, b) => {
       // Ready first: those are the rows somebody can act on today.
       if (a.blockers.length !== b.blockers.length) return a.blockers.length - b.blockers.length;
+      // Then the ones whose supply is already in place, so a release meeting
+      // reads the rows waiting on a decision before the ones waiting on a
+      // business to apply.
+      const rank = (entry: { category: Category }) =>
+        entry.category.supplyStatus === 'LAUNCH_READY' ? 0 : 1;
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
       return a.category.name.localeCompare(b.category.name, 'tr-TR');
     });
   const readyCount = draftReadiness.filter((entry) => entry.blockers.length === 0).length;
@@ -106,6 +115,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                   <th className="col-num">Teklif kredisi</th>
                   <th className="col-num">Onaylı hizmet veren</th>
                   <th className="col-num">Geçerli davet</th>
+                  <th>Arz durumu</th>
                   <th>Yayına hazır mı?</th>
                 </tr>
               </thead>
@@ -171,6 +181,30 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                         ) : (
                           <strong>{activeInvites}</strong>
                         )}
+                      </td>
+                      {/*
+                        The supply reading, next to the release verdict and
+                        deliberately not merged into it. A draft can have its
+                        providers and still be unreleasable for want of a price,
+                        and that is the row somebody acts on differently.
+                      */}
+                      <td data-testid={`supply-status-${category.slug}`}>
+                        {category.supplyStatus ? (
+                          <span className={supplyStatusBadgeClass(category.supplyStatus)}>
+                            {SUPPLY_STATUS_LABELS[category.supplyStatus]}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                        {enrollmentSentence(category) ? (
+                          <div
+                            className="muted"
+                            data-testid={`enrollment-note-${category.slug}`}
+                            style={{ fontSize: 12 }}
+                          >
+                            {enrollmentSentence(category)}
+                          </div>
+                        ) : null}
                       </td>
                       <td>
                         {blockers.length === 0 ? (

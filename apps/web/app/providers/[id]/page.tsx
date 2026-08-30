@@ -129,6 +129,34 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
               )}
             </div>
 
+            {/*
+              The services this provider joined before the marketplace released
+              them. Its own block rather than a badge in the list above, because
+              the two behave differently: one brings requests today and the other
+              brings none at all, and a chip that looked the same would read as
+              "no requests yet" instead of "not open yet".
+
+              One sentence and no numbers. How many businesses stand behind an
+              unreleased service, and how close it is to launching, is the
+              operator's panel — nothing about a provider joining one makes that
+              figure theirs.
+            */}
+            {(provider.upcomingServiceCategories ?? []).length > 0 ? (
+              <>
+                <h2 style={{ marginTop: 8 }}>Yakında açılacak hizmetlerim</h2>
+                <div className="pdash-chip-list" data-testid="upcoming-service-categories">
+                  {provider.upcomingServiceCategories!.map((item) => (
+                    <span className="tag tag-neutral" key={item.id}>
+                      {item.category.name}
+                    </span>
+                  ))}
+                </div>
+                <span className="pdash-card-sub">
+                  Yakında açılacak — henüz talep alamaz.
+                </span>
+              </>
+            ) : null}
+
             <h2 style={{ marginTop: 8 }}>Hizmet bölgeleri</h2>
             <div className="pdash-chip-list">
               {provider.serviceAreas.length === 0 ? (
@@ -197,6 +225,10 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
               <div className="metric-cell" style={{ padding: 16 }}>
                 <span className="metric-label">Kategori</span>
                 <span className="metric-value" style={{ fontSize: 24 }}>
+                  {/*
+                    Live categories only. An unreleased one brings no request, so
+                    counting it here would promise matches that cannot come.
+                  */}
                   {provider.serviceCategories.length}
                 </span>
               </div>

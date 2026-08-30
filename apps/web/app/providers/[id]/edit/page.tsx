@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
-  Category,
+  ProviderEnrollmentCategory,
   fetchOrNotFound,
   getCurrentUser,
   ProviderProfile,
@@ -26,7 +26,9 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
 
   const [provider, categories, creditBalance, provinces] = await Promise.all([
     fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
-    apiFetch<Category[]>('/categories'),
+    // The same enrollment catalogue the application form uses, so a provider
+    // edits their scope within exactly the vocabulary they applied in.
+    apiFetch<ProviderEnrollmentCategory[]>('/categories/provider-enrollment'),
     readCreditBalance(id),
     // The same canonical list the application form offers and the API validates
     // against, so an existing profile is edited within the same vocabulary.
@@ -41,7 +43,13 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
   // Only a claimed application carries a vouched-for address, and only that
   // address is frozen — see ensureContactEmailStable on the API side.
   const emailLocked = Boolean(provider.claimedAt);
-  const selectedCategoryIds = new Set(provider.serviceCategories.map((item) => item.category.id));
+  // Both lists, because this form replaces the whole selection. A draft the
+  // provider signed up for lives in `upcomingServiceCategories` — leaving it
+  // unticked here would drop it on the next save without anybody asking for it.
+  const selectedCategoryIds = new Set([
+    ...provider.serviceCategories.map((item) => item.category.id),
+    ...(provider.upcomingServiceCategories ?? []).map((item) => item.category.id),
+  ]);
   const firstArea = provider.serviceAreas[0];
 
   return (
@@ -151,6 +159,9 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
                   defaultChecked={selectedCategoryIds.has(category.id)}
                 />
                 <span>{category.name}</span>
+                {category.availability === 'UPCOMING' ? (
+                  <span className="check-chip-note">Yakında açılacak</span>
+                ) : null}
               </label>
             ))}
           </div>

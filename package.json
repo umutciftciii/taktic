@@ -20,6 +20,7 @@
     "db:seed": "prisma db seed",
     "db:import:categories": "tsx prisma/import-draft-categories.ts",
     "db:import:categories:wave-2": "tsx prisma/import-draft-categories-wave-2.ts",
+    "db:open-provider-enrollment:wave-1-2": "tsx prisma/open-provider-enrollment-wave-1-2.ts",
     "db:studio": "prisma studio"
   },
   "devDependencies": {

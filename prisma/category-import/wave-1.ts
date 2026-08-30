@@ -154,6 +154,10 @@ const cleaning: CategoryDefinition[] = [
     description:
       'Ofis, dükkan ve ortak alanlar için tek seferlik ya da periyodik temizlik.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'temizlik-ve-hijyen',
     offerCreditCost: 3,
@@ -247,6 +251,10 @@ const cleaning: CategoryDefinition[] = [
     description:
       'Tadilat veya inşaat bitiminde toz, boya ve yapıştırıcı kalıntısının temizlenmesi.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'temizlik-ve-hijyen',
     offerCreditCost: 3,
@@ -316,6 +324,10 @@ const cleaning: CategoryDefinition[] = [
     name: 'Yerinde Döşeme Yıkama',
     description: 'Koltuk, kanepe, sandalye ve yatağın adreste makineyle yıkanması.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'temizlik-ve-hijyen',
     offerCreditCost: 2,
@@ -414,6 +426,10 @@ const cleaning: CategoryDefinition[] = [
     name: 'Boş Daire Temizliği',
     description: 'Taşınma öncesi veya sonrası, eşyasız konutun detaylı temizliği.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'temizlik-ve-hijyen',
     offerCreditCost: 2,
@@ -471,6 +487,10 @@ const moving: CategoryDefinition[] = [
     name: 'Evden Eve Taşıma',
     description: 'Paketleme, yükleme, nakil ve yerleştirme dahil konut taşıma.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tasinma-ve-lojistik',
     offerCreditCost: 5,
@@ -535,6 +555,10 @@ const moving: CategoryDefinition[] = [
     name: 'İşyeri Taşıma',
     description: 'Ofis mobilyası, arşiv ve teknik ekipmanın kurumsal nakli.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tasinma-ve-lojistik',
     offerCreditCost: 5,
@@ -595,6 +619,10 @@ const moving: CategoryDefinition[] = [
     name: 'Eşya Depolama',
     description: 'Süreli veya süresiz eşya saklama ve depo alanı.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tasinma-ve-lojistik',
     offerCreditCost: 3,
@@ -662,6 +690,10 @@ const moving: CategoryDefinition[] = [
     name: 'Asansörlü Taşıma',
     description: 'Dış cephe mobil asansörüyle yüksek katlara eşya indirme ve çıkarma.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tasinma-ve-lojistik',
     offerCreditCost: 4,
@@ -724,6 +756,10 @@ const moving: CategoryDefinition[] = [
     name: 'Hamaliye Hizmeti',
     description: 'Yalnızca yükleme, boşaltma ve taşıma iş gücü.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tasinma-ve-lojistik',
     offerCreditCost: 2,
@@ -844,6 +880,10 @@ const renovation: CategoryDefinition[] = [
     name: 'Banyo Yenileme',
     description: 'Seramik, tesisat, vitrifiye ve dolap işlerini kapsayan banyo tadilatı.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tadilat-ve-yenileme',
     offerCreditCost: 6,
@@ -925,6 +965,10 @@ const renovation: CategoryDefinition[] = [
     name: 'Asma Tavan Uygulaması',
     description: 'Alçıpan asma tavan tasarımı ve montajı.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tadilat-ve-yenileme',
     offerCreditCost: 4,
@@ -994,6 +1038,10 @@ const renovation: CategoryDefinition[] = [
     name: 'Banyo Seramik Kaplama',
     description: 'Banyo duvar ve zemininin fayans veya seramikle kaplanması.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'tadilat-ve-yenileme',
     offerCreditCost: 4,
@@ -1070,6 +1118,10 @@ const appliances: CategoryDefinition[] = [
     name: 'Çamaşır Makinesi Onarımı',
     description: 'Çamaşır makinesi arıza tespiti, parça değişimi ve bakımı.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'beyaz-esya-teknik-servis',
     offerCreditCost: 2,
@@ -1122,6 +1174,10 @@ const appliances: CategoryDefinition[] = [
     name: 'Bulaşık Makinesi Onarımı',
     description: 'Bulaşık makinesi arıza tespiti ve onarımı.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'beyaz-esya-teknik-servis',
     offerCreditCost: 2,
@@ -1177,6 +1233,10 @@ const installation: CategoryDefinition[] = [
     name: 'Güvenlik Kamerası Kurulumu',
     description: 'Kamera, kayıt cihazı ve kablolamanın kurulumu.',
     kind: ServiceCategoryKind.LEAF,
+    // Open to applications from the day it lands: this wave exists to be
+    // staffed before it is released, and a draft nobody may apply to
+    // collects nobody. Groups and routers stay closed — neither is work.
+    providerEnrollmentOpen: true,
     status: ServiceCategoryStatus.DRAFT,
     parentSlug: 'yapi-ve-montaj',
     offerCreditCost: 3,

@@ -23,12 +23,21 @@ import {
   isGroupCategory,
   isPubliclyReachable,
   isRouterCategory,
+  providerEnrollmentCategoryWhere,
 } from './category-taxonomy';
 import {
   normalizeCategoryIconKey,
   normalizeCategoryImageUrl,
 } from './category-visuals';
-import { questionWithRulesInclude, serializeQuestion } from './category-serialization';
+import {
+  resolveCategorySupplyStatus,
+  type CategorySupplyStatus,
+} from './category-supply-status';
+import {
+  questionWithRulesInclude,
+  serializeQuestion,
+  type QuestionWithRules,
+} from './category-serialization';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { ResolveRoutingDto } from './dto/resolve-routing.dto';
 import { resolveRequestedStatus } from './dto/update-category-status.dto';
@@ -121,6 +130,39 @@ function operatorCategoryCounts(
   };
 }
 
+/** The shape the supply status is derived from, as the operator queries return it. */
+type CategoryWithOperatorCounts = {
+  kind: ServiceCategoryKind;
+  status: ServiceCategoryStatus;
+  offerCreditCost: number | null;
+  _count: { providers: number };
+};
+
+/**
+ * Attaches the derived status to a row on its way out.
+ *
+ * Computed here rather than left to the admin app: the figure is what somebody
+ * releases a service on, and two clients doing the same arithmetic is two
+ * chances to do it differently. A client renders a label for a value it is
+ * given.
+ *
+ * Only ever applied to the operator's query, because only that query computes
+ * the approved-provider count the status is derived from.
+ */
+function withSupplyStatus<T extends CategoryWithOperatorCounts>(
+  category: T,
+): T & { supplyStatus: CategorySupplyStatus | null } {
+  return {
+    ...category,
+    supplyStatus: resolveCategorySupplyStatus({
+      kind: category.kind,
+      status: category.status,
+      offerCreditCost: category.offerCreditCost,
+      approvedProviderCount: category._count.providers,
+    }),
+  };
+}
+
 export type RouterSelection = {
   questionKey: string;
   optionKey: string;
@@ -148,6 +190,57 @@ export type RoutingResolution = {
    * selections — i.e. "ask this next", not an error.
    */
   pendingRouterQuestionKey: string | null;
+};
+
+/**
+ * `providerEnrollmentOpen` may only be written onto a DRAFT leaf.
+ *
+ * Judged against the category the write produces rather than the one that was
+ * there, because the same PATCH may be changing `kind` or `status` too, and the
+ * rule belongs to the row being stored.
+ *
+ * A refusal rather than a silent drop: an operator who thinks they opened a
+ * service to applications and did not is exactly the state the switch exists to
+ * prevent, and an ignored field is how they would come to think it.
+ */
+function assertEnrollmentFieldIsWritable(
+  requested: boolean | undefined,
+  resulting: { kind: ServiceCategoryKind; status: ServiceCategoryStatus },
+) {
+  if (requested === undefined) {
+    return;
+  }
+
+  if (resulting.kind !== ServiceCategoryKind.LEAF) {
+    throw new BadRequestException(
+      'Hizmet veren başvurusu yalnızca hizmet tipindeki kategorilerde ayarlanabilir.',
+    );
+  }
+
+  if (resulting.status !== ServiceCategoryStatus.DRAFT) {
+    throw new BadRequestException(
+      'Hizmet veren başvurusu yalnızca taslak hizmetlerde ayarlanabilir. Yayındaki hizmetler her zaman başvuruya açıktır.',
+    );
+  }
+}
+
+/**
+ * A service as the application form needs to render it, and not one field more.
+ *
+ * `availability` is a vocabulary of its own rather than the supply status: it
+ * answers "can this take a request today", which is all an applicant is owed.
+ * The operator's four-state figure would tell a stranger how many businesses
+ * stand behind an unreleased service, and that is an operational number with no
+ * reader outside the admin panel.
+ */
+export type ProviderEnrollmentCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  iconKey: string | null;
+  imageUrl: string | null;
+  parent: { id: string; name: string; slug: string } | null;
+  availability: 'LIVE' | 'UPCOMING';
 };
 
 @Injectable()
@@ -206,13 +299,57 @@ export class CategoriesService {
       });
     }
 
-    return this.prisma.serviceCategory.findMany({
+    const categories = await this.prisma.serviceCategory.findMany({
       ...query,
       include: {
         parent: { select: { id: true, name: true, slug: true } },
         _count: { select: operatorCategoryCounts() },
       },
     });
+
+    return categories.map(withSupplyStatus);
+  }
+
+  /**
+   * The catalogue a business signs itself up against.
+   *
+   * Deliberately reachable signed out. The whole problem this solves is the
+   * repairer who finds the marketplace, opens the application form and cannot
+   * tick the one service they actually do because it has not been released yet
+   * — and that form is reachable without an account by design, since the claim
+   * link mailed to the applicant is what hands the application back to them.
+   *
+   * What that discloses is the name of a draft service an operator has
+   * explicitly opened to applications, which is what recruiting for one means.
+   * `providerEnrollmentOpen` starts false, so nothing appears here until
+   * somebody decides it should.
+   *
+   * The filter is the shared one, so this list and the selection gate cannot
+   * describe two different sets: a category offered here and refused on submit
+   * is a dead end with no error the applicant could act on.
+   */
+  async listProviderEnrollmentCategories(): Promise<ProviderEnrollmentCategory[]> {
+    const categories = await this.prisma.serviceCategory.findMany({
+      where: providerEnrollmentCategoryWhere,
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      // A select rather than a narrowing afterwards: the columns this response
+      // must never carry are then never loaded, so there is no field for a
+      // later edit to forget to strip.
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        iconKey: true,
+        imageUrl: true,
+        status: true,
+        parent: { select: { id: true, name: true, slug: true } },
+      },
+    });
+
+    return categories.map(({ status, ...category }) => ({
+      ...category,
+      availability: status === ServiceCategoryStatus.ACTIVE ? 'LIVE' : 'UPCOMING',
+    }));
   }
 
   async getCategoryBySlug(slug: string, options: CategoryViewOptions) {
@@ -227,17 +364,34 @@ export class CategoriesService {
       },
     } satisfies Prisma.ServiceCategoryInclude;
 
-    // Same split as the listing: the release figures are part of the operator's
-    // view of a category and of no other.
-    const category = includeInactive
-      ? await this.prisma.serviceCategory.findUnique({
-          where: { slug },
-          include: { ...include, _count: { select: operatorCategoryCounts() } },
-        })
-      : await this.prisma.serviceCategory.findUnique({
-          where: { slug },
-          include: { ...include, _count: { select: { children: true } } },
-        });
+    // `includeInactive` is the admin path, and the only one that may see where
+    // a router leads.
+    const serializeQuestions = (questions: QuestionWithRules[]) =>
+      questions.map((question) =>
+        serializeQuestion(question, { exposeRouterTargets: includeInactive }),
+      );
+
+    // Two shapes rather than one narrowed afterwards, for the same reason the
+    // listing splits: the public response never computes the approved-provider
+    // count, so there is no figure for a later change to forget to strip — and
+    // no status derived from one.
+    if (includeInactive) {
+      const category = await this.prisma.serviceCategory.findUnique({
+        where: { slug },
+        include: { ...include, _count: { select: operatorCategoryCounts() } },
+      });
+
+      if (!category) {
+        throw new NotFoundException('Category not found');
+      }
+
+      return withSupplyStatus({ ...category, questions: serializeQuestions(category.questions) });
+    }
+
+    const category = await this.prisma.serviceCategory.findUnique({
+      where: { slug },
+      include: { ...include, _count: { select: { children: true } } },
+    });
 
     if (!category) {
       throw new NotFoundException('Category not found');
@@ -246,18 +400,11 @@ export class CategoriesService {
     // A category the public may not reach is indistinguishable from one that
     // does not exist — a 403 would confirm the slug of an unreleased service to
     // anybody who guessed it.
-    if (!includeInactive && !isPubliclyReachable(category)) {
+    if (!isPubliclyReachable(category)) {
       throw new NotFoundException('Category not found');
     }
 
-    return {
-      ...category,
-      // `includeInactive` is the admin path, and the only one that may see
-      // where a router leads.
-      questions: category.questions.map((question) =>
-        serializeQuestion(question, { exposeRouterTargets: includeInactive }),
-      ),
-    };
+    return { ...category, questions: serializeQuestions(category.questions) };
   }
 
   /**
@@ -476,6 +623,9 @@ export class CategoriesService {
     // `isActive` is the pre-taxonomy spelling of the same switch; ACTIVE is
     // what a payload that mentions neither has always meant.
     const status = resolveRequestedStatus(dto) ?? ServiceCategoryStatus.ACTIVE;
+    const kind = dto.kind ?? ServiceCategoryKind.LEAF;
+
+    assertEnrollmentFieldIsWritable(dto.providerEnrollmentOpen, { kind, status });
 
     try {
       return await this.prisma.serviceCategory.create({
@@ -485,8 +635,11 @@ export class CategoriesService {
           description: normalizeNullableString(dto.description),
           offerCreditCost: dto.offerCreditCost,
           parentId,
-          kind: dto.kind ?? ServiceCategoryKind.LEAF,
+          kind,
           status,
+          // Absent means closed, which is the column default and the safe one:
+          // a category nobody has opened recruits nobody.
+          providerEnrollmentOpen: dto.providerEnrollmentOpen ?? false,
           // Written together, never one without the other: see
           // ServiceCategoryStatus in the schema.
           isActive: isActiveFor(status),
@@ -526,6 +679,11 @@ export class CategoriesService {
 
     const status = resolveRequestedStatus(dto);
 
+    assertEnrollmentFieldIsWritable(dto.providerEnrollmentOpen, {
+      kind: dto.kind ?? existing.kind,
+      status: status ?? existing.status,
+    });
+
     try {
       return await this.prisma.serviceCategory.update({
         where: { id },
@@ -546,6 +704,9 @@ export class CategoriesService {
           ...(imageUrl !== undefined ? { imageUrl } : {}),
           ...(coverImageUrl !== undefined ? { coverImageUrl } : {}),
           ...(iconKey !== undefined ? { iconKey } : {}),
+          ...(dto.providerEnrollmentOpen !== undefined
+            ? { providerEnrollmentOpen: dto.providerEnrollmentOpen }
+            : {}),
           ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         },
       });

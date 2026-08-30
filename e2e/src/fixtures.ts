@@ -299,6 +299,8 @@ export async function createCategory(
     kind?: CategoryKind;
     status?: CategoryStatus;
     namePrefix?: string;
+    /** Defaults to false, exactly as the column does. */
+    providerEnrollmentOpen?: boolean;
   } = {},
 ): Promise<SeededCategory> {
   const suffix = uniqueSuffix();
@@ -317,6 +319,7 @@ export async function createCategory(
       isActive: status === 'ACTIVE',
       sortOrder: 0,
       offerCreditCost,
+      providerEnrollmentOpen: options.providerEnrollmentOpen ?? false,
     },
     select: { id: true, name: true, slug: true },
   });

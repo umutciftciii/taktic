@@ -90,6 +90,22 @@ export class CategoriesController {
     };
   }
 
+  /**
+   * The services a business may sign itself up for.
+   *
+   * Unauthenticated on purpose: the application form is reachable without an
+   * account, and this is the list it renders. See
+   * CategoriesService.listProviderEnrollmentCategories for what that discloses
+   * and why the projection is as narrow as it is.
+   *
+   * Declared above `:slug` because Nest matches routes in declaration order,
+   * and `:slug` would otherwise swallow this path.
+   */
+  @Get('provider-enrollment')
+  listProviderEnrollmentCategories() {
+    return this.categoriesService.listProviderEnrollmentCategories();
+  }
+
   /** Same two views, same gate, one category. */
   @Get(':slug')
   @UseGuards(OptionalAuthGuard)

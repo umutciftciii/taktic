@@ -160,6 +160,24 @@ export type CustomerServiceRequest = {
 
 export type ProviderStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
 
+/**
+ * A service as the application form offers it.
+ *
+ * Narrower than `Category` on purpose, and served by its own endpoint: it says
+ * what a business needs to pick a service and nothing about how ready that
+ * service is, which is the operator's question and stays on their panel.
+ */
+export type ProviderEnrollmentCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  iconKey: string | null;
+  imageUrl: string | null;
+  parent: { id: string; name: string; slug: string } | null;
+  /** LIVE takes requests today; UPCOMING has not been released yet. */
+  availability: 'LIVE' | 'UPCOMING';
+};
+
 export type ProviderServiceCategory = {
   id: string;
   category: {
@@ -209,6 +227,12 @@ export type ProviderProfile = {
     role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
   } | null;
   serviceCategories: ProviderServiceCategory[];
+  /**
+   * Unreleased services this provider has joined — present on their own view
+   * and the operator's, and on nobody else's. Absent from the public shape
+   * entirely, which is why it is optional here.
+   */
+  upcomingServiceCategories?: ProviderServiceCategory[];
   serviceAreas: ProviderServiceArea[];
 };
 

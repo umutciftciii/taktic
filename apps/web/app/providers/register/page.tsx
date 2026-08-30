@@ -1,6 +1,11 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { apiFetch, Category, getCurrentUser, ProviderDashboard } from '../../../lib/api';
+import {
+  apiFetch,
+  getCurrentUser,
+  ProviderDashboard,
+  ProviderEnrollmentCategory,
+} from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { ProviderApplicationFields } from '../provider-application-fields';
 import { CategoryVisual } from '../../category-visual';
@@ -30,7 +35,11 @@ const APPROVAL_STEPS = [
 export default async function ProviderApplyPage({ searchParams }: ProviderRegisterPageProps) {
   const [{ error }, categories, user, provinces] = await Promise.all([
     searchParams,
-    apiFetch<Category[]>('/categories'),
+    // The enrollment catalogue, not the customer one. It carries the services
+    // an operator has opened to applications — including ones the marketplace
+    // has not released yet, which is the whole reason a repairer whose trade is
+    // in the next wave can apply at all.
+    apiFetch<ProviderEnrollmentCategory[]>('/categories/provider-enrollment'),
     getCurrentUser(),
     // The canonical province/district list, from the same API that validates
     // the submitted application.
@@ -142,6 +151,15 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
                         <label className="check-chip" key={category.id}>
                           <input name="categoryIds" type="checkbox" value={category.id} />
                           <span>{category.name}</span>
+                          {/*
+                            Said on the chip rather than in a footnote: a business
+                            ticking a service that cannot take a request yet has to
+                            know that before they submit, not afterwards while they
+                            wonder why nothing arrives.
+                          */}
+                          {category.availability === 'UPCOMING' ? (
+                            <span className="check-chip-note">Yakında açılacak</span>
+                          ) : null}
                         </label>
                       ))}
                     </div>

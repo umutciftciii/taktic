@@ -39,6 +39,15 @@ export type CategoryKind = 'GROUP' | 'LEAF' | 'ROUTER';
  */
 export type CategoryStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE';
 
+/**
+ * How far an unreleased service has got towards being one.
+ *
+ * Derived by the API on every read from the category, its approved-provider
+ * count and its price — never stored, so it cannot go stale. `null` for groups,
+ * routers and closed categories, which the question does not apply to.
+ */
+export type CategorySupplyStatus = 'EMPTY' | 'SUPPLY_READY' | 'LAUNCH_READY' | 'LIVE';
+
 export type Category = {
   id: string;
   parentId: string | null;
@@ -59,6 +68,14 @@ export type Category = {
    * the admin list.
    */
   offerCreditCost: number | null;
+  /**
+   * Whether providers may sign themselves up for this service. Only editable on
+   * a draft: a live service is always open, and the API refuses a write that
+   * says otherwise.
+   */
+  providerEnrollmentOpen: boolean;
+  /** Present on the operator view only. See CategorySupplyStatus. */
+  supplyStatus?: CategorySupplyStatus | null;
   _count?: {
     questions: number;
     children?: number;

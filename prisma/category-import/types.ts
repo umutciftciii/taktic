@@ -74,6 +74,19 @@ export type CategoryDefinition = {
    * catalogue — or put an unfinished one on it — is not a safe thing to run.
    */
   status: ServiceCategoryStatus;
+  /**
+   * Whether the wave's services start open to provider applications.
+   *
+   * Written on creation and never rewritten, for the same reason
+   * `offerCreditCost` is not: closing a draft to applications is a decision an
+   * operator makes — a regulated service is the obvious case — and an import
+   * that reopened it on the next run would undo that decision without anybody
+   * being told.
+   *
+   * Absent means false, which is the column default and the safe one: a
+   * category nobody has opened recruits nobody.
+   */
+  providerEnrollmentOpen?: boolean;
   /** Must name a GROUP category, defined earlier in the same wave or already present. */
   parentSlug?: string;
   /**
