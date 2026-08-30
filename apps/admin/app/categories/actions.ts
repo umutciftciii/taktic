@@ -259,6 +259,7 @@ function inviteFailureMessage(error: unknown): string {
 
 function categoryPayload(formData: FormData) {
   const kind = readFormString(formData, 'kind') as CategoryKind;
+  const status = readFormString(formData, 'status') as CategoryStatus;
 
   return {
     name: readFormString(formData, 'name'),
@@ -270,7 +271,7 @@ function categoryPayload(formData: FormData) {
     // Empty means "top level"; the API refuses a parent that is not a GROUP.
     parentId: readOptionalFormString(formData, 'parentId'),
     kind,
-    status: readFormString(formData, 'status') as CategoryStatus,
+    status,
     sortOrder: readFormNumber(formData, 'sortOrder'),
     // Mandatory for a service, and only for a service. A group is a folder and
     // a router is a question — neither can ever be offered on, so neither has a
@@ -278,6 +279,17 @@ function categoryPayload(formData: FormData) {
     // so the API DTO's @IsInt/@Min(1) rejects empty, zero, negative and
     // non-numeric input rather than the value silently becoming null.
     ...(kind === 'LEAF' ? { offerCreditCost: readFormNumber(formData, 'offerCreditCost') } : {}),
+    // Only sent where the API will take it. A live service is always open to
+    // applications and refuses the field, so sending it there would turn every
+    // unrelated edit of a released category into a 400. `kind` and `status` come
+    // off this same form, so the condition is asked of the category the save
+    // produces — which is the row the API judges too.
+    //
+    // An unticked checkbox never reaches FormData at all, so the comparison
+    // below is how closing the switch is expressed.
+    ...(kind === 'LEAF' && status === 'DRAFT'
+      ? { providerEnrollmentOpen: readFormString(formData, 'providerEnrollmentOpen') === 'on' }
+      : {}),
   };
 }
 

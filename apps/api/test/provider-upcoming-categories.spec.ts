@@ -88,8 +88,8 @@ describe('a provider’s upcoming services', () => {
       category: Record<string, unknown>;
     }>;
     expect(upcoming).toHaveLength(1);
-    expect(upcoming[0].category.id).toBe(draft.id);
-    expect(Object.keys(upcoming[0].category).sort()).toEqual(['id', 'name', 'slug']);
+    expect(upcoming[0]!.category.id).toBe(draft.id);
+    expect(Object.keys(upcoming[0]!.category).sort()).toEqual(['id', 'name', 'slug']);
   });
 
   it('shows a stranger nothing at all', async () => {

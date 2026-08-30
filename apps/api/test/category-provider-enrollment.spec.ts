@@ -231,7 +231,9 @@ describe('the provider enrollment catalogue', () => {
     });
 
     const response = await request(ctx.server).get('/categories/provider-enrollment').expect(200);
-    const [row] = response.body as Array<Record<string, unknown>>;
+    const rows = response.body as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
 
     expect(Object.keys(row).sort()).toEqual([
       'availability',

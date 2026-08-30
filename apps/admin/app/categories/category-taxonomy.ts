@@ -2,6 +2,7 @@ import type {
   Category,
   CategoryKind,
   CategoryStatus,
+  CategorySupplyStatus,
   IssuedProviderInvite,
   ProviderInviteState,
 } from '../../lib/api';
@@ -43,6 +44,44 @@ export const STATUS_HINTS: Record<CategoryStatus, string> = {
   INACTIVE:
     'Yeni talep ve yeni hizmet veren seçimi kapalıdır. Geçmiş talepler, teklifler ve cevaplar okunmaya devam eder.',
 };
+
+/**
+ * The supply question, in words.
+ *
+ * Deliberately a different sentence from the release verdict below, and shown
+ * beside it rather than merged into it. They answer different questions — "is
+ * there anybody behind this" and "may this be published" — and a category can
+ * have its providers and still be unreleasable for want of a price. One badge
+ * for both would hide exactly that row, which is the one somebody has to act on
+ * differently.
+ */
+export const SUPPLY_STATUS_LABELS: Record<CategorySupplyStatus, string> = {
+  EMPTY: 'Onaylı hizmet veren bekleniyor',
+  SUPPLY_READY: 'Hizmet veren hazır · teklif kredisi tanımlanmalı',
+  LAUNCH_READY: 'Yayına hazır',
+  LIVE: 'Yayında',
+};
+
+export function supplyStatusBadgeClass(status: CategorySupplyStatus): string {
+  if (status === 'LIVE' || status === 'LAUNCH_READY') return 'badge badge-good';
+  if (status === 'SUPPLY_READY') return 'badge badge-warn';
+  return 'badge badge-muted';
+}
+
+/**
+ * What the enrollment switch adds to the supply sentence.
+ *
+ * `null` when there is nothing to add: a live service is always open, so saying
+ * so on every row would be noise. A closed draft is the case worth a line,
+ * because "nobody has applied" and "nobody may apply" look identical in the
+ * count and are entirely different problems.
+ */
+export function enrollmentSentence(category: Category): string | null {
+  if (category.kind !== 'LEAF' || category.status !== 'DRAFT') return null;
+  if (!category.providerEnrollmentOpen) return 'Yeni hizmet veren başvurusu kapalı';
+  if (category.supplyStatus === 'EMPTY') return 'Başvuruya açık, onaylı hizmet veren bekleniyor';
+  return 'Başvuruya açık';
+}
 
 /**
  * The services whose release needs a decision nothing in the database can make.

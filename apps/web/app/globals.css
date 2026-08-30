@@ -770,6 +770,18 @@ input[readonly] {
   font-size: 13px;
 }
 
+/*
+ * "Yakında açılacak" on a service the marketplace has opened to applications but
+ * not yet released. Quieter than the name it follows: it qualifies the chip, it
+ * is not a second label competing with it.
+ */
+.check-chip-note {
+  margin-left: 6px;
+  font-weight: 500;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .check-chip:hover { border-color: var(--color-accent); }
 
 .check-chip:has(input:checked) {
