@@ -186,6 +186,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                             {blockers.map((blocker) => (
                               <span
                                 className="muted"
+                                data-testid={`release-blocker-${blocker}`}
                                 key={blocker}
                                 style={{ fontSize: 12 }}
                               >

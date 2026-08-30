@@ -45,10 +45,37 @@ export const STATUS_HINTS: Record<CategoryStatus, string> = {
 };
 
 /**
+ * The services whose release needs a decision nothing in the database can make.
+ *
+ * Two of the second expansion wave's categories sit in regulated work: who may
+ * perform it, and how it may be advertised, are questions with legal answers
+ * rather than operational ones. Both are perfectly fine as drafts — a draft is
+ * invisible to customers and to provider discovery — but neither may be put on
+ * the catalogue on the strength of a price and a headcount alone.
+ *
+ * A list of slugs in the admin app, and deliberately not a column on the
+ * category. The warning is a note to the operator standing in front of the
+ * status switch; it is not a property of the service, it has no reader outside
+ * this panel, and keeping it here means there is no field for the public
+ * catalogue, the provider surfaces or an API response to leak. The API never
+ * learns this list exists.
+ *
+ * Adding a slug here is how a future wave's regulated service inherits the
+ * same warning. Removing one is how a completed eligibility review is
+ * recorded — which is a code change on purpose, because "we checked" is a
+ * claim somebody should have to sign.
+ */
+const ELIGIBILITY_REVIEW_SLUGS = new Set<string>(['beslenme-danismanligi', 'isg-danismanligi']);
+
+export function needsEligibilityReview(category: Category): boolean {
+  return category.kind === 'LEAF' && ELIGIBILITY_REVIEW_SLUGS.has(category.slug);
+}
+
+/**
  * What stands between a draft service and the catalogue.
  *
- * Two things, and deliberately only two, because each of them makes a released
- * category *silently* broken rather than visibly wrong:
+ * Three things, and deliberately only three, because each of them makes a
+ * released category broken in a way nobody would notice from the outside:
  *
  *   price missing        A provider is charged per offer, and a category with
  *                        no price refuses every offer. The category would look
@@ -56,6 +83,10 @@ export const STATUS_HINTS: Record<CategoryStatus, string> = {
  *   no approved provider The request would be published to an empty room. A
  *                        pending or suspended profile does not count — neither
  *                        is ever shown a request.
+ *   eligibility unclear  The work is regulated. Releasing it would put the
+ *                        marketplace in front of customers for a service whose
+ *                        providers have not been checked against the rules that
+ *                        govern who may perform it.
  *
  * An empty question set is *not* on the list. A service whose base form is
  * enough is a real thing — several of the founding categories are exactly that
@@ -64,11 +95,12 @@ export const STATUS_HINTS: Record<CategoryStatus, string> = {
  * Only services can be released in this sense. A group is a folder and a router
  * is a question; neither takes a request or carries a price.
  */
-export type ReleaseBlocker = 'NO_PRICE' | 'NO_APPROVED_PROVIDER';
+export type ReleaseBlocker = 'NO_PRICE' | 'NO_APPROVED_PROVIDER' | 'NEEDS_ELIGIBILITY_REVIEW';
 
 export const RELEASE_BLOCKER_LABELS: Record<ReleaseBlocker, string> = {
   NO_PRICE: 'Teklif kredisi tanımsız',
   NO_APPROVED_PROVIDER: 'Onaylı hizmet veren yok',
+  NEEDS_ELIGIBILITY_REVIEW: 'Ek uygunluk incelemesi gerekir',
 };
 
 export const RELEASE_BLOCKER_HINTS: Record<ReleaseBlocker, string> = {
@@ -76,6 +108,8 @@ export const RELEASE_BLOCKER_HINTS: Record<ReleaseBlocker, string> = {
     'Teklif kredisi tanımlı olmayan bir kategoride hizmet veren teklif veremez. Yayına alınırsa talep alır ama hiçbir teklif ulaşmaz.',
   NO_APPROVED_PROVIDER:
     'Bu kategoriye bağlı onaylı hizmet veren yok. Yayına alınırsa açılan talepler kimseye ulaşmaz.',
+  NEEDS_ELIGIBILITY_REVIEW:
+    'Bu hizmet düzenlemeye tabi bir alanda. Yayına almadan önce hizmet verenlerin mesleki yeterliliği ve belge durumu ayrıca incelenmelidir. Bu not yalnız bu panelde görünür.',
 };
 
 export function releaseBlockers(category: Category): ReleaseBlocker[] {
@@ -84,6 +118,7 @@ export function releaseBlockers(category: Category): ReleaseBlocker[] {
   const blockers: ReleaseBlocker[] = [];
   if (category.offerCreditCost === null) blockers.push('NO_PRICE');
   if ((category._count?.providers ?? 0) === 0) blockers.push('NO_APPROVED_PROVIDER');
+  if (needsEligibilityReview(category)) blockers.push('NEEDS_ELIGIBILITY_REVIEW');
   return blockers;
 }
 
