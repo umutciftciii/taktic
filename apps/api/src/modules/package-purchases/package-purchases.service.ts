@@ -5,9 +5,19 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CreditTransactionType, NumberedEntityType, PackagePurchaseStatus, Prisma } from '@prisma/client';
+import {
+  CreditTransactionType,
+  NumberedEntityType,
+  OfferPackageType,
+  PackagePurchaseStatus,
+  Prisma,
+} from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  assertPackageIsPurchasable,
+  grantEntitlementForPurchase,
+} from '../entitlements/entitlement-grant';
 import { resolvePaymentProviderKind } from '../payments/payment-provider.config';
 import { CreditsService } from '../credits/credits.service';
 import { NumberingService } from '../numbering/numbering.service';
@@ -57,6 +67,17 @@ export class PackagePurchasesService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Refuses a period package the provider is not in a position to buy —
+      // a second queued period, or an unlimited scope another live package of
+      // theirs already covers. Checked before the purchase row exists, because
+      // this is the last point at which refusing is free. A ONE_TIME_CREDITS
+      // package passes straight through, exactly as before.
+      await assertPackageIsPurchasable(tx, {
+        providerId,
+        pkg: creditPackage,
+        now: new Date(),
+      });
+
       const purchaseNumber = await this.numbering.generateDisplayNumber(
         tx,
         NumberedEntityType.PACKAGE_PURCHASE,
@@ -169,14 +190,44 @@ export class PackagePurchasesService {
           });
         }
 
-        const creditTransaction = await this.creditsService.createProviderCreditTransactionInTransaction(tx, {
-          providerId: purchase.providerId,
-          type: CreditTransactionType.PACKAGE_PURCHASE,
-          amount: purchase.creditAmountSnapshot,
-          reason: `Mock package purchase: ${purchase.packageNameSnapshot}`,
-          referenceType: 'PackagePurchase',
-          referenceId: purchase.id,
-        });
+        /*
+         * What a settled purchase produces depends on what was bought, and the
+         * two are mutually exclusive.
+         *
+         * A ONE_TIME_CREDITS package loads the ledger, exactly as it always
+         * has. A period package grants an entitlement and touches no balance at
+         * all: writing a zero-credit ledger row for it would put a transaction
+         * in the provider's history that says nothing happened, and a non-zero
+         * one would hand out credits the package did not sell.
+         *
+         * Both happen inside this Serializable transaction, so a purchase can
+         * never be PAID without whatever it bought existing beside it.
+         */
+        const isOneTime = purchase.package.type === OfferPackageType.ONE_TIME_CREDITS;
+
+        const creditTransaction = isOneTime
+          ? await this.creditsService.createProviderCreditTransactionInTransaction(tx, {
+              providerId: purchase.providerId,
+              type: CreditTransactionType.PACKAGE_PURCHASE,
+              amount: purchase.creditAmountSnapshot,
+              reason: `Mock package purchase: ${purchase.packageNameSnapshot}`,
+              referenceType: 'PackagePurchase',
+              referenceId: purchase.id,
+            })
+          : null;
+
+        if (!isOneTime) {
+          await grantEntitlementForPurchase(tx, {
+            providerId: purchase.providerId,
+            purchaseId: purchase.id,
+            paidAt: now,
+            packageId: purchase.packageId,
+            priceAmountSnapshot: purchase.priceAmountSnapshot,
+            currencySnapshot: purchase.currencySnapshot,
+            packageNameSnapshot: purchase.packageNameSnapshot,
+            paymentProvider: purchase.paymentProvider ?? 'mock',
+          });
+        }
 
         return tx.packagePurchase.update({
           where: { id: purchase.id },
@@ -184,7 +235,7 @@ export class PackagePurchasesService {
             status: PackagePurchaseStatus.PAID,
             paidAt: now,
             mockPaymentReference: buildMockPaymentReference(now, purchase.id),
-            creditTransactionId: creditTransaction.id,
+            ...(creditTransaction ? { creditTransactionId: creditTransaction.id } : {}),
           },
           include: packagePurchaseInclude,
           omit: packagePurchaseOmit,
@@ -320,6 +371,10 @@ const packagePurchaseInclude = {
       priceAmount: true,
       currency: true,
       isActive: true,
+      type: true,
+      quotaCredits: true,
+      periodDays: true,
+      dailyOfferLimit: true,
     },
   },
 } satisfies Prisma.PackagePurchaseInclude;

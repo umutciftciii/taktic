@@ -74,6 +74,8 @@ export type Category = {
    * says otherwise.
    */
   providerEnrollmentOpen: boolean;
+  /** Whether this category may be sold inside a CATEGORY_UNLIMITED package. */
+  unlimitedPackageEligible: boolean;
   /** Present on the operator view only. See CategorySupplyStatus. */
   supplyStatus?: CategorySupplyStatus | null;
   _count?: {
@@ -627,6 +629,95 @@ export type OfferCreditPackage = {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type OfferPackageType = 'ONE_TIME_CREDITS' | 'MONTHLY_QUOTA' | 'CATEGORY_UNLIMITED';
+
+export type OfferPackageScopeCategory = {
+  category: {
+    id: string;
+    name: string;
+    slug: string;
+    kind: 'GROUP' | 'LEAF' | 'ROUTER';
+    status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+  };
+};
+
+/** A package of any type, as the admin screens read it. */
+export type AdminOfferPackage = OfferCreditPackage & {
+  type: OfferPackageType;
+  quotaCredits: number | null;
+  periodDays: number | null;
+  dailyOfferLimit: number | null;
+  scopeCategories: OfferPackageScopeCategory[];
+};
+
+/** A category an admin has opened up for unlimited-package scopes. */
+export type UnlimitedEligibleCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  kind: 'GROUP' | 'LEAF' | 'ROUTER';
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+  parentId: string | null;
+};
+
+export type ProviderEntitlementStatus = 'ACTIVE' | 'EXPIRED' | 'PAST_DUE' | 'CANCELLED';
+
+export type EntitlementRenewalAttempt = {
+  id: string;
+  periodIndex: number;
+  status: 'SUCCEEDED' | 'FAILED' | 'UNSUPPORTED';
+  failureCode: string | null;
+  paymentProvider: string | null;
+  /**
+   * The payment provider's own opaque transaction identifier — the reference an
+   * operator uses to find the transaction on the provider's side. Never a
+   * payload, never a card detail, never a stored credential.
+   */
+  providerTransactionRef: string | null;
+  attemptedAt: string;
+};
+
+export type AdminProviderEntitlement = {
+  id: string;
+  packageId: string;
+  type: OfferPackageType;
+  packageName: string;
+  priceAmount: number;
+  currency: string;
+  startAt: string;
+  endAt: string;
+  periodDays: number;
+  status: ProviderEntitlementStatus;
+  usable: boolean;
+  queued: boolean;
+  quotaTotal: number | null;
+  quotaRemaining: number | null;
+  dailyOfferLimit: number | null;
+  scope: { categoryId: string; name: string; kind: string }[];
+  autoRenewEnabled: boolean;
+  cancelledAt: string | null;
+  lastRenewalAttemptAt: string | null;
+  lastRenewalFailureCode: string | null;
+  periodIndex: number;
+  purchaseId: string | null;
+  purchaseNumber: string | null;
+  paymentProvider: string | null;
+  /** Whether a stored payment method exists. The reference itself never travels. */
+  paymentMethodOnFile: boolean;
+  renewalAttempts: EntitlementRenewalAttempt[];
+};
+
+export type AdminProviderEntitlements = {
+  providerId: string;
+  autoRenew: {
+    available: boolean;
+    unsupportedReason: string | null;
+    message: string | null;
+    periodDays: number;
+  };
+  entitlements: AdminProviderEntitlement[];
 };
 
 export type ProviderCreditTransaction = {

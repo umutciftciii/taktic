@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   CreditTransactionType,
+  OfferEntitlementSource,
   OfferRejectionReason,
   OfferStatus,
   Prisma,
@@ -217,6 +218,9 @@ export class OffersService {
             // Needed so the policy can see a competitor-rejected offer and
             // recommend NO_REFUND; an admin can still refund it with override.
             rejectionReason: true,
+            // A period-package offer has no ledger row to give back, and the
+            // policy says so in as many words rather than as "no credit spend".
+            entitlementSource: true,
           },
         });
 
@@ -318,7 +322,7 @@ export class OffersService {
       creditCost: offer.creditCost,
       creditRefundedAt: offer.creditRefundedAt,
       creditRefundReason: offer.creditRefundReason,
-      refundEligibility: calculateRefundEligibility(offer),
+      refundEligibility: customerRefundEligibility(offer),
       submittedAt: offer.submittedAt,
     }));
   }
@@ -673,6 +677,19 @@ function ensureCustomerCanAccessRequest(customerId: string | null, user: AuthUse
   }
 }
 
+/**
+ * The refund verdict a customer is allowed to see.
+ *
+ * Identical to the provider's in every case a customer can distinguish, with
+ * one field withheld: `entitlementSource` would tell the customer that this
+ * provider is offering under a monthly quota or an unlimited package, and what
+ * commercial arrangement a provider is on is nobody else's business. Withheld
+ * rather than reworded, so a later reason code cannot leak it by accident.
+ */
+function customerRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
+  return calculateRefundEligibility({ ...offer, entitlementSource: null });
+}
+
 function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
   return {
     ...offer,
@@ -690,6 +707,7 @@ type RefundPolicyOfferShape = {
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
   rejectionReason?: OfferRejectionReason | null;
+  entitlementSource?: OfferEntitlementSource | null;
 };
 
 export async function refundOfferCreditInTransaction(
@@ -836,7 +854,7 @@ function toCustomerOfferDetail(
     creditCost: offer.creditCost,
     creditRefundedAt: offer.creditRefundedAt,
     creditRefundReason: offer.creditRefundReason,
-    refundEligibility: calculateRefundEligibility(offer),
+    refundEligibility: customerRefundEligibility(offer),
     submittedAt: offer.submittedAt,
     viewedAt: offer.viewedAt,
     acceptedAt: offer.acceptedAt,

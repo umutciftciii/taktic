@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
-  OfferCreditPackage,
+  AdminOfferPackage,
   formatDateTime,
   formatPrice,
   requireAdmin,
@@ -34,7 +34,13 @@ function normalizeStatusFilter(value: string | undefined): StatusFilter {
   return 'all';
 }
 
-function canonicalSort(packages: OfferCreditPackage[]) {
+const PACKAGE_TYPE_LABEL: Record<string, string> = {
+  ONE_TIME_CREDITS: 'Tek seferlik kredi',
+  MONTHLY_QUOTA: 'Aylık kota',
+  CATEGORY_UNLIMITED: 'Kategori limitsiz',
+};
+
+function canonicalSort(packages: AdminOfferPackage[]) {
   return [...packages].sort(
     (a, b) =>
       a.sortOrder - b.sortOrder ||
@@ -55,9 +61,10 @@ export default async function AdminCreditPackagesPage({
   const partialFailure = params.partial === '1';
   const okMessage = okKey ? OK_MESSAGES[okKey] ?? null : null;
 
-  const packages = await apiFetch<OfferCreditPackage[]>(
-    '/credit-packages?includeInactive=true',
-  );
+  // The admin listing: every package of every type, with its category scope.
+  // The public `/credit-packages` route deliberately returns only the one-time
+  // packages, because it answers unauthenticated callers.
+  const packages = await apiFetch<AdminOfferPackage[]>('/admin/offer-packages');
 
   const canonical = canonicalSort(packages);
   const positionById = new Map<string, number>();
@@ -179,7 +186,8 @@ export default async function AdminCreditPackagesPage({
                 <tr>
                   <th className="col-num">Sıra</th>
                   <th>Paket</th>
-                  <th className="col-num">Kredi</th>
+                  <th>Tür</th>
+                  <th className="col-num">Kredi / kota</th>
                   <th className="col-num">Fiyat</th>
                   <th>Para birimi</th>
                   <th>Durum</th>
@@ -243,8 +251,38 @@ export default async function AdminCreditPackagesPage({
                           </span>
                         </div>
                       </td>
+                      <td>
+                        <span className="badge badge-muted">
+                          {PACKAGE_TYPE_LABEL[pkg.type] ?? pkg.type}
+                        </span>
+                        {pkg.type === 'CATEGORY_UNLIMITED' ? (
+                          <div className="cell-muted" style={{ fontSize: 12 }}>
+                            {pkg.scopeCategories.length > 0
+                              ? pkg.scopeCategories
+                                  .map((scope) => scope.category.name)
+                                  .join(', ')
+                              : 'Kapsam tanımsız'}
+                          </div>
+                        ) : null}
+                        {pkg.periodDays ? (
+                          <div className="cell-muted" style={{ fontSize: 12 }}>
+                            {pkg.periodDays} gün geçerli
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="col-num">
-                        <strong>{pkg.creditAmount}</strong>
+                        <strong>
+                          {pkg.type === 'MONTHLY_QUOTA'
+                            ? (pkg.quotaCredits ?? '—')
+                            : pkg.type === 'CATEGORY_UNLIMITED'
+                              ? 'Limitsiz'
+                              : pkg.creditAmount}
+                        </strong>
+                        {pkg.type === 'CATEGORY_UNLIMITED' && pkg.dailyOfferLimit ? (
+                          <div className="cell-muted" style={{ fontSize: 12 }}>
+                            günlük {pkg.dailyOfferLimit}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="col-num">{formatPrice(pkg.priceAmount, pkg.currency)}</td>
                       <td>{pkg.currency}</td>

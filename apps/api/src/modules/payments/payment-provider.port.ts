@@ -43,10 +43,105 @@ export type CheckoutSession = {
   expiresAt: Date | null;
 };
 
+/**
+ * Why an adapter cannot charge a stored payment method, as a short code the
+ * screens map onto plain wording.
+ *
+ * `NO_STORED_PAYMENT_METHOD` is the case both adapters in this build are in:
+ * there is no card on file to charge, because nothing here ever stores one.
+ * `NO_LIVE_MODE` is the second, independent reason — a sandbox integration
+ * settles nothing, so a "successful" renewal through it would be a renewal
+ * against money that never moved.
+ */
+export type AutomaticRenewalUnsupportedReason =
+  | 'NO_STORED_PAYMENT_METHOD'
+  | 'NO_LIVE_MODE';
+
+/**
+ * What an adapter can do beyond opening a checkout.
+ *
+ * Modelled as a capability the adapter declares rather than a feature flag an
+ * operator sets, because it is a fact about the integration and not a
+ * preference. Automatic renewal is offered to providers only where this says
+ * the money can actually be taken; everywhere else the screens say so in as
+ * many words and the manual renewal path is the whole of the feature.
+ */
+export type PaymentProviderCapabilities = {
+  /**
+   * Whether this adapter can charge a payment method the provider has already
+   * authorised, without them being present.
+   *
+   * False for every adapter in this build. See `automaticRenewalUnsupportedReason`.
+   */
+  automaticRenewal: boolean;
+  automaticRenewalUnsupportedReason: AutomaticRenewalUnsupportedReason | null;
+};
+
 export abstract class PaymentProviderPort {
   abstract readonly kind: PaymentProviderKind;
 
+  /**
+   * Declared by every adapter. There is deliberately no default: an adapter
+   * added later must state what it can do rather than inherit an answer.
+   */
+  abstract readonly capabilities: PaymentProviderCapabilities;
+
   abstract createCheckoutSession(request: CheckoutSessionRequest): Promise<CheckoutSession>;
+
+  /**
+   * Charges a payment method the provider already authorised, for one renewal.
+   *
+   * Optional, and absent from every adapter in this build. An adapter that
+   * declares `capabilities.automaticRenewal` must implement it; the renewal
+   * service treats "claims the capability but has no method" as an unsupported
+   * provider rather than as a silent success, so the two can never disagree in
+   * the direction that would grant unpaid access.
+   *
+   * `idempotencyKey` is `<entitlementId>:<periodIndex>` — stable for a given
+   * period, so a provider that honours idempotency keys refuses the second
+   * charge itself rather than relying on this application winning a race.
+   */
+  chargeStoredPaymentMethod?(
+    request: StoredPaymentChargeRequest,
+  ): Promise<StoredPaymentChargeResult>;
+}
+
+export type StoredPaymentChargeRequest = {
+  entitlementId: string;
+  providerId: string;
+  /** The provider's own token for the stored method. Never card data. */
+  paymentMethodReference: string;
+  /** Minor units, from the entitlement's own snapshot. */
+  priceAmount: number;
+  currency: string;
+  idempotencyKey: string;
+};
+
+export type StoredPaymentChargeResult = {
+  /** The payment provider's opaque transaction identifier. Never a payload. */
+  providerTransactionRef: string;
+};
+
+/**
+ * A renewal charge that did not go through, as one of a closed set of classes.
+ *
+ * No decline message, no response body, no card detail: this travels into an
+ * audit row an admin reads and into a screen the provider reads.
+ */
+export type StoredPaymentChargeFailureCode =
+  | 'PAYMENT_DECLINED'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'PROVIDER_REJECTED'
+  | 'PROVIDER_TIMEOUT';
+
+export class StoredPaymentChargeError extends Error {
+  readonly failureCode: StoredPaymentChargeFailureCode;
+
+  constructor(failureCode: StoredPaymentChargeFailureCode) {
+    super(`Stored payment method could not be charged (${failureCode})`);
+    this.failureCode = failureCode;
+    this.name = 'StoredPaymentChargeError';
+  }
 }
 
 /**

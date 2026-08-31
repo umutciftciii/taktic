@@ -248,6 +248,27 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                           : 'Açıkken hizmet verenler bu taslak hizmeti kendi profillerine ekleyebilir. Müşteri tarafı kapalı kalır.'}
                   </span>
                 </label>
+                {/*
+                  Whether this category may be sold as part of a "category
+                  unlimited" package. Off for everything until somebody turns it
+                  on, which is how regulated and high-value services stay out of
+                  unlimited packages without anybody maintaining a list.
+                */}
+                <label className="field field-6">
+                  <span>Limitsiz paket uygunluğu</span>
+                  <input
+                    name="unlimitedPackageEligible"
+                    type="checkbox"
+                    data-testid="unlimited-package-eligible"
+                    defaultChecked={category.unlimitedPackageEligible}
+                    disabled={category.status === 'INACTIVE'}
+                  />
+                  <span className="help-text">
+                    {category.status === 'INACTIVE'
+                      ? 'Kapalı kategoriler limitsiz paket kapsamına alınamaz.'
+                      : 'Açıkken bu kategori (ve grup seçilirse alt kategorileri) kategori limitsiz paketlerin kapsamına eklenebilir. Regüle veya yüksek değerli kategorilerde kapalı bırakın.'}
+                  </span>
+                </label>
                 <label className="field field-3">
                   <span>Teklif kredisi{category.kind === 'LEAF' ? ' *' : ''}</span>
                   <input

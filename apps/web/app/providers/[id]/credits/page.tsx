@@ -162,6 +162,14 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
         </span>
       </div>
 
+      <div className="pdash-notice" style={{ marginTop: 16 }}>
+        <span>
+          <strong>Aylık kota ve limitsiz paketler:</strong> Kredi bakiyesinin yanı sıra 30 gün
+          geçerli dönemsel paketler de alabilirsiniz.{' '}
+          <Link href={`/providers/${id}/subscriptions`}>Paketlerim sayfasına git</Link>
+        </span>
+      </div>
+
       <div className="pdash-section-head" id="paketler">
         <h2 className="pdash-section-title">
           <span>Kredi paketleri</span>

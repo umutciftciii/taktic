@@ -6,6 +6,7 @@ import { ContactSharingModule } from './modules/contact-sharing/contact-sharing.
 import { CustomerActivationModule } from './modules/customer-activation/customer-activation.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { EmailVerificationModule } from './modules/email-verification/email-verification.module';
+import { EntitlementsModule } from './modules/entitlements/entitlements.module';
 import { HealthModule } from './modules/health/health.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
@@ -53,6 +54,7 @@ import { PrismaModule } from './prisma/prisma.module';
     RefundSchedulerModule,
     RequestLifecycleModule,
     CreditsModule,
+    EntitlementsModule,
     CustomersModule,
     CustomerActivationModule,
     DashboardModule,

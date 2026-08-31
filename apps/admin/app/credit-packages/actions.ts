@@ -2,7 +2,13 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { apiFetch, OfferCreditPackage, parseDecimalToMinor } from '../../lib/api';
+import {
+  AdminOfferPackage,
+  OfferCreditPackage,
+  OfferPackageType,
+  apiFetch,
+  parseDecimalToMinor,
+} from '../../lib/api';
 
 const ALLOWED_CURRENCIES = ['TRY', 'USD', 'EUR'] as const;
 type AllowedCurrency = (typeof ALLOWED_CURRENCIES)[number];
@@ -13,7 +19,18 @@ type AllowedCurrency = (typeof ALLOWED_CURRENCIES)[number];
 type PackageDraft = {
   name: string;
   slug: string;
+  /**
+   * What the package sells. Chosen once, at creation: the edit form does not
+   * send it, and the API refuses it, because changing what a package sells
+   * would make every period already bought against it describe a product that
+   * no longer exists.
+   */
+  type: OfferPackageType;
   creditAmount: number;
+  quotaCredits: number;
+  /** 0 means "no daily cap", which the API reads as null. */
+  dailyOfferLimit: number;
+  scopeCategoryIds: string[];
   priceAmount: number;
   priceInput: string;
   currency: AllowedCurrency;
@@ -21,6 +38,12 @@ type PackageDraft = {
   sortOrder: number;
   isActive: boolean;
 };
+
+const PACKAGE_TYPES: readonly OfferPackageType[] = [
+  'ONE_TIME_CREDITS',
+  'MONTHLY_QUOTA',
+  'CATEGORY_UNLIMITED',
+];
 
 export async function createCreditPackageAction(formData: FormData) {
   const draft = readDraft(formData);
@@ -36,7 +59,7 @@ export async function createCreditPackageAction(formData: FormData) {
   try {
     created = await apiFetch<OfferCreditPackage>('/credit-packages', {
       method: 'POST',
-      body: JSON.stringify(payloadFromDraft(draft)),
+      body: JSON.stringify(createPayloadFromDraft(draft)),
     });
   } catch (error) {
     if (isRedirectError(error)) throw error;
@@ -64,7 +87,7 @@ export async function updateCreditPackageAction(formData: FormData) {
   try {
     await apiFetch<OfferCreditPackage>(`/credit-packages/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(payloadFromDraft(draft)),
+      body: JSON.stringify(updatePayloadFromDraft(draft)),
     });
   } catch (error) {
     if (isRedirectError(error)) throw error;
@@ -110,7 +133,10 @@ export async function moveCreditPackageAction(formData: FormData) {
   let partialFailure = false;
 
   try {
-    const packages = await apiFetch<OfferCreditPackage[]>('/credit-packages?includeInactive=true');
+    // The admin listing rather than the public one: `GET /credit-packages`
+    // answers unauthenticated callers and therefore returns only the one-time
+    // packages, which would make reordering silently skip every period package.
+    const packages = await apiFetch<AdminOfferPackage[]>('/admin/offer-packages');
     const sorted = [...packages].sort(
       (a, b) =>
         a.sortOrder - b.sortOrder ||
@@ -175,7 +201,13 @@ function readDraft(formData: FormData): PackageDraft {
   return {
     name: readFormString(formData, 'name').trim(),
     slug: readFormString(formData, 'slug').trim(),
+    type: normalizePackageType(readFormString(formData, 'type')),
     creditAmount: readFormNumber(formData, 'creditAmount'),
+    quotaCredits: readFormNumber(formData, 'quotaCredits'),
+    dailyOfferLimit: readFormNumber(formData, 'dailyOfferLimit'),
+    scopeCategoryIds: formData
+      .getAll('scopeCategoryIds')
+      .filter((value): value is string => typeof value === 'string' && value.trim() !== ''),
     priceAmount: priceAmountMinor,
     priceInput,
     currency: normalizeCurrency(readFormString(formData, 'currency')),
@@ -185,17 +217,56 @@ function readDraft(formData: FormData): PackageDraft {
   };
 }
 
-function payloadFromDraft(draft: PackageDraft) {
-  return {
+function normalizePackageType(value: string): OfferPackageType {
+  return (PACKAGE_TYPES as readonly string[]).includes(value)
+    ? (value as OfferPackageType)
+    : 'ONE_TIME_CREDITS';
+}
+
+/**
+ * The payload for a create.
+ *
+ * Per-type, so a monthly quota is never sent a credit amount and an unlimited
+ * package is never sent a quota — the API refuses those combinations and the
+ * database makes them unrepresentable, and sending them anyway would turn a
+ * clear message into a validation error about a field the admin never filled.
+ */
+function createPayloadFromDraft(draft: PackageDraft) {
+  const shared = {
     name: draft.name,
     slug: draft.slug,
-    creditAmount: draft.creditAmount,
+    type: draft.type,
     priceAmount: draft.priceAmount,
     currency: draft.currency,
     description: draft.description,
     sortOrder: draft.sortOrder,
     isActive: draft.isActive,
   };
+
+  if (draft.type === 'MONTHLY_QUOTA') {
+    return { ...shared, quotaCredits: draft.quotaCredits };
+  }
+
+  if (draft.type === 'CATEGORY_UNLIMITED') {
+    return {
+      ...shared,
+      scopeCategoryIds: draft.scopeCategoryIds,
+      ...(draft.dailyOfferLimit > 0 ? { dailyOfferLimit: draft.dailyOfferLimit } : {}),
+    };
+  }
+
+  return { ...shared, creditAmount: draft.creditAmount };
+}
+
+/** The same, minus `type`, which is not editable. */
+function updatePayloadFromDraft(draft: PackageDraft) {
+  const { type: _type, ...rest } = createPayloadFromDraft(draft);
+
+  if (draft.type === 'CATEGORY_UNLIMITED') {
+    return { ...rest, dailyOfferLimit: draft.dailyOfferLimit > 0 ? draft.dailyOfferLimit : null };
+  }
+
+  return rest;
 }
 
 function validateDraft(draft: PackageDraft): string | null {
@@ -203,8 +274,23 @@ function validateDraft(draft: PackageDraft): string | null {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(draft.slug)) {
     return 'Slug yalnızca küçük harf, rakam ve tire (-) içerebilir.';
   }
-  if (!Number.isInteger(draft.creditAmount) || draft.creditAmount < 1) {
-    return 'Kredi tutarı en az 1 olmalıdır.';
+  if (draft.type === 'ONE_TIME_CREDITS') {
+    if (!Number.isInteger(draft.creditAmount) || draft.creditAmount < 1) {
+      return 'Kredi tutarı en az 1 olmalıdır.';
+    }
+  }
+  if (draft.type === 'MONTHLY_QUOTA') {
+    if (!Number.isInteger(draft.quotaCredits) || draft.quotaCredits < 1) {
+      return 'Aylık kota en az 1 kredi olmalıdır.';
+    }
+  }
+  if (draft.type === 'CATEGORY_UNLIMITED') {
+    if (draft.scopeCategoryIds.length === 0) {
+      return 'Limitsiz paket için en az bir kategori veya kategori grubu seçmelisiniz.';
+    }
+    if (!Number.isInteger(draft.dailyOfferLimit) || draft.dailyOfferLimit < 0) {
+      return 'Günlük teklif limiti 0 (sınırsız) veya pozitif tam sayı olmalıdır.';
+    }
   }
   // priceAmount is stored in minor units; 100 = 1,00 in the selected currency.
   // Empty / non-numeric inputs are normalised to 0 in readDraft, which falls
@@ -226,7 +312,13 @@ function buildNewUrl(draft: PackageDraft, errorMessage: string) {
   params.set('error', errorMessage);
   if (draft.name) params.set('name', draft.name);
   if (draft.slug) params.set('slug', draft.slug);
+  params.set('type', draft.type);
   params.set('creditAmount', String(draft.creditAmount || ''));
+  params.set('quotaCredits', String(draft.quotaCredits || ''));
+  params.set('dailyOfferLimit', String(draft.dailyOfferLimit || ''));
+  for (const categoryId of draft.scopeCategoryIds) {
+    params.append('scopeCategoryIds', categoryId);
+  }
   // Preserve the original decimal entry verbatim so the user does not lose
   // their input after a validation error (e.g. "149,90" stays as typed).
   params.set('priceAmount', draft.priceInput);

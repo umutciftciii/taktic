@@ -32,6 +32,7 @@ import {
   phoneVerifiedRequestFilter,
 } from '../../common/provider-request-matching';
 import { runSerializable } from '../../common/serializable-transaction';
+import { EntitlementResolverService } from '../entitlements/entitlement-resolver.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
@@ -166,6 +167,8 @@ export class ProvidersService {
     @Inject(NumberingService) private readonly numbering: NumberingService,
     @Inject(ProviderClaimService) private readonly providerClaim: ProviderClaimService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(EntitlementResolverService)
+    private readonly entitlements: EntitlementResolverService,
   ) {}
 
   async createProvider(
@@ -1022,10 +1025,24 @@ export class ProvidersService {
             });
           }
 
-          const currentBalance = await getProviderCreditBalanceInTransaction(tx, providerId);
-          if (currentBalance < actualCreditCost) {
-            throw new HttpException('Yetersiz teklif kredisi.', HttpStatus.PAYMENT_REQUIRED);
-          }
+          /*
+           * One resolver decides what pays for this offer, in this order: an
+           * active unlimited period whose snapshotted scope covers this
+           * category, then an active monthly quota, then the one-time credit
+           * balance, then the 402 this flow has always answered with.
+           *
+           * It runs *after* every other rule — the category's status and price,
+           * the provider's binding to it, the area match, the one-offer-per-
+           * request guard — because none of them is relaxed by holding a
+           * package. An unlimited period changes what an offer costs, never who
+           * may send one.
+           */
+          const decision = await this.entitlements.resolve(tx, {
+            providerId,
+            categoryId: category.id,
+            creditCost: actualCreditCost,
+            now: new Date(),
+          });
 
           const offerNumber = await this.numbering.generateDisplayNumber(
             tx,
@@ -1047,24 +1064,27 @@ export class ProvidersService {
               // Immutable snapshot. Refunds read this, never the live category
               // price, so a later price change cannot alter historical amounts.
               creditCost: actualCreditCost,
+              // What actually paid, recorded on the offer rather than inferred
+              // later from the absence of a ledger row.
+              entitlementSource: decision.source,
+              entitlementId: decision.entitlementId,
             },
           });
 
-          const spendTransaction = await tx.providerCreditTransaction.create({
-            data: {
-              providerId,
-              type: CreditTransactionType.OFFER_SPEND,
-              amount: -actualCreditCost,
-              balanceAfter: currentBalance - actualCreditCost,
-              reason: `Offer submitted (${category.slug}, ${actualCreditCost} kredi)`,
-              referenceType: 'Offer',
-              referenceId: offer.id,
-            },
+          // The charge itself: an atomic quota decrement, a ledger row, or —
+          // for an unlimited period — nothing at all. A failure here throws, and
+          // the whole transaction (offer included) rolls back, so a refused
+          // offer can never have consumed anything.
+          const { creditTransactionId } = await this.entitlements.consume(tx, decision, {
+            providerId,
+            offerId: offer.id,
+            reason: `Offer submitted (${category.slug}, ${actualCreditCost} kredi)`,
+            now: new Date(),
           });
 
           const updatedOffer = await tx.offer.update({
             where: { id: offer.id },
-            data: { creditSpentTransactionId: spendTransaction.id },
+            data: { creditSpentTransactionId: creditTransactionId },
             include: providerOfferInclude,
           });
 

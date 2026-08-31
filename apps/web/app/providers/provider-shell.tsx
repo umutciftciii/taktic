@@ -25,6 +25,7 @@ type ProviderShellActive =
   | 'offers'
   | 'messages'
   | 'credits'
+  | 'subscriptions'
   | 'packages'
   | 'profile';
 
@@ -67,6 +68,7 @@ export async function ProviderShell({
   const requestsHref = providerId ? `/providers/${providerId}/requests` : '/providers/me';
   const offersHref = providerId ? `/providers/${providerId}/offers` : null;
   const creditsHref = providerId ? `/providers/${providerId}/credits` : null;
+  const subscriptionsHref = providerId ? `/providers/${providerId}/subscriptions` : null;
   const packagesHref = providerId ? `/providers/${providerId}/package-purchases` : null;
   const profileHref = providerId ? `/providers/${providerId}` : null;
   const unread = await loadUnreadMessageCount();
@@ -92,6 +94,7 @@ export async function ProviderShell({
     // from every screen in the panel rather than only from the offer they won.
     { key: 'messages', label: 'Mesajlar', Icon: IconMessage, href: '/mesajlar', count: unread?.total },
     { key: 'credits', label: 'Krediler', Icon: IconCoins, href: creditsHref },
+    { key: 'subscriptions', label: 'Paketlerim', Icon: IconPackage, href: subscriptionsHref },
     { key: 'packages', label: 'Paket geçmişim', Icon: IconPackage, href: packagesHref },
     { key: 'profile', label: 'İşletme profili', Icon: IconProfile, href: profileHref },
   ];

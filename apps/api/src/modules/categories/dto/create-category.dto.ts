@@ -102,6 +102,18 @@ export class CreateCategoryDto {
   @IsBoolean()
   providerEnrollmentOpen?: boolean;
 
+  /**
+   * Whether this category may be put inside a CATEGORY_UNLIMITED offer
+   * package's scope.
+   *
+   * Defaults to false and stays false until an admin sets it. Regulated and
+   * high-value categories are therefore excluded by construction rather than by
+   * a list somebody has to keep up to date.
+   */
+  @IsOptional()
+  @IsBoolean()
+  unlimitedPackageEligible?: boolean;
+
   @IsOptional()
   @IsInt()
   @Min(0)

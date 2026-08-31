@@ -3,6 +3,7 @@ import { PaymentProviderKind } from './payment-provider.config';
 import {
   CheckoutSession,
   CheckoutSessionRequest,
+  PaymentProviderCapabilities,
   PaymentProviderPort,
 } from './payment-provider.port';
 
@@ -19,6 +20,16 @@ import {
 @Injectable()
 export class MockPaymentAdapter extends PaymentProviderPort {
   readonly kind: PaymentProviderKind = 'mock';
+
+  /**
+   * Nothing is stored and nothing is charged, so there is no payment method to
+   * come back to when a period ends. The renewal path is manual here, and the
+   * screens say so rather than offering a switch that would do nothing.
+   */
+  readonly capabilities: PaymentProviderCapabilities = {
+    automaticRenewal: false,
+    automaticRenewalUnsupportedReason: 'NO_STORED_PAYMENT_METHOD',
+  };
 
   async createCheckoutSession(_request: CheckoutSessionRequest): Promise<CheckoutSession> {
     return {

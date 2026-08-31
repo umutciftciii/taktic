@@ -41,6 +41,10 @@ const refundScanOfferSelect = {
   viewedAt: true,
   acceptedAt: true,
   rejectionReason: true,
+  // The scan already filters on a non-null creditSpentTransactionId, which no
+  // period-package offer has, so this changes no row it selects. It is here so
+  // the policy verdict written into the scan's report names the real reason.
+  entitlementSource: true,
 } satisfies Prisma.OfferSelect;
 
 /**

@@ -114,11 +114,20 @@ const approvedProviderCount = {
  * exactly one thing — this column is not public — and every existing field of
  * the response is untouched, which is what keeps a client written before this
  * change working.
+ *
+ * `unlimitedPackageEligible` joins it for the same reason and a sharper one:
+ * it says whether this category may be sold as part of an unlimited offer
+ * package. That is a commercial decision about what providers can buy, and a
+ * customer browsing the catalogue has no reader for it at all.
  */
-function withoutOperatorColumns<T extends { providerEnrollmentOpen: boolean }>(
-  category: T,
-): Omit<T, 'providerEnrollmentOpen'> {
-  const { providerEnrollmentOpen: _providerEnrollmentOpen, ...rest } = category;
+function withoutOperatorColumns<
+  T extends { providerEnrollmentOpen: boolean; unlimitedPackageEligible: boolean },
+>(category: T): Omit<T, 'providerEnrollmentOpen' | 'unlimitedPackageEligible'> {
+  const {
+    providerEnrollmentOpen: _providerEnrollmentOpen,
+    unlimitedPackageEligible: _unlimitedPackageEligible,
+    ...rest
+  } = category;
   return rest;
 }
 
@@ -667,6 +676,9 @@ export class CategoriesService {
           // Absent means closed, which is the column default and the safe one:
           // a category nobody has opened recruits nobody.
           providerEnrollmentOpen: dto.providerEnrollmentOpen ?? false,
+          // Opt-in, always. A newly created or newly imported category is never
+          // sellable as part of an unlimited package until somebody says so.
+          unlimitedPackageEligible: dto.unlimitedPackageEligible ?? false,
           // Written together, never one without the other: see
           // ServiceCategoryStatus in the schema.
           isActive: isActiveFor(status),
@@ -733,6 +745,9 @@ export class CategoriesService {
           ...(iconKey !== undefined ? { iconKey } : {}),
           ...(dto.providerEnrollmentOpen !== undefined
             ? { providerEnrollmentOpen: dto.providerEnrollmentOpen }
+            : {}),
+          ...(dto.unlimitedPackageEligible !== undefined
+            ? { unlimitedPackageEligible: dto.unlimitedPackageEligible }
             : {}),
           ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         },

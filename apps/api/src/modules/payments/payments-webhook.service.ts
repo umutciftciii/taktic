@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   CreditTransactionType,
+  OfferPackageType,
   PackagePurchaseStatus,
   PaymentWebhookEventStatus,
   Prisma,
@@ -15,6 +16,7 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
+import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
 import { LEMON_SQUEEZY_PROVIDER_KIND, readLemonSqueezyConfig } from './lemon-squeezy.config';
 import {
   LEMON_SQUEEZY_PAYMENT_EVENTS,
@@ -297,7 +299,7 @@ export class PaymentsWebhookService {
 
     const purchase = await tx.packagePurchase.findUnique({
       where: { paymentReference: event.reference },
-      include: { package: { select: { slug: true } } },
+      include: { package: { select: { slug: true, type: true } } },
     });
 
     if (!purchase) {
@@ -351,14 +353,47 @@ export class PaymentsWebhookService {
       return { mismatch: 'ORDER_ALREADY_SETTLED', purchaseId: purchase.id };
     }
 
-    const creditTransaction = await this.credits.createProviderCreditTransactionInTransaction(tx, {
-      providerId: purchase.providerId,
-      type: CreditTransactionType.PACKAGE_PURCHASE,
-      amount: purchase.creditAmountSnapshot,
-      reason: `Test-mode package purchase: ${purchase.packageNameSnapshot}`,
-      referenceType: 'PackagePurchase',
-      referenceId: purchase.id,
-    });
+    /*
+     * What the settlement grants depends on what was sold, and only one of the
+     * two ever happens.
+     *
+     * A ONE_TIME_CREDITS package loads the ledger — the behaviour this method
+     * has always had, unchanged down to the reason string. A period package
+     * grants an entitlement instead and moves no balance: its
+     * `creditAmountSnapshot` is zero by construction, and a zero-credit ledger
+     * row would be a transaction in the provider's history that records
+     * nothing.
+     *
+     * Both are written inside the same Serializable transaction as the purchase
+     * update and the audit row, so a redelivered event that got past the
+     * PROCESSED short-circuit still cannot produce a second period: the unique
+     * index on ProviderPackageEntitlement.purchaseId refuses it at the database.
+     */
+    const isOneTime = purchase.package.type === OfferPackageType.ONE_TIME_CREDITS;
+
+    const creditTransaction = isOneTime
+      ? await this.credits.createProviderCreditTransactionInTransaction(tx, {
+          providerId: purchase.providerId,
+          type: CreditTransactionType.PACKAGE_PURCHASE,
+          amount: purchase.creditAmountSnapshot,
+          reason: `Test-mode package purchase: ${purchase.packageNameSnapshot}`,
+          referenceType: 'PackagePurchase',
+          referenceId: purchase.id,
+        })
+      : null;
+
+    if (!isOneTime) {
+      await grantEntitlementForPurchase(tx, {
+        providerId: purchase.providerId,
+        purchaseId: purchase.id,
+        paidAt: now,
+        packageId: purchase.packageId,
+        priceAmountSnapshot: purchase.priceAmountSnapshot,
+        currencySnapshot: purchase.currencySnapshot,
+        packageNameSnapshot: purchase.packageNameSnapshot,
+        paymentProvider: purchase.paymentProvider,
+      });
+    }
 
     await tx.packagePurchase.update({
       where: { id: purchase.id },
@@ -366,7 +401,7 @@ export class PaymentsWebhookService {
         status: PackagePurchaseStatus.PAID,
         paidAt: now,
         providerOrderId: event.objectId,
-        creditTransactionId: creditTransaction.id,
+        ...(creditTransaction ? { creditTransactionId: creditTransaction.id } : {}),
       },
     });
 

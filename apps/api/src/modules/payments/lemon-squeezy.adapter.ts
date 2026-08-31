@@ -8,6 +8,7 @@ import {
   CheckoutSession,
   CheckoutSessionError,
   CheckoutSessionRequest,
+  PaymentProviderCapabilities,
   PaymentProviderPort,
 } from './payment-provider.port';
 import {
@@ -63,6 +64,33 @@ export const LEMON_SQUEEZY_FETCH = Symbol('LEMON_SQUEEZY_FETCH');
 @Injectable()
 export class LemonSqueezyCheckoutAdapter extends PaymentProviderPort {
   readonly kind: PaymentProviderKind = 'lemon-squeezy-test';
+
+  /**
+   * No automatic renewal, for two independent reasons — either one alone would
+   * be enough.
+   *
+   * The first is the integration's shape. This adapter opens one-off checkouts
+   * (`POST /v1/checkouts` against a fixed variant, `custom_price` pinned to this
+   * application's own snapshot) and stores nothing but the checkout's opaque id.
+   * Lemon Squeezy is a merchant of record: it holds the buyer's card, and it
+   * exposes no endpoint that lets this application charge a card on file of its
+   * own accord. Recurring billing there is a property of a *subscription
+   * variant* that Lemon Squeezy itself bills on its own schedule — a different
+   * product configuration, a different checkout, and a different set of webhook
+   * events (`subscription_payment_success` and friends) than the `order_created`
+   * this build accepts.
+   *
+   * The second is that this build has no live mode at all, and refuses to boot
+   * with one (see payment-provider.config.ts). A renewal "succeeding" against a
+   * sandbox would be a period granted for money that never moved.
+   *
+   * So the honest answer here is false, and the feature is presented to
+   * providers as unavailable rather than as coming soon.
+   */
+  readonly capabilities: PaymentProviderCapabilities = {
+    automaticRenewal: false,
+    automaticRenewalUnsupportedReason: 'NO_LIVE_MODE',
+  };
 
   private readonly logger = new Logger('LemonSqueezyCheckout');
   private readonly fetchImpl: LemonSqueezyFetch;

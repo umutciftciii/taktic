@@ -359,11 +359,11 @@ model Session {
 }
 
 model ServiceCategory {
-  id              String                @id @default(cuid())
-  parentId        String?
-  name            String
-  slug            String                @unique
-  description     String?
+  id                       String                @id @default(cuid())
+  parentId                 String?
+  name                     String
+  slug                     String                @unique
+  description              String?
   /// Credits a provider spends to submit one offer on a request in this
   /// category. There is deliberately NO default: a default value would be the
   /// hidden "1 credit" fallback the pricing rules forbid.
@@ -374,18 +374,18 @@ model ServiceCategory {
   ///
   /// There is no hierarchical inheritance: a request uses the cost of exactly
   /// the category it is attached to, never a parent's.
-  offerCreditCost Int?
-  imageUrl        String?
-  coverImageUrl   String?
-  iconKey         String?
+  offerCreditCost          Int?
+  imageUrl                 String?
+  coverImageUrl            String?
+  iconKey                  String?
   /// What this category is in the tree. See ServiceCategoryKind.
-  kind            ServiceCategoryKind   @default(LEAF)
+  kind                     ServiceCategoryKind   @default(LEAF)
   /// Operational readiness. See ServiceCategoryStatus.
   ///
   /// `isActive` below is the same fact in the shape every existing caller and
   /// response body already speaks, and the two are written together by
   /// CategoriesService — never one without the other.
-  status          ServiceCategoryStatus @default(ACTIVE)
+  status                   ServiceCategoryStatus @default(ACTIVE)
   /// Whether a provider may put this category in their own service list.
   ///
   /// Only ever consulted for a DRAFT leaf. An ACTIVE leaf is always open — see
@@ -397,24 +397,41 @@ model ServiceCategory {
   /// newly created or newly imported draft is invisible to applicants until an
   /// operator opens it. The migration backfills ACTIVE leaves to true, which is
   /// what keeps enrollment open if one of them is later pulled back to DRAFT.
-  providerEnrollmentOpen Boolean          @default(false)
-  isActive        Boolean               @default(true)
-  sortOrder       Int                   @default(0)
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  providerEnrollmentOpen   Boolean               @default(false)
+  /// Whether this category may be put inside a CATEGORY_UNLIMITED package's
+  /// scope.
+  ///
+  /// Defaults to false for every category that exists and every category that
+  /// will ever be created, including the ones the taxonomy import brings in.
+  /// That is the rule "regulated or high-value categories are not part of an
+  /// unlimited package by default" implemented the only way that cannot be
+  /// forgotten: nothing is eligible until an admin opts it in, so a category
+  /// nobody has considered is a category nobody can sell unmetered offering on.
+  ///
+  /// Being eligible is necessary and never sufficient. A package's scope is
+  /// checked against this flag at write time, and offering is still refused for
+  /// an INACTIVE category, a category the provider is not bound to, and every
+  /// other rule that applied before packages existed.
+  unlimitedPackageEligible Boolean               @default(false)
+  isActive                 Boolean               @default(true)
+  sortOrder                Int                   @default(0)
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
 
   /// Restrict, not the implicit SetNull: silently orphaning a subtree is how a
   /// category tree loses a whole branch without anybody being told. A parent
   /// with children cannot be deleted — the API says so with a 409, and the
   /// database says so even if something bypasses the API.
-  parent          ServiceCategory?            @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children        ServiceCategory[]           @relation("ServiceCategoryTree")
-  questions       ServiceRequestQuestion[]
-  requests        ServiceRequest[]
-  entryRequests   ServiceRequest[]            @relation("ServiceRequestEntryCategory")
-  providers       ProviderServiceCategory[]
-  routerRulesIn   ServiceCategoryRouterRule[] @relation("ServiceCategoryRouterTarget")
-  providerInvites ProviderInviteToken[]
+  parent            ServiceCategory?                  @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children          ServiceCategory[]                 @relation("ServiceCategoryTree")
+  questions         ServiceRequestQuestion[]
+  requests          ServiceRequest[]
+  entryRequests     ServiceRequest[]                  @relation("ServiceRequestEntryCategory")
+  providers         ProviderServiceCategory[]
+  routerRulesIn     ServiceCategoryRouterRule[]       @relation("ServiceCategoryRouterTarget")
+  providerInvites   ProviderInviteToken[]
+  packageScopes     OfferPackageScopeCategory[]
+  entitlementScopes ProviderPackageEntitlementScope[]
 
   @@index([parentId])
   @@index([isActive, sortOrder])
@@ -829,7 +846,7 @@ model ProviderProfile {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user                User?                       @relation(fields: [userId], references: [id])
+  user                User?                        @relation(fields: [userId], references: [id])
   serviceCategories   ProviderServiceCategory[]
   serviceAreas        ProviderServiceArea[]
   offers              Offer[]
@@ -839,6 +856,7 @@ model ProviderProfile {
   claimTokens         ProviderClaimToken[]
   notificationLogs    NotificationLog[]
   messageThreads      MessageThread[]
+  packageEntitlements ProviderPackageEntitlement[]
 
   @@index([status])
   @@index([city])
@@ -877,35 +895,46 @@ model ProviderServiceArea {
 }
 
 model Offer {
-  id                          String                @id @default(cuid())
-  offerNumber                 String?               @unique
+  id                          String                  @id @default(cuid())
+  offerNumber                 String?                 @unique
   requestId                   String
   providerId                  String
-  status                      OfferStatus           @default(SUBMITTED)
+  status                      OfferStatus             @default(SUBMITTED)
   priceAmount                 Int
-  currency                    String                @default("TRY")
+  currency                    String                  @default("TRY")
   estimatedStartDate          DateTime?
   estimatedCompletionDate     DateTime?
   message                     String
   warrantyNote                String?
   internalNote                String?
-  creditCost                  Int                   @default(1)
+  creditCost                  Int                     @default(1)
+  /// Which right paid for this offer.
+  ///
+  /// Written by the entitlement resolver in the same transaction that charged
+  /// it, so "no credit moved" and "an unlimited period covered it" are never
+  /// the same reading. Backfilled to ONE_TIME_CREDIT for every offer that
+  /// predates entitlements, which is what they all spent.
+  entitlementSource           OfferEntitlementSource?
+  /// The period entitlement that covered this offer, when one did. NULL for a
+  /// ONE_TIME_CREDIT offer.
+  entitlementId               String?
   creditSpentTransactionId    String?
   creditRefundedTransactionId String?
   creditRefundedAt            DateTime?
   creditRefundReason          String?
-  submittedAt                 DateTime              @default(now())
+  submittedAt                 DateTime                @default(now())
   viewedAt                    DateTime?
   acceptedAt                  DateTime?
   rejectedAt                  DateTime?
   rejectionReason             OfferRejectionReason?
   withdrawnAt                 DateTime?
-  createdAt                   DateTime              @default(now())
-  updatedAt                   DateTime              @updatedAt
+  createdAt                   DateTime                @default(now())
+  updatedAt                   DateTime                @updatedAt
 
-  request            ServiceRequest      @relation(fields: [requestId], references: [id])
-  provider           ProviderProfile     @relation(fields: [providerId], references: [id])
-  matchedForRequest  ServiceRequest?     @relation("ServiceRequestMatchedOffer")
+  request            ServiceRequest              @relation(fields: [requestId], references: [id])
+  provider           ProviderProfile             @relation(fields: [providerId], references: [id])
+  entitlement        ProviderPackageEntitlement? @relation(fields: [entitlementId], references: [id])
+  matchedForRequest  ServiceRequest?             @relation("ServiceRequestMatchedOffer")
   contactRevealEvent ContactRevealEvent?
   messageThread      MessageThread?
   // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
@@ -923,24 +952,145 @@ model Offer {
   @@index([creditSpentTransactionId])
   @@index([creditRefundedTransactionId])
   @@index([rejectionReason])
+  @@index([entitlementId, submittedAt])
+}
+
+/// What a purchasable offer package sells.
+///
+/// ONE_TIME_CREDITS is everything this table held before the enum existed: a
+/// bundle of credits that lands in the provider's ledger and never expires. The
+/// two period products sit beside it and change nothing about it.
+///
+/// MONTHLY_QUOTA sells a credit quota that lives for one 30-day period and does
+/// not carry over. CATEGORY_UNLIMITED sells unmetered offering for 30 days, but
+/// only inside the category scope snapshotted at purchase time.
+enum OfferPackageType {
+  ONE_TIME_CREDITS
+  MONTHLY_QUOTA
+  CATEGORY_UNLIMITED
+}
+
+/// Where a period entitlement stands right now.
+///
+/// ACTIVE    — inside its period and usable. `endAt` still decides: the
+///             resolver never trusts the status alone.
+/// EXPIRED   — the period ended. Reached by the sweeper, and assumed by every
+///             reader the moment `endAt` passes, so a stopped sweeper cannot
+///             hand out an extra day.
+/// PAST_DUE  — a renewal charge was attempted at period end and did not
+///             succeed. It grants nothing; it exists so "the money failed" is
+///             distinguishable from "the period simply ran out".
+/// CANCELLED — auto-renew was cancelled AND the period has since ended.
+///             Cancelling on its own never leaves ACTIVE early.
+enum ProviderEntitlementStatus {
+  ACTIVE
+  EXPIRED
+  PAST_DUE
+  CANCELLED
+}
+
+/// The outcome of one renewal attempt.
+///
+/// UNSUPPORTED is a first-class outcome rather than a failure dressed up as
+/// one: this build's payment adapters cannot charge a stored payment method at
+/// all, and an attempt row that said FAILED would read as "the card was
+/// declined" to whoever audits it later.
+enum EntitlementRenewalStatus {
+  SUCCEEDED
+  FAILED
+  UNSUPPORTED
+}
+
+/// Why a renewal attempt did not produce a new period, as a closed set of short
+/// codes.
+///
+/// Never a payment-provider response body, never a decline message, never
+/// anything about a card. The provider-facing screens map these onto neutral
+/// wording and the admin screens show the code itself.
+enum EntitlementRenewalFailureCode {
+  PROVIDER_UNSUPPORTED
+  PAYMENT_METHOD_MISSING
+  PAYMENT_DECLINED
+  PROVIDER_UNAVAILABLE
+  PROVIDER_REJECTED
+  PROVIDER_TIMEOUT
+  AUTO_RENEW_DISABLED
+  ENTITLEMENT_NOT_RENEWABLE
+}
+
+/// Which right paid for an offer, decided once by the entitlement resolver and
+/// then written on the offer.
+///
+/// Existing offers are backfilled to ONE_TIME_CREDIT, which is what every offer
+/// submitted before this enum existed actually spent.
+enum OfferEntitlementSource {
+  UNLIMITED
+  MONTHLY_QUOTA
+  ONE_TIME_CREDIT
 }
 
 model OfferCreditPackage {
-  id           String   @id @default(cuid())
-  name         String
-  slug         String   @unique
-  creditAmount Int
-  priceAmount  Int
-  currency     String   @default("TRY")
-  description  String?
-  isActive     Boolean  @default(true)
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String           @id @default(cuid())
+  name            String
+  slug            String           @unique
+  /// Credits handed to the ledger when a ONE_TIME_CREDITS package settles.
+  ///
+  /// Zero for the two period types, which grant an entitlement rather than a
+  /// balance. A database CHECK keeps the pairing honest in both directions —
+  /// see the add_offer_package_entitlements migration.
+  creditAmount    Int
+  priceAmount     Int
+  currency        String           @default("TRY")
+  description     String?
+  isActive        Boolean          @default(true)
+  sortOrder       Int              @default(0)
+  /// What this package sells. Defaults to the only thing the table used to
+  /// hold, so every existing row keeps its exact meaning.
+  type            OfferPackageType @default(ONE_TIME_CREDITS)
+  /// The credit quota one MONTHLY_QUOTA period carries. NULL for every other
+  /// type; a CHECK enforces both halves.
+  quotaCredits    Int?
+  /// How long one period lasts, in whole days. NULL for ONE_TIME_CREDITS,
+  /// which does not expire. Stored rather than hard-coded so a purchased
+  /// entitlement can snapshot the number it was actually sold under, but the
+  /// admin API only ever writes PACKAGE_PERIOD_DAYS (30).
+  periodDays      Int?
+  /// How many offers a CATEGORY_UNLIMITED period allows per day. NULL means no
+  /// daily cap. Kept nullable rather than defaulted so "unset" stays visible.
+  dailyOfferLimit Int?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
-  purchases PackagePurchase[]
+  purchases       PackagePurchase[]
+  /// Which categories a CATEGORY_UNLIMITED package is allowed to cover. Empty
+  /// for every other type.
+  scopeCategories OfferPackageScopeCategory[]
+  entitlements    ProviderPackageEntitlement[]
 
   @@index([isActive, sortOrder])
+  @@index([type, isActive, sortOrder])
+}
+
+/// A category an admin has put inside a CATEGORY_UNLIMITED package's scope.
+///
+/// The row can only exist for a category whose `unlimitedPackageEligible` flag
+/// is set, which is the whole of the "regulated categories are not sold as
+/// unlimited by default" rule: nothing is eligible until somebody says so.
+///
+/// This is the package *definition*. What a provider bought is snapshotted onto
+/// ProviderPackageEntitlementScope and never reads back through here, so
+/// editing a package cannot widen or narrow a period somebody already paid for.
+model OfferPackageScopeCategory {
+  id         String   @id @default(cuid())
+  packageId  String
+  categoryId String
+  createdAt  DateTime @default(now())
+
+  package  OfferCreditPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  category ServiceCategory    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([packageId, categoryId])
+  @@index([categoryId])
 }
 
 model PackagePurchase {
@@ -987,8 +1137,14 @@ model PackagePurchase {
   createdAt                 DateTime              @default(now())
   updatedAt                 DateTime              @updatedAt
 
-  provider ProviderProfile    @relation(fields: [providerId], references: [id])
-  package  OfferCreditPackage @relation(fields: [packageId], references: [id])
+  provider       ProviderProfile             @relation(fields: [providerId], references: [id])
+  package        OfferCreditPackage          @relation(fields: [packageId], references: [id])
+  /// The period this purchase paid for, when it paid for one. A ONE_TIME_CREDITS
+  /// purchase has none.
+  entitlement    ProviderPackageEntitlement? @relation("PackagePurchaseEntitlement")
+  /// The renewal attempt this purchase settled, when it was a renewal rather
+  /// than a first purchase.
+  renewalAttempt PackageRenewalAttempt?
 
   @@index([providerId])
   @@index([packageId])
@@ -1020,6 +1176,155 @@ model PackagePurchase {
 /// correlation token and no buyer detail: `eventKey` is the provider's own
 /// opaque identity for the event object and the codes are the short machine
 /// strings in payments-webhook.service.ts.
+/// One 30-day period a provider actually bought.
+///
+/// Everything a period is judged by is snapshotted here at settlement: the
+/// price, the quota, the daily cap, the period length and — in
+/// ProviderPackageEntitlementScope — the exact set of categories it covers.
+/// The package definition is never read back through `packageId` to decide
+/// anything: repricing a package, renaming it or widening its scope must leave
+/// every period somebody already paid for exactly as it was sold.
+///
+/// `startAt`/`endAt` are wall-clock instants, never calendar months. A period
+/// bought on 27 September ends on 27 October, and a period bought on 31 January
+/// ends on 2 March — there is no month arithmetic anywhere in this feature.
+///
+/// Unused quota does not carry over. The row is not topped up and not extended;
+/// a renewal is a new period on the same row (`periodIndex` increments) or a new
+/// row, and either way the remaining quota is reset from the snapshot, never
+/// added to.
+model ProviderPackageEntitlement {
+  id                      String                         @id @default(cuid())
+  providerId              String
+  packageId               String
+  /// The purchase that opened this period. Unique, so one settled payment can
+  /// never produce two periods — the database half of the idempotency
+  /// guarantee that the Serializable settlement transaction is the other half
+  /// of.
+  purchaseId              String?                        @unique
+  type                    OfferPackageType
+  packageNameSnapshot     String
+  priceAmountSnapshot     Int
+  currencySnapshot        String                         @default("TRY")
+  /// The quota one period carries, for MONTHLY_QUOTA. NULL for the other types.
+  quotaCreditsSnapshot    Int?
+  /// What is left of it right now. Decremented under a conditional UPDATE, so
+  /// two offers racing for the last credit cannot both win.
+  remainingQuota          Int?
+  dailyOfferLimitSnapshot Int?
+  periodDaysSnapshot      Int
+  startAt                 DateTime
+  endAt                   DateTime
+  status                  ProviderEntitlementStatus      @default(ACTIVE)
+  /// Which period this is. 0 is the purchased one; a successful renewal
+  /// increments it. Half of the renewal idempotency key.
+  periodIndex             Int                            @default(0)
+  /// Off unless the provider turned it on themselves, in a separate action from
+  /// buying. There is no code path that sets this at purchase time.
+  autoRenewEnabled        Boolean                        @default(false)
+  /// When that separate consent was given. Cleared when auto-renew is turned
+  /// off again, so the column is never a record of a consent that no longer
+  /// stands.
+  autoRenewConsentAt      DateTime?
+  /// The payment provider's own reference for a stored payment method, and
+  /// nothing else. Never a card number, never a CVC, never a PAN fragment, and
+  /// never rendered to anyone but a SUPER_ADMIN.
+  ///
+  /// Always NULL in this build: no adapter here can store or charge a payment
+  /// method. The column exists so enabling that capability is a change to the
+  /// adapter rather than a migration.
+  paymentMethodReference  String?
+  paymentProvider         String?
+  /// When the provider cancelled auto-renew. Cancelling never shortens the
+  /// period: `endAt` is untouched and the status stays ACTIVE until it passes.
+  cancelledAt             DateTime?
+  lastRenewalAttemptAt    DateTime?
+  lastRenewalFailureCode  EntitlementRenewalFailureCode?
+  createdAt               DateTime                       @default(now())
+  updatedAt               DateTime                       @updatedAt
+
+  provider        ProviderProfile                   @relation(fields: [providerId], references: [id])
+  package         OfferCreditPackage                @relation(fields: [packageId], references: [id])
+  purchase        PackagePurchase?                  @relation("PackagePurchaseEntitlement", fields: [purchaseId], references: [id])
+  scopes          ProviderPackageEntitlementScope[]
+  renewalAttempts PackageRenewalAttempt[]
+  offers          Offer[]
+
+  @@index([providerId, status, endAt])
+  @@index([packageId])
+  @@index([status, endAt])
+}
+
+/// One category a bought period covers.
+///
+/// Two kinds of row, told apart by `selected`:
+///
+/// - `selected = true`  — a node the package definition named. A GROUP here is
+///                        what the provider sees on screen and what the package
+///                        was sold as.
+/// - `selected = false` — a leaf reached by expanding one of those groups at
+///                        purchase time.
+///
+/// Both are matched against a request's category, which is why adding a child
+/// to a group afterwards cannot silently widen a period somebody already paid
+/// for: the expansion is frozen here, and the live tree is never walked to
+/// answer "is this request in scope".
+model ProviderPackageEntitlementScope {
+  id                   String              @id @default(cuid())
+  entitlementId        String
+  categoryId           String
+  /// The name as it read at purchase time, so a renamed category does not
+  /// rewrite what a past receipt says it covered.
+  categoryNameSnapshot String
+  categoryKindSnapshot ServiceCategoryKind
+  selected             Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+
+  entitlement ProviderPackageEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+  category    ServiceCategory            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([entitlementId, categoryId])
+  @@index([categoryId])
+  @@index([entitlementId, selected])
+}
+
+/// One attempt to start the next period by charging for it.
+///
+/// Rows are written for every outcome, including the one this build always
+/// produces — UNSUPPORTED, because neither payment adapter here can charge a
+/// stored payment method. A failed attempt extends nothing: it never touches
+/// `endAt`, and the entitlement moves to PAST_DUE.
+///
+/// A PostgreSQL partial unique index — "PackageRenewalAttempt_one_success_per_period",
+/// UNIQUE ("entitlementId", "periodIndex") WHERE status = 'SUCCEEDED' — is
+/// created by the add_offer_package_entitlements migration. Prisma cannot
+/// express partial indexes, so it lives in raw SQL; it is what makes two crons,
+/// two webhook deliveries or two operators unable to buy the same period twice.
+model PackageRenewalAttempt {
+  id                     String                         @id @default(cuid())
+  entitlementId          String
+  /// The period this attempt was trying to open — the entitlement's
+  /// `periodIndex` + 1 at the time. Half of the idempotency key.
+  periodIndex            Int
+  status                 EntitlementRenewalStatus
+  failureCode            EntitlementRenewalFailureCode?
+  paymentProvider        String?
+  /// The payment provider's opaque transaction or order identifier. Never a
+  /// payload, never a card detail.
+  providerTransactionRef String?
+  /// The purchase row this attempt settled through, when the renewal went
+  /// through the ordinary checkout path.
+  purchaseId             String?                        @unique
+  attemptedAt            DateTime                       @default(now())
+
+  entitlement ProviderPackageEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+  purchase    PackagePurchase?           @relation(fields: [purchaseId], references: [id])
+
+  @@index([entitlementId, periodIndex])
+  @@index([status])
+  @@index([attemptedAt])
+}
+
 model PaymentWebhookEvent {
   id         String                    @id @default(cuid())
   provider   String
