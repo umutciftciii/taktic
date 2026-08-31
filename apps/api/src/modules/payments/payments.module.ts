@@ -44,6 +44,6 @@ import { PaymentsWebhookService } from './payments-webhook.service';
     PaymentsService,
     PaymentsWebhookService,
   ],
-  exports: [PaymentsService, PaymentsWebhookService],
+  exports: [PaymentsService, PaymentsWebhookService, PaymentProviderPort],
 })
 export class PaymentsModule {}

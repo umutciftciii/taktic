@@ -37,6 +37,40 @@ export class CreditsController {
     return this.creditsService.listCreditPackages(shouldIncludeInactive);
   }
 
+  /**
+   * Every package of every type, for the admin package screens.
+   *
+   * Separate from `GET /credit-packages` rather than a flag on it, because that
+   * route answers unauthenticated callers and a quota size or an unlimited
+   * scope is not public information.
+   */
+  @Get('admin/offer-packages')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  listAdminPackages(@Query('includeInactive') includeInactive?: string) {
+    return this.creditsService.listAllPackagesForAdmin(includeInactive !== 'false');
+  }
+
+  /**
+   * The pool a CATEGORY_UNLIMITED scope may be drawn from: categories an admin
+   * has explicitly marked eligible. Everything else — including every
+   * regulated or high-value category nobody has considered — is absent by
+   * default.
+   */
+  @Get('admin/offer-packages/unlimited-eligible-categories')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  listUnlimitedEligibleCategories() {
+    return this.creditsService.listUnlimitedEligibleCategories();
+  }
+
+  @Get('admin/offer-packages/:id')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  getAdminPackage(@Param('id') id: string) {
+    return this.creditsService.getPackageForAdmin(id);
+  }
+
   @Post('credit-packages')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)

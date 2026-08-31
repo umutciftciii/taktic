@@ -5,8 +5,10 @@ import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import {
   CreditTransactionType,
   CustomerOrigin,
+  OfferPackageType,
   PrismaClient,
   ProviderStatus,
+  ProviderEntitlementStatus,
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestStatus,
@@ -197,6 +199,10 @@ const TRUNCATED_TABLES = [
   'ProviderClaimToken',
   'ProviderInviteToken',
   'ProviderCreditTransaction',
+  'PackageRenewalAttempt',
+  'ProviderPackageEntitlementScope',
+  'ProviderPackageEntitlement',
+  'OfferPackageScopeCategory',
   'PackagePurchase',
   'Offer',
   'ServiceRequestAnswer',
@@ -293,6 +299,8 @@ export async function createCategory(
     sortOrder?: number;
     /** Defaults to false, exactly as the column does. */
     providerEnrollmentOpen?: boolean;
+    /** Defaults to false, exactly as the column does. */
+    unlimitedPackageEligible?: boolean;
   } = {},
 ) {
   const suffix = uniqueSuffix();
@@ -311,6 +319,7 @@ export async function createCategory(
       sortOrder: options.sortOrder ?? 0,
       offerCreditCost: options.offerCreditCost ?? null,
       providerEnrollmentOpen: options.providerEnrollmentOpen ?? false,
+      unlimitedPackageEligible: options.unlimitedPackageEligible ?? false,
     },
   });
 }
@@ -526,4 +535,129 @@ export function providerPayload(categoryIds: string[] = []) {
     categoryIds,
     serviceAreas: [{ city: 'İstanbul', district: 'Kadıköy' }],
   };
+}
+
+
+/**
+ * A purchasable package of any type, with the per-type invariants the database
+ * CHECK also insists on already satisfied.
+ */
+export async function createOfferPackage(
+  prisma: PrismaClient,
+  options: {
+    type?: OfferPackageType;
+    name?: string;
+    priceAmount?: number;
+    creditAmount?: number;
+    quotaCredits?: number;
+    dailyOfferLimit?: number | null;
+    periodDays?: number;
+    isActive?: boolean;
+    scopeCategoryIds?: string[];
+  } = {},
+) {
+  const suffix = uniqueSuffix();
+  const type = options.type ?? OfferPackageType.ONE_TIME_CREDITS;
+  const isOneTime = type === OfferPackageType.ONE_TIME_CREDITS;
+
+  return prisma.offerCreditPackage.create({
+    data: {
+      name: `${options.name ?? 'Paket'} ${suffix}`,
+      slug: `paket-${suffix}`,
+      type,
+      creditAmount: isOneTime ? (options.creditAmount ?? 10) : 0,
+      quotaCredits:
+        type === OfferPackageType.MONTHLY_QUOTA ? (options.quotaCredits ?? 20) : null,
+      periodDays: isOneTime ? null : (options.periodDays ?? 30),
+      dailyOfferLimit:
+        type === OfferPackageType.CATEGORY_UNLIMITED
+          ? (options.dailyOfferLimit ?? null)
+          : null,
+      priceAmount: options.priceAmount ?? 100_000,
+      currency: 'TRY',
+      isActive: options.isActive ?? true,
+      ...(options.scopeCategoryIds?.length
+        ? {
+            scopeCategories: {
+              create: options.scopeCategoryIds.map((categoryId) => ({ categoryId })),
+            },
+          }
+        : {}),
+    },
+    include: { scopeCategories: true },
+  });
+}
+
+/**
+ * A bought period, written straight to the table.
+ *
+ * Tests that are about the *settlement* path go through a payment instead; this
+ * is for the many cases whose subject is what an already-held period does.
+ * `scopeCategoryIds` are written as selected rows — expansion is the settlement
+ * path's job and is asserted there.
+ */
+export async function createEntitlement(
+  prisma: PrismaClient,
+  options: {
+    providerId: string;
+    packageId: string;
+    type: OfferPackageType;
+    startAt?: Date;
+    endAt?: Date;
+    quotaCredits?: number | null;
+    remainingQuota?: number | null;
+    dailyOfferLimit?: number | null;
+    status?: ProviderEntitlementStatus;
+    autoRenewEnabled?: boolean;
+    paymentMethodReference?: string | null;
+    periodIndex?: number;
+    scopeCategoryIds?: string[];
+  },
+) {
+  const startAt = options.startAt ?? new Date(Date.now() - 60_000);
+  const endAt = options.endAt ?? new Date(startAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const isQuota = options.type === OfferPackageType.MONTHLY_QUOTA;
+  const quota = isQuota ? (options.quotaCredits ?? 20) : null;
+
+  const categories = options.scopeCategoryIds?.length
+    ? await prisma.serviceCategory.findMany({
+        where: { id: { in: options.scopeCategoryIds } },
+        select: { id: true, name: true, kind: true },
+      })
+    : [];
+
+  return prisma.providerPackageEntitlement.create({
+    data: {
+      providerId: options.providerId,
+      packageId: options.packageId,
+      type: options.type,
+      packageNameSnapshot: `Paket ${uniqueSuffix()}`,
+      priceAmountSnapshot: 100_000,
+      currencySnapshot: 'TRY',
+      quotaCreditsSnapshot: quota,
+      remainingQuota: isQuota ? (options.remainingQuota ?? quota) : null,
+      dailyOfferLimitSnapshot: options.dailyOfferLimit ?? null,
+      periodDaysSnapshot: 30,
+      startAt,
+      endAt,
+      status: options.status ?? ProviderEntitlementStatus.ACTIVE,
+      periodIndex: options.periodIndex ?? 0,
+      autoRenewEnabled: options.autoRenewEnabled ?? false,
+      autoRenewConsentAt: options.autoRenewEnabled ? new Date() : null,
+      paymentMethodReference: options.paymentMethodReference ?? null,
+      ...(categories.length
+        ? {
+            scopes: {
+              create: categories.map((category) => ({
+                categoryId: category.id,
+                categoryNameSnapshot: category.name,
+                categoryKindSnapshot: category.kind,
+                selected: true,
+              })),
+            },
+          }
+        : {}),
+    },
+    include: { scopes: true },
+  });
 }

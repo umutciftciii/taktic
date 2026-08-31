@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import {
+  AdminProviderEntitlements,
   apiFetch,
+  formatDateTime,
+  formatPrice,
   ProviderCredits,
   ProviderProfile,
   statusBadgeClass,
@@ -13,6 +16,19 @@ import { submitCreditOperationAction } from './actions';
 import { CreditOperationForm } from './credit-operation-form';
 import { TransactionsPanel } from './transactions-panel';
 
+const PROVIDER_PACKAGE_TYPE_LABEL: Record<string, string> = {
+  ONE_TIME_CREDITS: 'Tek seferlik kredi',
+  MONTHLY_QUOTA: 'Aylık kota',
+  CATEGORY_UNLIMITED: 'Kategori limitsiz',
+};
+
+const ENTITLEMENT_STATUS_LABEL: Record<string, string> = {
+  ACTIVE: 'Aktif',
+  EXPIRED: 'Süresi doldu',
+  PAST_DUE: 'Ödeme alınamadı',
+  CANCELLED: 'İptal edildi',
+};
+
 type AdminProviderCreditsPageProps = {
   params: Promise<{ id: string }>;
 };
@@ -20,9 +36,10 @@ type AdminProviderCreditsPageProps = {
 export default async function AdminProviderCreditsPage({ params }: AdminProviderCreditsPageProps) {
   const { id } = await params;
 
-  const [credits, provider] = await Promise.all([
+  const [credits, provider, entitlements] = await Promise.all([
     apiFetch<ProviderCredits>(`/providers/${id}/credits`),
     apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`),
+    apiFetch<AdminProviderEntitlements>(`/providers/${id}/entitlements`),
   ]);
 
   const transactions = credits.transactions;
@@ -80,6 +97,114 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
         <StatCard label="Manuel ekleme" value={totalGrant} hint={listedHint} />
         <StatCard label="Manuel düşme" value={totalDeduct} hint={listedHint} />
       </section>
+
+      <SectionCard
+        title="Dönemsel paketler"
+        subtitle={
+          entitlements.autoRenew.available
+            ? `${entitlements.entitlements.length} kayıt`
+            : `${entitlements.entitlements.length} kayıt · otomatik yenileme bu kurulumda kullanılamıyor`
+        }
+        padded={false}
+      >
+        {entitlements.entitlements.length === 0 ? (
+          <p className="cell-muted" style={{ padding: 16 }}>
+            Bu hizmet verenin aylık kota veya limitsiz paketi bulunmuyor.
+          </p>
+        ) : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Paket</th>
+                  <th>Dönem</th>
+                  <th>Durum</th>
+                  <th>Kalan / kapsam</th>
+                  <th>Yenileme</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entitlements.entitlements.map((item) => {
+                  const latestAttempt = item.renewalAttempts[0] ?? null;
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <div className="cell-stack">
+                          <strong>{item.packageName}</strong>
+                          <span className="cell-muted" style={{ fontSize: 12 }}>
+                            {PROVIDER_PACKAGE_TYPE_LABEL[item.type] ?? item.type} ·{' '}
+                            {formatPrice(item.priceAmount, item.currency)}
+                          </span>
+                          {item.purchaseNumber ? (
+                            <span className="cell-muted" style={{ fontSize: 12 }}>
+                              satın alma <code>{item.purchaseNumber}</code>
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="cell-muted">
+                        {formatDateTime(item.startAt)} – {formatDateTime(item.endAt)}
+                        <div style={{ fontSize: 12 }}>
+                          {item.periodDays} gün · dönem #{item.periodIndex}
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={
+                            item.usable ? 'badge badge-good' : 'badge badge-muted'
+                          }
+                        >
+                          {ENTITLEMENT_STATUS_LABEL[item.status] ?? item.status}
+                        </span>
+                        {item.queued ? (
+                          <div className="cell-muted" style={{ fontSize: 12 }}>
+                            sıraya alındı
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        {item.type === 'MONTHLY_QUOTA'
+                          ? `${item.quotaRemaining ?? 0} / ${item.quotaTotal ?? 0} kredi`
+                          : item.scope.map((scope) => scope.name).join(', ') || '—'}
+                        {item.type === 'CATEGORY_UNLIMITED' && item.dailyOfferLimit ? (
+                          <div className="cell-muted" style={{ fontSize: 12 }}>
+                            günlük limit {item.dailyOfferLimit}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <div className="cell-stack">
+                          <span>
+                            otomatik yenileme:{' '}
+                            <strong>{item.autoRenewEnabled ? 'açık' : 'kapalı'}</strong>
+                          </span>
+                          <span className="cell-muted" style={{ fontSize: 12 }}>
+                            kayıtlı ödeme yöntemi:{' '}
+                            {item.paymentMethodOnFile ? 'var' : 'yok'}
+                          </span>
+                          {latestAttempt ? (
+                            <span className="cell-muted" style={{ fontSize: 12 }}>
+                              son deneme {formatDateTime(latestAttempt.attemptedAt)} ·{' '}
+                              {latestAttempt.status}
+                              {latestAttempt.failureCode ? ` (${latestAttempt.failureCode})` : ''}
+                              {latestAttempt.providerTransactionRef ? (
+                                <>
+                                  {' '}
+                                  · işlem <code>{latestAttempt.providerTransactionRef}</code>
+                                </>
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       <div className="credit-ops-grid">
         <SectionCard

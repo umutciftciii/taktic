@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { requireAdmin } from '../../../lib/api';
+import { apiFetch, requireAdmin, type UnlimitedEligibleCategory } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { createCreditPackageAction } from '../actions';
@@ -9,7 +9,11 @@ type NewCreditPackagePageProps = {
     error?: string;
     name?: string;
     slug?: string;
+    type?: string;
     creditAmount?: string;
+    quotaCredits?: string;
+    dailyOfferLimit?: string;
+    scopeCategoryIds?: string | string[];
     priceAmount?: string;
     currency?: string;
     description?: string;
@@ -20,14 +24,38 @@ type NewCreditPackagePageProps = {
 
 const CURRENCIES = ['TRY', 'USD', 'EUR'] as const;
 
+const PACKAGE_TYPES = [
+  { value: 'ONE_TIME_CREDITS', label: 'Tek seferlik kredi (süresiz)' },
+  { value: 'MONTHLY_QUOTA', label: 'Aylık kota (30 gün)' },
+  { value: 'CATEGORY_UNLIMITED', label: 'Kategori limitsiz (30 gün)' },
+] as const;
+
 export default async function NewCreditPackagePage({ searchParams }: NewCreditPackagePageProps) {
   await requireAdmin();
   const params = await searchParams;
   const errorMessage = (params.error ?? '').trim();
+  // The pool an unlimited scope may be drawn from. Empty until an admin marks
+  // categories eligible in category management, which is what keeps regulated
+  // and high-value categories out of unlimited packages by default.
+  const eligibleCategories = await apiFetch<UnlimitedEligibleCategory[]>(
+    '/admin/offer-packages/unlimited-eligible-categories',
+  );
+
+  const selectedScope = new Set(
+    Array.isArray(params.scopeCategoryIds)
+      ? params.scopeCategoryIds
+      : params.scopeCategoryIds
+        ? [params.scopeCategoryIds]
+        : [],
+  );
+
   const draft = {
     name: params.name ?? '',
     slug: params.slug ?? '',
+    type: params.type ?? 'ONE_TIME_CREDITS',
     creditAmount: params.creditAmount ?? '',
+    quotaCredits: params.quotaCredits ?? '',
+    dailyOfferLimit: params.dailyOfferLimit ?? '',
     priceAmount: params.priceAmount ?? '',
     currency: (params.currency ?? 'TRY').toUpperCase(),
     description: params.description ?? '',
@@ -98,16 +126,90 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
                   <span className="help-text">Yalnızca küçük harf, rakam ve tire (-).</span>
                 </label>
                 <label className="field field-3">
-                  <span>Kredi *</span>
+                  <span>Paket türü *</span>
+                  <select name="type" defaultValue={draft.type} required>
+                    {PACKAGE_TYPES.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="help-text">
+                    Tür sonradan değiştirilemez. Dönemsel paketler satın alma anından itibaren
+                    tam 30 gün sürer; takvim ayı kullanılmaz.
+                  </span>
+                </label>
+                <label className="field field-3">
+                  <span>Kredi (tek seferlik paket)</span>
                   <input
                     name="creditAmount"
                     type="number"
                     min="1"
                     step="1"
-                    required
                     defaultValue={draft.creditAmount || '1'}
                   />
-                  <span className="help-text">Satın alımda yüklenecek kredi adedi.</span>
+                  <span className="help-text">
+                    Yalnızca tek seferlik kredi paketlerinde kullanılır.
+                  </span>
+                </label>
+                <label className="field field-3">
+                  <span>Aylık kota (kredi)</span>
+                  <input
+                    name="quotaCredits"
+                    type="number"
+                    min="1"
+                    step="1"
+                    defaultValue={draft.quotaCredits}
+                  />
+                  <span className="help-text">
+                    Yalnızca aylık kota paketlerinde. Kullanılmayan kota dönem sonunda devretmez.
+                  </span>
+                </label>
+                <label className="field field-3">
+                  <span>Günlük teklif limiti</span>
+                  <input
+                    name="dailyOfferLimit"
+                    type="number"
+                    min="0"
+                    step="1"
+                    defaultValue={draft.dailyOfferLimit || '0'}
+                  />
+                  <span className="help-text">
+                    Yalnızca limitsiz paketlerde. 0 = günlük sınır yok.
+                  </span>
+                </label>
+                <label className="field field-12">
+                  <span>Limitsiz paket kapsamı</span>
+                  {eligibleCategories.length === 0 ? (
+                    <span className="help-text">
+                      Limitsiz paket kapsamına açılmış kategori yok. Kategori yönetiminden
+                      &ldquo;limitsiz paket uygunluğu&rdquo;nu açtığınız kategoriler burada
+                      listelenir. Regüle veya yüksek değerli kategoriler varsayılan olarak
+                      kapalıdır.
+                    </span>
+                  ) : (
+                    <>
+                      <select
+                        name="scopeCategoryIds"
+                        multiple
+                        size={Math.min(8, eligibleCategories.length)}
+                        defaultValue={[...selectedScope]}
+                      >
+                        {eligibleCategories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                            {category.kind === 'GROUP' ? ' (grup)' : ''}
+                            {category.status === 'DRAFT' ? ' — taslak' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="help-text">
+                        Yalnızca limitsiz paketlerde kullanılır. Bir grup seçtiğinizde satın alma
+                        anındaki alt kategorileri de kapsanır ve bu kapsam o satın alma için
+                        dondurulur.
+                      </span>
+                    </>
+                  )}
                 </label>
                 <label className="field field-3">
                   <span>Para birimi *</span>

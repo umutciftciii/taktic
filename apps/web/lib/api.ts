@@ -580,6 +580,114 @@ export type OfferCreditPackage = {
   sortOrder: number;
 };
 
+/** What an offer package sells. */
+export type OfferPackageType = 'ONE_TIME_CREDITS' | 'MONTHLY_QUOTA' | 'CATEGORY_UNLIMITED';
+
+export type ProviderEntitlementStatus = 'ACTIVE' | 'EXPIRED' | 'PAST_DUE' | 'CANCELLED';
+
+export type EntitlementRenewalFailureCode =
+  | 'PROVIDER_UNSUPPORTED'
+  | 'PAYMENT_METHOD_MISSING'
+  | 'PAYMENT_DECLINED'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'PROVIDER_REJECTED'
+  | 'PROVIDER_TIMEOUT'
+  | 'AUTO_RENEW_DISABLED'
+  | 'ENTITLEMENT_NOT_RENEWABLE';
+
+export type EntitlementScopeEntry = {
+  categoryId: string;
+  name: string;
+  kind: 'GROUP' | 'LEAF' | 'ROUTER';
+};
+
+/**
+ * One 30-day period the provider bought.
+ *
+ * Deliberately carries no payment credential: the API never selects the stored
+ * payment-method reference into any response, and the admin view reports only
+ * whether one exists.
+ */
+export type ProviderEntitlement = {
+  id: string;
+  packageId: string;
+  type: OfferPackageType;
+  packageName: string;
+  priceAmount: number;
+  currency: string;
+  startAt: string;
+  endAt: string;
+  periodDays: number;
+  status: ProviderEntitlementStatus;
+  /** Inside its own clock and ACTIVE — the only state that pays for offers. */
+  usable: boolean;
+  /** Paid for, but not started yet: an early renewal waiting its turn. */
+  queued: boolean;
+  quotaTotal: number | null;
+  quotaRemaining: number | null;
+  dailyOfferLimit: number | null;
+  dailyOfferUsed: number | null;
+  scope: EntitlementScopeEntry[];
+  autoRenewEnabled: boolean;
+  autoRenewConsentAt: string | null;
+  cancelledAt: string | null;
+  lastRenewalAttemptAt: string | null;
+  lastRenewalFailureCode: EntitlementRenewalFailureCode | null;
+  periodIndex: number;
+  createdAt: string;
+};
+
+/**
+ * Whether automatic renewal can be offered at all.
+ *
+ * Read from the bound payment adapter, not from configuration. When
+ * `available` is false the screens say so as a fact and offer manual renewal —
+ * there is no disabled switch and no "coming soon".
+ */
+export type AutoRenewCapability = {
+  available: boolean;
+  unsupportedReason: 'NO_STORED_PAYMENT_METHOD' | 'NO_LIVE_MODE' | null;
+  message: string | null;
+  periodDays: number;
+};
+
+export type ProviderEntitlements = {
+  providerId: string;
+  autoRenew: AutoRenewCapability;
+  entitlements: ProviderEntitlement[];
+};
+
+export type OfferPackageScopeEntry = {
+  categoryId: string;
+  name: string;
+  kind: 'GROUP' | 'LEAF' | 'ROUTER';
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+};
+
+export type PurchasableOfferPackage = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  type: OfferPackageType;
+  priceAmount: number;
+  currency: string;
+  creditAmount: number;
+  quotaCredits: number | null;
+  periodDays: number | null;
+  dailyOfferLimit: number | null;
+  scope: OfferPackageScopeEntry[];
+  purchasable: boolean;
+  unavailableCode: string | null;
+  unavailableReason: string | null;
+};
+
+export type OfferPackageCatalogue = {
+  providerId: string;
+  periodDays: number;
+  packages: PurchasableOfferPackage[];
+};
+
 export type ProviderCreditTransaction = {
   id: string;
   providerId: string;

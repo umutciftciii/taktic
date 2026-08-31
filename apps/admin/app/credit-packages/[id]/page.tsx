@@ -5,12 +5,19 @@ import {
   formatDateTime,
   formatMinorAsInput,
   formatPrice,
-  OfferCreditPackage,
+  AdminOfferPackage,
   PackagePurchase,
+  UnlimitedEligibleCategory,
   requireAdmin,
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
+
+const PACKAGE_TYPE_LABEL: Record<string, string> = {
+  ONE_TIME_CREDITS: 'Tek seferlik kredi',
+  MONTHLY_QUOTA: 'Aylık kota (30 gün)',
+  CATEGORY_UNLIMITED: 'Kategori limitsiz (30 gün)',
+};
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { EmptyState } from '../../../components/empty-state';
@@ -44,13 +51,26 @@ export default async function CreditPackageDetailPage({
   const okKey = (rawOk ?? '').trim();
   const okMessage = okKey ? OK_MESSAGES[okKey] ?? null : null;
 
-  const packages = await apiFetch<OfferCreditPackage[]>(
-    '/credit-packages?includeInactive=true',
-  );
-  const creditPackage = packages.find((pkg) => pkg.id === id);
+  // Read through the admin listing, which carries every type and each
+  // package's category scope. The public route returns only one-time packages.
+  const [creditPackage, eligibleCategories] = await Promise.all([
+    apiFetch<AdminOfferPackage>(`/admin/offer-packages/${id}`).catch(() => null),
+    apiFetch<UnlimitedEligibleCategory[]>('/admin/offer-packages/unlimited-eligible-categories'),
+  ]);
+
   if (!creditPackage) {
     notFound();
   }
+
+  const scopeIds = creditPackage.scopeCategories.map((scope) => scope.category.id);
+  // A category that is in the scope but no longer eligible must still be
+  // rendered, or saving the form would silently drop it.
+  const scopeOptions = [
+    ...eligibleCategories,
+    ...creditPackage.scopeCategories
+      .filter((scope) => !eligibleCategories.some((item) => item.id === scope.category.id))
+      .map((scope) => ({ ...scope.category, parentId: null })),
+  ];
 
   const selectedCurrency = (CURRENCIES as readonly string[]).includes(creditPackage.currency)
     ? creditPackage.currency
@@ -109,7 +129,17 @@ export default async function CreditPackageDetailPage({
         <span className="meta-pill">
           slug <code>{creditPackage.slug}</code>
         </span>
-        <span className="meta-pill">{creditPackage.creditAmount} kredi</span>
+        <span className="meta-pill">{PACKAGE_TYPE_LABEL[creditPackage.type] ?? creditPackage.type}</span>
+        <span className="meta-pill">
+          {creditPackage.type === 'MONTHLY_QUOTA'
+            ? `${creditPackage.quotaCredits ?? 0} kredi kota`
+            : creditPackage.type === 'CATEGORY_UNLIMITED'
+              ? 'limitsiz'
+              : `${creditPackage.creditAmount} kredi`}
+        </span>
+        {creditPackage.periodDays ? (
+          <span className="meta-pill">{creditPackage.periodDays} gün geçerli</span>
+        ) : null}
         <span className="meta-pill">
           {formatPrice(creditPackage.priceAmount, creditPackage.currency)}
         </span>
@@ -159,17 +189,81 @@ export default async function CreditPackageDetailPage({
                     Slug değiştirilirse harici bağlantılar kırılabilir. Provider satın alma akışı paketi id ile bulur, etkilenmez.
                   </span>
                 </label>
-                <label className="field field-3">
-                  <span>Kredi *</span>
-                  <input
-                    name="creditAmount"
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    defaultValue={creditPackage.creditAmount}
-                  />
-                </label>
+                {/*
+                  * The type is not editable and is therefore not a form field:
+                  * changing what a package sells would leave every period
+                  * already bought against it describing a product that no
+                  * longer exists. The API refuses it too.
+                  */}
+                <input type="hidden" name="type" value={creditPackage.type} />
+
+                {creditPackage.type === 'ONE_TIME_CREDITS' ? (
+                  <label className="field field-3">
+                    <span>Kredi *</span>
+                    <input
+                      name="creditAmount"
+                      type="number"
+                      min="1"
+                      step="1"
+                      required
+                      defaultValue={creditPackage.creditAmount}
+                    />
+                  </label>
+                ) : null}
+
+                {creditPackage.type === 'MONTHLY_QUOTA' ? (
+                  <label className="field field-3">
+                    <span>Aylık kota (kredi) *</span>
+                    <input
+                      name="quotaCredits"
+                      type="number"
+                      min="1"
+                      step="1"
+                      required
+                      defaultValue={creditPackage.quotaCredits ?? 1}
+                    />
+                    <span className="help-text">
+                      Kullanılmayan kota dönem sonunda devretmez.
+                    </span>
+                  </label>
+                ) : null}
+
+                {creditPackage.type === 'CATEGORY_UNLIMITED' ? (
+                  <>
+                    <label className="field field-3">
+                      <span>Günlük teklif limiti</span>
+                      <input
+                        name="dailyOfferLimit"
+                        type="number"
+                        min="0"
+                        step="1"
+                        defaultValue={creditPackage.dailyOfferLimit ?? 0}
+                      />
+                      <span className="help-text">0 = günlük sınır yok.</span>
+                    </label>
+                    <label className="field field-12">
+                      <span>Kapsam *</span>
+                      <select
+                        name="scopeCategoryIds"
+                        multiple
+                        size={Math.min(8, Math.max(2, scopeOptions.length))}
+                        defaultValue={scopeIds}
+                      >
+                        {scopeOptions.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                            {category.kind === 'GROUP' ? ' (grup)' : ''}
+                            {category.status === 'DRAFT' ? ' — taslak' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="help-text">
+                        Kapsamı değiştirmek yalnızca bundan sonraki satın almaları etkiler.
+                        Satılmış paketlerin kapsamı satın alma anında dondurulmuştur.
+                      </span>
+                    </label>
+                  </>
+                ) : null}
                 <label className="field field-3">
                   <span>Para birimi *</span>
                   <select name="currency" defaultValue={selectedCurrency} required>

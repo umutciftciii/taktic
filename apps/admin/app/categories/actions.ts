@@ -290,6 +290,16 @@ function categoryPayload(formData: FormData) {
     ...(kind === 'LEAF' && status === 'DRAFT'
       ? { providerEnrollmentOpen: readFormString(formData, 'providerEnrollmentOpen') === 'on' }
       : {}),
+    // Sent whenever the form could carry it. A closed category renders the box
+    // disabled, and a disabled input never reaches FormData — so sending the
+    // field there would read as "untick it" and silently clear a flag nobody
+    // touched.
+    ...(status === 'INACTIVE'
+      ? {}
+      : {
+          unlimitedPackageEligible:
+            readFormString(formData, 'unlimitedPackageEligible') === 'on',
+        }),
   };
 }
 

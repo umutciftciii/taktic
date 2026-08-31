@@ -1,4 +1,4 @@
-import { OfferRejectionReason, OfferStatus } from '@prisma/client';
+import { OfferEntitlementSource, OfferRejectionReason, OfferStatus } from '@prisma/client';
 
 export type RefundRecommendedAction = 'FULL_REFUND' | 'MANUAL_REVIEW' | 'NO_REFUND';
 
@@ -38,6 +38,12 @@ type RefundPolicyOffer = {
    * field existed carries — so their eligibility is unchanged.
    */
   rejectionReason?: OfferRejectionReason | null;
+  /**
+   * Which right paid for the offer. NULL on every offer written before
+   * entitlements existed, which the migration backfilled to ONE_TIME_CREDIT —
+   * so a NULL here is read as the one-time path and nothing changes for them.
+   */
+  entitlementSource?: OfferEntitlementSource | null;
 };
 
 export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new Date()): RefundEligibility {
@@ -45,6 +51,28 @@ export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new D
 
   if (offer.creditRefundedTransactionId || offer.creditRefundedAt) {
     return policyResult(false, 'NO_REFUND', 'ALREADY_REFUNDED', hoursSinceSubmitted);
+  }
+
+  /*
+   * A period package is not refunded, and that is a decision rather than an
+   * omission.
+   *
+   * A monthly quota and an unlimited period are sold as a period, not as a
+   * per-offer price: the provider paid once for thirty days, and giving a quota
+   * credit back would be topping the period up beyond what was bought — which
+   * the database's own `remainingQuota <= quotaCreditsSnapshot` check calls a
+   * bug. Refunds stay what they have always been: a one-time-credit remedy.
+   *
+   * Checked before the "no credit spend" branch because both are true of a
+   * period offer and only this one says anything useful: a provider reading
+   * their own panel needs "your package covered it", not "no credit was
+   * spent".
+   */
+  if (
+    offer.entitlementSource &&
+    offer.entitlementSource !== OfferEntitlementSource.ONE_TIME_CREDIT
+  ) {
+    return policyResult(false, 'NO_REFUND', 'PERIOD_PACKAGE_NOT_REFUNDABLE', hoursSinceSubmitted);
   }
 
   if (!offer.creditSpentTransactionId || offer.creditCost <= 0) {
@@ -121,6 +149,7 @@ function policyResult(
 const REFUND_REASON_LABELS: Record<string, string> = {
   ALREADY_REFUNDED: 'Kredi daha önce iade edildi',
   NO_CREDIT_SPEND: 'Kredi harcaması yok',
+  PERIOD_PACKAGE_NOT_REFUNDABLE: 'Dönemsel pakete ait teklif',
   PROVIDER_WITHDRAWN_OR_CANCELLED: 'Teklif sağlayıcı tarafından geri çekildi veya iptal edildi',
   OFFER_ACCEPTED: 'Teklif kabul edildi',
   // Deliberately neutral: this label is rendered in the provider's own panel,
@@ -139,6 +168,8 @@ const REFUND_REASON_LABELS: Record<string, string> = {
 const REFUND_DETAILS: Record<string, string> = {
   ALREADY_REFUNDED: 'Bu teklif için kredi iadesi zaten yapılmış.',
   NO_CREDIT_SPEND: 'Bu teklif için kayıtlı kredi harcaması bulunmuyor.',
+  PERIOD_PACKAGE_NOT_REFUNDABLE:
+    'Bu teklif aylık kota veya limitsiz paket kapsamında gönderildi. Dönemsel paketlerde teklif başına iade yapılmaz.',
   PROVIDER_WITHDRAWN_OR_CANCELLED: 'Sağlayıcı tarafından geri çekilen veya iptal edilen tekliflerde otomatik iade önerilmez.',
   OFFER_ACCEPTED: 'Kabul edilmiş tekliflerde kredi iadesi önerilmez.',
   OFFER_NOT_SELECTED: 'Bu talep için teklifiniz kabul edilmedi. Gönderilen teklifin kredisi iade edilmez.',

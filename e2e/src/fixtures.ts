@@ -171,11 +171,17 @@ export function prisma(): PrismaClient {
 /**
  * How many worker processes may each hold a private range of districts.
  *
- * Turkey has 973 of them, so a block is sixty-odd — comfortably more than any
- * one worker allocates, and the allocator below refuses rather than wraps if
- * that ever stops being true.
+ * Turkey has 973 of them, so a block is a hundred-odd — comfortably more than
+ * any one worker allocates, and the allocator below refuses rather than wraps
+ * if that ever stops being true.
+ *
+ * Was sixteen blocks of sixty until the offer-package suite arrived and the
+ * single worker this config runs (`workers: 1`) went past sixty allocations.
+ * Widened rather than worked around, which is what the allocator's own refusal
+ * message asks for: eight is still more parallelism than this suite has ever
+ * been run with, and the ceiling per worker doubles.
  */
-export const LOCATION_WORKER_BLOCKS = 16;
+export const LOCATION_WORKER_BLOCKS = 8;
 
 /** Every (province, district) pair, in one deterministic order. */
 export function allDistrictPairs(): Location[] {
@@ -301,6 +307,8 @@ export async function createCategory(
     namePrefix?: string;
     /** Defaults to false, exactly as the column does. */
     providerEnrollmentOpen?: boolean;
+    /** Defaults to false, exactly as the column does. */
+    unlimitedPackageEligible?: boolean;
   } = {},
 ): Promise<SeededCategory> {
   const suffix = uniqueSuffix();
@@ -320,6 +328,7 @@ export async function createCategory(
       sortOrder: 0,
       offerCreditCost,
       providerEnrollmentOpen: options.providerEnrollmentOpen ?? false,
+      unlimitedPackageEligible: options.unlimitedPackageEligible ?? false,
     },
     select: { id: true, name: true, slug: true },
   });
@@ -518,4 +527,126 @@ export function requestFormValues(location: Location, customerName: string) {
     district: location.district,
     description: 'Salon klimasının montajı ve ilk bakımı gerekiyor.',
   };
+}
+
+
+/**
+ * A purchasable offer package of any type.
+ *
+ * Seeded rather than created through the admin screens for the same reason the
+ * credit grant is: the subject of these specs is what a package *does* once it
+ * exists, and going through the whole authoring flow first would make every one
+ * of them fail for an unrelated reason.
+ */
+export async function createOfferPackage(options: {
+  type: 'ONE_TIME_CREDITS' | 'MONTHLY_QUOTA' | 'CATEGORY_UNLIMITED';
+  name?: string;
+  priceAmount?: number;
+  creditAmount?: number;
+  quotaCredits?: number;
+  dailyOfferLimit?: number | null;
+  scopeCategoryIds?: string[];
+}) {
+  const suffix = uniqueSuffix();
+  const isOneTime = options.type === 'ONE_TIME_CREDITS';
+
+  return prisma().offerCreditPackage.create({
+    data: {
+      name: `${options.name ?? 'E2E Paket'} ${suffix}`,
+      slug: `e2e-paket-${suffix}`,
+      type: options.type,
+      creditAmount: isOneTime ? (options.creditAmount ?? 10) : 0,
+      quotaCredits: options.type === 'MONTHLY_QUOTA' ? (options.quotaCredits ?? 20) : null,
+      periodDays: isOneTime ? null : 30,
+      dailyOfferLimit:
+        options.type === 'CATEGORY_UNLIMITED' ? (options.dailyOfferLimit ?? null) : null,
+      priceAmount: options.priceAmount ?? 149_900,
+      currency: 'TRY',
+      isActive: true,
+      sortOrder: 0,
+      ...(options.scopeCategoryIds?.length
+        ? {
+            scopeCategories: {
+              create: options.scopeCategoryIds.map((categoryId) => ({ categoryId })),
+            },
+          }
+        : {}),
+    },
+    select: { id: true, name: true, slug: true },
+  });
+}
+
+/**
+ * A 30-day period the provider already holds.
+ *
+ * Written straight to the table, because settling a real payment is exactly
+ * what these specs must not do. The settlement path itself is covered by the
+ * API integration suite, which drives the signed webhook endpoint.
+ */
+export async function createEntitlement(options: {
+  providerId: string;
+  packageId: string;
+  packageName: string;
+  type: 'MONTHLY_QUOTA' | 'CATEGORY_UNLIMITED';
+  quotaCredits?: number;
+  remainingQuota?: number;
+  dailyOfferLimit?: number | null;
+  autoRenewEnabled?: boolean;
+  /** Selected nodes; descendants are expanded here the way settlement does. */
+  scopeCategoryIds?: string[];
+}) {
+  const isQuota = options.type === 'MONTHLY_QUOTA';
+  const quota = isQuota ? (options.quotaCredits ?? 20) : null;
+  const startAt = new Date(Date.now() - 60_000);
+  const endAt = new Date(startAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  const categories = options.scopeCategoryIds?.length
+    ? await prisma().serviceCategory.findMany({
+        where: { id: { in: options.scopeCategoryIds } },
+        select: { id: true, name: true, kind: true },
+      })
+    : [];
+
+  return prisma().providerPackageEntitlement.create({
+    data: {
+      providerId: options.providerId,
+      packageId: options.packageId,
+      type: options.type,
+      packageNameSnapshot: options.packageName,
+      priceAmountSnapshot: 149_900,
+      currencySnapshot: 'TRY',
+      quotaCreditsSnapshot: quota,
+      remainingQuota: isQuota ? (options.remainingQuota ?? quota) : null,
+      dailyOfferLimitSnapshot: options.dailyOfferLimit ?? null,
+      periodDaysSnapshot: 30,
+      startAt,
+      endAt,
+      status: 'ACTIVE',
+      autoRenewEnabled: options.autoRenewEnabled ?? false,
+      autoRenewConsentAt: options.autoRenewEnabled ? new Date() : null,
+      ...(categories.length
+        ? {
+            scopes: {
+              create: categories.map((category) => ({
+                categoryId: category.id,
+                categoryNameSnapshot: category.name,
+                categoryKindSnapshot: category.kind,
+                selected: true,
+              })),
+            },
+          }
+        : {}),
+    },
+    select: { id: true, startAt: true, endAt: true },
+  });
+}
+
+/** What is left of a quota period right now. */
+export async function remainingQuota(entitlementId: string): Promise<number | null> {
+  const row = await prisma().providerPackageEntitlement.findUnique({
+    where: { id: entitlementId },
+    select: { remainingQuota: true },
+  });
+
+  return row?.remainingQuota ?? null;
 }
