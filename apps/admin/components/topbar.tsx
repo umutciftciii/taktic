@@ -1,5 +1,6 @@
 'use client';
 
+import type { RefObject } from 'react';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, navGroups } from '../lib/nav';
 import { logoutAction } from '../app/login/actions';
@@ -7,9 +8,12 @@ import { LogoutButton } from '../app/session/logout-button';
 
 type TopbarProps = {
   onToggleSidebar: () => void;
+  sidebarOpen: boolean;
+  sidebarId: string;
+  toggleRef: RefObject<HTMLButtonElement | null>;
 };
 
-export function Topbar({ onToggleSidebar }: TopbarProps) {
+export function Topbar({ onToggleSidebar, sidebarOpen, sidebarId, toggleRef }: TopbarProps) {
   const pathname = usePathname();
   const current = findActive(pathname);
 
@@ -17,10 +21,14 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
     <header className="admin-topbar">
       <div className="admin-topbar-inner">
         <button
+          ref={toggleRef}
           type="button"
           className="admin-topbar-toggle"
+          data-testid="panel-drawer-toggle"
           onClick={onToggleSidebar}
-          aria-label="Menüyü aç"
+          aria-expanded={sidebarOpen}
+          aria-controls={sidebarId}
+          aria-label={sidebarOpen ? 'Menüyü kapat' : 'Menüyü aç'}
         >
           <span aria-hidden="true">☰</span>
         </button>

@@ -95,11 +95,18 @@ section {
   transition: transform 0.2s ease;
 }
 
+/*
+ * `flex: 1` rather than `height: 100%`: the drawer's close button sits above
+ * this nav inside the same column, and a child claiming the full height of the
+ * container would push itself past the bottom of the screen by exactly that
+ * button.
+ */
 .admin-sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   padding: 18px 14px 24px;
   overflow-y: auto;
 }
@@ -205,8 +212,13 @@ section {
   color: var(--primary-dark);
 }
 
-.admin-sidebar-backdrop {
+/* Only rendered while the drawer is open, so it needs no `display: none` state. */
+.admin-drawer-head,
+.admin-drawer-close {
   display: none;
+}
+
+.admin-sidebar-backdrop {
   position: fixed;
   inset: 0;
   z-index: 25;
@@ -214,10 +226,6 @@ section {
   background: rgba(15, 23, 42, 0.4);
   padding: 0;
   cursor: pointer;
-}
-
-.admin-shell.is-sidebar-open .admin-sidebar-backdrop {
-  display: block;
 }
 
 .admin-main {
@@ -602,7 +610,7 @@ button:disabled {
 .form-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
 }
 
 .form-row {
@@ -974,14 +982,28 @@ button:disabled {
   margin: 14px 0;
 }
 
-@media (max-width: 960px) {
+/*
+ * 1024px rather than 960px, so this panel and the two in the web app agree on
+ * where the sidebar becomes a drawer — a tablet at 768px got the desktop
+ * margin-left here and the drawer there.
+ *
+ * `visibility` is what takes a closed drawer out of the tab order and the
+ * accessibility tree; a transform alone left every nav link reachable by Tab
+ * while it sat off the side of the screen.
+ */
+@media (max-width: 1023.98px) {
   .admin-sidebar {
+    width: min(280px, 86vw);
     transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0.2s ease;
     box-shadow: 0 30px 60px rgba(15, 23, 42, 0.18);
+    overscroll-behavior: contain;
   }
 
   .admin-shell.is-sidebar-open .admin-sidebar {
     transform: translateX(0);
+    visibility: visible;
   }
 
   .admin-main {
@@ -994,6 +1016,36 @@ button:disabled {
 
   .admin-topbar-inner {
     padding: 10px 16px;
+  }
+
+  .admin-drawer-head {
+    display: flex;
+    justify-content: flex-end;
+    padding: 10px 10px 0;
+  }
+
+  .admin-drawer-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .admin-drawer-close:hover {
+    background: #f1f5f9;
+  }
+
+  /* The page behind an open drawer does not scroll. */
+  body.has-drawer-open {
+    overflow: hidden;
   }
 }
 
@@ -1528,8 +1580,14 @@ button:disabled {
   display: grid;
 }
 
+/*
+ * Seven columns that add up to about 720px at their narrowest. That is the
+ * table, not a bug — but it scrolls inside this box rather than dragging the
+ * whole page sideways on a phone.
+ */
 .question-table {
   display: block;
+  overflow-x: auto;
 }
 
 .question-table-head {
@@ -1558,6 +1616,11 @@ button:disabled {
 
 .question-row:last-child {
   border-bottom: 0;
+}
+
+.question-table-head,
+.question-row > summary {
+  min-width: 720px;
 }
 
 .question-row > summary {
@@ -2222,7 +2285,7 @@ button:disabled {
 
 .answer-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
   gap: 10px;
 }
 
@@ -3328,7 +3391,8 @@ button:disabled {
 
 .finance-two-col {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  /* min() so the 320px track never becomes wider than the viewport it is in. */
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   gap: 16px;
 }
 
@@ -3537,7 +3601,7 @@ button:disabled {
 
 .finance-manual-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: 12px;
 }
 

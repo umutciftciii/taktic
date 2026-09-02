@@ -15,6 +15,7 @@ import {
   IconSearch,
   IconSend,
 } from '../landing-icons';
+import { PanelDrawer } from '../panel-drawer';
 import { providerDashboardLogoutAction } from '../login/actions';
 import { LogoutButton } from '../session/logout-button';
 import { SessionGuard } from '../session/session-guard';
@@ -99,140 +100,150 @@ export async function ProviderShell({
     { key: 'profile', label: 'İşletme profili', Icon: IconProfile, href: profileHref },
   ];
 
-  return (
-    <div className="pdash-shell">
-      <aside className="pdash-sidebar" aria-label="Hizmet Veren Paneli navigasyonu">
-        <div className="pdash-brand">
-          <Link href="/" aria-label="TakTick ana sayfa">
-            <img className="brand-mark-img" style={{ height: 38 }} src="/brand/icon.png" alt="TakTick" />
-          </Link>
-          <div style={{ minWidth: 0 }}>
-            <div className="pdash-brand-title">Hizmet Veren</div>
-            <div className="pdash-brand-sub">{subtitle}</div>
-          </div>
+  const sidebar = (
+    <>
+      <div className="pdash-brand">
+        <Link href="/" aria-label="TakTick ana sayfa">
+          <img className="brand-mark-img" style={{ height: 38 }} src="/brand/icon.png" alt="TakTick" />
+        </Link>
+        <div style={{ minWidth: 0 }}>
+          <div className="pdash-brand-title">Hizmet Veren</div>
+          <div className="pdash-brand-sub">{subtitle}</div>
         </div>
+      </div>
 
-        {/*
-          The credit box only appears once a balance has actually been read. It
-          never converts credits into a number of offers: an offer costs 1–3
-          credits depending on the request's category, and the exact price is
-          written on that request's own screen.
-        */}
-        {typeof creditBalance === 'number' ? (
-          <div className="pdash-credit-box">
-            <span className="pdash-credit-label">Kredi bakiyesi</span>
-            <span className="pdash-credit-value">{creditBalance}</span>
-            <span className="pdash-credit-note">
-              Teklif maliyeti kategoriye göre değişir; her talebin kredi bedeli detay ekranında
-              yazılıdır.
-            </span>
-            {creditsHref ? (
-              <Link className="pdash-btn pdash-btn-primary pdash-btn-block" href={creditsHref}>
-                Kredi yükle
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
+      {/*
+        The credit box only appears once a balance has actually been read. It
+        never converts credits into a number of offers: an offer costs 1–3
+        credits depending on the request's category, and the exact price is
+        written on that request's own screen.
+      */}
+      {typeof creditBalance === 'number' ? (
+        <div className="pdash-credit-box">
+          <span className="pdash-credit-label">Kredi bakiyesi</span>
+          <span className="pdash-credit-value">{creditBalance}</span>
+          <span className="pdash-credit-note">
+            Teklif maliyeti kategoriye göre değişir; her talebin kredi bedeli detay ekranında
+            yazılıdır.
+          </span>
+          {creditsHref ? (
+            <Link className="pdash-btn pdash-btn-primary pdash-btn-block" href={creditsHref}>
+              Kredi yükle
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
-        <nav className="pdash-nav" aria-label="Bölüm navigasyonu">
-          {navItems.map((item) => {
-            const isActive = item.key === active;
-            const { Icon } = item;
+      <nav className="pdash-nav" aria-label="Bölüm navigasyonu">
+        {navItems.map((item) => {
+          const isActive = item.key === active;
+          const { Icon } = item;
 
-            if (item.href) {
-              return (
-                <Link
-                  key={item.key}
-                  href={item.href}
-                  className={`pdash-nav-item${isActive ? ' is-active' : ''}`}
-                  aria-current={isActive ? 'page' : undefined}
-                >
-                  <span className="pdash-nav-icon">
-                    <Icon size={16} />
-                  </span>
-                  <span>{item.label}</span>
-                  {typeof item.count === 'number' ? (
-                    <span className="pdash-nav-count">{item.count}</span>
-                  ) : null}
-                </Link>
-              );
-            }
-
+          if (item.href) {
             return (
-              <span
+              <Link
                 key={item.key}
-                className="pdash-nav-item is-disabled"
-                aria-disabled="true"
-                title="Profil oluşturulduğunda açılır"
+                href={item.href}
+                className={`pdash-nav-item${isActive ? ' is-active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
               >
                 <span className="pdash-nav-icon">
                   <Icon size={16} />
                 </span>
                 <span>{item.label}</span>
-                <span className="pdash-nav-soon">Yakında</span>
-              </span>
+                {typeof item.count === 'number' ? (
+                  <span className="pdash-nav-count">{item.count}</span>
+                ) : null}
+              </Link>
             );
-          })}
-        </nav>
+          }
 
-        <div className="pdash-sidebar-footer">
-          {status ? (
-            <div style={{ padding: 16, borderTop: '1px solid var(--color-divider)' }}>
-              <span className="pdash-credit-label">Onay durumu</span>
-              <div style={{ marginTop: 8 }}>
-                <span className={status === 'APPROVED' ? 'tag tag-ink' : 'tag tag-neutral'}>
-                  {status === 'APPROVED' ? 'Onaylı işletme' : statusLabel(status)}
-                </span>
-              </div>
-            </div>
-          ) : null}
-          <span className="pdash-nav-item is-disabled" aria-disabled="true" title="Yakında">
-            <span className="pdash-nav-icon">
-              <IconHelp size={16} />
-            </span>
-            <span>Destek</span>
-            <span className="pdash-nav-soon">Yakında</span>
-          </span>
-        </div>
-      </aside>
-
-      <div className="pdash-main">
-        <div className="pdash-topbar">
-          <div className="pdash-topbar-search" role="search" aria-label="Genel arama (yakında)">
-            <IconSearch size={16} />
-            <input
-              type="search"
-              placeholder="Talep, teklif veya referans no..."
-              disabled
-              aria-disabled="true"
-            />
-          </div>
-          <div className="pdash-topbar-actions">
+          return (
             <span
-              className="pdash-icon-btn"
-              role="button"
-              aria-label="Bildirimler (yakında)"
+              key={item.key}
+              className="pdash-nav-item is-disabled"
               aria-disabled="true"
-              title="Yakında"
+              title="Profil oluşturulduğunda açılır"
             >
-              <IconBell size={16} />
+              <span className="pdash-nav-icon">
+                <Icon size={16} />
+              </span>
+              <span>{item.label}</span>
+              <span className="pdash-nav-soon">Yakında</span>
             </span>
-            <ProviderUserMenu
-              user={user}
-              display={display}
-              initials={initials || 'H'}
-              creditsHref={creditsHref}
-              profileHref={profileHref}
-            />
-          </div>
-        </div>
+          );
+        })}
+      </nav>
 
-        {children}
+      <div className="pdash-sidebar-footer">
+        {status ? (
+          <div style={{ padding: 16, borderTop: '1px solid var(--color-divider)' }}>
+            <span className="pdash-credit-label">Onay durumu</span>
+            <div style={{ marginTop: 8 }}>
+              <span className={status === 'APPROVED' ? 'tag tag-ink' : 'tag tag-neutral'}>
+                {status === 'APPROVED' ? 'Onaylı işletme' : statusLabel(status)}
+              </span>
+            </div>
+          </div>
+        ) : null}
+        <span className="pdash-nav-item is-disabled" aria-disabled="true" title="Yakında">
+          <span className="pdash-nav-icon">
+            <IconHelp size={16} />
+          </span>
+          <span>Destek</span>
+          <span className="pdash-nav-soon">Yakında</span>
+        </span>
       </div>
+    </>
+  );
+
+  const topbar = (
+    <>
+      <div className="pdash-topbar-search" role="search" aria-label="Genel arama (yakında)">
+        <IconSearch size={16} />
+        <input
+          type="search"
+          placeholder="Talep, teklif veya referans no..."
+          disabled
+          aria-disabled="true"
+        />
+      </div>
+      <div className="pdash-topbar-actions">
+        <span
+          className="pdash-icon-btn"
+          role="button"
+          aria-label="Bildirimler (yakında)"
+          aria-disabled="true"
+          title="Yakında"
+        >
+          <IconBell size={16} />
+        </span>
+        <ProviderUserMenu
+          user={user}
+          display={display}
+          initials={initials || 'H'}
+          creditsHref={creditsHref}
+          profileHref={profileHref}
+        />
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      <PanelDrawer
+        prefix="pdash"
+        navLabel="Hizmet Veren Paneli navigasyonu"
+        title="Hizmet Veren"
+        sidebar={sidebar}
+        topbar={topbar}
+      >
+        {children}
+      </PanelDrawer>
 
       {/* See the customer panel: it warns, the server decides. */}
       <SessionGuard />
-    </div>
+    </>
   );
 }
 

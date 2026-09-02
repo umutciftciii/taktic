@@ -143,16 +143,17 @@ jobs:
           if-no-files-found: ignore
 
   e2e-webkit:
-    name: e2e (webkit · sign-in only)
+    name: e2e (webkit · sign-in and mobile shells)
     runs-on: ubuntu-latest
 
     # Its own job rather than a second project on the one above, for the reason
     # that one is Chromium-only: a second engine over the whole suite would
     # double every pull request to re-test the same API. What WebKit is here for
-    # is the one thing an engine can decide — the sign-in screens and the route
-    # a customer lands on afterwards, where the reported Safari failure was — so
-    # this runs that spec and nothing else, in parallel with the job above and
-    # without adding a browser download to it.
+    # is the two things an engine really decides — the cookie each sign-in flow
+    # leaves the browser holding, where the reported Safari failure was, and the
+    # panel layouts at phone widths, where the reported iPhone one was. It runs
+    # those specs and nothing else, in parallel with the job above and without
+    # adding a browser download to it.
     services:
       postgres:
         image: postgres:16.6-alpine
@@ -196,7 +197,7 @@ jobs:
       - name: Install WebKit
         run: pnpm e2e:install:webkit
 
-      - name: Sign-in screens (WebKit)
+      - name: Sign-in screens and mobile shells (WebKit)
         run: pnpm e2e:webkit
 
       - name: Upload failure artifacts
