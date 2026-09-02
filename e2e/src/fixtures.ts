@@ -482,19 +482,48 @@ export async function createLemonSqueezyCreditPackage(options: {
 
 /** Seeds a balance the same way the admin grant does: an ADMIN_GRANT ledger row. */
 export async function grantCredits(providerId: string, amount: number) {
+  return recordCreditTransaction({
+    providerId,
+    type: 'ADMIN_GRANT',
+    amount,
+    reason: 'E2E fixture grant',
+  });
+}
+
+/**
+ * One ledger row of any type, chained onto the balance already there.
+ *
+ * `grantCredits` above only ever writes ADMIN_GRANT, which is enough to give a
+ * provider a number but not enough to give a screen anything to draw. The
+ * credits screen's "how much of the last package is left" bar needs a
+ * PACKAGE_PURCHASE to exist for its denominator, and its spent/refunded
+ * counters read OFFER_SPEND and OFFER_REFUND — so a provider seeded only with a
+ * grant renders the emptiest version of that page there is.
+ *
+ * Written straight to the table rather than settled through the payment path,
+ * for the same reason `createEntitlement` is: settling a real purchase is
+ * exactly what these specs must not do.
+ */
+export async function recordCreditTransaction(options: {
+  providerId: string;
+  type: 'ADMIN_GRANT' | 'ADMIN_DEDUCT' | 'PACKAGE_PURCHASE' | 'OFFER_SPEND' | 'OFFER_REFUND' | 'ADJUSTMENT';
+  /** Signed the way the ledger stores it: negative for a spend. */
+  amount: number;
+  reason?: string;
+}) {
   const latest = await prisma().providerCreditTransaction.findFirst({
-    where: { providerId },
+    where: { providerId: options.providerId },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: { balanceAfter: true },
   });
 
   return prisma().providerCreditTransaction.create({
     data: {
-      providerId,
-      type: 'ADMIN_GRANT',
-      amount,
-      balanceAfter: (latest?.balanceAfter ?? 0) + amount,
-      reason: 'E2E fixture grant',
+      providerId: options.providerId,
+      type: options.type,
+      amount: options.amount,
+      balanceAfter: (latest?.balanceAfter ?? 0) + options.amount,
+      reason: options.reason ?? 'E2E fixture ledger row',
     },
   });
 }
