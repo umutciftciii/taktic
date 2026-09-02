@@ -91,6 +91,16 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
           </div>
         ) : null}
 
+        {error === 'role-conflict' ? (
+          <div className="provider-apply-notice is-warning" role="alert">
+            <span className="provider-apply-notice-icon" aria-hidden="true">!</span>
+            <span>
+              Bu e-posta başka türde bir hesap için kullanılıyor. Başvurunuz için farklı bir
+              e-posta adresi girin.
+            </span>
+          </div>
+        ) : null}
+
         {!user ? (
           <div className="provider-apply-notice" role="status">
             <span className="provider-apply-notice-icon" aria-hidden="true">i</span>

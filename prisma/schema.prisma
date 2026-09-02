@@ -211,6 +211,20 @@ enum MessageSenderRole {
 
 model User {
   id              String          @id @default(cuid())
+  /// The account's address, and the platform's answer to "which kind of account
+  /// is this person".
+  ///
+  /// Unique, and stored only in its normalised form — trimmed and lower-cased —
+  /// which a CHECK constraint enforces (`User_email_normalized_check`, added by
+  /// the migration of the same name). The two facts are one rule together: an
+  /// account carries exactly one role, so a unique index over a single stored
+  /// form is what makes it impossible for one address to hold both a customer
+  /// account and a provider account. The index alone was not enough, because a
+  /// byte-exact index keeps `Ayse@…` and `ayse@…` apart and the folding lived in
+  /// application code that any new caller could forget.
+  ///
+  /// Nullable, and several rows use that: an account may exist without an
+  /// address, and PostgreSQL treats NULLs as distinct in a unique index.
   email           String?         @unique
   phone           String?         @unique
   name            String?

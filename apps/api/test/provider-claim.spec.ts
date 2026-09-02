@@ -529,13 +529,23 @@ describe('claim consume — accounts that already exist', () => {
     enableClaim();
   });
 
+  /**
+   * The customer account appears *after* the application, which is now the only
+   * order that can produce this state: filing an application against an address
+   * a customer already holds is refused at submission time (see
+   * account-email-role-conflict.spec.ts). Registering at an address that merely
+   * has a pending application is deliberately still allowed — an application is
+   * not an account, and letting a stranger's typo lock somebody out of
+   * registering would be a worse rule than the one it enforces — so this guard
+   * is what the flow still needs, and it still has to hold.
+   */
   it('refuses when the address belongs to a customer, and changes no role', async () => {
+    const { providerId } = await submitGuestApplication();
+    const token = lastClaimToken();
     const customer = await createUser(ctx.prisma, {
       role: UserRole.CUSTOMER,
       email: APPLICANT_EMAIL,
     });
-    const { providerId } = await submitGuestApplication();
-    const token = lastClaimToken();
 
     const validate = await request(ctx.server).get(
       `/auth/provider-claim?token=${encodeURIComponent(token)}`,

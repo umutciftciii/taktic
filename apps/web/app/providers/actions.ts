@@ -20,6 +20,18 @@ export async function createProviderAction(formData: FormData) {
       redirect('/providers/register?error=email');
     }
 
+    // The address on a guest application is where the claim link is mailed and
+    // where the provider account would be opened, so the API refuses one filed
+    // against a customer's address. Nothing was written and nothing was sent;
+    // the applicant needs a different address, not a retry.
+    if (
+      error instanceof ApiError &&
+      error.status === 409 &&
+      error.body.includes('EMAIL_ROLE_CONFLICT')
+    ) {
+      redirect('/providers/register?error=role-conflict');
+    }
+
     throw error;
   }
 

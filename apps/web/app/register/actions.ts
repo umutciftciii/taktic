@@ -26,12 +26,22 @@ async function register(path: string, formData: FormData, redirectTo: string) {
   });
 
   if (!response.ok) {
+    const code = response.status === 409 ? await conflictCode(response) : null;
+
     // The API answers 409 + ACTIVATION_REQUIRED when this e-mail belongs to an
     // account the platform auto-created for a guest service request. That is not
     // a dead end: an activation link has just been mailed, so tell the visitor
     // to open it rather than showing "already registered".
-    if (response.status === 409 && (await isActivationRequired(response))) {
+    if (code === 'ACTIVATION_REQUIRED') {
       redirect(`${redirectToForPath(path)}?notice=activation-sent`);
+    }
+
+    // EMAIL_ROLE_CONFLICT is a different refusal from an ordinary duplicate and
+    // has to read like one. "Bu e-posta veya telefon zaten kayıtlı" sends the
+    // visitor to the sign-in screen, where their password will not work,
+    // because the address is not on an account of this kind at all.
+    if (code === 'EMAIL_ROLE_CONFLICT') {
+      redirect(`${redirectToForPath(path)}?error=role-conflict`);
     }
 
     const reason = response.status === 409 ? 'duplicate' : 'invalid';
@@ -51,12 +61,13 @@ function redirectToForPath(path: string) {
   return path.includes('provider') ? '/register/provider' : '/register/customer';
 }
 
-async function isActivationRequired(response: Response): Promise<boolean> {
+/** The API's machine-readable reason for a 409, or null when it carries none. */
+async function conflictCode(response: Response): Promise<string | null> {
   try {
     const parsed = (await response.clone().json()) as { code?: unknown };
-    return parsed?.code === 'ACTIVATION_REQUIRED';
+    return typeof parsed?.code === 'string' ? parsed.code : null;
   } catch {
-    return false;
+    return null;
   }
 }
 

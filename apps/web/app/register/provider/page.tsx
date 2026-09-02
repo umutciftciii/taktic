@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { AuthFrame } from '../../auth-frame';
 import { registerProviderAction } from '../actions';
 import { RoleSwitch } from '../role-switch';
+import { registerErrorMessage } from '../error-message';
 import { PasswordFields } from '../../password-criteria';
 
 type ProviderRegisterPageProps = {
@@ -26,9 +27,7 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
 
         {error ? (
           <div className="auth-screen-error" role="alert">
-            {error === 'duplicate'
-              ? 'Bu e-posta veya telefon zaten kayıtlı.'
-              : 'Bilgileri kontrol edin.'}
+            {registerErrorMessage(error)}
           </div>
         ) : null}
 
