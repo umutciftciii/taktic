@@ -13,6 +13,7 @@ import {
   IconSettings,
   IconUsers,
 } from '../landing-icons';
+import { PanelDrawer } from '../panel-drawer';
 import { customerLogoutAction } from '../login/actions';
 import { loadUnreadMessageCount } from '../../lib/api';
 import { LogoutButton } from '../session/logout-button';
@@ -96,107 +97,117 @@ export async function CustomerShell({
     { key: 'settings', label: 'Profil ve ayarlar', Icon: IconSettings, href: '/account/profile' },
   ];
 
-  return (
-    <div className="cdash-shell">
-      <aside className="cdash-sidebar" aria-label="Müşteri Paneli navigasyonu">
-        <div className="cdash-brand">
-          <Link href="/" aria-label="TakTick ana sayfa">
-            <img className="brand-mark-img" style={{ height: 38 }} src="/brand/icon.png" alt="TakTick" />
-          </Link>
-          <div style={{ minWidth: 0 }}>
-            <div className="cdash-brand-title">Hizmet Alan Paneli</div>
-            <div className="cdash-brand-sub">{display}</div>
-          </div>
-        </div>
-
-        <Link className="cdash-cta" href="/categories">
-          <IconPlus size={14} />
-          <span>Yeni Talep Oluştur</span>
+  const sidebar = (
+    <>
+      <div className="cdash-brand">
+        <Link href="/" aria-label="TakTick ana sayfa">
+          <img className="brand-mark-img" style={{ height: 38 }} src="/brand/icon.png" alt="TakTick" />
         </Link>
+        <div style={{ minWidth: 0 }}>
+          <div className="cdash-brand-title">Hizmet Alan Paneli</div>
+          <div className="cdash-brand-sub">{display}</div>
+        </div>
+      </div>
 
-        <nav className="cdash-nav" aria-label="Bölüm navigasyonu">
-          {navItems.map((item) => {
-            const isActive = item.key === active;
-            const { Icon } = item;
+      <Link className="cdash-cta" href="/categories">
+        <IconPlus size={14} />
+        <span>Yeni Talep Oluştur</span>
+      </Link>
 
-            if (item.href) {
-              return (
-                <Link
-                  key={item.key}
-                  href={item.href}
-                  className={`cdash-nav-item${isActive ? ' is-active' : ''}`}
-                  aria-current={isActive ? 'page' : undefined}
-                >
-                  <span className="cdash-nav-icon">
-                    <Icon size={16} />
-                  </span>
-                  <span>{item.label}</span>
-                  {/*
-                    A number when there is one — zero included, because zero is
-                    an answer. A dash only when the counters could not be read
-                    at all, so an unavailable list never reads as an empty one.
-                  */}
-                  <span
-                    className="cdash-nav-count"
-                    data-testid={`cdash-nav-count-${item.key}`}
-                    title={counts ? undefined : 'Sayılar şu anda getirilemedi'}
-                  >
-                    {typeof item.count === 'number' ? item.count : '—'}
-                  </span>
-                </Link>
-              );
-            }
+      <nav className="cdash-nav" aria-label="Bölüm navigasyonu">
+        {navItems.map((item) => {
+          const isActive = item.key === active;
+          const { Icon } = item;
 
+          if (item.href) {
             return (
-              <span
+              <Link
                 key={item.key}
-                className="cdash-nav-item is-disabled"
-                aria-disabled="true"
-                title="Yakında"
+                href={item.href}
+                className={`cdash-nav-item${isActive ? ' is-active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
               >
                 <span className="cdash-nav-icon">
                   <Icon size={16} />
                 </span>
                 <span>{item.label}</span>
-                <span className="cdash-nav-soon">Yakında</span>
-              </span>
+                {/*
+                  A number when there is one — zero included, because zero is
+                  an answer. A dash only when the counters could not be read
+                  at all, so an unavailable list never reads as an empty one.
+                */}
+                <span
+                  className="cdash-nav-count"
+                  data-testid={`cdash-nav-count-${item.key}`}
+                  title={counts ? undefined : 'Sayılar şu anda getirilemedi'}
+                >
+                  {typeof item.count === 'number' ? item.count : '—'}
+                </span>
+              </Link>
             );
-          })}
-        </nav>
+          }
 
-        <div className="cdash-sidebar-footer">
-          <span className="cdash-nav-item is-disabled" aria-disabled="true" title="Yakında">
-            <span className="cdash-nav-icon">
-              <IconHelp size={16} />
-            </span>
-            <span>Destek</span>
-            <span className="cdash-nav-soon">Yakında</span>
-          </span>
-        </div>
-      </aside>
-
-      <div className="cdash-main">
-        <div className="cdash-topbar">
-          <div className="cdash-topbar-search" role="search" aria-label="Genel arama (yakında)">
-            <IconSearch size={16} />
-            <input type="search" placeholder="Talep, teklif veya işletme ara..." disabled aria-disabled="true" />
-          </div>
-          <div className="cdash-topbar-actions">
+          return (
             <span
-              className="cdash-icon-btn"
-              role="button"
-              aria-label="Bildirimler (yakında)"
+              key={item.key}
+              className="cdash-nav-item is-disabled"
               aria-disabled="true"
               title="Yakında"
             >
-              <IconBell size={16} />
+              <span className="cdash-nav-icon">
+                <Icon size={16} />
+              </span>
+              <span>{item.label}</span>
+              <span className="cdash-nav-soon">Yakında</span>
             </span>
-            <CustomerUserMenu user={user} display={display} initials={initials} />
-          </div>
-        </div>
+          );
+        })}
+      </nav>
 
-        {children}
+      <div className="cdash-sidebar-footer">
+        <span className="cdash-nav-item is-disabled" aria-disabled="true" title="Yakında">
+          <span className="cdash-nav-icon">
+            <IconHelp size={16} />
+          </span>
+          <span>Destek</span>
+          <span className="cdash-nav-soon">Yakında</span>
+        </span>
       </div>
+    </>
+  );
+
+  const topbar = (
+    <>
+      <div className="cdash-topbar-search" role="search" aria-label="Genel arama (yakında)">
+        <IconSearch size={16} />
+        <input type="search" placeholder="Talep, teklif veya işletme ara..." disabled aria-disabled="true" />
+      </div>
+      <div className="cdash-topbar-actions">
+        <span
+          className="cdash-icon-btn"
+          role="button"
+          aria-label="Bildirimler (yakında)"
+          aria-disabled="true"
+          title="Yakında"
+        >
+          <IconBell size={16} />
+        </span>
+        <CustomerUserMenu user={user} display={display} initials={initials} />
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      <PanelDrawer
+        prefix="cdash"
+        navLabel="Müşteri Paneli navigasyonu"
+        title="Hizmet Alan Paneli"
+        sidebar={sidebar}
+        topbar={topbar}
+      >
+        {children}
+      </PanelDrawer>
 
       {/*
         Watches the session and offers to extend it before inactivity ends it.
@@ -205,7 +216,7 @@ export async function CustomerShell({
         would not submit.
       */}
       <SessionGuard />
-    </div>
+    </>
   );
 }
 

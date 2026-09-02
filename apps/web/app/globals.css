@@ -70,6 +70,12 @@
 
   /* Layout constants from the handoff. */
   --wrap: 1280px;
+  /*
+   * 32px a side is the handoff's gutter and stays that on anything wider than a
+   * phone. On a 320px screen it was spending a fifth of the viewport on margin,
+   * so below 640px the gutter halves; every rule that reads this token — the
+   * page frame, the container, the hero's padding-inline — narrows with it.
+   */
   --wrap-pad: 32px;
   --side-w: 264px;
 
@@ -98,6 +104,12 @@
   --error: var(--color-accent-700);
   --error-soft: var(--color-accent-100);
   --lp-max-w: var(--wrap);
+}
+
+@media (max-width: 639.98px) {
+  :root {
+    --wrap-pad: 16px;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2714,7 +2726,7 @@ input[readonly] {
 .provider-apply-grid,
 .pdash-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: var(--space-4);
 }
 
@@ -3048,7 +3060,7 @@ input[readonly] {
 
 .provider-apply-categories {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: var(--space-2);
 }
 
@@ -3141,7 +3153,7 @@ input[readonly] {
 
 .start-choice-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: var(--space-4);
 }
 
@@ -3182,16 +3194,6 @@ input[readonly] {
   flex-direction: column;
   background: var(--color-neutral-100);
   border-right: 2px solid var(--color-divider);
-}
-
-@media (max-width: 900px) {
-  .cdash-sidebar,
-  .pdash-sidebar {
-    flex-basis: 100%;
-    width: 100%;
-    border-right: 0;
-    border-bottom: 2px solid var(--color-divider);
-  }
 }
 
 .shell-brand-logo-link {
@@ -3973,7 +3975,11 @@ input[readonly] {
 .cdash-history-time { color: var(--color-neutral-700); margin-left: auto; }
 
 /* Comparison table. */
-.compare-panel { border: 2px solid var(--color-text); }
+/*
+ * The table below is 760px wide at its narrowest — six offers side by side is
+ * the comparison. It scrolls inside this box so the page does not.
+ */
+.compare-panel { border: 2px solid var(--color-text); overflow-x: auto; }
 
 .compare-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 14px; }
 
@@ -4121,7 +4127,7 @@ input[readonly] {
 
 .pkg-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 20px;
 }
 
@@ -4733,5 +4739,155 @@ a.seg-opt:hover { text-decoration: none; color: var(--color-text); }
 
   .msg-list {
     max-height: 60vh;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Panel drawer — the small-screen half of the shell above
+
+   What used to stand beside `.cdash-sidebar` gave the aside `flex-basis: 100%`
+   below 900px, so a phone opened the panel onto a full-width column of brand,
+   credit box and eight nav items and put the screen that was actually asked for
+   underneath all of it. Below 1024px the aside is off-canvas instead.
+
+   It lives at the end of the file rather than next to the shell it belongs to,
+   and that placement is load-bearing: these are single-class overrides of rules
+   like `.pdash-topbar-search`, so on equal specificity the later declaration
+   wins. Written in place, the disabled search box was still on screen at 375px
+   because its own base rule came a hundred lines further down.
+
+   A closed drawer is hidden with `visibility`, not with a class the assistive
+   tree cannot read: that keeps it out of both the tab order and the
+   accessibility tree without an `inert` attribute, which would have to differ
+   between the server render and the first client one and so would hydrate
+   wrong. At 1024px and above every rule here stops applying and the two-column
+   layout is exactly what it was.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.panel-drawer-head,
+.panel-drawer-close,
+.panel-drawer-toggle,
+.panel-drawer-title {
+  display: none;
+}
+
+.panel-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  border: 0;
+  padding: 0;
+  background: rgba(17, 17, 17, 0.44);
+  cursor: pointer;
+}
+
+/* The page behind an open drawer does not scroll. */
+body.has-drawer-open {
+  overflow: hidden;
+}
+
+@media (max-width: 1023.98px) {
+  .cdash-shell,
+  .pdash-shell {
+    display: block;
+    flex-wrap: nowrap;
+  }
+
+  .cdash-sidebar,
+  .pdash-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: min(320px, 86vw);
+    max-width: 86vw;
+    flex-basis: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0.2s ease;
+  }
+
+  .is-drawer-open > .cdash-sidebar,
+  .is-drawer-open > .pdash-sidebar {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .panel-drawer-head {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space-2) var(--space-2) 0;
+  }
+
+  .panel-drawer-close,
+  .panel-drawer-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--color-divider);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .panel-drawer-close:hover,
+  .panel-drawer-toggle:hover {
+    background: var(--color-neutral-100);
+  }
+
+  .panel-drawer-title {
+    display: block;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-heading);
+    font-weight: var(--font-heading-weight);
+    font-size: 15px;
+  }
+
+  /*
+   * Both are disabled placeholders ("yakında") on every screen. On a phone they
+   * are nothing but width, so the compact bar is the hamburger, the panel name
+   * and the account menu.
+   */
+  .cdash-topbar-search,
+  .pdash-topbar-search,
+  .cdash-icon-btn,
+  .pdash-icon-btn {
+    display: none;
+  }
+
+  .cdash-topbar,
+  .pdash-topbar {
+    flex-wrap: nowrap;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .cdash-topbar-actions,
+  .pdash-topbar-actions {
+    flex: none;
+  }
+
+  /* The account name is the widest thing in the bar; the avatar still names it. */
+  .cdash-user-summary .lp-user-name,
+  .pdash-user-summary .lp-user-name {
+    display: none;
+  }
+
+  .cdash-main > *:not(.cdash-topbar),
+  .pdash-main > *:not(.pdash-topbar) {
+    margin-left: var(--space-4);
+    margin-right: var(--space-4);
   }
 }

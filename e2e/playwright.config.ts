@@ -197,6 +197,16 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *   auth-session-cookie  the cookie each auth flow leaves the browser holding
  *   provider-claim       the claim, which needs two cookies to survive at once
  *
+ * And now one more, for the same reason in a different layer:
+ *
+ *   responsive-shell     the panel shells at phone widths
+ *
+ * Layout is the other thing an engine really decides. The defect that spec was
+ * written for was reported from an iPhone screen recording, and flexbox min-size
+ * and viewport units are exactly where Chromium and WebKit have historically
+ * disagreed — so a Chromium-only pass would be answering a different question
+ * about the browser the report came from.
+ *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
  * what keeps the existing CI job's browser download and wall clock unchanged;
@@ -210,7 +220,7 @@ function webkitProject() {
   return [
     {
       name: 'webkit',
-      testMatch: /(login-screen|auth-session-cookie|provider-claim)\.spec\.ts/,
+      testMatch: /(login-screen|auth-session-cookie|provider-claim|responsive-shell)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];
