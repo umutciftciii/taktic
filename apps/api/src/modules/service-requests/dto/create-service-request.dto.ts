@@ -12,6 +12,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { MaxCodeUnitLength } from '../../../common/max-code-unit-length.validator';
+import { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH } from '../../../common/service-request-limits';
 import { IsKnownTurkishLocation } from '../../locations/turkish-location.validator';
 
 export class CreateServiceRequestAnswerDto {
@@ -128,8 +130,20 @@ export class CreateServiceRequestDto {
   @IsString()
   urgency?: string | null;
 
+  /**
+   * Bounded so a request cannot carry an unbounded blob of text. The number is
+   * @taktic/shared's, which is also what the public form's counter and its
+   * `maxLength` read — the client-side stop is a courtesy, this is the rule.
+   *
+   * Counted in UTF-16 code units — `string.length` — which is the unit the
+   * browser applies to the textarea's `maxLength` and the unit the counter
+   * beside it reports. `@MaxLength` would count code points instead and let an
+   * emoji-heavy description past a limit the form had already refused, so the
+   * rule uses {@link MaxCodeUnitLength}.
+   */
   @IsOptional()
   @IsString()
+  @MaxCodeUnitLength(SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH)
   description?: string | null;
 
   /**
