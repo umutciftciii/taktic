@@ -3,8 +3,8 @@ import Link from 'next/link';
 import {
   apiFetch,
   getCurrentUser,
+  getRefundPolicy,
   ProviderOffer,
-  UNVIEWED_OFFER_REFUND_NOTICE,
 } from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
@@ -21,9 +21,10 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
     redirect(`/login?redirectTo=/providers/${id}/offers`);
   }
 
-  const [offers, creditBalance] = await Promise.all([
+  const [offers, creditBalance, refundPolicy] = await Promise.all([
     apiFetch<ProviderOffer[]>(`/providers/${id}/offers`),
     readCreditBalance(id),
+    getRefundPolicy(),
   ]);
 
   /*
@@ -98,9 +99,15 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
         <OffersTable providerId={id} offers={offers} />
       )}
 
+      {/*
+        The window a new offer would carry, because this sentence describes what
+        the provider gets if they send one now. The offers listed above may have
+        been created under a different window; each row reports its own state
+        rather than inheriting this one.
+      */}
       <p className="pdash-page-footer">
-        İade politikası: {UNVIEWED_OFFER_REFUND_NOTICE} Her teklifin iade durumu kendi satırında
-        görünür.
+        İade politikası: {refundPolicy.unviewedOfferRefundNotice} Her teklifin iade durumu kendi
+        satırında görünür.
       </p>
     </ProviderShell>
   );

@@ -83,8 +83,14 @@ Tek merkezî çözümleyici: `apps/api/src/modules/entitlements/entitlement-reso
 ### İade kuralı
 
 Ürün kuralı — kullanıcıya duyurulan tek iade vaadi: **teklif oluşturulduktan
-sonraki 48 saat içinde yetkili müşteri tarafından hiç görüntülenmeyen teklifin
-kredisi otomatik iade edilir** (`UNVIEWED_OFFER_48H`). Görüntülenmiş teklifte
+sonra, o teklifin kendi iade süresi içinde yetkili müşteri tarafından hiç
+görüntülenmeyen teklifin kredisi otomatik iade edilir** (`UNVIEWED_OFFER_48H`).
+
+Süre, super admin'in *Yönetim → Operasyon Ayarları* ekranından tam saat olarak
+belirlediği ticari bir terimdir; varsayılanı 48 saattir. Değişiklik yalnız
+sonraki teklifleri bağlar: her teklif oluşturulurken geçerli süreyi ve kesin
+iade zamanını kendi üzerinde saklar (`Offer.unviewedRefundWindowHours`,
+`Offer.unviewedRefundEligibleAt`) ve işçi yalnız bu kaydı okur. Görüntülenmiş teklifte
 kabul, red, süre dolumu veya geri çekme fark etmez — iade yoktur.
 Görüntülenmemiş teklifte de teklifin durumu tek başına iadeyi engellemez.
 

@@ -13,7 +13,7 @@ import {
   qualityBreakdownLabel,
   statusLabel,
   urgencyLabel,
-  UNVIEWED_OFFER_REFUND_NOTICE,
+  getRefundPolicy,
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
 import { readCreditBalance } from '../../../provider-data';
@@ -56,6 +56,13 @@ export default async function ProviderRequestDetailPage({
   // The detail payload already carries the balance for an approved provider;
   // the credits route is only consulted when it does not.
   const sidebarBalance = request.providerCreditBalance ?? (await readCreditBalance(id));
+  /*
+   * The current window, because this form is about the offer the provider is
+   * about to create — and that offer will be created with exactly this window
+   * and snapshot it. An offer that already exists is described by its own
+   * snapshot instead; see the offer detail screen.
+   */
+  const refundPolicy = await getRefundPolicy();
 
   return (
     <ProviderShell
@@ -369,7 +376,7 @@ export default async function ProviderRequestDetailPage({
                   Teklifi Gönder{offerCreditCost !== null ? ` · ${offerCreditCost} kredi` : ''}
                 </button>
 
-                <p className="pdash-card-sub">{UNVIEWED_OFFER_REFUND_NOTICE}</p>
+                <p className="pdash-card-sub">{refundPolicy.unviewedOfferRefundNotice}</p>
               </form>
             )}
           </section>

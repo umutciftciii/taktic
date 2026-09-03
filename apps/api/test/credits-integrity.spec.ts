@@ -7,6 +7,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  backdateOfferSubmission,
   createApprovedRequest,
   createCategory,
   createDiscoverableProvider,
@@ -234,10 +235,7 @@ describe('offer credit refund — idempotency', () => {
     const offerId = created.body.id as string;
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(credits - cost);
 
-    await ctx.prisma.offer.update({
-      where: { id: offerId },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
+    await backdateOfferSubmission(ctx.prisma, offerId, 72);
 
     return { provider, offerId, worker: ctx.app.get(UnviewedOfferRefundService) };
   }

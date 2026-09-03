@@ -58,8 +58,10 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
       <section className="filters-card">
         <h2 style={{ margin: 0, fontSize: 15 }}>Tarama parametreleri</h2>
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          Görüntülenme penceresi {scan.windowHours} saattir ve değiştirilemez. Limit yalnız bu
-          çalıştırmada işlenecek teklif sayısını sınırlar.
+          Yeni teklifler {scan.currentWindowHours} saatlik iade süresiyle oluşturulur; bu süre
+          Operasyon Ayarları ekranından değiştirilir. Bu tarama süreyi değiştirmez — her teklif
+          oluşturulduğu andaki kendi süresine göre değerlendirilir. Limit yalnız bu çalıştırmada
+          işlenecek teklif sayısını sınırlar.
         </p>
         <div className="filters-grid">
           <label className="form-row">
@@ -124,6 +126,10 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
             <span className="muted">Politika dışı</span>
             <span className="metric">{scan.skippedSummary.outOfPolicy}</span>
           </div>
+          <div className="stat-card">
+            <span className="muted">İade zamanı kayıtlı değil</span>
+            <span className="metric">{scan.skippedSummary.noSchedule}</span>
+          </div>
         </div>
       </section>
 
@@ -146,6 +152,8 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
                     <th>Kredi</th>
                     <th>Gönderim</th>
                     <th>Saat</th>
+                    <th>İade süresi</th>
+                    <th>İade zamanı</th>
                     <th>Politika</th>
                   </tr>
                 </thead>
@@ -158,6 +166,8 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
                       <td>{item.creditCost}</td>
                       <td>{formatDate(item.submittedAt)}</td>
                       <td>{item.hoursSinceSubmitted ?? '-'}</td>
+                      <td>{item.windowHours === null ? '-' : `${item.windowHours} saat`}</td>
+                      <td>{item.eligibleAt ? formatDate(item.eligibleAt) : '-'}</td>
                       <td>
                         <span className="badge badge-good">{item.recommendedAction}</span>{' '}
                         <span className="muted" style={{ fontSize: 12 }}>{item.reasonCode}</span>

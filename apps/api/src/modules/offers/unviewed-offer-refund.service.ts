@@ -3,11 +3,8 @@ import { Prisma } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
-import {
-  UNVIEWED_OFFER_REFUND_REASON,
-  UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
-  calculateRefundEligibility,
-} from './refund-policy';
+import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
+import { UNVIEWED_OFFER_REFUND_REASON, calculateRefundEligibility } from './refund-policy';
 import { refundOfferCreditInTransaction } from './offers.service';
 
 type UnviewedOfferRefundOptions = {
@@ -20,7 +17,8 @@ type SkippedReason =
   | 'adminDecision'
   | 'notOldEnough'
   | 'noCreditSpend'
-  | 'outOfPolicy';
+  | 'outOfPolicy'
+  | 'noSchedule';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -48,6 +46,11 @@ const candidateOfferSelect = {
   submittedAt: true,
   viewedAt: true,
   unviewedRefundPolicy: true,
+  // The offer's own clock. The worker reads this and never the live setting, so
+  // an administrator changing the window today cannot move an offer created
+  // yesterday — in either direction.
+  unviewedRefundWindowHours: true,
+  unviewedRefundEligibleAt: true,
   refundBlockedAt: true,
   refundBlockedReason: true,
   // The scan already filters on a non-null creditSpentTransactionId, which no
@@ -62,16 +65,19 @@ type CandidateOffer = Prisma.OfferGetPayload<{ select: typeof candidateOfferSele
  * Pays back the credit of an offer the customer never opened.
  *
  * The whole rule: an offer inside the policy (see `Offer.unviewedRefundPolicy`)
- * that has spent a one-time credit, carries no `viewedAt`, and was submitted at
- * least 48 hours ago, is refunded exactly once. Nothing else is refunded, by
- * this service or by any other — the manual admin refund it used to sit beside
- * was removed with this policy, because a hand-made refund is a second answer
- * to a question that now has one.
+ * that has spent a one-time credit, carries no `viewedAt`, and has reached its
+ * own `unviewedRefundEligibleAt`, is refunded exactly once.
  *
- * Late is safe, early is not. The worker refunds on the first run after the
- * window closes, whenever that is; the cutoff is computed from a fixed 48 hours
- * rather than from a parameter, so no caller — scheduler, admin screen or test —
- * can shorten it and pay out on an offer the customer could still open.
+ * That moment is a snapshot taken when the offer was created, and reading it
+ * rather than the current setting is the whole design. An administrator may
+ * change the window from the operations settings screen, but the change governs
+ * offers created after it: an offer sold at 48 hours keeps 48 hours even if the
+ * setting says 72 tomorrow, and — just as importantly — shortening the setting
+ * cannot pay out early on an offer whose customer was promised longer.
+ *
+ * Late is safe, early is not. The worker refunds on the first run after each
+ * offer's own moment, whenever that is; there is no caller-supplied window, so
+ * no scheduler, admin screen or test can shorten one.
  */
 @Injectable()
 export class UnviewedOfferRefundService {
@@ -80,14 +86,15 @@ export class UnviewedOfferRefundService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(OperationsSettingsService)
+    private readonly operationsSettings: OperationsSettingsService,
   ) {}
 
   async dryRun(options: UnviewedOfferRefundOptions = {}) {
     const limit = normalizeLimit(options.limit);
     const now = new Date();
-    const cutoff = getCutoff(now);
     const offers = await this.prisma.offer.findMany({
-      where: refundCandidateWhere(cutoff),
+      where: refundCandidateWhere(now),
       orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
       take: limit,
       select: candidateOfferSelect,
@@ -105,17 +112,27 @@ export class UnviewedOfferRefundService {
           creditCost: offer.creditCost,
           submittedAt: offer.submittedAt,
           hoursSinceSubmitted: eligibility.hoursSinceSubmitted,
+          // Per item, because two offers in the same scan can carry two
+          // different windows once the setting has been changed.
+          windowHours: offer.unviewedRefundWindowHours,
+          eligibleAt: offer.unviewedRefundEligibleAt,
           reasonCode: eligibility.reasonCode,
           recommendedAction: eligibility.recommendedAction,
         });
       }
     }
 
-    const skippedSummary = await this.getSkippedSummary(cutoff);
+    const [skippedSummary, currentWindowHours] = await Promise.all([
+      this.getSkippedSummary(now),
+      this.operationsSettings.getUnviewedOfferRefundWindowHours(),
+    ]);
     const skippedCount = Object.values(skippedSummary).reduce((sum, count) => sum + count, 0);
 
     return {
-      windowHours: UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+      // The window a *new* offer is created with, not the window this scan
+      // applied: the scan applied each offer's own snapshot, which the items
+      // report individually.
+      currentWindowHours,
       eligibleCount: items.length,
       skippedCount,
       items,
@@ -125,9 +142,8 @@ export class UnviewedOfferRefundService {
 
   async execute(options: UnviewedOfferRefundOptions = {}) {
     const limit = normalizeLimit(options.limit);
-    const cutoff = getCutoff(new Date());
     const offers = await this.prisma.offer.findMany({
-      where: refundCandidateWhere(cutoff),
+      where: refundCandidateWhere(new Date()),
       orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
       take: limit,
       select: { id: true },
@@ -234,9 +250,16 @@ export class UnviewedOfferRefundService {
    * policy's own population, so an offer written before the policy shipped is
    * reported as out of scope rather than padding one of the other buckets.
    */
-  private async getSkippedSummary(cutoff: Date) {
-    const [alreadyRefunded, viewed, noCreditSpend, notOldEnough, outOfPolicy, adminDecision] =
-      await Promise.all([
+  private async getSkippedSummary(now: Date) {
+    const [
+      alreadyRefunded,
+      viewed,
+      noCreditSpend,
+      notOldEnough,
+      outOfPolicy,
+      adminDecision,
+      noSchedule,
+    ] = await Promise.all([
         this.prisma.offer.count({
           where: {
             unviewedRefundPolicy: true,
@@ -260,21 +283,43 @@ export class UnviewedOfferRefundService {
             refundBlockedAt: null,
             creditSpentTransactionId: { not: null },
             creditCost: { gt: 0 },
-            submittedAt: { gt: cutoff },
+            unviewedRefundEligibleAt: { gt: now },
           },
         }),
         this.prisma.offer.count({ where: { unviewedRefundPolicy: false } }),
         this.prisma.offer.count({
           where: { ...inPolicyUnrefundedWhere, viewedAt: null, refundBlockedAt: { not: null } },
         }),
+        // Its own bucket rather than a silent share of "not old enough": an
+        // in-policy offer with no eligibility moment is never paid, and an
+        // operator has to be able to see that it exists.
+        this.prisma.offer.count({
+          where: {
+            ...inPolicyUnrefundedWhere,
+            viewedAt: null,
+            refundBlockedAt: null,
+            creditSpentTransactionId: { not: null },
+            creditCost: { gt: 0 },
+            unviewedRefundEligibleAt: null,
+          },
+        }),
       ]);
 
-    return { alreadyRefunded, viewed, adminDecision, notOldEnough, noCreditSpend, outOfPolicy };
+    return {
+      alreadyRefunded,
+      viewed,
+      adminDecision,
+      notOldEnough,
+      noCreditSpend,
+      outOfPolicy,
+      noSchedule,
+    };
   }
 }
 
 function getRefundEligibility(offer: CandidateOffer, now: Date) {
   const policy = calculateRefundEligibility(offer, now);
+
 
   // The policy verdict is the decision; this only translates a refusal into the
   // bucket the report names it by. Ordered from the most settled fact outwards,
@@ -307,10 +352,15 @@ function getRefundEligibility(offer: CandidateOffer, now: Date) {
     );
   }
 
-  if (
-    policy.hoursSinceSubmitted === null ||
-    policy.hoursSinceSubmitted < UNVIEWED_OFFER_REFUND_WINDOW_HOURS
-  ) {
+  if (!offer.unviewedRefundEligibleAt) {
+    return skipped(
+      'noSchedule',
+      policy.hoursSinceSubmitted,
+      'Offer carries no refund eligibility moment',
+    );
+  }
+
+  if (offer.unviewedRefundEligibleAt.getTime() > now.getTime()) {
     return skipped('notOldEnough', policy.hoursSinceSubmitted, 'Offer is not old enough');
   }
 
@@ -357,17 +407,15 @@ function normalizeLimit(value: number | string | undefined) {
 }
 
 /**
- * The 48-hour boundary, derived from the constant and from nothing else.
+ * The offers whose own eligibility moment has arrived.
  *
- * There is no parameter here and there was one before. A caller-supplied window
- * can only ever be used to refund sooner than the promise allows, which would
- * pay for an offer the customer still had time to open.
+ * There is no window parameter here and there never was one: a caller-supplied
+ * window could only ever be used to refund sooner than the promise allows.
+ * There is no live setting here either — each row carries the moment it was
+ * created with, and `lte` never matches NULL, so an in-policy offer that
+ * somehow has no schedule is skipped rather than paid.
  */
-function getCutoff(now: Date) {
-  return new Date(now.getTime() - UNVIEWED_OFFER_REFUND_WINDOW_HOURS * 60 * 60 * 1000);
-}
-
-function refundCandidateWhere(cutoff: Date): Prisma.OfferWhereInput {
+function refundCandidateWhere(now: Date): Prisma.OfferWhereInput {
   return {
     ...inPolicyUnrefundedWhere,
     creditSpentTransactionId: { not: null },
@@ -377,7 +425,7 @@ function refundCandidateWhere(cutoff: Date): Prisma.OfferWhereInput {
     // reject on the customer's behalf settles the credit without any customer
     // opening the offer, and the worker has to see that.
     refundBlockedAt: null,
-    submittedAt: { lte: cutoff },
+    unviewedRefundEligibleAt: { lte: now },
   };
 }
 

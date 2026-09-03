@@ -9,7 +9,7 @@ import {
   MatchedCustomerContact,
   ProviderAcceptedWorkScope,
   ProviderOffer,
-  UNVIEWED_OFFER_REFUND_NOTICE,
+  unviewedOfferRefundNotice,
   formatDate,
   formatPrice,
   formatDateTime,
@@ -60,6 +60,19 @@ export default async function ProviderOfferDetailPage({
   ]);
 
   const canWithdraw = canWithdrawOffer(offer.status, offer.request.status);
+
+  /*
+   * This offer's own promise, built from the window it was created with.
+   *
+   * Null for an offer the rule does not govern, and every surface below then
+   * prints nothing rather than a sentence promising a refund that will never
+   * come. Never the platform's current setting: an offer sold at 48 hours is
+   * still a 48-hour offer after an administrator moves the setting to 72.
+   */
+  const refundNotice =
+    offer.refundEligibility.windowHours === null
+      ? null
+      : unviewedOfferRefundNotice(offer.refundEligibility.windowHours);
   // Still live, but on a request that no longer takes offers. Worth explaining;
   // a closed offer needs no explanation because its own status already is one.
   const withdrawBlockedByRequest = !canWithdraw && isWithdrawableOfferStatus(offer.status);
@@ -271,9 +284,11 @@ export default async function ProviderOfferDetailPage({
                 </>
               ) : null}
             </dl>
-            <p className="pdash-card-sub" style={{ marginTop: 12 }}>
-              {UNVIEWED_OFFER_REFUND_NOTICE}
-            </p>
+            {refundNotice ? (
+              <p className="pdash-card-sub" style={{ marginTop: 12 }}>
+                {refundNotice}
+              </p>
+            ) : null}
           </section>
 
           {withdrawError ? (
@@ -306,7 +321,7 @@ export default async function ProviderOfferDetailPage({
                     an offer the customer never opened is refunded whether or
                     not the provider pulled it.
                   */}
-                  <li>{UNVIEWED_OFFER_REFUND_NOTICE}</li>
+                  {refundNotice ? <li>{refundNotice}</li> : null}
                 </ul>
                 <form action={withdrawOfferAction}>
                   <input type="hidden" name="providerId" value={id} />

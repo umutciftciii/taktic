@@ -6,7 +6,7 @@ import {
   OfferCreditPackage,
   PaymentMode,
   ProviderCredits,
-  UNVIEWED_OFFER_REFUND_NOTICE,
+  getRefundPolicy,
   creditTxnTypeLabel,
   formatPrice,
   formatDateTime,
@@ -26,10 +26,13 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
     redirect(`/login?redirectTo=/providers/${id}/credits`);
   }
 
-  const [credits, packages, paymentMode] = await Promise.all([
+  const [credits, packages, paymentMode, refundPolicy] = await Promise.all([
     apiFetch<ProviderCredits>(`/providers/${id}/credits`),
     apiFetch<OfferCreditPackage[]>('/credit-packages'),
     apiFetch<PaymentMode>('/payments/mode'),
+    // The window a new offer would carry: this panel describes the promise
+    // attached to the credits sitting in the balance, not to any one offer.
+    getRefundPolicy(),
   ]);
 
   const activePackages = packages.filter((p) => p.isActive);
@@ -154,12 +157,13 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
 
       {/*
         The refund promise, on the screen where a provider reads their balance.
-        One sentence, the same one every other surface uses, so the panel and
-        the worker cannot drift apart.
+        One builder, the same one every other surface uses, so the panel and the
+        worker cannot drift apart — including when an administrator changes the
+        window.
       */}
       <div className="pdash-notice" data-testid="credit-refund-policy" style={{ marginTop: 24 }}>
         <span>
-          <strong>Kredi iadesi:</strong> {UNVIEWED_OFFER_REFUND_NOTICE}{' '}
+          <strong>Kredi iadesi:</strong> {refundPolicy.unviewedOfferRefundNotice}{' '}
           <Link href={`/providers/${id}/offers`}>Tekliflerimin iade durumunu gör</Link>
         </span>
       </div>

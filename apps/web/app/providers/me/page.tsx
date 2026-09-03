@@ -5,6 +5,7 @@ import {
   formatDateTime,
   formatPrice,
   getCurrentUser,
+  getRefundPolicy,
   ProviderDashboard,
   ProviderOffer,
   ProviderRequestListItem,
@@ -60,9 +61,12 @@ export default async function MyProviderPage() {
    * show, read from the same routes. A provider whose profile is not approved
    * yet cannot list matching requests, so that call is not even made.
    */
-  const [opportunities, recentOffers] = await Promise.all([
+  const [opportunities, recentOffers, refundPolicy] = await Promise.all([
     canUseOfferFlow ? safeList<ProviderRequestListItem>(`/providers/${provider.id}/requests`) : [],
     safeList<ProviderOffer>(`/providers/${provider.id}/offers`),
+    // The window a new offer would carry. The offers listed on this panel each
+    // report their own state; this rail describes what happens next.
+    getRefundPolicy(),
   ]);
 
   return (
@@ -264,9 +268,8 @@ export default async function MyProviderPage() {
           </div>
 
           <div className="rail-note">
-            <strong>Kredi iadesi.</strong> Teklifiniz müşteri tarafından 48 saat içinde
-            görüntülenmezse krediniz otomatik olarak iade edilir. İade durumunu her teklifin
-            detayında görebilirsin.
+            <strong>Kredi iadesi.</strong> {refundPolicy.unviewedOfferRefundNotice} İade durumunu
+            her teklifin detayında görebilirsin.
           </div>
 
           <div className="rail-note">

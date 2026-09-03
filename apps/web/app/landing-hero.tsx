@@ -28,12 +28,15 @@ type LandingHeroProps = {
   isCustomer?: boolean;
   isAuthenticated?: boolean;
   user?: AuthUser | null;
+  /** The platform's current refund window, so the card never states its own. */
+  refundWindowHours: number;
 };
 
 export function LandingHero({
   isCustomer = false,
   isAuthenticated = false,
   user = null,
+  refundWindowHours,
 }: LandingHeroProps) {
   const primaryCtaLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Teklif Al';
   const router = useRouter();
@@ -303,7 +306,7 @@ export function LandingHero({
               <div className="lp-floating-card">
                 <span>
                   <span className="lp-floating-label">Kredi iadesi</span>
-                  <span className="lp-floating-val">48 saat kuralı</span>
+                  <span className="lp-floating-val">{refundWindowHours} saat kuralı</span>
                 </span>
               </div>
             </div>

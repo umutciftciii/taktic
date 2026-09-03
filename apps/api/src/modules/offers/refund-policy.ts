@@ -12,8 +12,36 @@ export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
  */
 export const UNVIEWED_OFFER_REFUND_REASON = 'UNVIEWED_OFFER_48H';
 
-/** The window, in hours, and the only one. Not configurable — see the module doc. */
-export const UNVIEWED_OFFER_REFUND_WINDOW_HOURS = 48;
+/**
+ * The window the platform uses when no operator has chosen one.
+ *
+ * Not "the" window any more — a super admin sets it from the operations
+ * settings screen — but still the answer to every question the setting has not
+ * been asked. It is what every offer written before the setting existed was
+ * sold under, so an empty settings table and a settings table saying 48 are the
+ * same platform.
+ */
+export const DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS = 48;
+
+/**
+ * The bounds an operator may choose between, restated as a CHECK constraint in
+ * the migration.
+ *
+ * Below one hour the promise is not a refund policy, it is a rounding error on
+ * the customer's chance to look. Above thirty days a provider cannot plan
+ * around it, and the credit is effectively held indefinitely.
+ */
+export const MIN_UNVIEWED_OFFER_REFUND_WINDOW_HOURS = 1;
+export const MAX_UNVIEWED_OFFER_REFUND_WINDOW_HOURS = 720;
+
+/** Whether `value` is a window an operator may save. Whole hours only. */
+export function isValidUnviewedOfferRefundWindowHours(value: number): boolean {
+  return (
+    Number.isInteger(value) &&
+    value >= MIN_UNVIEWED_OFFER_REFUND_WINDOW_HOURS &&
+    value <= MAX_UNVIEWED_OFFER_REFUND_WINDOW_HOURS
+  );
+}
 
 /**
  * The ledger reason an administrator's hand-made refund carries.
@@ -56,12 +84,19 @@ export function manualRefundStoredReason(reasonCode: ManualRefundReasonCode) {
 /**
  * The sentence every provider-facing surface uses for this policy, verbatim.
  *
- * One constant rather than one copy per screen, because the promise is a
+ * One builder rather than one copy per screen, because the promise is a
  * commercial commitment: a screen that paraphrases it is a screen that promises
  * something the worker does not do.
+ *
+ * It takes the hours rather than printing 48, and every caller has to say which
+ * hours it means. A screen about an offer that exists passes that offer's own
+ * snapshot; a screen about the offer a provider is *about* to send passes the
+ * current setting. Nothing may pass a constant, because a sentence that says 48
+ * while the worker waits 72 is a promise the platform does not keep.
  */
-export const UNVIEWED_OFFER_REFUND_NOTICE =
-  'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.';
+export function unviewedOfferRefundNotice(windowHours: number) {
+  return `Teklifiniz müşteri tarafından ${windowHours} saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.`;
+}
 
 /**
  * What the provider panel shows for an offer inside the policy.
@@ -94,8 +129,20 @@ export type RefundEligibility = {
   reasonLabel: string;
   details: string;
   hoursSinceSubmitted: number | null;
-  /** Whether the 48-hour rule governs this offer at all. */
+  /** Whether the unviewed-offer refund rule governs this offer at all. */
   unviewedRefundPolicy: boolean;
+  /**
+   * The window this offer was sold under, in whole hours, and the exact moment
+   * its credit becomes refundable — both read from the offer's own snapshot and
+   * never from the live setting. `null` for an offer outside the policy, and
+   * for the one case an in-policy offer can carry no schedule (see
+   * `NO_REFUND_SCHEDULE`).
+   *
+   * Present here so a provider-facing screen can say "48 saat" or "72 saat"
+   * about *this* offer without asking what the setting happens to be today.
+   */
+  windowHours: number | null;
+  eligibleAt: Date | string | null;
   /** The provider-facing state, or `null` for an offer outside the policy. */
   policyStatus: UnviewedRefundPolicyStatus | null;
   policyStatusLabel: string | null;
@@ -109,11 +156,22 @@ type RefundPolicyOffer = {
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
   /**
-   * Whether this offer was sold under the 48-hour rule. Absent on a caller that
+   * Whether this offer was sold under the unviewed-offer rule. Absent on a caller that
    * has not selected the column, which is read as `false` — the safe reading,
    * since a missing opt-in must never become a payout.
    */
   unviewedRefundPolicy?: boolean | null;
+  /**
+   * The window and the eligibility moment this offer was created with.
+   *
+   * `unviewedRefundEligibleAt` is the only clock the policy reads. It is a
+   * snapshot, so an administrator changing the setting cannot move an offer
+   * that already exists — in either direction — and the worker never has to
+   * reconstruct "48 hours after submittedAt" from a constant that is no longer
+   * constant.
+   */
+  unviewedRefundWindowHours?: number | null;
+  unviewedRefundEligibleAt?: Date | string | null;
   /**
    * Set when something other than a customer view closed this offer's
    * eligibility — today only an administrator's accept or reject on the
@@ -133,8 +191,9 @@ type RefundPolicyOffer = {
  * The whole refund policy.
  *
  * One rule decides: a credit spent on an offer comes back if, and only if, the
- * authorised customer never opened that offer's detail within 48 hours of it
- * being submitted. An offer's *status* is deliberately not consulted: an
+ * authorised customer never opened that offer's detail before the offer's own
+ * refund moment — `unviewedRefundEligibleAt`, snapshotted when the offer was
+ * created from the window then in force. An offer's *status* is deliberately not consulted: an
  * unviewed offer that expired unread is exactly the case this policy exists to
  * pay, and a viewed offer is settled no matter how it ended.
  *
@@ -160,6 +219,8 @@ export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new D
   const refunded = Boolean(offer.creditRefundedTransactionId || offer.creditRefundedAt);
   const viewed = Boolean(offer.viewedAt);
   const adminDecision = Boolean(offer.refundBlockedAt);
+  const windowHours = inPolicy ? (offer.unviewedRefundWindowHours ?? null) : null;
+  const eligibleAt = inPolicy ? toDate(offer.unviewedRefundEligibleAt) : null;
 
   // Read before anything else so the state a provider sees never depends on the
   // order of the branches below.
@@ -173,10 +234,12 @@ export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new D
     eligible,
     recommendedAction,
     reasonCode,
-    reasonLabel: refundReasonLabel(reasonCode),
-    details: REFUND_DETAILS[reasonCode] ?? '',
+    reasonLabel: refundReasonLabel(reasonCode, windowHours),
+    details: refundDetails(reasonCode, windowHours),
     hoursSinceSubmitted,
     unviewedRefundPolicy: inPolicy,
+    windowHours,
+    eligibleAt,
     policyStatus,
     policyStatusLabel: policyStatus ? UNVIEWED_REFUND_POLICY_STATUS_LABELS[policyStatus] : null,
   });
@@ -227,15 +290,73 @@ export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new D
     return result(false, 'NO_REFUND', 'ADMIN_CUSTOMER_DECISION');
   }
 
-  if (hoursSinceSubmitted !== null && hoursSinceSubmitted >= UNVIEWED_OFFER_REFUND_WINDOW_HOURS) {
+  /*
+   * The offer's own clock, and nothing else.
+   *
+   * Not "hoursSinceSubmitted >= the current setting": that would let an
+   * administrator lowering the window this afternoon pay out on offers sold
+   * this morning under a longer one, and raising it withdraw a refund a
+   * provider had already earned. The moment was fixed when the offer was
+   * created and this only asks whether it has arrived.
+   *
+   * A missing schedule is never eligible. It cannot occur for an offer created
+   * by the current path, and the migration wrote one onto every in-policy offer
+   * that predates the column — but "no answer" must read as "do not pay", not
+   * as "pay now".
+   */
+  if (!eligibleAt) {
+    return result(false, 'NO_REFUND', 'NO_REFUND_SCHEDULE');
+  }
+
+  if (now.getTime() >= eligibleAt.getTime()) {
     return result(true, 'FULL_REFUND', UNVIEWED_OFFER_REFUND_REASON);
   }
 
   return result(false, 'NO_REFUND', 'WAITING_VIEW_WINDOW');
 }
 
-export function refundReasonLabel(reasonCode: string) {
+/** A stored timestamp as a Date, or null when there is nothing usable to read. */
+function toDate(value: Date | string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * The label for a refund reason, in the words a provider or an operator reads.
+ *
+ * `windowHours` is only consulted by the one code that names a duration. It
+ * falls back to the product default rather than to a number-free paraphrase,
+ * because every offer that can carry this code has a snapshot — the backfilled
+ * ones all say 48 — and a label that silently drops the hours would read as a
+ * different promise.
+ */
+export function refundReasonLabel(reasonCode: string, windowHours?: number | null) {
+  if (reasonCode === UNVIEWED_OFFER_REFUND_REASON) {
+    return `${windowHours ?? DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS} saat içinde görüntülenmedi`;
+  }
+
   return REFUND_REASON_LABELS[reasonCode] ?? reasonCode;
+}
+
+/** The sentence under the label, for the codes that have one. */
+export function refundDetails(reasonCode: string, windowHours?: number | null) {
+  const hours = windowHours ?? DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS;
+
+  if (reasonCode === UNVIEWED_OFFER_REFUND_REASON) {
+    return `Teklifiniz ${hours} saat içinde görüntülenmedi. Teklif kredisi otomatik olarak iade edilir.`;
+  }
+
+  if (reasonCode === 'WAITING_VIEW_WINDOW') {
+    // Not the full notice: every provider screen already prints that sentence
+    // once, and a detail row repeating it verbatim reads as two promises.
+    return `${hours} saatlik görüntüleme penceresi henüz dolmadı.`;
+  }
+
+  return REFUND_DETAILS[reasonCode] ?? '';
 }
 
 /**
@@ -243,7 +364,8 @@ export function refundReasonLabel(reasonCode: string) {
  * eligibility does: not "will this be refunded" but "where does this offer
  * stand under the policy right now".
  *
- * An unviewed offer past 48 hours whose refund the worker has not yet written
+ * An unviewed offer past its own refund moment whose refund the worker has not
+ * yet written
  * reads as AWAITING_VIEW rather than as a promise already kept. It is the
  * honest reading — no credit has moved, and the customer can still open it in
  * the seconds before the worker runs — and it is the safe one: the panel never
@@ -263,7 +385,7 @@ function resolvePolicyStatus(offer: {
     return 'REFUNDED';
   }
 
-  // Everything below this line is a statement about what the 48-hour rule will
+  // Everything below this line is a statement about what the refund rule will
   // do, and an offer outside the rule has none to make.
   if (!offer.inPolicy) {
     return null;
@@ -293,31 +415,36 @@ function calculateHoursSinceSubmitted(submittedAt: Date | string | null, now: Da
   return Math.max(0, Math.floor((now.getTime() - submittedDate.getTime()) / 36_000) / 100);
 }
 
+/**
+ * The codes whose wording is fixed. The two that name a duration are not here —
+ * they are built from the offer's own window in {@link refundReasonLabel} and
+ * {@link refundDetails}, because a hard-coded "48 saat" on a screen about an
+ * offer sold at 72 is simply false.
+ */
 const REFUND_REASON_LABELS: Record<string, string> = {
   ALREADY_REFUNDED: 'Kredi iade edildi',
-  POLICY_NOT_APPLICABLE: 'Bu teklif 48 saat iade politikası kapsamında değil',
+  POLICY_NOT_APPLICABLE: 'Bu teklif otomatik kredi iade politikası kapsamında değil',
   NO_CREDIT_SPEND: 'Kredi harcaması yok',
   PERIOD_PACKAGE_NOT_REFUNDABLE: 'Dönemsel pakete ait teklif',
   OFFER_VIEWED: 'Görüntülendi — iade uygun değil',
   ADMIN_CUSTOMER_DECISION: 'Müşteri kararı kaydedildi — iade uygun değil',
+  // An in-policy offer with no eligibility moment. It should not exist, so the
+  // label says what an operator has to know rather than paraphrasing a state.
+  NO_REFUND_SCHEDULE: 'İade zamanı kayıtlı değil',
   [MANUAL_REFUND_REASON_PREFIX]: 'Yönetici kredi iadesi',
-  [UNVIEWED_OFFER_REFUND_REASON]: '48 saat içinde görüntülenmedi',
   WAITING_VIEW_WINDOW: 'Görüntülenme bekleniyor',
 };
 
 const REFUND_DETAILS: Record<string, string> = {
   ALREADY_REFUNDED: 'Bu teklif için kredi iadesi yapıldı.',
   POLICY_NOT_APPLICABLE:
-    'Bu teklif, 48 saat içinde görüntülenmeyen tekliflerin otomatik kredi iadesi kuralından önce gönderildi.',
+    'Bu teklif, görüntülenmeyen tekliflerin otomatik kredi iadesi kuralından önce gönderildi.',
   NO_CREDIT_SPEND: 'Bu teklif için kayıtlı kredi harcaması bulunmuyor.',
   PERIOD_PACKAGE_NOT_REFUNDABLE:
     'Bu teklif aylık kota veya limitsiz paket kapsamında gönderildi. Dönemsel paketlerde teklif başına iade yapılmaz.',
   OFFER_VIEWED: 'Teklifiniz müşteri tarafından görüntülendi; kredi iadesi yapılmaz.',
   ADMIN_CUSTOMER_DECISION:
     'Bu teklif için müşteri kararı kaydedildi; kredi iadesi yapılmaz.',
-  [UNVIEWED_OFFER_REFUND_REASON]:
-    'Teklifiniz 48 saat içinde görüntülenmedi. Teklif kredisi otomatik olarak iade edilir.',
-  // Not the full notice: every provider screen already prints that sentence
-  // once, and a detail row repeating it verbatim reads as two promises.
-  WAITING_VIEW_WINDOW: '48 saatlik görüntüleme penceresi henüz dolmadı.',
+  NO_REFUND_SCHEDULE:
+    'Bu teklif için iade zamanı kayıtlı değil; otomatik iade yapılmaz. Lütfen destek ile iletişime geçin.',
 };

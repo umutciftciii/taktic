@@ -187,7 +187,7 @@ export class OffersService {
    * An administrator gives one offer's credit back by hand.
    *
    * This is an operations tool and not the product's refund policy. The policy
-   * is the 48-hour unviewed-offer rule, it is what providers are promised, and
+   * is the unviewed-offer refund rule, it is what providers are promised, and
    * the worker performs it without being asked; nothing customer- or
    * provider-facing mentions this endpoint. It exists for what an automatic
    * rule cannot see — a request that turned out to be invalid, a customer who
@@ -363,7 +363,8 @@ export class OffersService {
    * This endpoint — POST /service-requests/:requestId/offers/:offerId/view — is
    * the only writer of `Offer.viewedAt` that a customer can reach, and
    * `viewedAt` is now the whole refund policy: an offer with a timestamp here
-   * keeps its credit forever, one without it is paid back after 48 hours. So
+   * keeps its credit forever, one without it is paid back once its own refund
+   * window has elapsed. So
    * everything about this method is about not writing that timestamp by
    * accident.
    *
@@ -437,8 +438,8 @@ export class OffersService {
      *
      * The provider's credit bought an outcome on this request, and an accept or
      * a reject *is* that outcome — delivered through the admin panel rather
-     * than by the customer clicking, but delivered. Refunding it 48 hours later
-     * would pay for something the platform did.
+     * than by the customer clicking, but delivered. Refunding it once the
+     * window elapsed would pay for something the platform did.
      *
      * It is not written as a `viewedAt`, which would be the cheap way to get
      * the same refusal: the customer did not open the offer, and a database
@@ -492,7 +493,7 @@ export class OffersService {
         ...(adminDecision ? adminDecisionRefundBlock(now) : {}),
         // A hand-rejected offer deliberately gets no rejectionReason: the enum
         // records why the platform closed an offer, and nothing closed this
-        // one. It no longer affects refunds either way — under the 48-hour rule
+        // one. It no longer affects refunds either way — under the current rule
         // only `viewedAt` and `refundBlockedAt` do.
         ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
       },
@@ -816,6 +817,12 @@ type RefundPolicyOfferShape = {
   // the column should fail to compile rather than quietly report an offer as
   // out of scope.
   unviewedRefundPolicy: boolean;
+  // Required for the same reason: a projection that renders a refund verdict
+  // has to state which window the offer was sold under, and a caller that
+  // forgot the columns should fail to compile rather than quietly report the
+  // offer as having no schedule.
+  unviewedRefundWindowHours: number | null;
+  unviewedRefundEligibleAt: Date | string | null;
   refundBlockedAt: Date | string | null;
   entitlementSource?: OfferEntitlementSource | null;
 };
@@ -896,6 +903,10 @@ export async function refundOfferCreditInTransaction(
             unviewedRefundPolicy: true,
             viewedAt: null,
             refundBlockedAt: null,
+            // The offer's own eligibility moment, re-checked against the
+            // committed row. `lte` never matches NULL, so an in-policy offer
+            // carrying no schedule cannot be paid by this path at all.
+            unviewedRefundEligibleAt: { lte: new Date() },
           }
         : {}),
     },

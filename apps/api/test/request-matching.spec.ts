@@ -8,6 +8,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  backdateOfferSubmission,
   createApprovedRequest,
   createCategory,
   createDiscoverableProvider,
@@ -195,10 +196,7 @@ describe('offer acceptance — credits', () => {
 
     // The loser was closed by the cascade and never opened by anyone. Losing
     // the request is not what the policy charges for — being read is.
-    await ctx.prisma.offer.update({
-      where: { id: loser.offerId },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
+    await backdateOfferSubmission(ctx.prisma, loser.offerId, 72);
 
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const adminCookie = await loginAs(ctx.prisma, admin.id);
@@ -237,10 +235,7 @@ describe('offer acceptance — credits', () => {
       .send(ACCEPT_OFFER)
       .expect(201);
 
-    await ctx.prisma.offer.update({
-      where: { id: winner.offerId },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
+    await backdateOfferSubmission(ctx.prisma, winner.offerId, 72);
 
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const adminCookie = await loginAs(ctx.prisma, admin.id);

@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import {
   apiFetch,
   getCurrentUser,
+  getRefundPolicy,
   ProviderDashboard,
   ProviderEnrollmentCategory,
 } from '../../../lib/api';
@@ -33,7 +34,7 @@ const APPROVAL_STEPS = [
 ];
 
 export default async function ProviderApplyPage({ searchParams }: ProviderRegisterPageProps) {
-  const [{ error }, categories, user, provinces] = await Promise.all([
+  const [{ error }, categories, user, provinces, refundPolicy] = await Promise.all([
     searchParams,
     // The enrollment catalogue, not the customer one. It carries the services
     // an operator has opened to applications — including ones the marketplace
@@ -44,6 +45,10 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
     // The canonical province/district list, from the same API that validates
     // the submitted application.
     apiFetch<ProvinceWithDistricts[]>('/locations/provinces'),
+    // The window an applicant's first offer would be created with, rather than
+    // a number written into the copy — this rail is the promise they are
+    // reading the terms of.
+    getRefundPolicy(),
   ]);
 
   // An account owns at most one provider profile, so a provider who already has
@@ -221,8 +226,7 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
             <div className="rail-note">
               <strong>Kredi nasıl çalışır?</strong> Teklif göndermek kredi kullanır; bir teklifin
               kredi bedeli talebin kategorisine göre değişir ve her talebin detay ekranında
-              yazılıdır. Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz
-              otomatik olarak iade edilir.
+              yazılıdır. {refundPolicy.unviewedOfferRefundNotice}
             </div>
           </aside>
         </div>

@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { NotificationMessage } from '../src/modules/notifications/notification.port';
 import { TransactionalMailService } from '../src/modules/notifications/transactional-mail.service';
 import {
+  backdateOfferSubmission,
   createApprovedRequest,
   createCategory,
   createDiscoverableProvider,
@@ -469,10 +470,7 @@ describe('credit refund notifications', () => {
     ctx.notifications.clear();
 
     // Unviewed and past the window: the one thing that produces a refund.
-    await ctx.prisma.offer.update({
-      where: { id: offer.body.id as string },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
+    await backdateOfferSubmission(ctx.prisma, offer.body.id as string, 72);
 
     const admin = await adminCookie();
     await request(ctx.server)

@@ -3,12 +3,20 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { EntitlementsModule } from '../entitlements/entitlements.module';
 import { NumberingModule } from '../numbering/numbering.module';
+import { OperationsSettingsModule } from '../operations-settings/operations-settings.module';
 import { ProviderClaimModule } from '../provider-claim/provider-claim.module';
 import { ProvidersController } from './providers.controller';
 import { ProvidersService } from './providers.service';
 
 @Module({
-  imports: [PrismaModule, AuthModule, NumberingModule, ProviderClaimModule, EntitlementsModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    NumberingModule,
+    ProviderClaimModule,
+    EntitlementsModule,
+    OperationsSettingsModule,
+  ],
   controllers: [ProvidersController],
   providers: [ProvidersService],
   // The invitation flow writes its applications through this service rather

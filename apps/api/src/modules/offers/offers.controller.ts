@@ -89,7 +89,7 @@ export class OffersController {
 
   /**
    * The operations refund: an administrator returning one offer's credit by
-   * hand, for a case the automatic 48-hour rule cannot see.
+   * hand, for a case the automatic unviewed-offer rule cannot see.
    *
    * SUPER_ADMIN only, and the caller is required rather than optional — the
    * audit row this writes has a NOT NULL operator column, and a refund nobody

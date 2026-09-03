@@ -8,6 +8,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  backdateOfferSubmission,
   createApprovedRequest,
   createCategory,
   createDiscoverableProvider,
@@ -413,12 +414,9 @@ describe('provider offer withdrawal — refunds', () => {
       .expect(201);
 
     // Never viewed and past the window. Withdrawing used to disqualify the
-    // offer; under the 48-hour rule it decides nothing — what the customer did
-    // or did not do decides.
-    await ctx.prisma.offer.update({
-      where: { id: offerId },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
+    // offer; under the unviewed-offer rule it decides nothing — what the
+    // customer did or did not do decides.
+    await backdateOfferSubmission(ctx.prisma, offerId, 72);
 
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const adminCookie = await loginAs(ctx.prisma, admin.id);
@@ -454,10 +452,7 @@ describe('provider offer withdrawal — refunds', () => {
       .set('Cookie', cookie)
       .expect(201);
 
-    await ctx.prisma.offer.update({
-      where: { id: offerId },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
+    await backdateOfferSubmission(ctx.prisma, offerId, 72);
 
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const adminCookie = await loginAs(ctx.prisma, admin.id);

@@ -1,4 +1,4 @@
-import { UNVIEWED_OFFER_REFUND_NOTICE } from '../../offers/refund-policy';
+import { unviewedOfferRefundNotice } from '../../offers/refund-policy';
 import { EmailBranding } from '../email-branding.config';
 import { NotificationMessage } from '../notification.port';
 import {
@@ -633,6 +633,7 @@ function offerAccepted(subject: string, fullName: string, data: Data): EmailDocu
 // ─────────────────── 11 · offer.rejected → unselected provider ───────────────
 
 function offerNotSelected(subject: string, fullName: string, data: Data): EmailDocument {
+  const refundWindowHours = int(data.refundWindowHours);
   const requestNumber = text(data.requestNumber);
 
   return {
@@ -663,7 +664,12 @@ function offerNotSelected(subject: string, fullName: string, data: Data): EmailD
       // this offer. Saying "not refundable" here was true under the previous
       // rules and would now be a false denial — an offer closed by a competing
       // acceptance that the customer never opened is refunded like any other.
-      note(UNVIEWED_OFFER_REFUND_NOTICE),
+      //
+      // Built from this offer's own window, and omitted entirely for an offer
+      // the policy does not govern: a fixed sentence would promise 48 hours to
+      // a provider whose offer was sold at 72, and promise anything at all to
+      // one sold before the rule existed.
+      refundWindowHours === null ? null : note(unviewedOfferRefundNotice(refundWindowHours)),
     ]),
   };
 }

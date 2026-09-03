@@ -502,7 +502,7 @@ export type OfferStatus =
 
 export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
 
-/** Where an offer stands under the 48-hour unviewed-offer refund rule. */
+/** Where an offer stands under the unviewed-offer refund rule. */
 export type UnviewedRefundPolicyStatus =
   | 'AWAITING_VIEW'
   | 'VIEWED'
@@ -518,6 +518,13 @@ export type RefundEligibility = {
   hoursSinceSubmitted: number | null;
   /** False for every offer submitted before the rule shipped. */
   unviewedRefundPolicy: boolean;
+  /**
+   * The window this offer was sold under and the exact moment its credit
+   * becomes refundable — the offer's own snapshot, not the current setting.
+   * Null for an offer outside the rule.
+   */
+  windowHours: number | null;
+  eligibleAt: string | null;
   /** `null` for an offer outside the rule — no state to report. */
   policyStatus: UnviewedRefundPolicyStatus | null;
   policyStatusLabel: string | null;
@@ -589,6 +596,9 @@ export type RefundScanItem = {
   creditCost: number;
   submittedAt: string;
   hoursSinceSubmitted: number | null;
+  /** This offer's own window and eligibility moment, not the scan's. */
+  windowHours: number | null;
+  eligibleAt: string | null;
   reasonCode: 'UNVIEWED_OFFER_48H';
   recommendedAction: 'FULL_REFUND';
 };
@@ -602,11 +612,20 @@ export type RefundScanSkippedSummary = {
   noCreditSpend: number;
   /** Offers submitted before the rule shipped. Never refunded. */
   outOfPolicy: number;
+  /**
+   * In-policy offers carrying no eligibility moment. Should be zero; they are
+   * never refunded, so a non-zero count is something to investigate.
+   */
+  noSchedule: number;
 };
 
 export type RefundScanResponse = {
-  /** Fixed at 48 by the policy; reported so the screen never states its own. */
-  windowHours: number;
+  /**
+   * The window a *new* offer is created with, not the one this scan applied:
+   * each offer is judged by its own snapshot, which the items report
+   * individually.
+   */
+  currentWindowHours: number;
   eligibleCount: number;
   skippedCount: number;
   items: RefundScanItem[];
@@ -1915,3 +1934,32 @@ export async function requireAdmin() {
 
   return user;
 }
+
+/** One recorded change to an operations setting. */
+export type OperationsSettingsChange = {
+  id: string;
+  setting: string;
+  /** Null on the first save, when the effective value was the product default. */
+  previousValue: string | null;
+  newValue: string;
+  createdAt: string;
+  changedBy: { id: string; name: string | null } | null;
+};
+
+export type OperationsSettings = {
+  /** False until an operator has saved once; the value below is the default. */
+  configured: boolean;
+  unviewedOfferRefundWindowHours: number;
+  minUnviewedOfferRefundWindowHours: number;
+  maxUnviewedOfferRefundWindowHours: number;
+  defaultUnviewedOfferRefundWindowHours: number;
+  /** The exact sentence a provider is shown for an offer created right now. */
+  unviewedOfferRefundNotice: string;
+  updatedAt: string | null;
+  updatedBy: { id: string; name: string | null } | null;
+  recentChanges: OperationsSettingsChange[];
+};
+
+export const OPERATIONS_SETTING_LABELS: Record<string, string> = {
+  unviewedOfferRefundWindowHours: 'Görüntülenmeyen teklif için kredi iade süresi (saat)',
+};
