@@ -187,8 +187,7 @@ export class ServiceRequestsService {
       district: location.district,
       neighborhood: location.neighborhood,
       addressNote: normalizeNullableString(dto.addressNote),
-      budgetMin: normalizeOptionalPriceMinor(dto.budgetMin, 'Budget minimum'),
-      budgetMax: normalizeOptionalPriceMinor(dto.budgetMax, 'Budget maximum'),
+      ...normalizeBudgetRange(dto.budgetMin, dto.budgetMax),
       preferredDate,
       urgency: normalizeNullableString(dto.urgency),
       description: normalizeNullableString(dto.description),
@@ -1062,6 +1061,28 @@ function normalizeOptionalPriceMinor(value: number | null | undefined, fieldName
   }
 
   return value;
+}
+
+// A budget is a range, so the two ends have to be in that order. Equal ends are
+// a range too — a customer with an exact figure gives the same number twice —
+// but a minimum above the maximum describes nothing a provider could quote
+// against, and would silently skew every budget-based comparison downstream.
+// Either end may still be absent: "at least this much", "at most this much" and
+// "no preference" are all valid.
+function normalizeBudgetRange(
+  min: number | null | undefined,
+  max: number | null | undefined,
+) {
+  const budgetMin = normalizeOptionalPriceMinor(min, 'Budget minimum');
+  const budgetMax = normalizeOptionalPriceMinor(max, 'Budget maximum');
+
+  if (budgetMin !== null && budgetMax !== null && budgetMin > budgetMax) {
+    throw new BadRequestException(
+      'Budget minimum cannot be greater than budget maximum.',
+    );
+  }
+
+  return { budgetMin, budgetMax };
 }
 
 function normalizeOptionalDate(value: string | null | undefined, fieldName: string) {

@@ -5,6 +5,7 @@ import { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH } from '@taktic/shared';
 import type { ContactDisclosureConfig, Question, RouterSelection } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
+import { BudgetFields } from './budget-fields';
 import { LocationFields } from './location-fields';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
@@ -416,40 +417,12 @@ export function RequestForm({
                     <span className="help-text">{preferredDateQuestion.helpText}</span>
                   ) : null}
                 </label>
-                <label className="form-row">
-                  <span>
-                    {budgetQuestion?.label ?? 'Minimum bütçe'}
-                    {budgetQuestion?.isRequired ? ' *' : ''}
-                  </span>
-                  <input
-                    name="budgetMin"
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    inputMode="decimal"
-                    required={budgetQuestion?.isRequired ?? false}
-                    data-testid="request-budget-min"
-                    placeholder="Örn. 1500.00"
-                  />
-                  <span className="help-text">
-                    {budgetQuestion?.helpText ??
-                      (budgetQuestion?.isRequired
-                        ? 'Bu hizmet için bütçe aralığı gerekiyor.'
-                        : 'İsteğe bağlı. Ondalıklı tutar girebilirsiniz.')}
-                  </span>
-                </label>
-                <label className="form-row">
-                  <span>Maksimum bütçe</span>
-                  <input
-                    name="budgetMax"
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    inputMode="decimal"
-                    placeholder="Örn. 3000.00"
-                  />
-                  <span className="help-text">İsteğe bağlı. Boş bırakabilirsiniz.</span>
-                </label>
+                <BudgetFields
+                  minLabel={budgetQuestion?.label ?? 'Minimum bütçe'}
+                  required={budgetQuestion?.isRequired ?? false}
+                  minHelpText={budgetQuestion?.helpText}
+                  onChange={refreshSignals}
+                />
               </div>
             </section>
           </div>
