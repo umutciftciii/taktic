@@ -8,6 +8,14 @@ import {
 } from '@nestjs/common';
 import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import {
+  assertEmailFreeForAccountKind,
+  conflictsWithAccountKind,
+  crossRoleEmailConflictException,
+  findAccountByEmail,
+  normalizeAccountEmail,
+  type MarketplaceAccountKind,
+} from '../../common/account-email';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from './auth.types';
 import { EmailAlreadyRegisteredException } from './auth.errors';
@@ -46,7 +54,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, meta: SessionMeta) {
-    const email = dto.email.trim().toLowerCase();
+    const email = normalizeRequiredEmail(dto.email);
     const user = await this.prisma.user.findUnique({
       where: { email },
       select: {
@@ -234,11 +242,17 @@ export class AuthService {
     };
   }
 
-  private async register(dto: RegisterDto, role: UserRole, meta: SessionMeta) {
+  private async register(dto: RegisterDto, role: MarketplaceAccountKind, meta: SessionMeta) {
     const name = normalizeRequiredString(dto.name, 'Name');
-    const email = dto.email.trim().toLowerCase();
+    const email = normalizeRequiredEmail(dto.email);
     const phone = normalizeOptionalPhone(dto.phone);
     const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    // Asked before the write only so the visitor gets the rule's own sentence
+    // rather than a duplicate-account one. It is not what enforces the rule —
+    // two simultaneous registrations can both pass it — which is why the catch
+    // below asks the same question again of the account that actually won.
+    await assertEmailFreeForAccountKind(this.prisma, email, role);
 
     try {
       const user = await this.prisma.user.create({
@@ -283,6 +297,16 @@ export class AuthService {
           throw new ConflictException('Phone already registered');
         }
 
+        // The unique index on User.email is what actually keeps one address to
+        // one account, so this branch is where a lost race lands. Whoever won
+        // it is committed by now, so reading them back is the same question the
+        // pre-check asked — and it gives the loser of a cross-role race the
+        // same sentence as the caller who was simply second.
+        const winner = await findAccountByEmail(this.prisma, email);
+        if (winner && conflictsWithAccountKind(winner, role)) {
+          throw crossRoleEmailConflictException();
+        }
+
         throw new EmailAlreadyRegisteredException(email);
       }
 
@@ -320,6 +344,21 @@ function normalizeRequiredString(value: unknown, fieldName: string) {
   }
 
   return trimmed;
+}
+
+/**
+ * The address as it is stored and compared: trimmed and folded, and rejected
+ * outright when nothing survives that. Shared with every other flow through
+ * `common/account-email.ts`, so a lookup can never miss an account over a
+ * capital letter.
+ */
+function normalizeRequiredEmail(value: unknown) {
+  const normalized = normalizeAccountEmail(typeof value === 'string' ? value : null);
+  if (!normalized) {
+    throw new BadRequestException('Email is required');
+  }
+
+  return normalized;
 }
 
 function normalizeOptionalPhone(value: string | null | undefined) {

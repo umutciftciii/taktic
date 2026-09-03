@@ -216,9 +216,18 @@ test.describe('provider claim', () => {
     const applicant = await Actor.open(browser, 'applicant', providerClaimRuntime);
 
     try {
-      // The address already belongs to a customer account. There is exactly one
-      // role per account and User.email is globally unique, so this is the case
-      // that must never quietly turn a customer into a provider.
+      // The application goes in first, and it has to: filing one against an
+      // address a customer already holds is refused at submission time now, so
+      // the only way to reach this state is for the customer account to appear
+      // afterwards. Registering at an address that merely has a pending
+      // application is deliberately still allowed — an application is not an
+      // account — which is exactly why the claim itself must still refuse.
+      await submitApplication(applicant, category.id, values);
+      const claimUrl = await waitForLatestClaimUrl(values.email);
+
+      // There is exactly one role per account and User.email is globally
+      // unique, so this is the case that must never quietly turn a customer
+      // into a provider.
       const customer = await prisma().user.create({
         data: {
           email: values.email,
@@ -228,9 +237,6 @@ test.describe('provider claim', () => {
         },
         select: { id: true },
       });
-
-      await submitApplication(applicant, category.id, values);
-      const claimUrl = await waitForLatestClaimUrl(values.email);
 
       await applicant.page.goto(claimUrl, { waitUntil: 'domcontentloaded' });
       await assertNoErrorScreen(applicant.page);

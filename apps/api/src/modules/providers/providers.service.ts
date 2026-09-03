@@ -26,6 +26,7 @@ import {
   normalizeProviderEmail,
   sameProviderEmail,
 } from '../../common/provider-email';
+import { assertEmailFreeForAccountKind } from '../../common/account-email';
 import {
   isRequestVisibleToProviders,
   matchesProviderArea,
@@ -232,8 +233,22 @@ export class ProvidersService {
     // for, and it is the only one that needs a reachable address. A provider
     // creating their own profile is already the owner, so their address stays
     // as optional as it has always been.
-    if (willBeUnownedApplication(user) && isProviderClaimEnabled()) {
-      requireClaimableApplicationEmail(payload.email);
+    if (willBeUnownedApplication(user)) {
+      if (isProviderClaimEnabled()) {
+        requireClaimableApplicationEmail(payload.email);
+      }
+
+      // The address on an unowned application is the address a claim link is
+      // mailed to and the address the resulting provider account is opened
+      // under, so filing one against a customer's address is an attempt to open
+      // the second kind of account there. It used to be accepted: the row was
+      // written, the invitation went to the customer's own mailbox, and the
+      // flow only dead-ended much later when the claim refused to bind them.
+      // Refusing here is checked whether or not the claim flow is switched on —
+      // the rule is about accounts, not about a feature flag.
+      if (payload.email) {
+        await assertEmailFreeForAccountKind(this.prisma, payload.email, UserRole.PROVIDER);
+      }
     }
 
     return payload;
@@ -733,6 +748,16 @@ export class ProvidersService {
     ensureProviderUpdateAccess(existingProvider, user);
     const payload = await this.normalizeAndValidatePayload(dto);
     ensureContactEmailStable(existingProvider, payload.email);
+
+    // The same rule as at submission time, from the other side. An unowned
+    // application is one claim link away from being a provider account, so
+    // pointing one at a customer's address — which an admin correcting a typo
+    // can do — would re-create exactly the state the submission path now
+    // refuses. An owned profile is untouched: its address is a contact detail,
+    // not a pending account.
+    if (!existingProvider.userId && payload.email) {
+      await assertEmailFreeForAccountKind(this.prisma, payload.email, UserRole.PROVIDER);
+    }
 
     return this.prisma.$transaction(async (tx) => {
       // A profile save replaces the categories the *saver* can see, and DRAFT

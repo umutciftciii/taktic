@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { AuthFrame } from '../../auth-frame';
 import { registerCustomerAction } from '../actions';
 import { RoleSwitch } from '../role-switch';
+import { registerErrorMessage } from '../error-message';
 import { PasswordFields } from '../../password-criteria';
 
 type CustomerRegisterPageProps = {
@@ -35,9 +36,7 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
 
         {error ? (
           <div className="auth-screen-error" role="alert">
-            {error === 'duplicate'
-              ? 'Bu e-posta veya telefon zaten kayıtlı.'
-              : 'Bilgileri kontrol edin.'}
+            {registerErrorMessage(error)}
           </div>
         ) : null}
 

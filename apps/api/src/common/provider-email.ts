@@ -1,4 +1,5 @@
 import { isEmail } from 'class-validator';
+import { normalizeAccountEmail } from './account-email';
 
 /**
  * The one normalisation for a provider application's contact address.
@@ -10,15 +11,13 @@ import { isEmail } from 'class-validator';
  *
  * Kept in `common/` rather than in either module because the providers module
  * writes the value and the claim module reads it, and neither may own the
- * definition alone.
+ * definition alone. It is deliberately the *same* function an account address
+ * goes through rather than a second one that happens to agree today: the whole
+ * point is that an application's address and an account's address compare
+ * equal, and two independent definitions could only ever drift apart.
  */
 export function normalizeProviderEmail(value: string | null | undefined): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  const trimmed = value.trim().toLowerCase();
-  return trimmed ? trimmed : null;
+  return normalizeAccountEmail(value);
 }
 
 export function isValidProviderEmail(value: string): boolean {
