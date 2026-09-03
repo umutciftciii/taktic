@@ -236,22 +236,37 @@ Nothing in the product can repeat, edit or undo a reveal; the accept transaction
 
 ## Local Ops
 
-Refund scan automation is disabled by default. The scheduled worker is optional and uses the same execution logic as the admin refund scan endpoint, so it preserves the same eligibility checks, transactions, and idempotency behavior.
+### Unviewed-offer credit refund
+
+The platform refunds one thing and only one thing: the credit a provider spent on an offer that the authorised customer never opened within 48 hours of it being submitted. A viewed offer is never refunded — not on rejection, expiry, withdrawal or anything else — and an unviewed one is refunded regardless of the status it ended in. There is no manual refund path; the admin offer screen shows the outcome and cannot create one.
+
+Only offers created after this policy shipped are covered. `Offer.unviewedRefundPolicy` records that per row, so an offer sold under the earlier terms is out of scope permanently and no clock comparison decides it.
+
+The worker is disabled by default. It uses the same execution logic as the admin refund-scan endpoint, so both share one set of eligibility checks, one transaction and one database-level idempotency guarantee (`ProviderCreditTransaction_one_refund_per_offer`, a partial unique index that makes a second refund row for one offer impossible).
 
 To enable it locally:
 
 ```bash
-REFUND_SCHEDULER_ENABLED=true
+UNVIEWED_OFFER_REFUND_ENABLED=true
 ```
 
 Relevant environment variables:
 
-- `REFUND_SCHEDULER_ENABLED=false`
-- `REFUND_SCHEDULER_CRON=0 * * * *`
-- `REFUND_SCAN_OLDER_THAN_HOURS=48`
-- `REFUND_SCAN_LIMIT=100`
+- `UNVIEWED_OFFER_REFUND_ENABLED=false`
+- `UNVIEWED_OFFER_REFUND_CRON=0 * * * *`
+- `UNVIEWED_OFFER_REFUND_LIMIT=100`
 
-The scheduler only runs full refunds for the existing not-viewed offer policy. It does not perform partial refunds.
+There is deliberately no window setting. The 48 hours are the promise made to providers; a cron that runs late refunds on its next pass, and no configuration can refund early. Ledger rows written by the worker carry the reason `UNVIEWED_OFFER_48H`.
+
+Two things settle a credit and so keep the worker away from it, and they are stored as two different facts. `Offer.viewedAt` is the customer opening the offer. `Offer.refundBlockedAt` / `refundBlockedReason` is an administrator accepting or rejecting on the customer's behalf: the outcome the credit bought was delivered through the admin panel, so the credit is spent — but the database still says truthfully that no customer opened the offer, which a faked `viewedAt` would not. An admin merely *reading* an offer changes neither.
+
+### Manual credit refund (operations)
+
+`POST /offers/:id/refund-credit`, SUPER_ADMIN only, is an operations remedy for what an automatic rule cannot see — an invalid request, an unreachable customer, a platform mistake. It is **not** the refund policy: nothing provider- or customer-facing mentions it, and the only refund promise in the product is the 48-hour rule above.
+
+It writes its own ledger reason, `MANUAL_ADMIN_REFUND:<CODE>`, so a finance report can always separate what the policy cost from what operations decided, and a mandatory `ManualOfferRefundAudit` row in the same transaction recording the operator, the moment, the offer, the credit amount, the operations reason and any note. The operations reason never leaves the admin surfaces.
+
+The manual and automatic paths cannot double-pay in either order: both write through one function whose conditional UPDATE refuses an offer that already carries a refund, both land on `ProviderCreditTransaction_one_refund_per_offer`, and the audit table's UNIQUE on `offerId` is a third bar specific to the manual path.
 
 ### Request expiry and reminder
 

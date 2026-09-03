@@ -24,7 +24,7 @@ const items = [
   {
     q: 'Görülmeyen tekliflerde kredi iadesi nasıl işler?',
     a:
-      'Müşteri tarafından makul süre içinde görüntülenmeyen veya geçersiz olduğu tespit edilen taleplerde, iade uygunluğu otomatik taranır ve uygun olan krediler hesaba geri yansır.',
+      'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir. Teklif görüntülendiyse kredi iadesi yapılmaz.',
   },
   {
     q: 'Hizmet veren başvurusu nasıl yapılır?',

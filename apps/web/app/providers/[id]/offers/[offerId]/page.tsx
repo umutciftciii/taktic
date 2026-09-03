@@ -9,7 +9,7 @@ import {
   MatchedCustomerContact,
   ProviderAcceptedWorkScope,
   ProviderOffer,
-  refundActionLabel,
+  UNVIEWED_OFFER_REFUND_NOTICE,
   formatDate,
   formatPrice,
   formatDateTime,
@@ -242,29 +242,38 @@ export default async function ProviderOfferDetailPage({
               </div>
               <div className="pdash-info-row">
                 <dt>İade tarihi</dt>
-                <dd>
-                  {offer.creditRefundedAt
-                    ? `${formatDateTime(offer.creditRefundedAt)} — ${offer.creditRefundReason ?? '-'}`
-                    : 'Yok'}
-                </dd>
+                <dd>{offer.creditRefundedAt ? formatDateTime(offer.creditRefundedAt) : 'Yok'}</dd>
               </div>
-              <div className="pdash-info-row">
-                <dt>Öneri</dt>
-                <dd>
-                  <span className={providerRefundBadgeClass(offer.refundEligibility.recommendedAction)}>
-                    {refundActionLabel(offer.refundEligibility.recommendedAction)}
-                  </span>
-                </dd>
-              </div>
-              <div className="pdash-info-row">
-                <dt>Neden</dt>
-                <dd>{offer.refundEligibility.reasonLabel}</dd>
-              </div>
-              <div className="pdash-info-row">
-                <dt>Detay</dt>
-                <dd style={{ color: 'var(--muted)', fontSize: 13 }}>{offer.refundEligibility.details}</dd>
-              </div>
+              {/*
+                Only for an offer the policy governs. One from before it has no
+                standing under this rule, and a row here would read as a promise
+                it will never keep.
+              */}
+              {offer.refundEligibility.policyStatus ? (
+                <>
+                  <div className="pdash-info-row">
+                    <dt>İade durumu</dt>
+                    <dd>
+                      <span
+                        className={providerRefundBadgeClass(offer.refundEligibility.policyStatus)}
+                        data-testid="offer-refund-policy-status"
+                      >
+                        {offer.refundEligibility.policyStatusLabel}
+                      </span>
+                    </dd>
+                  </div>
+                  <div className="pdash-info-row">
+                    <dt>Detay</dt>
+                    <dd style={{ color: 'var(--muted)', fontSize: 13 }}>
+                      {offer.refundEligibility.details}
+                    </dd>
+                  </div>
+                </>
+              ) : null}
             </dl>
+            <p className="pdash-card-sub" style={{ marginTop: 12 }}>
+              {UNVIEWED_OFFER_REFUND_NOTICE}
+            </p>
           </section>
 
           {withdrawError ? (
@@ -291,7 +300,13 @@ export default async function ProviderOfferDetailPage({
                 <ul className="pdash-withdraw-list">
                   <li>Teklifiniz geri çekilecek.</li>
                   <li>Bu işlem geri alınamaz.</li>
-                  <li>Kredi iadesi yapılmaz.</li>
+                  {/*
+                    Withdrawing decides nothing about the credit. It used to say
+                    "Kredi iadesi yapılmaz", which the 48-hour rule made false:
+                    an offer the customer never opened is refunded whether or
+                    not the provider pulled it.
+                  */}
+                  <li>{UNVIEWED_OFFER_REFUND_NOTICE}</li>
                 </ul>
                 <form action={withdrawOfferAction}>
                   <input type="hidden" name="providerId" value={id} />

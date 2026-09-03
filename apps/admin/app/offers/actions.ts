@@ -18,15 +18,20 @@ export async function updateOfferStatusAction(formData: FormData) {
   redirect(`/offers/${id}?statusSaved=1`);
 }
 
+/**
+ * The operations refund. Not the product's policy — see the API's
+ * OffersService.refundOfferCredit — so this screen is the only place it is
+ * offered, and the reason code it posts is an operations code, never
+ * UNVIEWED_OFFER_48H.
+ */
 export async function refundOfferCreditAction(formData: FormData) {
   const id = readFormString(formData, 'id');
-  const reason = readOptionalFormString(formData, 'reason');
   const reasonCode = readFormString(formData, 'reasonCode');
-  const override = formData.get('override') === 'true';
+  const note = readOptionalFormString(formData, 'note');
 
   await apiFetch<{ offer: Offer; balance: number }>(`/offers/${id}/refund-credit`, {
     method: 'POST',
-    body: JSON.stringify({ reasonCode, reason, override }),
+    body: JSON.stringify({ reasonCode, note }),
   });
 
   revalidatePath('/offers');

@@ -1222,10 +1222,13 @@ function recipientFor(provider: {
 }
 
 /**
- * The stored refund reason is `"<CODE>: <free text>"`, and the free text can be
- * an admin's internal note. Only the code is read, and only when it is one this
- * build knows — anything else yields null and the row disappears, rather than
- * putting an internal note in a provider's inbox.
+ * The stored refund reason is the policy code — today always
+ * `UNVIEWED_OFFER_48H`, since the automatic worker is the only writer of refund
+ * rows. Historical rows from the removed manual path carry `"<CODE>: <free
+ * text>"`, where the free text can be an admin's internal note, so only the
+ * code is ever read and only when it is one this build knows. Anything else
+ * yields null and the row disappears, rather than putting an internal note in a
+ * provider's inbox.
  */
 function knownRefundReasonLabel(stored: string | null): string | null {
   const code = stored?.split(':', 1)[0]?.trim();

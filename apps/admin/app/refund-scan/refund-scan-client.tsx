@@ -8,16 +8,10 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 type RefundScanClientProps = {
   initialScan: RefundScanResponse;
-  initialOlderThanHours: number;
   initialLimit: number;
 };
 
-export function RefundScanClient({
-  initialScan,
-  initialOlderThanHours,
-  initialLimit,
-}: RefundScanClientProps) {
-  const [olderThanHours, setOlderThanHours] = useState(initialOlderThanHours);
+export function RefundScanClient({ initialScan, initialLimit }: RefundScanClientProps) {
   const [limit, setLimit] = useState(initialLimit);
   const [scan, setScan] = useState(initialScan);
   const [executeResult, setExecuteResult] = useState<RefundScanExecuteResponse | null>(null);
@@ -29,10 +23,7 @@ export function RefundScanClient({
       setError(null);
       setExecuteResult(null);
       try {
-        const params = new URLSearchParams({
-          olderThanHours: String(olderThanHours),
-          limit: String(limit),
-        });
+        const params = new URLSearchParams({ limit: String(limit) });
         const response = await fetch(`${apiUrl}/offers/refund-scan?${params.toString()}`, {
           credentials: 'include',
         });
@@ -51,7 +42,7 @@ export function RefundScanClient({
           method: 'POST',
           credentials: 'include',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ olderThanHours, limit }),
+          body: JSON.stringify({ limit }),
         });
         const result = await readApiResponse<RefundScanExecuteResponse>(response);
         setExecuteResult(result);
@@ -66,17 +57,11 @@ export function RefundScanClient({
     <>
       <section className="filters-card">
         <h2 style={{ margin: 0, fontSize: 15 }}>Tarama parametreleri</h2>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          Görüntülenme penceresi {scan.windowHours} saattir ve değiştirilemez. Limit yalnız bu
+          çalıştırmada işlenecek teklif sayısını sınırlar.
+        </p>
         <div className="filters-grid">
-          <label className="form-row">
-            <span>Saatten eski</span>
-            <input
-              min="1"
-              name="olderThanHours"
-              type="number"
-              value={olderThanHours}
-              onChange={(event) => setOlderThanHours(Number(event.target.value))}
-            />
-          </label>
           <label className="form-row">
             <span>Limit</span>
             <input
@@ -132,8 +117,12 @@ export function RefundScanClient({
             <span className="metric">{scan.skippedSummary.noCreditSpend}</span>
           </div>
           <div className="stat-card">
-            <span className="muted">Durum uygun değil</span>
-            <span className="metric">{scan.skippedSummary.statusNotEligible}</span>
+            <span className="muted">Müşteri kararı kaydedildi</span>
+            <span className="metric">{scan.skippedSummary.adminDecision}</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">Politika dışı</span>
+            <span className="metric">{scan.skippedSummary.outOfPolicy}</span>
           </div>
         </div>
       </section>

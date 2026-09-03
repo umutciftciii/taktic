@@ -17,7 +17,7 @@ import { ProviderInvitesModule } from './modules/provider-invites/provider-invit
 import { ProvidersModule } from './modules/providers/providers.module';
 import { OffersModule } from './modules/offers/offers.module';
 import { PhoneVerificationModule } from './modules/phone-verification/phone-verification.module';
-import { RefundSchedulerModule } from './modules/refund-scheduler/refund-scheduler.module';
+import { UnviewedOfferRefundModule } from './modules/unviewed-offer-refund/unviewed-offer-refund.module';
 import { RequestLifecycleModule } from './modules/request-lifecycle/request-lifecycle.module';
 import { CreditsModule } from './modules/credits/credits.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -51,7 +51,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ProviderInvitesModule,
     OffersModule,
     PhoneVerificationModule,
-    RefundSchedulerModule,
+    UnviewedOfferRefundModule,
     RequestLifecycleModule,
     CreditsModule,
     EntitlementsModule,

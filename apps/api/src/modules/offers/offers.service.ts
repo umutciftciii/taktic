@@ -11,6 +11,7 @@ import {
 import {
   CreditTransactionType,
   OfferEntitlementSource,
+  OfferRefundBlockReason,
   OfferRejectionReason,
   OfferStatus,
   Prisma,
@@ -35,9 +36,10 @@ import {
   offerStatusNotSettableException,
 } from './offer-transitions';
 import {
+  ManualRefundReasonCode,
   calculateRefundEligibility,
   isManualRefundReasonCode,
-  refundReasonLabel,
+  manualRefundStoredReason,
 } from './refund-policy';
 
 type OfferListFilters = {
@@ -181,12 +183,39 @@ export class OffersService {
     return this.getOffer(id);
   }
 
-  async refundOfferCredit(id: string, dto: RefundOfferCreditDto) {
-    const result = await this.refundOfferCreditRecord(id, dto);
+  /**
+   * An administrator gives one offer's credit back by hand.
+   *
+   * This is an operations tool and not the product's refund policy. The policy
+   * is the 48-hour unviewed-offer rule, it is what providers are promised, and
+   * the worker performs it without being asked; nothing customer- or
+   * provider-facing mentions this endpoint. It exists for what an automatic
+   * rule cannot see — a request that turned out to be invalid, a customer who
+   * could never be reached, a platform mistake — and it deliberately does not
+   * consult {@link calculateRefundEligibility}: asking the automatic policy for
+   * permission would defeat the point of having a manual remedy, and the
+   * "override the recommendation" checkbox that used to sit here was
+   * ceremony around a decision the operator had already made.
+   *
+   * What it does insist on is a record. The ledger row, the offer's refund
+   * columns and a ManualOfferRefundAudit naming the operator, the moment, the
+   * offer, the amount, the operations reason and any note all commit in one
+   * transaction, so a hand-made refund with nobody's name on it cannot exist.
+   *
+   * It cannot double-pay with the worker in either order: both write through
+   * {@link refundOfferCreditInTransaction}, whose conditional UPDATE refuses an
+   * offer that already carries a refund, and both land on the same partial
+   * unique index on the ledger. The audit table's UNIQUE on `offerId` is a
+   * third bar, specific to this path.
+   */
+  async refundOfferCredit(id: string, dto: RefundOfferCreditDto, user: AuthUser) {
+    const result = await this.refundOfferCreditRecord(id, dto, user);
 
     // After the ledger row is committed, and driven by that row: every figure
     // in the message is read back from the transaction the refund wrote, never
-    // from a live balance.
+    // from a live balance. The provider is told a credit came back and how
+    // much; the operations reason and the operator's note stay in the admin
+    // surfaces, which is why the mail reads `reason` and never the audit row.
     await this.notify(
       () => this.mail.sendCreditRefunded(result.refundTransaction.id),
       `offer ${id}`,
@@ -195,9 +224,9 @@ export class OffersService {
     return result;
   }
 
-  private refundOfferCreditRecord(id: string, dto: RefundOfferCreditDto) {
-    const reasonCode = normalizeRefundReasonCode(dto.reasonCode);
-    const reasonNote = normalizeOptionalReason(dto.reason);
+  private refundOfferCreditRecord(id: string, dto: RefundOfferCreditDto, user: AuthUser) {
+    const reasonCode = normalizeManualRefundReasonCode(dto.reasonCode);
+    const note = normalizeOptionalNote(dto.note);
 
     return runSerializable(
       this.prisma,
@@ -211,16 +240,6 @@ export class OffersService {
             creditSpentTransactionId: true,
             creditRefundedTransactionId: true,
             creditRefundedAt: true,
-            status: true,
-            submittedAt: true,
-            viewedAt: true,
-            acceptedAt: true,
-            // Needed so the policy can see a competitor-rejected offer and
-            // recommend NO_REFUND; an admin can still refund it with override.
-            rejectionReason: true,
-            // A period-package offer has no ledger row to give back, and the
-            // policy says so in as many words rather than as "no credit spend".
-            entitlementSource: true,
           },
         });
 
@@ -228,25 +247,33 @@ export class OffersService {
           throw new NotFoundException('Offer not found');
         }
 
+        // The two things a manual refund still cannot do: invent a credit that
+        // was never spent, and pay one that has already come back.
         if (!offer.creditSpentTransactionId || offer.creditCost <= 0) {
           throw new BadRequestException('Offer has no credit spend to refund');
         }
 
-        if (offer.creditRefundedTransactionId) {
+        if (offer.creditRefundedTransactionId || offer.creditRefundedAt) {
           throw new ConflictException('Offer credit already refunded');
         }
 
-        const refundEligibility = calculateRefundEligibility(offer);
-        if (refundEligibility.recommendedAction === 'NO_REFUND' && dto.override !== true) {
-          throw new BadRequestException('Refund is not recommended for this offer without override');
-        }
+        const { refundTransaction } = await refundOfferCreditInTransaction(
+          tx,
+          offer,
+          manualRefundStoredReason(reasonCode),
+          { enforceUnviewedPolicy: false, createdById: user.id },
+        );
 
-        const storedReason =
-          dto.override === true
-            ? `${reasonCode}: ${reasonNote ?? 'Manual override'}`
-            : `${reasonCode}: ${reasonNote ?? refundReasonLabel(reasonCode)}`;
+        await createManualRefundAudit(tx, {
+          offerId: offer.id,
+          providerId: offer.providerId,
+          creditAmount: offer.creditCost,
+          reasonCode,
+          note,
+          performedById: user.id,
+          creditTransactionId: refundTransaction.id,
+        });
 
-        const { refundTransaction } = await refundOfferCreditInTransaction(tx, offer, storedReason);
         const updatedOffer = await tx.offer.findUnique({
           where: { id: offer.id },
           include: offerInclude,
@@ -321,8 +348,6 @@ export class OffersService {
       warrantyNote: offer.warrantyNote,
       creditCost: offer.creditCost,
       creditRefundedAt: offer.creditRefundedAt,
-      creditRefundReason: offer.creditRefundReason,
-      refundEligibility: customerRefundEligibility(offer),
       submittedAt: offer.submittedAt,
     }));
   }
@@ -332,16 +357,48 @@ export class OffersService {
     return toCustomerOfferDetail(offer);
   }
 
+  /**
+   * The single point at which an offer becomes "viewed".
+   *
+   * This endpoint — POST /service-requests/:requestId/offers/:offerId/view — is
+   * the only writer of `Offer.viewedAt` that a customer can reach, and
+   * `viewedAt` is now the whole refund policy: an offer with a timestamp here
+   * keeps its credit forever, one without it is paid back after 48 hours. So
+   * everything about this method is about not writing that timestamp by
+   * accident.
+   *
+   * Who counts is decided by {@link isCustomerViewer}, not by the access guard.
+   * `getRequestOfferOrThrow` also admits a SUPER_ADMIN, deliberately, so support
+   * can read a customer's screen — but an admin reading it is not the customer
+   * looking at the offer, and a support ticket must not cost a provider a
+   * refund. Nothing else stamps it either: listing offers, the provider's own
+   * panel and every admin projection are reads.
+   *
+   * The stamp itself is a conditional UPDATE on `viewedAt IS NULL`, so of any
+   * number of simultaneous opens exactly one row-write wins and the recorded
+   * first view is the first one — a re-open, a refresh or a double-submitted
+   * request changes nothing.
+   */
   async markRequestOfferViewed(requestId: string, offerId: string, user: AuthUser | null = null) {
     const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId, user);
-    const now = new Date();
 
-    const offer = await this.prisma.offer.update({
+    if (isCustomerViewer(existingOffer.request.customerId, user)) {
+      // Two conditional writes rather than one read-then-write: the row was read
+      // outside any transaction and is already stale. Each clause is its own
+      // guard, so a concurrent open cannot move a timestamp that is already set.
+      await this.prisma.offer.updateMany({
+        where: { id: offerId, viewedAt: null },
+        data: { viewedAt: new Date() },
+      });
+
+      await this.prisma.offer.updateMany({
+        where: { id: offerId, status: OfferStatus.SUBMITTED },
+        data: { status: OfferStatus.VIEWED },
+      });
+    }
+
+    const offer = await this.prisma.offer.findUniqueOrThrow({
       where: { id: offerId },
-      data: {
-        ...(existingOffer.viewedAt ? {} : { viewedAt: now }),
-        ...(existingOffer.status === OfferStatus.SUBMITTED ? { status: OfferStatus.VIEWED } : {}),
-      },
       include: customerOfferInclude,
     });
 
@@ -366,8 +423,39 @@ export class OffersService {
 
     const status = customerActionToStatus(dto.action);
 
+    // Acting on an offer implies having read it — but only when it is the
+    // customer acting. A SUPER_ADMIN reaches this same method through the admin
+    // status control, and an admin's decision is not the customer's view, so it
+    // must not close a provider's refund window. Same predicate the view
+    // endpoint uses, for the same reason.
+    const stampViewedAt =
+      existingOffer.viewedAt === null && isCustomerViewer(existingOffer.request.customerId, user);
+
+    /*
+     * An administrator deciding on the customer's behalf settles the credit,
+     * and is recorded as its own fact.
+     *
+     * The provider's credit bought an outcome on this request, and an accept or
+     * a reject *is* that outcome — delivered through the admin panel rather
+     * than by the customer clicking, but delivered. Refunding it 48 hours later
+     * would pay for something the platform did.
+     *
+     * It is not written as a `viewedAt`, which would be the cheap way to get
+     * the same refusal: the customer did not open the offer, and a database
+     * that says they did misleads the provider's panel, the admin timeline and
+     * every reader afterwards. A separate column costs one migration and keeps
+     * both facts true.
+     *
+     * Only ACCEPT and REJECT qualify. SHORTLIST decides nothing — the offer is
+     * still live and the customer may yet open it — and an admin merely reading
+     * the screen is not a decision at all.
+     */
+    const adminDecision =
+      user?.role === UserRole.SUPER_ADMIN &&
+      (status === OfferStatus.ACCEPTED || status === OfferStatus.REJECTED);
+
     if (status === OfferStatus.ACCEPTED) {
-      const accepted = await this.acceptRequestOffer(requestId, offerId, existingOffer.viewedAt, {
+      const accepted = await this.acceptRequestOffer(requestId, offerId, stampViewedAt, adminDecision, {
         accepted: dto.contactDisclosureAccepted === true,
         version: dto.contactDisclosureVersion?.trim().toLowerCase() || null,
       });
@@ -397,9 +485,15 @@ export class OffersService {
       },
       data: {
         status,
-        ...(existingOffer.viewedAt ? {} : { viewedAt: now }),
-        // A hand-rejected offer deliberately gets no rejectionReason: NULL is
-        // what keeps its existing refund behaviour.
+        ...(stampViewedAt ? { viewedAt: now } : {}),
+        // In the same conditional UPDATE as the status it belongs to, so the
+        // decision and the fact that it settled the credit either both land or
+        // neither does.
+        ...(adminDecision ? adminDecisionRefundBlock(now) : {}),
+        // A hand-rejected offer deliberately gets no rejectionReason: the enum
+        // records why the platform closed an offer, and nothing closed this
+        // one. It no longer affects refunds either way — under the 48-hour rule
+        // only `viewedAt` and `refundBlockedAt` do.
         ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
       },
     });
@@ -443,7 +537,8 @@ export class OffersService {
   private acceptRequestOffer(
     requestId: string,
     offerId: string,
-    viewedAt: Date | null,
+    stampViewedAt: boolean,
+    adminDecision: boolean,
     disclosure: { accepted: boolean; version: string | null },
   ) {
     const now = new Date();
@@ -522,7 +617,10 @@ export class OffersService {
           data: {
             status: OfferStatus.ACCEPTED,
             acceptedAt: now,
-            ...(viewedAt ? {} : { viewedAt: now }),
+            ...(stampViewedAt ? { viewedAt: now } : {}),
+            // Inside the accept transaction, so an admin's acceptance and the
+            // credit it settles commit together with the match itself.
+            ...(adminDecision ? adminDecisionRefundBlock(now) : {}),
           },
         });
 
@@ -678,16 +776,25 @@ function ensureCustomerCanAccessRequest(customerId: string | null, user: AuthUse
 }
 
 /**
- * The refund verdict a customer is allowed to see.
+ * Whether this caller opening this offer counts as *the customer* seeing it.
  *
- * Identical to the provider's in every case a customer can distinguish, with
- * one field withheld: `entitlementSource` would tell the customer that this
- * provider is offering under a monthly quota or an unlimited package, and what
- * commercial arrangement a provider is on is nobody else's business. Withheld
- * rather than reworded, so a later reason code cannot leak it by accident.
+ * Narrower than {@link ensureCustomerCanAccessRequest} on purpose. That guard
+ * answers "may this request be read at all" and admits a SUPER_ADMIN so support
+ * can look; this one answers "did the customer look", which is the fact the
+ * refund policy turns on. A provider, an admin and any other role are reads, not
+ * views.
+ *
+ * A request with no linked account is opened through its own link and has no
+ * signed-in owner to compare against, so the link-holder is the customer — but
+ * only while they are anonymous or signed in as a customer. An admin following
+ * the same link is still an admin.
  */
-function customerRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
-  return calculateRefundEligibility({ ...offer, entitlementSource: null });
+function isCustomerViewer(customerId: string | null, user: AuthUser | null): boolean {
+  if (customerId) {
+    return user?.role === UserRole.CUSTOMER && user.id === customerId;
+  }
+
+  return user === null || user.role === UserRole.CUSTOMER;
 }
 
 function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
@@ -698,18 +805,55 @@ function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
 }
 
 type RefundPolicyOfferShape = {
-  status: OfferStatus;
   submittedAt: Date | string | null;
   viewedAt: Date | string | null;
-  acceptedAt: Date | string | null;
   creditCost: number;
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
-  rejectionReason?: OfferRejectionReason | null;
+  // Required, not optional: every projection that renders a refund verdict has
+  // to state whether the offer is inside the policy, and a caller that forgot
+  // the column should fail to compile rather than quietly report an offer as
+  // out of scope.
+  unviewedRefundPolicy: boolean;
+  refundBlockedAt: Date | string | null;
   entitlementSource?: OfferEntitlementSource | null;
 };
 
+/**
+ * Gives one offer's credit back, inside the caller's transaction.
+ *
+ * Three things happen together or not at all: the OFFER_REFUND ledger row, the
+ * offer's refund columns, and — because the caller holds the transaction — the
+ * decision that led here. There is no window in which a provider's balance has
+ * moved but the offer does not say so, or the reverse.
+ *
+ * Paying twice is prevented three times over, which for money is the right
+ * number:
+ *
+ *  1. The conditional UPDATE below matches only an offer that is still unviewed
+ *     and still unrefunded, so a customer who opens the offer between the
+ *     worker's read and its write takes the refund away rather than racing it.
+ *  2. The caller runs Serializable, so two workers cannot both observe an
+ *     unrefunded offer.
+ *  3. `ProviderCreditTransaction_one_refund_per_offer` — a partial UNIQUE index
+ *     on ("referenceId") WHERE type = 'OFFER_REFUND' — makes a second refund row
+ *     for one offer impossible in the database itself. This is the guarantee
+ *     that does not depend on any code above it being right, and it is reported
+ *     as the 409 it is rather than leaking a Prisma error.
+ *
+ * `storedReason` is written verbatim into the ledger and onto the offer. The
+ * automatic path passes {@link UNVIEWED_OFFER_REFUND_REASON} and nothing else,
+ * so the admin ledger shows exactly `UNVIEWED_OFFER_48H`; the manual path
+ * passes `MANUAL_ADMIN_REFUND:<CODE>`, so a report can always separate the
+ * policy's cost from operations' — see {@link manualRefundStoredReason}.
+ *
+ * `enforceUnviewedPolicy` is what the two callers disagree about, and only
+ * that. The worker must re-check the policy against the committed row; the
+ * administrator's operations tool must not, because a manual remedy that asks
+ * the automatic rule for permission is not a remedy. Both keep the clauses that
+ * protect the money — there is a spend, and it has not already come back.
+ */
 export async function refundOfferCreditInTransaction(
   tx: Prisma.TransactionClient,
   offer: {
@@ -718,40 +862,40 @@ export async function refundOfferCreditInTransaction(
     creditCost: number;
   },
   storedReason: string,
-  options: { enforceAutomaticEligibility?: boolean } = {},
+  options: { enforceUnviewedPolicy?: boolean; createdById?: string | null } = {},
 ) {
+  const enforceUnviewedPolicy = options.enforceUnviewedPolicy ?? true;
   const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
-  const refundTransaction = await tx.providerCreditTransaction.create({
-    data: {
-      providerId: offer.providerId,
-      type: CreditTransactionType.OFFER_REFUND,
-      amount: offer.creditCost,
-      balanceAfter: currentBalance + offer.creditCost,
-      reason: storedReason,
-      referenceType: 'Offer',
-      referenceId: offer.id,
-    },
+  const refundTransaction = await createRefundLedgerRow(tx, {
+    providerId: offer.providerId,
+    offerId: offer.id,
+    creditCost: offer.creditCost,
+    balanceAfter: currentBalance + offer.creditCost,
+    storedReason,
+    createdById: options.createdById ?? null,
   });
 
   const updated = await tx.offer.updateMany({
     where: {
       id: offer.id,
+      // True for both callers: an offer with no spend has nothing to give back,
+      // and one already refunded must never be paid twice — whichever path got
+      // there first.
       creditRefundedTransactionId: null,
       creditRefundedAt: null,
       creditSpentTransactionId: { not: null },
       creditCost: { gt: 0 },
-      ...(options.enforceAutomaticEligibility
+      // The automatic policy, restated as a WHERE clause so it is re-checked
+      // against the committed row and not against whatever the worker read a
+      // moment ago. Status is deliberately absent: under this policy an
+      // unviewed offer is refundable however it ended. `refundBlockedAt` sits
+      // beside `viewedAt` because eligibility must never rest on `viewedAt`
+      // alone.
+      ...(enforceUnviewedPolicy
         ? {
+            unviewedRefundPolicy: true,
             viewedAt: null,
-            status: {
-              notIn: [
-                OfferStatus.VIEWED,
-                OfferStatus.ACCEPTED,
-                OfferStatus.WITHDRAWN,
-                OfferStatus.CANCELLED,
-                OfferStatus.EXPIRED,
-              ],
-            },
+            refundBlockedAt: null,
           }
         : {}),
     },
@@ -767,6 +911,109 @@ export async function refundOfferCreditInTransaction(
   }
 
   return { refundTransaction };
+}
+
+async function createRefundLedgerRow(
+  tx: Prisma.TransactionClient,
+  entry: {
+    providerId: string;
+    offerId: string;
+    creditCost: number;
+    balanceAfter: number;
+    storedReason: string;
+    createdById: string | null;
+  },
+) {
+  try {
+    return await tx.providerCreditTransaction.create({
+      data: {
+        providerId: entry.providerId,
+        type: CreditTransactionType.OFFER_REFUND,
+        amount: entry.creditCost,
+        balanceAfter: entry.balanceAfter,
+        reason: entry.storedReason,
+        referenceType: 'Offer',
+        referenceId: entry.offerId,
+        // NULL for the worker, which acts on nobody's behalf, and the operator's
+        // id for a manual refund. The ledger alone therefore says whether a
+        // person or the policy moved this credit.
+        createdById: entry.createdById,
+      },
+    });
+  } catch (error) {
+    // The partial unique index fired: this offer already has a refund row. The
+    // insert failed, so nothing was paid — the caller gets the same 409 the
+    // application-level guards produce, and the transaction rolls back.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException('Offer credit already refunded');
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Writes the audit row for a manual refund, inside the caller's transaction.
+ *
+ * Not optional and not "best effort": an operations action that moves money
+ * without a record of who took it and why is exactly what this table exists to
+ * make impossible. A failure here rolls the refund back with it.
+ *
+ * The UNIQUE on `offerId` doubles as a per-offer guard, so two administrators
+ * pressing the button at the same moment cannot both succeed even if every
+ * other check somehow passed.
+ */
+async function createManualRefundAudit(
+  tx: Prisma.TransactionClient,
+  entry: {
+    offerId: string;
+    providerId: string;
+    creditAmount: number;
+    reasonCode: ManualRefundReasonCode;
+    note: string | null;
+    performedById: string;
+    creditTransactionId: string;
+  },
+) {
+  try {
+    return await tx.manualOfferRefundAudit.create({ data: entry });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException('Offer credit already refunded');
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * The columns that record "an administrator decided on the customer's behalf".
+ *
+ * One helper rather than two literals, because the timestamp and the reason are
+ * a single fact and a row carrying one without the other would be unreadable.
+ */
+function adminDecisionRefundBlock(now: Date) {
+  return {
+    refundBlockedAt: now,
+    refundBlockedReason: OfferRefundBlockReason.ADMIN_CUSTOMER_DECISION,
+  } satisfies Prisma.OfferUpdateManyMutationInput;
+}
+
+function normalizeManualRefundReasonCode(value: unknown): ManualRefundReasonCode {
+  if (typeof value !== 'string' || !isManualRefundReasonCode(value.trim())) {
+    throw new BadRequestException('Invalid refund reason code');
+  }
+
+  return value.trim() as ManualRefundReasonCode;
+}
+
+function normalizeOptionalNote(value: string | null | undefined) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 async function getProviderCreditBalanceInTransaction(
@@ -837,6 +1084,20 @@ const customerOfferInclude = {
   },
 } satisfies Prisma.OfferInclude;
 
+/**
+ * The customer's view of an offer.
+ *
+ * It carries neither `refundEligibility` nor `creditRefundReason` — the latter
+ * is an operations code an administrator filed a case under, and a customer has
+ * no business reading the platform's internal judgement of it.
+ *
+ * It deliberately carries no `refundEligibility`. Under the 48-hour policy that
+ * verdict says, in effect, "leave this unopened and the provider gets their
+ * credit back" — a reason for a customer not to look at an offer, published on
+ * the very screen where they are meant to look at it. The provider is told the
+ * policy because it is their money; the customer is not, because it is not
+ * their decision to make.
+ */
 function toCustomerOfferDetail(
   offer: Prisma.OfferGetPayload<{ include: typeof customerOfferInclude }>,
 ) {
@@ -853,8 +1114,6 @@ function toCustomerOfferDetail(
     warrantyNote: offer.warrantyNote,
     creditCost: offer.creditCost,
     creditRefundedAt: offer.creditRefundedAt,
-    creditRefundReason: offer.creditRefundReason,
-    refundEligibility: customerRefundEligibility(offer),
     submittedAt: offer.submittedAt,
     viewedAt: offer.viewedAt,
     acceptedAt: offer.acceptedAt,
@@ -900,45 +1159,6 @@ function normalizeNullableString(value: string | null | undefined) {
   return trimmed ? trimmed : null;
 }
 
-function normalizeRequiredString(value: unknown, fieldName: string) {
-  if (typeof value !== 'string') {
-    throw new BadRequestException(`${fieldName} is required`);
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new BadRequestException(`${fieldName} cannot be empty`);
-  }
-
-  return trimmed;
-}
-
-function normalizeOptionalReason(value: string | null | undefined) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  if (typeof value !== 'string') {
-    throw new BadRequestException('Refund reason must be a string');
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new BadRequestException('Refund reason cannot be empty when provided');
-  }
-
-  return trimmed;
-}
-
-function normalizeRefundReasonCode(value: unknown) {
-  const reasonCode = normalizeRequiredString(value, 'Refund reason code');
-
-  if (!isManualRefundReasonCode(reasonCode)) {
-    throw new BadRequestException('Invalid refund reason code');
-  }
-
-  return reasonCode;
-}
 
 function normalizeOptionalDate(value: string | undefined | null, fieldName: string): Date | null {
   const normalized = normalizeNullableString(value ?? undefined);

@@ -936,6 +936,8 @@ export class ProvidersService {
             creditRefundedTransactionId: true,
             creditRefundedAt: true,
             creditRefundReason: true,
+            unviewedRefundPolicy: true,
+            refundBlockedAt: true,
             viewedAt: true,
             acceptedAt: true,
             submittedAt: true,
@@ -1093,6 +1095,12 @@ export class ProvidersService {
               // later from the absence of a ledger row.
               entitlementSource: decision.source,
               entitlementId: decision.entitlementId,
+              // The opt-in into the 48-hour unviewed-offer refund rule, written
+              // here because this is the code path that shipped with it. Every
+              // offer created from now on carries the promise the provider was
+              // shown; every offer that predates this line keeps the column's
+              // false default and is out of scope forever.
+              unviewedRefundPolicy: true,
             },
           });
 
@@ -2054,6 +2062,8 @@ function toProviderRequestDetail(
           creditRefundedTransactionId: true;
           creditRefundedAt: true;
           creditRefundReason: true;
+          unviewedRefundPolicy: true;
+          refundBlockedAt: true;
           viewedAt: true;
           acceptedAt: true;
           submittedAt: true;
@@ -2098,12 +2108,20 @@ function toProviderRequestDetail(
 }
 
 function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
-  // rejectionReason is internal. COMPETITOR_ACCEPTED tells the provider that
-  // somebody else won, which is exactly what the provider must not learn, so it
-  // is dropped here. What stays is refundEligibility, whose label for that case
-  // is the neutral "Teklif kabul edilmedi".
-  const { rejectionReason, ...visible } = offer;
+  // Two internal fields are dropped rather than reworded.
+  //
+  // rejectionReason: COMPETITOR_ACCEPTED tells the provider that somebody else
+  // won, which is exactly what the provider must not learn.
+  //
+  // creditRefundReason: for a manual refund this is the operations code an
+  // administrator filed the case under — "CUSTOMER_UNREACHABLE",
+  // "PLATFORM_ERROR" — which is an internal judgement about a case, not
+  // something the provider is owed an explanation in. What stays is the fact
+  // and its date: refundEligibility reports "Kredi iade edildi", and
+  // creditRefundedAt says when.
+  const { rejectionReason, creditRefundReason, ...visible } = offer;
   void rejectionReason;
+  void creditRefundReason;
 
   return {
     ...visible,
@@ -2112,15 +2130,21 @@ function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
 }
 
 type RefundPolicyOfferShape = {
-  status: OfferStatus;
   submittedAt: Date | string | null;
   viewedAt: Date | string | null;
-  acceptedAt: Date | string | null;
   creditCost: number;
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
+  // Required: a provider screen that renders a refund verdict must state
+  // whether the offer is inside the policy at all.
+  unviewedRefundPolicy: boolean;
+  // Required for the same reason: without it an offer an administrator has
+  // already decided would read to its provider as "Görüntülenme bekleniyor",
+  // which is a refund promise the worker will not keep.
+  refundBlockedAt: Date | string | null;
   rejectionReason?: OfferRejectionReason | null;
+  creditRefundReason?: string | null;
 };
 
 async function getProviderCreditBalanceInTransaction(

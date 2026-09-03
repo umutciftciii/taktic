@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 // Types only: `lib/api` reaches for next/headers and cannot be bundled here.
 import type { ProviderOffer } from '../../../../lib/api';
-import { formatDateTime, formatPrice, refundActionLabel } from '../../../../lib/formatters';
+import { formatDateTime, formatPrice } from '../../../../lib/formatters';
 import {
   canOpenRequestDetail,
   canWithdrawOffer,
@@ -129,11 +129,20 @@ export function OffersTable({ providerId, offers }: OffersTableProps) {
                     ) : null}
                   </td>
                   <td>
-                    <span
-                      className={providerRefundBadgeClass(offer.refundEligibility.recommendedAction)}
-                    >
-                      {refundActionLabel(offer.refundEligibility.recommendedAction)}
-                    </span>
+                    {/*
+                      Nothing at all for an offer from before the policy: its
+                      refund terms were different and it has no standing under
+                      this one to report.
+                    */}
+                    {offer.refundEligibility.policyStatus ? (
+                      <span
+                        className={providerRefundBadgeClass(offer.refundEligibility.policyStatus)}
+                      >
+                        {offer.refundEligibility.policyStatusLabel}
+                      </span>
+                    ) : (
+                      <span className="pdash-card-sub">-</span>
+                    )}
                   </td>
                   <td>
                     <div className="pdash-actions">

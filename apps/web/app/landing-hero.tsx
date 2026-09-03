@@ -303,7 +303,7 @@ export function LandingHero({
               <div className="lp-floating-card">
                 <span>
                   <span className="lp-floating-label">Kredi iadesi</span>
-                  <span className="lp-floating-val">Otomatik tarama</span>
+                  <span className="lp-floating-val">48 saat kuralı</span>
                 </span>
               </div>
             </div>

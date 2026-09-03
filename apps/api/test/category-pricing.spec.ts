@@ -247,20 +247,21 @@ describe('refund after a category price change', () => {
       .send({ offerCreditCost: NEW_COST })
       .expect(200);
 
-    // Make the offer refund-eligible under the not-viewed policy.
+    // Unviewed and past the 48-hour window, which is the one thing that earns a
+    // refund.
     await ctx.prisma.offer.update({
       where: { id: offerId },
       data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
     });
 
-    const refund = await request(ctx.server)
-      .post(`/offers/${offerId}/refund-credit`)
+    await request(ctx.server)
+      .post('/offers/refund-scan/execute')
       .set('Cookie', adminCookie)
-      .send({ reasonCode: 'NOT_VIEWED_48H' })
+      .send({})
       .expect(201);
 
     // The refund uses the snapshot: balance returns exactly to where it started.
-    expect(refund.body.balance).toBe(CREDITS);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(CREDITS);
     const refundRows = await ctx.prisma.providerCreditTransaction.findMany({
       where: { providerId: provider.id, type: CreditTransactionType.OFFER_REFUND },
     });

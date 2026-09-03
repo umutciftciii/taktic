@@ -229,8 +229,9 @@ const providerFeatures: Array<{ title: string; desc: string }> = [
     desc: 'Her teklif için kredi hareketi geçmişe işlenir, anlık olarak görüntülenebilir.',
   },
   {
-    title: 'İade önerisi ve iade taraması',
-    desc: 'Görüntülenmeyen veya geçersiz talepler için iade uygunluğu otomatik taranır.',
+    title: '48 saat kredi iadesi',
+    desc:
+      'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.',
   },
   {
     title: 'Kategori ve bölgeye göre eşleşme',
@@ -253,8 +254,8 @@ function ProviderValue() {
           <div className="lp-pv-left">
             <p className="lp-section-sub" style={{ marginTop: 0 }}>
               TakTic, hizmet verenlerin yalnızca kaliteli ve takip edilebilir taleplere teklif
-              vermesini hedefler. Görüntülenmeyen veya geçersiz talepler için iade politikası
-              şeffaftır.
+              vermesini hedefler. Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse
+              krediniz otomatik olarak iade edilir.
             </p>
 
             <ul className="lp-pv-features">

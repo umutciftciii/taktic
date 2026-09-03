@@ -13,7 +13,7 @@ import {
   qualityBreakdownLabel,
   statusLabel,
   urgencyLabel,
-  refundActionLabel,
+  UNVIEWED_OFFER_REFUND_NOTICE,
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
 import { readCreditBalance } from '../../../provider-data';
@@ -250,21 +250,25 @@ export default async function ProviderRequestDetailPage({
                   <dt>Kredi iadesi</dt>
                   <dd>
                     {request.existingOffer.creditRefundedAt
-                      ? `${formatDateTime(request.existingOffer.creditRefundedAt)} — ${
-                          request.existingOffer.creditRefundReason ?? '-'
-                        }`
+                      ? formatDateTime(request.existingOffer.creditRefundedAt)
                       : 'Yok'}
                   </dd>
-                  <dt>İade politikası</dt>
-                  <dd>
-                    <span
-                      className={providerRefundBadgeClass(
-                        request.existingOffer.refundEligibility.recommendedAction,
-                      )}
-                    >
-                      {refundActionLabel(request.existingOffer.refundEligibility.recommendedAction)}
-                    </span>
-                  </dd>
+                  {/* Omitted for an offer from before the policy: it has no
+                      standing under this rule to report. */}
+                  {request.existingOffer.refundEligibility.policyStatus ? (
+                    <>
+                      <dt>İade durumu</dt>
+                      <dd>
+                        <span
+                          className={providerRefundBadgeClass(
+                            request.existingOffer.refundEligibility.policyStatus,
+                          )}
+                        >
+                          {request.existingOffer.refundEligibility.policyStatusLabel}
+                        </span>
+                      </dd>
+                    </>
+                  ) : null}
                 </dl>
 
                 <div className="pdash-notice">
@@ -365,10 +369,7 @@ export default async function ProviderRequestDetailPage({
                   Teklifi Gönder{offerCreditCost !== null ? ` · ${offerCreditCost} kredi` : ''}
                 </button>
 
-                <p className="pdash-card-sub">
-                  Teklifini geri çekersen kredi iadesi yapılmaz. Görüntülenmeyen veya geçersiz hale
-                  gelen taleplerde iade uygunluğu otomatik taranır.
-                </p>
+                <p className="pdash-card-sub">{UNVIEWED_OFFER_REFUND_NOTICE}</p>
               </form>
             )}
           </section>

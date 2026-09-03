@@ -20,6 +20,7 @@ import {
   uniqueSuffix,
   type TestContext,
 } from './harness';
+import { UnviewedOfferRefundService } from '../src/modules/offers/unviewed-offer-refund.service';
 
 let ctx: TestContext;
 
@@ -213,15 +214,16 @@ describe('offer creation — concurrent requests against a single credit', () =>
 });
 
 describe('offer credit refund — idempotency', () => {
-  it('refunds once and rejects the second attempt', async () => {
-    const CREDITS = 6;
-    const COST = 4;
+  /**
+   * The only refund path there is: an offer the customer never opened, older
+   * than the window, refunded by the worker. The manual admin endpoint these
+   * cases used to drive was removed with the policy it belonged to.
+   */
+  async function unviewedRefundableOffer(credits: number, cost: number) {
     const { provider, serviceRequest, cookie } = await offerFixture({
-      credits: CREDITS,
-      categoryCost: COST,
+      credits,
+      categoryCost: cost,
     });
-    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
-    const adminCookie = await loginAs(ctx.prisma, admin.id);
 
     const created = await request(ctx.server)
       .post(offerUrl(provider.id, serviceRequest.id))
@@ -230,27 +232,23 @@ describe('offer credit refund — idempotency', () => {
       .expect(201);
 
     const offerId = created.body.id as string;
-    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(CREDITS - COST);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(credits - cost);
 
-    // Not viewed and older than the policy window -> full refund is recommended.
     await ctx.prisma.offer.update({
       where: { id: offerId },
       data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
     });
 
-    const firstRefund = await request(ctx.server)
-      .post(`/offers/${offerId}/refund-credit`)
-      .set('Cookie', adminCookie)
-      .send({ reasonCode: 'NOT_VIEWED_48H' })
-      .expect(201);
+    return { provider, offerId, worker: ctx.app.get(UnviewedOfferRefundService) };
+  }
 
-    expect(firstRefund.body.balance).toBe(CREDITS);
+  it('refunds once and does nothing on the next run', async () => {
+    const CREDITS = 6;
+    const COST = 4;
+    const { provider, offerId, worker } = await unviewedRefundableOffer(CREDITS, COST);
 
-    await request(ctx.server)
-      .post(`/offers/${offerId}/refund-credit`)
-      .set('Cookie', adminCookie)
-      .send({ reasonCode: 'NOT_VIEWED_48H' })
-      .expect(409);
+    expect((await worker.execute()).refunded).toBe(1);
+    expect((await worker.execute()).refunded).toBe(0);
 
     const refunds = await ctx.prisma.providerCreditTransaction.findMany({
       where: { providerId: provider.id, type: CreditTransactionType.OFFER_REFUND },
@@ -264,45 +262,20 @@ describe('offer credit refund — idempotency', () => {
     expect(offer.creditRefundedAt).not.toBeNull();
   });
 
-  it('rejects concurrent refunds of the same offer', async () => {
+  it('refunds once under concurrent runs, and no run fails', async () => {
     const CREDITS = 5;
     const COST = 3;
-    const { provider, serviceRequest, cookie } = await offerFixture({
-      credits: CREDITS,
-      categoryCost: COST,
-    });
-    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
-    const adminCookie = await loginAs(ctx.prisma, admin.id);
+    const { provider, worker } = await unviewedRefundableOffer(CREDITS, COST);
 
-    const created = await request(ctx.server)
-      .post(offerUrl(provider.id, serviceRequest.id))
-      .set('Cookie', cookie)
-      .send(offerPayload())
-      .expect(201);
-    const offerId = created.body.id as string;
+    const runs = await Promise.all([worker.execute(), worker.execute(), worker.execute()]);
 
-    await ctx.prisma.offer.update({
-      where: { id: offerId },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
-
-    const results = await Promise.all([
-      request(ctx.server)
-        .post(`/offers/${offerId}/refund-credit`)
-        .set('Cookie', adminCookie)
-        .send({ reasonCode: 'NOT_VIEWED_48H' }),
-      request(ctx.server)
-        .post(`/offers/${offerId}/refund-credit`)
-        .set('Cookie', adminCookie)
-        .send({ reasonCode: 'NOT_VIEWED_48H' }),
-    ]);
-
-    expect(results.filter((result) => result.status === 201)).toHaveLength(1);
-    // The loser must reach a business-rule answer, not a leaked serialization
-    // abort: runSerializable retries the P2034 and the replay then sees the
-    // refund already recorded. A 500 here is a regression, never acceptable.
-    const loser = results.find((result) => result.status !== 201);
-    expect(loser?.status).toBe(409);
+    expect(runs.reduce((sum, run) => sum + run.refunded, 0)).toBe(1);
+    // A loser must reach the business rule, not a leaked serialization abort:
+    // runSerializable retries the P2034 and the replay sees the refund already
+    // recorded. A FAILED here is a regression, never acceptable.
+    for (const run of runs) {
+      expect(run.results.filter((entry) => entry.status === 'FAILED')).toHaveLength(0);
+    }
 
     const refunds = await ctx.prisma.providerCreditTransaction.count({
       where: { providerId: provider.id, type: CreditTransactionType.OFFER_REFUND },

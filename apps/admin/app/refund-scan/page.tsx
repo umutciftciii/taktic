@@ -3,21 +3,24 @@ import { RefundScanClient } from './refund-scan-client';
 
 type RefundScanPageProps = {
   searchParams?: Promise<{
-    olderThanHours?: string;
     limit?: string;
   }>;
 };
 
+/**
+ * The `olderThanHours` control this screen used to carry is gone.
+ *
+ * The window is the product promise — 48 hours — and a screen that can shorten
+ * it is a screen that can refund an offer the customer still had time to open.
+ * The API no longer accepts the parameter either; `limit` is a batch size and
+ * changes nothing about who qualifies.
+ */
 export default async function RefundScanPage({ searchParams }: RefundScanPageProps) {
   await requireAdmin();
 
   const params = (await searchParams) ?? {};
-  const olderThanHours = readPositiveInt(params.olderThanHours, 48);
   const limit = Math.min(readPositiveInt(params.limit, 100), 500);
-  const query = new URLSearchParams({
-    olderThanHours: String(olderThanHours),
-    limit: String(limit),
-  });
+  const query = new URLSearchParams({ limit: String(limit) });
   const scan = await apiFetch<RefundScanResponse>(`/offers/refund-scan?${query.toString()}`);
 
   return (
@@ -25,12 +28,12 @@ export default async function RefundScanPage({ searchParams }: RefundScanPagePro
       <header className="page-header">
         <h1 className="page-title">İade Taraması</h1>
         <p className="page-subtitle">
-          Görüntülenmemiş ve yeterince eski teklifler için yönetici tarafından tetiklenen iadeleri önizleyin
-          ve çalıştırın.
+          {scan.windowHours} saat içinde görüntülenmemiş teklifleri önizleyin ve iadeyi
+          çalıştırın. Görüntülenmiş tekliflerde kredi iadesi yapılmaz.
         </p>
       </header>
 
-      <RefundScanClient initialLimit={limit} initialOlderThanHours={olderThanHours} initialScan={scan} />
+      <RefundScanClient initialLimit={limit} initialScan={scan} />
     </main>
   );
 }

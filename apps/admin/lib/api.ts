@@ -500,7 +500,14 @@ export type OfferStatus =
   | 'EXPIRED'
   | 'CANCELLED';
 
-export type RefundRecommendedAction = 'FULL_REFUND' | 'MANUAL_REVIEW' | 'NO_REFUND';
+export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
+
+/** Where an offer stands under the 48-hour unviewed-offer refund rule. */
+export type UnviewedRefundPolicyStatus =
+  | 'AWAITING_VIEW'
+  | 'VIEWED'
+  | 'ADMIN_DECISION'
+  | 'REFUNDED';
 
 export type RefundEligibility = {
   eligible: boolean;
@@ -509,6 +516,11 @@ export type RefundEligibility = {
   reasonLabel: string;
   details: string;
   hoursSinceSubmitted: number | null;
+  /** False for every offer submitted before the rule shipped. */
+  unviewedRefundPolicy: boolean;
+  /** `null` for an offer outside the rule — no state to report. */
+  policyStatus: UnviewedRefundPolicyStatus | null;
+  policyStatusLabel: string | null;
 };
 
 export type Offer = {
@@ -577,19 +589,24 @@ export type RefundScanItem = {
   creditCost: number;
   submittedAt: string;
   hoursSinceSubmitted: number | null;
-  reasonCode: 'NOT_VIEWED_48H';
+  reasonCode: 'UNVIEWED_OFFER_48H';
   recommendedAction: 'FULL_REFUND';
 };
 
 export type RefundScanSkippedSummary = {
   alreadyRefunded: number;
   viewed: number;
+  /** Settled by an administrator's accept or reject on the customer's behalf. */
+  adminDecision: number;
   notOldEnough: number;
   noCreditSpend: number;
-  statusNotEligible: number;
+  /** Offers submitted before the rule shipped. Never refunded. */
+  outOfPolicy: number;
 };
 
 export type RefundScanResponse = {
+  /** Fixed at 48 by the policy; reported so the screen never states its own. */
+  windowHours: number;
   eligibleCount: number;
   skippedCount: number;
   items: RefundScanItem[];
@@ -1652,8 +1669,7 @@ export function statusBadgeClass(status: string) {
 
 export function refundActionLabel(action: string) {
   const labels: Record<string, string> = {
-    FULL_REFUND: 'Tam iade önerilir',
-    MANUAL_REVIEW: 'Manuel inceleme',
+    FULL_REFUND: 'İade edilecek',
     NO_REFUND: 'İade yok',
   };
 
@@ -1664,8 +1680,6 @@ export function refundActionBadgeClass(action: string) {
   switch (action) {
     case 'FULL_REFUND':
       return 'badge badge-good';
-    case 'MANUAL_REVIEW':
-      return 'badge badge-warn';
     case 'NO_REFUND':
       return 'badge badge-muted';
     default:

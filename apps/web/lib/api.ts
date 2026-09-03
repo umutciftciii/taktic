@@ -269,7 +269,6 @@ export type ExistingOfferSummary = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
-  creditRefundReason: string | null;
   refundEligibility: RefundEligibility;
   submittedAt: string;
 };
@@ -326,7 +325,20 @@ export type OfferStatus =
   | 'EXPIRED'
   | 'CANCELLED';
 
-export type RefundRecommendedAction = 'FULL_REFUND' | 'MANUAL_REVIEW' | 'NO_REFUND';
+export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
+
+/**
+ * Where an offer stands under the 48-hour unviewed-offer refund rule.
+ *
+ * `null` — on `policyStatus` — is not a fourth state. It means the offer was
+ * submitted before the rule shipped, and the panel renders no policy state at
+ * all for it rather than inventing one.
+ */
+export type UnviewedRefundPolicyStatus =
+  | 'AWAITING_VIEW'
+  | 'VIEWED'
+  | 'ADMIN_DECISION'
+  | 'REFUNDED';
 
 export type RefundEligibility = {
   eligible: boolean;
@@ -335,6 +347,9 @@ export type RefundEligibility = {
   reasonLabel: string;
   details: string;
   hoursSinceSubmitted: number | null;
+  unviewedRefundPolicy: boolean;
+  policyStatus: UnviewedRefundPolicyStatus | null;
+  policyStatusLabel: string | null;
 };
 
 export type ProviderOffer = {
@@ -354,7 +369,6 @@ export type ProviderOffer = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
-  creditRefundReason: string | null;
   refundEligibility: RefundEligibility;
   submittedAt: string;
   viewedAt: string | null;
@@ -416,8 +430,6 @@ export type RequestOfferPreview = {
   warrantyNote: string | null;
   creditCost: number;
   creditRefundedAt: string | null;
-  creditRefundReason: string | null;
-  refundEligibility: RefundEligibility;
   submittedAt: string;
 };
 

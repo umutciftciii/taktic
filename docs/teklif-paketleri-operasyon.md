@@ -82,14 +82,57 @@ Tek merkezî çözümleyici: `apps/api/src/modules/entitlements/entitlement-reso
 
 ### İade kuralı
 
-Mevcut ürün kuralı: **geri çekilen teklifte iade yoktur**
-(`PROVIDER_WITHDRAWN_OR_CANCELLED`). Aynı kural kota için de geçerlidir.
+Ürün kuralı — kullanıcıya duyurulan tek iade vaadi: **teklif oluşturulduktan
+sonraki 48 saat içinde yetkili müşteri tarafından hiç görüntülenmeyen teklifin
+kredisi otomatik iade edilir** (`UNVIEWED_OFFER_48H`). Görüntülenmiş teklifte
+kabul, red, süre dolumu veya geri çekme fark etmez — iade yoktur.
+Görüntülenmemiş teklifte de teklifin durumu tek başına iadeyi engellemez.
 
-Buna ek olarak, dönemsel paketle gönderilen teklifler için **hiçbir koşulda**
-teklif başına iade yapılmaz (`PERIOD_PACKAGE_NOT_REFUNDABLE`). Dönemsel ürün
-teklif başına değil dönem başına satılır; kota iadesi satın alınandan fazla kota
-yaratırdı. 48 saat kuralına dayalı otomatik iade taraması yalnızca tek seferlik
-kredi harcamalarını görür (`creditSpentTransactionId IS NOT NULL` filtresi).
+Krediyi kapatan ikinci bir olay daha var ve ayrı bir alanda tutulur: **admin'in
+müşteri adına kabul/red kararı** (`Offer.refundBlockedAt` +
+`refundBlockedReason = ADMIN_CUSTOMER_DECISION`). Kredinin satın aldığı sonuç
+admin panelinden de olsa teslim edilmiştir. Bu, sahte bir `viewedAt` yazılarak
+değil kendi alanıyla kaydedilir — müşteri teklifi açmadı ve veritabanı bunu
+doğru söylemeye devam etmeli. Admin'in yalnızca ekranı okuması ise hiçbir şeyi
+değiştirmez.
+
+Sağlayıcı ekranındaki metin bu ayrımı korur: görüntülenmede
+`Görüntülendi — iade uygun değil`, admin kararında
+`Müşteri kararı kaydedildi — iade uygun değil`.
+
+Kural yalnız `Offer.unviewedRefundPolicy = true` olan teklifler için işler. Bu
+kolon, kuralla birlikte deploy edilen teklif oluşturma yolunda yazılır; daha
+önce gönderilmiş her teklif migration'ın `false` varsayılanını taşır ve kural
+kapsamı dışındadır. Geçmişe dönük iade veya backfill yapılmaz.
+
+Dönemsel paketle gönderilen teklifler için **hiçbir koşulda** teklif başına iade
+yapılmaz (`PERIOD_PACKAGE_NOT_REFUNDABLE`). Dönemsel ürün teklif başına değil
+dönem başına satılır; kota iadesi satın alınandan fazla kota yaratırdı. Otomatik
+iade yalnızca tek seferlik kredi harcamalarını görür
+(`creditSpentTransactionId IS NOT NULL` filtresi).
+
+İdempotency veritabanı düzeyindedir: `ProviderCreditTransaction_one_refund_per_offer`
+kısmi UNIQUE index'i aynı teklif için ikinci bir `OFFER_REFUND` satırını
+imkânsız kılar.
+
+### Manuel kredi iadesi (operasyon aracı)
+
+`POST /offers/:id/refund-credit` yalnız SUPER_ADMIN'e açıktır ve otomatik
+kuralın göremediği durumlar içindir (geçersiz talep, ulaşılamayan müşteri,
+platform hatası). **Ürünün iade politikası değildir**: sağlayıcıya ve müşteriye
+görünen hiçbir metinde yer almaz, vaat edilmez.
+
+- Ledger sebebi `MANUAL_ADMIN_REFUND:<KOD>`; `UNVIEWED_OFFER_48H` yalnız
+  otomatik worker'a aittir. Finans raporu politikanın maliyetini operasyonun
+  kararından her zaman ayırabilir.
+- Aynı transaction'da zorunlu `ManualOfferRefundAudit` satırı yazılır: işlemi
+  yapan yönetici, zaman, teklif, kredi miktarı, operasyon gerekçesi ve not.
+  `performedById` NOT NULL — imzasız bir iade oluşamaz.
+- Operasyon gerekçesi admin yüzeylerinden dışarı çıkmaz; sağlayıcı yalnız
+  `Kredi iade edildi` ve tarihi görür.
+- Manuel ve otomatik iade hiçbir sırada çift kredi üretemez: ikisi de aynı
+  koşullu `UPDATE`'ten geçer, ikisi de aynı kısmi UNIQUE index'e düşer, ve audit
+  tablosunun `offerId` UNIQUE'i manuel yola özgü üçüncü bariyerdir.
 
 ## Otomatik yenileme — gerçek durum
 
@@ -229,7 +272,7 @@ alma `FAILED` olur.
 
 - `apps/api/test/offer-package-entitlements.spec.ts` — 30 gün aritmetiği, hak
   önceliği, kota tüketimi ve paralel tüketim, kapsam içi/dışı, kapsam
-  dondurulması, INACTIVE kategori, günlük limit, geri çekmede iade yok.
+  dondurulması, INACTIVE kategori, günlük limit.
 - `apps/api/test/offer-package-settlement.spec.ts` — webhook ile dönem verilmesi,
   grup genişletmesi, snapshot değişmezliği, tekrarlı/yarışan webhook
   idempotency'si, imzasız/ödenmemiş olayda hak verilmemesi, elle yenileme
