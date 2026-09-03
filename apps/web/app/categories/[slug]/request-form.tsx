@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH } from '@taktic/shared';
 import type { ContactDisclosureConfig, Question, RouterSelection } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
@@ -35,6 +36,16 @@ const STEPS = [
   { key: 'place', label: 'Konum & zaman' },
   { key: 'contact', label: 'İletişim' },
 ] as const;
+
+/**
+ * Where the description counter starts warning, in characters.
+ *
+ * Purely presentational — the rule itself is
+ * SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH, which the API enforces. This only
+ * decides when the customer is told they are running out of room, early enough
+ * to be useful while there is still a paragraph left to write.
+ */
+const DESCRIPTION_NEAR_LIMIT_AT = 4500;
 
 /**
  * The public request form, in the three steps the design defines.
@@ -90,6 +101,31 @@ export function RequestForm({
    */
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
 
+  /*
+   * The description's length, mirrored into state purely so the counter can
+   * render it. The textarea itself stays uncontrolled — the server action reads
+   * the posted field, exactly as before — so this never becomes the value's
+   * source of truth. React's onChange is the `input` event, which is what makes
+   * typing, deleting and pasting all land here.
+   */
+  const [descriptionLength, setDescriptionLength] = useState(0);
+
+  /*
+   * Browsers restore a textarea's text when the customer comes back to this
+   * page — with the Back button, or from bfcache — but they do not re-run the
+   * change handler that fed the count. Reading the field once on mount is what
+   * stops the counter from claiming 0 under a description that is plainly
+   * there. It only ever reads; the field stays uncontrolled.
+   */
+  useEffect(() => {
+    const field = detailRef.current
+      ?.closest('form')
+      ?.elements.namedItem('description');
+    if (field instanceof HTMLTextAreaElement) {
+      setDescriptionLength(field.value.length);
+    }
+  }, []);
+
   const shown = useMemo(() => visibleQuestions(questions, answers), [questions, answers]);
 
   /*
@@ -117,6 +153,19 @@ export function RequestForm({
   );
 
   const estimate = checklist.filter((item) => item.done).length * 25;
+
+  /*
+   * What the counter says beyond the bare numbers. Both states are spelled out
+   * in words rather than signalled by colour alone, so the warning survives
+   * greyscale, low vision and a screen reader.
+   */
+  const descriptionAtLimit = descriptionLength >= SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH;
+  const descriptionNearLimit = !descriptionAtLimit && descriptionLength > DESCRIPTION_NEAR_LIMIT_AT;
+  const descriptionStatus = descriptionAtLimit
+    ? 'Karakter sınırına ulaştınız'
+    : descriptionNearLimit
+      ? 'Sınıra yaklaşıyorsunuz'
+      : null;
 
   function refreshSignals() {
     const form = detailRef.current?.closest('form');
@@ -279,6 +328,9 @@ export function RequestForm({
                   name="description"
                   required={descriptionQuestion?.isRequired ?? false}
                   data-testid="request-description"
+                  maxLength={SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
+                  aria-describedby="request-description-counter"
+                  onChange={(event) => setDescriptionLength(event.target.value.length)}
                   placeholder="Yapılacak işi kısaca anlatın: ne, nerede, hangi durumda."
                 />
                 <span className="help-text">
@@ -286,6 +338,27 @@ export function RequestForm({
                     'Detay yazdıkça talebin kalite skoru yükselir ve daha isabetli teklif alırsınız.'}
                 </span>
               </label>
+              {/*
+                * Outside the label on purpose: a count that changes on every
+                * keystroke inside it would keep rewriting the field's accessible
+                * name. As a description it is announced when the field is
+                * reached, and the status line — which only changes at the two
+                * thresholds, so it is not chatty — announces itself.
+                */}
+              <p
+                className="description-counter"
+                id="request-description-counter"
+                data-testid="request-description-counter"
+                data-state={descriptionAtLimit ? 'limit' : descriptionNearLimit ? 'near' : 'ok'}
+              >
+                <span className="description-counter-count">
+                  {descriptionLength} / {SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
+                  <span className="visually-hidden"> karakter kullanıldı</span>
+                </span>
+                <span className="description-counter-status" role="status">
+                  {descriptionStatus}
+                </span>
+              </p>
             </section>
           </div>
 

@@ -747,6 +747,45 @@ input[readonly] {
   color: var(--color-neutral-700);
 }
 
+/* The request description's character counter, directly under its help text.
+
+   Wrapping is what keeps it inside a narrow phone: the count and the status
+   sit on one line while there is room and stack when there is not, so the row
+   never forces the form card to scroll sideways. */
+.description-counter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 2px var(--space-3);
+  margin: var(--space-1) 0 0;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-neutral-700);
+}
+
+.description-counter-count {
+  /* Digits of equal width, so the number does not jitter while typing. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Never colour alone: the state is carried by the wording in
+   .description-counter-status, and weight reinforces it for anyone who cannot
+   tell the two colours apart. */
+.description-counter[data-state='near'] {
+  color: var(--color-neutral-900);
+  font-weight: 600;
+}
+
+.description-counter[data-state='limit'] {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.description-counter-status:empty {
+  display: none;
+}
+
 .provider-apply-required,
 .required-mark {
   color: var(--color-accent);
