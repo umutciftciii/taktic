@@ -3,11 +3,11 @@
 import { redirect } from 'next/navigation';
 import {
   apiFetch,
-  parseDecimalToMinor,
   QuestionType,
   RoutingResolution,
   ServiceRequest,
 } from '../../lib/api';
+import { parseLiraToMinor } from '../../lib/lira-input';
 import { decodeRouterSelections, encodeRouterSelections } from '../../lib/request-flow';
 
 type QuestionMeta = {
@@ -65,11 +65,13 @@ export async function submitServiceRequestAction(formData: FormData) {
       district: readFormString(formData, 'district'),
       neighborhood: readOptionalFormString(formData, 'neighborhood'),
       addressNote: readOptionalFormString(formData, 'addressNote'),
-      // Budget inputs accept a human-readable decimal ("1500,00" or "149.90").
-      // parseDecimalToMinor returns the minor-unit integer (kuruş for TRY) or null
-      // when the customer left the field empty — preserving the optional semantics.
-      budgetMin: parseDecimalToMinor(readFormString(formData, 'budgetMin')),
-      budgetMax: parseDecimalToMinor(readFormString(formData, 'budgetMax')),
+      // The budget fields post what the customer sees — Turkish lira, grouped
+      // and with a comma before the kuruş ("5.000,00"). parseLiraToMinor is the
+      // one place that text becomes a number: the minor-unit integer (kuruş for
+      // TRY) the API's DTO has always taken, or null for an empty field, so the
+      // optional semantics and the wire format are both unchanged.
+      budgetMin: parseLiraToMinor(readFormString(formData, 'budgetMin')),
+      budgetMax: parseLiraToMinor(readFormString(formData, 'budgetMax')),
       preferredDate: readOptionalFormString(formData, 'preferredDate'),
       urgency: readOptionalFormString(formData, 'urgency'),
       description: readOptionalFormString(formData, 'description'),
