@@ -34,6 +34,7 @@ import {
 } from '../../common/provider-request-matching';
 import { runSerializable } from '../../common/serializable-transaction';
 import { EntitlementResolverService } from '../entitlements/entitlement-resolver.service';
+import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
@@ -170,6 +171,8 @@ export class ProvidersService {
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
     @Inject(EntitlementResolverService)
     private readonly entitlements: EntitlementResolverService,
+    @Inject(OperationsSettingsService)
+    private readonly operationsSettings: OperationsSettingsService,
   ) {}
 
   async createProvider(
@@ -937,6 +940,8 @@ export class ProvidersService {
             creditRefundedAt: true,
             creditRefundReason: true,
             unviewedRefundPolicy: true,
+            unviewedRefundWindowHours: true,
+            unviewedRefundEligibleAt: true,
             refundBlockedAt: true,
             viewedAt: true,
             acceptedAt: true,
@@ -1076,6 +1081,29 @@ export class ProvidersService {
             NumberedEntityType.OFFER,
           );
 
+          /*
+           * The refund window this offer is sold under, read now and written
+           * onto the offer.
+           *
+           * Read inside the transaction so the value the offer records and the
+           * value in force when it was created are the same read, not two with
+           * a gap between them. Written as a snapshot — both the hours and the
+           * exact moment — so a later change to the setting governs the next
+           * offer and never this one: raising the window cannot postpone a
+           * refund a provider has already been promised, and lowering it cannot
+           * pay one out while the customer still has the time they were given.
+           *
+           * `submittedAt` is set explicitly rather than left to the column
+           * default, because the eligibility moment is derived from it and the
+           * two must agree exactly.
+           */
+          const refundWindowHours =
+            await this.operationsSettings.getUnviewedOfferRefundWindowHours(tx);
+          const submittedAt = new Date();
+          const refundEligibleAt = new Date(
+            submittedAt.getTime() + refundWindowHours * 60 * 60 * 1000,
+          );
+
           const offer = await tx.offer.create({
             data: {
               providerId,
@@ -1095,12 +1123,15 @@ export class ProvidersService {
               // later from the absence of a ledger row.
               entitlementSource: decision.source,
               entitlementId: decision.entitlementId,
-              // The opt-in into the 48-hour unviewed-offer refund rule, written
-              // here because this is the code path that shipped with it. Every
-              // offer created from now on carries the promise the provider was
-              // shown; every offer that predates this line keeps the column's
-              // false default and is out of scope forever.
+              // The opt-in into the unviewed-offer refund rule, written here
+              // because this is the code path that shipped with it. Every offer
+              // created from now on carries the promise the provider was shown;
+              // every offer that predates this line keeps the column's false
+              // default and is out of scope forever.
               unviewedRefundPolicy: true,
+              submittedAt,
+              unviewedRefundWindowHours: refundWindowHours,
+              unviewedRefundEligibleAt: refundEligibleAt,
             },
           });
 
@@ -2063,6 +2094,8 @@ function toProviderRequestDetail(
           creditRefundedAt: true;
           creditRefundReason: true;
           unviewedRefundPolicy: true;
+          unviewedRefundWindowHours: true;
+          unviewedRefundEligibleAt: true;
           refundBlockedAt: true;
           viewedAt: true;
           acceptedAt: true;
@@ -2143,6 +2176,11 @@ type RefundPolicyOfferShape = {
   // already decided would read to its provider as "Görüntülenme bekleniyor",
   // which is a refund promise the worker will not keep.
   refundBlockedAt: Date | string | null;
+  // Required for the same reason again: the window and the moment are what the
+  // screen quotes back to the provider, and a projection that forgets them
+  // would report an in-policy offer as having no refund schedule at all.
+  unviewedRefundWindowHours: number | null;
+  unviewedRefundEligibleAt: Date | string | null;
   rejectionReason?: OfferRejectionReason | null;
   creditRefundReason?: string | null;
 };

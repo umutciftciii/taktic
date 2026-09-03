@@ -238,9 +238,13 @@ Nothing in the product can repeat, edit or undo a reveal; the accept transaction
 
 ### Unviewed-offer credit refund
 
-The platform refunds one thing and only one thing: the credit a provider spent on an offer that the authorised customer never opened within 48 hours of it being submitted. A viewed offer is never refunded — not on rejection, expiry, withdrawal or anything else — and an unviewed one is refunded regardless of the status it ended in. There is no manual refund path; the admin offer screen shows the outcome and cannot create one.
+The platform refunds one thing and only one thing: the credit a provider spent on an offer that the authorised customer never opened within that offer's refund window. A viewed offer is never refunded — not on rejection, expiry, withdrawal or anything else — and an unviewed one is refunded regardless of the status it ended in.
 
-Only offers created after this policy shipped are covered. `Offer.unviewedRefundPolicy` records that per row, so an offer sold under the earlier terms is out of scope permanently and no clock comparison decides it.
+The window is a commercial term a SUPER_ADMIN sets on **Yönetim → Operasyon Ayarları** (`GET`/`PUT /operations-settings`), in whole hours between 1 and 720. It defaults to 48, and an unsaved settings row means exactly that default — nothing is seeded. Every change records the old value, the new value, the operator and the moment in `OperationsSettingsChange`. The current window and the sentence built from it are published unauthenticated at `GET /refund-policy`, which is what every provider-facing and marketing screen renders instead of a hard-coded "48 saat".
+
+A change reaches the next offer and nothing else. When an offer is created it snapshots the window in force (`Offer.unviewedRefundWindowHours`) and the exact moment its credit becomes refundable (`Offer.unviewedRefundEligibleAt`), and the worker reads that moment only. An offer sold at 48 hours keeps 48 hours after the setting moves to 72, and shortening the setting cannot pay one out while its customer still has the time they were promised. A `NULL` eligibility moment is never eligible.
+
+Only offers created after this policy shipped are covered. `Offer.unviewedRefundPolicy` records that per row, so an offer sold under the earlier terms is out of scope permanently and no clock comparison decides it. The migration that added the snapshot backfilled `submittedAt + 48 hours` onto in-policy offers only — the rule they were already governed by — and widened nobody's scope.
 
 The worker is disabled by default. It uses the same execution logic as the admin refund-scan endpoint, so both share one set of eligibility checks, one transaction and one database-level idempotency guarantee (`ProviderCreditTransaction_one_refund_per_offer`, a partial unique index that makes a second refund row for one offer impossible).
 
@@ -256,13 +260,13 @@ Relevant environment variables:
 - `UNVIEWED_OFFER_REFUND_CRON=0 * * * *`
 - `UNVIEWED_OFFER_REFUND_LIMIT=100`
 
-There is deliberately no window setting. The 48 hours are the promise made to providers; a cron that runs late refunds on its next pass, and no configuration can refund early. Ledger rows written by the worker carry the reason `UNVIEWED_OFFER_48H`.
+The scheduler decides *when to look*, never *how far back to look*: there is no window parameter on the worker, the scan or the cron, so a late run refunds on its next pass and an aggressive one cannot refund early. Ledger rows written by the worker carry the reason `UNVIEWED_OFFER_48H` — an identifier kept for the historical rows that already hold it, not a statement that the window is still 48 hours.
 
 Two things settle a credit and so keep the worker away from it, and they are stored as two different facts. `Offer.viewedAt` is the customer opening the offer. `Offer.refundBlockedAt` / `refundBlockedReason` is an administrator accepting or rejecting on the customer's behalf: the outcome the credit bought was delivered through the admin panel, so the credit is spent — but the database still says truthfully that no customer opened the offer, which a faked `viewedAt` would not. An admin merely *reading* an offer changes neither.
 
 ### Manual credit refund (operations)
 
-`POST /offers/:id/refund-credit`, SUPER_ADMIN only, is an operations remedy for what an automatic rule cannot see — an invalid request, an unreachable customer, a platform mistake. It is **not** the refund policy: nothing provider- or customer-facing mentions it, and the only refund promise in the product is the 48-hour rule above.
+`POST /offers/:id/refund-credit`, SUPER_ADMIN only, is an operations remedy for what an automatic rule cannot see — an invalid request, an unreachable customer, a platform mistake. It is **not** the refund policy: nothing provider- or customer-facing mentions it, and the only refund promise in the product is the unviewed-offer rule above.
 
 It writes its own ledger reason, `MANUAL_ADMIN_REFUND:<CODE>`, so a finance report can always separate what the policy cost from what operations decided, and a mandatory `ManualOfferRefundAudit` row in the same transaction recording the operator, the moment, the offer, the credit amount, the operations reason and any note. The operations reason never leaves the admin surfaces.
 

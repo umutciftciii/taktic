@@ -472,6 +472,43 @@ export function daysAgo(days: number): Date {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * Backdates an offer as if it had been submitted `hours` ago.
+ *
+ * Both clocks move, because the offer carries both. `submittedAt` is what the
+ * reports and the provider's screens show; `unviewedRefundEligibleAt` — the
+ * moment snapshotted from the window in force when the offer was created — is
+ * the only one the refund worker reads. Moving the first alone produces an
+ * offer that looks old and is not eligible, which is a state no real offer
+ * reaches and no test should assert against.
+ *
+ * An offer with no snapshot keeps none: an out-of-policy offer must stay out of
+ * policy however far back it is moved.
+ */
+export async function backdateOfferSubmission(
+  prisma: PrismaClient,
+  offerId: string,
+  hours: number,
+) {
+  const offer = await prisma.offer.findUniqueOrThrow({
+    where: { id: offerId },
+    select: { unviewedRefundWindowHours: true },
+  });
+
+  const submittedAt = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+  return prisma.offer.update({
+    where: { id: offerId },
+    data: {
+      submittedAt,
+      unviewedRefundEligibleAt:
+        offer.unviewedRefundWindowHours === null
+          ? null
+          : new Date(submittedAt.getTime() + offer.unviewedRefundWindowHours * 60 * 60 * 1000),
+    },
+  });
+}
+
 /** Seeds a credit balance by appending an ADMIN_GRANT ledger row. */
 export async function grantCredits(prisma: PrismaClient, providerId: string, amount: number) {
   const latest = await prisma.providerCreditTransaction.findFirst({

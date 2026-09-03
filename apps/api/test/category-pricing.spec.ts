@@ -2,6 +2,7 @@ import { CreditTransactionType, ServiceCategoryStatus, UserRole } from '@prisma/
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  backdateOfferSubmission,
   createApprovedRequest,
   createCategory,
   createDiscoverableProvider,
@@ -247,12 +248,9 @@ describe('refund after a category price change', () => {
       .send({ offerCreditCost: NEW_COST })
       .expect(200);
 
-    // Unviewed and past the 48-hour window, which is the one thing that earns a
-    // refund.
-    await ctx.prisma.offer.update({
-      where: { id: offerId },
-      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
-    });
+    // Unviewed and past its own refund window, which is the one thing that
+    // earns a refund.
+    await backdateOfferSubmission(ctx.prisma, offerId, 72);
 
     await request(ctx.server)
       .post('/offers/refund-scan/execute')

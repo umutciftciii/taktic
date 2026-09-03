@@ -1,4 +1,8 @@
 export * from './formatters';
+import {
+  DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+  unviewedOfferRefundNotice,
+} from './formatters';
 
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
@@ -348,6 +352,13 @@ export type RefundEligibility = {
   details: string;
   hoursSinceSubmitted: number | null;
   unviewedRefundPolicy: boolean;
+  /**
+   * The window this offer was sold under and the exact moment its credit
+   * becomes refundable — this offer's own snapshot, not the platform's current
+   * setting. Null for an offer outside the rule.
+   */
+  windowHours: number | null;
+  eligibleAt: string | null;
   policyStatus: UnviewedRefundPolicyStatus | null;
   policyStatusLabel: string | null;
 };
@@ -821,6 +832,39 @@ export class ApiError extends Error {
   ) {
     super(body || `API request failed with status ${status}`);
     this.name = 'ApiError';
+  }
+}
+
+/** The published refund policy: the window, and the sentence built from it. */
+export type RefundPolicy = {
+  unviewedOfferRefundWindowHours: number;
+  unviewedOfferRefundNotice: string;
+};
+
+/**
+ * The refund window a new offer would be created with, for the screens that
+ * describe the promise before an offer exists.
+ *
+ * Falls back to the product default when the API cannot be reached, because the
+ * alternative is a page that either fails or prints a sentence with a hole in
+ * it. The default is the value the platform itself uses when no operator has
+ * saved one, so the fallback is the same answer the API would have given on a
+ * fresh deployment — not a guess.
+ *
+ * A screen about an offer that *exists* must not call this: it has the offer's
+ * own snapshot in `refundEligibility.windowHours`, and that is the term the
+ * provider was actually sold.
+ */
+export async function getRefundPolicy(): Promise<RefundPolicy> {
+  try {
+    return await apiFetch<RefundPolicy>('/refund-policy');
+  } catch {
+    return {
+      unviewedOfferRefundWindowHours: DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+      unviewedOfferRefundNotice: unviewedOfferRefundNotice(
+        DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+      ),
+    };
   }
 }
 

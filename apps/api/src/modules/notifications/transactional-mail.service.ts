@@ -23,7 +23,10 @@ import {
 } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { readContactSharingConfig } from '../contact-sharing/contact-sharing.config';
-import { refundReasonLabel } from '../offers/refund-policy';
+import {
+  DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+  refundReasonLabel,
+} from '../offers/refund-policy';
 import {
   DedupedDispatchContext,
   DispatchContext,
@@ -854,6 +857,11 @@ function loadOffer(prisma: PrismaService, offerId: string) {
         priceAmount: true,
         message: true,
         estimatedStartDate: true,
+        // The window this offer was sold under. Every sentence a message prints
+        // about the refund promise is built from it, so a provider is never
+        // told "48 saat" about an offer created at 72.
+        unviewedRefundPolicy: true,
+        unviewedRefundWindowHours: true,
         provider: {
           select: {
             id: true,
@@ -1044,9 +1052,33 @@ function offerNotSelectedData(offer: LoadedOffer): MailData {
     requestNumber: offer.request.requestNumber,
     categoryName: offer.request.category.name,
     offerAmountMinor: String(offer.priceAmount),
+    // Null for an offer the policy does not govern, and the template then
+    // prints no refund note at all rather than a promise this offer never
+    // carried.
+    refundWindowHours: refundWindowHoursFor(offer),
     requestsUrl: providerRequestsUrl(offer.providerId),
     accountUrl: providerAccountUrl(),
   };
+}
+
+/**
+ * The refund window to quote for an offer, or null when there is none to quote.
+ *
+ * Falls back to the product default only for an in-policy offer whose snapshot
+ * predates the column — those were all created under 48 hours, which is what
+ * the default says. An out-of-policy offer returns null and is quoted nothing.
+ */
+function refundWindowHoursFor(offer: {
+  unviewedRefundPolicy: boolean;
+  unviewedRefundWindowHours: number | null;
+}): string | null {
+  if (!offer.unviewedRefundPolicy) {
+    return null;
+  }
+
+  return String(
+    offer.unviewedRefundWindowHours ?? DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+  );
 }
 
 function creditRefundedData(
@@ -1058,7 +1090,10 @@ function creditRefundedData(
     fullName: provider.contactName,
     requestNumber: offer?.request.requestNumber ?? null,
     categoryName: offer?.request.category.name ?? null,
-    refundReason: knownRefundReasonLabel(transaction.reason),
+    refundReason: knownRefundReasonLabel(
+      transaction.reason,
+      offer?.unviewedRefundWindowHours ?? null,
+    ),
     refundedCredits: String(transaction.amount),
     previousBalance: String(transaction.balanceAfter - transaction.amount),
     currentBalance: String(transaction.balanceAfter),
@@ -1230,13 +1265,20 @@ function recipientFor(provider: {
  * yields null and the row disappears, rather than putting an internal note in a
  * provider's inbox.
  */
-function knownRefundReasonLabel(stored: string | null): string | null {
+function knownRefundReasonLabel(
+  stored: string | null,
+  windowHours: number | null,
+): string | null {
   const code = stored?.split(':', 1)[0]?.trim();
   if (!code) {
     return null;
   }
 
-  const label = refundReasonLabel(code);
+  // The offer's own window, so the reason a provider reads names the term they
+  // were actually sold. Only the automatic code consults it; the manual prefix
+  // renders as "Yönetici kredi iadesi" and never as an operations reason code
+  // or an admin's note.
+  const label = refundReasonLabel(code, windowHours);
   // refundReasonLabel echoes an unrecognised code back unchanged, which is
   // exactly the case that must not be shown.
   return label === code ? null : label;

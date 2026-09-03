@@ -6,11 +6,17 @@ const REASON_LABELS: Record<string, string> = {
   // Written by the unviewed-offer refund worker, and the only refund reason the
   // platform produces today. NOT_VIEWED_48H is kept for ledger rows the removed
   // manual refund path wrote before this policy.
-  UNVIEWED_OFFER_48H: 'Teklif 48 saat içinde görüntülenmedi',
+  //
+  // The stored code keeps its "48H" spelling even though the window is now
+  // configurable: it is an identifier already written onto historical ledger
+  // rows, and renaming it would split every report that groups by it. The label
+  // names no duration, because two rows carrying this code can have been
+  // refunded under two different windows.
+  UNVIEWED_OFFER_48H: 'Teklif iade süresi içinde görüntülenmedi',
   // Manuel operasyon iadesi. Operasyon gerekçesi ":" sonrasında saklanır ve
   // "Not: …" satırında görünür; ürünün iade politikası değildir.
   MANUAL_ADMIN_REFUND: 'Yönetici manuel kredi iadesi',
-  NOT_VIEWED_48H: 'Teklif 48 saat içinde görüntülenmedi',
+  NOT_VIEWED_48H: 'Teklif iade süresi içinde görüntülenmedi',
   OFFER_SPEND: 'Teklif gönderimi',
   OFFER_REFUND: 'Teklif iadesi',
   PACKAGE_PURCHASE: 'Paket satın alımı',

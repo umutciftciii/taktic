@@ -8,11 +8,14 @@ type RefundScanPageProps = {
 };
 
 /**
- * The `olderThanHours` control this screen used to carry is gone.
+ * The `olderThanHours` control this screen used to carry is gone, and it is not
+ * coming back as the configurable window.
  *
- * The window is the product promise — 48 hours — and a screen that can shorten
- * it is a screen that can refund an offer the customer still had time to open.
- * The API no longer accepts the parameter either; `limit` is a batch size and
+ * The window is a commercial term: a super admin sets it on the operations
+ * settings screen, and every offer snapshots the term it was sold under when it
+ * is created. A scan control would be neither — it would shorten one run's
+ * window and refund offers whose customers still had the time they were
+ * promised. The API accepts no such parameter; `limit` is a batch size and
  * changes nothing about who qualifies.
  */
 export default async function RefundScanPage({ searchParams }: RefundScanPageProps) {
@@ -28,8 +31,9 @@ export default async function RefundScanPage({ searchParams }: RefundScanPagePro
       <header className="page-header">
         <h1 className="page-title">İade Taraması</h1>
         <p className="page-subtitle">
-          {scan.windowHours} saat içinde görüntülenmemiş teklifleri önizleyin ve iadeyi
-          çalıştırın. Görüntülenmiş tekliflerde kredi iadesi yapılmaz.
+          İade süresi dolmuş ve hâlâ görüntülenmemiş teklifleri önizleyin ve iadeyi çalıştırın.
+          Her teklif kendi iade süresine göre değerlendirilir; görüntülenmiş tekliflerde kredi
+          iadesi yapılmaz.
         </p>
       </header>
 

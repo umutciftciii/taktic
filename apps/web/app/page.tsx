@@ -1,5 +1,12 @@
 import Link from 'next/link';
-import { apiFetch, AuthUser, Category, getCurrentUser } from '../lib/api';
+import {
+  apiFetch,
+  AuthUser,
+  Category,
+  getCurrentUser,
+  getRefundPolicy,
+  unviewedOfferRefundNotice,
+} from '../lib/api';
 import { LandingHero } from './landing-hero';
 import { LandingFAQ } from './landing-faq';
 import { StartChoiceModal } from './start-choice-modal';
@@ -35,16 +42,27 @@ export default async function HomePage() {
   const isCustomer = user?.role === 'CUSTOMER';
   const isAuthenticated = !!user;
 
+  // The refund window this page promises is the one a provider signing up today
+  // would actually get, read from the platform rather than written into the
+  // copy. A marketing page that keeps saying 48 hours after an administrator
+  // sets 72 is a page making a promise the worker does not keep.
+  const { unviewedOfferRefundWindowHours: refundWindowHours } = await getRefundPolicy();
+
   return (
     <>
-      <LandingHero isCustomer={isCustomer} isAuthenticated={isAuthenticated} user={user} />
+      <LandingHero
+        isCustomer={isCustomer}
+        isAuthenticated={isAuthenticated}
+        user={user}
+        refundWindowHours={refundWindowHours}
+      />
       <MetricStrip categoryCount={categories.length} />
       <PopularCategories categories={categories} />
       <HowItWorks />
-      <ProviderValue />
+      <ProviderValue refundWindowHours={refundWindowHours} />
       <Comparison />
       <ProviderCTABand />
-      <LandingFAQ />
+      <LandingFAQ refundWindowHours={refundWindowHours} />
       <FinalCTA isCustomer={isCustomer} isAuthenticated={isAuthenticated} user={user} />
     </>
   );
@@ -215,7 +233,9 @@ function HowItWorks() {
   );
 }
 
-const providerFeatures: Array<{ title: string; desc: string }> = [
+const buildProviderFeatures = (
+  refundWindowHours: number,
+): Array<{ title: string; desc: string }> => [
   {
     title: 'İncelenmiş talepler',
     desc: 'Kategori formuyla detaylandırılan talepler, yayına alınmadan önce incelenir.',
@@ -229,9 +249,8 @@ const providerFeatures: Array<{ title: string; desc: string }> = [
     desc: 'Her teklif için kredi hareketi geçmişe işlenir, anlık olarak görüntülenebilir.',
   },
   {
-    title: '48 saat kredi iadesi',
-    desc:
-      'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.',
+    title: `${refundWindowHours} saat kredi iadesi`,
+    desc: unviewedOfferRefundNotice(refundWindowHours),
   },
   {
     title: 'Kategori ve bölgeye göre eşleşme',
@@ -239,7 +258,9 @@ const providerFeatures: Array<{ title: string; desc: string }> = [
   },
 ];
 
-function ProviderValue() {
+function ProviderValue({ refundWindowHours }: { refundWindowHours: number }) {
+  const providerFeatures = buildProviderFeatures(refundWindowHours);
+
   return (
     <section className="lp-section" id="hizmet-ver">
       <div className="lp-container">
@@ -254,8 +275,7 @@ function ProviderValue() {
           <div className="lp-pv-left">
             <p className="lp-section-sub" style={{ marginTop: 0 }}>
               TakTic, hizmet verenlerin yalnızca kaliteli ve takip edilebilir taleplere teklif
-              vermesini hedefler. Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse
-              krediniz otomatik olarak iade edilir.
+              vermesini hedefler. {unviewedOfferRefundNotice(refundWindowHours)}
             </p>
 
             <ul className="lp-pv-features">

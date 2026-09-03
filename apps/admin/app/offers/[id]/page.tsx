@@ -493,11 +493,24 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                     <p className="muted" style={{ fontSize: 13 }}>
                       {offer.refundEligibility.details}
                     </p>
+                    {/*
+                      The window this offer was sold under, not today's setting.
+                      An operator looking at a case has to see the term that
+                      governs it — the two differ as soon as the setting moves.
+                    */}
+                    {offer.refundEligibility.windowHours !== null ? (
+                      <p className="muted" style={{ fontSize: 13 }}>
+                        İade süresi: {offer.refundEligibility.windowHours} saat
+                        {offer.refundEligibility.eligibleAt
+                          ? ` · İade zamanı: ${formatDateTime(offer.refundEligibility.eligibleAt)}`
+                          : ''}
+                      </p>
+                    ) : null}
                   </>
                 ) : (
                   <div className="notice-warning">
-                    Bu teklif, 48 saat iade kuralı yürürlüğe girmeden önce gönderildi ve bu kural
-                    kapsamında değil.
+                    Bu teklif, görüntülenmeyen teklif iade kuralı yürürlüğe girmeden önce
+                    gönderildi ve bu kural kapsamında değil.
                   </div>
                 )}
 

@@ -8,6 +8,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ACCEPT_OFFER,
+  backdateOfferSubmission,
   createApprovedRequest,
   createCategory,
   createDiscoverableProvider,
@@ -27,8 +28,9 @@ import { UnviewedOfferRefundService } from '../src/modules/offers/unviewed-offer
  * The whole refund policy, end to end.
  *
  * One rule is under test and it has two halves that must both hold: a credit
- * comes back when the authorised customer never opened the offer inside 48
- * hours, and it comes back at no other time and never twice. The cases below
+ * comes back when the authorised customer never opened the offer inside the
+ * window that offer was created with, and it comes back at no other time and
+ * never twice. The cases below
  * are written from the money's point of view — every assertion is about ledger
  * rows and balances, because that is what a provider is actually paid in.
  */
@@ -86,12 +88,9 @@ async function adminCookie() {
   return loginAs(ctx.prisma, admin.id);
 }
 
-/** Backdates the offer past the 48-hour window. Nothing else about it changes. */
+/** Backdates an offer past its own refund moment. See the harness helper. */
 function ageBeyondWindow(offerId: string, hours = 72) {
-  return ctx.prisma.offer.update({
-    where: { id: offerId },
-    data: { submittedAt: new Date(Date.now() - hours * 60 * 60 * 1000) },
-  });
+  return backdateOfferSubmission(ctx.prisma, offerId, hours);
 }
 
 function refundRows(offerId?: string) {
@@ -972,5 +971,114 @@ describe('the automatic window cannot be shortened', () => {
       .expect(400);
 
     expect(await refundRows(offerId)).toHaveLength(0);
+  });
+});
+
+describe('the provider is told, exactly once, that their credit came back', () => {
+  function refundMessages() {
+    return ctx.notifications.ofTemplate('credit-refunded');
+  }
+
+  function notificationRows() {
+    return ctx.prisma.notificationLog.findMany({ where: { template: 'credit-refunded' } });
+  }
+
+  it('sends one notification after an automatic refund, and none on a re-run', async () => {
+    const { provider, offerId, serviceRequest } = await policyFixture();
+    ctx.notifications.clear();
+    await ageBeyondWindow(offerId);
+
+    await worker().execute();
+
+    const messages = refundMessages();
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.subject).toContain('Krediniz iade edildi');
+    expect(messages[0]!.data?.refundedCredits).toBe(String(CATEGORY_COST));
+    // Something that identifies the work the credit was spent on, and a link
+    // that opens the provider's own credits screen.
+    expect(messages[0]!.data?.requestNumber).toBeTruthy();
+    expect(messages[0]!.data?.creditsUrl).toContain(`/providers/${provider.id}/credits`);
+    void serviceRequest;
+
+    // The scan is safe to run again: there is nothing left to refund, so there
+    // is nothing left to say.
+    await worker().execute();
+    await worker().execute();
+
+    expect(refundMessages()).toHaveLength(1);
+    expect(await refundRows(offerId)).toHaveLength(1);
+    expect(await notificationRows()).toHaveLength(1);
+  });
+
+  it('sends one notification after a manual refund, and none on a second attempt', async () => {
+    const { provider, offerId } = await policyFixture();
+    ctx.notifications.clear();
+    const adminSession = await adminCookie();
+
+    await request(ctx.server)
+      .post(`/offers/${offerId}/refund-credit`)
+      .set('Cookie', adminSession)
+      .send({ reasonCode: 'CUSTOMER_UNREACHABLE', note: 'Müşteriye üç kez ulaşılamadı' })
+      .expect(201);
+
+    expect(refundMessages()).toHaveLength(1);
+
+    await request(ctx.server)
+      .post(`/offers/${offerId}/refund-credit`)
+      .set('Cookie', adminSession)
+      .send({ reasonCode: 'CUSTOMER_UNREACHABLE' })
+      .expect(409);
+
+    expect(refundMessages()).toHaveLength(1);
+    expect(await refundRows(offerId)).toHaveLength(1);
+    expect(await notificationRows()).toHaveLength(1);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(STARTING_CREDITS);
+  });
+
+  it('never puts the operations reason or the admin note in front of the provider', async () => {
+    const { offerId } = await policyFixture();
+    ctx.notifications.clear();
+    const adminSession = await adminCookie();
+
+    await request(ctx.server)
+      .post(`/offers/${offerId}/refund-credit`)
+      .set('Cookie', adminSession)
+      .send({ reasonCode: 'PLATFORM_ERROR', note: 'Ödeme sağlayıcısı iki kez ücretlendirdi' })
+      .expect(201);
+
+    const message = refundMessages()[0]!;
+    const rendered = JSON.stringify(message);
+
+    expect(message.data?.refundReason).toBe('Yönetici kredi iadesi');
+    expect(rendered).not.toContain('PLATFORM_ERROR');
+    expect(rendered).not.toContain('MANUAL_ADMIN_REFUND');
+    expect(rendered).not.toContain('Ödeme sağlayıcısı iki kez ücretlendirdi');
+  });
+
+  it('sends nothing to the customer', async () => {
+    const { offerId, customer } = await policyFixture();
+    ctx.notifications.clear();
+    await ageBeyondWindow(offerId);
+
+    await worker().execute();
+
+    // The credit belongs to the provider; the customer has no part in it.
+    expect(ctx.notifications.sent.map((message) => message.to)).not.toContain(customer.email);
+    expect(refundMessages()).toHaveLength(1);
+  });
+
+  it('does not notify when the refund transaction rolled back', async () => {
+    const { offerId } = await policyFixture();
+    // Viewed, so the worker's re-read inside the transaction refuses it and
+    // nothing commits.
+    await ageBeyondWindow(offerId);
+    await ctx.prisma.offer.update({ where: { id: offerId }, data: { viewedAt: new Date() } });
+    ctx.notifications.clear();
+
+    const result = await worker().execute();
+
+    expect(result.refunded).toBe(0);
+    expect(refundMessages()).toHaveLength(0);
+    expect(await notificationRows()).toHaveLength(0);
   });
 });

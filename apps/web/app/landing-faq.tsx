@@ -1,6 +1,13 @@
 import Link from 'next/link';
+import { unviewedOfferRefundNotice } from '../lib/formatters';
 
-const items = [
+/**
+ * Built from the platform's current refund window rather than from a fixed
+ * sentence: this answer is a commercial promise, and a page that keeps saying
+ * 48 hours after an administrator sets 72 is making one the platform does not
+ * keep.
+ */
+const buildItems = (refundWindowHours: number) => [
   {
     q: "TakTick'te teklif almak ücretli mi?",
     a:
@@ -23,8 +30,7 @@ const items = [
   },
   {
     q: 'Görülmeyen tekliflerde kredi iadesi nasıl işler?',
-    a:
-      'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir. Teklif görüntülendiyse kredi iadesi yapılmaz.',
+    a: `${unviewedOfferRefundNotice(refundWindowHours)} Teklif görüntülendiyse kredi iadesi yapılmaz.`,
   },
   {
     q: 'Hizmet veren başvurusu nasıl yapılır?',
@@ -37,7 +43,9 @@ const items = [
  * Native `<details>`: the accordion needs no client bundle, and it keeps
  * keyboard behaviour and the open/closed state the browser already gives.
  */
-export function LandingFAQ() {
+export function LandingFAQ({ refundWindowHours }: { refundWindowHours: number }) {
+  const items = buildItems(refundWindowHours);
+
   return (
     <section className="lp-section" id="lp-sss">
       <div className="lp-container">

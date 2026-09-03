@@ -65,7 +65,7 @@ export function offerNotWithdrawableException() {
  *
  * The three that are absent are absent on purpose:
  *
- * - `VIEWED` stamps `viewedAt`, and under the 48-hour policy `viewedAt` is the
+ * - `VIEWED` stamps `viewedAt`, and under the unviewed-offer policy `viewedAt` is the
  *   whole rule: an offer carrying one is never refunded. An admin marking an
  *   offer "seen" would be recording something the customer did not do, and
  *   charging a provider for it.

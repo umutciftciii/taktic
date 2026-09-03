@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ProviderStatus, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UNVIEWED_OFFER_REFUND_WINDOW_HOURS } from '../offers/refund-policy';
 
 @Injectable()
 export class DashboardService {
@@ -25,9 +24,11 @@ export class DashboardService {
       this.prisma.providerProfile.count({ where: { status: ProviderStatus.PENDING_REVIEW } }),
       this.prisma.offer.count(),
       // Offers the unviewed-offer worker will actually pay out on: inside the
-      // policy, unviewed, unrefunded and past the 48-hour window. Without those
-      // last two clauses this counted every fresh offer nobody had opened yet,
-      // and every offer written before the policy existed — a figure labelled
+      // policy, unviewed, unrefunded and past their own eligibility moment.
+      // Each offer's moment, never the current setting — the same snapshot the
+      // worker reads, so this figure and the worker cannot disagree. Without
+      // those clauses this counted every fresh offer nobody had opened yet, and
+      // every offer written before the policy existed — a figure labelled
       // "refundable" that named things that would never be refunded.
       this.prisma.offer.count({
         where: {
@@ -36,9 +37,7 @@ export class DashboardService {
           creditRefundedTransactionId: null,
           creditRefundedAt: null,
           viewedAt: null,
-          submittedAt: {
-            lte: new Date(Date.now() - UNVIEWED_OFFER_REFUND_WINDOW_HOURS * 60 * 60 * 1000),
-          },
+          unviewedRefundEligibleAt: { lte: new Date() },
         },
       }),
       this.prisma.packagePurchase.count(),

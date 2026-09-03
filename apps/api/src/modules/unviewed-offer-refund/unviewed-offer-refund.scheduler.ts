@@ -15,10 +15,11 @@ const schedulerCron = readCronEnv();
  * moves money must be turned on by somebody, in one environment at a time, and
  * never by a default that follows a deploy into production.
  *
- * There is no window setting. The scheduler decides *when to look*, never *how
- * far back to look*: the 48 hours are the product promise and live in the
- * policy module. A late run therefore refunds on its next pass, and an
- * aggressive cron cannot refund early.
+ * There is no window setting here, and the configurable one does not belong
+ * here either. The scheduler decides *when to look*, never *how far back to
+ * look*: the window is a commercial term a super admin sets, and each offer
+ * carries the moment it produced. A late run therefore refunds on its next
+ * pass, and an aggressive cron cannot refund early.
  */
 @Injectable()
 export class UnviewedOfferRefundSchedulerService implements OnModuleInit {

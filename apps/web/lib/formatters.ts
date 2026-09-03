@@ -122,14 +122,30 @@ export function statusBadgeClass(status: string) {
 }
 
 /**
+ * The window the platform uses when no operator has chosen one — the same
+ * default the API applies, and the term every existing offer was created under.
+ *
+ * Used only as the fallback for a screen that could not reach the API. Nothing
+ * renders it as "the" window.
+ */
+export const DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS = 48;
+
+/**
  * The one sentence this platform says about credit refunds, and the only one
  * any provider-facing screen may say.
  *
- * A single constant because it is a commercial promise: a screen that
+ * A single builder because it is a commercial promise: a screen that
  * paraphrases it promises something the worker does not do.
+ *
+ * It takes the hours and every caller has to say which hours it means — a
+ * screen about an existing offer passes that offer's own snapshot, a screen
+ * about the offer a provider is about to send passes the current setting. A
+ * hard-coded 48 here would be a promise the worker stops keeping the moment an
+ * administrator changes the window.
  */
-export const UNVIEWED_OFFER_REFUND_NOTICE =
-  'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.';
+export function unviewedOfferRefundNotice(windowHours: number) {
+  return `Teklifiniz müşteri tarafından ${windowHours} saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.`;
+}
 
 
 /**
