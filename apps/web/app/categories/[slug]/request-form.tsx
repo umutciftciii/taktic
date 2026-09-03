@@ -329,36 +329,43 @@ export function RequestForm({
                   required={descriptionQuestion?.isRequired ?? false}
                   data-testid="request-description"
                   maxLength={SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
-                  aria-describedby="request-description-counter"
+                  aria-describedby="request-description-help request-description-counter"
                   onChange={(event) => setDescriptionLength(event.target.value.length)}
                   placeholder="Yapılacak işi kısaca anlatın: ne, nerede, hangi durumda."
                 />
-                <span className="help-text">
+              </label>
+              {/*
+                * The help text and the counter share one row — guidance on the
+                * left, the count on the right — because they answer the same
+                * question about the field and reading them as two stacked lines
+                * made the count look like a stray label.
+                *
+                * Both sit outside the label on purpose. A count that changes on
+                * every keystroke inside it would keep rewriting the field's
+                * accessible name; as descriptions they are announced when the
+                * field is reached, and the status line — which only changes at
+                * the two thresholds, so it is not chatty — announces itself.
+                */}
+              <div className="description-meta">
+                <span className="help-text" id="request-description-help">
                   {descriptionQuestion?.helpText ??
                     'Detay yazdıkça talebin kalite skoru yükselir ve daha isabetli teklif alırsınız.'}
                 </span>
-              </label>
-              {/*
-                * Outside the label on purpose: a count that changes on every
-                * keystroke inside it would keep rewriting the field's accessible
-                * name. As a description it is announced when the field is
-                * reached, and the status line — which only changes at the two
-                * thresholds, so it is not chatty — announces itself.
-                */}
-              <p
-                className="description-counter"
-                id="request-description-counter"
-                data-testid="request-description-counter"
-                data-state={descriptionAtLimit ? 'limit' : descriptionNearLimit ? 'near' : 'ok'}
-              >
-                <span className="description-counter-count">
-                  {descriptionLength} / {SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
-                  <span className="visually-hidden"> karakter kullanıldı</span>
-                </span>
-                <span className="description-counter-status" role="status">
-                  {descriptionStatus}
-                </span>
-              </p>
+                <p
+                  className="description-counter"
+                  id="request-description-counter"
+                  data-testid="request-description-counter"
+                  data-state={descriptionAtLimit ? 'limit' : descriptionNearLimit ? 'near' : 'ok'}
+                >
+                  <span className="description-counter-count">
+                    {descriptionLength} / {SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
+                    <span className="visually-hidden"> karakter kullanıldı</span>
+                  </span>
+                  <span className="description-counter-status" role="status">
+                    {descriptionStatus}
+                  </span>
+                </p>
+              </div>
             </section>
           </div>
 
