@@ -250,9 +250,7 @@ export default async function ProviderRequestDetailPage({
                   <dt>Kredi iadesi</dt>
                   <dd>
                     {request.existingOffer.creditRefundedAt
-                      ? `${formatDateTime(request.existingOffer.creditRefundedAt)} — ${
-                          request.existingOffer.creditRefundReason ?? '-'
-                        }`
+                      ? formatDateTime(request.existingOffer.creditRefundedAt)
                       : 'Yok'}
                   </dd>
                   {/* Omitted for an offer from before the policy: it has no

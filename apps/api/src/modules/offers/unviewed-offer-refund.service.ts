@@ -14,7 +14,13 @@ type UnviewedOfferRefundOptions = {
   limit?: number | string;
 };
 
-type SkippedReason = 'alreadyRefunded' | 'viewed' | 'notOldEnough' | 'noCreditSpend' | 'outOfPolicy';
+type SkippedReason =
+  | 'alreadyRefunded'
+  | 'viewed'
+  | 'adminDecision'
+  | 'notOldEnough'
+  | 'noCreditSpend'
+  | 'outOfPolicy';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -26,6 +32,10 @@ const MAX_LIMIT = 500;
  * nothing: an unviewed offer that expired, was withdrawn or was rejected is
  * still an unviewed offer, and its credit still comes back. Leaving the column
  * out means no future edit can quietly reintroduce a status rule.
+ *
+ * `refundBlockedAt` is present for the opposite reason: eligibility must never
+ * rest on `viewedAt` alone, because an administrator deciding on the customer's
+ * behalf settles the credit without any customer ever opening the offer.
  */
 const candidateOfferSelect = {
   id: true,
@@ -38,6 +48,8 @@ const candidateOfferSelect = {
   submittedAt: true,
   viewedAt: true,
   unviewedRefundPolicy: true,
+  refundBlockedAt: true,
+  refundBlockedReason: true,
   // The scan already filters on a non-null creditSpentTransactionId, which no
   // period-package offer has, so this changes no row it selects. It is here so
   // the policy verdict written into the report names the real reason.
@@ -223,36 +235,41 @@ export class UnviewedOfferRefundService {
    * reported as out of scope rather than padding one of the other buckets.
    */
   private async getSkippedSummary(cutoff: Date) {
-    const [alreadyRefunded, viewed, noCreditSpend, notOldEnough, outOfPolicy] = await Promise.all([
-      this.prisma.offer.count({
-        where: {
-          unviewedRefundPolicy: true,
-          OR: [{ creditRefundedTransactionId: { not: null } }, { creditRefundedAt: { not: null } }],
-        },
-      }),
-      this.prisma.offer.count({
-        where: { ...inPolicyUnrefundedWhere, viewedAt: { not: null } },
-      }),
-      this.prisma.offer.count({
-        where: {
-          ...inPolicyUnrefundedWhere,
-          viewedAt: null,
-          OR: [{ creditSpentTransactionId: null }, { creditCost: { lte: 0 } }],
-        },
-      }),
-      this.prisma.offer.count({
-        where: {
-          ...inPolicyUnrefundedWhere,
-          viewedAt: null,
-          creditSpentTransactionId: { not: null },
-          creditCost: { gt: 0 },
-          submittedAt: { gt: cutoff },
-        },
-      }),
-      this.prisma.offer.count({ where: { unviewedRefundPolicy: false } }),
-    ]);
+    const [alreadyRefunded, viewed, noCreditSpend, notOldEnough, outOfPolicy, adminDecision] =
+      await Promise.all([
+        this.prisma.offer.count({
+          where: {
+            unviewedRefundPolicy: true,
+            OR: [{ creditRefundedTransactionId: { not: null } }, { creditRefundedAt: { not: null } }],
+          },
+        }),
+        this.prisma.offer.count({
+          where: { ...inPolicyUnrefundedWhere, viewedAt: { not: null } },
+        }),
+        this.prisma.offer.count({
+          where: {
+            ...inPolicyUnrefundedWhere,
+            viewedAt: null,
+            OR: [{ creditSpentTransactionId: null }, { creditCost: { lte: 0 } }],
+          },
+        }),
+        this.prisma.offer.count({
+          where: {
+            ...inPolicyUnrefundedWhere,
+            viewedAt: null,
+            refundBlockedAt: null,
+            creditSpentTransactionId: { not: null },
+            creditCost: { gt: 0 },
+            submittedAt: { gt: cutoff },
+          },
+        }),
+        this.prisma.offer.count({ where: { unviewedRefundPolicy: false } }),
+        this.prisma.offer.count({
+          where: { ...inPolicyUnrefundedWhere, viewedAt: null, refundBlockedAt: { not: null } },
+        }),
+      ]);
 
-    return { alreadyRefunded, viewed, notOldEnough, noCreditSpend, outOfPolicy };
+    return { alreadyRefunded, viewed, adminDecision, notOldEnough, noCreditSpend, outOfPolicy };
   }
 }
 
@@ -280,6 +297,14 @@ function getRefundEligibility(offer: CandidateOffer, now: Date) {
 
   if (offer.viewedAt) {
     return skipped('viewed', policy.hoursSinceSubmitted, 'Offer was viewed');
+  }
+
+  if (offer.refundBlockedAt) {
+    return skipped(
+      'adminDecision',
+      policy.hoursSinceSubmitted,
+      `Refund blocked: ${offer.refundBlockedReason ?? 'unknown reason'}`,
+    );
   }
 
   if (
@@ -348,6 +373,10 @@ function refundCandidateWhere(cutoff: Date): Prisma.OfferWhereInput {
     creditSpentTransactionId: { not: null },
     creditCost: { gt: 0 },
     viewedAt: null,
+    // Beside `viewedAt`, never instead of it: an administrator's accept or
+    // reject on the customer's behalf settles the credit without any customer
+    // opening the offer, and the worker has to see that.
+    refundBlockedAt: null,
     submittedAt: { lte: cutoff },
   };
 }

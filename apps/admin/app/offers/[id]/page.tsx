@@ -15,7 +15,7 @@ import {
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
-import { updateOfferStatusAction } from '../actions';
+import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
 
 type StatTone = 'neutral' | 'success' | 'warning' | 'error';
 
@@ -31,6 +31,24 @@ type StatTone = 'neutral' | 'success' | 'warning' | 'error';
  * invite an error screen.
  */
 const statuses: OfferStatus[] = ['SHORTLISTED', 'ACCEPTED', 'REJECTED'];
+
+/**
+ * The operations reasons a manual refund may be filed under. Mirrors
+ * MANUAL_REFUND_REASON_CODES on the API side, which validates the choice; this
+ * list only decides what the select offers.
+ *
+ * None of these is UNVIEWED_OFFER_48H. That code belongs to the automatic
+ * worker and to it alone, so a finance report can always tell what the policy
+ * cost from what operations decided.
+ */
+const manualRefundReasons: ReadonlyArray<{ code: string; label: string }> = [
+  { code: 'INVALID_REQUEST', label: 'Geçersiz talep' },
+  { code: 'CUSTOMER_UNREACHABLE', label: 'Müşteriye ulaşılamadı' },
+  { code: 'DUPLICATE_REQUEST', label: 'Mükerrer talep' },
+  { code: 'PLATFORM_ERROR', label: 'Platform hatası' },
+  { code: 'GOODWILL', label: 'İyi niyet iadesi' },
+  { code: 'OTHER', label: 'Diğer' },
+];
 
 function statusTone(status: OfferStatus): StatTone {
   switch (status) {
@@ -73,12 +91,13 @@ function buildTimeline(offer: Offer): TimelineEvent[] {
 
 type OfferDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ statusSaved?: string }>;
+  searchParams?: Promise<{ refunded?: string; statusSaved?: string }>;
 };
 
 export default async function OfferDetailPage({ params, searchParams }: OfferDetailPageProps) {
   const { id } = await params;
   const search = (await searchParams) ?? {};
+  const justRefunded = search.refunded === '1';
   const justStatusSaved = search.statusSaved === '1';
 
   const offer = await apiFetch<Offer>(`/offers/${id}`);
@@ -128,6 +147,11 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
         }
       />
 
+      {justRefunded ? (
+        <div className="notice-success" role="status" style={{ marginBottom: 14 }}>
+          Manuel iade tamamlandı. Kredi hizmet verenin bakiyesine eklendi.
+        </div>
+      ) : null}
       {justStatusSaved ? (
         <div className="notice-success" role="status" style={{ marginBottom: 14 }}>
           Teklif durumu güncellendi.
@@ -434,16 +458,14 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
           </SectionCard>
 
           {/*
-            Read-only, and deliberately so.
+            Two things, kept apart on purpose.
 
-            This card used to be a form: pick a reason code, optionally tick
-            "override the NO_REFUND recommendation", refund. Under the 48-hour
-            unviewed-offer rule there is nothing left for it to decide — a
-            credit comes back when, and only when, the customer never opened the
-            offer within the window, and the worker applies that without being
-            asked. A hand-made refund could only ever contradict the promise the
-            provider was shown, so the endpoint behind this form was removed
-            with it. What stays is the record of what the rule did.
+            The card states where the offer stands under the automatic 48-hour
+            policy — the promise providers are actually shown, which the worker
+            keeps without being asked. Below it sits the operations refund: the
+            remedy for cases the rule cannot see. It is not the policy, nothing
+            provider- or customer-facing mentions it, and it files its own
+            ledger reason so a report can always separate the two.
           */}
           <SectionCard title="Kredi İadesi">
             {offer.creditRefundedAt ? (
@@ -457,22 +479,60 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                   </>
                 ) : null}
               </div>
-            ) : offer.refundEligibility.policyStatus ? (
-              <>
-                <p style={{ marginTop: 0 }}>
-                  <span className={refundActionBadgeClass(offer.refundEligibility.recommendedAction)}>
-                    {offer.refundEligibility.policyStatusLabel}
-                  </span>
-                </p>
-                <p className="muted" style={{ marginBottom: 0, fontSize: 13 }}>
-                  {offer.refundEligibility.details}
-                </p>
-              </>
             ) : (
-              <div className="notice-warning">
-                Bu teklif, 48 saat iade kuralı yürürlüğe girmeden önce gönderildi ve bu kural
-                kapsamında değil.
-              </div>
+              <>
+                {offer.refundEligibility.policyStatus ? (
+                  <>
+                    <p style={{ marginTop: 0 }}>
+                      <span
+                        className={refundActionBadgeClass(offer.refundEligibility.recommendedAction)}
+                      >
+                        {offer.refundEligibility.policyStatusLabel}
+                      </span>
+                    </p>
+                    <p className="muted" style={{ fontSize: 13 }}>
+                      {offer.refundEligibility.details}
+                    </p>
+                  </>
+                ) : (
+                  <div className="notice-warning">
+                    Bu teklif, 48 saat iade kuralı yürürlüğe girmeden önce gönderildi ve bu kural
+                    kapsamında değil.
+                  </div>
+                )}
+
+                {offer.creditSpentTransactionId ? (
+                  <form action={refundOfferCreditAction} style={{ display: 'grid', gap: 12 }}>
+                    <input type="hidden" name="id" value={offer.id} />
+                    <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                      <strong>Manuel iade (operasyon).</strong> Standart iade politikası değildir ve
+                      hizmet verene duyurulmaz. Yapılan işlem, işlemi yapan yönetici ve gerekçesiyle
+                      birlikte kalıcı olarak kaydedilir.
+                    </p>
+                    <label className="form-row">
+                      <span>Operasyon gerekçesi *</span>
+                      <select name="reasonCode" defaultValue="INVALID_REQUEST">
+                        {manualRefundReasons.map((reason) => (
+                          <option key={reason.code} value={reason.code}>
+                            {reason.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="form-row">
+                      <span>Yönetici notu</span>
+                      <textarea name="note" />
+                    </label>
+                    <div>
+                      <button className="btn btn-danger btn-block" type="submit">
+                        Krediyi manuel iade et
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="notice-warning">Bu teklifin kredi harcama işlemi yok.</div>
+                )}
+              </>
             )}
           </SectionCard>
         </div>

@@ -937,6 +937,7 @@ export class ProvidersService {
             creditRefundedAt: true,
             creditRefundReason: true,
             unviewedRefundPolicy: true,
+            refundBlockedAt: true,
             viewedAt: true,
             acceptedAt: true,
             submittedAt: true,
@@ -2062,6 +2063,7 @@ function toProviderRequestDetail(
           creditRefundedAt: true;
           creditRefundReason: true;
           unviewedRefundPolicy: true;
+          refundBlockedAt: true;
           viewedAt: true;
           acceptedAt: true;
           submittedAt: true;
@@ -2106,12 +2108,20 @@ function toProviderRequestDetail(
 }
 
 function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
-  // rejectionReason is internal. COMPETITOR_ACCEPTED tells the provider that
-  // somebody else won, which is exactly what the provider must not learn, so it
-  // is dropped here. What stays is refundEligibility, whose label for that case
-  // is the neutral "Teklif kabul edilmedi".
-  const { rejectionReason, ...visible } = offer;
+  // Two internal fields are dropped rather than reworded.
+  //
+  // rejectionReason: COMPETITOR_ACCEPTED tells the provider that somebody else
+  // won, which is exactly what the provider must not learn.
+  //
+  // creditRefundReason: for a manual refund this is the operations code an
+  // administrator filed the case under — "CUSTOMER_UNREACHABLE",
+  // "PLATFORM_ERROR" — which is an internal judgement about a case, not
+  // something the provider is owed an explanation in. What stays is the fact
+  // and its date: refundEligibility reports "Kredi iade edildi", and
+  // creditRefundedAt says when.
+  const { rejectionReason, creditRefundReason, ...visible } = offer;
   void rejectionReason;
+  void creditRefundReason;
 
   return {
     ...visible,
@@ -2129,7 +2139,12 @@ type RefundPolicyOfferShape = {
   // Required: a provider screen that renders a refund verdict must state
   // whether the offer is inside the policy at all.
   unviewedRefundPolicy: boolean;
+  // Required for the same reason: without it an offer an administrator has
+  // already decided would read to its provider as "Görüntülenme bekleniyor",
+  // which is a refund promise the worker will not keep.
+  refundBlockedAt: Date | string | null;
   rejectionReason?: OfferRejectionReason | null;
+  creditRefundReason?: string | null;
 };
 
 async function getProviderCreditBalanceInTransaction(

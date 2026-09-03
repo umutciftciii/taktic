@@ -117,6 +117,10 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
             <span className="metric">{scan.skippedSummary.noCreditSpend}</span>
           </div>
           <div className="stat-card">
+            <span className="muted">Müşteri kararı kaydedildi</span>
+            <span className="metric">{scan.skippedSummary.adminDecision}</span>
+          </div>
+          <div className="stat-card">
             <span className="muted">Politika dışı</span>
             <span className="metric">{scan.skippedSummary.outOfPolicy}</span>
           </div>

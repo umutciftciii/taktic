@@ -82,12 +82,23 @@ Tek merkezî çözümleyici: `apps/api/src/modules/entitlements/entitlement-reso
 
 ### İade kuralı
 
-Tek kural: **teklif oluşturulduktan sonraki 48 saat içinde yetkili müşteri
-tarafından hiç görüntülenmeyen teklifin kredisi otomatik iade edilir**
-(`UNVIEWED_OFFER_48H`). Görüntülenmiş teklifte kabul, red, süre dolumu veya geri
-çekme fark etmez — iade yoktur. Görüntülenmemiş teklifte de teklifin durumu tek
-başına iadeyi engellemez; belirleyici olan 48 saat kuralıdır. Manuel iade yolu
-yoktur; admin ekranı sonucu gösterir, iade üretmez.
+Ürün kuralı — kullanıcıya duyurulan tek iade vaadi: **teklif oluşturulduktan
+sonraki 48 saat içinde yetkili müşteri tarafından hiç görüntülenmeyen teklifin
+kredisi otomatik iade edilir** (`UNVIEWED_OFFER_48H`). Görüntülenmiş teklifte
+kabul, red, süre dolumu veya geri çekme fark etmez — iade yoktur.
+Görüntülenmemiş teklifte de teklifin durumu tek başına iadeyi engellemez.
+
+Krediyi kapatan ikinci bir olay daha var ve ayrı bir alanda tutulur: **admin'in
+müşteri adına kabul/red kararı** (`Offer.refundBlockedAt` +
+`refundBlockedReason = ADMIN_CUSTOMER_DECISION`). Kredinin satın aldığı sonuç
+admin panelinden de olsa teslim edilmiştir. Bu, sahte bir `viewedAt` yazılarak
+değil kendi alanıyla kaydedilir — müşteri teklifi açmadı ve veritabanı bunu
+doğru söylemeye devam etmeli. Admin'in yalnızca ekranı okuması ise hiçbir şeyi
+değiştirmez.
+
+Sağlayıcı ekranındaki metin bu ayrımı korur: görüntülenmede
+`Görüntülendi — iade uygun değil`, admin kararında
+`Müşteri kararı kaydedildi — iade uygun değil`.
 
 Kural yalnız `Offer.unviewedRefundPolicy = true` olan teklifler için işler. Bu
 kolon, kuralla birlikte deploy edilen teklif oluşturma yolunda yazılır; daha
@@ -103,6 +114,25 @@ iade yalnızca tek seferlik kredi harcamalarını görür
 İdempotency veritabanı düzeyindedir: `ProviderCreditTransaction_one_refund_per_offer`
 kısmi UNIQUE index'i aynı teklif için ikinci bir `OFFER_REFUND` satırını
 imkânsız kılar.
+
+### Manuel kredi iadesi (operasyon aracı)
+
+`POST /offers/:id/refund-credit` yalnız SUPER_ADMIN'e açıktır ve otomatik
+kuralın göremediği durumlar içindir (geçersiz talep, ulaşılamayan müşteri,
+platform hatası). **Ürünün iade politikası değildir**: sağlayıcıya ve müşteriye
+görünen hiçbir metinde yer almaz, vaat edilmez.
+
+- Ledger sebebi `MANUAL_ADMIN_REFUND:<KOD>`; `UNVIEWED_OFFER_48H` yalnız
+  otomatik worker'a aittir. Finans raporu politikanın maliyetini operasyonun
+  kararından her zaman ayırabilir.
+- Aynı transaction'da zorunlu `ManualOfferRefundAudit` satırı yazılır: işlemi
+  yapan yönetici, zaman, teklif, kredi miktarı, operasyon gerekçesi ve not.
+  `performedById` NOT NULL — imzasız bir iade oluşamaz.
+- Operasyon gerekçesi admin yüzeylerinden dışarı çıkmaz; sağlayıcı yalnız
+  `Kredi iade edildi` ve tarihi görür.
+- Manuel ve otomatik iade hiçbir sırada çift kredi üretemez: ikisi de aynı
+  koşullu `UPDATE`'ten geçer, ikisi de aynı kısmi UNIQUE index'e düşer, ve audit
+  tablosunun `offerId` UNIQUE'i manuel yola özgü üçüncü bariyerdir.
 
 ## Otomatik yenileme — gerçek durum
 

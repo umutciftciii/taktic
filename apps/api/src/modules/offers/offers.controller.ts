@@ -1,10 +1,22 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
 import { ListOffersQueryDto } from './dto/list-offers-query.dto';
+import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { ExecuteRefundScanDto, RefundScanQueryDto } from './dto/refund-scan.dto';
 import { UpdateOfferStatusDto } from './dto/update-offer-status.dto';
 import { UnviewedOfferRefundService } from './unviewed-offer-refund.service';
@@ -73,5 +85,30 @@ export class OffersController {
     @CurrentUser() user: AuthUser | null,
   ) {
     return this.offersService.updateOfferStatus(id, dto.status, user);
+  }
+
+  /**
+   * The operations refund: an administrator returning one offer's credit by
+   * hand, for a case the automatic 48-hour rule cannot see.
+   *
+   * SUPER_ADMIN only, and the caller is required rather than optional — the
+   * audit row this writes has a NOT NULL operator column, and a refund nobody
+   * signed is the thing that column exists to prevent. The guards above already
+   * make a null user unreachable; the check restates it so the invariant is
+   * enforced where it is relied upon.
+   */
+  @Post(':id/refund-credit')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  refundOfferCredit(
+    @Param('id') id: string,
+    @Body() dto: RefundOfferCreditDto,
+    @CurrentUser() user: AuthUser | null,
+  ) {
+    if (!user) {
+      throw new ForbiddenException('Manual refund requires an authenticated administrator');
+    }
+
+    return this.offersService.refundOfferCredit(id, dto, user);
   }
 }

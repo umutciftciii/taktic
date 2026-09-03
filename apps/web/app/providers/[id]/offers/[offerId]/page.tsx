@@ -242,11 +242,7 @@ export default async function ProviderOfferDetailPage({
               </div>
               <div className="pdash-info-row">
                 <dt>İade tarihi</dt>
-                <dd>
-                  {offer.creditRefundedAt
-                    ? `${formatDateTime(offer.creditRefundedAt)} — ${offer.creditRefundReason ?? '-'}`
-                    : 'Yok'}
-                </dd>
+                <dd>{offer.creditRefundedAt ? formatDateTime(offer.creditRefundedAt) : 'Yok'}</dd>
               </div>
               {/*
                 Only for an offer the policy governs. One from before it has no

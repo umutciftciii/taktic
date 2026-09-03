@@ -503,7 +503,11 @@ export type OfferStatus =
 export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
 
 /** Where an offer stands under the 48-hour unviewed-offer refund rule. */
-export type UnviewedRefundPolicyStatus = 'AWAITING_VIEW' | 'VIEWED' | 'REFUNDED';
+export type UnviewedRefundPolicyStatus =
+  | 'AWAITING_VIEW'
+  | 'VIEWED'
+  | 'ADMIN_DECISION'
+  | 'REFUNDED';
 
 export type RefundEligibility = {
   eligible: boolean;
@@ -592,6 +596,8 @@ export type RefundScanItem = {
 export type RefundScanSkippedSummary = {
   alreadyRefunded: number;
   viewed: number;
+  /** Settled by an administrator's accept or reject on the customer's behalf. */
+  adminDecision: number;
   notOldEnough: number;
   noCreditSpend: number;
   /** Offers submitted before the rule shipped. Never refunded. */

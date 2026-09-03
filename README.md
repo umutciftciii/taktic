@@ -258,6 +258,16 @@ Relevant environment variables:
 
 There is deliberately no window setting. The 48 hours are the promise made to providers; a cron that runs late refunds on its next pass, and no configuration can refund early. Ledger rows written by the worker carry the reason `UNVIEWED_OFFER_48H`.
 
+Two things settle a credit and so keep the worker away from it, and they are stored as two different facts. `Offer.viewedAt` is the customer opening the offer. `Offer.refundBlockedAt` / `refundBlockedReason` is an administrator accepting or rejecting on the customer's behalf: the outcome the credit bought was delivered through the admin panel, so the credit is spent — but the database still says truthfully that no customer opened the offer, which a faked `viewedAt` would not. An admin merely *reading* an offer changes neither.
+
+### Manual credit refund (operations)
+
+`POST /offers/:id/refund-credit`, SUPER_ADMIN only, is an operations remedy for what an automatic rule cannot see — an invalid request, an unreachable customer, a platform mistake. It is **not** the refund policy: nothing provider- or customer-facing mentions it, and the only refund promise in the product is the 48-hour rule above.
+
+It writes its own ledger reason, `MANUAL_ADMIN_REFUND:<CODE>`, so a finance report can always separate what the policy cost from what operations decided, and a mandatory `ManualOfferRefundAudit` row in the same transaction recording the operator, the moment, the offer, the credit amount, the operations reason and any note. The operations reason never leaves the admin surfaces.
+
+The manual and automatic paths cannot double-pay in either order: both write through one function whose conditional UPDATE refuses an offer that already carries a refund, both land on `ProviderCreditTransaction_one_refund_per_offer`, and the audit table's UNIQUE on `offerId` is a third bar specific to the manual path.
+
 ### Request expiry and reminder
 
 An approved request stays open for **14 days**. Two independent jobs act on that window, and both are disabled by default:

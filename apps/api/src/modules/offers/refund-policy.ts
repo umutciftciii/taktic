@@ -1,4 +1,4 @@
-import { OfferEntitlementSource } from '@prisma/client';
+import { OfferEntitlementSource, OfferRefundBlockReason } from '@prisma/client';
 
 export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
 
@@ -14,6 +14,44 @@ export const UNVIEWED_OFFER_REFUND_REASON = 'UNVIEWED_OFFER_48H';
 
 /** The window, in hours, and the only one. Not configurable — see the module doc. */
 export const UNVIEWED_OFFER_REFUND_WINDOW_HOURS = 48;
+
+/**
+ * The ledger reason an administrator's hand-made refund carries.
+ *
+ * Deliberately not {@link UNVIEWED_OFFER_REFUND_REASON}. The two refunds answer
+ * different questions — one is the promise the product makes, the other is an
+ * operations remedy — and a finance report that cannot separate them cannot say
+ * what the policy actually cost. The stored string is
+ * `MANUAL_ADMIN_REFUND:<CODE>`; only the prefix is ever rendered to a provider,
+ * so the operational code stays inside the admin surfaces.
+ */
+export const MANUAL_REFUND_REASON_PREFIX = 'MANUAL_ADMIN_REFUND';
+
+/**
+ * The operations reasons an administrator may file a manual refund under.
+ *
+ * A closed list, because a free-text-only reason is a reason nobody can report
+ * on. The operator's own words go in the separate note field.
+ */
+export const MANUAL_REFUND_REASON_CODES = [
+  'INVALID_REQUEST',
+  'CUSTOMER_UNREACHABLE',
+  'DUPLICATE_REQUEST',
+  'PLATFORM_ERROR',
+  'GOODWILL',
+  'OTHER',
+] as const;
+
+export type ManualRefundReasonCode = (typeof MANUAL_REFUND_REASON_CODES)[number];
+
+export function isManualRefundReasonCode(value: string): value is ManualRefundReasonCode {
+  return MANUAL_REFUND_REASON_CODES.includes(value as ManualRefundReasonCode);
+}
+
+/** The ledger string for a manual refund filed under `reasonCode`. */
+export function manualRefundStoredReason(reasonCode: ManualRefundReasonCode) {
+  return `${MANUAL_REFUND_REASON_PREFIX}:${reasonCode}`;
+}
 
 /**
  * The sentence every provider-facing surface uses for this policy, verbatim.
@@ -33,11 +71,19 @@ export const UNVIEWED_OFFER_REFUND_NOTICE =
  * no standing under this one, and showing it "Görüntülenme bekleniyor" would be
  * promising a refund that will never come.
  */
-export type UnviewedRefundPolicyStatus = 'AWAITING_VIEW' | 'VIEWED' | 'REFUNDED';
+export type UnviewedRefundPolicyStatus =
+  | 'AWAITING_VIEW'
+  | 'VIEWED'
+  | 'ADMIN_DECISION'
+  | 'REFUNDED';
 
 export const UNVIEWED_REFUND_POLICY_STATUS_LABELS: Record<UnviewedRefundPolicyStatus, string> = {
   AWAITING_VIEW: 'Görüntülenme bekleniyor',
   VIEWED: 'Görüntülendi — iade uygun değil',
+  // Not "Görüntülendi": the customer did not open it, an administrator recorded
+  // their decision. Saying otherwise would tell a provider something untrue
+  // about their own customer.
+  ADMIN_DECISION: 'Müşteri kararı kaydedildi — iade uygun değil',
   REFUNDED: 'Kredi iade edildi',
 };
 
@@ -69,6 +115,13 @@ type RefundPolicyOffer = {
    */
   unviewedRefundPolicy?: boolean | null;
   /**
+   * Set when something other than a customer view closed this offer's
+   * eligibility — today only an administrator's accept or reject on the
+   * customer's behalf. Read alongside `viewedAt`, never instead of it.
+   */
+  refundBlockedAt?: Date | string | null;
+  refundBlockedReason?: OfferRefundBlockReason | null;
+  /**
    * Which right paid for the offer. NULL on every offer written before
    * entitlements existed, which the migration backfilled to ONE_TIME_CREDIT —
    * so a NULL here is read as the one-time path and nothing changes for them.
@@ -81,25 +134,36 @@ type RefundPolicyOffer = {
  *
  * One rule decides: a credit spent on an offer comes back if, and only if, the
  * authorised customer never opened that offer's detail within 48 hours of it
- * being submitted. Nothing else earns a refund — not a rejection, not an
- * expiry, not a withdrawal, not an admin's opinion — and nothing else blocks
- * one either. An offer's *status* is deliberately not consulted: an unviewed
- * offer that expired unread is exactly the case this policy exists to pay, and
- * a viewed offer is settled no matter how it ended.
+ * being submitted. An offer's *status* is deliberately not consulted: an
+ * unviewed offer that expired unread is exactly the case this policy exists to
+ * pay, and a viewed offer is settled no matter how it ended.
+ *
+ * One event other than a view also settles it, and carries its own column
+ * rather than borrowing `viewedAt`: an administrator accepting or rejecting on
+ * the customer's behalf. That is the outcome the provider's credit bought,
+ * delivered through a different door — so the credit is spent, while the
+ * database still says truthfully that no customer ever opened the offer. Merely
+ * *reading* an offer as an admin changes nothing; only a recorded decision
+ * does.
  *
  * The two NO_REFUND branches that survive from the previous policy are not
- * exceptions to it: they name offers that never spent a refundable credit at
- * all, so there is nothing to give back.
+ * exceptions to any of this: they name offers that never spent a refundable
+ * credit at all, so there is nothing to give back.
+ *
+ * This function describes the automatic policy only. An administrator's manual
+ * refund is an operations tool that deliberately does not consult it — see
+ * OffersService.refundOfferCredit.
  */
 export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new Date()): RefundEligibility {
   const hoursSinceSubmitted = calculateHoursSinceSubmitted(offer.submittedAt, now);
   const inPolicy = offer.unviewedRefundPolicy === true;
   const refunded = Boolean(offer.creditRefundedTransactionId || offer.creditRefundedAt);
   const viewed = Boolean(offer.viewedAt);
+  const adminDecision = Boolean(offer.refundBlockedAt);
 
   // Read before anything else so the state a provider sees never depends on the
   // order of the branches below.
-  const policyStatus = inPolicy ? resolvePolicyStatus({ refunded, viewed }) : null;
+  const policyStatus = resolvePolicyStatus({ inPolicy, refunded, viewed, adminDecision });
 
   const result = (
     eligible: boolean,
@@ -156,6 +220,13 @@ export function calculateRefundEligibility(offer: RefundPolicyOffer, now = new D
     return result(false, 'NO_REFUND', 'OFFER_VIEWED');
   }
 
+  // After the view branch, so an offer the customer had already opened keeps
+  // reading as viewed. A later admin decision on such an offer changes nothing
+  // about the outcome and must not change what the provider is told either.
+  if (adminDecision) {
+    return result(false, 'NO_REFUND', 'ADMIN_CUSTOMER_DECISION');
+  }
+
   if (hoursSinceSubmitted !== null && hoursSinceSubmitted >= UNVIEWED_OFFER_REFUND_WINDOW_HOURS) {
     return result(true, 'FULL_REFUND', UNVIEWED_OFFER_REFUND_REASON);
   }
@@ -178,13 +249,32 @@ export function refundReasonLabel(reasonCode: string) {
  * the seconds before the worker runs — and it is the safe one: the panel never
  * claims a payment the ledger cannot show.
  */
-function resolvePolicyStatus(offer: { refunded: boolean; viewed: boolean }): UnviewedRefundPolicyStatus {
+function resolvePolicyStatus(offer: {
+  inPolicy: boolean;
+  refunded: boolean;
+  viewed: boolean;
+  adminDecision: boolean;
+}): UnviewedRefundPolicyStatus | null {
+  // Checked before the policy gate: a refund that happened is a fact about the
+  // money, not a promise about the future, so it is reported even for an offer
+  // outside the policy — an administrator's manual refund of a legacy offer
+  // still shows the provider "Kredi iade edildi".
   if (offer.refunded) {
     return 'REFUNDED';
   }
 
+  // Everything below this line is a statement about what the 48-hour rule will
+  // do, and an offer outside the rule has none to make.
+  if (!offer.inPolicy) {
+    return null;
+  }
+
   if (offer.viewed) {
     return 'VIEWED';
+  }
+
+  if (offer.adminDecision) {
+    return 'ADMIN_DECISION';
   }
 
   return 'AWAITING_VIEW';
@@ -209,6 +299,8 @@ const REFUND_REASON_LABELS: Record<string, string> = {
   NO_CREDIT_SPEND: 'Kredi harcaması yok',
   PERIOD_PACKAGE_NOT_REFUNDABLE: 'Dönemsel pakete ait teklif',
   OFFER_VIEWED: 'Görüntülendi — iade uygun değil',
+  ADMIN_CUSTOMER_DECISION: 'Müşteri kararı kaydedildi — iade uygun değil',
+  [MANUAL_REFUND_REASON_PREFIX]: 'Yönetici kredi iadesi',
   [UNVIEWED_OFFER_REFUND_REASON]: '48 saat içinde görüntülenmedi',
   WAITING_VIEW_WINDOW: 'Görüntülenme bekleniyor',
 };
@@ -221,6 +313,8 @@ const REFUND_DETAILS: Record<string, string> = {
   PERIOD_PACKAGE_NOT_REFUNDABLE:
     'Bu teklif aylık kota veya limitsiz paket kapsamında gönderildi. Dönemsel paketlerde teklif başına iade yapılmaz.',
   OFFER_VIEWED: 'Teklifiniz müşteri tarafından görüntülendi; kredi iadesi yapılmaz.',
+  ADMIN_CUSTOMER_DECISION:
+    'Bu teklif için müşteri kararı kaydedildi; kredi iadesi yapılmaz.',
   [UNVIEWED_OFFER_REFUND_REASON]:
     'Teklifiniz 48 saat içinde görüntülenmedi. Teklif kredisi otomatik olarak iade edilir.',
   // Not the full notice: every provider screen already prints that sentence

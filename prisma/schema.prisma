@@ -140,6 +140,21 @@ enum OfferRejectionReason {
   COMPETITOR_ACCEPTED
 }
 
+/// Why an offer can never be refunded by the automatic 48-hour rule again.
+///
+/// Separate from `viewedAt` on purpose. Both facts close refund eligibility,
+/// but they are different events and conflating them would be a lie in the
+/// database: writing a `viewedAt` the customer never earned would tell the
+/// provider's panel, the admin timeline and every future reader that a customer
+/// opened an offer nobody opened.
+enum OfferRefundBlockReason {
+  /// An administrator accepted or rejected the offer on the customer's behalf.
+  /// The outcome the offer was bought for was delivered — a decision was made
+  /// and recorded — so the credit is spent, even though the customer never
+  /// opened the offer themselves.
+  ADMIN_CUSTOMER_DECISION
+}
+
 enum ProviderStatus {
   DRAFT
   PENDING_REVIEW
@@ -266,6 +281,7 @@ model User {
   createdProviderInvites     ProviderInviteToken[]       @relation("ProviderInviteTokenCreatedBy")
   companySettingsUpdates     CompanySettings[]           @relation("CompanySettingsUpdatedBy")
   customerMessageThreads     MessageThread[]             @relation("MessageThreadCustomer")
+  manualOfferRefunds         ManualOfferRefundAudit[]    @relation("ManualOfferRefundPerformedBy")
   providerMessageThreads     MessageThread[]             @relation("MessageThreadProviderUser")
   sentMessages               Message[]                   @relation("MessageSender")
 
@@ -865,6 +881,7 @@ model ProviderProfile {
   serviceAreas        ProviderServiceArea[]
   offers              Offer[]
   creditTransactions  ProviderCreditTransaction[]
+  manualOfferRefunds  ManualOfferRefundAudit[]
   packagePurchases    PackagePurchase[]
   contactRevealEvents ContactRevealEvent[]
   claimTokens         ProviderClaimToken[]
@@ -949,6 +966,14 @@ model Offer {
   /// under the old terms", which is why the provider panel renders no policy
   /// state at all for those rows rather than inventing one.
   unviewedRefundPolicy        Boolean                 @default(false)
+  /// When something other than a customer view closed this offer's refund
+  /// eligibility for good, and why.
+  ///
+  /// The worker excludes a non-NULL `refundBlockedAt` exactly as it excludes a
+  /// non-NULL `viewedAt`, so eligibility never rests on `viewedAt` alone. The
+  /// pair is written atomically with the status change that caused it.
+  refundBlockedAt             DateTime?
+  refundBlockedReason         OfferRefundBlockReason?
   submittedAt                 DateTime                @default(now())
   viewedAt                    DateTime?
   acceptedAt                  DateTime?
@@ -964,6 +989,7 @@ model Offer {
   matchedForRequest  ServiceRequest?             @relation("ServiceRequestMatchedOffer")
   contactRevealEvent ContactRevealEvent?
   messageThread      MessageThread?
+  manualRefundAudit  ManualOfferRefundAudit?
   // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
   // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
   // add_request_matching migration. Prisma cannot express partial indexes in
@@ -983,6 +1009,7 @@ model Offer {
   // The worker's candidate query, in its own selectivity order: policy offers
   // only, unviewed only, oldest first.
   @@index([unviewedRefundPolicy, viewedAt, submittedAt])
+  @@index([refundBlockedAt])
 }
 
 /// What a purchasable offer package sells.
@@ -1404,8 +1431,9 @@ model ProviderCreditTransaction {
   createdById   String?
   createdAt     DateTime              @default(now())
 
-  provider  ProviderProfile @relation(fields: [providerId], references: [id])
-  createdBy User?           @relation(fields: [createdById], references: [id])
+  provider          ProviderProfile         @relation(fields: [providerId], references: [id])
+  createdBy         User?                   @relation(fields: [createdById], references: [id])
+  manualRefundAudit ManualOfferRefundAudit?
 
   // A PostgreSQL partial unique index —
   // "ProviderCreditTransaction_one_refund_per_offer", UNIQUE ("referenceId")
@@ -1417,6 +1445,51 @@ model ProviderCreditTransaction {
   @@index([providerId])
   @@index([type])
   @@index([referenceType, referenceId])
+  @@index([createdAt])
+}
+
+/// The record of an administrator giving a credit back by hand.
+///
+/// Manual refund is an operations tool, not the product's refund policy. The
+/// policy — a credit returns when the customer never opened the offer inside 48
+/// hours — is what providers are promised and what the worker performs; this is
+/// the escape hatch for the cases an automatic rule cannot see, such as a
+/// request that turned out to be invalid. Nothing customer-facing mentions it,
+/// and it uses its own ledger reason so a report can always tell the two apart.
+///
+/// The row is mandatory: the service writes it in the same transaction as the
+/// ledger entry and the offer update, so a manual refund without an operator's
+/// name on it cannot exist. `performedById` is non-nullable for the same
+/// reason — an operations action with no operator is not an audit record.
+model ManualOfferRefundAudit {
+  id                  String   @id @default(cuid())
+  /// UNIQUE, and that is the point: this is a second, independent
+  /// database-level bar against paying one offer twice, beside the partial
+  /// unique index on the ledger itself.
+  offerId             String   @unique
+  providerId          String
+  /// The credit actually returned, snapshotted here rather than read back from
+  /// the offer later, so the record stays true whatever happens to the offer.
+  creditAmount        Int
+  /// The operational reason chosen from the closed list in refund-policy.ts.
+  /// Never shown to a provider or a customer.
+  reasonCode          String
+  /// The operator's free-text note. May carry internal detail, so it is read by
+  /// admin surfaces only and never reaches an outbound message.
+  note                String?
+  performedById       String
+  /// The ledger row this refund wrote, so the money and its justification are
+  /// one another's counterpart rather than two rows a reader has to correlate.
+  creditTransactionId String   @unique
+  createdAt           DateTime @default(now())
+
+  offer             Offer                     @relation(fields: [offerId], references: [id])
+  provider          ProviderProfile           @relation(fields: [providerId], references: [id])
+  performedBy       User                      @relation("ManualOfferRefundPerformedBy", fields: [performedById], references: [id])
+  creditTransaction ProviderCreditTransaction @relation(fields: [creditTransactionId], references: [id])
+
+  @@index([providerId])
+  @@index([performedById])
   @@index([createdAt])
 }
 

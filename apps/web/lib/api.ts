@@ -269,7 +269,6 @@ export type ExistingOfferSummary = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
-  creditRefundReason: string | null;
   refundEligibility: RefundEligibility;
   submittedAt: string;
 };
@@ -335,7 +334,11 @@ export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
  * submitted before the rule shipped, and the panel renders no policy state at
  * all for it rather than inventing one.
  */
-export type UnviewedRefundPolicyStatus = 'AWAITING_VIEW' | 'VIEWED' | 'REFUNDED';
+export type UnviewedRefundPolicyStatus =
+  | 'AWAITING_VIEW'
+  | 'VIEWED'
+  | 'ADMIN_DECISION'
+  | 'REFUNDED';
 
 export type RefundEligibility = {
   eligible: boolean;
@@ -366,7 +369,6 @@ export type ProviderOffer = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
-  creditRefundReason: string | null;
   refundEligibility: RefundEligibility;
   submittedAt: string;
   viewedAt: string | null;
@@ -428,7 +430,6 @@ export type RequestOfferPreview = {
   warrantyNote: string | null;
   creditCost: number;
   creditRefundedAt: string | null;
-  creditRefundReason: string | null;
   submittedAt: string;
 };
 

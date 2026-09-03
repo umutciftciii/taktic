@@ -160,3 +160,84 @@ test.describe('offer withdrawal', () => {
     }
   });
 });
+
+/**
+ * Scenario 4b — an administrator decides on the customer's behalf.
+ *
+ * The rule is proved in the integration suite; what only a browser can show is
+ * that the provider's own screen says the right thing about it. "Görüntülendi"
+ * would be a lie — no customer opened this offer — and the panel must say what
+ * actually happened instead.
+ */
+test.describe('an admin decision on the customer’s behalf', () => {
+  test('the provider is told a decision was recorded, not that it was viewed', async ({
+    browser,
+  }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(CATEGORY_COST);
+    const customerAccount = await createCustomer();
+    const adminAccount = await createAdmin();
+    const providerAccount = await createProvider({
+      categoryId: category.id,
+      location,
+      credits: STARTING_CREDITS,
+    });
+
+    const customer = await Actor.open(browser, 'customer', primaryRuntime);
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+    const provider = await Actor.open(browser, 'provider', primaryRuntime);
+
+    try {
+      await customer.loginToWeb(customerAccount.email, customerAccount.password);
+      const values = requestFormValues(location, customerAccount.name);
+      const requestId = await createRequest(customer, category, values);
+
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await approveRequest(admin, requestId);
+
+      await provider.loginToWeb(providerAccount.email, providerAccount.password);
+      await submitOffer(provider, {
+        providerId: providerAccount.id,
+        requestId,
+        expectedCreditCost: CATEGORY_COST,
+        priceAmount: '1500.00',
+        message: 'Yarın başlayabiliriz.',
+      });
+      const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);
+
+      // Before anyone decides, the provider is waiting on the customer.
+      await provider.gotoWeb(`/providers/${providerAccount.id}/offers/${offerId}`);
+      await expect(provider.page.getByTestId('offer-refund-policy-status')).toHaveText(
+        'Görüntülenme bekleniyor',
+      );
+
+      // The admin rejects on the customer's behalf, from the admin panel's own
+      // status control — the production path an operator takes.
+      await admin.gotoAdmin(`/offers/${offerId}`);
+      await admin.page.locator('select[name="status"]').selectOption('REJECTED');
+      await admin.page.getByRole('button', { name: 'Durumu Kaydet' }).click();
+      await expect(admin.page.getByText('Teklif durumu güncellendi.')).toBeVisible();
+      await assertNoErrorScreen(admin.page);
+
+      // The database still says, truthfully, that no customer opened it.
+      const decided = await prisma().offer.findUniqueOrThrow({ where: { id: offerId } });
+      expect(decided.viewedAt).toBeNull();
+      expect(decided.refundBlockedAt).not.toBeNull();
+      expect(decided.refundBlockedReason).toBe('ADMIN_CUSTOMER_DECISION');
+
+      await provider.gotoWeb(`/providers/${providerAccount.id}/offers/${offerId}`);
+      await expect(provider.page.getByTestId('offer-refund-policy-status')).toHaveText(
+        'Müşteri kararı kaydedildi — iade uygun değil',
+      );
+      const body = await provider.page.locator('body').innerText();
+      expect(body).not.toContain('Görüntülendi — iade uygun değil');
+      await assertNoErrorScreen(provider.page);
+
+      // Nothing was refunded by any of this.
+      expect(await countRefundTransactions(providerAccount.id)).toBe(0);
+      expect(await creditBalance(providerAccount.id)).toBe(STARTING_CREDITS - CATEGORY_COST);
+    } finally {
+      await Promise.all([customer.close(), admin.close(), provider.close()]);
+    }
+  });
+});

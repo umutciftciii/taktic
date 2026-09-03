@@ -109,6 +109,7 @@ export function providerRefundBadgeClass(status: string | null): string {
     case 'AWAITING_VIEW':
       return 'pdash-badge pdash-badge-warn';
     case 'VIEWED':
+    case 'ADMIN_DECISION':
       return 'pdash-badge pdash-badge-muted';
     default:
       return 'pdash-badge pdash-badge-muted';

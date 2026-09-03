@@ -7,6 +7,9 @@ const REASON_LABELS: Record<string, string> = {
   // platform produces today. NOT_VIEWED_48H is kept for ledger rows the removed
   // manual refund path wrote before this policy.
   UNVIEWED_OFFER_48H: 'Teklif 48 saat içinde görüntülenmedi',
+  // Manuel operasyon iadesi. Operasyon gerekçesi ":" sonrasında saklanır ve
+  // "Not: …" satırında görünür; ürünün iade politikası değildir.
+  MANUAL_ADMIN_REFUND: 'Yönetici manuel kredi iadesi',
   NOT_VIEWED_48H: 'Teklif 48 saat içinde görüntülenmedi',
   OFFER_SPEND: 'Teklif gönderimi',
   OFFER_REFUND: 'Teklif iadesi',

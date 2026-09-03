@@ -474,8 +474,15 @@ describe('provider offer withdrawal — refunds', () => {
     );
   });
 
-  it('offers the admin no way to refund by hand', async () => {
-    const { provider, cookie, offerId } = await withdrawalFixture();
+  it('lets an admin refund a withdrawn offer by hand, once, with an audit row', async () => {
+    const { provider, cookie, offerId, serviceRequest, customerCookie } = await withdrawalFixture();
+
+    // Viewed, so the automatic policy will never pay this one. The manual tool
+    // is the remedy for exactly that: a case the rule cannot see.
+    await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/offers/${offerId}/view`)
+      .set('Cookie', customerCookie)
+      .expect(201);
     await request(ctx.server)
       .post(withdrawUrl(provider.id, offerId))
       .set('Cookie', cookie)
@@ -484,18 +491,28 @@ describe('provider offer withdrawal — refunds', () => {
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const adminCookie = await loginAs(ctx.prisma, admin.id);
 
-    // The endpoint is gone: a hand-made refund could only ever contradict the
-    // promise the provider was shown.
     await request(ctx.server)
       .post(`/offers/${offerId}/refund-credit`)
       .set('Cookie', adminCookie)
-      .send({ reasonCode: 'ADMIN_OVERRIDE', override: true })
-      .expect(404);
+      .send({ reasonCode: 'PLATFORM_ERROR', note: 'Dahili not' })
+      .expect(201);
 
-    expect(await countRefunds()).toBe(0);
-    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(
-      STARTING_CREDITS - CATEGORY_COST,
-    );
+    expect(await countRefunds()).toBe(1);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(STARTING_CREDITS);
+
+    const audit = await ctx.prisma.manualOfferRefundAudit.findUniqueOrThrow({ where: { offerId } });
+    expect(audit.performedById).toBe(admin.id);
+    expect(audit.reasonCode).toBe('PLATFORM_ERROR');
+
+    // And it is a one-off: a second attempt adds no credit.
+    await request(ctx.server)
+      .post(`/offers/${offerId}/refund-credit`)
+      .set('Cookie', adminCookie)
+      .send({ reasonCode: 'PLATFORM_ERROR' })
+      .expect(409);
+
+    expect(await countRefunds()).toBe(1);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(STARTING_CREDITS);
   });
 
   it('does not disturb the competitor-closed verdict', async () => {
