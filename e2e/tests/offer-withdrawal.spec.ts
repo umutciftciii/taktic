@@ -93,7 +93,13 @@ test.describe('offer withdrawal', () => {
       await leaving.page.getByTestId('withdraw-open').click();
       await expect(leaving.page.getByText('Teklifiniz geri çekilecek.')).toBeVisible();
       await expect(leaving.page.getByText('Bu işlem geri alınamaz.')).toBeVisible();
-      await expect(leaving.page.getByText('Kredi iadesi yapılmaz.')).toBeVisible();
+      // Not "no refund": withdrawing decides nothing about the credit. What
+      // decides it is whether the customer opened the offer inside 48 hours.
+      await expect(
+        leaving.page.getByText(
+          'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.',
+        ).first(),
+      ).toBeVisible();
 
       await leaving.page.getByTestId('withdraw-confirm').click();
 

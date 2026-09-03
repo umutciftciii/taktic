@@ -63,7 +63,7 @@ const sharedEnv = {
   AUTH_COOKIE_NAME: 'taktic_session',
   // Both schedulers stay off: a cron firing mid-run could expire a fixture
   // while a test is asserting on it.
-  REFUND_SCHEDULER_ENABLED: 'false',
+  UNVIEWED_OFFER_REFUND_ENABLED: 'false',
   REQUEST_EXPIRY_SCHEDULER_ENABLED: 'false',
   REQUEST_REMINDER_SCHEDULER_ENABLED: 'false',
   // The credential throttle keys on the client IP, and every actor in the suite

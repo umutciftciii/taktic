@@ -15,7 +15,7 @@ import {
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
-import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
+import { updateOfferStatusAction } from '../actions';
 
 type StatTone = 'neutral' | 'success' | 'warning' | 'error';
 
@@ -31,16 +31,6 @@ type StatTone = 'neutral' | 'success' | 'warning' | 'error';
  * invite an error screen.
  */
 const statuses: OfferStatus[] = ['SHORTLISTED', 'ACCEPTED', 'REJECTED'];
-
-const refundReasonCodes = [
-  'NOT_VIEWED_48H',
-  'VIEWED_MANUAL_REVIEW',
-  'INVALID_REQUEST',
-  'CUSTOMER_UNREACHABLE',
-  'DUPLICATE_REQUEST',
-  'ADMIN_OVERRIDE',
-  'OTHER',
-];
 
 function statusTone(status: OfferStatus): StatTone {
   switch (status) {
@@ -60,14 +50,7 @@ function statusTone(status: OfferStatus): StatTone {
 }
 
 function refundTone(action: RefundRecommendedAction): StatTone {
-  switch (action) {
-    case 'FULL_REFUND':
-      return 'success';
-    case 'MANUAL_REVIEW':
-      return 'warning';
-    default:
-      return 'neutral';
-  }
+  return action === 'FULL_REFUND' ? 'success' : 'neutral';
 }
 
 type TimelineEvent = {
@@ -90,13 +73,12 @@ function buildTimeline(offer: Offer): TimelineEvent[] {
 
 type OfferDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ refunded?: string; statusSaved?: string }>;
+  searchParams?: Promise<{ statusSaved?: string }>;
 };
 
 export default async function OfferDetailPage({ params, searchParams }: OfferDetailPageProps) {
   const { id } = await params;
   const search = (await searchParams) ?? {};
-  const justRefunded = search.refunded === '1';
   const justStatusSaved = search.statusSaved === '1';
 
   const offer = await apiFetch<Offer>(`/offers/${id}`);
@@ -146,11 +128,6 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
         }
       />
 
-      {justRefunded ? (
-        <div className="notice-success" role="status" style={{ marginBottom: 14 }}>
-          İade işlemi başarıyla tamamlandı. Kredi hizmet verenin bakiyesine eklendi.
-        </div>
-      ) : null}
       {justStatusSaved ? (
         <div className="notice-success" role="status" style={{ marginBottom: 14 }}>
           Teklif durumu güncellendi.
@@ -456,53 +433,46 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
             </form>
           </SectionCard>
 
+          {/*
+            Read-only, and deliberately so.
+
+            This card used to be a form: pick a reason code, optionally tick
+            "override the NO_REFUND recommendation", refund. Under the 48-hour
+            unviewed-offer rule there is nothing left for it to decide — a
+            credit comes back when, and only when, the customer never opened the
+            offer within the window, and the worker applies that without being
+            asked. A hand-made refund could only ever contradict the promise the
+            provider was shown, so the endpoint behind this form was removed
+            with it. What stays is the record of what the rule did.
+          */}
           <SectionCard title="Kredi İadesi">
             {offer.creditRefundedAt ? (
               <div className="notice-success">
-                {justRefunded
-                  ? 'İade işlemi başarıyla tamamlandı.'
-                  : 'Bu teklifin kredi iadesi tamamlandı.'}
-                {offer.creditRefundedAt ? (
+                Bu teklifin kredi iadesi tamamlandı.{' '}
+                <span className="muted">{formatDateTime(offer.creditRefundedAt)}</span>
+                {offer.creditRefundReason ? (
                   <>
-                    {' '}
-                    <span className="muted">{formatDateTime(offer.creditRefundedAt)}</span>
+                    {' · '}
+                    <code style={{ fontSize: 12 }}>{offer.creditRefundReason}</code>
                   </>
                 ) : null}
               </div>
-            ) : offer.creditSpentTransactionId ? (
-              <form action={refundOfferCreditAction} style={{ display: 'grid', gap: 12 }}>
-                <input type="hidden" name="id" value={offer.id} />
-                <label className="form-row">
-                  <span>Sebep kodu *</span>
-                  <select
-                    name="reasonCode"
-                    defaultValue={offer.refundEligibility.reasonCode}
-                  >
-                    {refundReasonCodes.map((reasonCode) => (
-                      <option key={reasonCode} value={reasonCode}>
-                        {reasonCode}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="form-row">
-                  <span>Yönetici notu</span>
-                  <textarea name="reason" />
-                </label>
-                {offer.refundEligibility.recommendedAction === 'NO_REFUND' ? (
-                  <label className="checkbox-row">
-                    <input type="checkbox" name="override" value="true" />
-                    <span>&quot;İade yok&quot; önerisini geçersiz kıl</span>
-                  </label>
-                ) : null}
-                <div>
-                  <button className="btn btn-danger btn-block" type="submit">
-                    Kredi iade et
-                  </button>
-                </div>
-              </form>
+            ) : offer.refundEligibility.policyStatus ? (
+              <>
+                <p style={{ marginTop: 0 }}>
+                  <span className={refundActionBadgeClass(offer.refundEligibility.recommendedAction)}>
+                    {offer.refundEligibility.policyStatusLabel}
+                  </span>
+                </p>
+                <p className="muted" style={{ marginBottom: 0, fontSize: 13 }}>
+                  {offer.refundEligibility.details}
+                </p>
+              </>
             ) : (
-              <div className="notice-warning">Bu teklifin kredi harcama işlemi yok.</div>
+              <div className="notice-warning">
+                Bu teklif, 48 saat iade kuralı yürürlüğe girmeden önce gönderildi ve bu kural
+                kapsamında değil.
+              </div>
             )}
           </SectionCard>
         </div>

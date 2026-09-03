@@ -221,7 +221,8 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
             <div className="rail-note">
               <strong>Kredi nasıl çalışır?</strong> Teklif göndermek kredi kullanır; bir teklifin
               kredi bedeli talebin kategorisine göre değişir ve her talebin detay ekranında
-              yazılıdır. Görüntülenmeyen veya geçersiz taleplerde iade uygunluğu otomatik taranır.
+              yazılıdır. Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz
+              otomatik olarak iade edilir.
             </div>
           </aside>
         </div>

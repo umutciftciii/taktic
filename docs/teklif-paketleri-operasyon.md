@@ -82,14 +82,27 @@ Tek merkezî çözümleyici: `apps/api/src/modules/entitlements/entitlement-reso
 
 ### İade kuralı
 
-Mevcut ürün kuralı: **geri çekilen teklifte iade yoktur**
-(`PROVIDER_WITHDRAWN_OR_CANCELLED`). Aynı kural kota için de geçerlidir.
+Tek kural: **teklif oluşturulduktan sonraki 48 saat içinde yetkili müşteri
+tarafından hiç görüntülenmeyen teklifin kredisi otomatik iade edilir**
+(`UNVIEWED_OFFER_48H`). Görüntülenmiş teklifte kabul, red, süre dolumu veya geri
+çekme fark etmez — iade yoktur. Görüntülenmemiş teklifte de teklifin durumu tek
+başına iadeyi engellemez; belirleyici olan 48 saat kuralıdır. Manuel iade yolu
+yoktur; admin ekranı sonucu gösterir, iade üretmez.
 
-Buna ek olarak, dönemsel paketle gönderilen teklifler için **hiçbir koşulda**
-teklif başına iade yapılmaz (`PERIOD_PACKAGE_NOT_REFUNDABLE`). Dönemsel ürün
-teklif başına değil dönem başına satılır; kota iadesi satın alınandan fazla kota
-yaratırdı. 48 saat kuralına dayalı otomatik iade taraması yalnızca tek seferlik
-kredi harcamalarını görür (`creditSpentTransactionId IS NOT NULL` filtresi).
+Kural yalnız `Offer.unviewedRefundPolicy = true` olan teklifler için işler. Bu
+kolon, kuralla birlikte deploy edilen teklif oluşturma yolunda yazılır; daha
+önce gönderilmiş her teklif migration'ın `false` varsayılanını taşır ve kural
+kapsamı dışındadır. Geçmişe dönük iade veya backfill yapılmaz.
+
+Dönemsel paketle gönderilen teklifler için **hiçbir koşulda** teklif başına iade
+yapılmaz (`PERIOD_PACKAGE_NOT_REFUNDABLE`). Dönemsel ürün teklif başına değil
+dönem başına satılır; kota iadesi satın alınandan fazla kota yaratırdı. Otomatik
+iade yalnızca tek seferlik kredi harcamalarını görür
+(`creditSpentTransactionId IS NOT NULL` filtresi).
+
+İdempotency veritabanı düzeyindedir: `ProviderCreditTransaction_one_refund_per_offer`
+kısmi UNIQUE index'i aynı teklif için ikinci bir `OFFER_REFUND` satırını
+imkânsız kılar.
 
 ## Otomatik yenileme — gerçek durum
 
@@ -229,7 +242,7 @@ alma `FAILED` olur.
 
 - `apps/api/test/offer-package-entitlements.spec.ts` — 30 gün aritmetiği, hak
   önceliği, kota tüketimi ve paralel tüketim, kapsam içi/dışı, kapsam
-  dondurulması, INACTIVE kategori, günlük limit, geri çekmede iade yok.
+  dondurulması, INACTIVE kategori, günlük limit.
 - `apps/api/test/offer-package-settlement.spec.ts` — webhook ile dönem verilmesi,
   grup genişletmesi, snapshot değişmezliği, tekrarlı/yarışan webhook
   idempotency'si, imzasız/ödenmemiş olayda hak verilmemesi, elle yenileme

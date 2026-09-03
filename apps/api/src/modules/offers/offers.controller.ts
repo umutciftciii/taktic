@@ -5,17 +5,17 @@ import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
 import { ListOffersQueryDto } from './dto/list-offers-query.dto';
-import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { ExecuteRefundScanDto, RefundScanQueryDto } from './dto/refund-scan.dto';
 import { UpdateOfferStatusDto } from './dto/update-offer-status.dto';
-import { RefundScanService } from './refund-scan.service';
+import { UnviewedOfferRefundService } from './unviewed-offer-refund.service';
 import { OffersService } from './offers.service';
 
 @Controller('offers')
 export class OffersController {
   constructor(
     @Inject(OffersService) private readonly offersService: OffersService,
-    @Inject(RefundScanService) private readonly refundScanService: RefundScanService,
+    @Inject(UnviewedOfferRefundService)
+    private readonly unviewedOfferRefund: UnviewedOfferRefundService,
   ) {}
 
   @Get()
@@ -39,17 +39,14 @@ export class OffersController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   refundScan(@Query() query: RefundScanQueryDto) {
-    return this.refundScanService.dryRun({
-      olderThanHours: query.olderThanHours,
-      limit: query.limit,
-    });
+    return this.unviewedOfferRefund.dryRun({ limit: query.limit });
   }
 
   @Post('refund-scan/execute')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   executeRefundScan(@Body() dto: ExecuteRefundScanDto) {
-    return this.refundScanService.execute(dto);
+    return this.unviewedOfferRefund.execute(dto);
   }
 
   @Get(':id')
@@ -76,12 +73,5 @@ export class OffersController {
     @CurrentUser() user: AuthUser | null,
   ) {
     return this.offersService.updateOfferStatus(id, dto.status, user);
-  }
-
-  @Post(':id/refund-credit')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
-  refundOfferCredit(@Param('id') id: string, @Body() dto: RefundOfferCreditDto) {
-    return this.offersService.refundOfferCredit(id, dto);
   }
 }

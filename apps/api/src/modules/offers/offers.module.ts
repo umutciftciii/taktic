@@ -3,12 +3,12 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { OffersController } from './offers.controller';
 import { OffersService } from './offers.service';
-import { RefundScanService } from './refund-scan.service';
+import { UnviewedOfferRefundService } from './unviewed-offer-refund.service';
 
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [OffersController],
-  providers: [OffersService, RefundScanService],
-  exports: [OffersService, RefundScanService],
+  providers: [OffersService, UnviewedOfferRefundService],
+  exports: [OffersService, UnviewedOfferRefundService],
 })
 export class OffersModule {}

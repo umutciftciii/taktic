@@ -1,99 +1,90 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
-import { OfferRejectionReason, OfferStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
-import { calculateRefundEligibility } from './refund-policy';
+import {
+  UNVIEWED_OFFER_REFUND_REASON,
+  UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+  calculateRefundEligibility,
+} from './refund-policy';
 import { refundOfferCreditInTransaction } from './offers.service';
 
-type RefundScanOptions = {
-  olderThanHours?: number | string;
+type UnviewedOfferRefundOptions = {
   limit?: number | string;
 };
 
-type SkippedReason =
-  | 'alreadyRefunded'
-  | 'viewed'
-  | 'notOldEnough'
-  | 'noCreditSpend'
-  | 'statusNotEligible';
+type SkippedReason = 'alreadyRefunded' | 'viewed' | 'notOldEnough' | 'noCreditSpend' | 'outOfPolicy';
 
-const DEFAULT_OLDER_THAN_HOURS = 48;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
-const AUTOMATIC_REFUND_REASON = 'NOT_VIEWED_48H: Automatic refund scan';
-const INELIGIBLE_STATUSES = [
-  OfferStatus.ACCEPTED,
-  OfferStatus.WITHDRAWN,
-  OfferStatus.CANCELLED,
-  OfferStatus.EXPIRED,
-] as const;
 
-const refundScanOfferSelect = {
+/**
+ * The columns the policy reads, and only those.
+ *
+ * `status` is absent on purpose. Under this policy an offer's status decides
+ * nothing: an unviewed offer that expired, was withdrawn or was rejected is
+ * still an unviewed offer, and its credit still comes back. Leaving the column
+ * out means no future edit can quietly reintroduce a status rule.
+ */
+const candidateOfferSelect = {
   id: true,
   providerId: true,
   requestId: true,
-  status: true,
   creditCost: true,
   creditSpentTransactionId: true,
   creditRefundedTransactionId: true,
   creditRefundedAt: true,
   submittedAt: true,
   viewedAt: true,
-  acceptedAt: true,
-  rejectionReason: true,
+  unviewedRefundPolicy: true,
   // The scan already filters on a non-null creditSpentTransactionId, which no
   // period-package offer has, so this changes no row it selects. It is here so
-  // the policy verdict written into the scan's report names the real reason.
+  // the policy verdict written into the report names the real reason.
   entitlementSource: true,
 } satisfies Prisma.OfferSelect;
 
+type CandidateOffer = Prisma.OfferGetPayload<{ select: typeof candidateOfferSelect }>;
+
 /**
- * Offers the platform closed because a competing offer was accepted are never
- * automatically refunded.
+ * Pays back the credit of an offer the customer never opened.
  *
- * This filters on the reason, not on the REJECTED status: an offer the customer
- * rejected by hand carries no reason and keeps the refund behaviour it had
- * before matching existed.
+ * The whole rule: an offer inside the policy (see `Offer.unviewedRefundPolicy`)
+ * that has spent a one-time credit, carries no `viewedAt`, and was submitted at
+ * least 48 hours ago, is refunded exactly once. Nothing else is refunded, by
+ * this service or by any other — the manual admin refund it used to sit beside
+ * was removed with this policy, because a hand-made refund is a second answer
+ * to a question that now has one.
+ *
+ * Late is safe, early is not. The worker refunds on the first run after the
+ * window closes, whenever that is; the cutoff is computed from a fixed 48 hours
+ * rather than from a parameter, so no caller — scheduler, admin screen or test —
+ * can shorten it and pay out on an offer the customer could still open.
  */
-const notCompetitorRejectedWhere = {
-  // Written as an explicit OR rather than `not`, because SQL inequality does not
-  // match NULL and the overwhelming majority of rows have no reason at all.
-  OR: [
-    { rejectionReason: null },
-    { rejectionReason: { notIn: [OfferRejectionReason.COMPETITOR_ACCEPTED] } },
-  ],
-} satisfies Prisma.OfferWhereInput;
-
-const competitorRejectedWhere = {
-  rejectionReason: OfferRejectionReason.COMPETITOR_ACCEPTED,
-} satisfies Prisma.OfferWhereInput;
-
-type RefundScanOffer = Prisma.OfferGetPayload<{ select: typeof refundScanOfferSelect }>;
-
 @Injectable()
-export class RefundScanService {
-  private readonly logger = new Logger(RefundScanService.name);
+export class UnviewedOfferRefundService {
+  private readonly logger = new Logger(UnviewedOfferRefundService.name);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
   ) {}
 
-  async dryRun(options: RefundScanOptions = {}) {
-    const normalized = normalizeRefundScanOptions(options);
+  async dryRun(options: UnviewedOfferRefundOptions = {}) {
+    const limit = normalizeLimit(options.limit);
     const now = new Date();
-    const cutoff = getCutoff(normalized.olderThanHours);
+    const cutoff = getCutoff(now);
     const offers = await this.prisma.offer.findMany({
-      where: automaticRefundCandidateWhere(cutoff),
+      where: refundCandidateWhere(cutoff),
       orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
-      take: normalized.limit,
-      select: refundScanOfferSelect,
+      take: limit,
+      select: candidateOfferSelect,
     });
 
     const items = [];
 
     for (const offer of offers) {
-      const eligibility = getAutomaticRefundEligibility(offer, normalized.olderThanHours, now);
+      const eligibility = getRefundEligibility(offer, now);
       if (eligibility.eligible) {
         items.push({
           offerId: offer.id,
@@ -112,6 +103,7 @@ export class RefundScanService {
     const skippedCount = Object.values(skippedSummary).reduce((sum, count) => sum + count, 0);
 
     return {
+      windowHours: UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
       eligibleCount: items.length,
       skippedCount,
       items,
@@ -119,13 +111,13 @@ export class RefundScanService {
     };
   }
 
-  async execute(options: RefundScanOptions = {}) {
-    const normalized = normalizeRefundScanOptions(options);
-    const cutoff = getCutoff(normalized.olderThanHours);
+  async execute(options: UnviewedOfferRefundOptions = {}) {
+    const limit = normalizeLimit(options.limit);
+    const cutoff = getCutoff(new Date());
     const offers = await this.prisma.offer.findMany({
-      where: automaticRefundCandidateWhere(cutoff),
+      where: refundCandidateWhere(cutoff),
       orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
-      take: normalized.limit,
+      take: limit,
       select: { id: true },
     });
 
@@ -133,22 +125,28 @@ export class RefundScanService {
 
     for (const offer of offers) {
       try {
-        const result = await this.prisma.$transaction(
+        // runSerializable rather than a bare $transaction: two workers reaching
+        // the same offer make PostgreSQL abort one with a write conflict, and a
+        // conflict is not a failure — the loser replays, sees the refund already
+        // recorded and skips. Without the retry it would be reported as FAILED
+        // and an operator would go looking for a bug that is not there.
+        const result = await runSerializable(
+          this.prisma,
           async (tx) => {
+            // Re-read inside the transaction. The list above was assembled
+            // outside it and a customer may have opened the offer since; the
+            // eligibility that decides a payment is the one computed from the
+            // row this transaction can see.
             const currentOffer = await tx.offer.findUnique({
               where: { id: offer.id },
-              select: refundScanOfferSelect,
+              select: candidateOfferSelect,
             });
 
             if (!currentOffer) {
               return { status: 'SKIPPED' as const, reason: 'Offer not found' };
             }
 
-            const eligibility = getAutomaticRefundEligibility(
-              currentOffer,
-              normalized.olderThanHours,
-              new Date(),
-            );
+            const eligibility = getRefundEligibility(currentOffer, new Date());
             if (!eligibility.eligible) {
               return { status: 'SKIPPED' as const, reason: eligibility.reason };
             }
@@ -156,16 +154,16 @@ export class RefundScanService {
             const { refundTransaction } = await refundOfferCreditInTransaction(
               tx,
               currentOffer,
-              AUTOMATIC_REFUND_REASON,
-              { enforceAutomaticEligibility: true },
+              UNVIEWED_OFFER_REFUND_REASON,
             );
+
             return {
               status: 'REFUNDED' as const,
-              reason: AUTOMATIC_REFUND_REASON,
+              reason: UNVIEWED_OFFER_REFUND_REASON,
               refundTransactionId: refundTransaction.id,
             };
           },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          { label: 'unviewedOfferRefund.execute' },
         );
 
         // Outside the transaction, and only for a refund that really happened.
@@ -184,6 +182,8 @@ export class RefundScanService {
 
         results.push({ offerId: offer.id, ...result });
       } catch (err) {
+        // A 409 is the expected outcome of a race, not a failure: another run,
+        // or the database's own one-refund-per-offer index, got there first.
         if (err instanceof ConflictException) {
           results.push({
             offerId: offer.id,
@@ -192,6 +192,11 @@ export class RefundScanService {
           });
           continue;
         }
+
+        this.logger.error(
+          `Refund execution failed for offer ${offer.id}`,
+          err instanceof Error ? err.stack : String(err),
+        );
 
         results.push({
           offerId: offer.id,
@@ -212,95 +217,81 @@ export class RefundScanService {
     };
   }
 
+  /**
+   * Why the offers this scan did not pick up were left alone. Counted over the
+   * policy's own population, so an offer written before the policy shipped is
+   * reported as out of scope rather than padding one of the other buckets.
+   */
   private async getSkippedSummary(cutoff: Date) {
-    const [
-      alreadyRefunded,
-      viewed,
-      noCreditSpend,
-      statusNotEligible,
-      notOldEnough,
-    ] = await Promise.all([
+    const [alreadyRefunded, viewed, noCreditSpend, notOldEnough, outOfPolicy] = await Promise.all([
       this.prisma.offer.count({
         where: {
+          unviewedRefundPolicy: true,
           OR: [{ creditRefundedTransactionId: { not: null } }, { creditRefundedAt: { not: null } }],
         },
       }),
       this.prisma.offer.count({
-        where: {
-          ...notRefundedWhere,
-          OR: [{ viewedAt: { not: null } }, { status: OfferStatus.VIEWED }],
-        },
+        where: { ...inPolicyUnrefundedWhere, viewedAt: { not: null } },
       }),
       this.prisma.offer.count({
         where: {
-          ...notRefundedWhere,
+          ...inPolicyUnrefundedWhere,
           viewedAt: null,
-          status: { not: OfferStatus.VIEWED },
           OR: [{ creditSpentTransactionId: null }, { creditCost: { lte: 0 } }],
         },
       }),
       this.prisma.offer.count({
         where: {
-          ...notRefundedWhere,
+          ...inPolicyUnrefundedWhere,
+          viewedAt: null,
           creditSpentTransactionId: { not: null },
           creditCost: { gt: 0 },
-          viewedAt: null,
-          OR: [{ status: { in: [...INELIGIBLE_STATUSES] } }, competitorRejectedWhere],
-        },
-      }),
-      this.prisma.offer.count({
-        where: {
-          ...notRefundedWhere,
-          creditSpentTransactionId: { not: null },
-          creditCost: { gt: 0 },
-          viewedAt: null,
-          status: { notIn: [OfferStatus.VIEWED, ...INELIGIBLE_STATUSES] },
           submittedAt: { gt: cutoff },
-          AND: [notCompetitorRejectedWhere],
         },
       }),
+      this.prisma.offer.count({ where: { unviewedRefundPolicy: false } }),
     ]);
 
-    return {
-      alreadyRefunded,
-      viewed,
-      notOldEnough,
-      noCreditSpend,
-      statusNotEligible,
-    };
+    return { alreadyRefunded, viewed, notOldEnough, noCreditSpend, outOfPolicy };
   }
 }
 
-function getAutomaticRefundEligibility(
-  offer: RefundScanOffer,
-  olderThanHours: number,
-  now: Date,
-) {
+function getRefundEligibility(offer: CandidateOffer, now: Date) {
   const policy = calculateRefundEligibility(offer, now);
 
+  // The policy verdict is the decision; this only translates a refusal into the
+  // bucket the report names it by. Ordered from the most settled fact outwards,
+  // so an already-refunded offer never reads as "not old enough".
   if (offer.creditRefundedTransactionId || offer.creditRefundedAt) {
     return skipped('alreadyRefunded', policy.hoursSinceSubmitted, 'Offer credit already refunded');
+  }
+
+  if (!offer.unviewedRefundPolicy) {
+    return skipped(
+      'outOfPolicy',
+      policy.hoursSinceSubmitted,
+      'Offer predates the unviewed-offer refund policy',
+    );
   }
 
   if (!offer.creditSpentTransactionId || offer.creditCost <= 0) {
     return skipped('noCreditSpend', policy.hoursSinceSubmitted, 'Offer has no credit spend');
   }
 
-  if (offer.viewedAt || offer.status === OfferStatus.VIEWED) {
+  if (offer.viewedAt) {
     return skipped('viewed', policy.hoursSinceSubmitted, 'Offer was viewed');
   }
 
-  if (INELIGIBLE_STATUSES.includes(offer.status as (typeof INELIGIBLE_STATUSES)[number])) {
-    return skipped('statusNotEligible', policy.hoursSinceSubmitted, `Offer status is ${offer.status}`);
-  }
-
-  if (policy.hoursSinceSubmitted === null || policy.hoursSinceSubmitted < olderThanHours) {
+  if (
+    policy.hoursSinceSubmitted === null ||
+    policy.hoursSinceSubmitted < UNVIEWED_OFFER_REFUND_WINDOW_HOURS
+  ) {
     return skipped('notOldEnough', policy.hoursSinceSubmitted, 'Offer is not old enough');
   }
 
-  if (policy.recommendedAction !== 'FULL_REFUND' || policy.reasonCode !== 'NOT_VIEWED_48H') {
+  if (policy.recommendedAction !== 'FULL_REFUND' || policy.reasonCode !== UNVIEWED_OFFER_REFUND_REASON) {
     return skipped(
-      'statusNotEligible',
+      'outOfPolicy',
       policy.hoursSinceSubmitted,
       `Refund policy returned ${policy.recommendedAction}/${policy.reasonCode}`,
     );
@@ -323,53 +314,46 @@ function skipped(skippedReason: SkippedReason, hoursSinceSubmitted: number | nul
   };
 }
 
-function normalizeRefundScanOptions(options: RefundScanOptions) {
-  const olderThanHours = readPositiveInteger(options.olderThanHours, 'olderThanHours');
-  const limit = readPositiveInteger(options.limit, 'limit');
-
-  if (limit !== undefined && limit > MAX_LIMIT) {
-    throw new BadRequestException(`limit must be a positive integer up to ${MAX_LIMIT}`);
-  }
-
-  return {
-    olderThanHours: olderThanHours ?? DEFAULT_OLDER_THAN_HOURS,
-    limit: limit ?? DEFAULT_LIMIT,
-  };
-}
-
-function readPositiveInteger(value: number | string | undefined, fieldName: string) {
+function normalizeLimit(value: number | string | undefined) {
   if (value === undefined) {
-    return undefined;
+    return DEFAULT_LIMIT;
   }
 
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new BadRequestException(`${fieldName} must be a positive integer`);
+    throw new BadRequestException('limit must be a positive integer');
+  }
+
+  if (parsed > MAX_LIMIT) {
+    throw new BadRequestException(`limit must be a positive integer up to ${MAX_LIMIT}`);
   }
 
   return parsed;
 }
 
-function getCutoff(olderThanHours: number) {
-  const effectiveHours = Math.max(olderThanHours, DEFAULT_OLDER_THAN_HOURS);
-  return new Date(Date.now() - effectiveHours * 60 * 60 * 1000);
+/**
+ * The 48-hour boundary, derived from the constant and from nothing else.
+ *
+ * There is no parameter here and there was one before. A caller-supplied window
+ * can only ever be used to refund sooner than the promise allows, which would
+ * pay for an offer the customer still had time to open.
+ */
+function getCutoff(now: Date) {
+  return new Date(now.getTime() - UNVIEWED_OFFER_REFUND_WINDOW_HOURS * 60 * 60 * 1000);
 }
 
-function automaticRefundCandidateWhere(cutoff: Date): Prisma.OfferWhereInput {
+function refundCandidateWhere(cutoff: Date): Prisma.OfferWhereInput {
   return {
-    ...notRefundedWhere,
+    ...inPolicyUnrefundedWhere,
     creditSpentTransactionId: { not: null },
     creditCost: { gt: 0 },
     viewedAt: null,
-    status: { notIn: [OfferStatus.VIEWED, ...INELIGIBLE_STATUSES] },
     submittedAt: { lte: cutoff },
-    // Nested under AND so the OR inside it cannot collide with any OR the
-    // caller merges into this filter.
-    AND: [notCompetitorRejectedWhere],
   };
 }
 
-const notRefundedWhere = {
+const inPolicyUnrefundedWhere = {
+  unviewedRefundPolicy: true,
   creditRefundedTransactionId: null,
   creditRefundedAt: null,
 } satisfies Prisma.OfferWhereInput;

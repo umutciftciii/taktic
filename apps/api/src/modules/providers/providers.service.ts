@@ -936,6 +936,7 @@ export class ProvidersService {
             creditRefundedTransactionId: true,
             creditRefundedAt: true,
             creditRefundReason: true,
+            unviewedRefundPolicy: true,
             viewedAt: true,
             acceptedAt: true,
             submittedAt: true,
@@ -1093,6 +1094,12 @@ export class ProvidersService {
               // later from the absence of a ledger row.
               entitlementSource: decision.source,
               entitlementId: decision.entitlementId,
+              // The opt-in into the 48-hour unviewed-offer refund rule, written
+              // here because this is the code path that shipped with it. Every
+              // offer created from now on carries the promise the provider was
+              // shown; every offer that predates this line keeps the column's
+              // false default and is out of scope forever.
+              unviewedRefundPolicy: true,
             },
           });
 
@@ -2054,6 +2061,7 @@ function toProviderRequestDetail(
           creditRefundedTransactionId: true;
           creditRefundedAt: true;
           creditRefundReason: true;
+          unviewedRefundPolicy: true;
           viewedAt: true;
           acceptedAt: true;
           submittedAt: true;
@@ -2112,14 +2120,15 @@ function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
 }
 
 type RefundPolicyOfferShape = {
-  status: OfferStatus;
   submittedAt: Date | string | null;
   viewedAt: Date | string | null;
-  acceptedAt: Date | string | null;
   creditCost: number;
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: Date | string | null;
+  // Required: a provider screen that renders a refund verdict must state
+  // whether the offer is inside the policy at all.
+  unviewedRefundPolicy: boolean;
   rejectionReason?: OfferRejectionReason | null;
 };
 

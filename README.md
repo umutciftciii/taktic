@@ -236,22 +236,27 @@ Nothing in the product can repeat, edit or undo a reveal; the accept transaction
 
 ## Local Ops
 
-Refund scan automation is disabled by default. The scheduled worker is optional and uses the same execution logic as the admin refund scan endpoint, so it preserves the same eligibility checks, transactions, and idempotency behavior.
+### Unviewed-offer credit refund
+
+The platform refunds one thing and only one thing: the credit a provider spent on an offer that the authorised customer never opened within 48 hours of it being submitted. A viewed offer is never refunded — not on rejection, expiry, withdrawal or anything else — and an unviewed one is refunded regardless of the status it ended in. There is no manual refund path; the admin offer screen shows the outcome and cannot create one.
+
+Only offers created after this policy shipped are covered. `Offer.unviewedRefundPolicy` records that per row, so an offer sold under the earlier terms is out of scope permanently and no clock comparison decides it.
+
+The worker is disabled by default. It uses the same execution logic as the admin refund-scan endpoint, so both share one set of eligibility checks, one transaction and one database-level idempotency guarantee (`ProviderCreditTransaction_one_refund_per_offer`, a partial unique index that makes a second refund row for one offer impossible).
 
 To enable it locally:
 
 ```bash
-REFUND_SCHEDULER_ENABLED=true
+UNVIEWED_OFFER_REFUND_ENABLED=true
 ```
 
 Relevant environment variables:
 
-- `REFUND_SCHEDULER_ENABLED=false`
-- `REFUND_SCHEDULER_CRON=0 * * * *`
-- `REFUND_SCAN_OLDER_THAN_HOURS=48`
-- `REFUND_SCAN_LIMIT=100`
+- `UNVIEWED_OFFER_REFUND_ENABLED=false`
+- `UNVIEWED_OFFER_REFUND_CRON=0 * * * *`
+- `UNVIEWED_OFFER_REFUND_LIMIT=100`
 
-The scheduler only runs full refunds for the existing not-viewed offer policy. It does not perform partial refunds.
+There is deliberately no window setting. The 48 hours are the promise made to providers; a cron that runs late refunds on its next pass, and no configuration can refund early. Ledger rows written by the worker carry the reason `UNVIEWED_OFFER_48H`.
 
 ### Request expiry and reminder
 

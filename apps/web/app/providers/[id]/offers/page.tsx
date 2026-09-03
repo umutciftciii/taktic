@@ -1,6 +1,11 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { apiFetch, getCurrentUser, ProviderOffer } from '../../../../lib/api';
+import {
+  apiFetch,
+  getCurrentUser,
+  ProviderOffer,
+  UNVIEWED_OFFER_REFUND_NOTICE,
+} from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
 import { OffersTable } from './offers-table';
@@ -94,9 +99,8 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
       )}
 
       <p className="pdash-page-footer">
-        İade politikası: teklifini kendin geri çekersen kredi iadesi yapılmaz. Görüntülenmeyen veya
-        geçersiz hale gelen taleplerde iade uygunluğu otomatik taranır ve sonucu her teklifin
-        satırında görünür.
+        İade politikası: {UNVIEWED_OFFER_REFUND_NOTICE} Her teklifin iade durumu kendi satırında
+        görünür.
       </p>
     </ProviderShell>
   );

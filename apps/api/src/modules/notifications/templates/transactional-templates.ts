@@ -1,3 +1,4 @@
+import { UNVIEWED_OFFER_REFUND_NOTICE } from '../../offers/refund-policy';
 import { EmailBranding } from '../email-branding.config';
 import { NotificationMessage } from '../notification.port';
 import {
@@ -657,12 +658,12 @@ function offerNotSelected(subject: string, fullName: string, data: Data): EmailD
       spacer(24),
       cta('Uygun talepleri gör', text(data.requestsUrl), 'primary'),
       spacer(20),
-      // The real policy, in place of the handoff's unmeasured tip: a delivered
-      // offer that simply was not chosen is not refundable.
-      note(
-        'Teklifiniz müşteriye ulaştığı için bu teklif kredisi iade edilmez. Kredi geçmişinizi ' +
-          'panelinizden görebilirsiniz.',
-      ),
+      // The real policy, and the only one. Losing the request decides nothing
+      // about the credit: what decides it is whether the customer ever opened
+      // this offer. Saying "not refundable" here was true under the previous
+      // rules and would now be a false denial — an offer closed by a competing
+      // acceptance that the customer never opened is refunded like any other.
+      note(UNVIEWED_OFFER_REFUND_NOTICE),
     ]),
   };
 }

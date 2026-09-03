@@ -121,28 +121,16 @@ export function statusBadgeClass(status: string) {
   }
 }
 
-export function refundActionLabel(action: string) {
-  const labels: Record<string, string> = {
-    FULL_REFUND: 'Tam iade önerilir',
-    MANUAL_REVIEW: 'Manuel inceleme',
-    NO_REFUND: 'İade yok',
-  };
+/**
+ * The one sentence this platform says about credit refunds, and the only one
+ * any provider-facing screen may say.
+ *
+ * A single constant because it is a commercial promise: a screen that
+ * paraphrases it promises something the worker does not do.
+ */
+export const UNVIEWED_OFFER_REFUND_NOTICE =
+  'Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.';
 
-  return labels[action] ?? action;
-}
-
-export function refundActionBadgeClass(action: string) {
-  switch (action) {
-    case 'FULL_REFUND':
-      return 'badge badge-good';
-    case 'MANUAL_REVIEW':
-      return 'badge badge-warn';
-    case 'NO_REFUND':
-      return 'badge badge-muted';
-    default:
-      return 'badge';
-  }
-}
 
 /**
  * The stored urgency code in the words a customer reads.

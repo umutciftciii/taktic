@@ -49,8 +49,7 @@ const statusFilters: Array<{ label: string; value: StatusFilter }> = [
 
 const refundFilters: Array<{ label: string; value: RefundActionFilter }> = [
   { label: 'Tümü', value: 'all' },
-  { label: 'Tam iade önerilir', value: 'FULL_REFUND' },
-  { label: 'Manuel inceleme', value: 'MANUAL_REVIEW' },
+  { label: 'İade edilecek', value: 'FULL_REFUND' },
   { label: 'İade yok', value: 'NO_REFUND' },
 ];
 
@@ -73,7 +72,7 @@ function normalizeStatus(value: string | undefined): StatusFilter {
 
 function normalizeRefundAction(value: string | undefined): RefundActionFilter {
   const upper = value?.toUpperCase();
-  if (upper === 'FULL_REFUND' || upper === 'MANUAL_REVIEW' || upper === 'NO_REFUND') {
+  if (upper === 'FULL_REFUND' || upper === 'NO_REFUND') {
     return upper;
   }
   return 'all';
@@ -132,8 +131,11 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
   const fullRefundCount = offers.filter(
     (o) => o.refundEligibility.recommendedAction === 'FULL_REFUND',
   ).length;
-  const manualReviewCount = offers.filter(
-    (o) => o.refundEligibility.recommendedAction === 'MANUAL_REVIEW',
+  // Offers the customer opened, which the 48-hour rule settles for good. Kept
+  // as a figure an operator can read at a glance; there is no action attached to
+  // it, because a viewed offer is never refunded.
+  const viewedCount = offers.filter(
+    (o) => o.refundEligibility.policyStatus === 'VIEWED',
   ).length;
   const newUnviewedCount = offers.filter(
     (o) => o.status === 'SUBMITTED' && !o.viewedAt,
@@ -184,11 +186,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
           value={fullRefundCount}
           tone={fullRefundCount > 0 ? 'success' : 'neutral'}
         />
-        <StatCard
-          label="Manuel inceleme"
-          value={manualReviewCount}
-          tone={manualReviewCount > 0 ? 'warning' : 'neutral'}
-        />
+        <StatCard label="Görüntülendi" value={viewedCount} />
         <StatCard label="Yeni / görüntülenmemiş" value={newUnviewedCount} />
       </section>
 
@@ -356,8 +354,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
               <tbody>
                 {filtered.map((offer) => {
                   const refundRecommended =
-                    offer.refundEligibility.recommendedAction === 'FULL_REFUND' ||
-                    offer.refundEligibility.recommendedAction === 'MANUAL_REVIEW';
+                    offer.refundEligibility.recommendedAction === 'FULL_REFUND';
                   const customerName = offer.request.customerName;
                   const customerPhone = offer.request.customerPhone;
                   const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;

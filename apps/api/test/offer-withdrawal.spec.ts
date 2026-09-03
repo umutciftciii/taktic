@@ -404,7 +404,7 @@ describe('provider offer withdrawal — refunds', () => {
     expect(adminView.body.withdrawnAt).not.toBeNull();
   });
 
-  it('keeps a self-withdrawn offer out of the automatic refund scan', async () => {
+  it('still refunds a self-withdrawn offer the customer never opened', async () => {
     const { provider, cookie, offerId } = await withdrawalFixture();
 
     await request(ctx.server)
@@ -412,8 +412,9 @@ describe('provider offer withdrawal — refunds', () => {
       .set('Cookie', cookie)
       .expect(201);
 
-    // Never viewed and long past the window, so without the status rule this
-    // would look like a textbook "not viewed in 48 hours" candidate.
+    // Never viewed and past the window. Withdrawing used to disqualify the
+    // offer; under the 48-hour rule it decides nothing — what the customer did
+    // or did not do decides.
     await ctx.prisma.offer.update({
       where: { id: offerId },
       data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
@@ -426,10 +427,40 @@ describe('provider offer withdrawal — refunds', () => {
       .get('/offers/refund-scan')
       .set('Cookie', adminCookie)
       .expect(200);
-    expect((scan.body.items as Array<{ offerId: string }>).map((item) => item.offerId)).not.toContain(
+    expect((scan.body.items as Array<{ offerId: string }>).map((item) => item.offerId)).toContain(
       offerId,
     );
-    expect(scan.body.skippedSummary.statusNotEligible).toBeGreaterThan(0);
+
+    await request(ctx.server)
+      .post('/offers/refund-scan/execute')
+      .set('Cookie', adminCookie)
+      .send({})
+      .expect(201);
+
+    expect(await countRefunds()).toBe(1);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(STARTING_CREDITS);
+  });
+
+  it('never refunds a withdrawn offer the customer had already opened', async () => {
+    const { provider, cookie, offerId, serviceRequest, customerCookie } = await withdrawalFixture();
+
+    await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/offers/${offerId}/view`)
+      .set('Cookie', customerCookie)
+      .expect(201);
+
+    await request(ctx.server)
+      .post(withdrawUrl(provider.id, offerId))
+      .set('Cookie', cookie)
+      .expect(201);
+
+    await ctx.prisma.offer.update({
+      where: { id: offerId },
+      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
+    });
+
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const adminCookie = await loginAs(ctx.prisma, admin.id);
 
     await request(ctx.server)
       .post('/offers/refund-scan/execute')
@@ -443,7 +474,7 @@ describe('provider offer withdrawal — refunds', () => {
     );
   });
 
-  it('leaves the admin’s manual refund operations intact', async () => {
+  it('offers the admin no way to refund by hand', async () => {
     const { provider, cookie, offerId } = await withdrawalFixture();
     await request(ctx.server)
       .post(withdrawUrl(provider.id, offerId))
@@ -453,22 +484,18 @@ describe('provider offer withdrawal — refunds', () => {
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const adminCookie = await loginAs(ctx.prisma, admin.id);
 
-    // NO_REFUND, so the manual endpoint refuses it without an override…
-    await request(ctx.server)
-      .post(`/offers/${offerId}/refund-credit`)
-      .set('Cookie', adminCookie)
-      .send({ reasonCode: 'OTHER' })
-      .expect(400);
-    expect(await countRefunds()).toBe(0);
-
-    // …and still performs it with one, exactly as before this feature.
+    // The endpoint is gone: a hand-made refund could only ever contradict the
+    // promise the provider was shown.
     await request(ctx.server)
       .post(`/offers/${offerId}/refund-credit`)
       .set('Cookie', adminCookie)
       .send({ reasonCode: 'ADMIN_OVERRIDE', override: true })
-      .expect(201);
-    expect(await countRefunds()).toBe(1);
-    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(STARTING_CREDITS);
+      .expect(404);
+
+    expect(await countRefunds()).toBe(0);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(
+      STARTING_CREDITS - CATEGORY_COST,
+    );
   });
 
   it('does not disturb the competitor-closed verdict', async () => {
@@ -500,7 +527,10 @@ describe('provider offer withdrawal — refunds', () => {
       .get(`/providers/${loser.provider.id}/offers/${loser.offerId}`)
       .set('Cookie', loser.cookie)
       .expect(200);
-    expect(loserView.body.refundEligibility.reasonCode).toBe('OFFER_NOT_SELECTED');
+    // Losing decides nothing about the credit: the loser was never opened and
+    // is simply inside its window still.
+    expect(loserView.body.refundEligibility.reasonCode).toBe('WAITING_VIEW_WINDOW');
+    expect(loserView.body.refundEligibility.policyStatus).toBe('AWAITING_VIEW');
 
     expect(await countRefunds()).toBe(0);
   });

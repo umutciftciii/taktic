@@ -6,6 +6,7 @@ import {
   OfferCreditPackage,
   PaymentMode,
   ProviderCredits,
+  UNVIEWED_OFFER_REFUND_NOTICE,
   creditTxnTypeLabel,
   formatPrice,
   formatDateTime,
@@ -150,6 +151,18 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
           </div>
         </div>
       </section>
+
+      {/*
+        The refund promise, on the screen where a provider reads their balance.
+        One sentence, the same one every other surface uses, so the panel and
+        the worker cannot drift apart.
+      */}
+      <div className="pdash-notice" data-testid="credit-refund-policy" style={{ marginTop: 24 }}>
+        <span>
+          <strong>Kredi iadesi:</strong> {UNVIEWED_OFFER_REFUND_NOTICE}{' '}
+          <Link href={`/providers/${id}/offers`}>Tekliflerimin iade durumunu gör</Link>
+        </span>
+      </div>
 
       <div className="pdash-notice" data-testid="payment-mode-notice" style={{ marginTop: 24 }}>
         <span>

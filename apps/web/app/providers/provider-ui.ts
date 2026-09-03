@@ -93,13 +93,22 @@ export function providerQualityBadgeClass(label: string): string {
   }
 }
 
-export function providerRefundBadgeClass(action: string): string {
-  switch (action) {
-    case 'FULL_REFUND':
+/**
+ * The badge for an offer's standing under the 48-hour refund policy.
+ *
+ * Keyed on the policy status rather than on a recommended action: a provider
+ * reading their own panel wants to know where their credit stands, not what an
+ * internal policy engine would recommend. An offer from before the policy
+ * carries a `null` status, and its callers render no badge at all rather than
+ * asking this function for one.
+ */
+export function providerRefundBadgeClass(status: string | null): string {
+  switch (status) {
+    case 'REFUNDED':
       return 'pdash-badge pdash-badge-success';
-    case 'MANUAL_REVIEW':
+    case 'AWAITING_VIEW':
       return 'pdash-badge pdash-badge-warn';
-    case 'NO_REFUND':
+    case 'VIEWED':
       return 'pdash-badge pdash-badge-muted';
     default:
       return 'pdash-badge pdash-badge-muted';

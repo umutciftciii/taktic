@@ -108,6 +108,19 @@ test.describe('marketplace journey', () => {
       const winningOfferId = await readProviderOfferId(winner, firstProvider.id, requestId);
       const losingOfferId = await readProviderOfferId(loser, secondProvider.id, requestId);
 
+      // ---- before anyone looks: the policy state the provider is shown ---
+      await winner.gotoWeb(`/providers/${firstProvider.id}/offers/${winningOfferId}`);
+      await expect(winner.page.getByTestId('offer-refund-policy-status')).toHaveText(
+        'Görüntülenme bekleniyor',
+      );
+      await expect(winner.page.getByText('Teklifiniz müşteri tarafından 48 saat içinde görüntülenmezse krediniz otomatik olarak iade edilir.').first()).toBeVisible();
+      // The old promises are gone from the screen, not merely joined by the new
+      // one: a provider must not read two different refund rules on one page.
+      const beforeViewBody = await winner.page.locator('body').innerText();
+      expect(beforeViewBody).not.toContain('iade uygunluğu otomatik taranır');
+      expect(beforeViewBody).not.toContain('Kredi iadesi yapılmaz');
+      expect(beforeViewBody).not.toContain('Manuel inceleme');
+
       // ---- the customer sees both and accepts one -----------------------
       await customer.gotoWeb(`/requests/${requestId}/offers`);
       await expect(customer.page.getByTestId('request-status')).toHaveText('Onaylandı');
@@ -131,6 +144,10 @@ test.describe('marketplace journey', () => {
       // ---- the winner sees ACCEPTED, the loser sees REJECTED ------------
       await winner.gotoWeb(`/providers/${firstProvider.id}/offers/${winningOfferId}`);
       await expect(winner.page.getByTestId('offer-status')).toHaveText('Kabul edildi');
+      // Opening the offer is what settled the credit, and the panel says so.
+      await expect(winner.page.getByTestId('offer-refund-policy-status')).toHaveText(
+        'Görüntülendi — iade uygun değil',
+      );
       await assertNoErrorScreen(winner.page);
 
       await loser.gotoWeb(`/providers/${secondProvider.id}/offers/${losingOfferId}`);
@@ -162,8 +179,8 @@ test.describe('marketplace journey', () => {
       expect(acceptedOffers).toBe(1);
 
       // ---- losing did not refund anything -------------------------------
-      // The loser's credit bought a real, delivered offer; it simply was not
-      // chosen. Nothing in this journey may hand it back.
+      // Not because the offer lost — losing decides nothing — but because the
+      // customer opened it. A read offer is settled, whatever it ended as.
       expect(await countRefundTransactions()).toBe(0);
       expect(await creditBalance(secondProvider.id)).toBe(STARTING_CREDITS - CATEGORY_COST);
 

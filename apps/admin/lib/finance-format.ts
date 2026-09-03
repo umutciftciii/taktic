@@ -1,8 +1,12 @@
-// Reason metni hem teknik enum koduyla (örn. "NOT_VIEWED_48H") hem de admin/sistem
-// tarafından girilmiş serbest açıklamayla (":" sonrası) gelebiliyor. Bilinen
-// prefix'leri Türkçe etikete çeviriyoruz; serbest metni "Not: …" satırında
-// koruyoruz ki audit takibi kaybolmasın.
+// Reason metni bugün yalnız politika koduyla gelir (örn. "UNVIEWED_OFFER_48H").
+// Kaldırılan manuel iade yolundan kalan eski satırlarda ":" sonrasında serbest
+// açıklama bulunabilir. Bilinen prefix'leri Türkçe etikete çeviriyoruz; serbest
+// metni "Not: …" satırında koruyoruz ki audit takibi kaybolmasın.
 const REASON_LABELS: Record<string, string> = {
+  // Written by the unviewed-offer refund worker, and the only refund reason the
+  // platform produces today. NOT_VIEWED_48H is kept for ledger rows the removed
+  // manual refund path wrote before this policy.
+  UNVIEWED_OFFER_48H: 'Teklif 48 saat içinde görüntülenmedi',
   NOT_VIEWED_48H: 'Teklif 48 saat içinde görüntülenmedi',
   OFFER_SPEND: 'Teklif gönderimi',
   OFFER_REFUND: 'Teklif iadesi',

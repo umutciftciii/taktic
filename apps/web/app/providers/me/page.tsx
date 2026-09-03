@@ -264,8 +264,9 @@ export default async function MyProviderPage() {
           </div>
 
           <div className="rail-note">
-            <strong>İade taraması.</strong> Görüntülenmeyen veya geçersiz hale gelen talepler için
-            iade uygunluğu otomatik taranır; sonucu her teklifin detayında görebilirsin.
+            <strong>Kredi iadesi.</strong> Teklifiniz müşteri tarafından 48 saat içinde
+            görüntülenmezse krediniz otomatik olarak iade edilir. İade durumunu her teklifin
+            detayında görebilirsin.
           </div>
 
           <div className="rail-note">

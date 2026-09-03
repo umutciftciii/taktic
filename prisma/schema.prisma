@@ -936,6 +936,19 @@ model Offer {
   creditRefundedTransactionId String?
   creditRefundedAt            DateTime?
   creditRefundReason          String?
+  /// Whether this offer is governed by the 48-hour unviewed-offer refund rule.
+  ///
+  /// The column IS the opt-in. Only the offer-creation path that shipped with
+  /// the rule writes `true`; every offer that predates it keeps the migration's
+  /// `false` default and is permanently outside the policy — no reader compares
+  /// `submittedAt` against a deploy timestamp to guess, because a deploy time is
+  /// not a fact the database holds and a clock skew would silently start paying
+  /// out on history.
+  ///
+  /// A `false` here is not "not refundable yet"; it is "this offer was sold
+  /// under the old terms", which is why the provider panel renders no policy
+  /// state at all for those rows rather than inventing one.
+  unviewedRefundPolicy        Boolean                 @default(false)
   submittedAt                 DateTime                @default(now())
   viewedAt                    DateTime?
   acceptedAt                  DateTime?
@@ -967,6 +980,9 @@ model Offer {
   @@index([creditRefundedTransactionId])
   @@index([rejectionReason])
   @@index([entitlementId, submittedAt])
+  // The worker's candidate query, in its own selectivity order: policy offers
+  // only, unviewed only, oldest first.
+  @@index([unviewedRefundPolicy, viewedAt, submittedAt])
 }
 
 /// What a purchasable offer package sells.
@@ -1391,6 +1407,13 @@ model ProviderCreditTransaction {
   provider  ProviderProfile @relation(fields: [providerId], references: [id])
   createdBy User?           @relation(fields: [createdById], references: [id])
 
+  // A PostgreSQL partial unique index —
+  // "ProviderCreditTransaction_one_refund_per_offer", UNIQUE ("referenceId")
+  // WHERE type = 'OFFER_REFUND' AND "referenceType" = 'Offer' — is created by
+  // the add_unviewed_offer_refund_policy migration. Prisma cannot express
+  // partial indexes here, so it lives in raw SQL; it is what makes a second
+  // refund of one offer unrepresentable, whatever a retried worker, a parallel
+  // run or a future code path attempts.
   @@index([providerId])
   @@index([type])
   @@index([referenceType, referenceId])

@@ -468,11 +468,17 @@ describe('credit refund notifications', () => {
 
     ctx.notifications.clear();
 
+    // Unviewed and past the window: the one thing that produces a refund.
+    await ctx.prisma.offer.update({
+      where: { id: offer.body.id as string },
+      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
+    });
+
     const admin = await adminCookie();
     await request(ctx.server)
-      .post(`/offers/${offer.body.id}/refund-credit`)
+      .post('/offers/refund-scan/execute')
       .set('Cookie', admin)
-      .send({ reasonCode: 'INVALID_REQUEST', reason: 'Dahili not: müşteri ulaşılamadı', override: true })
+      .send({})
       .expect(201);
 
     const messages = sentTo('credit-refunded', ownerUser.email!);
@@ -480,10 +486,9 @@ describe('credit refund notifications', () => {
     expect(messages[0]!.data?.refundedCredits).toBe(String(CATEGORY_COST));
     expect(messages[0]!.data?.previousBalance).toBe(String(10 - CATEGORY_COST));
     expect(messages[0]!.data?.currentBalance).toBe('10');
-    // The label from the closed policy list, never the stored string with the
-    // admin's internal note in it.
-    expect(messages[0]!.data?.refundReason).toBe('Geçersiz talep');
-    expect(bodyOf(messages[0]!)).not.toContain('Dahili not');
+    // The label from the closed policy list, never the raw stored code.
+    expect(messages[0]!.data?.refundReason).toBe('48 saat içinde görüntülenmedi');
+    expect(bodyOf(messages[0]!)).not.toContain('UNVIEWED_OFFER_48H');
   });
 });
 
@@ -615,7 +620,7 @@ describe('audit and idempotency', () => {
         type: CreditTransactionType.OFFER_REFUND,
         amount: 2,
         balanceAfter: grant.balanceAfter + 2,
-        reason: 'NOT_VIEWED_48H: Automatic refund scan',
+        reason: 'UNVIEWED_OFFER_48H',
       },
     });
 

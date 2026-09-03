@@ -181,10 +181,11 @@ describe('offer acceptance — credits', () => {
     expect(balanceBefore).toBe(10 - CATEGORY_COST);
   });
 
-  it('keeps a competitor-closed offer out of the automatic refund scan', async () => {
+  it('refunds a competitor-closed offer the customer never opened', async () => {
     const { category, customerCookie, serviceRequest } = await matchingFixture();
     const winner = await addOffer(category.id, serviceRequest.id);
     const loser = await addOffer(category.id, serviceRequest.id);
+    const loserBalanceBefore = await currentCreditBalance(ctx.prisma, loser.provider.id);
 
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
@@ -192,8 +193,8 @@ describe('offer acceptance — credits', () => {
       .send(ACCEPT_OFFER)
       .expect(201);
 
-    // The loser was never viewed, so without the policy rule it would look like
-    // a textbook "not viewed in 48 hours" refund candidate.
+    // The loser was closed by the cascade and never opened by anyone. Losing
+    // the request is not what the policy charges for — being read is.
     await ctx.prisma.offer.update({
       where: { id: loser.offerId },
       data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
@@ -206,45 +207,29 @@ describe('offer acceptance — credits', () => {
       .get('/offers/refund-scan')
       .set('Cookie', adminCookie)
       .expect(200);
+    expect((scan.body.items as Array<{ offerId: string }>).map((item) => item.offerId)).toContain(
+      loser.offerId,
+    );
 
-    const scannedIds = (scan.body.items as Array<{ offerId: string }>).map((item) => item.offerId);
-    expect(scannedIds).not.toContain(loser.offerId);
-
-    const executed = await request(ctx.server)
+    await request(ctx.server)
       .post('/offers/refund-scan/execute')
       .set('Cookie', adminCookie)
       .send({})
       .expect(201);
-    expect(
-      (executed.body.results as Array<{ offerId: string; status: string }>).filter(
-        (result) => result.offerId === loser.offerId && result.status === 'REFUNDED',
-      ),
-    ).toHaveLength(0);
-    expect(
-      await ctx.prisma.providerCreditTransaction.count({
-        where: { type: CreditTransactionType.OFFER_REFUND },
-      }),
-    ).toBe(0);
+
+    const refunded = await ctx.prisma.providerCreditTransaction.findMany({
+      where: { type: CreditTransactionType.OFFER_REFUND },
+      select: { referenceId: true },
+    });
+    expect(refunded.map((row) => row.referenceId)).toEqual([loser.offerId]);
+    expect(await currentCreditBalance(ctx.prisma, loser.provider.id)).toBe(
+      loserBalanceBefore + CATEGORY_COST,
+    );
   });
 
-  it('needs an override to refund a competitor-closed offer, but not a hand-rejected one', async () => {
+  it('never refunds the accepted offer, because accepting is reading it', async () => {
     const { category, customerCookie, serviceRequest } = await matchingFixture();
     const winner = await addOffer(category.id, serviceRequest.id);
-    const loser = await addOffer(category.id, serviceRequest.id);
-
-    const otherRequest = await createApprovedRequest(ctx.prisma, {
-      categoryId: category.id,
-      customerId: (
-        await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: serviceRequest.id } })
-      ).customerId,
-    });
-    const handRejected = await addOffer(category.id, otherRequest.id);
-
-    await request(ctx.server)
-      .post(actionUrl(otherRequest.id, handRejected.offerId))
-      .set('Cookie', customerCookie)
-      .send({ action: 'REJECT' })
-      .expect(201);
 
     await request(ctx.server)
       .post(actionUrl(serviceRequest.id, winner.offerId))
@@ -252,31 +237,24 @@ describe('offer acceptance — credits', () => {
       .send(ACCEPT_OFFER)
       .expect(201);
 
+    await ctx.prisma.offer.update({
+      where: { id: winner.offerId },
+      data: { submittedAt: new Date(Date.now() - 72 * 60 * 60 * 1000) },
+    });
+
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const adminCookie = await loginAs(ctx.prisma, admin.id);
-
-    // A hand-rejected offer keeps the behaviour it had before matching existed:
-    // the policy still recommends a manual review, so no override is needed.
     await request(ctx.server)
-      .post(`/offers/${handRejected.offerId}/refund-credit`)
+      .post('/offers/refund-scan/execute')
       .set('Cookie', adminCookie)
-      .send({ reasonCode: 'OTHER' })
+      .send({})
       .expect(201);
 
-    // The competitor-closed one is NO_REFUND and is refused without an override.
-    await request(ctx.server)
-      .post(`/offers/${loser.offerId}/refund-credit`)
-      .set('Cookie', adminCookie)
-      .send({ reasonCode: 'OTHER' })
-      .expect(400);
-
-    const refundedOfferIds = (
-      await ctx.prisma.providerCreditTransaction.findMany({
-        where: { type: CreditTransactionType.OFFER_REFUND },
-        select: { referenceId: true },
-      })
-    ).map((row) => row.referenceId);
-    expect(refundedOfferIds).toEqual([handRejected.offerId]);
+    expect(
+      await ctx.prisma.providerCreditTransaction.count({
+        where: { type: CreditTransactionType.OFFER_REFUND, referenceId: winner.offerId },
+      }),
+    ).toBe(0);
   });
 });
 
@@ -518,8 +496,10 @@ describe('matching leaks no contact details', () => {
     expect(loserBody).not.toContain('rejectionReason');
     expect(loserBody).not.toContain('customerPhone');
     // What it does get is the neutral verdict, with no hint of a rival.
-    expect(loserView.body.refundEligibility.reasonCode).toBe('OFFER_NOT_SELECTED');
-    expect(loserView.body.refundEligibility.reasonLabel).toBe('Teklif kabul edilmedi');
+    // Nothing about a rival, and nothing invented: the offer is simply unviewed
+    // and still inside its window.
+    expect(loserView.body.refundEligibility.reasonCode).toBe('WAITING_VIEW_WINDOW');
+    expect(loserView.body.refundEligibility.policyStatusLabel).toBe('Görüntülenme bekleniyor');
 
     // The admin, by contrast, still sees the precise internal reason.
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
