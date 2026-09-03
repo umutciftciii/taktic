@@ -747,19 +747,38 @@ input[readonly] {
   color: var(--color-neutral-700);
 }
 
-/* The request description's character counter, directly under its help text.
+/* The request description's help text and character counter, on one row:
+   guidance on the left, the count hard against the right edge of the field.
 
-   Wrapping is what keeps it inside a narrow phone: the count and the status
-   sit on one line while there is room and stack when there is not, so the row
-   never forces the form card to scroll sideways. */
-.description-counter {
+   Wrapping is what keeps it inside a narrow phone. When the two no longer fit
+   side by side the counter drops to its own line and `margin-left: auto` keeps
+   it right-aligned there, so it stays visually tied to the end of the textarea
+   instead of drifting under the sentence. */
+.description-meta {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  gap: 2px var(--space-3);
-  margin: var(--space-1) 0 0;
+  gap: 2px var(--space-4);
+  margin-top: var(--space-1);
   min-width: 0;
+}
+
+.description-meta .help-text {
+  /* Takes the room the counter does not need, and may wrap inside it. */
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.description-counter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  margin: 0 0 0 auto;
+  min-width: 0;
+  text-align: right;
   font-size: 12px;
   color: var(--color-neutral-700);
 }
@@ -767,6 +786,7 @@ input[readonly] {
 .description-counter-count {
   /* Digits of equal width, so the number does not jitter while typing. */
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Never colour alone: the state is carried by the wording in
