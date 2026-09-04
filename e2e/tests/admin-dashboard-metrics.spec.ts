@@ -16,7 +16,9 @@ import { primaryRuntime } from '../src/runtime';
  * What is asserted here is the rule rather than a screenshot: **no card showing
  * a zero carries a badge**, checked across every card on the screen so a card
  * added later cannot quietly opt out, and **the support card counts the backlog
- * and hands the operator the filtered queue**. The badge rule itself is pinned
+ * and hands the operator exactly the tickets it counted** — the number on the
+ * card and the total on the screen it opens, compared against each other rather
+ * than each against a hard-coded three. The badge rule itself is pinned
  * as a pure function in `apps/admin/test/dashboard-metrics.spec.ts` and the
  * backlog's definition in `apps/api/test/admin-dashboard-summary.spec.ts`; this
  * spec is what proves the screen actually uses both.
@@ -119,7 +121,9 @@ test.describe('admin dashboard metric cards', () => {
       // really is empty here: the zero is an observation, not a hope.
       await expect(supportCard.locator('.metric')).toHaveText('0');
       await expect(supportCard.getByTestId('stat-card-badge')).toHaveCount(0);
-      await expect(supportCard).toHaveAttribute('href', '/support?status=OPEN');
+      // Both halves of the backlog, comma-separated and unencoded: the address
+      // is meant to be read and pasted.
+      await expect(supportCard).toHaveAttribute('href', '/support?status=OPEN,IN_PROGRESS');
 
       // The card names itself, its number and where it goes, to a screen reader
       // as well as to an eye.
@@ -167,37 +171,56 @@ test.describe('admin dashboard metric cards', () => {
         'dikkat',
       );
 
-      // ---- and it leads somewhere -----------------------------------------
+      // ---- and it leads to exactly the tickets it counted -----------------
+      const counted = Number(await admin.page.locator(`${SUPPORT_CARD} .metric`).innerText());
+
       await admin.page.locator(SUPPORT_CARD).click();
-      await expect(admin.page).toHaveURL(/\/support\?status=OPEN$/);
+      // The comma survives the navigation, encoded or not, depending on the
+      // browser — either is the same filter.
+      await expect(admin.page).toHaveURL(/\/support\?status=OPEN(,|%2C)IN_PROGRESS$/);
       await assertNoErrorScreen(admin.page);
 
-      // The list arrives already filtered: the status the card asked for is the
-      // one the filter shows, the two waiting tickets are on it, and the three
-      // that are being worked, answered or filed are not.
-      await expect(admin.page.locator('#support-status')).toHaveValue('OPEN');
+      // The filter reflects the link that was followed, so pressing Uygula
+      // keeps the operator where they are instead of resetting to "Tümü".
+      await expect(admin.page.locator('#support-status')).toHaveValue('OPEN,IN_PROGRESS');
 
+      // The number on the card is the size of the list behind it. This is the
+      // assertion the mismatch would have failed: the card said one thing and
+      // the screen it opened said another.
+      await expect(admin.page.getByTestId('support-ticket-count')).toHaveAttribute(
+        'data-total',
+        String(counted),
+      );
+
+      // And it is the same tickets, not merely the same number of them: both
+      // waiting ones and the one being worked are here, the answered and the
+      // filed are not.
       const rows = admin.page.getByTestId('support-ticket-row');
-      await expect(rows.filter({ hasText: BACKLOG.openA })).toHaveCount(1);
-      await expect(rows.filter({ hasText: BACKLOG.openB })).toHaveCount(1);
-      for (const absent of [BACKLOG.inProgress, BACKLOG.resolved, BACKLOG.closed]) {
-        await expect(rows.filter({ hasText: absent }), `"${absent}" is not an open ticket`).toHaveCount(
-          0,
-        );
+      for (const present of [BACKLOG.openA, BACKLOG.openB, BACKLOG.inProgress]) {
+        await expect(
+          rows.filter({ hasText: present }),
+          `"${present}" is in the backlog and should be listed`,
+        ).toHaveCount(1);
+      }
+      for (const absent of [BACKLOG.resolved, BACKLOG.closed]) {
+        await expect(
+          rows.filter({ hasText: absent }),
+          `"${absent}" is finished work and should not be listed`,
+        ).toHaveCount(0);
       }
 
-      // And nothing else slipped through the filter either.
+      // Nothing outside the backlog slipped through the filter either.
       for (const status of await rows.evaluateAll((nodes) =>
         nodes.map((node) => (node as HTMLElement).dataset.status),
       )) {
-        expect(status).toBe('OPEN');
+        expect(['OPEN', 'IN_PROGRESS']).toContain(status);
       }
     } finally {
       await admin.close();
     }
   });
 
-  test('the cards fit a 320px phone without widening the page', async ({ browser }) => {
+  test('the cards and the list they open fit a 320px phone', async ({ browser }) => {
     const adminAccount = await createAdmin();
 
     const admin = await Actor.open(browser, 'admin-dashboard-320', primaryRuntime, {
@@ -218,6 +241,14 @@ test.describe('admin dashboard metric cards', () => {
       });
       expect(box.left, 'the support card starts off the left edge').toBeGreaterThanOrEqual(-1);
       expect(box.right, 'the support card ends past the right edge').toBeLessThanOrEqual(321);
+
+      // And the screen the card opens. Its filter gained an option naming both
+      // backlog statuses, and a `<select>` is as wide as its widest option — the
+      // one way this change could widen a phone.
+      await admin.gotoAdmin('/support?status=OPEN,IN_PROGRESS');
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.locator('#support-status')).toHaveValue('OPEN,IN_PROGRESS');
+      await expectNoHorizontalOverflow(admin.page, 'admin backlog list @320');
     } finally {
       await admin.close();
     }

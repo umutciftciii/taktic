@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { buildAdminDashboardMetrics, resolveMetricTone } from '../lib/dashboard-metrics';
 import {
-  buildAdminDashboardMetrics,
-  resolveMetricTone,
+  OPEN_SUPPORT_TICKETS_FILTER,
   OPEN_SUPPORT_TICKETS_HREF,
-} from '../lib/dashboard-metrics';
+  OPEN_SUPPORT_TICKET_STATUSES,
+  isOpenSupportTicketFilter,
+} from '../lib/support-ticket-filter';
 import type { AdminSummary } from '../lib/api';
 
 /**
@@ -79,13 +81,38 @@ describe('a positive count', () => {
 });
 
 describe('the open support tickets card', () => {
-  it('is labelled and pointed at the admin queue, filtered', () => {
+  it('is labelled and pointed at the admin queue, filtered to the backlog', () => {
     const card = metric({ openSupportTickets: 4 }, 'openSupportTickets');
 
     expect(card.label).toBe('Açık destek talepleri');
     expect(card.value).toBe(4);
-    expect(card.href).toBe('/support?status=OPEN');
+    expect(card.href).toBe('/support?status=OPEN,IN_PROGRESS');
     expect(card.href).toBe(OPEN_SUPPORT_TICKETS_HREF);
+  });
+
+  /**
+   * The card counts OPEN + IN_PROGRESS, so the list it opens has to select the
+   * same two. This is the assertion that would have caught the mismatch it
+   * replaced — a link naming only OPEN, under a number counting both.
+   */
+  it('asks the list for exactly the statuses the number counts', () => {
+    expect([...OPEN_SUPPORT_TICKET_STATUSES]).toEqual(['OPEN', 'IN_PROGRESS']);
+    expect(OPEN_SUPPORT_TICKETS_HREF).toBe(`/support?status=${OPEN_SUPPORT_TICKETS_FILTER}`);
+
+    const filter = new URL(OPEN_SUPPORT_TICKETS_HREF, 'https://admin.test').searchParams.get(
+      'status',
+    );
+    expect(filter?.split(',')).toEqual([...OPEN_SUPPORT_TICKET_STATUSES]);
+  });
+
+  it('leaves the answered and the filed out of the filter it opens', () => {
+    expect(OPEN_SUPPORT_TICKETS_FILTER).not.toContain('RESOLVED');
+    expect(OPEN_SUPPORT_TICKETS_FILTER).not.toContain('CLOSED');
+  });
+
+  it('keeps the address readable rather than percent-encoded', () => {
+    expect(OPEN_SUPPORT_TICKETS_HREF).toContain(',');
+    expect(OPEN_SUPPORT_TICKETS_HREF).not.toContain('%2C');
   });
 
   it('shows the number the summary carries, and a badge only while it is positive', () => {
@@ -103,5 +130,20 @@ describe('the badge rule itself', () => {
   it('treats a missing or nonsensical count as nothing to do', () => {
     expect(resolveMetricTone(Number.NaN, 'warning')).toBe('neutral');
     expect(resolveMetricTone(-1, 'warning')).toBe('neutral');
+  });
+});
+
+describe('recognising the backlog filter', () => {
+  it('accepts the two statuses in any order, with repeats', () => {
+    expect(isOpenSupportTicketFilter(['OPEN', 'IN_PROGRESS'])).toBe(true);
+    expect(isOpenSupportTicketFilter(['IN_PROGRESS', 'OPEN'])).toBe(true);
+    expect(isOpenSupportTicketFilter(['OPEN', 'OPEN', 'IN_PROGRESS'])).toBe(true);
+  });
+
+  it('is not half of it, and not something wider', () => {
+    expect(isOpenSupportTicketFilter(['OPEN'])).toBe(false);
+    expect(isOpenSupportTicketFilter(['IN_PROGRESS'])).toBe(false);
+    expect(isOpenSupportTicketFilter([])).toBe(false);
+    expect(isOpenSupportTicketFilter(['OPEN', 'IN_PROGRESS', 'RESOLVED'])).toBe(false);
   });
 });

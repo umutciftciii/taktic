@@ -51,7 +51,17 @@ export class AdminSupportTicketsService {
   ) {}
 
   /**
-   * Every ticket, newest activity first, optionally narrowed to one status.
+   * Every ticket, newest activity first, optionally narrowed to a set of
+   * statuses.
+   *
+   * A set rather than a single status because the two ends of the product
+   * disagreed otherwise: the dashboard's "açık destek talepleri" card counts
+   * the backlog — OPEN and IN_PROGRESS together — and a link that could only
+   * name one of them sent the operator to a list that was missing the other
+   * half of the number they had just read.
+   *
+   * One status is the same query with a one-element set, so `?status=OPEN`
+   * still means exactly what it always did.
    *
    * Paged rather than complete: the list is the operator's queue and a queue
    * that returns every ticket ever opened stops being usable long before it
@@ -60,7 +70,10 @@ export class AdminSupportTicketsService {
   async listTickets(filters: ListSupportTicketsDto) {
     const page = filters.page ?? 1;
     const pageSize = clampPageSize(filters.pageSize);
-    const where: Prisma.SupportTicketWhereInput = filters.status ? { status: filters.status } : {};
+    const statuses = filters.status ?? [];
+    const where: Prisma.SupportTicketWhereInput = statuses.length
+      ? { status: { in: statuses } }
+      : {};
 
     const [total, rows] = await Promise.all([
       this.prisma.supportTicket.count({ where }),

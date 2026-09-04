@@ -1,4 +1,5 @@
 import type { AdminSummary } from './api';
+import { OPEN_SUPPORT_TICKETS_HREF } from './support-ticket-filter';
 
 /**
  * The dashboard's metric cards, decided in one place.
@@ -47,17 +48,6 @@ type AdminMetricDefinition = {
    */
   actionTone?: AdminMetricActionTone;
 };
-
-/**
- * Where the support card sends an operator.
- *
- * The card counts OPEN and IN_PROGRESS together, but the admin list takes one
- * status at a time — `ListSupportTicketsDto` has a single `status` field — and
- * this link deliberately stays inside that contract rather than inventing a
- * query the API would drop. OPEN is the half that has nobody on it yet, which
- * is the one an operator opening this card is going to.
- */
-export const OPEN_SUPPORT_TICKETS_HREF = '/support?status=OPEN';
 
 const ADMIN_DASHBOARD_METRICS: readonly AdminMetricDefinition[] = [
   { key: 'totalRequests', label: 'Toplam talep', href: '/requests', read: (s) => s.totalRequests },
