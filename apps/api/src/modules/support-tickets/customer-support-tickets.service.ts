@@ -1,7 +1,8 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, SupportTicketAuthorRole, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import {
   supportTicketSelect,
   toSupportTicketMessage,
@@ -33,7 +34,12 @@ import { appendSupportTicketMessage, readSupportTicketTimeline } from './support
  */
 @Injectable()
 export class CustomerSupportTicketsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(CustomerSupportTicketsService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+  ) {}
 
   /** The caller's own tickets, most recent activity first. Never anybody else's. */
   async listTickets(user: AuthUser) {
@@ -87,6 +93,16 @@ export class CustomerSupportTicketsService {
       return created;
     });
 
+    // After the commit, and best-effort. The ticket exists and the customer has
+    // been shown it, so a broken transport must not turn an opened ticket into
+    // a failed submission — and a rolled-back transaction never reaches this
+    // line at all, which is what keeps NotificationLog free of messages about
+    // tickets that do not exist.
+    await this.notify(
+      () => this.mail.sendSupportTicketOpened(ticket.id),
+      `ticket ${ticket.id}`,
+    );
+
     return toSupportTicketSummary(ticket);
   }
 
@@ -123,7 +139,32 @@ export class CustomerSupportTicketsService {
       writableStatuses: CUSTOMER_WRITABLE_STATUSES,
     });
 
+    // The support mailbox hears; the customer does not need to be told what
+    // they just wrote. Keyed on the message, so a ticket with four replies
+    // produces four notices and a replay of any one of them produces none.
+    await this.notify(
+      () => this.mail.sendSupportTicketCustomerMessage(message.id),
+      `message ${message.id}`,
+    );
+
     return toSupportTicketMessage(message, user.id);
+  }
+
+  /**
+   * Runs a notification without letting it undo what already happened.
+   *
+   * The subject line of the log entry is an id, never a subject or a body: a
+   * ticket's text is the one thing this module has always kept out of stdout.
+   */
+  private async notify(run: () => Promise<unknown>, subject: string) {
+    try {
+      await run();
+    } catch (error) {
+      this.logger.error(
+        `Failed to send a support notification for ${subject}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   /**

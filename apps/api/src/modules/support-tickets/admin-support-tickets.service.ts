@@ -1,7 +1,8 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, SupportTicketAuthorRole, SupportTicketStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { ListSupportTicketsDto } from './dto/list-support-tickets.dto';
 import { SupportTicketInvalidTransitionException } from './support-ticket.errors';
 import {
@@ -42,7 +43,12 @@ import {
  */
 @Injectable()
 export class AdminSupportTicketsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminSupportTicketsService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+  ) {}
 
   /**
    * Every ticket, newest activity first, optionally narrowed to one status.
@@ -107,6 +113,14 @@ export class AdminSupportTicketsService {
       writableStatuses: ADMIN_WRITABLE_STATUSES,
     });
 
+    // The customer hears, and hears nothing about who answered — see
+    // TransactionalMailService.sendSupportTicketAdminMessage, which never reads
+    // the author.
+    await this.notify(
+      () => this.mail.sendSupportTicketAdminMessage(message.id),
+      `message ${message.id}`,
+    );
+
     return toSupportTicketMessage(message, user.id);
   }
 
@@ -135,7 +149,7 @@ export class AdminSupportTicketsService {
 
     const now = new Date();
 
-    await this.prisma.$transaction(async (tx) => {
+    const statusChangeId = await this.prisma.$transaction(async (tx) => {
       const swapped = await tx.supportTicket.updateMany({
         where: { id: ticket.id, status: ticket.status },
         data: {
@@ -158,7 +172,7 @@ export class AdminSupportTicketsService {
         throw new SupportTicketInvalidTransitionException(current?.status ?? ticket.status, next);
       }
 
-      await tx.supportTicketStatusChange.create({
+      const change = await tx.supportTicketStatusChange.create({
         data: {
           ticketId: ticket.id,
           fromStatus: ticket.status,
@@ -166,10 +180,39 @@ export class AdminSupportTicketsService {
           changedById: user.id,
           createdAt: now,
         },
+        select: { id: true },
       });
+
+      return change.id;
     });
 
+    // After the commit, and keyed on the recorded change. A transition the
+    // table refused wrote no row and reaches no line below; a transaction that
+    // rolled back returns no id.
+    await this.notify(
+      () => this.mail.sendSupportTicketStatusChanged(statusChangeId),
+      `status change ${statusChangeId}`,
+    );
+
     return this.getTicket(ticket.id, user);
+  }
+
+  /**
+   * Runs a notification without letting it undo what already happened.
+   *
+   * The log entry names an id and never a subject, a body or an address: the
+   * whole module keeps a ticket's text out of stdout, and a notification
+   * failure is not the place to start writing it there.
+   */
+  private async notify(run: () => Promise<unknown>, subject: string) {
+    try {
+      await run();
+    } catch (error) {
+      this.logger.error(
+        `Failed to send a support notification for ${subject}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   private async loadTicket(ticketId: string) {

@@ -28,8 +28,16 @@ import { escapeHtml } from './format';
  * customer trusts because the platform sent it.
  */
 
-/** The context label in the header's right-hand corner. */
-export type EmailAudience = 'HESAP' | 'HİZMET ALAN' | 'HİZMET VEREN';
+/**
+ * The context label in the header's right-hand corner.
+ *
+ * `DESTEK` is the one label that names an internal mailbox rather than a side
+ * of the marketplace. It exists because the two support-ticket messages that go
+ * to the operator inbox are read next to the three that go to the customer, and
+ * an operator glancing at a card has to be able to tell at once which of the
+ * two they are looking at.
+ */
+export type EmailAudience = 'HESAP' | 'HİZMET ALAN' | 'HİZMET VEREN' | 'DESTEK';
 
 export type EmailDataRow = {
   label: string;

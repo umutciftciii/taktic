@@ -179,6 +179,25 @@ describe('ResendNotificationAdapter', () => {
     expect(Object.keys(body).sort()).toEqual(['from', 'html', 'subject', 'text', 'to']);
   });
 
+  it('sends a Reply-To only when the message names one', async () => {
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, { id: 'msg_1' }));
+
+    await adapter(fetchImpl).send({ ...CLAIM_MESSAGE, replyTo: 'destek@taktick.com.tr' });
+
+    const body = JSON.parse(onlyCall(calls).init.body) as Record<string, unknown>;
+    // A support message has to come back to the mailbox that sent it, and the
+    // From address is a no-reply sender for every message this platform sends.
+    expect(body.reply_to).toBe('destek@taktick.com.tr');
+    expect(Object.keys(body).sort()).toEqual([
+      'from',
+      'html',
+      'reply_to',
+      'subject',
+      'text',
+      'to',
+    ]);
+  });
+
   it('keeps the send SENT when the success body carries no usable id', async () => {
     for (const payload of [{}, { id: 42 }, { id: `${RECIPIENT} queued` }]) {
       const { fetchImpl } = recordingFetch(() => jsonResponse(200, payload));
