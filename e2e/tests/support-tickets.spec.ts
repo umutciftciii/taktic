@@ -87,11 +87,19 @@ test.describe('customer support tickets', () => {
       const ticketUrl = customer.page.url().split('?')[0]!;
       const ticketId = ticketUrl.split('/').pop() as string;
 
-      // Exactly one ticket exists, it belongs to this customer, and its opening
+      // The composer wrote exactly one ticket for this customer, and its opening
       // message is on the timeline rather than hidden in a column.
-      const stored = await prisma().supportTicket.findMany({ include: { messages: true } });
+      //
+      // Scoped to the owner rather than counting the whole table: the suite
+      // shares one database and other specs seed tickets of their own, so a
+      // global count would be asserting how many people had asked for help all
+      // run rather than what this composer did.
+      const stored = await prisma().supportTicket.findMany({
+        where: { customerId: customerAccount.id },
+        include: { messages: true },
+      });
       expect(stored).toHaveLength(1);
-      expect(stored[0]!.customerId).toBe(customerAccount.id);
+      expect(stored[0]!.id).toBe(ticketId);
       expect(stored[0]!.status).toBe('OPEN');
       expect(stored[0]!.messages).toHaveLength(1);
 
@@ -113,9 +121,13 @@ test.describe('customer support tickets', () => {
       await admin.gotoAdmin('/support');
       await assertNoErrorScreen(admin.page);
 
-      await expect(admin.page.getByTestId('support-ticket-row')).toHaveCount(1);
-      await expect(admin.page.getByTestId('support-ticket-subject')).toHaveText(SUBJECT);
-      await admin.page.getByRole('link', { name: 'Detay' }).click();
+      // Found by its subject rather than by being the only row: the queue is
+      // unfiltered and the suite shares one database, so other specs' tickets
+      // are legitimately on this screen too.
+      const queueRow = admin.page.getByTestId('support-ticket-row').filter({ hasText: SUBJECT });
+      await expect(queueRow).toHaveCount(1);
+      await expect(queueRow.getByTestId('support-ticket-subject')).toHaveText(SUBJECT);
+      await queueRow.getByRole('link', { name: 'Detay' }).click();
       await expect(admin.page).toHaveURL(new RegExp(`/support/${ticketId}$`));
 
       await expect(admin.page.getByTestId('support-timeline-message')).toHaveCount(1);

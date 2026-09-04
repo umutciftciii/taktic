@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ProviderStatus, ServiceRequestStatus } from '@prisma/client';
+import { ProviderStatus, ServiceRequestStatus, SupportTicketStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -16,6 +16,7 @@ export class DashboardService {
       totalOffers,
       refundableOffers,
       packagePurchases,
+      openSupportTickets,
     ] = await Promise.all([
       this.prisma.serviceRequest.count(),
       this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.SUBMITTED } }),
@@ -41,6 +42,16 @@ export class DashboardService {
         },
       }),
       this.prisma.packagePurchase.count(),
+      // The support queue's backlog: the two statuses a ticket sits in while it
+      // is still somebody's job. RESOLVED and CLOSED are deliberately outside
+      // the count — a resolved ticket has been answered and a closed one is
+      // filed, so counting either would put a number on the dashboard that no
+      // operator can bring down.
+      this.prisma.supportTicket.count({
+        where: {
+          status: { in: [SupportTicketStatus.OPEN, SupportTicketStatus.IN_PROGRESS] },
+        },
+      }),
     ]);
 
     return {
@@ -52,6 +63,7 @@ export class DashboardService {
       totalOffers,
       refundableOffers,
       packagePurchases,
+      openSupportTickets,
     };
   }
 }

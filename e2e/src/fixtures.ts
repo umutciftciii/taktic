@@ -697,3 +697,44 @@ export async function remainingQuota(entitlementId: string): Promise<number | nu
 
   return row?.remainingQuota ?? null;
 }
+
+/**
+ * A support ticket already in a given status, with its opening message.
+ *
+ * Written directly rather than opened through the customer's composer and
+ * walked with the operator's buttons: what the dashboard test is about is the
+ * number on a card, and driving six tickets through two screens to produce it
+ * would make that test fail for reasons that have nothing to do with the card.
+ * The transitions themselves have their own coverage in
+ * `apps/api/test/support-tickets.spec.ts`, and the ticket journey in
+ * `support-tickets.spec.ts` drives every screen for real.
+ */
+export async function createSupportTicket(options: {
+  customerId: string;
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  subject?: string;
+  message?: string;
+}): Promise<{ id: string }> {
+  const suffix = uniqueSuffix();
+  const now = new Date();
+
+  return prisma().supportTicket.create({
+    data: {
+      customerId: options.customerId,
+      subject: options.subject ?? `E2E destek talebi ${suffix}`,
+      status: options.status,
+      lastActivityAt: now,
+      resolvedAt:
+        options.status === 'RESOLVED' || options.status === 'CLOSED' ? now : null,
+      closedAt: options.status === 'CLOSED' ? now : null,
+      messages: {
+        create: {
+          authorUserId: options.customerId,
+          authorRole: 'CUSTOMER',
+          body: options.message ?? 'Yardım eder misiniz?',
+        },
+      },
+    },
+    select: { id: true },
+  });
+}
