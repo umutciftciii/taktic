@@ -8,14 +8,17 @@ import {
   ProviderStatus,
   ServiceCategoryStatus,
   ServiceRequestStatus,
+  SupportTicketAuthorRole,
 } from '@prisma/client';
 import {
   matchesProviderArea,
   phoneVerifiedRequestFilter,
 } from '../../common/provider-request-matching';
 import {
+  adminSupportTicketUrl,
   customerAccountUrl,
   customerRequestUrl,
+  customerSupportTicketUrl,
   providerAccountUrl,
   providerCreditsUrl,
   providerOfferUrl,
@@ -29,6 +32,10 @@ import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   refundReasonLabel,
 } from '../offers/refund-policy';
+import {
+  readSupportInboxEmail,
+  supportReplyToEmail,
+} from '../support-tickets/support-inbox.config';
 import {
   DedupedDispatchContext,
   DispatchContext,
@@ -108,7 +115,7 @@ export class TransactionalMailService {
         expiryMinutes: String(input.expiryMinutes),
       },
       { userId: input.userId },
-      input.resetUrl,
+      { actionUrl: input.resetUrl },
     );
   }
 
@@ -130,7 +137,7 @@ export class TransactionalMailService {
         expiryDays: String(input.expiryDays),
       },
       { userId: input.userId },
-      input.verifyUrl,
+      { actionUrl: input.verifyUrl },
     );
   }
 
@@ -485,6 +492,155 @@ export class TransactionalMailService {
     );
   }
 
+  // ───────────────────────── 17-21 · support tickets ─────────────────────────
+
+  /**
+   * A ticket was opened: two messages, and both of them exactly once.
+   *
+   * The pair is sent from one method rather than two call sites because they
+   * are one event, and a caller that could send half of it would eventually
+   * send half of it. They still carry a template and a dedupe key each, so the
+   * unique index counts them separately: a replay that already sent the
+   * customer's copy but failed on the operator's re-sends only the second.
+   *
+   * Called after the creating transaction has committed, like every other
+   * method here. A ticket that rolled back has no id worth mailing about.
+   */
+  async sendSupportTicketOpened(ticketId: string) {
+    const ticket = await loadSupportTicket(this.prisma, ticketId);
+    if (!ticket) {
+      return;
+    }
+
+    const opening = await firstSupportTicketMessage(this.prisma, ticket.id);
+
+    // The operator's copy first: the person waiting has already seen the ticket
+    // appear on their own screen, and the mailbox that has to answer has not.
+    await this.send(
+      'support-ticket-new-for-support',
+      readSupportInboxEmail(),
+      supportInboxData(ticket, {
+        messageExcerpt: opening?.body ?? null,
+        createdAt: ticket.createdAt.toISOString(),
+      }),
+      { dedupeKey: `support-ticket-new:${ticket.id}` },
+    );
+
+    if (!ticket.customerEmail) {
+      return;
+    }
+
+    await this.send(
+      'support-ticket-created',
+      ticket.customerEmail,
+      supportCustomerData(ticket, {
+        messageExcerpt: opening?.body ?? null,
+        createdAt: ticket.createdAt.toISOString(),
+      }),
+      { userId: ticket.customerId, dedupeKey: `support-ticket-created:${ticket.id}` },
+      { replyTo: supportReplyToEmail() },
+    );
+  }
+
+  /**
+   * A customer wrote on their ticket: the support mailbox hears, and nobody
+   * else does.
+   *
+   * Keyed on the message rather than the ticket, because a customer may write
+   * as many times as the ticket's status allows and every one of them is news.
+   * The author's role is re-read from the row instead of trusted from the
+   * caller, so a message id pointed at this method by mistake — or by a retry
+   * rebuilding an old audit row — cannot turn an operator's answer into a
+   * "customer replied" notice.
+   */
+  async sendSupportTicketCustomerMessage(messageId: string) {
+    const message = await loadSupportTicketMessage(
+      this.prisma,
+      messageId,
+      SupportTicketAuthorRole.CUSTOMER,
+    );
+
+    if (!message) {
+      return;
+    }
+
+    await this.send(
+      'support-ticket-customer-reply',
+      readSupportInboxEmail(),
+      supportInboxData(message.ticket, {
+        messageExcerpt: message.body,
+        messageAt: message.createdAt.toISOString(),
+      }),
+      { dedupeKey: `support-ticket-customer-reply:${message.id}` },
+    );
+  }
+
+  /**
+   * An operator answered: the customer hears, and hears nothing about who
+   * answered.
+   *
+   * {@link supportCustomerData} is the enforcement rather than a convention —
+   * it reads the ticket and the quoted body and has no access to the message's
+   * author at all, so there is no field on the payload an operator's identity
+   * could arrive in.
+   */
+  async sendSupportTicketAdminMessage(messageId: string) {
+    const message = await loadSupportTicketMessage(
+      this.prisma,
+      messageId,
+      SupportTicketAuthorRole.ADMIN,
+    );
+
+    if (!message?.ticket.customerEmail) {
+      return;
+    }
+
+    await this.send(
+      'support-ticket-admin-reply',
+      message.ticket.customerEmail,
+      supportCustomerData(message.ticket, {
+        messageExcerpt: message.body,
+        messageAt: message.createdAt.toISOString(),
+      }),
+      {
+        userId: message.ticket.customerId,
+        dedupeKey: `support-ticket-admin-reply:${message.id}`,
+      },
+      { replyTo: supportReplyToEmail() },
+    );
+  }
+
+  /**
+   * The ticket moved: the customer is told what it moved from and to.
+   *
+   * Keyed on the recorded change, which is the only thing that makes this
+   * countable — a ticket resolved, reopened and resolved again has genuinely
+   * changed status three times, and each row is a separate transition with a
+   * separate key. A transition the table refused wrote no row, so there is
+   * nothing here to mail about.
+   *
+   * The status printed is the one the change recorded, not the one the ticket
+   * holds now. A message that said "çözümlendi" when the operator later closed
+   * it would be describing a moment that never existed.
+   */
+  async sendSupportTicketStatusChanged(statusChangeId: string) {
+    const change = await loadSupportTicketStatusChange(this.prisma, statusChangeId);
+    if (!change?.ticket.customerEmail) {
+      return;
+    }
+
+    await this.send(
+      'support-ticket-status-changed',
+      change.ticket.customerEmail,
+      supportStatusChangeData(change),
+      {
+        userId: change.ticket.customerId,
+        dedupeKey: `support-ticket-status:${change.id}`,
+      },
+      { replyTo: supportReplyToEmail() },
+    );
+  }
+
   // ─────────────────────────── admin-triggered retry ─────────────────────────
 
   /**
@@ -530,6 +686,10 @@ export class TransactionalMailService {
       template: source.template,
       to: composed.to,
       subject: transactionalSubject(source.template, composed.data),
+      // Carried through the retry: a re-sent support answer that a customer
+      // could not reply to would be a different message from the one that
+      // failed.
+      replyTo: composed.replyTo,
       data: composed.data,
     };
   }
@@ -668,6 +828,92 @@ export class TransactionalMailService {
           : null;
       }
 
+      case 'support-ticket-created': {
+        const ticket = await loadSupportTicket(this.prisma, source.ids[0]);
+        if (!ticket?.customerEmail) {
+          return null;
+        }
+
+        const opening = await firstSupportTicketMessage(this.prisma, ticket.id);
+        return {
+          to: ticket.customerEmail,
+          replyTo: supportReplyToEmail(),
+          data: supportCustomerData(ticket, {
+            messageExcerpt: opening?.body ?? null,
+            createdAt: ticket.createdAt.toISOString(),
+          }),
+        };
+      }
+
+      case 'support-ticket-new-for-support': {
+        const ticket = await loadSupportTicket(this.prisma, source.ids[0]);
+        if (!ticket) {
+          return null;
+        }
+
+        const opening = await firstSupportTicketMessage(this.prisma, ticket.id);
+        // The mailbox is re-read rather than taken from the audit row, which
+        // stores no address at all. A deployment that has since moved its
+        // support inbox retries to the inbox it has now — and the retry service
+        // compares the rebuilt address against the recorded mask, so a move
+        // shows up as a refused retry rather than a message to a stranger.
+        return {
+          to: readSupportInboxEmail(),
+          data: supportInboxData(ticket, {
+            messageExcerpt: opening?.body ?? null,
+            createdAt: ticket.createdAt.toISOString(),
+          }),
+        };
+      }
+
+      case 'support-ticket-customer-reply': {
+        const message = await loadSupportTicketMessage(
+          this.prisma,
+          source.ids[0],
+          SupportTicketAuthorRole.CUSTOMER,
+        );
+
+        return message
+          ? {
+              to: readSupportInboxEmail(),
+              data: supportInboxData(message.ticket, {
+                messageExcerpt: message.body,
+                messageAt: message.createdAt.toISOString(),
+              }),
+            }
+          : null;
+      }
+
+      case 'support-ticket-admin-reply': {
+        const message = await loadSupportTicketMessage(
+          this.prisma,
+          source.ids[0],
+          SupportTicketAuthorRole.ADMIN,
+        );
+
+        return message?.ticket.customerEmail
+          ? {
+              to: message.ticket.customerEmail,
+              replyTo: supportReplyToEmail(),
+              data: supportCustomerData(message.ticket, {
+                messageExcerpt: message.body,
+                messageAt: message.createdAt.toISOString(),
+              }),
+            }
+          : null;
+      }
+
+      case 'support-ticket-status-changed': {
+        const change = await loadSupportTicketStatusChange(this.prisma, source.ids[0]);
+        return change?.ticket.customerEmail
+          ? {
+              to: change.ticket.customerEmail,
+              replyTo: supportReplyToEmail(),
+              data: supportStatusChangeData(change),
+            }
+          : null;
+      }
+
       case 'credit-refunded': {
         const transaction = await loadRefundTransaction(this.prisma, source.ids[0]);
         if (!transaction) {
@@ -706,13 +952,23 @@ export class TransactionalMailService {
     to: string,
     data: Record<string, string | null | undefined>,
     context: DispatchContext | DedupedDispatchContext,
-    actionUrl?: string,
+    /**
+     * The two headers a message can carry beyond its body.
+     *
+     * An object rather than two positional arguments because they are set by
+     * disjoint families — `actionUrl` by the messages that carry a single-use
+     * link, `replyTo` by the support-ticket messages a customer may answer —
+     * and a call site that had to pass `undefined` past one to reach the other
+     * is a call site that will eventually pass it to the wrong one.
+     */
+    options: { actionUrl?: string; replyTo?: string } = {},
   ) {
     const message = {
       template,
       to,
       subject: transactionalSubject(template, data),
-      actionUrl,
+      actionUrl: options.actionUrl,
+      replyTo: options.replyTo,
       data,
     };
 
@@ -967,7 +1223,200 @@ function loadOffer(prisma: PrismaService, offerId: string) {
 export type ComposedMail = {
   to: string;
   data: Record<string, string | null | undefined>;
+  /** Carried through a retry too: a re-sent support answer must still be answerable. */
+  replyTo?: string;
 };
+
+// ───────────────────────────── support ticket sources ────────────────────────
+
+/**
+ * The columns a support notification is allowed to read.
+ *
+ * Explicit, and short on purpose. A ticket's own owner is joined for exactly
+ * two fields — the name a message greets with and the address it goes to — and
+ * nothing else about that account (phone, verification, requests, payments) is
+ * selected, so no later edit to this file can widen a support e-mail into an
+ * account summary.
+ */
+const supportTicketSource = {
+  id: true,
+  subject: true,
+  status: true,
+  customerId: true,
+  createdAt: true,
+  customer: { select: { name: true, email: true } },
+} as const;
+
+type SupportTicketSource = {
+  id: string;
+  subject: string;
+  status: string;
+  customerId: string;
+  createdAt: Date;
+  customerName: string | null;
+  customerEmail: string | null;
+};
+
+async function loadSupportTicket(
+  prisma: PrismaService,
+  ticketId: string,
+): Promise<SupportTicketSource | null> {
+  const ticket = await prisma.supportTicket.findUnique({
+    where: { id: ticketId },
+    select: supportTicketSource,
+  });
+
+  return ticket ? flattenSupportTicket(ticket) : null;
+}
+
+function flattenSupportTicket(ticket: {
+  id: string;
+  subject: string;
+  status: string;
+  customerId: string;
+  createdAt: Date;
+  customer: { name: string | null; email: string | null };
+}): SupportTicketSource {
+  return {
+    id: ticket.id,
+    subject: ticket.subject,
+    status: ticket.status,
+    customerId: ticket.customerId,
+    createdAt: ticket.createdAt,
+    customerName: ticket.customer.name,
+    customerEmail: ticket.customer.email,
+  };
+}
+
+/** The opening message, which is an ordinary message row and always the first one. */
+function firstSupportTicketMessage(prisma: PrismaService, ticketId: string) {
+  return prisma.supportTicketMessage.findFirst({
+    where: { ticketId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { body: true },
+  });
+}
+
+/**
+ * One message, and only if it was written by the side the caller expects.
+ *
+ * The role is a predicate in the query rather than a check afterwards, for the
+ * same reason the ticket module puts ownership in its `where`: a row that does
+ * not match is simply not found, so there is no branch in which an operator's
+ * answer has already been loaded into a "the customer replied" code path.
+ */
+async function loadSupportTicketMessage(
+  prisma: PrismaService,
+  messageId: string,
+  authorRole: SupportTicketAuthorRole,
+) {
+  const message = await prisma.supportTicketMessage.findFirst({
+    where: { id: messageId, authorRole },
+    select: {
+      id: true,
+      body: true,
+      createdAt: true,
+      // Deliberately not `authorUserId`, and deliberately no join to the
+      // author. The customer's copy of an answer must not be able to name the
+      // operator who wrote it, and the surest way to keep it that way is for
+      // the operator's identity never to be read at all.
+      ticket: { select: supportTicketSource },
+    },
+  });
+
+  return message ? { ...message, ticket: flattenSupportTicket(message.ticket) } : null;
+}
+
+async function loadSupportTicketStatusChange(prisma: PrismaService, statusChangeId: string) {
+  const change = await prisma.supportTicketStatusChange.findUnique({
+    where: { id: statusChangeId },
+    select: {
+      id: true,
+      fromStatus: true,
+      toStatus: true,
+      createdAt: true,
+      // `changedById` is not selected: which operator moved the ticket is an
+      // internal fact, and this row's only reader is the customer's message.
+      ticket: { select: supportTicketSource },
+    },
+  });
+
+  return change ? { ...change, ticket: flattenSupportTicket(change.ticket) } : null;
+}
+
+/**
+ * What the customer's three support messages are told.
+ *
+ * The ticket, its subject, its status, the quoted message and a link to the
+ * customer's own ticket page. There is no operator field on this payload and no
+ * way to add one without editing this function, which is the point: the
+ * template renders what it is given, so "no operator identity reaches a
+ * customer" is enforced where the data is assembled rather than hoped for in
+ * five templates.
+ */
+function supportCustomerData(
+  ticket: SupportTicketSource,
+  extra: MailData,
+): MailData {
+  return {
+    fullName: ticket.customerName,
+    ticketReference: ticket.id,
+    ticketSubject: ticket.subject,
+    status: ticket.status,
+    ticketUrl: customerSupportTicketUrl(ticket.id),
+    accountUrl: customerAccountUrl(),
+    ...extra,
+  };
+}
+
+/**
+ * What the support mailbox's two messages are told.
+ *
+ * The customer's name and address are here and nowhere else — an operator
+ * already sees both on the queue screen this message links to, and a
+ * notification that withheld them would be a link somebody has to open to find
+ * out who is waiting. `accountUrl` is absent: the recipient is a mailbox, not
+ * an account with settings.
+ */
+function supportInboxData(ticket: SupportTicketSource, extra: MailData): MailData {
+  return {
+    fullName: SUPPORT_INBOX_SALUTATION,
+    ticketReference: ticket.id,
+    ticketSubject: ticket.subject,
+    status: ticket.status,
+    customerName: ticket.customerName,
+    customerEmail: ticket.customerEmail,
+    ticketUrl: adminSupportTicketUrl(ticket.id),
+    accountUrl: null,
+    ...extra,
+  };
+}
+
+/**
+ * Who a message to a shared mailbox greets.
+ *
+ * Every document in this design system opens with exactly one salutation, and
+ * the recipient here is a team rather than a person — so the greeting names the
+ * team instead of borrowing whichever operator happens to read it.
+ */
+const SUPPORT_INBOX_SALUTATION = 'Destek Ekibi';
+
+function supportStatusChangeData(change: {
+  fromStatus: string | null;
+  toStatus: string;
+  createdAt: Date;
+  ticket: SupportTicketSource;
+}): MailData {
+  return supportCustomerData(change.ticket, {
+    // The statuses the *change* recorded, not the ones the ticket holds now. A
+    // ticket resolved and later closed must not rewrite the message that
+    // announced the resolution.
+    fromStatus: change.fromStatus,
+    status: change.toStatus,
+    changedAt: change.createdAt.toISOString(),
+  });
+}
+
 
 type MailData = ComposedMail['data'];
 
@@ -1301,6 +1750,15 @@ const RETRY_DEDUPE_PREFIXES = {
   'offer-not-selected': 'offer-not-selected',
   'credit-refunded': 'credit-refunded',
   'package-purchase-confirmation': 'package-purchase',
+  // The support-ticket family is reproducible in full: every one of them is
+  // composed from a ticket, a message or a status-change row, all of which are
+  // permanent — this product deletes none of the three — and none of them
+  // carries a token or anything else that existed only in memory.
+  'support-ticket-created': 'support-ticket-created',
+  'support-ticket-new-for-support': 'support-ticket-new',
+  'support-ticket-customer-reply': 'support-ticket-customer-reply',
+  'support-ticket-admin-reply': 'support-ticket-admin-reply',
+  'support-ticket-status-changed': 'support-ticket-status',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -1334,6 +1792,11 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'offer-not-selected': 1,
   'credit-refunded': 1,
   'package-purchase-confirmation': 1,
+  'support-ticket-created': 1,
+  'support-ticket-new-for-support': 1,
+  'support-ticket-customer-reply': 1,
+  'support-ticket-admin-reply': 1,
+  'support-ticket-status-changed': 1,
 };
 
 /**

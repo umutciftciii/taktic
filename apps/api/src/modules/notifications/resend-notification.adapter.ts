@@ -91,6 +91,10 @@ export class ResendNotificationAdapter extends NotificationPort {
         subject: message.subject,
         text: rendered.text,
         html: rendered.html,
+        // Omitted rather than sent empty when the message names none: the field
+        // is absent from every payload but the support-ticket family, and a
+        // present-but-empty header is a header a provider may still act on.
+        ...(message.replyTo ? { reply_to: message.replyTo } : {}),
       },
       message.idempotencyKey,
     );
@@ -208,6 +212,8 @@ type ResendEmailRequest = {
   subject: string;
   text: string;
   html: string;
+  /** Resend's own spelling. Present only for messages that expect an answer. */
+  reply_to?: string;
 };
 
 /**

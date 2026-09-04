@@ -89,6 +89,17 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'provider-claim',
   'request-expiring',
   'package-purchase-confirmation',
+  // The five support-ticket messages. Two go to the operator inbox and three to
+  // the customer, and they are deliberately five templates rather than one
+  // parameterised by audience: the pair a single event produces say different
+  // things to different people, and a template that decided which of the two it
+  // was at render time would be one edit away from telling a customer what only
+  // an operator may read.
+  'support-ticket-created',
+  'support-ticket-new-for-support',
+  'support-ticket-customer-reply',
+  'support-ticket-admin-reply',
+  'support-ticket-status-changed',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -160,6 +171,51 @@ export function transactionalSubject(
       return 'Talebiniz için süre dolmak üzere';
     case 'package-purchase-confirmation':
       return 'Kredi paketiniz hesabınıza yüklendi';
+    // The ticket's own subject is the suffix on all five, because it is the one
+    // thing that tells two tickets apart in a mailbox — and it is truncated,
+    // because a customer may type two hundred characters into it and a subject
+    // line that runs past what an inbox shows tells nobody anything.
+    case 'support-ticket-created':
+      return withSuffix('Destek talebiniz alındı', ticketSubject(data));
+    case 'support-ticket-new-for-support':
+      return withSuffix('Yeni destek talebi', ticketSubject(data));
+    case 'support-ticket-customer-reply':
+      return withSuffix('Destek talebine müşteri yanıtı', ticketSubject(data));
+    case 'support-ticket-admin-reply':
+      return withSuffix('Destek talebinize yanıt', ticketSubject(data));
+    case 'support-ticket-status-changed':
+      return withSuffix(statusChangeSubject(data), ticketSubject(data));
+  }
+}
+
+/** How much of the customer's own subject a subject line carries. */
+const TICKET_SUBJECT_IN_SUBJECT_LINE = 70;
+
+function ticketSubject(data: Data): string | null {
+  return truncate(text(data.ticketSubject), TICKET_SUBJECT_IN_SUBJECT_LINE);
+}
+
+/**
+ * What a status change is called in an inbox.
+ *
+ * Each status gets its own sentence rather than one "durumu güncellendi" for
+ * all four, because the status *is* the news: a customer scanning their inbox
+ * should not have to open the message to find out whether their ticket was
+ * resolved or closed. A status this build does not know falls back to the
+ * neutral wording instead of naming a code.
+ */
+function statusChangeSubject(data: Data): string {
+  switch (text(data.status)) {
+    case 'OPEN':
+      return 'Destek talebiniz yeniden açıldı';
+    case 'IN_PROGRESS':
+      return 'Destek talebiniz inceleniyor';
+    case 'RESOLVED':
+      return 'Destek talebiniz çözümlendi';
+    case 'CLOSED':
+      return 'Destek talebiniz kapatıldı';
+    default:
+      return 'Destek talebinizin durumu güncellendi';
   }
 }
 
@@ -213,6 +269,16 @@ export function buildDocument(
       return requestExpiring(subject, fullName, data);
     case 'package-purchase-confirmation':
       return packagePurchaseConfirmation(subject, fullName, data);
+    case 'support-ticket-created':
+      return supportTicketCreated(subject, fullName, data);
+    case 'support-ticket-new-for-support':
+      return supportTicketNewForSupport(subject, fullName, data);
+    case 'support-ticket-customer-reply':
+      return supportTicketCustomerReply(subject, fullName, data);
+    case 'support-ticket-admin-reply':
+      return supportTicketAdminReply(subject, fullName, data);
+    case 'support-ticket-status-changed':
+      return supportTicketStatusChanged(subject, fullName, data);
   }
 }
 
@@ -981,6 +1047,249 @@ function packagePurchaseConfirmation(
       cta('Bakiyemi gör', text(data.creditsUrl), 'primary'),
       spacer(20),
       note('Bu satın alma kredi geçmişinizde paket yüklemesi olarak listelenir.'),
+    ]),
+  };
+}
+
+// ────────────────────────── 17-21 · support tickets ──────────────────────────
+
+/**
+ * What a ticket status is called in a message.
+ *
+ * The same table the two operator-facing and three customer-facing messages
+ * read, and the reason it lives here rather than at the call site is the rule
+ * every other coded value in this file follows: `data.status` carries the
+ * storage code the column holds — `IN_PROGRESS` — and a recipient must never be
+ * shown one. A code this build does not know resolves to null, which makes the
+ * row disappear exactly like a missing value rather than printing the code.
+ *
+ * The wording is the customer-facing wording for this message set. It is
+ * deliberately warmer than the panel's own badges ("İşlemde", "Çözüldü"): an
+ * inbox has none of the surrounding screen to explain a two-word label.
+ */
+const SUPPORT_TICKET_STATUS_LABELS: Record<string, string> = {
+  OPEN: 'Açık',
+  IN_PROGRESS: 'İnceleniyor',
+  RESOLVED: 'Çözümlendi',
+  CLOSED: 'Kapatıldı',
+};
+
+function supportStatusLabel(value: string | null | undefined): string | null {
+  const code = text(value);
+  return code ? (SUPPORT_TICKET_STATUS_LABELS[code] ?? null) : null;
+}
+
+/** How much of a message body a notification quotes. The ticket itself has all of it. */
+const SUPPORT_MESSAGE_EXCERPT_LENGTH = 240;
+
+function supportExcerpt(data: Data): string | null {
+  return truncate(text(data.messageExcerpt), SUPPORT_MESSAGE_EXCERPT_LENGTH);
+}
+
+/**
+ * The quoted message, as a labelled section, or nothing at all.
+ *
+ * Returned as a list so both halves vanish together: a section label with no
+ * section under it is worse than no label, and `compact` cannot know the two
+ * belong to each other.
+ */
+function quotedMessage(label: string, excerpt: string | null): (EmailBlock | null)[] {
+  return excerpt ? [sectionLabel(label), paragraph(excerpt)] : [];
+}
+
+/** The ticket's identity rows, shared by all five messages. */
+function ticketRows(data: Data): (EmailDataRow | null)[] {
+  return [
+    row('Talep referansı', text(data.ticketReference)),
+    row('Konu', text(data.ticketSubject)),
+  ];
+}
+
+/**
+ * 17 · support.ticket_created — the customer's copy.
+ *
+ * It confirms that the ticket exists and shows what was said, and it stops
+ * there. There is no answering time in it and no service level, because this
+ * product measures neither and a receipt is a poor place to invent one.
+ */
+function supportTicketCreated(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Destek talebinizi aldık; yanıtlarımızı bu talep üzerinden ileteceğiz.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Destek talebi',
+    heading: 'Destek talebiniz alındı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Destek talebinizi aldık. Yanıtlarımızı ve talebinizle ilgili her gelişmeyi bu talep ' +
+          'üzerinden ileteceğiz.',
+      ),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Oluşturulma', formatDateTime(data.createdAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('Mesajınız', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.ticketUrl), 'primary'),
+      spacer(20),
+      note(
+        'Eklemek istediğiniz bir şey olursa bu e-postayı yanıtlayabilir veya talebi panelinizden ' +
+          'açarak yazabilirsiniz.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * 18 · support.ticket_created — the operator's copy.
+ *
+ * The one message in this file whose recipient is a mailbox rather than a
+ * person, which is why it carries the customer's name and address: an operator
+ * opening the queue sees both on the ticket already, and a notification that
+ * withheld them would just be a link somebody has to click to find out who is
+ * waiting. Nothing about the account beyond those two — no phone number, no
+ * request history, no payment fact — reaches this message.
+ */
+function supportTicketNewForSupport(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Bir müşteri yeni bir destek talebi açtı.',
+    audience: 'DESTEK',
+    kicker: 'Yeni talep',
+    heading: 'Yeni destek talebi',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph('Bir müşteri yeni bir destek talebi açtı.'),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Müşteri', text(data.customerName)),
+        row('Müşteri e-postası', text(data.customerEmail)),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Oluşturulma', formatDateTime(data.createdAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('İlk mesaj', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi panelde aç', text(data.ticketUrl), 'primary'),
+    ]),
+  };
+}
+
+/** 19 · support.customer_message — the operator's copy. */
+function supportTicketCustomerReply(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Açık bir destek talebine müşteri yanıtı geldi.',
+    audience: 'DESTEK',
+    kicker: 'Müşteri yanıtı',
+    heading: 'Destek talebine yeni mesaj',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph('Bir müşteri kendi destek talebine yeni bir mesaj ekledi.'),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Müşteri', text(data.customerName)),
+        row('Müşteri e-postası', text(data.customerEmail)),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Mesaj zamanı', formatDateTime(data.messageAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('Mesaj', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi panelde aç', text(data.ticketUrl), 'primary'),
+    ]),
+  };
+}
+
+/**
+ * 20 · support.admin_message — the customer's copy.
+ *
+ * What is absent is the whole point. The answer itself is quoted, because the
+ * customer can read it on their own ticket screen anyway; who wrote it is not,
+ * and nor is anything the operator wrote for the company rather than for the
+ * customer. This template reads exactly four fields, and none of them can carry
+ * an operator's identity.
+ */
+function supportTicketAdminReply(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Destek talebinize yeni bir yanıt eklendi.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Yanıt',
+    heading: 'Destek talebinize yanıt verdik',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph('Destek ekibimiz talebinize yanıt verdi.'),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Yanıt zamanı', formatDateTime(data.messageAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('Yanıtımız', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.ticketUrl), 'primary'),
+      spacer(20),
+      note('Yanıtınızı bu e-postayı yanıtlayarak veya talebi panelinizden açarak iletebilirsiniz.'),
+    ]),
+  };
+}
+
+/**
+ * 21 · support.status_changed — the customer's copy.
+ *
+ * Both ends of the move are printed when both are known, because "çözümlendi"
+ * on its own does not tell the reader whether anything actually changed. The
+ * operational reason a ticket moved is never here: an operator's reasoning is
+ * internal, and the customer is being told a fact about their own ticket.
+ */
+function supportTicketStatusChanged(subject: string, fullName: string, data: Data): EmailDocument {
+  const to = supportStatusLabel(data.status);
+  const closed = text(data.status) === 'CLOSED';
+
+  return {
+    subject,
+    preheader: to
+      ? `Destek talebinizin durumu "${to}" olarak güncellendi.`
+      : 'Destek talebinizin durumu güncellendi.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Durum güncellemesi',
+    heading: 'Destek talebinizin durumu değişti',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        to
+          ? `Destek talebiniz "${to}" durumuna alındı.`
+          : 'Destek talebinizin durumu güncellendi.',
+      ),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Önceki durum', supportStatusLabel(data.fromStatus)),
+        row('Yeni durum', to),
+        row('Güncelleme zamanı', formatDateTime(data.changedAt)),
+      ]),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.ticketUrl), 'primary'),
+      spacer(20),
+      note(
+        closed
+          ? 'Kapatılan bir talebe yeni mesaj eklenemez. Aynı konu sürüyorsa panelinizden yeni bir ' +
+              'talep açabilirsiniz.'
+          : 'Talebinizle ilgili her gelişmeyi bu talep üzerinden ileteceğiz.',
+      ),
     ]),
   };
 }

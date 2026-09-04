@@ -1342,6 +1342,11 @@ export const NOTIFICATION_TEMPLATES = [
   'offer-accepted',
   'offer-not-selected',
   'credit-refunded',
+  'support-ticket-created',
+  'support-ticket-new-for-support',
+  'support-ticket-customer-reply',
+  'support-ticket-admin-reply',
+  'support-ticket-status-changed',
 ] as const;
 
 /**
@@ -1480,6 +1485,13 @@ export function notificationTemplateLabel(template: string): string {
     'offer-accepted': 'Teklif kabul edildi',
     'offer-not-selected': 'Teklif seçilmedi',
     'credit-refunded': 'Kredi iadesi',
+    // The two that go to the support mailbox are named for the mailbox, so a
+    // row addressed to the company is not read as one addressed to a customer.
+    'support-ticket-created': 'Destek talebi alındı',
+    'support-ticket-new-for-support': 'Destek: yeni talep',
+    'support-ticket-customer-reply': 'Destek: müşteri yanıtı',
+    'support-ticket-admin-reply': 'Destek talebine yanıt',
+    'support-ticket-status-changed': 'Destek talebi durumu',
   };
 
   return labels[template] ?? template;

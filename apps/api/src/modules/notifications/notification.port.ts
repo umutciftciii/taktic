@@ -44,6 +44,21 @@ export type NotificationMessage = {
   actionUrl?: string;
   data?: Record<string, string | null | undefined>;
   /**
+   * Where a recipient's reply should go, when it is not the sender.
+   *
+   * Set on exactly one family of messages: the support-ticket notifications,
+   * whose whole point is that the customer can answer them. Every message this
+   * platform sends leaves from a no-reply sender, so without this header a
+   * customer hitting "reply" on "destek talebinize yanıt verdik" would be
+   * writing to nobody.
+   *
+   * It is an address this repository resolves (see
+   * {@link import('../support-tickets/support-inbox.config').supportReplyToEmail}),
+   * never anything a user supplied, and it is never stored on the audit row —
+   * NotificationLog records no addresses but a masked recipient.
+   */
+  replyTo?: string;
+  /**
    * A stable name for *this message*, handed to transports that can de-duplicate
    * on one.
    *

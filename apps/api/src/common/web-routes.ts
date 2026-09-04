@@ -1,4 +1,5 @@
 import { PROVIDER_INVITE_PATH } from '../modules/provider-invites/provider-invites.constants';
+import { getAdminAppBaseUrl } from '../modules/users/admin-invite.constants';
 import { publicWebUrl } from './public-urls';
 
 /**
@@ -101,4 +102,23 @@ export function providerOfferUrl(providerId: string, offerId: string): string {
 /** The provider's credit balance and history. `apps/web/app/providers/[id]/credits`. */
 export function providerCreditsUrl(providerId: string): string {
   return publicWebUrl(`/providers/${encodeURIComponent(providerId)}/credits`);
+}
+
+/** The customer's own support ticket. `apps/web/app/destek/[ticketId]`. */
+export function customerSupportTicketUrl(ticketId: string): string {
+  return publicWebUrl(`/destek/${encodeURIComponent(ticketId)}`);
+}
+
+/**
+ * One ticket in the operator queue. `apps/admin/app/support/[id]`.
+ *
+ * The only link in this file that is *not* on the web application, and it is
+ * here rather than in a file of its own because the rule the module comment
+ * states applies to it unchanged: the path is a literal this repository owns,
+ * and a route that moves has to break the build rather than a link in an
+ * operator's inbox. It is used by exactly the two support notifications that
+ * go to the support mailbox — a customer is never sent here.
+ */
+export function adminSupportTicketUrl(ticketId: string): string {
+  return `${getAdminAppBaseUrl()}/support/${encodeURIComponent(ticketId)}`;
 }

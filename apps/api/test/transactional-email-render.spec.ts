@@ -21,6 +21,8 @@ import { URGENCY_LABELS, UrgencyCode } from '../src/common/urgency';
 
 const WEB = 'https://app.example.test';
 const ASSETS = 'https://cdn.example.test';
+/** The operator panel, which only the two support-facing messages ever link to. */
+const ADMIN = 'https://panel.example.test';
 
 /**
  * The footer values, passed in rather than read from the environment.
@@ -183,6 +185,60 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     creditsUrl: `${WEB}/providers/p1/credits`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'support-ticket-created': {
+    fullName: 'Deniz Yılmaz',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Geçen haftaki talebimin faturası elime geçmedi.',
+    status: 'OPEN',
+    createdAt: '2026-08-27T11:12:00.000Z',
+    ticketUrl: `${WEB}/destek/tkt_c1a2b3`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'support-ticket-new-for-support': {
+    fullName: 'Destek Ekibi',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Geçen haftaki talebimin faturası elime geçmedi.',
+    status: 'OPEN',
+    createdAt: '2026-08-27T11:12:00.000Z',
+    customerName: 'Deniz Yılmaz',
+    customerEmail: 'deniz@example.test',
+    ticketUrl: `${ADMIN}/support/tkt_c1a2b3`,
+    accountUrl: null,
+  },
+  'support-ticket-customer-reply': {
+    fullName: 'Destek Ekibi',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Ek olarak talep numaram #T-90412.',
+    status: 'IN_PROGRESS',
+    messageAt: '2026-08-28T09:00:00.000Z',
+    customerName: 'Deniz Yılmaz',
+    customerEmail: 'deniz@example.test',
+    ticketUrl: `${ADMIN}/support/tkt_c1a2b3`,
+    accountUrl: null,
+  },
+  'support-ticket-admin-reply': {
+    fullName: 'Deniz Yılmaz',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Faturanızı yeniden gönderdik, ekte bulabilirsiniz.',
+    status: 'IN_PROGRESS',
+    messageAt: '2026-08-28T10:00:00.000Z',
+    ticketUrl: `${WEB}/destek/tkt_c1a2b3`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'support-ticket-status-changed': {
+    fullName: 'Deniz Yılmaz',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    fromStatus: 'IN_PROGRESS',
+    status: 'RESOLVED',
+    changedAt: '2026-08-28T12:00:00.000Z',
+    ticketUrl: `${WEB}/destek/tkt_c1a2b3`,
+    accountUrl: `${WEB}/account/profile`,
+  },
 };
 
 /**
@@ -256,7 +312,7 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('covers every template the port accepts', () => {
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(16);
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(21);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -319,7 +375,13 @@ describe('transactional e-mail rendering', () => {
         expect(href).not.toBe('#');
         expect(href.startsWith('javascript:')).toBe(false);
         expect(href.startsWith('data:')).toBe(false);
-        expect(href.startsWith('mailto:') || href.startsWith(WEB)).toBe(true);
+        // Every link is either a mailto or an absolute URL on one of this
+        // deployment's own origins. The operator panel is the second: the two
+        // support messages that go to the support inbox link into the queue,
+        // which is not served by the web application.
+        expect(
+          href.startsWith('mailto:') || href.startsWith(WEB) || href.startsWith(ADMIN),
+        ).toBe(true);
       }
     });
 
@@ -480,6 +542,11 @@ describe('transactional e-mail rendering', () => {
       'provider-claim': 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
       'request-expiring': 'Talebiniz için süre dolmak üzere',
       'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
+      'support-ticket-created': 'Destek talebiniz alındı — Faturam ulaşmadı',
+      'support-ticket-new-for-support': 'Yeni destek talebi — Faturam ulaşmadı',
+      'support-ticket-customer-reply': 'Destek talebine müşteri yanıtı — Faturam ulaşmadı',
+      'support-ticket-admin-reply': 'Destek talebinize yanıt — Faturam ulaşmadı',
+      'support-ticket-status-changed': 'Destek talebiniz çözümlendi — Faturam ulaşmadı',
     });
   });
 
@@ -784,6 +851,160 @@ describe('transactional e-mail rendering', () => {
         expect(body).not.toContain('order_created');
         expect(body).not.toContain('lemon-secret-key');
       }
+    });
+  });
+
+  /**
+   * The five support-ticket messages.
+   *
+   * Two of them go to an operator mailbox and three to the customer, and the
+   * line between the two sets is the point of this section: the customer's
+   * copies must carry the ticket, the answer and nothing about who inside the
+   * company wrote it, while the operator's may carry the customer's identity
+   * because an operator already sees it on the queue screen.
+   */
+  describe('support tickets', () => {
+    const CUSTOMER_TEMPLATES: TransactionalEmailTemplate[] = [
+      'support-ticket-created',
+      'support-ticket-admin-reply',
+      'support-ticket-status-changed',
+    ];
+
+    const SUPPORT_TEMPLATES: TransactionalEmailTemplate[] = [
+      'support-ticket-new-for-support',
+      'support-ticket-customer-reply',
+    ];
+
+    /** Every code the status column can hold, as the enum spells them. */
+    const STATUS_CODES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
+
+    it.each([...CUSTOMER_TEMPLATES, ...SUPPORT_TEMPLATES])(
+      '%s names the ticket, its subject and the last message',
+      (template) => {
+        const { html, text } = render(messageFor(template));
+
+        for (const body of [html, text]) {
+          expect(body).toContain('tkt_c1a2b3');
+          expect(body).toContain('Faturam ulaşmadı');
+          expect(body).toContain(FULL_DATA[template].messageExcerpt ?? 'Faturam ulaşmadı');
+        }
+      },
+    );
+
+    it.each(CUSTOMER_TEMPLATES)('%s links the customer to their own ticket', (template) => {
+      const { html, text } = render(messageFor(template));
+
+      expect(html).toContain(`${WEB}/destek/tkt_c1a2b3`);
+      expect(text).toContain(`${WEB}/destek/tkt_c1a2b3`);
+      // Never the operator panel: a customer cannot open it and being sent
+      // there says the platform confused the two audiences.
+      expect(html).not.toContain(ADMIN);
+      expect(text).not.toContain(ADMIN);
+    });
+
+    it.each(SUPPORT_TEMPLATES)('%s links the operator to the queue entry', (template) => {
+      const { html, text } = render(messageFor(template));
+
+      expect(html).toContain(`${ADMIN}/support/tkt_c1a2b3`);
+      expect(text).toContain(`${ADMIN}/support/tkt_c1a2b3`);
+    });
+
+    it.each([...CUSTOMER_TEMPLATES, ...SUPPORT_TEMPLATES])(
+      '%s prints the status in Turkish and never the storage code',
+      (template) => {
+        for (const status of STATUS_CODES) {
+          const { html, text } = render(messageFor(template, { status, fromStatus: 'OPEN' }));
+
+          for (const body of [html, text]) {
+            for (const code of STATUS_CODES) {
+              expect(body).not.toContain(code);
+            }
+          }
+
+          expect(html).toContain(
+            { OPEN: 'Açık', IN_PROGRESS: 'İnceleniyor', RESOLVED: 'Çözümlendi', CLOSED: 'Kapatıldı' }[
+              status
+            ] as string,
+          );
+        }
+      },
+    );
+
+    it('drops the status row entirely for a code this build does not know', () => {
+      const { html, text } = render(
+        messageFor('support-ticket-status-changed', { status: 'ESCALATED', fromStatus: 'PARKED' }),
+      );
+
+      for (const body of [html, text]) {
+        expect(body).not.toContain('ESCALATED');
+        expect(body).not.toContain('PARKED');
+      }
+    });
+
+    it.each(CUSTOMER_TEMPLATES)('%s carries nothing about the operator who answered', (template) => {
+      const { html, text } = render(
+        messageFor(template, {
+          // Every one of these is a field an operator-facing payload could
+          // plausibly grow. None of them may reach a customer's inbox, and a
+          // template that started reading one would fail here rather than in
+          // somebody's mail client.
+          adminEmail: 'operator@taktick.com.tr',
+          adminName: 'Operatör Ayşe',
+          internalNote: 'İç not: müşteri ısrarcı',
+          operationalReason: 'SLA aşımı nedeniyle kapatıldı',
+          customerEmail: 'deniz@example.test',
+        }),
+      );
+
+      for (const body of [html, text]) {
+        expect(body).not.toContain('operator@taktick.com.tr');
+        expect(body).not.toContain('Operatör Ayşe');
+        expect(body).not.toContain('İç not');
+        expect(body).not.toContain('SLA');
+        expect(body).not.toContain('deniz@example.test');
+      }
+    });
+
+    it.each(SUPPORT_TEMPLATES)('%s carries the customer an operator has to answer', (template) => {
+      const { html, text } = render(messageFor(template));
+
+      for (const body of [html, text]) {
+        expect(body).toContain('Deniz Yılmaz');
+        expect(body).toContain('deniz@example.test');
+      }
+    });
+
+    it.each([...CUSTOMER_TEMPLATES, ...SUPPORT_TEMPLATES])(
+      '%s promises no response time and no service level',
+      (template) => {
+        const { html, text } = render(messageFor(template));
+
+        for (const body of [html, text]) {
+          expect(body).not.toMatch(/\d+\s*(saat|iş günü|gün) içinde/);
+          expect(body).not.toContain('en kısa sürede');
+          expect(body).not.toContain('SLA');
+          expect(body).not.toContain('garanti');
+        }
+      },
+    );
+
+    it('says what changed, in both directions, on a status message', () => {
+      const { html } = render(
+        messageFor('support-ticket-status-changed', {
+          fromStatus: 'IN_PROGRESS',
+          status: 'RESOLVED',
+        }),
+      );
+
+      expect(html).toContain('İnceleniyor');
+      expect(html).toContain('Çözümlendi');
+    });
+
+    it('states a subject that follows the ticket, however long the ticket subject is', () => {
+      const long = 'ç'.repeat(200);
+
+      expect(transactionalSubject('support-ticket-created', { ticketSubject: long }).length)
+        .toBeLessThanOrEqual(120);
     });
   });
 });
