@@ -1174,6 +1174,8 @@ export type AdminSummary = {
   totalOffers: number;
   refundableOffers: number;
   packagePurchases: number;
+  /** OPEN + IN_PROGRESS tickets — the support backlog, never RESOLVED or CLOSED. */
+  openSupportTickets: number;
 };
 
 export type FinanceSummaryRecentTransaction = {

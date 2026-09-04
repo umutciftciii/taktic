@@ -3,10 +3,12 @@ import { AdminSummary, apiFetch, requireAdmin } from '../lib/api';
 import { PageHeader } from '../components/page-header';
 import { SectionCard } from '../components/section-card';
 import { StatCard } from '../components/stat-card';
+import { buildAdminDashboardMetrics } from '../lib/dashboard-metrics';
 
 export default async function AdminHomePage() {
   const user = await requireAdmin();
   const summary = await apiFetch<AdminSummary>('/dashboard/admin-summary');
+  const metrics = buildAdminDashboardMetrics(summary);
 
   return (
     <main>
@@ -20,14 +22,22 @@ export default async function AdminHomePage() {
       />
 
       <section className="stat-grid">
-        <StatCard label="Toplam talep" value={summary.totalRequests} href="/requests" />
-        <StatCard label="Bekleyen talepler" value={summary.pendingRequests} href="/requests" tone="warning" />
-        <StatCard label="İncelemedeki talepler" value={summary.inReviewRequests} href="/requests" tone="warning" />
-        <StatCard label="Onaylı hizmet verenler" value={summary.approvedProviders} href="/providers" tone="success" />
-        <StatCard label="Bekleyen hizmet verenler" value={summary.pendingProviders} href="/providers" tone="warning" />
-        <StatCard label="Toplam teklif" value={summary.totalOffers} href="/offers" />
-        <StatCard label="İade adayı" value={summary.refundableOffers} href="/refund-scan" tone="warning" />
-        <StatCard label="Paket talebi" value={summary.packagePurchases} href="/package-purchases" />
+        {/*
+          Every card, its number and its badge come from one place. The page
+          used to type `tone="warning"` onto each card, which is how an empty
+          marketplace ended up wearing a "dikkat" badge on three zeroes — see
+          lib/dashboard-metrics.ts for the rule that replaced it.
+        */}
+        {metrics.map((metric) => (
+          <StatCard
+            key={metric.key}
+            metricKey={metric.key}
+            label={metric.label}
+            value={metric.value}
+            href={metric.href}
+            tone={metric.tone}
+          />
+        ))}
       </section>
 
       <SectionCard title="Hızlı işlemler" subtitle="Sık kullanılan operasyon ve katalog ekranlarına git.">
@@ -39,6 +49,7 @@ export default async function AdminHomePage() {
           <Link className="btn btn-secondary btn-sm" href="/credit-packages">Kredi paketleri</Link>
           <Link className="btn btn-secondary btn-sm" href="/package-purchases">Paket satın almaları</Link>
           <Link className="btn btn-ghost btn-sm" href="/refund-scan">İade taraması</Link>
+          <Link className="btn btn-ghost btn-sm" href="/support">Destek talepleri</Link>
         </div>
       </SectionCard>
     </main>

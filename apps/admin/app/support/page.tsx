@@ -10,6 +10,14 @@ import {
   type SupportTicketListResponse,
   type SupportTicketStatus,
 } from '../../lib/api';
+import {
+  OPEN_SUPPORT_TICKETS_FILTER,
+  OPEN_SUPPORT_TICKET_STATUSES,
+  buildSupportListHref,
+  isOpenSupportTicketFilter,
+  parseStatusFilter,
+  statusFilterValue,
+} from '../../lib/support-ticket-filter';
 import { EmptyState } from '../../components/empty-state';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
@@ -23,6 +31,14 @@ import { SectionCard } from '../../components/section-card';
  * ticket is created, deleted or reassigned from here, and none can be, because
  * the API has no route for any of the three.
  *
+ * The status filter takes a set, not a single status. `?status=OPEN` still
+ * means what it always did — it is a one-element set — and `?status=OPEN,IN_PROGRESS`
+ * is the backlog: everything still waiting on somebody. That second form is
+ * where the dashboard's "Açık destek talepleri" card points, and it is offered
+ * as the first option in the select below, so the number on the card and the
+ * rows on this screen are the same set of tickets rather than two lists that
+ * happen to overlap.
+ *
  * The table below carries `support-table-scroll` as well as `table-scroll`.
  * `.table-scroll` only gets its `overflow-x` inside a `.table-card`, and this
  * table lives in a `.section-card` — so without the extra class the six columns
@@ -33,7 +49,8 @@ import { SectionCard } from '../../components/section-card';
 const DEFAULT_PAGE_SIZE = 25;
 
 type RawSearchParams = {
-  status?: string;
+  /** An array when the caller repeated `?status=` — Next hands both shapes over. */
+  status?: string | string[];
   page?: string;
 };
 
@@ -41,41 +58,38 @@ type AdminSupportPageProps = {
   searchParams: Promise<RawSearchParams>;
 };
 
-function normalizeStatus(value: string | undefined): SupportTicketStatus | '' {
-  if (!value) return '';
-  const upper = value.toUpperCase();
-  return (SUPPORT_TICKET_STATUSES as readonly string[]).includes(upper)
-    ? (upper as SupportTicketStatus)
-    : '';
-}
-
 function normalizePage(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
-}
-
-function buildPageHref(status: SupportTicketStatus | '', page: number): string {
-  const query = new URLSearchParams();
-  if (status) query.set('status', status);
-  if (page > 1) query.set('page', String(page));
-  const search = query.toString();
-  return search ? `/support?${search}` : '/support';
 }
 
 export default async function AdminSupportPage({ searchParams }: AdminSupportPageProps) {
   await requireAdmin();
 
   const params = await searchParams;
-  const status = normalizeStatus(params.status);
+  const statuses = parseStatusFilter(params.status);
+  // Canonical order for the select: `?status=IN_PROGRESS,OPEN` is the same
+  // filter as `?status=OPEN,IN_PROGRESS`, and the option below should be the
+  // one shown as chosen either way rather than the box silently reading "Tümü".
+  const selectedFilter = isOpenSupportTicketFilter(statuses)
+    ? OPEN_SUPPORT_TICKETS_FILTER
+    : statusFilterValue(statuses);
   const page = normalizePage(params.page);
 
   const apiQuery = new URLSearchParams();
   apiQuery.set('page', String(page));
   apiQuery.set('pageSize', String(DEFAULT_PAGE_SIZE));
-  if (status) apiQuery.set('status', status);
+  if (selectedFilter) apiQuery.set('status', selectedFilter);
 
   const response = await apiFetch<SupportTicketListResponse>(
     `/admin/support/tickets?${apiQuery.toString()}`,
+  );
+
+  // The backlog's own count, so the option below says the same number the
+  // dashboard card does.
+  const openTicketCount = OPEN_SUPPORT_TICKET_STATUSES.reduce(
+    (total, status) => total + (response.statusCounts[status] ?? 0),
+    0,
   );
 
   const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
@@ -91,8 +105,17 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
       <form className="admin-toolbar" method="get" action="/support">
         <div className="admin-toolbar-field">
           <label htmlFor="support-status">Durum</label>
-          <select id="support-status" name="status" defaultValue={status}>
+          <select id="support-status" name="status" defaultValue={selectedFilter}>
             <option value="">Tümü</option>
+            {/*
+              The backlog, as one option. It is where the dashboard card points,
+              so an operator who arrives from there finds the filter reflecting
+              the link they followed rather than silently reading "Tümü" and
+              resetting the moment they press Uygula.
+            */}
+            <option value={OPEN_SUPPORT_TICKETS_FILTER}>
+              {`Açık + İşlemde (${openTicketCount})`}
+            </option>
             {SUPPORT_TICKET_STATUSES.map((value) => (
               <option key={value} value={value}>
                 {`${supportTicketStatusLabel(value)} (${response.statusCounts[value] ?? 0})`}
@@ -101,7 +124,11 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
           </select>
         </div>
         <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary" data-testid="support-ticket-count">
+          <span
+            className="admin-toolbar-summary"
+            data-testid="support-ticket-count"
+            data-total={response.total}
+          >
             {response.total === 0
               ? '0 talep'
               : `${startIndex}-${endIndex} / ${response.total} talep`}
@@ -109,7 +136,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
           <button className="btn btn-secondary btn-sm" type="submit">
             Uygula
           </button>
-          {status ? (
+          {statuses.length ? (
             <Link className="btn btn-ghost btn-sm" href="/support">
               Temizle
             </Link>
@@ -125,15 +152,19 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
         {response.items.length === 0 ? (
           <EmptyState
             title={
-              status ? 'Bu durumda destek talebi bulunamadı.' : 'Henüz destek talebi açılmadı.'
+              statuses.length
+                ? isOpenSupportTicketFilter(statuses)
+                  ? 'Bekleyen destek talebi yok.'
+                  : 'Bu durumda destek talebi bulunamadı.'
+                : 'Henüz destek talebi açılmadı.'
             }
             description={
-              status
+              statuses.length
                 ? 'Filtreyi temizleyerek tüm talepleri görebilirsiniz.'
                 : 'Bir hizmet alan panelinden destek talebi açtığında burada görünür.'
             }
             action={
-              status ? (
+              statuses.length ? (
                 <Link className="btn btn-secondary btn-sm" href="/support">
                   Filtreyi temizle
                 </Link>
@@ -168,7 +199,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
           {response.page > 1 ? (
             <Link
               className="btn btn-secondary btn-sm"
-              href={buildPageHref(status, response.page - 1)}
+              href={buildSupportListHref(statuses, response.page - 1)}
             >
               ← Önceki
             </Link>
@@ -181,7 +212,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
           {response.hasNextPage ? (
             <Link
               className="btn btn-secondary btn-sm"
-              href={buildPageHref(status, response.page + 1)}
+              href={buildSupportListHref(statuses, response.page + 1)}
             >
               Sonraki →
             </Link>
