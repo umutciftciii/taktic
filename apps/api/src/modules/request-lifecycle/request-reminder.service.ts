@@ -55,6 +55,7 @@ export class RequestReminderService {
         id: true,
         requestNumber: true,
         customerId: true,
+        customerName: true,
         customerEmail: true,
         approvedAt: true,
         category: { select: { name: true } },
@@ -101,6 +102,11 @@ export class RequestReminderService {
           to: email,
           subject: REMINDER_SUBJECT,
           data: {
+            // For the salutation. The reminder had no name to greet with while
+            // it rendered through the plain renderer, which opened with a bare
+            // "Merhaba,"; the design system opens every message with a named
+            // salutation, and the request already carries the name.
+            fullName: candidate.customerName,
             requestNumber: candidate.requestNumber,
             categoryName: candidate.category.name,
             openDays: String(REQUEST_EXPIRY_DAYS),

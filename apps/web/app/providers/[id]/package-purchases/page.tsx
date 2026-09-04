@@ -100,7 +100,7 @@ export default async function ProviderPackagePurchasesPage({
         <div>
           <h1 className="pdash-page-title">Paket Satın Alma Geçmişi</h1>
           <p className="pdash-page-sub">
-            Önceki paket satın alımlarınızı ve fatura detaylarınızı buradan görüntüleyin.
+            Önceki paket satın alımlarınızı ve ödeme detaylarınızı buradan görüntüleyin.
           </p>
         </div>
         <span

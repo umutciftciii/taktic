@@ -10,7 +10,7 @@ import { escapeHtml } from './format';
  * `role="presentation"` tables, every style inline, a 600px card, the MSO font
  * fallback, `mso-line-height-rule:exactly` on every line height, and a single
  * `<style>` block carrying nothing but the ≤620px media query. Rebuilding it as
- * blocks is what lets twelve templates share one shell without twelve copies
+ * blocks is what lets every template share one shell without a copy per message
  * drifting apart.
  *
  * Three things the design preview had that production must not:
@@ -64,9 +64,9 @@ export type EmailDocument = {
    * A real settings page for this recipient, or null.
    *
    * The design's footer carried "Bildirim tercihleri" and "Bildirimlerden çık".
-   * This product has no preference centre and no unsubscribe list, and these
-   * twelve messages are mandatory transactional notices that would not be
-   * subject to one anyway — so rather than ship two dead links, the footer
+   * This product has no preference centre and no unsubscribe list, and every
+   * message here is a mandatory transactional notice that would not be subject
+   * to one anyway — so rather than ship two dead links, the footer
    * carries one link to a page that exists and says plainly what kind of
    * message this is. See {@link renderFooter}.
    */

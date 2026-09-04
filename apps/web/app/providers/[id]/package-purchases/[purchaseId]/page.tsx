@@ -12,6 +12,7 @@ import {
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
 import { providerStatusBadgeClass } from '../../../provider-ui';
+import { Notice, noticeForStatus } from '../purchase-notice';
 
 type ProviderPackagePurchaseDetailPageProps = {
   params: Promise<{ id: string; purchaseId: string }>;
@@ -36,15 +37,6 @@ type TimelineEvent = {
   description?: string;
   timestamp: string;
   tone: TimelineTone;
-};
-
-type NoticeTone = 'default' | 'warn' | 'error';
-
-type Notice = {
-  tone: NoticeTone;
-  icon: string;
-  title: string;
-  body: string;
 };
 
 export default async function ProviderPackagePurchaseDetailPage({
@@ -199,6 +191,7 @@ export default async function ProviderPackagePurchaseDetailPage({
 
       {notice ? (
         <div
+          data-testid="purchase-notice"
           className={`pdash-info-banner${
             notice.tone === 'warn'
               ? ' is-warn'
@@ -329,60 +322,6 @@ function buildTimeline(p: PackagePurchase): TimelineEvent[] {
 
   events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return events;
-}
-
-function noticeForStatus(
-  status: PackagePurchaseStatus,
-  failureReason: string | null,
-): Notice | null {
-  switch (status) {
-    case 'PAID':
-      return {
-        tone: 'default',
-        icon: 'i',
-        title: 'Bilgilendirme',
-        body: 'Bu işleme ait e-fatura, sistemde kayıtlı e-posta adresinize iletilecektir.',
-      };
-    case 'PENDING':
-      return {
-        tone: 'warn',
-        icon: '·',
-        title: 'Ödeme bekleniyor',
-        body: 'Ödeme tamamlanmadı. İşleme ödeme ekranından devam edebilirsiniz.',
-      };
-    case 'FAILED':
-      return {
-        tone: 'error',
-        icon: '⚠',
-        title: 'Ödeme başarısız',
-        body: failureReason
-          ? `Kart işlemi tamamlanamadı. Sebep: ${failureReason}. Yeni bir paket satın alma işlemi başlatarak tekrar deneyebilirsiniz.`
-          : 'Kart işlemi tamamlanamadı. Yeni bir paket satın alma işlemi başlatarak tekrar deneyebilirsiniz.',
-      };
-    case 'CANCELLED':
-      return {
-        tone: 'default',
-        icon: 'i',
-        title: 'Sipariş iptal edildi',
-        body: 'Bu sipariş iptal edilmiştir. Yeni bir paket satın almak için Kredilerim sayfasını ziyaret edebilirsiniz.',
-      };
-    case 'EXPIRED':
-      return {
-        tone: 'default',
-        icon: 'i',
-        title: 'Sipariş süresi doldu',
-        body: 'Bu siparişin geçerlilik süresi dolmuştur. Yeni bir paket satın alabilirsiniz.',
-      };
-    case 'REFUNDED':
-      return {
-        tone: 'default',
-        icon: 'i',
-        title: 'İade tamamlandı',
-        body: 'Bu satın alma için iade işlemi tamamlanmıştır.',
-      };
-    default:
-      return null;
-  }
 }
 
 /**

@@ -4,7 +4,6 @@ import { EmailBrandingService } from './email-branding.service';
 import { renderEmail } from './email-template';
 import { maskEmail } from './mask';
 import { NotificationErrorCode } from './notification-errors';
-import { isTransactionalEmailTemplate } from './templates/transactional-templates';
 import {
   NotificationMessage,
   NotificationPort,
@@ -110,11 +109,11 @@ export class ResendNotificationAdapter extends NotificationPort {
   /**
    * Refuses a message whose links a recipient could not open.
    *
-   * Only messages that actually carry a URL built from the public base are
-   * gated. Every designed template embeds the logo and a call to action, and
-   * the two legacy templates that carry a single-use link are addressed by
-   * `actionUrl`; the day-7 request reminder carries neither, and there is
-   * nothing in it for an unusable base URL to spoil, so it still goes out.
+   * Every template embeds the logo, and most carry a call to action as well, so
+   * a deployment whose public address cannot be put in front of a recipient has
+   * nothing it can render honestly. The check used to exempt the one link-free
+   * legacy message; that message prints the logo now like every other, so the
+   * exemption is gone with it.
    *
    * The log line names the variable and the class of defect and stops there —
    * no recipient, no token, no URL. A base URL is not a credential, but this
@@ -122,7 +121,7 @@ export class ResendNotificationAdapter extends NotificationPort {
    * turned out to be a pasted secret must not be the thing that writes it down.
    */
   private requireUsablePublicUrls(message: NotificationMessage): void {
-    if (!carriesPublicUrl(message) || isPublicUrlDeliverable()) {
+    if (isPublicUrlDeliverable()) {
       return;
     }
 
@@ -140,11 +139,15 @@ export class ResendNotificationAdapter extends NotificationPort {
    * The footer, or a refusal.
    *
    * This is the last point at which a half-filled message can still be stopped.
-   * The three legacy templates print no company details, so they resolve to
-   * null and go out unchanged; every designed template prints the footer, and
-   * for those an unpublishable settings row ends the send here — before the
-   * request body is built, before anything reaches Resend, and therefore before
-   * anybody can receive an e-mail telling them to write to a placeholder.
+   * Every template prints the company footer, so an unpublishable settings row
+   * ends the send here — before the request body is built, before anything
+   * reaches Resend, and therefore before anybody can receive an e-mail telling
+   * them to write to a placeholder.
+   *
+   * The three formerly-plain templates are gated by this too now. They used to
+   * be exempt because they printed no company details and gating them would
+   * have taken a mailbox-ownership flow offline over a value they never showed;
+   * they show it today, so the exemption no longer describes anything true.
    *
    * The thrown error carries only the class and the named issues. Those are a
    * closed vocabulary about this deployment's own configuration — no address,
@@ -152,10 +155,6 @@ export class ResendNotificationAdapter extends NotificationPort {
    * on the audit row the dispatcher is about to mark FAILED.
    */
   private async resolveBranding(template: NotificationMessage['template']) {
-    if (!isTransactionalEmailTemplate(template)) {
-      return null;
-    }
-
     const resolution = await this.branding.resolve();
     if (!resolution.complete) {
       this.logger.error(
@@ -216,17 +215,6 @@ type ResendEmailRequest = {
  * nothing else: no recipient, no body, no key. {@link classifyNotificationError}
  * reads `errorCode` off it and the dispatcher stores only that.
  */
-/**
- * Whether this message would carry a URL built from the public base.
- *
- * True for every designed template — they all embed the logo — and for anything
- * addressed by a single-use action link. False only for the link-free
- * notification, which is the day-7 request reminder.
- */
-function carriesPublicUrl(message: NotificationMessage): boolean {
-  return isTransactionalEmailTemplate(message.template) || Boolean(message.actionUrl);
-}
-
 /**
  * Raised instead of sending, when this deployment's public address cannot be
  * put in front of a recipient.

@@ -10,7 +10,7 @@ import {
 import { URGENCY_LABELS, UrgencyCode } from '../src/common/urgency';
 
 /**
- * What the twelve designed messages must look like on the way out.
+ * What every designed message must look like on the way out.
  *
  * These cases render only — no database, no dispatcher — because the questions
  * they answer are about the markup: does every message carry the one mandatory
@@ -39,7 +39,7 @@ const BRANDING: EmailBranding = {
   logoUrl: `${ASSETS}/brand/logo-email.png`,
 };
 
-/** Renders with the branding above. The three legacy templates ignore it. */
+/** Renders with the branding above. Every template needs it — all print the footer. */
 function render(message: NotificationMessage) {
   return renderEmail(message, BRANDING);
 }
@@ -155,7 +155,48 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     creditsUrl: `${WEB}/providers/p1/credits`,
     accountUrl: `${WEB}/providers/me`,
   },
+  // The three that moved onto the design system keep the variable names their
+  // call sites have always passed. `customer-activation` greets from `name`,
+  // which is why it has no `fullName` of its own.
+  'customer-activation': { name: 'Deniz Yılmaz', expiresAt: '2026-08-29T11:12:00.000Z' },
+  'provider-claim': {
+    fullName: 'Murat Şahin',
+    businessName: 'Şahin Isı Sistemleri',
+    expiresAt: '2026-08-29T11:12:00.000Z',
+  },
+  'request-expiring': {
+    fullName: 'Deniz Yılmaz',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    openDays: '14',
+    remainingDays: '7',
+    expiresAt: '2026-09-05T11:12:00.000Z',
+  },
+  'package-purchase-confirmation': {
+    fullName: 'Murat Şahin',
+    packageName: 'Başlangıç Paketi',
+    creditAmount: '30',
+    priceAmountMinor: '49900',
+    currency: 'TRY',
+    purchaseNumber: '#P-10023',
+    paidAt: '2026-08-27T11:12:00.000Z',
+    creditsUrl: `${WEB}/providers/p1/credits`,
+    accountUrl: `${WEB}/providers/me`,
+  },
 };
+
+/**
+ * The name a template actually greets with.
+ *
+ * All but one read `fullName`; `customer-activation` reads the `name` variable
+ * its call site has passed since before the design system existed, and keeping
+ * that is the whole point of the move — the renderer changed, the payload did
+ * not.
+ */
+function greetedName(template: TransactionalEmailTemplate): string {
+  const data = FULL_DATA[template];
+  return (data.fullName ?? data.name) as string;
+}
 
 /**
  * The two messages that carry the customer's stated timing, and therefore the
@@ -167,7 +208,12 @@ const TIMING_TEMPLATES: TransactionalEmailTemplate[] = ['request-received', 'off
 const URGENCY_CODES = Object.keys(URGENCY_LABELS) as UrgencyCode[];
 
 /** Templates whose call to action carries a single-use token in the URL. */
-const TOKEN_TEMPLATES: TransactionalEmailTemplate[] = ['password-reset', 'email-verification'];
+const TOKEN_TEMPLATES: TransactionalEmailTemplate[] = [
+  'password-reset',
+  'email-verification',
+  'customer-activation',
+  'provider-claim',
+];
 
 function messageFor(
   template: TransactionalEmailTemplate,
@@ -210,14 +256,14 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('covers every template the port accepts', () => {
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(12);
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(16);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
   describe.each(TRANSACTIONAL_EMAIL_TEMPLATES)('%s', (template) => {
     it('carries the mandatory salutation and closing in both bodies', () => {
       const { html, text } = render(messageFor(template));
-      const fullName = FULL_DATA[template].fullName as string;
+      const fullName = greetedName(template);
 
       // Exactly one salutation, in exactly the form the editorial rules allow.
       expect(html.match(new RegExp(`Sayın ${fullName},`, 'g'))).toHaveLength(1);
@@ -293,6 +339,7 @@ describe('transactional e-mail rendering', () => {
       const { html, text } = render(
         messageFor(template, {
           fullName: injection,
+          name: injection,
           businessName: injection,
           providerName: injection,
           customerName: injection,
@@ -318,12 +365,12 @@ describe('transactional e-mail rendering', () => {
     it('drops a row rather than printing a placeholder when a value is missing', () => {
       const blanked = Object.fromEntries(
         Object.keys(FULL_DATA[template])
-          .filter((key) => key !== 'fullName')
+          .filter((key) => key !== 'fullName' && key !== 'name')
           .map((key) => [key, null]),
       );
       const { html } = render(messageFor(template, blanked));
 
-      expect(html).toContain(`Sayın ${FULL_DATA[template].fullName},`);
+      expect(html).toContain(`Sayın ${greetedName(template)},`);
       expect(html).toContain('Saygılarımızla,<br><strong>TakTick Ekibi</strong>');
       // No empty cells, no dashes standing in for absent data, no "undefined".
       expect(html).not.toContain('undefined');
@@ -426,6 +473,13 @@ describe('transactional e-mail rendering', () => {
       'offer-accepted': 'Teklifiniz kabul edildi — #T-90412',
       'offer-not-selected': 'Teklifiniz bu kez seçilmedi — #T-90412',
       'credit-refunded': 'Krediniz iade edildi — 2 kredi',
+      // The three that moved keep the exact subjects their call sites have
+      // always passed, older product spelling and all: re-skinning a message is
+      // not licence to rename the product in somebody's inbox.
+      'customer-activation': 'TakTic hesabınızı etkinleştirin',
+      'provider-claim': 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
+      'request-expiring': 'Talebiniz için süre dolmak üzere',
+      'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
     });
   });
 
@@ -546,17 +600,191 @@ describe('transactional e-mail rendering', () => {
     ).toThrow(/http or https/);
   });
 
-  it('leaves the three older templates on their original plain renderer', () => {
-    const { html } = render({
-      template: 'customer-activation',
-      to: 'alici@example.test',
-      subject: 'TakTic hesabınızı etkinleştirin',
-      actionUrl: `${WEB}/activate-customer?token=abc`,
-      data: { name: 'Deniz' },
+  /**
+   * The three that used to render through a plain renderer of their own.
+   *
+   * The generic cases above already hold them to the design system's shell —
+   * the 600px card, the inline styles, the logo and the footer are asserted for
+   * every template. What this section adds is the other half of the move: that
+   * nothing about the *messages* changed. Same variables, same single-use
+   * links, same expiry moments, same editorial constraints.
+   */
+  describe('the templates that moved onto the design system', () => {
+    it('renders the guest activation link inside the card, from the same variables', () => {
+      const token = 'ZmFrZS1hY3RpdmF0aW9u';
+      const { html, text } = render({
+        template: 'customer-activation',
+        to: 'alici@example.test',
+        subject: transactionalSubject('customer-activation'),
+        actionUrl: `${WEB}/activate-customer?token=${token}`,
+        data: { name: 'Deniz Yılmaz', expiresAt: '2026-08-29T11:12:00.000Z' },
+      });
+
+      // The design shell, not the old bare document.
+      expect(html.startsWith('<!DOCTYPE html>')).toBe(true);
+      expect(html).toContain(
+        'width:600px;max-width:600px;background-color:#ffffff;border:2px solid #201e1d;',
+      );
+      expect(html).toContain(`<img src="${ASSETS}/brand/logo-email.png" width="140" alt="TakTick"`);
+      expect(html).toContain('destek@example.test');
+      expect(html).toContain('TakTick Teknoloji A.Ş.');
+
+      // The name still comes from `name`, and the greeting is the design's one
+      // salutation form rather than the old "Merhaba".
+      expect(html).toContain('Sayın Deniz Yılmaz,');
+      expect(html).not.toContain('Merhaba');
+
+      // The link, once per body and nowhere else — no paste-this-address copy.
+      expect(html).toContain(`href="${WEB}/activate-customer?token=${token}"`);
+      expect(html.split(token)).toHaveLength(2);
+      expect(text.split(token)).toHaveLength(2);
+
+      // The same absolute expiry moment, in the same zone.
+      expect(html).toContain('29 Ağustos 2026, 14:12');
+      expect(html).toContain('Bu isteği siz yapmadıysanız');
     });
 
-    expect(html).toContain('<!doctype html>');
-    expect(html).not.toContain('border:2px solid #201e1d');
+    it('greets a guest customer generically rather than inventing a name', () => {
+      const { html } = render({
+        template: 'customer-activation',
+        to: 'alici@example.test',
+        subject: transactionalSubject('customer-activation'),
+        actionUrl: `${WEB}/activate-customer?token=abc`,
+        data: { name: null, expiresAt: null },
+      });
+
+      expect(html).toContain('Sayın Kullanıcı,');
+      expect(html).not.toContain('undefined');
+      // No expiry row invented for a moment the caller did not supply.
+      expect(html).not.toContain('Bağlantı geçerliliği');
+    });
+
+    it('keeps the claim invitation silent about the moderation outcome', () => {
+      const token = 'ZmFrZS1jbGFpbQ';
+      const { html, text } = render({
+        template: 'provider-claim',
+        to: 'basvuru@example.test',
+        subject: transactionalSubject('provider-claim'),
+        actionUrl: `${WEB}/claim-provider?token=${token}`,
+        data: {
+          fullName: 'Murat Şahin',
+          businessName: 'Şahin Isı Sistemleri',
+          expiresAt: '2026-08-29T11:12:00.000Z',
+        },
+      });
+
+      expect(html).toContain('Sayın Murat Şahin,');
+      expect(html).toContain('Şahin Isı Sistemleri');
+      expect(html).toContain(`href="${WEB}/claim-provider?token=${token}"`);
+      expect(html.split(token)).toHaveLength(2);
+      expect(text.split(token)).toHaveLength(2);
+      expect(html).toContain('29 Ağustos 2026, 14:12');
+
+      // The sentence that keeps a claim from reading as an approval.
+      expect(html).toContain('yalnızca başvurunun sahipliğini doğrular');
+      expect(html).not.toContain('onaylandı');
+      expect(html).not.toContain('kabul edildi');
+    });
+
+    it('falls back to the business when a guest application has no contact name', () => {
+      const { html } = render({
+        template: 'provider-claim',
+        to: 'basvuru@example.test',
+        subject: transactionalSubject('provider-claim'),
+        actionUrl: `${WEB}/claim-provider?token=abc`,
+        data: { fullName: null, businessName: 'Şahin Isı Sistemleri', expiresAt: null },
+      });
+
+      expect(html).toContain('Sayın Şahin Isı Sistemleri,');
+      expect(html).not.toContain('Sayın Kullanıcı,');
+    });
+
+    it('states the reminder without a link, a verification claim or an offer promise', () => {
+      const { html } = render({
+        template: 'request-expiring',
+        to: 'alici@example.test',
+        subject: transactionalSubject('request-expiring'),
+        data: FULL_DATA['request-expiring'],
+      });
+
+      expect(html).toContain('Sayın Deniz Yılmaz,');
+      expect(html).toContain('Kombi Servisi kategorisindeki #T-90412 numaralı talebiniz hâlâ açık.');
+      expect(html).toContain('14 gün');
+      expect(html).toContain('7 gün');
+      expect(html).toContain('5 Eylül 2026, 14:12');
+
+      // No call to action: this message has never linked anywhere, and the
+      // design drops a button it has no destination for.
+      const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1] ?? '');
+      expect(hrefs.every((href) => href.startsWith('mailto:'))).toBe(true);
+
+      // The two things it must never say.
+      expect(html).not.toContain('doğrulandı');
+      expect(html).not.toContain('teklifler yolda');
+    });
+  });
+
+  describe('package-purchase-confirmation', () => {
+    it('states what was bought, what it cost and what the balance gained', () => {
+      const { html, text } = render(messageFor('package-purchase-confirmation'));
+
+      expect(html).toContain('Kredi paketiniz hesabınıza yüklendi');
+      expect(html).toContain('Başlangıç Paketi');
+      expect(html).toContain('30 kredi');
+      expect(html).toContain('499 ₺');
+      expect(html).toContain('#P-10023');
+      expect(html).toContain('27 Ağustos 2026, 14:12');
+      expect(html).toContain(`href="${WEB}/providers/p1/credits"`);
+      expect(text).toContain('Ödenen tutar: 499 ₺');
+    });
+
+    it('names a currency this product has no sign for rather than guessing one', () => {
+      const { html } = render(
+        messageFor('package-purchase-confirmation', {
+          priceAmountMinor: '49900',
+          currency: 'USD',
+        }),
+      );
+
+      expect(html).toContain('499 USD');
+      expect(html).not.toContain('499 ₺');
+    });
+
+    it('drops the amount entirely when the currency is missing', () => {
+      const { html } = render(
+        messageFor('package-purchase-confirmation', { currency: null }),
+      );
+
+      // An amount with no currency is not a fact a receipt may state.
+      expect(html).not.toContain('499');
+      expect(html).not.toContain('Ödenen tutar');
+      // The rest of the receipt still stands.
+      expect(html).toContain('Başlangıç Paketi');
+      expect(html).toContain('30 kredi');
+    });
+
+    it('carries nothing from the payment provider or the operator', () => {
+      const { html, text } = render(
+        messageFor('package-purchase-confirmation', {
+          // None of these are variables this template reads. The point is that
+          // supplying them changes nothing, so a careless future caller cannot
+          // leak them into a receipt.
+          paymentReference: 'corr-token-abc123',
+          providerOrderId: 'ls-order-99',
+          adminNote: 'İç not: elle doğrulandı',
+          eventName: 'order_created',
+          apiKey: 'lemon-secret-key',
+        }),
+      );
+
+      for (const body of [html, text]) {
+        expect(body).not.toContain('corr-token-abc123');
+        expect(body).not.toContain('ls-order-99');
+        expect(body).not.toContain('İç not');
+        expect(body).not.toContain('order_created');
+        expect(body).not.toContain('lemon-secret-key');
+      }
+    });
   });
 });
 
