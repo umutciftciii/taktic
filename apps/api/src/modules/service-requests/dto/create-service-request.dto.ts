@@ -68,21 +68,49 @@ export class CreateServiceRequestDto {
   @Type(() => CreateServiceRequestRouterSelectionDto)
   routerSelections?: CreateServiceRequestRouterSelectionDto[];
 
-  @IsString()
-  @IsNotEmpty()
-  customerName!: string;
+  /**
+   * Whether the customer is naming somebody other than themselves as the
+   * contact for this request.
+   *
+   * Only ever consulted for a signed-in customer, and only they can set it
+   * meaningfully: with it false — which is what an omitted field means, and
+   * what every client written before this existed sends — the API derives the
+   * three contact fields below from the account and ignores whatever the body
+   * carried. A visitor with no session is unaffected: they have no account to
+   * derive anything from, so their own contact details are still the request's.
+   */
+  @IsOptional()
+  @IsBoolean()
+  useAlternateContact?: boolean;
 
+  /*
+   * The three contact fields are optional *in shape only*.
+   *
+   * They stopped being mandatory here because a signed-in customer on the
+   * default path posts none of them — the server reads the account instead —
+   * and a DTO cannot see who is signed in. Whether they are required, and for
+   * whom, is decided by ServiceRequestsService.resolveContactDetails: a guest
+   * and an alternate contact must still carry all three, and an empty string
+   * is still refused here rather than silently accepted as "not given".
+   */
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  customerPhone!: string;
+  customerName?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  customerPhone?: string;
 
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   )
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @IsEmail()
-  customerEmail!: string;
+  customerEmail?: string;
 
   /**
    * Carries the relation check for the whole triple: the district has to be a

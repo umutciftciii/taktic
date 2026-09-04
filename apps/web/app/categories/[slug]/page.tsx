@@ -44,6 +44,20 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
   const questions = category.questions ?? [];
   const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
 
+  /*
+   * The signed-in customer's own contact, for the form to show. Only a CUSTOMER
+   * account has one: an admin posting on the public endpoint is treated as a
+   * visitor by the API, so showing them an account contact would promise
+   * something the server would not do.
+   *
+   * It is display only. Nothing here is posted, and the API reads the same three
+   * values from the session's own User row when it stores the request.
+   */
+  const accountContact =
+    user?.role === 'CUSTOMER'
+      ? { name: user.name, phone: user.phone, email: user.email }
+      : null;
+
   const isRouter = category.kind === 'ROUTER';
   // A router that arrives without an entry is itself the entry: it is the first
   // screen of its own flow.
@@ -136,6 +150,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
             disclosure={disclosure}
             showDisclosure={showDisclosure}
             provinces={provinces}
+            accountContact={accountContact}
             action={submitServiceRequestAction}
           />
         )}

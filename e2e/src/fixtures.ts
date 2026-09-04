@@ -133,6 +133,12 @@ export type SeededCustomer = {
   email: string;
   password: string;
   name: string;
+  /**
+   * The account's own telephone number. Carried here because the request form
+   * now *shows* it to a signed-in customer instead of asking for one, so a test
+   * has to be able to say which number it expects to see.
+   */
+  phone: string;
 };
 
 export type SeededProvider = {
@@ -268,10 +274,16 @@ export async function createCustomer(name = 'E2E Müşteri'): Promise<SeededCust
       isActive: true,
       passwordHash: await bcrypt.hash(FIXTURE_PASSWORD, PASSWORD_ROUNDS),
     },
-    select: { id: true, name: true },
+    select: { id: true, name: true, phone: true },
   });
 
-  return { id: user.id, email, password: FIXTURE_PASSWORD, name: user.name ?? name };
+  return {
+    id: user.id,
+    email,
+    password: FIXTURE_PASSWORD,
+    name: user.name ?? name,
+    phone: user.phone ?? '',
+  };
 }
 
 export async function createAdmin(): Promise<SeededCustomer> {
@@ -286,10 +298,16 @@ export async function createAdmin(): Promise<SeededCustomer> {
       isActive: true,
       passwordHash: await bcrypt.hash(FIXTURE_PASSWORD, PASSWORD_ROUNDS),
     },
-    select: { id: true, name: true },
+    select: { id: true, name: true, phone: true },
   });
 
-  return { id: user.id, email, password: FIXTURE_PASSWORD, name: user.name ?? 'admin' };
+  return {
+    id: user.id,
+    email,
+    password: FIXTURE_PASSWORD,
+    name: user.name ?? 'admin',
+    phone: user.phone ?? '',
+  };
 }
 
 /**

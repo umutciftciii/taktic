@@ -91,6 +91,29 @@ export async function fillRequestFormUpToContact(
   await form.locator('select[name="district"]').selectOption(values.district);
   await nextStep.click();
 
+  await fillContactStep(actor, values);
+}
+
+/**
+ * Fills the contact step, whichever of its two shapes is on screen.
+ *
+ * A visitor is asked for the three details and types them. A signed-in customer
+ * is not: their account's details are shown instead, and the fields only exist
+ * once "farklı bir iletişim kişisi" is ticked. Ticking it is what keeps every
+ * scenario that names a contact — the disclosure, the phone code, the details a
+ * winning provider is shown — talking about the values it chose, rather than
+ * about whatever the fixture account happened to be seeded with.
+ *
+ * The account path itself is covered on its own, by request-contact-autofill.
+ */
+export async function fillContactStep(actor: Actor, values: RequestFormValues): Promise<void> {
+  const form = actor.page.locator('form.form-card');
+  const alternateToggle = actor.page.getByTestId('use-alternate-contact');
+
+  if ((await alternateToggle.count()) > 0) {
+    await alternateToggle.check();
+  }
+
   await form.locator('input[name="customerName"]').fill(values.customerName);
   await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
   await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
