@@ -16,6 +16,7 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
 import { LEMON_SQUEEZY_PROVIDER_KIND, readLemonSqueezyConfig } from './lemon-squeezy.config';
 import {
@@ -111,6 +112,9 @@ const RECOVERABLE_STATUSES: ReadonlySet<PaymentWebhookEventStatus> = new Set([
   PaymentWebhookEventStatus.MISMATCHED,
 ]);
 
+/** The purchase a committed settlement produced, or null when there was none. */
+type SettledPurchase = string | null;
+
 type SettlementResult = {
   mismatch: MismatchCode | null;
   /** Known as soon as the correlation token resolves, mismatch or not. */
@@ -138,6 +142,7 @@ export class PaymentsWebhookService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CreditsService) private readonly credits: CreditsService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
   ) {}
 
   async handleLemonSqueezyDelivery(
@@ -196,10 +201,18 @@ export class PaymentsWebhookService {
     expectedStoreId: string,
     variantsBySlug: ReadonlyMap<string, string>,
   ): Promise<WebhookOutcome> {
+    let settled: SettledPurchase = null;
+    let outcome: WebhookOutcome;
+
     try {
-      return await runSerializable(
+      outcome = await runSerializable(
         this.prisma,
         async (tx) => {
+          // Cleared per attempt. A write conflict rolls the whole callback back
+          // and replays it, and a note left over from the rolled-back attempt
+          // would be a receipt for a settlement that never committed.
+          settled = null;
+
           const now = new Date();
           const existing = await readEvent(tx, event);
 
@@ -241,6 +254,11 @@ export class PaymentsWebhookService {
             now,
           );
 
+          // Noted, not sent. The receipt goes out only once this transaction
+          // has committed — a settlement that rolls back must leave no message
+          // and no audit row behind it.
+          settled = purchaseId;
+
           if (existing) {
             this.logger.log(
               `webhook ${event.eventName} settled on a later delivery after ` +
@@ -257,12 +275,18 @@ export class PaymentsWebhookService {
         // Two deliveries of this event, or two events naming one provider
         // order, reached the write together and this one lost. It reports the
         // state that actually exists rather than claiming an outcome it did not
-        // produce.
+        // produce. The winner owns the receipt; this attempt committed nothing
+        // and sends nothing.
         return this.reportSettledState(event);
       }
 
       throw error;
     }
+
+    // Outside the try, so a failure here can never be mistaken for the write
+    // conflict the catch above is written to interpret.
+    await this.notifySettled(settled);
+    return outcome;
   }
 
   /**
@@ -406,6 +430,27 @@ export class PaymentsWebhookService {
     });
 
     return { mismatch: null, purchaseId: purchase.id };
+  }
+
+  /**
+   * The receipt, after the settling transaction has committed.
+   *
+   * It never throws and never affects the outcome reported to the payment
+   * provider: the money has already become credit, and a mail transport that
+   * is down must not turn a settled delivery into one Lemon Squeezy will retry.
+   * TransactionalMailService swallows its own failures and records them on
+   * NotificationLog, which is where an operator picks them up.
+   *
+   * A redelivery of an already-settled event never reaches here — the PROCESSED
+   * short-circuit answers it first — and if one somehow did, the unique index
+   * on (template, dedupeKey) refuses the second receipt.
+   */
+  private async notifySettled(purchaseId: SettledPurchase): Promise<void> {
+    if (!purchaseId) {
+      return;
+    }
+
+    await this.mail.sendPackagePurchaseConfirmation(purchaseId);
   }
 
   /**

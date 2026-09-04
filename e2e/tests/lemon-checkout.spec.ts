@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createHmac } from 'node:crypto';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { emailCountFor } from '../src/outbox';
 import {
   createCategory,
   createLemonSqueezyCreditPackage,
@@ -138,6 +139,10 @@ test.describe('test-mode credit package checkout', () => {
         'Ödeme doğrulanmayı bekliyor',
       );
       expect(await creditBalance(seeded.id)).toBe(0);
+      // Nothing has settled, so there is nothing to send a receipt about.
+      expect(emailCountFor(seeded.email, 'package-purchase-confirmation')).toBe(0);
+      // And no invoice was ever promised on the way here either.
+      await expect(provider.page.getByTestId('purchase-notice')).not.toContainText('fatura');
 
       // Reloading the return URL as often as you like changes nothing.
       await provider.page.reload();
@@ -195,6 +200,32 @@ test.describe('test-mode credit package checkout', () => {
       // browser.
       await provider.page.reload();
       await expect(provider.page.getByTestId('purchase-status')).toHaveText('Ödendi');
+
+      /*
+       * The notice on a settled purchase.
+       *
+       * It used to promise an e-fatura. There is no invoicing integration of
+       * any kind behind this screen, so the sentence described a document that
+       * was never produced and never sent. What the platform really does is
+       * send the receipt asserted below — and the wording says so without
+       * promising the send succeeded, because it can fail and the credits are
+       * loaded either way.
+       */
+      const settledNotice = provider.page.getByTestId('purchase-notice');
+      await expect(settledNotice).toContainText('onay e-postası');
+      await expect(settledNotice).toContainText('kredi geçmişinizden');
+      await expect(settledNotice).not.toContainText('fatura');
+
+      // Exactly one receipt, for the three deliveries above: the redelivered
+      // event settled nothing, and the dedupe key would have refused a second
+      // message even if it had.
+      await expect
+        .poll(() => emailCountFor(seeded.email, 'package-purchase-confirmation'), {
+          message: 'no purchase receipt was recorded for the buying provider',
+          timeout: 20_000,
+          intervals: [100, 200, 500],
+        })
+        .toBe(1);
 
       await provider.gotoWeb(`/providers/${seeded.id}/credits`);
       await expect(

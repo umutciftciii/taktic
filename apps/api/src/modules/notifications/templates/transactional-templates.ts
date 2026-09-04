@@ -14,13 +14,14 @@ import {
   formatDateTime,
   formatLocation,
   formatMoneyMinor,
+  formatMoneyMinorIn,
   nonEmpty,
   truncate,
   urgencyLabel,
 } from './format';
 
 /**
- * The twelve transactional messages, as data.
+ * The transactional messages, as data.
  *
  * Each entry turns the `data` bag the dispatcher carried into an
  * {@link EmailDocument}. The shape mirrors the design handoff one block at a
@@ -57,7 +58,20 @@ import {
  * that are true of the system as built.
  */
 
-/** The twelve template identifiers, in handoff order. */
+/**
+ * Every template identifier: the twelve from the handoff, in its order, then
+ * the four this system grew afterwards.
+ *
+ * The last four are not a second family. Three of them — the guest activation
+ * link, the provider claim invitation and the day-7 request reminder — predate
+ * the design system and used to render through a separate plain renderer in
+ * email-template.ts; that renderer is gone, and they are documents here like
+ * everything else. Their wording, their template variables, their links and
+ * their expiry semantics are unchanged; only the shell around them is.
+ *
+ * The fourth, the credit-package receipt, was written against this system from
+ * the start.
+ */
 export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'password-reset',
   'email-verification',
@@ -71,6 +85,10 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'offer-accepted',
   'offer-not-selected',
   'credit-refunded',
+  'customer-activation',
+  'provider-claim',
+  'request-expiring',
+  'package-purchase-confirmation',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -78,6 +96,16 @@ export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[
 export function isTransactionalEmailTemplate(value: string): value is TransactionalEmailTemplate {
   return (TRANSACTIONAL_EMAIL_TEMPLATES as readonly string[]).includes(value);
 }
+
+/**
+ * The salutation when the platform holds no name for the recipient.
+ *
+ * Every message opens with exactly one salutation, so there has to be
+ * something; this is the least wrong thing to say, and templates that have a
+ * better second source for the name — the business on a claim invitation, say —
+ * check for this value and prefer theirs.
+ */
+const GENERIC_RECIPIENT = 'Kullanıcı';
 
 type Data = Record<string, string | null | undefined>;
 
@@ -120,6 +148,18 @@ export function transactionalSubject(
       return withSuffix('Teklifiniz bu kez seçilmedi', text(data.requestNumber));
     case 'credit-refunded':
       return withSuffix('Krediniz iade edildi', formatCredits(int(data.refundedCredits)));
+    // The three subjects below are the strings their call sites have always
+    // passed, restated here so the switch stays exhaustive. They are the older
+    // "TakTic" spelling on purpose: re-skinning these messages was the job, and
+    // renaming the product in an inbox is not.
+    case 'customer-activation':
+      return 'TakTic hesabınızı etkinleştirin';
+    case 'provider-claim':
+      return 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın';
+    case 'request-expiring':
+      return 'Talebiniz için süre dolmak üzere';
+    case 'package-purchase-confirmation':
+      return 'Kredi paketiniz hesabınıza yüklendi';
   }
 }
 
@@ -137,7 +177,7 @@ export function buildDocument(
   message: NotificationMessage,
 ): EmailDocument {
   const data = message.data ?? {};
-  const fullName = text(data.fullName) ?? 'Kullanıcı';
+  const fullName = text(data.fullName) ?? GENERIC_RECIPIENT;
   const subject = message.subject;
 
   switch (template) {
@@ -165,6 +205,14 @@ export function buildDocument(
       return offerNotSelected(subject, fullName, data);
     case 'credit-refunded':
       return creditRefunded(subject, fullName, data);
+    case 'customer-activation':
+      return customerActivation(subject, fullName, data, message.actionUrl);
+    case 'provider-claim':
+      return providerClaim(subject, fullName, data, message.actionUrl);
+    case 'request-expiring':
+      return requestExpiring(subject, fullName, data);
+    case 'package-purchase-confirmation':
+      return packagePurchaseConfirmation(subject, fullName, data);
   }
 }
 
@@ -716,6 +764,223 @@ function creditRefunded(subject: string, fullName: string, data: Data): EmailDoc
       cta('Bakiyemi gör', text(data.creditsUrl), 'ghost'),
       spacer(20),
       note('İade işlemleri kredi geçmişinizde iade kaydı olarak listelenir.'),
+    ]),
+  };
+}
+
+// ────────────────────── 13 · customer.activation_requested ───────────────────
+
+/**
+ * The guest activation link, moved onto the design system.
+ *
+ * Everything the plain renderer said, it still says: the same instruction, the
+ * same absolute expiry moment, the same "ignore this if it was not you", and
+ * the same single-use URL as the one call to action. What is gone is the
+ * paste-this-address fallback the old HTML carried under the link — the token
+ * now appears exactly once in each body, which is the rule every other
+ * token-bearing message here already follows.
+ *
+ * The recipient's name comes from this template's own long-standing `name`
+ * variable rather than from `fullName`; the call site is unchanged.
+ */
+function customerActivation(
+  subject: string,
+  fullName: string,
+  data: Data,
+  actionUrl: string | undefined,
+): EmailDocument {
+  const validUntil = formatDateTime(data.expiresAt);
+
+  return {
+    subject,
+    preheader: validUntil
+      ? `Etkinleştirme bağlantınız ${validUntil} tarihine kadar geçerli.`
+      : 'Etkinleştirme bağlantınızı kullanarak hesabınızı açabilirsiniz.',
+    audience: 'HESAP',
+    kicker: 'Hesap etkinleştirme',
+    heading: 'Hesabınızı etkinleştirin',
+    fullName: text(data.name) ?? fullName,
+    // No settings link: the recipient has no usable account yet, which is the
+    // whole reason this message exists.
+    accountUrl: null,
+    blocks: compact([
+      paragraph('TakTic hesabınızı etkinleştirmek için aşağıdaki butonu kullanın.'),
+      spacer(6),
+      cta('Hesabımı etkinleştir', actionUrl, 'primary'),
+      spacer(24),
+      dataTable([row('Bağlantı geçerliliği', validUntil)]),
+      spacer(20),
+      note('Bu isteği siz yapmadıysanız bu e-postayı yok sayabilirsiniz.'),
+    ]),
+  };
+}
+
+// ────────────────────────── 14 · provider.claim_invited ──────────────────────
+
+/**
+ * The claim invitation, moved onto the design system.
+ *
+ * The second paragraph is load-bearing and is reproduced verbatim: a claim
+ * proves who owns an application and says nothing whatever about how its
+ * moderation went. An application still under review must not read this as an
+ * approval.
+ */
+function providerClaim(
+  subject: string,
+  fullName: string,
+  data: Data,
+  actionUrl: string | undefined,
+): EmailDocument {
+  const businessName = text(data.businessName);
+  const validUntil = formatDateTime(data.expiresAt);
+  // Addressed to the contact named on the application. A guest application
+  // recorded without one falls back to the business it is about, which is a
+  // truer salutation than the generic default.
+  const recipient = fullName === GENERIC_RECIPIENT ? (businessName ?? fullName) : fullName;
+
+  return {
+    subject,
+    preheader: 'Başvurunuzu hesabınıza bağlayarak takip etmeye başlayabilirsiniz.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Başvuru sahipliği',
+    heading: 'Başvurunuzu hesabınıza bağlayın',
+    fullName: recipient,
+    accountUrl: null,
+    blocks: compact([
+      paragraph(
+        'TakTic üzerinde bu işletme adına oluşturulmuş bir hizmet veren başvurusu bulunuyor. ' +
+          'Başvuruyu kendi hesabınıza bağlamak için aşağıdaki butonu kullanın.',
+      ),
+      spacer(6),
+      cta('Başvuruyu hesabıma bağla', actionUrl, 'primary'),
+      spacer(24),
+      dataTable([
+        row('İşletme', businessName),
+        row('Bağlantı geçerliliği', validUntil),
+      ]),
+      spacer(20),
+      note(
+        'Bu bağlantı yalnızca başvurunun sahipliğini doğrular; başvurunun değerlendirme sonucu ' +
+          'hakkında bir anlam taşımaz. Böyle bir başvuru yaptırmadıysanız bu e-postayı yok ' +
+          'sayabilirsiniz.',
+      ),
+    ]),
+  };
+}
+
+// ─────────────────────── 15 · request.expiring_reminder ──────────────────────
+
+/**
+ * The single day-7 nudge, moved onto the design system.
+ *
+ * It carries no call to action, and that is not an omission: the reminder has
+ * never linked anywhere, and the design drops a button it has no URL for rather
+ * than inventing a destination. The editorial constraint is unchanged too — it
+ * states that the window is closing and stops there. It must not describe the
+ * request as verified, and it must not suggest offers are on their way.
+ */
+function requestExpiring(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const categoryName = text(data.categoryName);
+  const remainingDays = int(data.remainingDays);
+  const openDays = int(data.openDays);
+
+  return {
+    subject,
+    preheader:
+      remainingDays === null
+        ? 'Talebiniz hâlâ açık; geçerlilik süresi dolmak üzere.'
+        : `Talebinizin süresinin dolmasına ${remainingDays} gün kaldı.`,
+    audience: 'HİZMET ALAN',
+    kicker: 'Süre uyarısı',
+    heading: 'Talebinizin süresi dolmak üzere',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph(openRequestLine(requestNumber, categoryName)),
+      spacer(4),
+      dataTable([
+        row('Talep', requestNumber),
+        row('Kategori', categoryName),
+        row('Açık kalma süresi', openDays === null ? null : `${openDays} gün`),
+        row('Kalan süre', remainingDays === null ? null : `${remainingDays} gün`),
+        row('Son geçerlilik', formatDateTime(data.expiresAt)),
+      ]),
+      spacer(22),
+      paragraph('Talebinizi TakTic üzerinden görüntüleyebilir veya güncelleyebilirsiniz.'),
+    ]),
+  };
+}
+
+/** The opening sentence, narrowed to whatever of the two facts is actually held. */
+function openRequestLine(
+  requestNumber: string | null,
+  categoryName: string | null,
+): string {
+  if (requestNumber && categoryName) {
+    return `${categoryName} kategorisindeki ${requestNumber} numaralı talebiniz hâlâ açık.`;
+  }
+
+  return requestNumber ? `${requestNumber} numaralı talebiniz hâlâ açık.` : 'Talebiniz hâlâ açık.';
+}
+
+// ─────────────────── 16 · credits.package_purchase_settled ───────────────────
+
+/**
+ * The receipt for a credit package that was paid for and loaded.
+ *
+ * Every figure is a snapshot column taken at checkout or the ledger row the
+ * settlement wrote — the package name, the credits, the price, the currency —
+ * so a package repriced or renamed afterwards cannot rewrite what an
+ * already-sent receipt said this order was.
+ *
+ * What is deliberately absent is the entire payment side of the transaction:
+ * no provider order id, no correlation token, no webhook field, no event name,
+ * no admin note, and nothing about which store or mode settled it. None of it
+ * is the buyer's business, some of it is this deployment's own configuration,
+ * and a receipt is the wrong place to find out.
+ */
+function packagePurchaseConfirmation(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  const packageName = text(data.packageName);
+  const credits = formatCredits(int(data.creditAmount));
+  const paid = formatMoneyMinorIn(int(data.priceAmountMinor), text(data.currency));
+
+  return {
+    subject,
+    preheader: credits
+      ? `${credits} bakiyenize eklendi.`
+      : 'Kredi paketiniz bakiyenize eklendi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Satın alma',
+    heading: 'Kredi paketiniz hesabınıza yüklendi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        joinNonEmpty(
+          [
+            packageName ? `${packageName} paketi için ödemeniz alındı` : 'Ödemeniz alındı',
+            credits ? `ve ${credits} bakiyenize eklendi.` : 've paketiniz hesabınıza yüklendi.',
+          ],
+          ' ',
+        ) as string,
+      ),
+      spacer(4),
+      dataTable([
+        row('Paket', packageName),
+        row('Eklenen kredi', credits),
+        row('Ödenen tutar', paid),
+        row('Sipariş no', text(data.purchaseNumber)),
+        row('İşlem tarihi', formatDateTime(data.paidAt)),
+      ]),
+      spacer(24),
+      cta('Bakiyemi gör', text(data.creditsUrl), 'primary'),
+      spacer(20),
+      note('Bu satın alma kredi geçmişinizde paket yüklemesi olarak listelenir.'),
     ]),
   };
 }

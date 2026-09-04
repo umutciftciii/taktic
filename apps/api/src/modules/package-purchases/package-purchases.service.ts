@@ -20,6 +20,7 @@ import {
 } from '../entitlements/entitlement-grant';
 import { resolvePaymentProviderKind } from '../payments/payment-provider.config';
 import { CreditsService } from '../credits/credits.service';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
@@ -37,6 +38,7 @@ export class PackagePurchasesService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CreditsService) private readonly creditsService: CreditsService,
     @Inject(NumberingService) private readonly numbering: NumberingService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
   ) {}
 
   /**
@@ -148,7 +150,7 @@ export class PackagePurchasesService {
     const payment = normalizeMockPayment(dto);
     const now = new Date();
 
-    return runSerializable(
+    const settled = await runSerializable(
       this.prisma,
       async (tx) => {
         const purchase = await tx.packagePurchase.findFirst({
@@ -243,6 +245,18 @@ export class PackagePurchasesService {
       },
       { label: 'packagePurchases.mockPayProviderPurchase' },
     );
+
+    // After the commit, never inside it. A declined card returns FAILED and
+    // gets no receipt; a transaction that rolled back never reaches this line,
+    // so there is no message and no NotificationLog row for a settlement that
+    // did not happen. The service re-reads the committed rows and swallows its
+    // own transport failures, so nothing here can turn a loaded balance into a
+    // failed HTTP response.
+    if (settled.status === PackagePurchaseStatus.PAID) {
+      await this.mail.sendPackagePurchaseConfirmation(settled.id);
+    }
+
+    return settled;
   }
 
   listAdminPurchases(filters: AdminPurchaseFilters) {

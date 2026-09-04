@@ -56,6 +56,46 @@ export function escapeHtml(value: string): string {
  * provider never quoted.
  */
 export function formatMoneyMinor(amountMinor: number | null | undefined): string | null {
+  const formatted = formatAmountMinor(amountMinor);
+  return formatted === null ? null : `${formatted} ₺`;
+}
+
+/**
+ * The signs this product knows how to print.
+ *
+ * Anything outside the table falls back to the ISO code — `499,00 USD` — rather
+ * than to a guessed glyph or to a bare number. A receipt that states an amount
+ * without saying what it is denominated in is worse than one that reads a
+ * little technically.
+ */
+const CURRENCY_SIGNS: Readonly<Record<string, string>> = { TRY: '₺' };
+
+/**
+ * Money whose currency comes from the row rather than from the product's
+ * assumptions.
+ *
+ * Used by the purchase receipt, where the amount and the currency are two
+ * snapshot columns taken at checkout: a package repriced or re-denominated
+ * afterwards must not change what an already-paid order says it cost. Null
+ * unless *both* halves are present — the amount alone is not a fact this
+ * message is allowed to state.
+ */
+export function formatMoneyMinorIn(
+  amountMinor: number | null | undefined,
+  currency: string | null | undefined,
+): string | null {
+  const formatted = formatAmountMinor(amountMinor);
+  const code = nonEmpty(currency)?.toLocaleUpperCase('en-US') ?? null;
+
+  if (formatted === null || code === null) {
+    return null;
+  }
+
+  return `${formatted} ${CURRENCY_SIGNS[code] ?? code}`;
+}
+
+/** The number half, shared by both formatters above. */
+function formatAmountMinor(amountMinor: number | null | undefined): string | null {
   if (typeof amountMinor !== 'number' || !Number.isFinite(amountMinor)) {
     return null;
   }
@@ -63,12 +103,10 @@ export function formatMoneyMinor(amountMinor: number | null | undefined): string
   const major = amountMinor / 100;
   const digits = Number.isInteger(major) ? 0 : 2;
 
-  const formatted = new Intl.NumberFormat(LOCALE, {
+  return new Intl.NumberFormat(LOCALE, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(major);
-
-  return `${formatted} ₺`;
 }
 
 /** `27 Ağustos 2026, 14:12`. */

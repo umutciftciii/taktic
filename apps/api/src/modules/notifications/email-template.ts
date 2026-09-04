@@ -1,30 +1,28 @@
 import { EmailBranding } from './email-branding.config';
 import { NotificationMessage } from './notification.port';
-import {
-  isTransactionalEmailTemplate,
-  renderTransactionalEmail,
-} from './templates/transactional-templates';
+import { renderTransactionalEmail } from './templates/transactional-templates';
 
 /**
  * Renders the plain-text and HTML bodies a delivering transport sends.
  *
- * Two families share this entry point.
+ * There is one renderer now. Every message this application sends is a document
+ * in the TakTick e-mail design system (see templates/email-design.ts) — a 600px
+ * table-based card with every style inline, a logo and the company footer.
  *
- * The twelve designed transactional messages are rendered from the TakTick
- * e-mail design system (see templates/email-design.ts) — a 600px table-based
- * card with every style inline. They are dispatched first, by identifier.
+ * It used to be two. A separate plain renderer lived here for the three
+ * templates that predate the design system — the guest activation link, the
+ * provider claim invitation and the day-7 request reminder — on the reasoning
+ * that re-skinning them was a product decision rather than a side effect of
+ * adding the new set. That decision has since been taken: the three are
+ * documents in transactional-templates.ts like everything else, with their
+ * wording, their variables, their links and their expiry semantics unchanged.
  *
- * Everything below that line is the original plain renderer for the three
- * templates that predate the design system: an activation link, a claim link,
- * and the one reminder an approved request earns. Their wording and markup are
- * unchanged, deliberately — re-skinning them is a product decision rather than
- * a side effect of adding the new set.
- *
- * Both families obey the same two rules. There is no marketing block, no
- * unsubscribe funnel and no tracking pixel; and every interpolated value is
- * escaped for the HTML body, because the values come from customer- and
- * applicant-supplied fields (a business name, an offer note) and treating them
- * as markup would be a stored-XSS sink in whatever client renders the mail.
+ * The two rules the renderer enforces are unchanged as well. There is no
+ * marketing block, no unsubscribe funnel and no tracking pixel; and every
+ * interpolated value is escaped for the HTML body, because the values come from
+ * customer- and applicant-supplied fields (a business name, an offer note) and
+ * treating them as markup would be a stored-XSS sink in whatever client renders
+ * the mail.
  */
 export type RenderedEmail = {
   text: string;
@@ -32,200 +30,29 @@ export type RenderedEmail = {
 };
 
 /**
- * `branding` may be null only for the three templates below the line.
+ * `branding` is required, with no degraded path.
  *
- * They predate the design system and render no footer at all — an activation
- * link and a claim link carry no company details — so there is nothing for
- * missing settings to make half-true, and gating them would take a mailbox-
- * ownership flow offline over a value it never prints. Every designed template
- * does print the footer, so for those the caller has to have resolved it; a
- * null here is a programming error rather than a state to degrade into.
+ * Every template prints the company footer, so a caller that could not resolve
+ * the admin-managed settings has to refuse the send rather than render half a
+ * message — which is what the delivering adapter does. A null reaching here is
+ * a programming error, not a state to degrade into.
+ *
+ * This now covers the three formerly-plain templates too. They print the footer
+ * like everything else, so they are gated like everything else — the same rule
+ * the password reset has always followed, and for the same reason: a recipient
+ * must never be told to write to a placeholder support address.
  */
 export function renderEmail(
   message: NotificationMessage,
   branding: EmailBranding | null,
 ): RenderedEmail {
-  if (isTransactionalEmailTemplate(message.template)) {
-    if (!branding) {
-      throw new Error(
-        `renderEmail(${message.template}) requires resolved branding: every designed template ` +
-          'prints the company footer.',
-      );
-    }
-
-    const rendered = renderTransactionalEmail(message.template, message, branding);
-    return { text: rendered.text, html: rendered.html };
-  }
-
-  const paragraphs = bodyParagraphs(message);
-  const action = actionFor(message);
-
-  return {
-    text: renderText(paragraphs, action),
-    html: renderHtml(message.subject, paragraphs, action),
-  };
-}
-
-type EmailAction = { label: string; url: string } | null;
-
-function bodyParagraphs(message: NotificationMessage): string[] {
-  const data = message.data ?? {};
-
-  switch (message.template) {
-    case 'customer-activation':
-      return [
-        greeting(data.name),
-        'TakTic hesabınızı etkinleştirmek için aşağıdaki bağlantıyı kullanın.',
-        expiryLine(data.expiresAt, 'Bağlantı'),
-        'Bu isteği siz yapmadıysanız bu e-postayı yok sayabilirsiniz.',
-      ].filter(isPresent);
-
-    case 'provider-claim':
-      return [
-        greeting(data.businessName),
-        'TakTic üzerinde bu işletme adına oluşturulmuş bir hizmet veren başvurusu bulunuyor. ' +
-          'Başvuruyu kendi hesabınıza bağlamak için aşağıdaki bağlantıyı kullanın.',
-        'Bu bağlantı yalnızca başvurunun sahipliğini doğrular; başvurunun değerlendirme sonucu ' +
-          'hakkında bir anlam taşımaz.',
-        expiryLine(data.expiresAt, 'Bağlantı'),
-        'Böyle bir başvuru yaptırmadıysanız bu e-postayı yok sayabilirsiniz.',
-      ].filter(isPresent);
-
-    case 'request-expiring':
-      return [
-        'Merhaba,',
-        requestLine(data.requestNumber, data.categoryName),
-        remainingLine(data.remainingDays, data.openDays),
-        expiryLine(data.expiresAt, 'Talep'),
-        'Talebinizi TakTic üzerinden görüntüleyebilir veya güncelleyebilirsiniz.',
-      ].filter(isPresent);
-
-    default:
-      return ['Merhaba,'];
-  }
-}
-
-function actionFor(message: NotificationMessage): EmailAction {
-  if (!message.actionUrl) {
-    return null;
-  }
-
-  return {
-    label: message.template === 'provider-claim' ? 'Başvuruyu hesabıma bağla' : 'Hesabımı etkinleştir',
-    url: message.actionUrl,
-  };
-}
-
-function greeting(name: string | null | undefined): string {
-  const trimmed = name?.trim();
-  return trimmed ? `Merhaba ${trimmed},` : 'Merhaba,';
-}
-
-function requestLine(
-  requestNumber: string | null | undefined,
-  categoryName: string | null | undefined,
-): string {
-  const number = requestNumber?.trim();
-  const category = categoryName?.trim();
-
-  if (number && category) {
-    return `${category} kategorisindeki ${number} numaralı talebiniz hâlâ açık.`;
-  }
-
-  return number ? `${number} numaralı talebiniz hâlâ açık.` : 'Talebiniz hâlâ açık.';
-}
-
-/**
- * States that the window is closing and stops there: it must not claim the
- * request was verified, and it must not suggest that offers are on their way.
- */
-function remainingLine(
-  remainingDays: string | null | undefined,
-  openDays: string | null | undefined,
-): string | null {
-  const remaining = remainingDays?.trim();
-  const open = openDays?.trim();
-
-  if (remaining && open) {
-    return `Talepler ${open} gün açık kalır; bu talebin süresinin dolmasına ${remaining} gün kaldı.`;
-  }
-
-  return remaining ? `Talebin süresinin dolmasına ${remaining} gün kaldı.` : null;
-}
-
-function expiryLine(value: string | null | undefined, subject: string): string | null {
-  const formatted = formatMoment(value);
-  return formatted ? `${subject} geçerlilik süresi: ${formatted}.` : null;
-}
-
-function formatMoment(value: string | null | undefined): string | null {
-  const raw = value?.trim();
-  if (!raw) {
-    return null;
-  }
-
-  const moment = new Date(raw);
-  if (Number.isNaN(moment.getTime())) {
-    return null;
-  }
-
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'long',
-    timeStyle: 'short',
-    timeZone: 'Europe/Istanbul',
-  }).format(moment);
-}
-
-function renderText(paragraphs: string[], action: EmailAction): string {
-  const lines = [...paragraphs];
-
-  if (action) {
-    lines.push(`${action.label}: ${action.url}`);
-  }
-
-  lines.push('— TakTic');
-
-  return `${lines.join('\n\n')}\n`;
-}
-
-function renderHtml(subject: string, paragraphs: string[], action: EmailAction): string {
-  const body = paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`);
-
-  if (action) {
-    // A plain anchor with the real href. Nothing rewrites or wraps it: click
-    // tracking is off for this domain, and a redirect host in a security link
-    // is exactly what a recipient is told to be suspicious of.
-    body.push(
-      `<p><a href="${escapeHtml(action.url)}">${escapeHtml(action.label)}</a></p>`,
-      `<p>${escapeHtml('Bağlantı çalışmazsa adresi tarayıcınıza yapıştırın:')}<br />` +
-        `<span>${escapeHtml(action.url)}</span></p>`,
+  if (!branding) {
+    throw new Error(
+      `renderEmail(${message.template}) requires resolved branding: every template prints the ` +
+        'company footer.',
     );
   }
 
-  body.push('<p>— TakTic</p>');
-
-  return [
-    '<!doctype html>',
-    '<html lang="tr">',
-    '<head><meta charset="utf-8" />',
-    `<title>${escapeHtml(subject)}</title>`,
-    '</head>',
-    '<body style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111">',
-    ...body,
-    '</body>',
-    '</html>',
-  ].join('\n');
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function isPresent(value: string | null): value is string {
-  return value !== null;
+  const rendered = renderTransactionalEmail(message.template, message, branding);
+  return { text: rendered.text, html: rendered.html };
 }

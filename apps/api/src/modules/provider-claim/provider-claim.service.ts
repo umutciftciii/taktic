@@ -560,6 +560,10 @@ export class ProviderClaimService {
         subject: 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
         actionUrl: buildClaimUrl(rawToken),
         data: {
+          // The person named on the application, for the salutation. The
+          // business name still carries the message's own subject matter; a
+          // very old application with no contact name falls back to it.
+          fullName: provider.contactName,
           businessName: provider.businessName,
           expiresAt: expiresAt.toISOString(),
         },

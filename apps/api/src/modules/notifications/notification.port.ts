@@ -8,32 +8,28 @@ import type { TransactionalEmailTemplate } from './templates/transactional-templ
  * delivering deployment — never touches business code.
  */
 /**
- * `request-expiring` is the day-7 nudge for an approved request that has not
- * received a single offer. It states that the request's window is running out
- * and nothing more: it must never claim the request is "verified", and it must
- * never promise that offers are coming.
- */
-/**
- * `provider-claim` invites the applicant behind a guest provider application to
- * take ownership of it. It carries the single-use claim URL and nothing about
- * the moderation outcome: an application that is still under review must not be
- * described as accepted, and a claim never approves anything.
- */
-/**
- * The twelve designed transactional messages live in
+ * Every message this application may send, taken from
  * {@link import('./templates/transactional-templates').TRANSACTIONAL_EMAIL_TEMPLATES}
- * and are spread in below, so the union and the renderer's switch can never
- * drift apart: adding an identifier there is what makes it sendable here.
+ * so the union and the renderer's switch can never drift apart: adding an
+ * identifier there is what makes it sendable here.
  *
- * The three names listed explicitly predate that set. They keep the plain
- * renderer in email-template.ts — same wording, same behaviour — because
- * re-skinning them is a product decision, not a side effect of this work.
+ * Three of them used to be listed separately, because they predated the design
+ * system and rendered through a plain renderer of their own. They are documents
+ * in the same table as the rest now, with their wording, their variables, their
+ * links and their expiry semantics unchanged:
+ *
+ * - `customer-activation` carries the single-use link that opens a guest
+ *   customer's account.
+ * - `provider-claim` invites the applicant behind a guest provider application
+ *   to take ownership of it. It carries the single-use claim URL and nothing
+ *   about the moderation outcome: an application that is still under review
+ *   must not be described as accepted, and a claim never approves anything.
+ * - `request-expiring` is the day-7 nudge for an approved request that has not
+ *   received a single offer. It states that the request's window is running out
+ *   and nothing more: it must never claim the request is "verified", and it
+ *   must never promise that offers are coming.
  */
-export type NotificationTemplate =
-  | 'customer-activation'
-  | 'request-expiring'
-  | 'provider-claim'
-  | TransactionalEmailTemplate;
+export type NotificationTemplate = TransactionalEmailTemplate;
 
 export type NotificationMessage = {
   template: NotificationTemplate;

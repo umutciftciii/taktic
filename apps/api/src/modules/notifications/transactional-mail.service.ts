@@ -2,7 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   CreditTransactionType,
   NotificationStatus,
+  OfferPackageType,
   OfferStatus,
+  PackagePurchaseStatus,
   ProviderStatus,
   ServiceCategoryStatus,
   ServiceRequestStatus,
@@ -39,10 +41,10 @@ import {
 } from './templates/transactional-templates';
 
 /**
- * Sends the twelve designed transactional messages.
+ * Sends the transactional messages that follow a domain event.
  *
  * One service rather than a send scattered through the domain modules, because
- * all twelve share the same three properties and each of them is easy to get
+ * every one of them shares the same three properties and each is easy to get
  * wrong one call site at a time:
  *
  * 1. **Never inside the business transaction.** Every method here is called
@@ -433,6 +435,56 @@ export class TransactionalMailService {
     );
   }
 
+  // ────────────────── 16 · credits.package_purchase_settled ──────────────────
+
+  /**
+   * The receipt for a credit package that has been paid for and loaded.
+   *
+   * Called after the settling transaction has committed, by both paths that can
+   * legitimately produce one: the signature-verified Lemon Squeezy webhook and,
+   * in a deployment wired to the mock provider, the in-app payment form. It is
+   * never called from inside either transaction, so a settlement that rolls
+   * back leaves no message and no audit row behind it.
+   *
+   * Everything it needs is re-read here from the committed rows, and every one
+   * of the three preconditions is checked again rather than trusted from the
+   * caller:
+   *
+   * - the purchase is PAID;
+   * - it sold credits (`ONE_TIME_CREDITS`) — a period package moves no balance
+   *   and has nothing to say that this message's heading would be true of;
+   * - the credit movement exists, and is the PACKAGE_PURCHASE row this purchase
+   *   points at. The credits in the message come from that ledger row, so the
+   *   figure the provider reads is the figure their balance actually moved by.
+   *
+   * `dedupeKey` names the purchase. One purchase settles once, so the unique
+   * index on (template, dedupeKey) is what makes a redelivered webhook — or a
+   * webhook and a mock settlement racing in a misconfigured deployment —
+   * produce exactly one receipt.
+   */
+  async sendPackagePurchaseConfirmation(purchaseId: string) {
+    const purchase = await loadPackagePurchase(this.prisma, purchaseId);
+    if (!purchase) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, purchase.providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    await this.send(
+      'package-purchase-confirmation',
+      provider.recipient,
+      packagePurchaseConfirmationData(provider, purchase),
+      {
+        providerId: provider.id,
+        userId: provider.userId,
+        dedupeKey: `package-purchase:${purchase.id}`,
+      },
+    );
+  }
+
   // ─────────────────────────── admin-triggered retry ─────────────────────────
 
   /**
@@ -602,6 +654,18 @@ export class TransactionalMailService {
 
         const recipient = recipientFor(offer.provider);
         return recipient ? { to: recipient, data: offerNotSelectedData(offer) } : null;
+      }
+
+      case 'package-purchase-confirmation': {
+        const purchase = await loadPackagePurchase(this.prisma, source.ids[0]);
+        if (!purchase) {
+          return null;
+        }
+
+        const provider = await loadProvider(this.prisma, purchase.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: packagePurchaseConfirmationData(provider, purchase) }
+          : null;
       }
 
       case 'credit-refunded': {
@@ -912,6 +976,7 @@ type LoadedRequest = NonNullable<Awaited<ReturnType<typeof loadRequest>>>;
 type LoadedOffer = NonNullable<Awaited<ReturnType<typeof loadOffer>>>;
 type MatchedProvider = Awaited<ReturnType<typeof findMatchingProviders>>[number];
 type RefundTransaction = NonNullable<Awaited<ReturnType<typeof loadRefundTransaction>>>;
+type LoadedPackagePurchase = NonNullable<Awaited<ReturnType<typeof loadPackagePurchase>>>;
 
 /**
  * The payload builders.
@@ -1109,6 +1174,31 @@ function countOpenOffers(prisma: PrismaService, requestId: string): Promise<numb
   });
 }
 
+/**
+ * The receipt's variables.
+ *
+ * Six facts and two links, all of them the buyer's own: what they bought, how
+ * many credits it added, what they paid and in what currency, the order number
+ * they can quote to support, and when it settled. Nothing about the payment
+ * provider, the store, the mode, the webhook or the operator crosses into here.
+ */
+function packagePurchaseConfirmationData(
+  provider: LoadedProvider,
+  purchase: LoadedPackagePurchase,
+): MailData {
+  return {
+    fullName: provider.contactName,
+    packageName: purchase.packageNameSnapshot,
+    creditAmount: String(purchase.creditedAmount),
+    priceAmountMinor: String(purchase.priceAmountSnapshot),
+    currency: purchase.currencySnapshot,
+    purchaseNumber: purchase.purchaseNumber,
+    paidAt: purchase.paidAt?.toISOString() ?? null,
+    creditsUrl: providerCreditsUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
 async function loadRefundTransaction(prisma: PrismaService, transactionId: string) {
   const transaction = await prisma.providerCreditTransaction.findUnique({
     where: { id: transactionId },
@@ -1125,6 +1215,61 @@ async function loadRefundTransaction(prisma: PrismaService, transactionId: strin
   });
 
   return transaction?.type === CreditTransactionType.OFFER_REFUND ? transaction : null;
+}
+
+/**
+ * A settled credit-package purchase, or null.
+ *
+ * Null for anything the receipt would misdescribe: a purchase that is not PAID,
+ * one that sold a period rather than credits, or one whose ledger row is
+ * missing or is not the PACKAGE_PURCHASE movement it claims. The credits the
+ * message states come from that row rather than from the purchase snapshot, so
+ * there is no version of this message that names an amount the balance did not
+ * move by.
+ *
+ * The payment columns are not selected at all — no correlation token, no
+ * provider order or checkout id, no failure code, no admin note. Nothing that
+ * is not selected can be interpolated by mistake.
+ */
+async function loadPackagePurchase(prisma: PrismaService, purchaseId: string) {
+  const purchase = await prisma.packagePurchase.findUnique({
+    where: { id: purchaseId },
+    select: {
+      id: true,
+      providerId: true,
+      status: true,
+      purchaseNumber: true,
+      packageNameSnapshot: true,
+      priceAmountSnapshot: true,
+      currencySnapshot: true,
+      paidAt: true,
+      creditTransactionId: true,
+      package: { select: { type: true } },
+    },
+  });
+
+  if (
+    !purchase ||
+    purchase.status !== PackagePurchaseStatus.PAID ||
+    purchase.package.type !== OfferPackageType.ONE_TIME_CREDITS ||
+    !purchase.creditTransactionId
+  ) {
+    return null;
+  }
+
+  const ledgerEntry = await prisma.providerCreditTransaction.findUnique({
+    where: { id: purchase.creditTransactionId },
+    select: { id: true, type: true, amount: true, providerId: true },
+  });
+
+  if (
+    ledgerEntry?.type !== CreditTransactionType.PACKAGE_PURCHASE ||
+    ledgerEntry.providerId !== purchase.providerId
+  ) {
+    return null;
+  }
+
+  return { ...purchase, creditedAmount: ledgerEntry.amount };
 }
 
 /**
@@ -1155,6 +1300,7 @@ const RETRY_DEDUPE_PREFIXES = {
   'offer-accepted': 'offer-accepted',
   'offer-not-selected': 'offer-not-selected',
   'credit-refunded': 'credit-refunded',
+  'package-purchase-confirmation': 'package-purchase',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -1187,6 +1333,7 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'offer-accepted': 1,
   'offer-not-selected': 1,
   'credit-refunded': 1,
+  'package-purchase-confirmation': 1,
 };
 
 /**

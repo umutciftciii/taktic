@@ -17,10 +17,9 @@ import {
  * stay reachable.
  */
 export const NOTIFICATION_TEMPLATES = [
-  'customer-activation',
-  'request-expiring',
+  // The one SMS template. Everything else this build sends is an e-mail, and
+  // the e-mail list is the renderer's own table rather than a second copy.
   'phone-verification-code',
-  'provider-claim',
   ...TRANSACTIONAL_EMAIL_TEMPLATES,
 ] as const;
 

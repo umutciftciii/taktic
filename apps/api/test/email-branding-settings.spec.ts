@@ -463,35 +463,42 @@ describe('a delivering send with an unusable public URL', () => {
     selectDeliveringTransportWithLoopbackUrl();
     const { requests, dispatcher } = deliveringStack();
 
-    // A claim link is exempt from the *branding* gate — it prints no footer —
-    // but not from this one: a localhost claim URL is unusable by definition.
     const outcome = await dispatcher.sendEmail({
       template: 'provider-claim',
       to: 'basvuru@example.com',
       subject: 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
       actionUrl: 'http://localhost:3000/claim-provider?token=single-use-secret',
-      data: { businessName: 'Örnek Yapı' },
+      data: { fullName: 'Ali Yapı', businessName: 'Örnek Yapı' },
     });
 
     expect(outcome.errorCode).toBe('EMAIL_PUBLIC_URL_INVALID');
     expect(requests).toHaveLength(0);
   });
 
-  it('still delivers the one notification that carries no link at all', async () => {
+  it('refuses the link-free reminder too, now that it prints the logo', async () => {
     selectDeliveringTransportWithLoopbackUrl();
     const { requests, dispatcher } = deliveringStack();
 
-    // The day-7 reminder has no action URL and no logo, so there is nothing in
-    // it for an unusable base URL to spoil.
+    // The day-7 reminder used to be the one exemption here: it carried no
+    // action URL and no logo, so an unusable base URL had nothing in it to
+    // spoil. It renders in the design system now, which means it embeds the
+    // logo from that same base — so a message a recipient would open to a
+    // broken image is refused like every other.
     const outcome = await dispatcher.sendEmail({
       template: 'request-expiring',
       to: 'musteri@example.com',
-      subject: 'Talebinizin süresi doluyor',
-      data: { requestNumber: '#T-90412', categoryName: 'Kombi Servisi', remainingDays: '7' },
+      subject: 'Talebiniz için süre dolmak üzere',
+      data: {
+        fullName: 'Deniz Yılmaz',
+        requestNumber: '#T-90412',
+        categoryName: 'Kombi Servisi',
+        remainingDays: '7',
+      },
     });
 
-    expect(outcome.status).toBe(NotificationStatus.SENT);
-    expect(requests).toHaveLength(1);
+    expect(outcome.status).toBe(NotificationStatus.FAILED);
+    expect(outcome.errorCode).toBe('EMAIL_PUBLIC_URL_INVALID');
+    expect(requests).toHaveLength(0);
   });
 
   it('keeps the two refusals distinct', async () => {
@@ -599,23 +606,51 @@ describe('a delivering send with incomplete settings', () => {
     expect(requests).toHaveLength(0);
   });
 
-  it('still delivers the templates that print no company footer', async () => {
+  it('holds the claim invitation to the same footer rule as everything else', async () => {
     selectDeliveringTransport();
     const { requests, dispatcher } = deliveringStack();
 
-    // A claim invitation is the proof of mailbox ownership the whole flow rests
-    // on, and it carries no company details at all. Blocking it over a footer
-    // it never prints would be collateral damage, not safety.
+    // This used to be the exemption: a claim invitation carried no company
+    // details at all, so blocking it over a footer it never printed would have
+    // been collateral damage rather than safety. It renders in the design
+    // system now and prints the same footer as every other message, so the
+    // reason for the exemption is gone and the rule applies — exactly as it
+    // always has for the password reset, which is the same kind of message.
     const outcome = await dispatcher.sendEmail({
       template: 'provider-claim',
       to: 'basvuru@example.com',
       subject: 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
       actionUrl: `${PUBLIC_WEB_URL}/claim-provider?token=single-use-secret`,
-      data: { businessName: 'Örnek Yapı' },
+      data: { fullName: 'Ali Yapı', businessName: 'Örnek Yapı' },
+    });
+
+    expect(outcome.status).toBe(NotificationStatus.FAILED);
+    expect(outcome.errorCode).toBe('EMAIL_BRANDING_INCOMPLETE');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('delivers the claim invitation once the settings are publishable', async () => {
+    const cookie = await adminCookie();
+    await saveSettings(cookie, REAL_SETTINGS).expect(200);
+    selectDeliveringTransport();
+
+    const { requests, dispatcher } = deliveringStack();
+    const outcome = await dispatcher.sendEmail({
+      template: 'provider-claim',
+      to: 'basvuru@example.com',
+      subject: 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
+      actionUrl: `${PUBLIC_WEB_URL}/claim-provider?token=single-use-secret`,
+      data: { fullName: 'Ali Yapı', businessName: 'Örnek Yapı' },
     });
 
     expect(outcome.status).toBe(NotificationStatus.SENT);
     expect(requests).toHaveLength(1);
+
+    // The message the mailbox-ownership flow rests on, with the real footer and
+    // its single-use link intact.
+    const body = requests[0] as { html: string; text: string };
+    expect(body.html).toContain(REAL_SETTINGS.supportEmail);
+    expect(body.html).toContain(`${PUBLIC_WEB_URL}/claim-provider?token=single-use-secret`);
   });
 
   it('sends the real footer once the settings are saved', async () => {
