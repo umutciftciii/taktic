@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AccountModule } from './modules/account/account.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { CompanySettingsModule } from './modules/company-settings/company-settings.module';
 import { ContactSharingModule } from './modules/contact-sharing/contact-sharing.module';
@@ -41,6 +42,7 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     NotificationsModule,
     AuthModule,
+    AccountModule,
     EmailVerificationModule,
     PasswordResetModule,
     CategoriesModule,
