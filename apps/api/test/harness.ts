@@ -239,7 +239,8 @@ export async function createUser(
     email?: string;
     phone?: string | null;
     password?: string | null;
-    name?: string;
+    /** Explicit null creates an account with no name — the column is nullable. */
+    name?: string | null;
     customerOrigin?: CustomerOrigin | null;
     isActive?: boolean;
   },
@@ -251,7 +252,7 @@ export async function createUser(
     data: {
       email: overrides.email ?? `user-${suffix}@example.test`,
       phone: overrides.phone === undefined ? `0555000${suffix.padStart(4, '0')}` : overrides.phone,
-      name: overrides.name ?? `User ${suffix}`,
+      name: overrides.name === undefined ? `User ${suffix}` : overrides.name,
       role: overrides.role,
       isActive: overrides.isActive ?? true,
       passwordHash: password === null ? null : await bcrypt.hash(password, 4),

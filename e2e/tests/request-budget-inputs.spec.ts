@@ -8,6 +8,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { fillContactStep } from '../src/journeys';
 
 /**
  * The two budget fields on the public request form, in Turkish lira.
@@ -171,9 +172,7 @@ test.describe('request form budget fields', () => {
       await form.getByTestId('request-budget-max').fill('7500,5');
 
       await customer.page.getByRole('button', { name: 'Devam et' }).click();
-      await form.locator('input[name="customerName"]').fill(values.customerName);
-      await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
-      await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
+      await fillContactStep(customer, values);
 
       await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
       await expect(customer.page).toHaveURL(/\/requests\/success\?id=/);

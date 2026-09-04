@@ -9,6 +9,21 @@ import { BudgetFields } from './budget-fields';
 import { LocationFields } from './location-fields';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
+/**
+ * The signed-in customer's own contact details, as the API reports them.
+ *
+ * Every field is nullable because every column is: an account may exist with no
+ * telephone number or no name. The form reads them to *show* what will be
+ * shared and to say when something is missing — it never posts them. On the
+ * default path the API derives all three from the account itself, so what is
+ * rendered here is a mirror, not an input.
+ */
+export type AccountContact = {
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+};
+
 type RequestFormProps = {
   /**
    * The leaf this form belongs to. When the customer arrived through a router
@@ -28,9 +43,18 @@ type RequestFormProps = {
   showDisclosure: boolean;
   /** Turkey's provinces with their districts, loaded by the page from the API. */
   provinces: ProvinceWithDistricts[];
+  /**
+   * The signed-in customer's account contact, or null for a visitor with no
+   * customer session. Null is what makes this the guest form: the three contact
+   * fields are asked for, exactly as they always were.
+   */
+  accountContact?: AccountContact | null;
   /** The existing server action; this component only decides what is on screen. */
   action: (formData: FormData) => void | Promise<void>;
 };
+
+/** An empty alternate contact — also what unticking the checkbox restores. */
+const EMPTY_ALTERNATE_CONTACT = { name: '', phone: '', email: '' };
 
 const STEPS = [
   { key: 'detail', label: 'İş detayı' },
@@ -68,6 +92,7 @@ export function RequestForm({
   disclosure,
   showDisclosure,
   provinces,
+  accountContact = null,
   action,
 }: RequestFormProps) {
   const [step, setStep] = useState(0);
@@ -127,6 +152,35 @@ export function RequestForm({
     }
   }, []);
 
+  /*
+   * Whether the customer asked to name somebody else, and what they typed.
+   *
+   * Controlled on purpose. The values have to be *erased* when the box is
+   * unticked — not merely hidden — and an uncontrolled input that React
+   * unmounts would leave the browser free to restore its text on the next tick
+   * of the box. Holding them here makes "cleared" a fact this component owns,
+   * and the fields are gone from the DOM as well, so nothing is posted.
+   */
+  const [useAlternateContact, setUseAlternateContact] = useState(false);
+  const [alternateContact, setAlternateContact] = useState(EMPTY_ALTERNATE_CONTACT);
+
+  /** True when the account carries all three details the API needs. */
+  const accountContactComplete = Boolean(
+    accountContact?.name?.trim() && accountContact?.phone?.trim() && accountContact?.email?.trim(),
+  );
+  /**
+   * A signed-in customer whose account is missing one of the three. The default
+   * path cannot work for them — the API refuses it — so the form says so and
+   * withholds submit until they name a contact person instead.
+   */
+  const accountContactIncomplete = Boolean(accountContact) && !accountContactComplete;
+  const missingAccountContactLabels = [
+    accountContact?.name?.trim() ? null : 'ad soyad',
+    accountContact?.phone?.trim() ? null : 'telefon',
+    accountContact?.email?.trim() ? null : 'e-posta',
+  ].filter((label): label is string => label !== null);
+  const submitBlocked = accountContactIncomplete && !useAlternateContact;
+
   const shown = useMemo(() => visibleQuestions(questions, answers), [questions, answers]);
 
   /*
@@ -143,14 +197,33 @@ export function RequestForm({
   /** The questions that are actually rendered as inputs. */
   const answerableQuestions = shown.filter((question) => !question.systemField);
 
+  /*
+   * The contact signal, which now has two sources.
+   *
+   * A guest fills the three fields in and `refreshSignals` reads them from the
+   * DOM, exactly as before. A signed-in customer on the default path has no
+   * fields to read — the details come from their account — so the signal is
+   * derived from state instead, and the estimate keeps counting contact as
+   * done rather than punishing them for a step the product filled in for them.
+   */
+  const contactSignal = accountContact
+    ? useAlternateContact
+      ? Boolean(
+          alternateContact.name.trim() &&
+            alternateContact.phone.trim() &&
+            alternateContact.email.trim(),
+        )
+      : accountContactComplete
+    : signals.contact;
+
   const checklist = useMemo(
     () => [
       { label: 'İş detayı yazıldı', done: signals.detail },
       { label: 'Konum girildi', done: signals.place },
       { label: 'Zaman veya bütçe belirtildi', done: signals.time },
-      { label: 'İletişim bilgisi verildi', done: signals.contact },
+      { label: 'İletişim bilgisi verildi', done: contactSignal },
     ],
-    [signals],
+    [signals, contactSignal],
   );
 
   const estimate = checklist.filter((item) => item.done).length * 25;
@@ -435,28 +508,151 @@ export function RequestForm({
           >
             <section className="form-section">
               <h2>İletişim</h2>
-              <div className="form-grid">
-                <label className="form-row">
-                  <span>Ad soyad *</span>
-                  <input name="customerName" required />
-                </label>
-                <label className="form-row">
-                  <span>Telefon *</span>
-                  <input name="customerPhone" required placeholder="05XX XXX XX XX" />
-                </label>
-              </div>
-              <label className="form-row">
-                <span>E-posta *</span>
-                <input
-                  name="customerEmail"
-                  type="email"
-                  required
-                  placeholder="ornek@eposta.com"
-                />
-                <span className="help-text">
-                  Tekliflerinizi takip edebilmeniz için e-posta adresiniz gereklidir.
-                </span>
-              </label>
+
+              {accountContact ? (
+                <>
+                  {/*
+                    What the account already knows, shown rather than asked for.
+                    Read-only in the strongest sense available: this is text, not
+                    a disabled control, so there is no field for anyone to edit
+                    and nothing named `customerName` is posted. The API derives
+                    all three from the session on its side.
+                  */}
+                  {accountContactComplete ? (
+                    <div className="verify-well" data-testid="account-contact-summary">
+                      <span className="cdash-summary-label">Hesap iletişim bilgileriniz</span>
+                      <dl className="account-contact-list">
+                        <div className="account-contact-row">
+                          <dt>Ad soyad</dt>
+                          <dd data-testid="account-contact-name">{accountContact.name}</dd>
+                        </div>
+                        <div className="account-contact-row">
+                          <dt>Telefon</dt>
+                          <dd data-testid="account-contact-phone">{accountContact.phone}</dd>
+                        </div>
+                        <div className="account-contact-row">
+                          <dt>E-posta</dt>
+                          <dd data-testid="account-contact-email">{accountContact.email}</dd>
+                        </div>
+                      </dl>
+                      <p className="help-text" style={{ margin: 0 }}>
+                        Teklifler bu iletişim bilgileriyle paylaşılacak.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="notice" data-testid="account-contact-incomplete">
+                      <span>
+                        Hesabınızda {missingAccountContactLabels.join(', ')} bilgisi eksik olduğu
+                        için talebiniz hesap bilgilerinizle oluşturulamıyor. Aşağıdan farklı bir
+                        iletişim kişisi tanımlayabilirsiniz.
+                      </span>
+                    </div>
+                  )}
+
+                  <label className="checkbox-row" htmlFor="use-alternate-contact">
+                    <input
+                      id="use-alternate-contact"
+                      name="useAlternateContact"
+                      type="checkbox"
+                      value="true"
+                      checked={useAlternateContact}
+                      data-testid="use-alternate-contact"
+                      onChange={(event) => {
+                        setUseAlternateContact(event.target.checked);
+                        // Unticking erases what was typed. The next tick starts
+                        // from empty fields, and nothing lingers to be posted.
+                        if (!event.target.checked) {
+                          setAlternateContact(EMPTY_ALTERNATE_CONTACT);
+                        }
+                      }}
+                    />
+                    <span>Farklı bir iletişim kişisi kullanacağım</span>
+                  </label>
+
+                  {useAlternateContact ? (
+                    <div className="alternate-contact-fields" data-testid="alternate-contact-fields">
+                      <p className="help-text">
+                        Bu bilgiler yalnızca bu talep için kullanılır; hesabınız değişmez.
+                      </p>
+                      <div className="form-grid">
+                        <label className="form-row">
+                          <span>Ad soyad *</span>
+                          <input
+                            name="customerName"
+                            required
+                            value={alternateContact.name}
+                            onChange={(event) =>
+                              setAlternateContact((current) => ({
+                                ...current,
+                                name: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="form-row">
+                          <span>Telefon *</span>
+                          <input
+                            name="customerPhone"
+                            required
+                            placeholder="05XX XXX XX XX"
+                            value={alternateContact.phone}
+                            onChange={(event) =>
+                              setAlternateContact((current) => ({
+                                ...current,
+                                phone: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                      <label className="form-row">
+                        <span>E-posta *</span>
+                        <input
+                          name="customerEmail"
+                          type="email"
+                          required
+                          placeholder="ornek@eposta.com"
+                          value={alternateContact.email}
+                          onChange={(event) =>
+                            setAlternateContact((current) => ({
+                              ...current,
+                              email: event.target.value,
+                            }))
+                          }
+                        />
+                        <span className="help-text">
+                          Teklifler bu kişiyle paylaşılacak. Talep yine hesabınıza bağlı kalır.
+                        </span>
+                      </label>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className="form-grid">
+                    <label className="form-row">
+                      <span>Ad soyad *</span>
+                      <input name="customerName" required />
+                    </label>
+                    <label className="form-row">
+                      <span>Telefon *</span>
+                      <input name="customerPhone" required placeholder="05XX XXX XX XX" />
+                    </label>
+                  </div>
+                  <label className="form-row">
+                    <span>E-posta *</span>
+                    <input
+                      name="customerEmail"
+                      type="email"
+                      required
+                      placeholder="ornek@eposta.com"
+                    />
+                    <span className="help-text">
+                      Tekliflerinizi takip edebilmeniz için e-posta adresiniz gereklidir.
+                    </span>
+                  </label>
+                </>
+              )}
 
               {/*
                 Telefon doğrulaması talep oluşturulduktan sonra, talebin kendi
@@ -527,13 +723,52 @@ export function RequestForm({
               </span>
             </div>
 
+            {/*
+              The two keys are load-bearing, not decoration.
+
+              Without them React sees one <button className="btn btn-primary">
+              in this slot and reuses the same DOM node when the last step is
+              reached — rewriting its `type` from "button" to "submit" during
+              the very click that got there, before the browser runs that
+              click's activation behaviour. The browser then activates a submit
+              button, and "Devam et" posts the form. Distinct keys make the
+              clicked node unmount instead: a detached button has no form to
+              submit.
+
+              The bug was invisible while the contact step always held empty
+              required fields — native validation refused the accidental submit
+              and the customer saw nothing. A signed-in customer's step has no
+              empty field left to refuse it.
+            */}
             {isLast ? (
-              <button className="btn btn-primary" type="submit">
+              /*
+                Withheld only for the one case the API will refuse anyway: a
+                signed-in customer whose account has no complete contact and who
+                has not named anybody else. `title` and the notice above both
+                say why, so the disabled control is never a dead end without an
+                explanation.
+              */
+              <button
+                key="submit"
+                className="btn btn-primary"
+                type="submit"
+                disabled={submitBlocked}
+                title={
+                  submitBlocked
+                    ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
+                    : undefined
+                }
+              >
                 Talebi Gönder
                 <IconArrowRight />
               </button>
             ) : (
-              <button type="button" className="btn btn-primary" onClick={() => goTo(step + 1)}>
+              <button
+                key="next"
+                type="button"
+                className="btn btn-primary"
+                onClick={() => goTo(step + 1)}
+              >
                 Devam et
                 <IconArrowRight />
               </button>

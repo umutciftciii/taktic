@@ -8,6 +8,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { fillContactStep } from '../src/journeys';
 
 /**
  * The request form's location step, driven the way a customer drives it.
@@ -98,9 +99,7 @@ test.describe('request form location', () => {
       await neighborhood.selectOption(chosenNeighborhood);
 
       await customer.page.getByRole('button', { name: 'Devam et' }).click();
-      await form.locator('input[name="customerName"]').fill(values.customerName);
-      await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
-      await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
+      await fillContactStep(customer, values);
 
       await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
       await expect(customer.page).toHaveURL(/\/requests\/success\?id=/);

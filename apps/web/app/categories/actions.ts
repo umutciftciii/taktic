@@ -58,9 +58,11 @@ export async function submitServiceRequestAction(formData: FormData) {
       routerSelections: decodeRouterSelections(
         readOptionalFormString(formData, 'routerSelections'),
       ),
-      customerName: readFormString(formData, 'customerName'),
-      customerPhone: readFormString(formData, 'customerPhone'),
-      customerEmail: readFormString(formData, 'customerEmail'),
+      // Ticked only by a signed-in customer who wants somebody else contacted.
+      // Absent — a guest's form, or the default path — it is false, and the API
+      // then decides for itself where the contact comes from.
+      useAlternateContact: formData.get('useAlternateContact') === 'true',
+      ...contactFields(formData),
       city: readFormString(formData, 'city'),
       district: readFormString(formData, 'district'),
       neighborhood: readOptionalFormString(formData, 'neighborhood'),
@@ -88,6 +90,28 @@ export async function submitServiceRequestAction(formData: FormData) {
   });
 
   redirect(`/requests/success?id=${request.id}`);
+}
+
+/**
+ * The three contact fields, but only when the form actually asked for them.
+ *
+ * A guest's form and an alternate contact both render them, and they are
+ * forwarded exactly as they always were — including empty, so the API's own
+ * "must not be empty" rule still produces the error it always did. A signed-in
+ * customer on the default path renders none of them: the keys are then left out
+ * of the payload entirely, because the API is going to read the account instead
+ * and a field sent here would only be something for it to ignore.
+ */
+function contactFields(formData: FormData) {
+  if (!formData.has('customerName')) {
+    return {};
+  }
+
+  return {
+    customerName: readFormString(formData, 'customerName'),
+    customerPhone: readFormString(formData, 'customerPhone'),
+    customerEmail: readFormString(formData, 'customerEmail'),
+  };
 }
 
 function parseQuestionMeta(value: string): QuestionMeta[] {

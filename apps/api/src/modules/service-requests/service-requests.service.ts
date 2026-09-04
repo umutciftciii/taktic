@@ -30,6 +30,15 @@ import {
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
+/**
+ * Returned when a signed-in customer's own account carries no complete contact
+ * triple, so the default "use my account details" path has nothing to use.
+ *
+ * A code rather than a message match: the web form reads it to explain what is
+ * missing instead of showing a raw validation error.
+ */
+export const ACCOUNT_CONTACT_INCOMPLETE_CODE = 'ACCOUNT_CONTACT_INCOMPLETE';
+
 type QuestionOption = {
   key: string;
   label: string;
@@ -179,10 +188,14 @@ export class ServiceRequestsService {
       );
     }
 
+    // Who the offers will be shared with. For a signed-in customer on the
+    // default path this reads the account row and nothing else — the body's own
+    // contact fields are not consulted at all, so a forged one cannot become
+    // the stored contact of a request that belongs to that account.
+    const contact = await this.resolveContactDetails(dto, user);
+
     const requestData = {
-      customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
-      customerPhone: normalizePhone(dto.customerPhone),
-      customerEmail: normalizeRequiredEmail(dto.customerEmail),
+      ...contact,
       city: location.city,
       district: location.district,
       neighborhood: location.neighborhood,
@@ -275,6 +288,70 @@ export class ServiceRequestsService {
     await this.notify(() => this.mail.sendRequestReceived(request.id), request.id);
 
     return withQualityLabel(request);
+  }
+
+  /**
+   * The name, telephone number and e-mail address the request is stored with.
+   *
+   * There are two sources and the caller never chooses between them — the
+   * session does:
+   *
+   * - A signed-in customer who did not ask for anything else gets their own
+   *   account's details, read here from the User row rather than taken from the
+   *   token or from the body. Whatever `customerName`, `customerPhone` and
+   *   `customerEmail` arrived with the request is discarded, which is what makes
+   *   a forged default contact impossible rather than merely unlikely.
+   * - Everybody else — a visitor with no session, an admin posting on the public
+   *   endpoint, and a signed-in customer who ticked "different contact person" —
+   *   supplies all three in the body, under exactly the rules they always were.
+   *
+   * An alternate contact belongs to the request alone: ownership is decided
+   * separately by {@link resolveCustomerForCreate}, which still hands a
+   * signed-in customer's request to that customer.
+   */
+  private async resolveContactDetails(
+    dto: CreateServiceRequestDto,
+    user: AuthUser | null,
+  ): Promise<{ customerName: string; customerPhone: string; customerEmail: string }> {
+    const usesAccountContact = user?.role === UserRole.CUSTOMER && dto.useAlternateContact !== true;
+
+    if (!usesAccountContact) {
+      return {
+        customerName: normalizeRequiredString(dto.customerName, 'Customer name'),
+        customerPhone: normalizePhone(dto.customerPhone),
+        customerEmail: normalizeRequiredEmail(dto.customerEmail),
+      };
+    }
+
+    const account = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { name: true, phone: true, email: true },
+    });
+
+    const name = normalizeNullableString(account?.name);
+    const phone = normalizeNullableString(account?.phone);
+    const email = normalizeNullableString(account?.email);
+
+    // An account may legitimately be missing any of the three — every column is
+    // nullable, and a customer created by an older flow may never have been
+    // asked. Refusing here is deliberate: the alternative is inventing a contact
+    // for a request whose whole purpose is to be answered.
+    if (!name || !phone || !email) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        error: 'Bad Request',
+        code: ACCOUNT_CONTACT_INCOMPLETE_CODE,
+        message:
+          'Hesabınızda ad soyad, telefon ve e-posta bilgilerinin tamamı bulunmuyor. ' +
+          'Talep oluşturmak için bu bilgileri tamamlayın veya farklı bir iletişim kişisi tanımlayın.',
+      });
+    }
+
+    return {
+      customerName: name,
+      customerPhone: normalizePhone(phone),
+      customerEmail: normalizeRequiredEmail(email),
+    };
   }
 
   async listServiceRequests() {
@@ -1038,7 +1115,7 @@ function normalizeRequiredString(value: unknown, fieldName: string) {
   return trimmed;
 }
 
-function normalizePhone(value: string) {
+function normalizePhone(value: unknown) {
   return normalizeRequiredString(value, 'Customer phone').replace(/[^\d+]/g, '');
 }
 

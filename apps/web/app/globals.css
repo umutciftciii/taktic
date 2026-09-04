@@ -2807,6 +2807,56 @@ input[readonly] {
   border: 1px solid var(--color-divider);
 }
 
+/*
+ * The signed-in customer's own contact, shown rather than asked for.
+ *
+ * Two columns while there is room, stacked below 420px so a long address never
+ * pushes the card wider than the viewport — the label is short and the value is
+ * not, and `minmax(0, 1fr)` is what lets the value shrink instead of forcing an
+ * overflow. `overflow-wrap` breaks an address with no spaces in it at 320px.
+ */
+.account-contact-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.account-contact-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: 14px;
+}
+
+.account-contact-row dt {
+  color: var(--color-neutral-700);
+}
+
+.account-contact-row dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 420px) {
+  .account-contact-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
+/*
+ * The alternate contact person's three fields. Its own stack rather than the
+ * section's, because the fields appear and disappear as a unit and the spacing
+ * has to come with them.
+ */
+.alternate-contact-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
 .verify-row {
   display: flex;
   flex-wrap: wrap;
