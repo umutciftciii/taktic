@@ -13,6 +13,7 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
+import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module';
 import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
 import { ProviderInvitesModule } from './modules/provider-invites/provider-invites.module';
 import { ProvidersModule } from './modules/providers/providers.module';
@@ -67,6 +68,7 @@ import { PrismaModule } from './prisma/prisma.module';
     UploadsModule,
     ContactSharingModule,
     MessagingModule,
+    SupportTicketsModule,
     CompanySettingsModule,
     OperationsSettingsModule,
     NotificationLogsModule,

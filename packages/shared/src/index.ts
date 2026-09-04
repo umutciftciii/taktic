@@ -2,6 +2,11 @@ export const TAKTIC_APP_NAME = 'TakTic';
 
 export { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH } from './service-requests';
 
+export {
+  SUPPORT_TICKET_MESSAGE_MAX_LENGTH,
+  SUPPORT_TICKET_SUBJECT_MAX_LENGTH,
+} from './support-tickets';
+
 export { URGENCY_LABELS, isUrgencyCode, urgencyLabel } from './urgency';
 export type { UrgencyCode } from './urgency';
 

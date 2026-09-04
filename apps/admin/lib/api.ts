@@ -1963,3 +1963,125 @@ export type OperationsSettings = {
 export const OPERATIONS_SETTING_LABELS: Record<string, string> = {
   unviewedOfferRefundWindowHours: 'Görüntülenmeyen teklif için kredi iade süresi (saat)',
 };
+
+/* ---- support tickets ----------------------------------------------------- */
+
+export const SUPPORT_TICKET_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as const;
+
+export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
+
+const SUPPORT_TICKET_STATUS_LABELS: Record<SupportTicketStatus, string> = {
+  OPEN: 'Açık',
+  IN_PROGRESS: 'İşlemde',
+  RESOLVED: 'Çözüldü',
+  CLOSED: 'Kapatıldı',
+};
+
+export function supportTicketStatusLabel(status: string): string {
+  return SUPPORT_TICKET_STATUS_LABELS[status as SupportTicketStatus] ?? status;
+}
+
+export function supportTicketStatusBadgeClass(status: string): string {
+  switch (status) {
+    case 'OPEN':
+      return 'badge badge-warning';
+    case 'IN_PROGRESS':
+      return 'badge badge-info';
+    case 'RESOLVED':
+      return 'badge badge-success';
+    case 'CLOSED':
+      return 'badge badge-muted';
+    default:
+      return 'badge';
+  }
+}
+
+/**
+ * What the button for one transition says.
+ *
+ * The API decides which transitions a ticket may make and returns them; this
+ * only decides how each one reads. A move the table does not allow never gets a
+ * label because it never gets a button.
+ */
+export function supportTicketTransitionLabel(status: string): string {
+  switch (status) {
+    case 'OPEN':
+      return 'Yeniden aç';
+    case 'IN_PROGRESS':
+      return 'İşleme al';
+    case 'RESOLVED':
+      return 'Çözüldü olarak işaretle';
+    case 'CLOSED':
+      return 'Talebi kapat';
+    default:
+      return supportTicketStatusLabel(status);
+  }
+}
+
+/** What a recorded status change says on the timeline. */
+export function supportTicketStatusChangeLabel(toStatus: string): string {
+  switch (toStatus) {
+    case 'OPEN':
+      return 'Talep yeniden açık duruma alındı.';
+    case 'IN_PROGRESS':
+      return 'Talep işleme alındı.';
+    case 'RESOLVED':
+      return 'Talep çözüldü olarak işaretlendi.';
+    case 'CLOSED':
+      return 'Talep kapatıldı.';
+    default:
+      return `Talep durumu ${supportTicketStatusLabel(toStatus)} olarak güncellendi.`;
+  }
+}
+
+/**
+ * One ticket in the operator's queue.
+ *
+ * The customer block is the identity an operator needs in order to answer — the
+ * name and the address every other admin screen already shows — and nothing
+ * more. No phone, no password state, no session, no payment fact.
+ */
+export type SupportTicketListEntry = {
+  id: string;
+  subject: string;
+  status: SupportTicketStatus;
+  lastActivityAt: string;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  customer: { id: string; name: string | null; email: string | null };
+};
+
+export type SupportTicketListResponse = {
+  items: SupportTicketListEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  statusCounts: Record<SupportTicketStatus, number>;
+};
+
+export type SupportTicketTimelineEntry =
+  | {
+      kind: 'MESSAGE';
+      id: string;
+      authorRole: 'CUSTOMER' | 'ADMIN';
+      /** True when this operator wrote it themselves. */
+      mine: boolean;
+      body: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'STATUS_CHANGE';
+      id: string;
+      fromStatus: SupportTicketStatus | null;
+      toStatus: SupportTicketStatus;
+      createdAt: string;
+    };
+
+export type SupportTicketDetail = SupportTicketListEntry & {
+  canReply: boolean;
+  /** Exactly the moves this ticket may make right now, decided by the API. */
+  allowedTransitions: SupportTicketStatus[];
+  timeline: SupportTicketTimelineEntry[];
+};
