@@ -22,7 +22,7 @@ import { loadCustomerPanelCounts } from './customer-panel-data';
 
 type CustomerShellProps = {
   user: AuthUser;
-  active?: 'requests' | 'offers' | 'compare' | 'matches' | 'messages' | 'settings';
+  active?: 'requests' | 'offers' | 'compare' | 'matches' | 'messages' | 'settings' | 'support';
   children: ReactNode;
 };
 
@@ -164,14 +164,23 @@ export async function CustomerShell({
         })}
       </nav>
 
+      {/*
+        No longer a placeholder: a customer can now open a real support ticket
+        and read the whole conversation, so this is an ordinary link like every
+        other entry above it.
+      */}
       <div className="cdash-sidebar-footer">
-        <span className="cdash-nav-item is-disabled" aria-disabled="true" title="Yakında">
+        <Link
+          href="/destek"
+          className={`cdash-nav-item${active === 'support' ? ' is-active' : ''}`}
+          aria-current={active === 'support' ? 'page' : undefined}
+          data-testid="cdash-nav-support"
+        >
           <span className="cdash-nav-icon">
             <IconHelp size={16} />
           </span>
           <span>Destek</span>
-          <span className="cdash-nav-soon">Yakında</span>
-        </span>
+        </Link>
       </div>
     </>
   );

@@ -247,3 +247,69 @@ export function formatMinorAsInput(amountMinor: number | null | undefined): stri
  * SSR and the first client render agree by construction.
  */
 export { formatDate, formatDateTime, formatTime } from '@taktic/shared';
+
+/**
+ * The four statuses a support ticket can be in, and how each one reads.
+ *
+ * Lives here rather than in `lib/api.ts` because the ticket screens are partly
+ * Client Components — the composer and its counter — and that module imports
+ * `next/headers`.
+ */
+export const SUPPORT_TICKET_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as const;
+
+export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
+
+const SUPPORT_TICKET_STATUS_LABELS: Record<SupportTicketStatus, string> = {
+  OPEN: 'Açık',
+  IN_PROGRESS: 'İşlemde',
+  RESOLVED: 'Çözüldü',
+  CLOSED: 'Kapatıldı',
+};
+
+export function supportTicketStatusLabel(status: string): string {
+  return SUPPORT_TICKET_STATUS_LABELS[status as SupportTicketStatus] ?? status;
+}
+
+/**
+ * The badge a status wears.
+ *
+ * "Çözüldü" is the one state the customer panel fills with ink, for the same
+ * reason a match is: it is the outcome the whole screen exists to reach.
+ * "Kapatıldı" is deliberately quiet — it is an ending, not an achievement.
+ */
+export function supportTicketStatusBadgeClass(status: string): string {
+  switch (status) {
+    case 'OPEN':
+      return 'cdash-badge cdash-badge-info';
+    case 'IN_PROGRESS':
+      return 'cdash-badge cdash-badge-muted';
+    case 'RESOLVED':
+      return 'cdash-badge cdash-badge-success';
+    case 'CLOSED':
+      return 'cdash-badge cdash-badge-danger';
+    default:
+      return 'cdash-badge';
+  }
+}
+
+/**
+ * What a recorded status change says on the timeline.
+ *
+ * Written from the destination alone: "who moved it from what" is an internal
+ * fact, and a customer reading their own ticket needs to know what happened to
+ * it rather than which operator did the moving.
+ */
+export function supportTicketStatusChangeLabel(toStatus: string): string {
+  switch (toStatus) {
+    case 'OPEN':
+      return 'Talep yeniden açık duruma alındı.';
+    case 'IN_PROGRESS':
+      return 'Talep işleme alındı.';
+    case 'RESOLVED':
+      return 'Talep çözüldü olarak işaretlendi.';
+    case 'CLOSED':
+      return 'Talep kapatıldı.';
+    default:
+      return `Talep durumu ${supportTicketStatusLabel(toStatus)} olarak güncellendi.`;
+  }
+}

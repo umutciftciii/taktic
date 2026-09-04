@@ -1,0 +1,231 @@
+import Link from 'next/link';
+import {
+  apiFetch,
+  formatDateTime,
+  requireAdmin,
+  SUPPORT_TICKET_STATUSES,
+  supportTicketStatusBadgeClass,
+  supportTicketStatusLabel,
+  type SupportTicketListEntry,
+  type SupportTicketListResponse,
+  type SupportTicketStatus,
+} from '../../lib/api';
+import { EmptyState } from '../../components/empty-state';
+import { PageHeader } from '../../components/page-header';
+import { SectionCard } from '../../components/section-card';
+
+/**
+ * The support queue.
+ *
+ * The screen answers one question — what have customers asked, what state is
+ * each ask in, and which one moved most recently — and hands the operator to
+ * the ticket itself to do anything about it. Everything it offers is a read: no
+ * ticket is created, deleted or reassigned from here, and none can be, because
+ * the API has no route for any of the three.
+ *
+ * The table below carries `support-table-scroll` as well as `table-scroll`.
+ * `.table-scroll` only gets its `overflow-x` inside a `.table-card`, and this
+ * table lives in a `.section-card` — so without the extra class the six columns
+ * widen the document itself on a 320px phone instead of scrolling inside their
+ * own box.
+ */
+
+const DEFAULT_PAGE_SIZE = 25;
+
+type RawSearchParams = {
+  status?: string;
+  page?: string;
+};
+
+type AdminSupportPageProps = {
+  searchParams: Promise<RawSearchParams>;
+};
+
+function normalizeStatus(value: string | undefined): SupportTicketStatus | '' {
+  if (!value) return '';
+  const upper = value.toUpperCase();
+  return (SUPPORT_TICKET_STATUSES as readonly string[]).includes(upper)
+    ? (upper as SupportTicketStatus)
+    : '';
+}
+
+function normalizePage(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+}
+
+function buildPageHref(status: SupportTicketStatus | '', page: number): string {
+  const query = new URLSearchParams();
+  if (status) query.set('status', status);
+  if (page > 1) query.set('page', String(page));
+  const search = query.toString();
+  return search ? `/support?${search}` : '/support';
+}
+
+export default async function AdminSupportPage({ searchParams }: AdminSupportPageProps) {
+  await requireAdmin();
+
+  const params = await searchParams;
+  const status = normalizeStatus(params.status);
+  const page = normalizePage(params.page);
+
+  const apiQuery = new URLSearchParams();
+  apiQuery.set('page', String(page));
+  apiQuery.set('pageSize', String(DEFAULT_PAGE_SIZE));
+  if (status) apiQuery.set('status', status);
+
+  const response = await apiFetch<SupportTicketListResponse>(
+    `/admin/support/tickets?${apiQuery.toString()}`,
+  );
+
+  const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
+  const endIndex = Math.min(response.page * response.pageSize, response.total);
+
+  return (
+    <main>
+      <PageHeader
+        title="Destek Talepleri"
+        subtitle="Hizmet alanların açtığı destek talepleri. Yanıtlamak ve durumunu değiştirmek için bir talebi açın."
+      />
+
+      <form className="admin-toolbar" method="get" action="/support">
+        <div className="admin-toolbar-field">
+          <label htmlFor="support-status">Durum</label>
+          <select id="support-status" name="status" defaultValue={status}>
+            <option value="">Tümü</option>
+            {SUPPORT_TICKET_STATUSES.map((value) => (
+              <option key={value} value={value}>
+                {`${supportTicketStatusLabel(value)} (${response.statusCounts[value] ?? 0})`}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="admin-toolbar-actions">
+          <span className="admin-toolbar-summary" data-testid="support-ticket-count">
+            {response.total === 0
+              ? '0 talep'
+              : `${startIndex}-${endIndex} / ${response.total} talep`}
+          </span>
+          <button className="btn btn-secondary btn-sm" type="submit">
+            Uygula
+          </button>
+          {status ? (
+            <Link className="btn btn-ghost btn-sm" href="/support">
+              Temizle
+            </Link>
+          ) : null}
+        </div>
+      </form>
+
+      <SectionCard
+        title="Talepler"
+        subtitle={`Sayfa ${response.page} · ${response.pageSize} talep/sayfa · son hareket önce`}
+        padded={false}
+      >
+        {response.items.length === 0 ? (
+          <EmptyState
+            title={
+              status ? 'Bu durumda destek talebi bulunamadı.' : 'Henüz destek talebi açılmadı.'
+            }
+            description={
+              status
+                ? 'Filtreyi temizleyerek tüm talepleri görebilirsiniz.'
+                : 'Bir hizmet alan panelinden destek talebi açtığında burada görünür.'
+            }
+            action={
+              status ? (
+                <Link className="btn btn-secondary btn-sm" href="/support">
+                  Filtreyi temizle
+                </Link>
+              ) : null
+            }
+          />
+        ) : (
+          <div className="table-scroll support-table-scroll">
+            <table className="data-table" data-testid="support-ticket-table">
+              <thead>
+                <tr>
+                  <th>Durum</th>
+                  <th>Konu</th>
+                  <th>Hizmet alan</th>
+                  <th>Son hareket</th>
+                  <th>Oluşturulma</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {response.items.map((ticket) => (
+                  <SupportTicketRow key={ticket.id} ticket={ticket} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {response.total > response.pageSize ? (
+        <nav className="inline-actions" style={{ marginTop: 16, justifyContent: 'space-between' }}>
+          {response.page > 1 ? (
+            <Link
+              className="btn btn-secondary btn-sm"
+              href={buildPageHref(status, response.page - 1)}
+            >
+              ← Önceki
+            </Link>
+          ) : (
+            <span />
+          )}
+          <span className="muted" style={{ fontSize: 13 }}>
+            Sayfa {response.page}
+          </span>
+          {response.hasNextPage ? (
+            <Link
+              className="btn btn-secondary btn-sm"
+              href={buildPageHref(status, response.page + 1)}
+            >
+              Sonraki →
+            </Link>
+          ) : (
+            <span />
+          )}
+        </nav>
+      ) : null}
+    </main>
+  );
+}
+
+function SupportTicketRow({ ticket }: { ticket: SupportTicketListEntry }) {
+  return (
+    <tr data-testid="support-ticket-row" data-status={ticket.status}>
+      <td>
+        <span className={supportTicketStatusBadgeClass(ticket.status)}>
+          {supportTicketStatusLabel(ticket.status)}
+        </span>
+      </td>
+      <td data-testid="support-ticket-subject">{ticket.subject}</td>
+      <td>
+        {/*
+          The name where there is one, the address otherwise. An account created
+          for a guest request has no name until somebody fills one in, and
+          printing an invented placeholder would make the two cases
+          indistinguishable.
+        */}
+        <div>{ticket.customer.name ?? <span className="cell-muted">İsimsiz hesap</span>}</div>
+        {ticket.customer.email ? (
+          <div className="cell-muted" style={{ fontSize: 12 }}>
+            {ticket.customer.email}
+          </div>
+        ) : null}
+      </td>
+      <td>{formatDateTime(ticket.lastActivityAt)}</td>
+      <td>{formatDateTime(ticket.createdAt)}</td>
+      <td>
+        <div className="inline-actions">
+          <Link className="btn btn-ghost btn-sm" href={`/support/${ticket.id}`}>
+            Detay
+          </Link>
+        </div>
+      </td>
+    </tr>
+  );
+}

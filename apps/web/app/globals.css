@@ -5014,3 +5014,50 @@ body.has-drawer-open {
     margin-right: var(--space-4);
   }
 }
+
+/* ---- support tickets ---------------------------------------------------- */
+
+/*
+ * The customer's support surface, as one region.
+ *
+ * It carries no layout of its own beyond stacking, because everything inside it
+ * is already a shape this panel has: the ticket list is the inbox's row list,
+ * the conversation is the message thread, and the form is the account form. The
+ * wrapper exists so the whole surface can be addressed at once — by the
+ * end-to-end suite, and by anything that later needs to style support as a
+ * whole.
+ */
+.cdash-support {
+  display: flex;
+  flex-direction: column;
+  /* min-width: 0 rather than auto: without it a long subject in a flex child
+     refuses to shrink and pushes the panel wider than the phone it is on. */
+  min-width: 0;
+}
+
+/*
+ * A recorded status change on the ticket timeline.
+ *
+ * Deliberately unlike .msg-item: it is centred, full width, quiet, and carries
+ * no author. What the platform did to a ticket must not be able to read as
+ * something a person said in it.
+ */
+.msg-event {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  align-self: center;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+  background: transparent;
+  border-top: 1px dashed var(--color-divider);
+  border-bottom: 1px dashed var(--color-divider);
+}
+
+.msg-event-text {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

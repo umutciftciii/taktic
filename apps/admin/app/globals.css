@@ -3897,3 +3897,89 @@ button:disabled {
   overflow-x: auto;
   text-overflow: ellipsis;
 }
+
+/* ----- Support ticket timeline ----- */
+
+/*
+ * Messages and status changes in one list, ordered as they happened.
+ *
+ * The two kinds are drawn differently on purpose: a message is a card with an
+ * author, a status change is a quiet centred line with none. What the platform
+ * recorded must never be able to read as something a person said.
+ */
+.support-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.support-timeline-message {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* min-width: 0 so a long unbroken word cannot widen the card past the panel
+     it sits in — the admin shell is a drawer layout on a phone. */
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-left: 3px solid var(--border);
+}
+
+.support-timeline-message.is-admin {
+  background: var(--surface);
+  border-left-color: var(--primary);
+}
+
+.support-timeline-author {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.support-timeline-body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  /* Newlines the author typed are kept; long unbroken input still wraps rather
+     than widening the column. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.support-timeline-message time,
+.support-timeline-event time {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.support-timeline-event {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The support queue's table scrolls inside its own box.
+ *
+ * `.table-scroll` gets its `overflow-x` from `.table-card`, and this table sits
+ * in a `.section-card` instead — so on a 320px phone the six columns would
+ * widen the document rather than scroll. Scoped to this screen rather than
+ * broadened to every `.section-card` table, because changing where the other
+ * admin lists overflow is a separate decision from shipping this one.
+ */
+.support-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}

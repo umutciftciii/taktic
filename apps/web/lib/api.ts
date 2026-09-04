@@ -3,6 +3,9 @@ import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   unviewedOfferRefundNotice,
 } from './formatters';
+// Re-exported by the `export *` above; imported by name as well because a
+// re-export does not put the name in this module's own scope.
+import type { SupportTicketStatus } from './formatters';
 
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
@@ -1102,6 +1105,70 @@ function readThreadUnavailableReason(body: string): ThreadUnavailableReason | nu
     return typeof reason === 'string' && reason in THREAD_UNAVAILABLE_MESSAGES
       ? (reason as ThreadUnavailableReason)
       : null;
+  } catch {
+    return null;
+  }
+}
+
+/* ---- support tickets ----------------------------------------------------- */
+
+/**
+ * What the customer's own support screens read.
+ *
+ * The shapes mirror the API's projections exactly, and what is missing from
+ * them is the point: no owner block (the reader is the owner), nothing about
+ * which operator answered, and no account, payment or security fact. A ticket
+ * is a subject, a status, some timestamps and what was said.
+ */
+export type SupportTicketSummary = {
+  id: string;
+  subject: string;
+  status: SupportTicketStatus;
+  /** The last message or status change, whichever came later. */
+  lastActivityAt: string;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  createdAt: string;
+};
+
+export type SupportTicketTimelineEntry =
+  | {
+      kind: 'MESSAGE';
+      id: string;
+      authorRole: 'CUSTOMER' | 'ADMIN';
+      /** True when the reader wrote it. */
+      mine: boolean;
+      body: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'STATUS_CHANGE';
+      id: string;
+      fromStatus: SupportTicketStatus | null;
+      toStatus: SupportTicketStatus;
+      createdAt: string;
+    };
+
+export type SupportTicketDetail = SupportTicketSummary & {
+  /**
+   * Whether this ticket still takes a message from the customer. Decided by the
+   * API, never inferred here: the screen and the server must agree about it, and
+   * only one of them can enforce it.
+   */
+  canReply: boolean;
+  timeline: SupportTicketTimelineEntry[];
+};
+
+/**
+ * The caller's own tickets, or null when the list could not be read.
+ *
+ * Null is never rendered as an empty list. "You have no tickets" and "we could
+ * not fetch your tickets" are different sentences, and showing the first when
+ * the second is true is how somebody concludes their ticket was lost.
+ */
+export async function loadSupportTickets(): Promise<SupportTicketSummary[] | null> {
+  try {
+    return await apiFetch<SupportTicketSummary[]>('/support/tickets');
   } catch {
     return null;
   }

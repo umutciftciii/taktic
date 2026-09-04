@@ -21,6 +21,7 @@ export const navGroups: NavGroup[] = [
       { href: '/customers', label: 'Hizmet Alanlar' },
       { href: '/offers', label: 'Teklifler' },
       { href: '/providers', label: 'Hizmet Verenler' },
+      { href: '/support', label: 'Destek Talepleri' },
     ],
   },
   {

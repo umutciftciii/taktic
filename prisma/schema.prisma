@@ -224,6 +224,33 @@ enum MessageSenderRole {
   PROVIDER
 }
 
+/// Where a support ticket is in its one-way life.
+///
+/// OPEN is a ticket nobody has picked up; IN_PROGRESS is one an operator is
+/// working; RESOLVED is one the operator believes is answered; CLOSED is the
+/// end. The order is deliberate and the transitions are enumerated in
+/// `support-ticket.rules.ts`: OPEN and IN_PROGRESS swap freely, either may be
+/// resolved, only a RESOLVED ticket may be closed, and CLOSED is terminal.
+/// A customer who needs more help after that opens a new ticket, which keeps
+/// the record of what was already answered intact.
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+/// Which side of the desk a ticket message came from.
+///
+/// Stored on the row rather than derived from the author's current UserRole,
+/// for the same reason MessageSenderRole is: a role can change on an account,
+/// and an old message must still read as having come from the side it came
+/// from.
+enum SupportTicketAuthorRole {
+  CUSTOMER
+  ADMIN
+}
+
 model User {
   id              String          @id @default(cuid())
   /// The account's address, and the platform's answer to "which kind of account
@@ -296,6 +323,9 @@ model User {
   manualOfferRefunds         ManualOfferRefundAudit[]    @relation("ManualOfferRefundPerformedBy")
   providerMessageThreads     MessageThread[]             @relation("MessageThreadProviderUser")
   sentMessages               Message[]                   @relation("MessageSender")
+  supportTickets             SupportTicket[]             @relation("SupportTicketCustomer")
+  supportTicketMessages      SupportTicketMessage[]      @relation("SupportTicketMessageAuthor")
+  supportTicketStatusChanges SupportTicketStatusChange[] @relation("SupportTicketStatusChangedBy")
 
   @@index([role])
   @@index([isActive])
@@ -1888,4 +1918,124 @@ model ProviderInviteToken {
   @@index([categoryId, createdAt])
   @@index([createdById])
   @@index([expiresAt])
+}
+
+/// One customer's request for help from the platform itself.
+///
+/// Deliberately unlike MessageThread, which is the shadow of a match between
+/// two customers of the marketplace. A ticket is between a customer and the
+/// operator, so it has exactly one owner and no second participant column: the
+/// other side is "whichever SUPER_ADMIN answered", and which one is recorded on
+/// each message rather than on the ticket. Nothing here can be reassigned to a
+/// different customer — `customerId` is written once, from the authenticated
+/// principal, and no endpoint accepts it as input.
+///
+/// The opening message is **not** a column on this row. It is written as the
+/// ticket's first SupportTicketMessage inside the same transaction, so the
+/// conversation is one ordered list from the first sentence onwards rather than
+/// a column that every reader has to remember to prepend. The create endpoint
+/// still requires it, so a ticket with no message is unrepresentable in
+/// practice.
+///
+/// Nothing is ever deleted: there is no delete endpoint, and the foreign keys
+/// below are RESTRICT, so an account with a ticket cannot be removed out from
+/// under it either.
+model SupportTicket {
+  id         String              @id @default(cuid())
+  /// The customer who owns this ticket. Every authorization query keys on this
+  /// column and never on the URL's id, so knowing a ticket id gets a stranger
+  /// nothing.
+  customerId String
+  subject    String
+  status     SupportTicketStatus @default(OPEN)
+
+  /// When something last happened on this ticket — a message from either side,
+  /// or a status change.
+  ///
+  /// Separate from `updatedAt`, which Prisma moves on every write including
+  /// ones that are not activity. It is the admin list's "son hareket" column
+  /// and its default sort, and it only ever moves forwards: the writes that
+  /// touch it are guarded on `lastActivityAt < now`, so two concurrent replies
+  /// cannot leave the ticket claiming the older of the two moments.
+  lastActivityAt DateTime @default(now())
+
+  /// When an operator marked the ticket resolved, and null again if it went
+  /// back to being worked. Two columns rather than one "closed" flag, because
+  /// "we think this is answered" and "this is over" are different facts and the
+  /// timeline has to be able to say which happened when.
+  resolvedAt DateTime?
+  closedAt   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  customer      User                        @relation("SupportTicketCustomer", fields: [customerId], references: [id])
+  messages      SupportTicketMessage[]
+  statusChanges SupportTicketStatusChange[]
+
+  /// The customer's own list: "my tickets, most recent activity first".
+  @@index([customerId, lastActivityAt])
+  /// The admin list, filtered by status and unfiltered, in that same order.
+  @@index([status, lastActivityAt])
+  @@index([lastActivityAt])
+}
+
+/// One plain-text message on a ticket. Immutable: there is no edit and no
+/// delete, so a row here is the permanent record of what was actually said.
+///
+/// `body` is stored exactly as its author typed it (trimmed, control characters
+/// stripped, length-capped) and is never HTML. Every surface renders it as
+/// text.
+model SupportTicketMessage {
+  id           String                  @id @default(cuid())
+  ticketId     String
+  /// The account that wrote it — the owning customer, or the SUPER_ADMIN who
+  /// answered. Taken from the session, never from the request body.
+  authorUserId String
+  authorRole   SupportTicketAuthorRole
+  body         String
+  createdAt    DateTime                @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id])
+  author User          @relation("SupportTicketMessageAuthor", fields: [authorUserId], references: [id])
+
+  /// The only ordering this feature has, and the one both screens read it in:
+  /// (createdAt, id) ascending, so two messages written in the same millisecond
+  /// still have exactly one order.
+  @@index([ticketId, createdAt, id])
+  /// The foreign key's own column. PostgreSQL does not index a referencing
+  /// column for you, and RESTRICT means every write to `User` has to check it.
+  @@index([authorUserId, createdAt])
+}
+
+/// One recorded status transition, kept forever.
+///
+/// It exists because "the ticket is resolved" is not the same fact as "an
+/// operator resolved it at 14:20, having first taken it into progress". Without
+/// this table the only status a screen could show is the current one, and the
+/// brief asks for status changes and admin messages to be distinguishable on
+/// one permanent timeline — which is what merging these rows with the messages
+/// above, ordered by `createdAt`, produces.
+///
+/// It is deliberately not a message: a transition has no body, and giving it
+/// one would mean either a nullable body on every real message or a
+/// system-written sentence stored as if a person had typed it.
+model SupportTicketStatusChange {
+  id          String               @id @default(cuid())
+  ticketId    String
+  /// Null only for a row whose transition had no predecessor, which no
+  /// transition this product performs does — the column is nullable so a future
+  /// "created as" row would not need a fake origin.
+  fromStatus  SupportTicketStatus?
+  toStatus    SupportTicketStatus
+  /// The SUPER_ADMIN who made the change. Only an admin can, which is why there
+  /// is no role column here to disambiguate.
+  changedById String
+  createdAt   DateTime             @default(now())
+
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id])
+  changedBy User          @relation("SupportTicketStatusChangedBy", fields: [changedById], references: [id])
+
+  @@index([ticketId, createdAt, id])
+  /// The foreign key's own column, for the reason above.
+  @@index([changedById, createdAt])
 }

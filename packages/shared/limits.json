@@ -1,3 +1,5 @@
 {
-  "serviceRequestDescriptionMaxLength": 5000
+  "serviceRequestDescriptionMaxLength": 5000,
+  "supportTicketSubjectMaxLength": 120,
+  "supportTicketMessageMaxLength": 2000
 }
