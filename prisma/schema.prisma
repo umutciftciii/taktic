@@ -258,6 +258,16 @@ model User {
   /// Nothing is gated on it today. It records a fact; it does not (yet) grant
   /// or withhold anything.
   emailVerifiedAt DateTime?
+  /// The province the account keeps on file, in the canonical spelling
+  /// `turkey-locations.ts` publishes — the same vocabulary a service request
+  /// and a provider service area are stored in, so the three can be compared
+  /// without folding anything at read time.
+  ///
+  /// Nullable, and deliberately so: it is a convenience the customer may set
+  /// and may clear again, and no flow requires it. A request still names its
+  /// own city and district, because the job happens where the job happens and
+  /// not where the customer's account says they live.
+  city            String?
   customerOrigin  CustomerOrigin?
   lastLoginAt     DateTime?
   createdAt       DateTime        @default(now())

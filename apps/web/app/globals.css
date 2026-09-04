@@ -3790,6 +3790,20 @@ input[readonly] {
 .pdash-detail-card,
 .cdash-detail-card { display: flex; flex-direction: column; gap: var(--space-4); }
 
+/*
+ * The account settings forms, inside one of those cards.
+ *
+ * A column with the card's own rhythm, and `min-width: 0` so a grid track can
+ * shrink instead of pushing the panel sideways — at 320px the two-up rows fold
+ * to one field per line and nothing sticks out past the viewport.
+ */
+.cdash-account-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 .pdash-detail-card > h2,
 .cdash-detail-card > h2 {
   margin: 0;

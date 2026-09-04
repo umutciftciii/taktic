@@ -921,6 +921,33 @@ export async function getCurrentUser() {
   }
 }
 
+/**
+ * The signed-in customer's own account, as the settings screens read it.
+ *
+ * Deliberately a different shape from {@link AuthUser}: it carries the city the
+ * session payload has no reason to hold, and `hasPassword`, which is what tells
+ * the password screen whether there is a password to change at all. An account
+ * the platform created for a guest request has none until the activation link
+ * is followed.
+ */
+export type CustomerAccountProfile = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  role: AuthUser['role'];
+  hasPassword: boolean;
+};
+
+export async function getAccountProfile(): Promise<CustomerAccountProfile | null> {
+  try {
+    return await apiFetch<CustomerAccountProfile>('/account/profile');
+  } catch {
+    return null;
+  }
+}
+
 /* ── Post-match messaging ──────────────────────────────────────────────────
  *
  * Everything below describes what the API actually returns to one of the two
