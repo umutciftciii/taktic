@@ -17,6 +17,7 @@ import {
 import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
+import { applyHttpSecurity } from '../src/common/http-security';
 import { SmsTransportUnavailableError } from '../src/modules/notifications/console-sms.adapter';
 import {
   NotificationMessage,
@@ -155,6 +156,10 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
   // `rawBody: true` mirrors main.ts: the payment webhook verifies an HMAC over
   // the untouched request bytes, so the suite has to boot the app the same way.
   const app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true });
+  // The CORS allow-list, the security headers and the suppressed `X-Powered-By`
+  // — the same call main.ts makes, so what the suite asserts on is the wiring a
+  // deployment runs rather than a second description of it.
+  applyHttpSecurity(app);
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );

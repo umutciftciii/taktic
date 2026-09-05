@@ -1,3 +1,4 @@
+import { safeRedirectPathOrNull } from '@taktic/shared';
 import Link from 'next/link';
 import { AuthFrame } from '../auth-frame';
 import { loginAction } from './actions';
@@ -12,6 +13,11 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const { error, redirectTo, reason } = await searchParams;
+  // The address bar decides what is in `redirectTo`, and whatever is there is
+  // about to be written into a hidden field this form posts back. Anything that
+  // is not a path inside this application is dropped here rather than carried
+  // one step further; see @taktic/shared's safe-redirect.
+  const safeRedirectTo = safeRedirectPathOrNull(redirectTo);
   // Somebody who was signed in a moment ago and is suddenly back here deserves
   // to know why. Without it, an idle timeout is indistinguishable from being
   // logged out at random, and the natural conclusion is that the site broke.
@@ -38,7 +44,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </div>
         ) : null}
 
-        {redirectTo ? <input type="hidden" name="redirectTo" value={redirectTo} /> : null}
+        {safeRedirectTo ? (
+          <input type="hidden" name="redirectTo" value={safeRedirectTo} />
+        ) : null}
 
         <div className="auth-screen-fields">
           <label className="auth-screen-field">

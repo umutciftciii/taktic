@@ -1,5 +1,6 @@
 'use server';
 
+import { safeRedirectPath } from '@taktic/shared';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
@@ -106,7 +107,11 @@ export async function updateCreditPackageAction(formData: FormData) {
 export async function updateCreditPackageStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const isActive = readFormString(formData, 'isActive') === 'true';
-  const redirectTo = readFormString(formData, 'redirectTo') || '/credit-packages';
+  // Which listing to go back to after the toggle. It is posted by a hidden
+  // field, so it is caller input like any other and goes through the same check
+  // as every other `redirectTo` in the product; the listing is the fallback.
+  // See @taktic/shared's safe-redirect.
+  const redirectTo = safeRedirectPath(readFormString(formData, 'redirectTo'), '/credit-packages');
 
   let errorMessage: string | null = null;
   try {

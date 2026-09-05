@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { applyHttpSecurity } from './common/http-security';
 import { assertSessionPolicyConfig } from './modules/auth/auth.constants';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
 import { assertEmailBrandingConfig } from './modules/notifications/email-branding.config';
@@ -79,10 +80,12 @@ async function bootstrap() {
     app.set('trust proxy', Number.isFinite(hops) && hops > 0 ? hops : trustProxy);
   }
 
-  app.enableCors({
-    origin: true,
-    credentials: true,
-  });
+  // The security headers every response carries, the CORS allow-list, and the
+  // `X-Powered-By` header this process no longer sends. Before the static file
+  // handler below, so an uploaded image is answered with the same headers as an
+  // endpoint. See common/http-security.ts.
+  applyHttpSecurity(app);
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

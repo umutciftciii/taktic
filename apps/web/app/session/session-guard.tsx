@@ -1,5 +1,6 @@
 'use client';
 
+import { safeRedirectPathOrNull } from '@taktic/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { announceSessionEnded, onSessionEnded } from './session-channel';
 
@@ -90,7 +91,13 @@ export function SessionGuard({
 
     const params = new URLSearchParams({ reason: 'session-expired' });
     if (preserveDestination) {
-      const destination = `${window.location.pathname}${window.location.search}`;
+      // Read off this window rather than trusted for being read off this
+      // window: the address bar is the one place a destination could have been
+      // planted, and it goes through the same check as every other
+      // `redirectTo` in the product. See @taktic/shared's safe-redirect.
+      const destination = safeRedirectPathOrNull(
+        `${window.location.pathname}${window.location.search}`,
+      );
       if (destination && destination !== loginPath) {
         params.set('redirectTo', destination);
       }

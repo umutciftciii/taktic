@@ -1,5 +1,6 @@
 'use server';
 
+import { safeRedirectPathOrNull } from '@taktic/shared';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { persistSessionCookie, type ParsedSessionCookie } from '../session-cookie';
@@ -15,7 +16,14 @@ type LoggedInUser = {
 export async function loginAction(formData: FormData) {
   const email = readFormString(formData, 'email');
   const password = readFormString(formData, 'password');
-  const explicitRedirect = readFormString(formData, 'redirectTo').trim();
+  // Posted by the sign-in form, which got it from the address bar — so it is
+  // whatever the author of the link that brought this person here wanted. The
+  // single check is here rather than at the two `redirect()` calls below,
+  // because a successful sign-in landing on somebody else's copy of this site
+  // is exactly the moment nobody looks at the address bar. `null` means "there
+  // was no usable destination", which is the same answer as "none was given":
+  // the role's own screen. See @taktic/shared's safe-redirect.
+  const explicitRedirect = safeRedirectPathOrNull(readFormString(formData, 'redirectTo'));
   // An unticked checkbox posts nothing at all, which is the "no" this reads.
   const rememberMe = formData.get('rememberMe') === 'true';
 
