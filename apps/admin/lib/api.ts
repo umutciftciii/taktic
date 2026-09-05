@@ -1984,6 +1984,46 @@ export const SUPPORT_TICKET_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOS
 
 export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
 
+/**
+ * The two desks the queue holds, in the order the filter offers them.
+ *
+ * Hizmet alan first because it is the older half of the queue and by far the
+ * larger one; the order is otherwise arbitrary and is fixed here so the select,
+ * the row badge and the tests all read it from one place.
+ */
+export const SUPPORT_TICKET_REQUESTER_ROLES = ['CUSTOMER', 'PROVIDER'] as const;
+
+export type SupportTicketRequesterRole = (typeof SUPPORT_TICKET_REQUESTER_ROLES)[number];
+
+const SUPPORT_TICKET_REQUESTER_ROLE_LABELS: Record<SupportTicketRequesterRole, string> = {
+  CUSTOMER: 'Hizmet alan',
+  PROVIDER: 'Hizmet veren',
+};
+
+/**
+ * What a desk is called on screen.
+ *
+ * Falls back to printing the raw value rather than guessing, for the reason
+ * {@link supportTicketStatusLabel} does: a build that meets a third desk should
+ * show an operator a word they can search for, not silently file it under one
+ * of the two it knows.
+ */
+export function supportTicketRequesterRoleLabel(role: string): string {
+  return SUPPORT_TICKET_REQUESTER_ROLE_LABELS[role as SupportTicketRequesterRole] ?? role;
+}
+
+/**
+ * The badge a row wears to say which side of the marketplace is waiting.
+ *
+ * Two visibly different tags rather than one neutral chip with different text:
+ * the queue is scanned, not read, and an operator picking a hizmet veren's
+ * ticket out of a page of hizmet alan ones should not have to read a word to
+ * find it.
+ */
+export function supportTicketRequesterRoleBadgeClass(role: string): string {
+  return role === 'PROVIDER' ? 'tag tag-ink' : 'tag tag-neutral';
+}
+
 const SUPPORT_TICKET_STATUS_LABELS: Record<SupportTicketStatus, string> = {
   OPEN: 'Açık',
   IN_PROGRESS: 'İşlemde',
@@ -2051,19 +2091,26 @@ export function supportTicketStatusChangeLabel(toStatus: string): string {
 /**
  * One ticket in the operator's queue.
  *
- * The customer block is the identity an operator needs in order to answer — the
- * name and the address every other admin screen already shows — and nothing
+ * The requester block is the identity an operator needs in order to answer —
+ * the name and the address every other admin screen already shows — and nothing
  * more. No phone, no password state, no session, no payment fact.
+ *
+ * It is called `requester` rather than `customer` because the queue now holds
+ * both sides of the marketplace, and `requesterRole` says which this one is.
+ * That value is the ticket's own snapshot from the moment it was opened, not
+ * the account's current role, so a row keeps saying what it said even if the
+ * account behind it changes.
  */
 export type SupportTicketListEntry = {
   id: string;
   subject: string;
   status: SupportTicketStatus;
+  requesterRole: SupportTicketRequesterRole;
   lastActivityAt: string;
   resolvedAt: string | null;
   closedAt: string | null;
   createdAt: string;
-  customer: { id: string; name: string | null; email: string | null };
+  requester: { id: string; name: string | null; email: string | null };
 };
 
 export type SupportTicketListResponse = {
@@ -2072,14 +2119,18 @@ export type SupportTicketListResponse = {
   page: number;
   pageSize: number;
   hasNextPage: boolean;
+  /** Behind the status filter's options, within the desk currently chosen. */
   statusCounts: Record<SupportTicketStatus, number>;
+  /** And behind the desk filter's options, under the status filter chosen. */
+  requesterRoleCounts: Record<SupportTicketRequesterRole, number>;
 };
 
 export type SupportTicketTimelineEntry =
   | {
       kind: 'MESSAGE';
       id: string;
-      authorRole: 'CUSTOMER' | 'ADMIN';
+      /** PROVIDER joined the pair when the desk opened to hizmet verenler. */
+      authorRole: 'CUSTOMER' | 'ADMIN' | 'PROVIDER';
       /** True when this operator wrote it themselves. */
       mine: boolean;
       body: string;

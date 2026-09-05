@@ -202,8 +202,9 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     messageExcerpt: 'Geçen haftaki talebimin faturası elime geçmedi.',
     status: 'OPEN',
     createdAt: '2026-08-27T11:12:00.000Z',
-    customerName: 'Deniz Yılmaz',
-    customerEmail: 'deniz@example.test',
+    requesterName: 'Deniz Yılmaz',
+    requesterEmail: 'deniz@example.test',
+    requesterRoleLabel: 'Hizmet alan',
     ticketUrl: `${ADMIN}/support/tkt_c1a2b3`,
     accountUrl: null,
   },
@@ -214,8 +215,9 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     messageExcerpt: 'Ek olarak talep numaram #T-90412.',
     status: 'IN_PROGRESS',
     messageAt: '2026-08-28T09:00:00.000Z',
-    customerName: 'Deniz Yılmaz',
-    customerEmail: 'deniz@example.test',
+    requesterName: 'Deniz Yılmaz',
+    requesterEmail: 'deniz@example.test',
+    requesterRoleLabel: 'Hizmet alan',
     ticketUrl: `${ADMIN}/support/tkt_c1a2b3`,
     accountUrl: null,
   },
@@ -231,6 +233,67 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
   },
   'support-ticket-status-changed': {
     fullName: 'Deniz Yılmaz',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    fromStatus: 'IN_PROGRESS',
+    status: 'RESOLVED',
+    changedAt: '2026-08-28T12:00:00.000Z',
+    ticketUrl: `${WEB}/destek/tkt_c1a2b3`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  // The hizmet veren half of the family. Deliberately the same ticket
+  // reference, subject and excerpts as the hizmet alan fixtures above: the
+  // assertions below are about which audience gets which fields, and giving the
+  // two sets different content would let a template pass by printing the other
+  // desk's data.
+  'support-ticket-provider-created': {
+    fullName: 'Murat Şahin',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Geçen haftaki talebimin faturası elime geçmedi.',
+    status: 'OPEN',
+    createdAt: '2026-08-27T11:12:00.000Z',
+    ticketUrl: `${WEB}/destek/tkt_c1a2b3`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'support-ticket-provider-new-for-support': {
+    fullName: 'Destek Ekibi',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Geçen haftaki talebimin faturası elime geçmedi.',
+    status: 'OPEN',
+    createdAt: '2026-08-27T11:12:00.000Z',
+    requesterName: 'Murat Şahin',
+    requesterEmail: 'murat@example.test',
+    requesterRoleLabel: 'Hizmet veren',
+    ticketUrl: `${ADMIN}/support/tkt_c1a2b3`,
+    accountUrl: null,
+  },
+  'support-ticket-provider-reply': {
+    fullName: 'Destek Ekibi',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Ek olarak talep numaram #T-90412.',
+    status: 'IN_PROGRESS',
+    messageAt: '2026-08-28T09:00:00.000Z',
+    requesterName: 'Murat Şahin',
+    requesterEmail: 'murat@example.test',
+    requesterRoleLabel: 'Hizmet veren',
+    ticketUrl: `${ADMIN}/support/tkt_c1a2b3`,
+    accountUrl: null,
+  },
+  'support-ticket-provider-admin-reply': {
+    fullName: 'Murat Şahin',
+    ticketReference: 'tkt_c1a2b3',
+    ticketSubject: 'Faturam ulaşmadı',
+    messageExcerpt: 'Faturanızı yeniden gönderdik, ekte bulabilirsiniz.',
+    status: 'IN_PROGRESS',
+    messageAt: '2026-08-28T10:00:00.000Z',
+    ticketUrl: `${WEB}/destek/tkt_c1a2b3`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'support-ticket-provider-status-changed': {
+    fullName: 'Murat Şahin',
     ticketReference: 'tkt_c1a2b3',
     ticketSubject: 'Faturam ulaşmadı',
     fromStatus: 'IN_PROGRESS',
@@ -312,7 +375,7 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('covers every template the port accepts', () => {
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(21);
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(26);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -547,6 +610,12 @@ describe('transactional e-mail rendering', () => {
       'support-ticket-customer-reply': 'Destek talebine müşteri yanıtı — Faturam ulaşmadı',
       'support-ticket-admin-reply': 'Destek talebinize yanıt — Faturam ulaşmadı',
       'support-ticket-status-changed': 'Destek talebiniz çözümlendi — Faturam ulaşmadı',
+      'support-ticket-provider-created': 'Destek talebiniz alındı — Faturam ulaşmadı',
+      'support-ticket-provider-new-for-support':
+        'Yeni destek talebi (hizmet veren) — Faturam ulaşmadı',
+      'support-ticket-provider-reply': 'Destek talebine hizmet veren yanıtı — Faturam ulaşmadı',
+      'support-ticket-provider-admin-reply': 'Destek talebinize yanıt — Faturam ulaşmadı',
+      'support-ticket-provider-status-changed': 'Destek talebiniz çözümlendi — Faturam ulaşmadı',
     });
   });
 
@@ -855,30 +924,42 @@ describe('transactional e-mail rendering', () => {
   });
 
   /**
-   * The five support-ticket messages.
+   * The support-ticket messages: five per desk, ten in all.
    *
-   * Two of them go to an operator mailbox and three to the customer, and the
-   * line between the two sets is the point of this section: the customer's
-   * copies must carry the ticket, the answer and nothing about who inside the
-   * company wrote it, while the operator's may carry the customer's identity
-   * because an operator already sees it on the queue screen.
+   * Four of them go to an operator mailbox and six to the person who opened the
+   * ticket, and the line between those two sets is the point of this section —
+   * not the line between the two desks. A requester's copy must carry the
+   * ticket, the answer and nothing about who inside the company wrote it,
+   * whichever side of the marketplace they are on; an operator's copy may carry
+   * the requester's identity, because an operator already sees it on the queue
+   * screen this message links to.
+   *
+   * Every case below runs over both desks. That is deliberate: the hizmet veren
+   * templates were written by copying the hizmet alan ones, which is exactly
+   * the situation in which a rule quietly holds for one half of a family and
+   * not the other.
    */
   describe('support tickets', () => {
-    const CUSTOMER_TEMPLATES: TransactionalEmailTemplate[] = [
+    const REQUESTER_TEMPLATES: TransactionalEmailTemplate[] = [
       'support-ticket-created',
       'support-ticket-admin-reply',
       'support-ticket-status-changed',
+      'support-ticket-provider-created',
+      'support-ticket-provider-admin-reply',
+      'support-ticket-provider-status-changed',
     ];
 
     const SUPPORT_TEMPLATES: TransactionalEmailTemplate[] = [
       'support-ticket-new-for-support',
       'support-ticket-customer-reply',
+      'support-ticket-provider-new-for-support',
+      'support-ticket-provider-reply',
     ];
 
     /** Every code the status column can hold, as the enum spells them. */
     const STATUS_CODES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 
-    it.each([...CUSTOMER_TEMPLATES, ...SUPPORT_TEMPLATES])(
+    it.each([...REQUESTER_TEMPLATES, ...SUPPORT_TEMPLATES])(
       '%s names the ticket, its subject and the last message',
       (template) => {
         const { html, text } = render(messageFor(template));
@@ -891,13 +972,14 @@ describe('transactional e-mail rendering', () => {
       },
     );
 
-    it.each(CUSTOMER_TEMPLATES)('%s links the customer to their own ticket', (template) => {
+    it.each(REQUESTER_TEMPLATES)('%s links its reader to their own ticket', (template) => {
       const { html, text } = render(messageFor(template));
 
       expect(html).toContain(`${WEB}/destek/tkt_c1a2b3`);
       expect(text).toContain(`${WEB}/destek/tkt_c1a2b3`);
-      // Never the operator panel: a customer cannot open it and being sent
-      // there says the platform confused the two audiences.
+      // Never the operator panel: neither a hizmet alan nor a hizmet veren can
+      // open it, and being sent there says the platform confused the two
+      // audiences.
       expect(html).not.toContain(ADMIN);
       expect(text).not.toContain(ADMIN);
     });
@@ -909,7 +991,7 @@ describe('transactional e-mail rendering', () => {
       expect(text).toContain(`${ADMIN}/support/tkt_c1a2b3`);
     });
 
-    it.each([...CUSTOMER_TEMPLATES, ...SUPPORT_TEMPLATES])(
+    it.each([...REQUESTER_TEMPLATES, ...SUPPORT_TEMPLATES])(
       '%s prints the status in Turkish and never the storage code',
       (template) => {
         for (const status of STATUS_CODES) {
@@ -941,7 +1023,7 @@ describe('transactional e-mail rendering', () => {
       }
     });
 
-    it.each(CUSTOMER_TEMPLATES)('%s carries nothing about the operator who answered', (template) => {
+    it.each(REQUESTER_TEMPLATES)('%s carries nothing about the operator who answered', (template) => {
       const { html, text } = render(
         messageFor(template, {
           // Every one of these is a field an operator-facing payload could
@@ -952,7 +1034,10 @@ describe('transactional e-mail rendering', () => {
           adminName: 'Operatör Ayşe',
           internalNote: 'İç not: müşteri ısrarcı',
           operationalReason: 'SLA aşımı nedeniyle kapatıldı',
-          customerEmail: 'deniz@example.test',
+          // The address field the operator's own copies carry. A requester
+          // template that started reading it would be printing an e-mail
+          // address into a message that had no business holding one.
+          requesterEmail: 'sizinle@example.test',
         }),
       );
 
@@ -961,20 +1046,53 @@ describe('transactional e-mail rendering', () => {
         expect(body).not.toContain('Operatör Ayşe');
         expect(body).not.toContain('İç not');
         expect(body).not.toContain('SLA');
-        expect(body).not.toContain('deniz@example.test');
+        expect(body).not.toContain('sizinle@example.test');
       }
     });
 
-    it.each(SUPPORT_TEMPLATES)('%s carries the customer an operator has to answer', (template) => {
+    it.each(SUPPORT_TEMPLATES)('%s carries the person an operator has to answer', (template) => {
       const { html, text } = render(messageFor(template));
+      const data = FULL_DATA[template];
 
       for (const body of [html, text]) {
-        expect(body).toContain('Deniz Yılmaz');
-        expect(body).toContain('deniz@example.test');
+        expect(body).toContain(data.requesterName as string);
+        expect(body).toContain(data.requesterEmail as string);
+        // And which desk they are on, so a shared mailbox can be triaged
+        // without opening the message.
+        expect(body).toContain(data.requesterRoleLabel as string);
       }
     });
 
-    it.each([...CUSTOMER_TEMPLATES, ...SUPPORT_TEMPLATES])(
+    /**
+     * The two halves of the family must not be able to swap audiences.
+     *
+     * A hizmet veren's copy of an answer is written by copying the hizmet
+     * alan's, and the copy that matters is the audience strip: it is the one
+     * line that says out loud which panel a forwarded message belongs to, and
+     * the one thing a copy-paste is most likely to leave pointing at the
+     * original.
+     */
+    it('marks each desk with its own audience strip', () => {
+      for (const template of [
+        'support-ticket-created',
+        'support-ticket-admin-reply',
+        'support-ticket-status-changed',
+      ] as TransactionalEmailTemplate[]) {
+        expect(render(messageFor(template)).html).toContain('HİZMET ALAN');
+      }
+
+      for (const template of [
+        'support-ticket-provider-created',
+        'support-ticket-provider-admin-reply',
+        'support-ticket-provider-status-changed',
+      ] as TransactionalEmailTemplate[]) {
+        const { html } = render(messageFor(template));
+        expect(html).toContain('HİZMET VEREN');
+        expect(html).not.toContain('HİZMET ALAN');
+      }
+    });
+
+    it.each([...REQUESTER_TEMPLATES, ...SUPPORT_TEMPLATES])(
       '%s promises no response time and no service level',
       (template) => {
         const { html, text } = render(messageFor(template));

@@ -5,6 +5,8 @@ import {
   fetchOrNotFound,
   formatDateTime,
   requireAdmin,
+  supportTicketRequesterRoleBadgeClass,
+  supportTicketRequesterRoleLabel,
   supportTicketStatusBadgeClass,
   supportTicketStatusChangeLabel,
   supportTicketStatusLabel,
@@ -51,11 +53,25 @@ export default async function AdminSupportTicketPage({
           ticket.lastActivityAt,
         )}`}
         actions={
-          <span
-            className={supportTicketStatusBadgeClass(ticket.status)}
-            data-testid="support-detail-status"
-          >
-            {supportTicketStatusLabel(ticket.status)}
+          <span className="inline-actions">
+            {/*
+              The desk sits beside the status, and before it in reading order,
+              because it is the fact that decides what the answer may say: a
+              hizmet veren's ticket is about teklifler and krediler, and a
+              hizmet alan's is about their talep.
+            */}
+            <span
+              className={supportTicketRequesterRoleBadgeClass(ticket.requesterRole)}
+              data-testid="support-detail-requester-role"
+            >
+              {supportTicketRequesterRoleLabel(ticket.requesterRole)}
+            </span>
+            <span
+              className={supportTicketStatusBadgeClass(ticket.status)}
+              data-testid="support-detail-status"
+            >
+              {supportTicketStatusLabel(ticket.status)}
+            </span>
           </span>
         }
       />
@@ -89,20 +105,31 @@ export default async function AdminSupportTicketPage({
         </div>
       ) : null}
 
-      <SectionCard title="Hizmet alan">
+      <SectionCard title="Talep sahibi">
         <dl className="meta-row">
           <div>
+            <dt>Rol</dt>
+            <dd data-testid="support-detail-requester-role-row">
+              {supportTicketRequesterRoleLabel(ticket.requesterRole)}
+            </dd>
+          </div>
+          <div>
             <dt>Ad</dt>
-            <dd>{ticket.customer.name ?? <span className="cell-muted">İsimsiz hesap</span>}</dd>
+            <dd>{ticket.requester.name ?? <span className="cell-muted">İsimsiz hesap</span>}</dd>
           </div>
           <div>
             <dt>E-posta</dt>
-            <dd>{ticket.customer.email ?? <span className="cell-muted">-</span>}</dd>
+            <dd>{ticket.requester.email ?? <span className="cell-muted">-</span>}</dd>
           </div>
           <div>
             <dt>Hesap</dt>
             <dd>
-              <Link href={`/customers/${ticket.customer.id}`}>Hesabı görüntüle</Link>
+              {/*
+                `/users/:id` rather than `/customers/:id`: the account behind a
+                ticket is now either a hizmet alan or a hizmet veren, and the
+                customer screen would 404 on half of them.
+              */}
+              <Link href={`/users/${ticket.requester.id}`}>Hesabı görüntüle</Link>
             </dd>
           </div>
         </dl>
@@ -114,7 +141,7 @@ export default async function AdminSupportTicketPage({
       >
         {ticket.allowedTransitions.length === 0 ? (
           <p className="cell-muted" data-testid="support-no-transitions">
-            Kapatılmış bir talep yeniden açılamaz. Konu devam ediyorsa hizmet alan yeni bir talep
+            Kapatılmış bir talep yeniden açılamaz. Konu devam ediyorsa talep sahibi yeni bir talep
             açabilir.
           </p>
         ) : (
@@ -162,7 +189,7 @@ export default async function AdminSupportTicketPage({
                 rows={5}
                 required
                 maxLength={SUPPORT_TICKET_MESSAGE_MAX_LENGTH}
-                placeholder="Hizmet alana yazacağınız yanıt…"
+                placeholder="Talep sahibine yazacağınız yanıt…"
                 data-testid="support-reply-input"
               />
             </label>
@@ -185,6 +212,21 @@ export default async function AdminSupportTicketPage({
     </main>
   );
 }
+
+/**
+ * Who wrote a message, as an operator reads it.
+ *
+ * A table rather than a ternary, because there are three answers now and a
+ * ternary that had to guess a third would print "Hizmet alan" over a hizmet
+ * veren's own words. The label is chosen by the role stored *on the message*,
+ * which is the permanent record of the side it came from — never by the desk
+ * the ticket is on, and never by the author's current account role.
+ */
+const TIMELINE_AUTHOR_LABELS: Record<'CUSTOMER' | 'ADMIN' | 'PROVIDER', string> = {
+  CUSTOMER: 'Hizmet alan',
+  PROVIDER: 'Hizmet veren',
+  ADMIN: 'Destek ekibi',
+};
 
 /**
  * One entry on the permanent timeline.
@@ -218,9 +260,7 @@ function TimelineEntry({ entry }: { entry: SupportTicketTimelineEntry }) {
       data-testid="support-timeline-message"
       data-author={entry.authorRole}
     >
-      <span className="support-timeline-author">
-        {entry.authorRole === 'ADMIN' ? 'Destek ekibi' : 'Hizmet alan'}
-      </span>
+      <span className="support-timeline-author">{TIMELINE_AUTHOR_LABELS[entry.authorRole]}</span>
       {/*
         Rendered as a text child. React escapes it, and nothing here ever asks a
         browser to parse a ticket body as markup.

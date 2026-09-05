@@ -37,13 +37,16 @@ export function isAllowedTransition(from: SupportTicketStatus, to: SupportTicket
 }
 
 /**
- * The statuses a **customer** may add a message to.
+ * The statuses a ticket's **owner** may add a message to.
  *
- * A resolved or closed ticket is one the operator has answered; the customer's
- * screen says so and offers a new ticket instead of a composer. Enforced here
- * rather than only on screen, because the composer is not the only way to POST.
+ * One list for both hizmet alan and hizmet veren, because they are one rule:
+ * the person waiting for an answer may write while the ticket is still being
+ * worked. A resolved or closed ticket is one the operator has answered; the
+ * owner's screen says so and offers a new ticket instead of a composer.
+ * Enforced here rather than only on screen, because the composer is not the
+ * only way to POST.
  */
-export const CUSTOMER_WRITABLE_STATUSES: readonly SupportTicketStatus[] = [
+export const REQUESTER_WRITABLE_STATUSES: readonly SupportTicketStatus[] = [
   SupportTicketStatus.OPEN,
   SupportTicketStatus.IN_PROGRESS,
 ];

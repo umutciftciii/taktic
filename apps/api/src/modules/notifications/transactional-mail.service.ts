@@ -9,6 +9,7 @@ import {
   ServiceCategoryStatus,
   ServiceRequestStatus,
   SupportTicketAuthorRole,
+  SupportTicketRequesterRole,
 } from '@prisma/client';
 import {
   matchesProviderArea,
@@ -500,8 +501,11 @@ export class TransactionalMailService {
    * The pair is sent from one method rather than two call sites because they
    * are one event, and a caller that could send half of it would eventually
    * send half of it. They still carry a template and a dedupe key each, so the
-   * unique index counts them separately: a replay that already sent the
-   * customer's copy but failed on the operator's re-sends only the second.
+   * unique index counts them separately: a replay that already sent the owner's
+   * copy but failed on the operator's re-sends only the second.
+   *
+   * Which pair is sent depends on the ticket's desk and on nothing else — see
+   * {@link SUPPORT_DESKS}.
    *
    * Called after the creating transaction has committed, like every other
    * method here. A ticket that rolled back has no id worth mailing about.
@@ -512,74 +516,80 @@ export class TransactionalMailService {
       return;
     }
 
+    const desk = SUPPORT_DESKS[ticket.requesterRole];
     const opening = await firstSupportTicketMessage(this.prisma, ticket.id);
 
     // The operator's copy first: the person waiting has already seen the ticket
     // appear on their own screen, and the mailbox that has to answer has not.
     await this.send(
-      'support-ticket-new-for-support',
+      desk.newForSupport,
       readSupportInboxEmail(),
       supportInboxData(ticket, {
         messageExcerpt: opening?.body ?? null,
         createdAt: ticket.createdAt.toISOString(),
       }),
-      { dedupeKey: `support-ticket-new:${ticket.id}` },
+      { dedupeKey: `${RETRY_DEDUPE_PREFIXES[desk.newForSupport]}:${ticket.id}` },
     );
 
-    if (!ticket.customerEmail) {
+    if (!ticket.requesterEmail) {
       return;
     }
 
     await this.send(
-      'support-ticket-created',
-      ticket.customerEmail,
-      supportCustomerData(ticket, {
+      desk.created,
+      ticket.requesterEmail,
+      supportRequesterData(ticket, {
         messageExcerpt: opening?.body ?? null,
         createdAt: ticket.createdAt.toISOString(),
       }),
-      { userId: ticket.customerId, dedupeKey: `support-ticket-created:${ticket.id}` },
+      {
+        userId: ticket.requesterId,
+        dedupeKey: `${RETRY_DEDUPE_PREFIXES[desk.created]}:${ticket.id}`,
+      },
       { replyTo: supportReplyToEmail() },
     );
   }
 
   /**
-   * A customer wrote on their ticket: the support mailbox hears, and nobody
-   * else does.
+   * The person who opened a ticket wrote on it: the support mailbox hears, and
+   * nobody else does.
    *
-   * Keyed on the message rather than the ticket, because a customer may write
-   * as many times as the ticket's status allows and every one of them is news.
-   * The author's role is re-read from the row instead of trusted from the
-   * caller, so a message id pointed at this method by mistake — or by a retry
-   * rebuilding an old audit row — cannot turn an operator's answer into a
-   * "customer replied" notice.
+   * Keyed on the message rather than the ticket, because they may write as many
+   * times as the ticket's status allows and every one of them is news.
+   *
+   * The author's role is re-read from the row and then checked against the
+   * ticket's own desk, instead of either being trusted from the caller. Two
+   * things follow. A message id pointed at this method by mistake — or by a
+   * retry rebuilding an old audit row — cannot turn an operator's answer into a
+   * "the customer replied" notice, because ADMIN is not a desk. And a message
+   * whose author role disagrees with the ticket it sits on, which nothing in
+   * this product can write, produces no message at all rather than one filed
+   * under the wrong side of the marketplace.
    */
-  async sendSupportTicketCustomerMessage(messageId: string) {
-    const message = await loadSupportTicketMessage(
-      this.prisma,
-      messageId,
-      SupportTicketAuthorRole.CUSTOMER,
-    );
-
+  async sendSupportTicketRequesterMessage(messageId: string) {
+    const message = await loadSupportTicketRequesterMessage(this.prisma, messageId);
     if (!message) {
       return;
     }
 
+    const desk = SUPPORT_DESKS[message.ticket.requesterRole];
+
     await this.send(
-      'support-ticket-customer-reply',
+      desk.requesterReply,
       readSupportInboxEmail(),
       supportInboxData(message.ticket, {
         messageExcerpt: message.body,
         messageAt: message.createdAt.toISOString(),
       }),
-      { dedupeKey: `support-ticket-customer-reply:${message.id}` },
+      { dedupeKey: `${RETRY_DEDUPE_PREFIXES[desk.requesterReply]}:${message.id}` },
     );
   }
 
   /**
-   * An operator answered: the customer hears, and hears nothing about who
-   * answered.
+   * An operator answered: the person who opened the ticket hears, and hears
+   * nothing about who answered.
    *
-   * {@link supportCustomerData} is the enforcement rather than a convention —
+   * {@link supportRequesterData} is the enforcement rather than a convention —
    * it reads the ticket and the quoted body and has no access to the message's
    * author at all, so there is no field on the payload an operator's identity
    * could arrive in.
@@ -591,20 +601,22 @@ export class TransactionalMailService {
       SupportTicketAuthorRole.ADMIN,
     );
 
-    if (!message?.ticket.customerEmail) {
+    if (!message?.ticket.requesterEmail) {
       return;
     }
 
+    const desk = SUPPORT_DESKS[message.ticket.requesterRole];
+
     await this.send(
-      'support-ticket-admin-reply',
-      message.ticket.customerEmail,
-      supportCustomerData(message.ticket, {
+      desk.adminReply,
+      message.ticket.requesterEmail,
+      supportRequesterData(message.ticket, {
         messageExcerpt: message.body,
         messageAt: message.createdAt.toISOString(),
       }),
       {
-        userId: message.ticket.customerId,
-        dedupeKey: `support-ticket-admin-reply:${message.id}`,
+        userId: message.ticket.requesterId,
+        dedupeKey: `${RETRY_DEDUPE_PREFIXES[desk.adminReply]}:${message.id}`,
       },
       { replyTo: supportReplyToEmail() },
     );
@@ -625,17 +637,19 @@ export class TransactionalMailService {
    */
   async sendSupportTicketStatusChanged(statusChangeId: string) {
     const change = await loadSupportTicketStatusChange(this.prisma, statusChangeId);
-    if (!change?.ticket.customerEmail) {
+    if (!change?.ticket.requesterEmail) {
       return;
     }
 
+    const desk = SUPPORT_DESKS[change.ticket.requesterRole];
+
     await this.send(
-      'support-ticket-status-changed',
-      change.ticket.customerEmail,
+      desk.statusChanged,
+      change.ticket.requesterEmail,
       supportStatusChangeData(change),
       {
-        userId: change.ticket.customerId,
-        dedupeKey: `support-ticket-status:${change.id}`,
+        userId: change.ticket.requesterId,
+        dedupeKey: `${RETRY_DEDUPE_PREFIXES[desk.statusChanged]}:${change.id}`,
       },
       { replyTo: supportReplyToEmail() },
     );
@@ -828,26 +842,36 @@ export class TransactionalMailService {
           : null;
       }
 
-      case 'support-ticket-created': {
+      // The support family, both desks. Each case names the desk its template
+      // belongs to and refuses a ticket that is not on it: a key rebuilt into
+      // the wrong half of the family would otherwise re-render a hizmet veren's
+      // ticket in the hizmet alan's words, which is the one thing a retry must
+      // never be able to do. Nothing in this product moves a ticket between
+      // desks, so the guard is a statement rather than a case anybody meets.
+      case 'support-ticket-created':
+      case 'support-ticket-provider-created': {
+        const desk = deskOfTemplate(source.template);
         const ticket = await loadSupportTicket(this.prisma, source.ids[0]);
-        if (!ticket?.customerEmail) {
+        if (!ticket?.requesterEmail || ticket.requesterRole !== desk) {
           return null;
         }
 
         const opening = await firstSupportTicketMessage(this.prisma, ticket.id);
         return {
-          to: ticket.customerEmail,
+          to: ticket.requesterEmail,
           replyTo: supportReplyToEmail(),
-          data: supportCustomerData(ticket, {
+          data: supportRequesterData(ticket, {
             messageExcerpt: opening?.body ?? null,
             createdAt: ticket.createdAt.toISOString(),
           }),
         };
       }
 
-      case 'support-ticket-new-for-support': {
+      case 'support-ticket-new-for-support':
+      case 'support-ticket-provider-new-for-support': {
+        const desk = deskOfTemplate(source.template);
         const ticket = await loadSupportTicket(this.prisma, source.ids[0]);
-        if (!ticket) {
+        if (!ticket || ticket.requesterRole !== desk) {
           return null;
         }
 
@@ -866,14 +890,12 @@ export class TransactionalMailService {
         };
       }
 
-      case 'support-ticket-customer-reply': {
-        const message = await loadSupportTicketMessage(
-          this.prisma,
-          source.ids[0],
-          SupportTicketAuthorRole.CUSTOMER,
-        );
+      case 'support-ticket-customer-reply':
+      case 'support-ticket-provider-reply': {
+        const desk = deskOfTemplate(source.template);
+        const message = await loadSupportTicketRequesterMessage(this.prisma, source.ids[0]);
 
-        return message
+        return message && message.ticket.requesterRole === desk
           ? {
               to: readSupportInboxEmail(),
               data: supportInboxData(message.ticket, {
@@ -884,18 +906,20 @@ export class TransactionalMailService {
           : null;
       }
 
-      case 'support-ticket-admin-reply': {
+      case 'support-ticket-admin-reply':
+      case 'support-ticket-provider-admin-reply': {
+        const desk = deskOfTemplate(source.template);
         const message = await loadSupportTicketMessage(
           this.prisma,
           source.ids[0],
           SupportTicketAuthorRole.ADMIN,
         );
 
-        return message?.ticket.customerEmail
+        return message?.ticket.requesterEmail && message.ticket.requesterRole === desk
           ? {
-              to: message.ticket.customerEmail,
+              to: message.ticket.requesterEmail,
               replyTo: supportReplyToEmail(),
-              data: supportCustomerData(message.ticket, {
+              data: supportRequesterData(message.ticket, {
                 messageExcerpt: message.body,
                 messageAt: message.createdAt.toISOString(),
               }),
@@ -903,11 +927,13 @@ export class TransactionalMailService {
           : null;
       }
 
-      case 'support-ticket-status-changed': {
+      case 'support-ticket-status-changed':
+      case 'support-ticket-provider-status-changed': {
+        const desk = deskOfTemplate(source.template);
         const change = await loadSupportTicketStatusChange(this.prisma, source.ids[0]);
-        return change?.ticket.customerEmail
+        return change?.ticket.requesterEmail && change.ticket.requesterRole === desk
           ? {
-              to: change.ticket.customerEmail,
+              to: change.ticket.requesterEmail,
               replyTo: supportReplyToEmail(),
               data: supportStatusChangeData(change),
             }
@@ -1242,19 +1268,30 @@ const supportTicketSource = {
   id: true,
   subject: true,
   status: true,
-  customerId: true,
+  requesterId: true,
+  requesterRole: true,
   createdAt: true,
-  customer: { select: { name: true, email: true } },
+  requester: { select: { name: true, email: true } },
 } as const;
 
 type SupportTicketSource = {
   id: string;
   subject: string;
   status: string;
-  customerId: string;
+  requesterId: string;
+  /**
+   * Which desk the ticket sits at, read from the ticket's own snapshot.
+   *
+   * Every one of the five support messages branches on this and on nothing
+   * else — not on the owner's current `User.role`, which can change, and not on
+   * anything the caller passed in. A ticket opened by a hizmet veren keeps
+   * producing hizmet veren messages for the rest of its life, including on a
+   * retry rebuilt years later.
+   */
+  requesterRole: SupportTicketRequesterRole;
   createdAt: Date;
-  customerName: string | null;
-  customerEmail: string | null;
+  requesterName: string | null;
+  requesterEmail: string | null;
 };
 
 async function loadSupportTicket(
@@ -1273,18 +1310,20 @@ function flattenSupportTicket(ticket: {
   id: string;
   subject: string;
   status: string;
-  customerId: string;
+  requesterId: string;
+  requesterRole: SupportTicketRequesterRole;
   createdAt: Date;
-  customer: { name: string | null; email: string | null };
+  requester: { name: string | null; email: string | null };
 }): SupportTicketSource {
   return {
     id: ticket.id,
     subject: ticket.subject,
     status: ticket.status,
-    customerId: ticket.customerId,
+    requesterId: ticket.requesterId,
+    requesterRole: ticket.requesterRole,
     createdAt: ticket.createdAt,
-    customerName: ticket.customer.name,
-    customerEmail: ticket.customer.email,
+    requesterName: ticket.requester.name,
+    requesterEmail: ticket.requester.email,
   };
 }
 
@@ -1296,6 +1335,98 @@ function firstSupportTicketMessage(prisma: PrismaService, ticketId: string) {
     select: { body: true },
   });
 }
+
+/**
+ * The five support messages, per side of the marketplace.
+ *
+ * A table rather than five `if`s spread across five methods, so "which template
+ * does a hizmet veren's ticket use" is answerable by reading one object, and so
+ * a sixth support message cannot be added for one desk and forgotten for the
+ * other — the type requires both columns to be filled.
+ *
+ * Ten templates rather than five parameterised by audience, for the reason the
+ * template registry gives about the original five: the two copies a single
+ * event produces say different things to different people, and a template that
+ * decided at render time which reader it had would be one edit away from
+ * telling a hizmet veren what only an operator may read. Here it is stronger
+ * still — the hizmet veren copies talk about teklifler and krediler, and the
+ * hizmet alan copies about talepler, so they are not the same message with a
+ * different word in it.
+ *
+ * The customer column is exactly the five template names that shipped first.
+ * They are untouched on purpose: every existing NotificationLog row, every
+ * dedupe key already written and every retry that may still be attempted names
+ * one of them, and renaming any of them would orphan all three at once.
+ */
+const SUPPORT_DESKS: Record<
+  SupportTicketRequesterRole,
+  {
+    /** To the person who opened it, confirming it exists. */
+    created: RetryableTransactionalTemplate;
+    /** To the support mailbox, announcing it. */
+    newForSupport: RetryableTransactionalTemplate;
+    /** To the support mailbox, when they write again. */
+    requesterReply: RetryableTransactionalTemplate;
+    /** To them, when an operator answers. */
+    adminReply: RetryableTransactionalTemplate;
+    /** To them, when an operator moves the ticket. */
+    statusChanged: RetryableTransactionalTemplate;
+  }
+> = {
+  [SupportTicketRequesterRole.CUSTOMER]: {
+    created: 'support-ticket-created',
+    newForSupport: 'support-ticket-new-for-support',
+    requesterReply: 'support-ticket-customer-reply',
+    adminReply: 'support-ticket-admin-reply',
+    statusChanged: 'support-ticket-status-changed',
+  },
+  [SupportTicketRequesterRole.PROVIDER]: {
+    created: 'support-ticket-provider-created',
+    newForSupport: 'support-ticket-provider-new-for-support',
+    requesterReply: 'support-ticket-provider-reply',
+    adminReply: 'support-ticket-provider-admin-reply',
+    statusChanged: 'support-ticket-provider-status-changed',
+  },
+};
+
+/**
+ * The desk a support template belongs to, read back out of the table above.
+ *
+ * Derived rather than restated, so the two directions cannot disagree: a
+ * template that {@link SUPPORT_DESKS} files under PROVIDER is a template this
+ * function answers PROVIDER for, by construction. Anything that is not a
+ * support template — which the callers' `switch` has already excluded — falls
+ * back to CUSTOMER, the desk that existed before there were two.
+ */
+function deskOfTemplate(template: RetryableTransactionalTemplate): SupportTicketRequesterRole {
+  const roles = Object.keys(SUPPORT_DESKS) as SupportTicketRequesterRole[];
+
+  return (
+    roles.find((role) =>
+      (Object.values(SUPPORT_DESKS[role]) as readonly string[]).includes(template),
+    ) ?? SupportTicketRequesterRole.CUSTOMER
+  );
+}
+
+/** How the two desks are named to an operator reading the inbox copy. */
+const SUPPORT_REQUESTER_ROLE_LABELS: Record<SupportTicketRequesterRole, string> = {
+  [SupportTicketRequesterRole.CUSTOMER]: 'Hizmet alan',
+  [SupportTicketRequesterRole.PROVIDER]: 'Hizmet veren',
+};
+
+/**
+ * The author role a message from each desk carries.
+ *
+ * The mirror of the same map in the support module's own service. It is stated
+ * again here rather than imported because the two are answering different
+ * questions — that one stamps a row, this one checks one — and a shared helper
+ * would make a message that disagreed with its ticket unrepresentable in the
+ * type system while remaining perfectly representable in the table.
+ */
+const SUPPORT_AUTHOR_ROLES: Record<SupportTicketRequesterRole, SupportTicketAuthorRole> = {
+  [SupportTicketRequesterRole.CUSTOMER]: SupportTicketAuthorRole.CUSTOMER,
+  [SupportTicketRequesterRole.PROVIDER]: SupportTicketAuthorRole.PROVIDER,
+};
 
 /**
  * One message, and only if it was written by the side the caller expects.
@@ -1327,6 +1458,44 @@ async function loadSupportTicketMessage(
   return message ? { ...message, ticket: flattenSupportTicket(message.ticket) } : null;
 }
 
+/**
+ * One message written by the ticket's own owner, whichever desk that is.
+ *
+ * The role cannot be a predicate in the query the way it is above, because
+ * which role counts depends on the ticket the message sits on — so it is loaded
+ * and then required to agree with the ticket's desk. A message whose author
+ * role disagrees is not something this product can write; if one is ever found,
+ * this returns null and no message is sent, rather than filing it under the
+ * side of the marketplace it does not belong to.
+ *
+ * An ADMIN message never agrees with either desk, which is what keeps an
+ * operator's answer out of the "they replied" notice.
+ */
+async function loadSupportTicketRequesterMessage(prisma: PrismaService, messageId: string) {
+  const message = await prisma.supportTicketMessage.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      body: true,
+      createdAt: true,
+      authorRole: true,
+      // Deliberately not `authorUserId`, for the reason the loader above gives.
+      ticket: { select: supportTicketSource },
+    },
+  });
+
+  if (!message) {
+    return null;
+  }
+
+  const ticket = flattenSupportTicket(message.ticket);
+  if (message.authorRole !== SUPPORT_AUTHOR_ROLES[ticket.requesterRole]) {
+    return null;
+  }
+
+  return { ...message, ticket };
+}
+
 async function loadSupportTicketStatusChange(prisma: PrismaService, statusChangeId: string) {
   const change = await prisma.supportTicketStatusChange.findUnique({
     where: { id: statusChangeId },
@@ -1345,21 +1514,24 @@ async function loadSupportTicketStatusChange(prisma: PrismaService, statusChange
 }
 
 /**
- * What the customer's three support messages are told.
+ * What the three support messages that go to a ticket's owner are told.
  *
- * The ticket, its subject, its status, the quoted message and a link to the
- * customer's own ticket page. There is no operator field on this payload and no
- * way to add one without editing this function, which is the point: the
- * template renders what it is given, so "no operator identity reaches a
- * customer" is enforced where the data is assembled rather than hoped for in
- * five templates.
+ * The ticket, its subject, its status, the quoted message and a link to their
+ * own ticket page. There is no operator field on this payload and no way to add
+ * one without editing this function, which is the point: the template renders
+ * what it is given, so "no operator identity reaches the person who opened the
+ * ticket" is enforced where the data is assembled rather than hoped for in six
+ * templates.
+ *
+ * One builder for both desks, unlike the templates: the fields are the same
+ * facts about the same ticket, and it is the templates that know what to call
+ * them. `ticketUrl` is one link for the same reason — `/destek/:id` is one
+ * screen served inside whichever panel the reader belongs to, so there is no
+ * second address to get wrong.
  */
-function supportCustomerData(
-  ticket: SupportTicketSource,
-  extra: MailData,
-): MailData {
+function supportRequesterData(ticket: SupportTicketSource, extra: MailData): MailData {
   return {
-    fullName: ticket.customerName,
+    fullName: ticket.requesterName,
     ticketReference: ticket.id,
     ticketSubject: ticket.subject,
     status: ticket.status,
@@ -1370,13 +1542,19 @@ function supportCustomerData(
 }
 
 /**
- * What the support mailbox's two messages are told.
+ * What the support mailbox's messages are told.
  *
- * The customer's name and address are here and nowhere else — an operator
- * already sees both on the queue screen this message links to, and a
- * notification that withheld them would be a link somebody has to open to find
- * out who is waiting. `accountUrl` is absent: the recipient is a mailbox, not
- * an account with settings.
+ * The owner's name and address are here and nowhere else — an operator already
+ * sees both on the queue screen this message links to, and a notification that
+ * withheld them would be a link somebody has to open to find out who is
+ * waiting. `accountUrl` is absent: the recipient is a mailbox, not an account
+ * with settings.
+ *
+ * `requesterRoleLabel` is on the payload rather than left to the template
+ * because it is a fact about the ticket, not a fact about the message: an
+ * operator triaging their inbox should be able to see which desk a mail came
+ * from without opening it, and there is exactly one place that decides what
+ * each desk is called.
  */
 function supportInboxData(ticket: SupportTicketSource, extra: MailData): MailData {
   return {
@@ -1384,8 +1562,9 @@ function supportInboxData(ticket: SupportTicketSource, extra: MailData): MailDat
     ticketReference: ticket.id,
     ticketSubject: ticket.subject,
     status: ticket.status,
-    customerName: ticket.customerName,
-    customerEmail: ticket.customerEmail,
+    requesterName: ticket.requesterName,
+    requesterEmail: ticket.requesterEmail,
+    requesterRoleLabel: SUPPORT_REQUESTER_ROLE_LABELS[ticket.requesterRole],
     ticketUrl: adminSupportTicketUrl(ticket.id),
     accountUrl: null,
     ...extra,
@@ -1407,7 +1586,7 @@ function supportStatusChangeData(change: {
   createdAt: Date;
   ticket: SupportTicketSource;
 }): MailData {
-  return supportCustomerData(change.ticket, {
+  return supportRequesterData(change.ticket, {
     // The statuses the *change* recorded, not the ones the ticket holds now. A
     // ticket resolved and later closed must not rewrite the message that
     // announced the resolution.
@@ -1759,6 +1938,16 @@ const RETRY_DEDUPE_PREFIXES = {
   'support-ticket-customer-reply': 'support-ticket-customer-reply',
   'support-ticket-admin-reply': 'support-ticket-admin-reply',
   'support-ticket-status-changed': 'support-ticket-status',
+  // The hizmet veren half of the same family, and prefixes of their own rather
+  // than a shared one per event. A dedupe key is what a retry is rebuilt from,
+  // so a key that did not say which desk it came from would be a key two
+  // templates could both claim — and the retry would then be free to re-render
+  // a hizmet veren's ticket with the hizmet alan's words.
+  'support-ticket-provider-created': 'support-ticket-provider-created',
+  'support-ticket-provider-new-for-support': 'support-ticket-provider-new',
+  'support-ticket-provider-reply': 'support-ticket-provider-reply',
+  'support-ticket-provider-admin-reply': 'support-ticket-provider-admin-reply',
+  'support-ticket-provider-status-changed': 'support-ticket-provider-status',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -1797,6 +1986,11 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'support-ticket-customer-reply': 1,
   'support-ticket-admin-reply': 1,
   'support-ticket-status-changed': 1,
+  'support-ticket-provider-created': 1,
+  'support-ticket-provider-new-for-support': 1,
+  'support-ticket-provider-reply': 1,
+  'support-ticket-provider-admin-reply': 1,
+  'support-ticket-provider-status-changed': 1,
 };
 
 /**

@@ -3,20 +3,22 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { AdminSupportTicketsController } from './admin-support-tickets.controller';
 import { AdminSupportTicketsService } from './admin-support-tickets.service';
-import { CustomerSupportTicketsController } from './customer-support-tickets.controller';
-import { CustomerSupportTicketsService } from './customer-support-tickets.service';
+import { RequesterSupportTicketsController } from './requester-support-tickets.controller';
+import { RequesterSupportTicketsService } from './requester-support-tickets.service';
 
 /**
- * One module, two role surfaces.
+ * One module, two surfaces: the desk, and the people who write to it.
  *
- * The controllers and services are separate all the way down — see either
- * controller for why — but the transition table, the text rules and the shared
- * append live in one place, so the two sides cannot disagree about what a
- * message is or which statuses take one.
+ * The split is by *authority*, not by marketplace role. Hizmet alan and hizmet
+ * veren share one controller and one service because they are the same product
+ * with a different sidebar around it; the operator has its own of both, because
+ * an operator reads every ticket and owns none. The transition table, the text
+ * rules and the shared append live in one place regardless, so no side can
+ * disagree about what a message is or which statuses take one.
  */
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [CustomerSupportTicketsController, AdminSupportTicketsController],
-  providers: [CustomerSupportTicketsService, AdminSupportTicketsService],
+  controllers: [RequesterSupportTicketsController, AdminSupportTicketsController],
+  providers: [RequesterSupportTicketsService, AdminSupportTicketsService],
 })
 export class SupportTicketsModule {}

@@ -246,9 +246,32 @@ enum SupportTicketStatus {
 /// for the same reason MessageSenderRole is: a role can change on an account,
 /// and an old message must still read as having come from the side it came
 /// from.
+///
+/// PROVIDER was added when the desk opened to the other side of the
+/// marketplace. It is a third value rather than a reuse of CUSTOMER because a
+/// message is a permanent record of who said something: every row written
+/// before that change really was written by a customer, and widening the
+/// meaning of CUSTOMER would have rewritten all of them at once.
 enum SupportTicketAuthorRole {
   CUSTOMER
   ADMIN
+  PROVIDER
+}
+
+/// Which side of the marketplace opened a ticket.
+///
+/// A snapshot, exactly like SupportTicketAuthorRole above and for the same
+/// reason: authorization, the admin queue's filter and every notification read
+/// this column rather than the owner's current `User.role`, so an account whose
+/// role is changed later cannot make an old ticket read as the other side's —
+/// or, worse, make it reachable from the other side's routes.
+///
+/// There is deliberately no SUPER_ADMIN member. An operator answers tickets and
+/// owns none, there is no create route on the admin controller, and a value
+/// nothing can write is a state a reader would still have to handle.
+enum SupportTicketRequesterRole {
+  CUSTOMER
+  PROVIDER
 }
 
 model User {
@@ -323,7 +346,7 @@ model User {
   manualOfferRefunds         ManualOfferRefundAudit[]    @relation("ManualOfferRefundPerformedBy")
   providerMessageThreads     MessageThread[]             @relation("MessageThreadProviderUser")
   sentMessages               Message[]                   @relation("MessageSender")
-  supportTickets             SupportTicket[]             @relation("SupportTicketCustomer")
+  supportTickets             SupportTicket[]             @relation("SupportTicketRequester")
   supportTicketMessages      SupportTicketMessage[]      @relation("SupportTicketMessageAuthor")
   supportTicketStatusChanges SupportTicketStatusChange[] @relation("SupportTicketStatusChangedBy")
 
@@ -1920,15 +1943,23 @@ model ProviderInviteToken {
   @@index([expiresAt])
 }
 
-/// One customer's request for help from the platform itself.
+/// One account's request for help from the platform itself.
 ///
 /// Deliberately unlike MessageThread, which is the shadow of a match between
-/// two customers of the marketplace. A ticket is between a customer and the
+/// two parties of the marketplace. A ticket is between one account and the
 /// operator, so it has exactly one owner and no second participant column: the
 /// other side is "whichever SUPER_ADMIN answered", and which one is recorded on
 /// each message rather than on the ticket. Nothing here can be reassigned to a
-/// different customer — `customerId` is written once, from the authenticated
+/// different owner — `requesterId` is written once, from the authenticated
 /// principal, and no endpoint accepts it as input.
+///
+/// The owner is a `User` rather than a customer. It always was — the column
+/// pointed at `User` from the first migration — but it was named `customerId`
+/// and every query around it assumed the CUSTOMER role, so opening the desk to
+/// hizmet verenler was a rename of the column and a new snapshot beside it
+/// rather than a second table. One table means one queue for the operator, one
+/// transition rule, one timeline shape and one set of notifications; two would
+/// have meant two of each, drifting.
 ///
 /// The opening message is **not** a column on this row. It is written as the
 /// ticket's first SupportTicketMessage inside the same transaction, so the
@@ -1941,13 +1972,29 @@ model ProviderInviteToken {
 /// below are RESTRICT, so an account with a ticket cannot be removed out from
 /// under it either.
 model SupportTicket {
-  id         String              @id @default(cuid())
-  /// The customer who owns this ticket. Every authorization query keys on this
+  id          String @id @default(cuid())
+  /// The account that owns this ticket. Every authorization query keys on this
   /// column and never on the URL's id, so knowing a ticket id gets a stranger
   /// nothing.
-  customerId String
-  subject    String
-  status     SupportTicketStatus @default(OPEN)
+  requesterId String
+
+  /// Which side of the marketplace opened it, frozen at the moment it was
+  /// opened.
+  ///
+  /// No `@default`: a ticket without a side is not a state this table should be
+  /// able to hold, and a default would let a future create path forget to say
+  /// which desk it belongs to and quietly file a provider's ticket as a
+  /// customer's. The migration that added the column defaulted it to CUSTOMER
+  /// to fill the rows that already existed — every one of which really was a
+  /// customer's — and then dropped the default for exactly this reason.
+  ///
+  /// It is the second half of every ownership predicate, next to `requesterId`.
+  /// One account holds one role so the id alone would already be enough today;
+  /// carrying the role too means the day an account's role changes, its old
+  /// tickets stay on the desk they were opened at instead of following it.
+  requesterRole SupportTicketRequesterRole
+  subject       String
+  status        SupportTicketStatus        @default(OPEN)
 
   /// When something last happened on this ticket — a message from either side,
   /// or a status change.
@@ -1968,15 +2015,21 @@ model SupportTicket {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  customer      User                        @relation("SupportTicketCustomer", fields: [customerId], references: [id])
+  requester     User                        @relation("SupportTicketRequester", fields: [requesterId], references: [id])
   messages      SupportTicketMessage[]
   statusChanges SupportTicketStatusChange[]
 
-  /// The customer's own list: "my tickets, most recent activity first".
-  @@index([customerId, lastActivityAt])
+  /// The owner's own list: "my tickets, most recent activity first".
+  @@index([requesterId, lastActivityAt])
   /// The admin list, filtered by status and unfiltered, in that same order.
   @@index([status, lastActivityAt])
   @@index([lastActivityAt])
+  /// The admin list narrowed to one side of the marketplace, with and without
+  /// the status filter. Two indexes rather than one because the queue is read
+  /// both ways: "hizmet verenlerin açık talepleri" and "hizmet verenlerin
+  /// tamamı" are both ordinary things for an operator to ask for.
+  @@index([requesterRole, status, lastActivityAt])
+  @@index([requesterRole, lastActivityAt])
 }
 
 /// One plain-text message on a ticket. Immutable: there is no edit and no
@@ -1988,8 +2041,8 @@ model SupportTicket {
 model SupportTicketMessage {
   id           String                  @id @default(cuid())
   ticketId     String
-  /// The account that wrote it — the owning customer, or the SUPER_ADMIN who
-  /// answered. Taken from the session, never from the request body.
+  /// The account that wrote it — the owner of the ticket, or the SUPER_ADMIN
+  /// who answered. Taken from the session, never from the request body.
   authorUserId String
   authorRole   SupportTicketAuthorRole
   body         String

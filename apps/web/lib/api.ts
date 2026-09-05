@@ -1112,8 +1112,12 @@ function readThreadUnavailableReason(body: string): ThreadUnavailableReason | nu
 
 /* ---- support tickets ----------------------------------------------------- */
 
+/** Which side of the marketplace opened a ticket. Frozen when it was opened. */
+export type SupportTicketRequesterRole = 'CUSTOMER' | 'PROVIDER';
+
 /**
- * What the customer's own support screens read.
+ * What the support screens read — the same shapes for hizmet alan and hizmet
+ * veren, because they are the same screens.
  *
  * The shapes mirror the API's projections exactly, and what is missing from
  * them is the point: no owner block (the reader is the owner), nothing about
@@ -1124,6 +1128,12 @@ export type SupportTicketSummary = {
   id: string;
   subject: string;
   status: SupportTicketStatus;
+  /**
+   * The reader's own desk, on the reader's own ticket — so never news to them.
+   * It is here because the API returns it, not because these screens branch on
+   * it: they do not, which is what keeps the two panels showing one interface.
+   */
+  requesterRole: SupportTicketRequesterRole;
   /** The last message or status change, whichever came later. */
   lastActivityAt: string;
   resolvedAt: string | null;
@@ -1135,7 +1145,13 @@ export type SupportTicketTimelineEntry =
   | {
       kind: 'MESSAGE';
       id: string;
-      authorRole: 'CUSTOMER' | 'ADMIN';
+      /**
+       * Which side of the desk wrote it. PROVIDER joined CUSTOMER and ADMIN
+       * when the desk opened to hizmet verenler; the screens still label a
+       * message by `mine` rather than by this, so a ticket reads as "Siz" and
+       * "Destek ekibi" in both panels.
+       */
+      authorRole: 'CUSTOMER' | 'ADMIN' | 'PROVIDER';
       /** True when the reader wrote it. */
       mine: boolean;
       body: string;
@@ -1160,7 +1176,8 @@ export type SupportTicketDetail = SupportTicketSummary & {
 };
 
 /**
- * The caller's own tickets, or null when the list could not be read.
+ * The caller's own tickets — their own desk only — or null when the list could
+ * not be read.
  *
  * Null is never rendered as an empty list. "You have no tickets" and "we could
  * not fetch your tickets" are different sentences, and showing the first when

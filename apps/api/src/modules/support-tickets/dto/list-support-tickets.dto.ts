@@ -1,4 +1,4 @@
-import { SupportTicketStatus } from '@prisma/client';
+import { SupportTicketRequesterRole, SupportTicketStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import { ArrayNotEmpty, IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { SUPPORT_TICKET_PAGE_MAX_SIZE } from '../support-tickets.config';
@@ -43,10 +43,11 @@ function toStatusList(value: unknown): SupportTicketStatus[] | undefined {
 }
 
 /**
- * The admin list's query: an optional set of statuses and a page.
+ * The admin list's query: an optional set of statuses, an optional desk, and a
+ * page.
  *
- * There is no customer filter and no free-text search in this version. Both are
- * real asks and neither is this one, and a half-built search that only matches
+ * There is no owner filter and no free-text search in this version. Both are
+ * real asks and neither is this one, and a half-built search that only matched
  * a subject would be worse than none.
  */
 export class ListSupportTicketsDto {
@@ -60,6 +61,21 @@ export class ListSupportTicketsDto {
   @ArrayNotEmpty()
   @IsEnum(SupportTicketStatus, { each: true })
   status?: SupportTicketStatus[];
+
+  /**
+   * Which side of the marketplace opened the tickets, when the operator has
+   * narrowed to one.
+   *
+   * A single value rather than a set, unlike `status` above: there are exactly
+   * two desks, so "both" is what leaving it off already means and a set could
+   * only ever say the same thing twice. Absent means the whole queue, which is
+   * what the screen has always shown and what every existing link still asks
+   * for.
+   */
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : value))
+  @IsEnum(SupportTicketRequesterRole)
+  requesterRole?: SupportTicketRequesterRole;
 
   @IsOptional()
   @Transform(({ value }) => toInt(value))

@@ -3443,19 +3443,37 @@ input[readonly] {
   color: var(--color-accent);
 }
 
-.cdash-nav-soon,
-.pdash-nav-soon {
+/*
+  The note on a provider nav entry that needs a profile the account has not
+  created yet. It replaces `.cdash-nav-soon` / `.pdash-nav-soon`, which drew a
+  "Yakında" chip: the only two entries that ever wore one were Destek — now a
+  real section in both panels — and the provider sections that are waiting on a
+  profile rather than on the platform.
+
+  Not uppercased, unlike the chip it replaces. "PROFİL GEREKLİ" shouted next to
+  a greyed-out row reads as a warning; this is a note explaining why the row is
+  not a link.
+*/
+.pdash-nav-note {
   margin-left: auto;
   padding: 2px 8px;
   background: var(--color-neutral-200);
   color: var(--color-neutral-700);
   font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.cdash-sidebar-footer,
-.pdash-sidebar-footer { margin-top: auto; }
+/*
+  The provider panel's approval badge, which used to sit in a `margin-top: auto`
+  footer alongside the Destek placeholder. Both are gone: pinning them to the
+  floor left a column of empty space between the nav and the badge on any screen
+  taller than the sections, and the badge belongs with the sections it describes
+  rather than at the bottom of the viewport.
+*/
+.pdash-sidebar-status {
+  padding: 16px;
+  border-top: 1px solid var(--color-divider);
+}
 
 .cdash-main,
 .pdash-main {

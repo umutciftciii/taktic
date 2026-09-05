@@ -25,6 +25,7 @@ type ProviderShellActive =
   | 'requests'
   | 'offers'
   | 'messages'
+  | 'support'
   | 'credits'
   | 'subscriptions'
   | 'packages'
@@ -94,6 +95,14 @@ export async function ProviderShell({
     // won a job can write to that customer, and the entry has to be reachable
     // from every screen in the panel rather than only from the offer they won.
     { key: 'messages', label: 'Mesajlar', Icon: IconMessage, href: '/mesajlar', count: unread?.total },
+    // Destek, immediately after Mesajlar and before the business's own settings
+    // — the same position it holds in the hizmet alan panel, because the two
+    // panels should not need to be learned separately. Not gated on the profile
+    // either, and that one matters more here than it does for messaging: a
+    // provider whose profile is the very thing that will not save is exactly
+    // the person who needs this link, and an entry that appeared only once they
+    // had a working profile would be missing whenever it was wanted.
+    { key: 'support', label: 'Destek', Icon: IconHelp, href: '/destek' },
     { key: 'credits', label: 'Krediler', Icon: IconCoins, href: creditsHref },
     { key: 'subscriptions', label: 'Paketlerim', Icon: IconPackage, href: subscriptionsHref },
     { key: 'packages', label: 'Paket geçmişim', Icon: IconPackage, href: packagesHref },
@@ -146,6 +155,7 @@ export async function ProviderShell({
                 href={item.href}
                 className={`pdash-nav-item${isActive ? ' is-active' : ''}`}
                 aria-current={isActive ? 'page' : undefined}
+                data-testid={`pdash-nav-${item.key}`}
               >
                 <span className="pdash-nav-icon">
                   <Icon size={16} />
@@ -158,42 +168,48 @@ export async function ProviderShell({
             );
           }
 
+          // A section that genuinely needs a provider profile, on an account
+          // that has not created one yet. It used to be labelled "Yakında",
+          // which was simply wrong — the feature has shipped, this account just
+          // cannot reach it yet — and told somebody waiting on their own profile
+          // to wait for the platform instead. The note now says which of the two
+          // it is, and says it in the row rather than only in a `title` a
+          // touchscreen never shows.
           return (
             <span
               key={item.key}
               className="pdash-nav-item is-disabled"
               aria-disabled="true"
-              title="Profil oluşturulduğunda açılır"
+              data-testid={`pdash-nav-${item.key}`}
             >
               <span className="pdash-nav-icon">
                 <Icon size={16} />
               </span>
               <span>{item.label}</span>
-              <span className="pdash-nav-soon">Yakında</span>
+              <span className="pdash-nav-note">Profil gerekli</span>
             </span>
           );
         })}
       </nav>
 
-      <div className="pdash-sidebar-footer">
-        {status ? (
-          <div style={{ padding: 16, borderTop: '1px solid var(--color-divider)' }}>
-            <span className="pdash-credit-label">Onay durumu</span>
-            <div style={{ marginTop: 8 }}>
-              <span className={status === 'APPROVED' ? 'tag tag-ink' : 'tag tag-neutral'}>
-                {status === 'APPROVED' ? 'Onaylı işletme' : statusLabel(status)}
-              </span>
-            </div>
+      {/*
+        The approval badge follows the sections instead of being pinned to the
+        bottom of the sidebar. It used to share a `margin-top: auto` container
+        with a "Destek — Yakında" placeholder, which pushed both to the floor and
+        left a column of empty space above them on every screen taller than the
+        nav. Destek is a real section now and sits with the others; this is a
+        status, so it reads immediately below them.
+      */}
+      {status ? (
+        <div className="pdash-sidebar-status">
+          <span className="pdash-credit-label">Onay durumu</span>
+          <div style={{ marginTop: 8 }}>
+            <span className={status === 'APPROVED' ? 'tag tag-ink' : 'tag tag-neutral'}>
+              {status === 'APPROVED' ? 'Onaylı işletme' : statusLabel(status)}
+            </span>
           </div>
-        ) : null}
-        <span className="pdash-nav-item is-disabled" aria-disabled="true" title="Yakında">
-          <span className="pdash-nav-icon">
-            <IconHelp size={16} />
-          </span>
-          <span>Destek</span>
-          <span className="pdash-nav-soon">Yakında</span>
-        </span>
-      </div>
+        </div>
+      ) : null}
     </>
   );
 

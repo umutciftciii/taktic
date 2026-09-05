@@ -1,5 +1,10 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma, SupportTicketAuthorRole, SupportTicketStatus } from '@prisma/client';
+import {
+  Prisma,
+  SupportTicketAuthorRole,
+  SupportTicketRequesterRole,
+  SupportTicketStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
@@ -31,10 +36,11 @@ import {
  * What an operator may do here is bounded by what this class exposes, and the
  * gaps are the point:
  *
- *   - There is no create. An operator cannot open a ticket in a customer's
+ *   - There is no create. An operator cannot open a ticket in somebody else's
  *     name, because there is no method and no route that would let them.
- *   - There is no way to change a ticket's owner. `customerId` is written once,
- *     by the customer's own create, and nothing in this file writes it.
+ *   - There is no way to change a ticket's owner or the desk it sits on.
+ *     `requesterId` and `requesterRole` are written once, by the owner's own
+ *     create, and nothing in this file writes either.
  *   - There is no delete, for a ticket or for a message. The record is the
  *     product.
  *
@@ -66,16 +72,27 @@ export class AdminSupportTicketsService {
    * Paged rather than complete: the list is the operator's queue and a queue
    * that returns every ticket ever opened stops being usable long before it
    * stops being answerable.
+   *
+   * `requesterRole` narrows the same queue to one side of the marketplace. It
+   * is a filter and nothing more — one queue holds both desks, so an operator
+   * answering a hizmet veren does it on the screen they already know, and
+   * nothing can fall between two lists because there is only one.
    */
   async listTickets(filters: ListSupportTicketsDto) {
     const page = filters.page ?? 1;
     const pageSize = clampPageSize(filters.pageSize);
     const statuses = filters.status ?? [];
-    const where: Prisma.SupportTicketWhereInput = statuses.length
-      ? { status: { in: statuses } }
-      : {};
+    const requesterRole = filters.requesterRole;
 
-    const [total, rows] = await Promise.all([
+    // The desk filter is separate from the status one and applies to the counts
+    // as well as to the rows — see below.
+    const deskWhere: Prisma.SupportTicketWhereInput = requesterRole ? { requesterRole } : {};
+    const where: Prisma.SupportTicketWhereInput = {
+      ...deskWhere,
+      ...(statuses.length ? { status: { in: statuses } } : {}),
+    };
+
+    const [total, rows, statusCounts, requesterRoleCounts] = await Promise.all([
       this.prisma.supportTicket.count({ where }),
       this.prisma.supportTicket.findMany({
         where,
@@ -86,6 +103,15 @@ export class AdminSupportTicketsService {
         take: pageSize,
         select: adminSupportTicketSelect,
       }),
+      // Scoped to the chosen desk on purpose. These numbers are printed on the
+      // status filter's own options, so a queue narrowed to hizmet verenler
+      // whose chips still counted every customer's ticket would be a screen
+      // whose filter and whose numbers described two different lists.
+      this.countByStatus(deskWhere),
+      // Not scoped, and for the mirror-image reason: these numbers are printed
+      // on the desk filter's own options, and an option that counted only the
+      // desk already chosen would always read as the total.
+      this.countByRequesterRole(statuses),
     ]);
 
     return {
@@ -95,7 +121,9 @@ export class AdminSupportTicketsService {
       pageSize,
       hasNextPage: page * pageSize < total,
       /** The counts behind the status filter's chips, for every status. */
-      statusCounts: await this.countByStatus(),
+      statusCounts,
+      /** And behind the desk filter's, for both sides of the marketplace. */
+      requesterRoleCounts,
     };
   }
 
@@ -241,10 +269,18 @@ export class AdminSupportTicketsService {
     return ticket;
   }
 
-  /** One grouped count, so the filter can say how much is behind each option. */
-  private async countByStatus() {
+  /**
+   * One grouped count, so the status filter can say how much is behind each
+   * option — within whichever desk the operator is currently looking at.
+   *
+   * Every status is present with a zero rather than omitted, because a missing
+   * key and a zero read the same on a screen and only one of them is a number
+   * this method actually established.
+   */
+  private async countByStatus(where: Prisma.SupportTicketWhereInput) {
     const grouped = await this.prisma.supportTicket.groupBy({
       by: ['status'],
+      where,
       _count: { _all: true },
     });
 
@@ -257,6 +293,34 @@ export class AdminSupportTicketsService {
 
     for (const row of grouped) {
       counts[row.status] = row._count._all;
+    }
+
+    return counts;
+  }
+
+  /**
+   * The same, for the desk filter: how many tickets each side of the
+   * marketplace has *under the status filter already applied*.
+   *
+   * The status filter is carried in and the desk filter is not, so the two
+   * options answer the question an operator is actually asking when they read
+   * them — "if I switch desks, how many of these am I looking at" — rather than
+   * each quietly counting the list already on screen.
+   */
+  private async countByRequesterRole(statuses: readonly SupportTicketStatus[]) {
+    const grouped = await this.prisma.supportTicket.groupBy({
+      by: ['requesterRole'],
+      where: statuses.length ? { status: { in: [...statuses] } } : {},
+      _count: { _all: true },
+    });
+
+    const counts: Record<SupportTicketRequesterRole, number> = {
+      [SupportTicketRequesterRole.CUSTOMER]: 0,
+      [SupportTicketRequesterRole.PROVIDER]: 0,
+    };
+
+    for (const row of grouped) {
+      counts[row.requesterRole] = row._count._all;
     }
 
     return counts;

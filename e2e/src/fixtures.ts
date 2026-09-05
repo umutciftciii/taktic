@@ -710,17 +710,26 @@ export async function remainingQuota(entitlementId: string): Promise<number | nu
  * `support-tickets.spec.ts` drives every screen for real.
  */
 export async function createSupportTicket(options: {
-  customerId: string;
+  requesterId: string;
+  /**
+   * Which desk. Defaults to CUSTOMER, which is what every caller of this
+   * fixture wanted before there were two — and the column itself has no
+   * database default on purpose, so the choice is made here rather than
+   * silently by PostgreSQL.
+   */
+  requesterRole?: 'CUSTOMER' | 'PROVIDER';
   status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
   subject?: string;
   message?: string;
 }): Promise<{ id: string }> {
   const suffix = uniqueSuffix();
   const now = new Date();
+  const requesterRole = options.requesterRole ?? 'CUSTOMER';
 
   return prisma().supportTicket.create({
     data: {
-      customerId: options.customerId,
+      requesterId: options.requesterId,
+      requesterRole,
       subject: options.subject ?? `E2E destek talebi ${suffix}`,
       status: options.status,
       lastActivityAt: now,
@@ -729,8 +738,10 @@ export async function createSupportTicket(options: {
       closedAt: options.status === 'CLOSED' ? now : null,
       messages: {
         create: {
-          authorUserId: options.customerId,
-          authorRole: 'CUSTOMER',
+          authorUserId: options.requesterId,
+          // The opening message comes from the same side the ticket does, the
+          // way the create endpoint writes it.
+          authorRole: requesterRole,
           body: options.message ?? 'Yardım eder misiniz?',
         },
       },

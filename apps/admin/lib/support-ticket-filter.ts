@@ -1,14 +1,20 @@
 /**
- * The support list's status filter, and the backlog it can name.
+ * The support list's filters, and the backlog one of them can name.
  *
- * One module because the two are the same contract seen from both ends: what a
- * `?status=` value may say, and which value the dashboard's card points at. The
- * screen parses with `parseStatusFilter` and links with `buildSupportListHref`,
- * and so do the tests — so what is asserted is the contract the page actually
- * implements rather than a restatement of it.
+ * One module because these are the same contract seen from both ends: what a
+ * `?status=` or `?requesterRole=` value may say, and which values the
+ * dashboard's card points at. The screen parses with `parseStatusFilter` and
+ * `parseRequesterRoleFilter`, links with `buildSupportListHref`, and so do the
+ * tests — so what is asserted is the contract the page actually implements
+ * rather than a restatement of it.
  */
 
-import { SUPPORT_TICKET_STATUSES, type SupportTicketStatus } from './api';
+import {
+  SUPPORT_TICKET_REQUESTER_ROLES,
+  SUPPORT_TICKET_STATUSES,
+  type SupportTicketRequesterRole,
+  type SupportTicketStatus,
+} from './api';
 
 /**
  * The support backlog, defined once.
@@ -89,18 +95,54 @@ export function statusFilterValue(statuses: readonly SupportTicketStatus[]): str
 }
 
 /**
- * A link back to the support list.
+ * The desk named by a `?requesterRole=` value, or null for "both".
+ *
+ * A single value rather than a set, because there are exactly two desks and
+ * naming both is what naming neither already means. Anything unrecognised —
+ * a stale link, a hand-edited address, the empty string the "Tümü" option
+ * submits — is dropped to null rather than forwarded: the operator gets the
+ * whole queue, which they can act on, instead of a 400 from the API.
+ *
+ * An array is tolerated because Next hands `?requesterRole=` over as one when
+ * it is repeated; the first recognised entry wins, and repeating a parameter is
+ * not a way to ask for both.
+ */
+export function parseRequesterRoleFilter(
+  value: string | string[] | undefined,
+): SupportTicketRequesterRole | null {
+  const raw = Array.isArray(value) ? value : [value];
+
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const candidate = entry.trim().toUpperCase();
+    if ((SUPPORT_TICKET_REQUESTER_ROLES as readonly string[]).includes(candidate)) {
+      return candidate as SupportTicketRequesterRole;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * A link back to the support list, carrying both filters.
  *
  * Built by hand rather than with `URLSearchParams` so the comma between two
  * statuses survives as a comma: an operator sharing
  * `/support?status=OPEN,IN_PROGRESS` should be sharing something legible.
+ *
+ * The desk is carried through paging for the obvious reason and one less
+ * obvious one: the page number is only meaningful within the list the filters
+ * describe, so a "Sonraki" link that dropped the desk would page into a
+ * different list at an offset taken from this one.
  */
 export function buildSupportListHref(
   statuses: readonly SupportTicketStatus[],
   page: number,
+  requesterRole: SupportTicketRequesterRole | null = null,
 ): string {
   const parts: string[] = [];
   if (statuses.length) parts.push(`status=${statusFilterValue(statuses)}`);
+  if (requesterRole) parts.push(`requesterRole=${requesterRole}`);
   if (page > 1) parts.push(`page=${page}`);
   return parts.length ? `/support?${parts.join('&')}` : '/support';
 }
