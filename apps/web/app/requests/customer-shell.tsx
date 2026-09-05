@@ -56,7 +56,14 @@ export async function CustomerShell({
     key: NonNullable<CustomerShellProps['active']>;
     label: string;
     Icon: typeof IconClipList;
-    href: string | null;
+    /**
+     * Never null any more. Every entry in this panel goes somewhere real, which
+     * is what let the disabled branch — and the "Yakında" chip that was the
+     * only thing it ever drew — come out of the renderer below entirely.
+     */
+    href: string;
+    /** Whether this section prints a counter at all. See the renderer. */
+    counted?: boolean;
     count?: number | undefined;
   }> = [
     {
@@ -64,6 +71,7 @@ export async function CustomerShell({
       label: 'Taleplerim',
       Icon: IconClipList,
       href: '/requests/my',
+      counted: true,
       count: counts?.requests,
     },
     // Offers have their own screen. It used to point at /requests/my — the same
@@ -74,6 +82,7 @@ export async function CustomerShell({
       label: 'Teklifler',
       Icon: IconCompare,
       href: '/requests/offers',
+      counted: true,
       count: counts?.offers,
     },
     // Matches have their own screen too, and for the same reason: this entry
@@ -83,6 +92,7 @@ export async function CustomerShell({
       label: 'Eşleşmelerim',
       Icon: IconUsers,
       href: '/requests/matches',
+      counted: true,
       count: counts?.matches,
     },
     // No longer "Yakında": a matched customer can now write to the provider
@@ -92,8 +102,16 @@ export async function CustomerShell({
       label: 'Mesajlar',
       Icon: IconMessage,
       href: '/mesajlar',
+      counted: true,
       count: unread?.total,
     },
+    // Destek sits between Mesajlar and Profil ve ayarlar, in both panels and in
+    // the same place: it is where somebody goes when the thing they were doing
+    // did not work, so it belongs among the sections rather than pinned to the
+    // bottom of the sidebar as it used to be. There is no counter — a ticket
+    // count is not a number anybody is waiting to see fall, and an empty
+    // `cdash-nav-count` slot would draw a dash next to a working link.
+    { key: 'support', label: 'Destek', Icon: IconHelp, href: '/destek' },
     { key: 'settings', label: 'Profil ve ayarlar', Icon: IconSettings, href: '/account/profile' },
   ];
 
@@ -119,23 +137,28 @@ export async function CustomerShell({
           const isActive = item.key === active;
           const { Icon } = item;
 
-          if (item.href) {
-            return (
-              <Link
-                key={item.key}
-                href={item.href}
-                className={`cdash-nav-item${isActive ? ' is-active' : ''}`}
-                aria-current={isActive ? 'page' : undefined}
-              >
-                <span className="cdash-nav-icon">
-                  <Icon size={16} />
-                </span>
-                <span>{item.label}</span>
-                {/*
-                  A number when there is one — zero included, because zero is
-                  an answer. A dash only when the counters could not be read
-                  at all, so an unavailable list never reads as an empty one.
-                */}
+          return (
+            <Link
+              key={item.key}
+              href={item.href}
+              className={`cdash-nav-item${isActive ? ' is-active' : ''}`}
+              aria-current={isActive ? 'page' : undefined}
+              data-testid={`cdash-nav-${item.key}`}
+            >
+              <span className="cdash-nav-icon">
+                <Icon size={16} />
+              </span>
+              <span>{item.label}</span>
+              {/*
+                Only the sections that actually count something carry a counter.
+                For those, a number when there is one — zero included, because
+                zero is an answer — and a dash only when the counters could not
+                be read at all, so an unavailable list never reads as an empty
+                one. Destek and Profil ve ayarlar count nothing and print
+                nothing, rather than printing a permanent dash that would read
+                as a figure nobody could fetch.
+              */}
+              {item.counted ? (
                 <span
                   className="cdash-nav-count"
                   data-testid={`cdash-nav-count-${item.key}`}
@@ -143,45 +166,11 @@ export async function CustomerShell({
                 >
                   {typeof item.count === 'number' ? item.count : '—'}
                 </span>
-              </Link>
-            );
-          }
-
-          return (
-            <span
-              key={item.key}
-              className="cdash-nav-item is-disabled"
-              aria-disabled="true"
-              title="Yakında"
-            >
-              <span className="cdash-nav-icon">
-                <Icon size={16} />
-              </span>
-              <span>{item.label}</span>
-              <span className="cdash-nav-soon">Yakında</span>
-            </span>
+              ) : null}
+            </Link>
           );
         })}
       </nav>
-
-      {/*
-        No longer a placeholder: a customer can now open a real support ticket
-        and read the whole conversation, so this is an ordinary link like every
-        other entry above it.
-      */}
-      <div className="cdash-sidebar-footer">
-        <Link
-          href="/destek"
-          className={`cdash-nav-item${active === 'support' ? ' is-active' : ''}`}
-          aria-current={active === 'support' ? 'page' : undefined}
-          data-testid="cdash-nav-support"
-        >
-          <span className="cdash-nav-icon">
-            <IconHelp size={16} />
-          </span>
-          <span>Destek</span>
-        </Link>
-      </div>
     </>
   );
 

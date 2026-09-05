@@ -95,7 +95,7 @@ test.describe('customer support tickets', () => {
       // global count would be asserting how many people had asked for help all
       // run rather than what this composer did.
       const stored = await prisma().supportTicket.findMany({
-        where: { customerId: customerAccount.id },
+        where: { requesterId: customerAccount.id },
         include: { messages: true },
       });
       expect(stored).toHaveLength(1);

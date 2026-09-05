@@ -138,27 +138,27 @@ test.describe('admin dashboard metric cards', () => {
       const before = Number(await admin.page.locator(`${SUPPORT_CARD} .metric`).innerText());
 
       await createSupportTicket({
-        customerId: customerAccount.id,
+        requesterId: customerAccount.id,
         status: 'OPEN',
         subject: BACKLOG.openA,
       });
       await createSupportTicket({
-        customerId: customerAccount.id,
+        requesterId: customerAccount.id,
         status: 'OPEN',
         subject: BACKLOG.openB,
       });
       await createSupportTicket({
-        customerId: customerAccount.id,
+        requesterId: customerAccount.id,
         status: 'IN_PROGRESS',
         subject: BACKLOG.inProgress,
       });
       await createSupportTicket({
-        customerId: customerAccount.id,
+        requesterId: customerAccount.id,
         status: 'RESOLVED',
         subject: BACKLOG.resolved,
       });
       await createSupportTicket({
-        customerId: customerAccount.id,
+        requesterId: customerAccount.id,
         status: 'CLOSED',
         subject: BACKLOG.closed,
       });

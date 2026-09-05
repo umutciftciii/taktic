@@ -9,29 +9,38 @@ import {
   type SupportTicketSummary,
 } from '../../lib/api';
 import { IconArrowRight, IconPlus } from '../landing-icons';
-import { CustomerShell } from '../requests/customer-shell';
+import { PanelShell } from '../panel-shell';
 
 type SupportPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
 /**
- * The customer's own support tickets.
+ * The signed-in account's own support tickets — hizmet alan or hizmet veren.
  *
- * Who may be here is settled before anything is read: support is a customer
- * surface, so a provider or an anonymous visitor is sent to sign in rather than
- * shown an empty list they would read as "you have no tickets".
+ * One screen for both, wrapped in whichever panel the reader belongs to. The
+ * two roles were never going to need different lists: a ticket is a subject, a
+ * status and a conversation regardless of which side opened it, and two copies
+ * of this file would have been two copies of the same table drifting.
  *
- * Nothing on this page filters. The API returns exactly the tickets whose owner
- * column names the caller, so "only mine" is a property of the query rather
- * than of this page remembering to check.
+ * Who may be here is settled before anything is read, and it is only about
+ * *signing in*: an anonymous visitor is sent to the login screen rather than
+ * shown an empty list they would read as "you have no tickets". Which tickets
+ * they then see is not this page's decision at all — the API returns exactly
+ * the tickets whose owner and desk name the caller, so "only mine" is a
+ * property of the query rather than of this page remembering to check, and a
+ * hizmet veren cannot see a hizmet alan's ticket by arriving here.
  */
 export default async function SupportPage({ searchParams }: SupportPageProps) {
   const user = await getCurrentUser();
   if (!user) {
     redirect('/login?redirectTo=/destek');
   }
-  if (user.role !== 'CUSTOMER') {
+  // SUPER_ADMIN is the one signed-in role with no desk here: an operator
+  // answers tickets and owns none, and the queue they want is in the admin
+  // panel. Sending them home is the same thing the API does by returning them
+  // nothing.
+  if (user.role !== 'CUSTOMER' && user.role !== 'PROVIDER') {
     redirect('/');
   }
 
@@ -39,7 +48,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
   const created = readParam(params, 'created') === '1';
 
   return (
-    <CustomerShell user={user} active="support">
+    <PanelShell user={user} active="support">
       {/*
         Everything this feature renders lives inside one region, so the
         end-to-end suite can hold the whole customer support surface to the
@@ -105,7 +114,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
           </ul>
         )}
       </div>
-    </CustomerShell>
+    </PanelShell>
   );
 }
 

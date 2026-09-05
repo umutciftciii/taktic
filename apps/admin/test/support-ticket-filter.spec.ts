@@ -6,6 +6,7 @@ import {
   OPEN_SUPPORT_TICKET_STATUSES,
   buildSupportListHref,
   isOpenSupportTicketFilter,
+  parseRequesterRoleFilter,
   parseStatusFilter,
   statusFilterValue,
 } from '../lib/support-ticket-filter';
@@ -120,5 +121,70 @@ describe('what a `?status=` value may say', () => {
 
   it('keeps the statuses it recognises out of a value that is partly rubbish', () => {
     expect(parseStatusFilter('OPEN,NOT_A_STATUS')).toEqual(['OPEN']);
+  });
+});
+
+
+/**
+ * The desk filter, which splits one queue rather than joining two.
+ *
+ * The contract it has to keep is mostly a negative one: every address that
+ * worked before the second desk existed still means what it meant, and an
+ * address that names no desk means both rather than neither.
+ */
+describe('what a `?requesterRole=` value may say', () => {
+  it('reads either desk', () => {
+    expect(parseRequesterRoleFilter('CUSTOMER')).toBe('CUSTOMER');
+    expect(parseRequesterRoleFilter('PROVIDER')).toBe('PROVIDER');
+  });
+
+  it('tolerates spacing and casing', () => {
+    expect(parseRequesterRoleFilter(' provider ')).toBe('PROVIDER');
+  });
+
+  it('treats absent, empty and unknown as both desks rather than as neither', () => {
+    // The distinction matters: null is forwarded as no filter at all, where a
+    // value matching nothing would show an operator an empty queue and let them
+    // conclude nobody is waiting.
+    expect(parseRequesterRoleFilter(undefined)).toBeNull();
+    expect(parseRequesterRoleFilter('')).toBeNull();
+    expect(parseRequesterRoleFilter('SUPER_ADMIN')).toBeNull();
+    expect(parseRequesterRoleFilter('  ')).toBeNull();
+  });
+
+  it('takes the first recognised entry when the parameter is repeated', () => {
+    // Repeating it is not a way to ask for both — leaving it off is.
+    expect(parseRequesterRoleFilter(['PROVIDER', 'CUSTOMER'])).toBe('PROVIDER');
+    expect(parseRequesterRoleFilter(['nonsense', 'CUSTOMER'])).toBe('CUSTOMER');
+  });
+});
+
+describe('a link back to the queue', () => {
+  it('carries both filters, and the page they were read at', () => {
+    expect(buildSupportListHref(['OPEN', 'IN_PROGRESS'], 3, 'PROVIDER')).toBe(
+      '/support?status=OPEN,IN_PROGRESS&requesterRole=PROVIDER&page=3',
+    );
+  });
+
+  it('says nothing it does not have to', () => {
+    expect(buildSupportListHref([], 1, null)).toBe('/support');
+    expect(buildSupportListHref([], 1)).toBe('/support');
+    expect(buildSupportListHref([], 2, 'CUSTOMER')).toBe('/support?requesterRole=CUSTOMER&page=2');
+  });
+
+  /**
+   * Paging must not drop the desk.
+   *
+   * A page number is only meaningful inside the list its filters describe, so a
+   * "Sonraki" link that lost the desk would page into a different list at an
+   * offset taken from this one — quietly skipping tickets rather than failing.
+   */
+  it('survives a round trip through the parsers', () => {
+    const href = buildSupportListHref(['OPEN'], 2, 'PROVIDER');
+    const params = new URLSearchParams(href.split('?')[1]);
+
+    expect(parseStatusFilter(params.get('status') ?? undefined)).toEqual(['OPEN']);
+    expect(parseRequesterRoleFilter(params.get('requesterRole') ?? undefined)).toBe('PROVIDER');
+    expect(params.get('page')).toBe('2');
   });
 });

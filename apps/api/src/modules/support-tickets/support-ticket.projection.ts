@@ -4,11 +4,11 @@ import { Prisma, SupportTicketAuthorRole, SupportTicketStatus } from '@prisma/cl
  * What a ticket, a message and a status change look like on the wire.
  *
  * Two audiences read these projections and they are not given the same thing.
- * A customer's ticket carries no customer block at all — they know who they
- * are, and repeating their own name and address in a payload only widens what a
- * leaked response would say. The admin's carries exactly the identity an
- * operator needs to answer: the account's name and e-mail, which every other
- * admin screen already shows.
+ * An owner's ticket carries no owner block at all — they know who they are, and
+ * repeating their own name and address in a payload only widens what a leaked
+ * response would say. The admin's carries exactly the identity an operator
+ * needs to answer: the account's name and e-mail, which every other admin
+ * screen already shows, plus which side of the marketplace is waiting.
  *
  * Neither carries a password hash, a session, a token, a phone verification, a
  * payment fact or anything at all about another customer. The selects below are
@@ -45,6 +45,7 @@ export const supportTicketSelect = {
   id: true,
   subject: true,
   status: true,
+  requesterRole: true,
   lastActivityAt: true,
   resolvedAt: true,
   closedAt: true,
@@ -57,8 +58,8 @@ type SupportTicketRow = Prisma.SupportTicketGetPayload<{ select: typeof supportT
 /** The same row, plus the owner an operator needs in order to answer. */
 export const adminSupportTicketSelect = {
   ...supportTicketSelect,
-  customerId: true,
-  customer: { select: { id: true, name: true, email: true } },
+  requesterId: true,
+  requester: { select: { id: true, name: true, email: true } },
 } satisfies Prisma.SupportTicketSelect;
 
 type AdminSupportTicketRow = Prisma.SupportTicketGetPayload<{
@@ -88,6 +89,15 @@ export function toSupportTicketSummary(ticket: SupportTicketRow) {
     id: ticket.id,
     subject: ticket.subject,
     status: ticket.status,
+    /**
+     * Which desk the ticket belongs to.
+     *
+     * Returned to the owner as well as to the operator: it is a fact about
+     * their own ticket, it tells them nothing they did not already know about
+     * themselves, and it is what lets one set of screens serve both panels
+     * without inferring the answer from the session.
+     */
+    requesterRole: ticket.requesterRole,
     lastActivityAt: ticket.lastActivityAt.toISOString(),
     resolvedAt: ticket.resolvedAt ? ticket.resolvedAt.toISOString() : null,
     closedAt: ticket.closedAt ? ticket.closedAt.toISOString() : null,
@@ -98,17 +108,24 @@ export function toSupportTicketSummary(ticket: SupportTicketRow) {
 /**
  * The admin list row.
  *
- * `customer.name` may be null — an account created for a guest request has no
+ * `requester.name` may be null — an account created for a guest request has no
  * name until somebody fills one in — and the projection says so rather than
  * inventing a placeholder, so the screen can decide what to print.
+ *
+ * The block is named `requester` rather than `customer` because it is now
+ * either one: the operator's queue holds both sides of the marketplace, and a
+ * field called "customer" sitting over a hizmet veren's row would be the one
+ * place a screen could quietly mislabel who is waiting. Which side it actually
+ * is comes from `requesterRole` on the summary above — the snapshot taken when
+ * the ticket was opened — and never from the account's current role.
  */
 export function toAdminSupportTicketSummary(ticket: AdminSupportTicketRow) {
   return {
     ...toSupportTicketSummary(ticket),
-    customer: {
-      id: ticket.customer.id,
-      name: ticket.customer.name,
-      email: ticket.customer.email,
+    requester: {
+      id: ticket.requester.id,
+      name: ticket.requester.name,
+      email: ticket.requester.email,
     },
   };
 }

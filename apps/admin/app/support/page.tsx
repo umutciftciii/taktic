@@ -3,7 +3,10 @@ import {
   apiFetch,
   formatDateTime,
   requireAdmin,
+  SUPPORT_TICKET_REQUESTER_ROLES,
   SUPPORT_TICKET_STATUSES,
+  supportTicketRequesterRoleBadgeClass,
+  supportTicketRequesterRoleLabel,
   supportTicketStatusBadgeClass,
   supportTicketStatusLabel,
   type SupportTicketListEntry,
@@ -15,6 +18,7 @@ import {
   OPEN_SUPPORT_TICKET_STATUSES,
   buildSupportListHref,
   isOpenSupportTicketFilter,
+  parseRequesterRoleFilter,
   parseStatusFilter,
   statusFilterValue,
 } from '../../lib/support-ticket-filter';
@@ -23,13 +27,19 @@ import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 
 /**
- * The support queue.
+ * The support queue — one queue, both sides of the marketplace.
  *
- * The screen answers one question — what have customers asked, what state is
- * each ask in, and which one moved most recently — and hands the operator to
- * the ticket itself to do anything about it. Everything it offers is a read: no
+ * The screen answers one question — who has asked for help, what state is each
+ * ask in, and which one moved most recently — and hands the operator to the
+ * ticket itself to do anything about it. Everything it offers is a read: no
  * ticket is created, deleted or reassigned from here, and none can be, because
  * the API has no route for any of the three.
+ *
+ * Hizmet alan and hizmet veren tickets share this list rather than getting one
+ * each, so nothing can fall between two queues while each is waiting for
+ * somebody who is watching the other. Which desk a ticket is on is a badge on
+ * its row and a filter in the toolbar, both driven by the ticket's own
+ * `requesterRole` snapshot.
  *
  * The status filter takes a set, not a single status. `?status=OPEN` still
  * means what it always did — it is a one-element set — and `?status=OPEN,IN_PROGRESS`
@@ -51,6 +61,8 @@ const DEFAULT_PAGE_SIZE = 25;
 type RawSearchParams = {
   /** An array when the caller repeated `?status=` — Next hands both shapes over. */
   status?: string | string[];
+  /** Likewise for the desk, though repeating it is not a way to ask for both. */
+  requesterRole?: string | string[];
   page?: string;
 };
 
@@ -68,6 +80,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
 
   const params = await searchParams;
   const statuses = parseStatusFilter(params.status);
+  const requesterRole = parseRequesterRoleFilter(params.requesterRole);
   // Canonical order for the select: `?status=IN_PROGRESS,OPEN` is the same
   // filter as `?status=OPEN,IN_PROGRESS`, and the option below should be the
   // one shown as chosen either way rather than the box silently reading "Tümü".
@@ -80,6 +93,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
   apiQuery.set('page', String(page));
   apiQuery.set('pageSize', String(DEFAULT_PAGE_SIZE));
   if (selectedFilter) apiQuery.set('status', selectedFilter);
+  if (requesterRole) apiQuery.set('requesterRole', requesterRole);
 
   const response = await apiFetch<SupportTicketListResponse>(
     `/admin/support/tickets?${apiQuery.toString()}`,
@@ -99,10 +113,34 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
     <main>
       <PageHeader
         title="Destek Talepleri"
-        subtitle="Hizmet alanların açtığı destek talepleri. Yanıtlamak ve durumunu değiştirmek için bir talebi açın."
+        subtitle="Hizmet alanların ve hizmet verenlerin açtığı destek talepleri, tek kuyrukta. Yanıtlamak ve durumunu değiştirmek için bir talebi açın."
       />
 
       <form className="admin-toolbar" method="get" action="/support">
+        {/*
+          The desk filter comes first because it splits the queue in two, where
+          the status filter narrows whichever half is on screen — and because
+          reading them left to right then says what the list is: "hizmet
+          verenlerin açık talepleri".
+        */}
+        <div className="admin-toolbar-field">
+          <label htmlFor="support-requester-role">Talep sahibi</label>
+          <select
+            id="support-requester-role"
+            name="requesterRole"
+            defaultValue={requesterRole ?? ''}
+            data-testid="support-requester-role-filter"
+          >
+            <option value="">Tümü</option>
+            {SUPPORT_TICKET_REQUESTER_ROLES.map((value) => (
+              <option key={value} value={value}>
+                {`${supportTicketRequesterRoleLabel(value)} (${
+                  response.requesterRoleCounts[value] ?? 0
+                })`}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="admin-toolbar-field">
           <label htmlFor="support-status">Durum</label>
           <select id="support-status" name="status" defaultValue={selectedFilter}>
@@ -136,7 +174,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
           <button className="btn btn-secondary btn-sm" type="submit">
             Uygula
           </button>
-          {statuses.length ? (
+          {statuses.length || requesterRole ? (
             <Link className="btn btn-ghost btn-sm" href="/support">
               Temizle
             </Link>
@@ -152,19 +190,19 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
         {response.items.length === 0 ? (
           <EmptyState
             title={
-              statuses.length
-                ? isOpenSupportTicketFilter(statuses)
+              statuses.length || requesterRole
+                ? isOpenSupportTicketFilter(statuses) && !requesterRole
                   ? 'Bekleyen destek talebi yok.'
-                  : 'Bu durumda destek talebi bulunamadı.'
+                  : 'Bu filtreyle destek talebi bulunamadı.'
                 : 'Henüz destek talebi açılmadı.'
             }
             description={
-              statuses.length
-                ? 'Filtreyi temizleyerek tüm talepleri görebilirsiniz.'
-                : 'Bir hizmet alan panelinden destek talebi açtığında burada görünür.'
+              statuses.length || requesterRole
+                ? 'Filtreleri temizleyerek tüm talepleri görebilirsiniz.'
+                : 'Bir hizmet alan veya hizmet veren panelinden destek talebi açtığında burada görünür.'
             }
             action={
-              statuses.length ? (
+              statuses.length || requesterRole ? (
                 <Link className="btn btn-secondary btn-sm" href="/support">
                   Filtreyi temizle
                 </Link>
@@ -177,8 +215,9 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
               <thead>
                 <tr>
                   <th>Durum</th>
+                  <th>Talep sahibi</th>
                   <th>Konu</th>
-                  <th>Hizmet alan</th>
+                  <th>Kim</th>
                   <th>Son hareket</th>
                   <th>Oluşturulma</th>
                   <th />
@@ -199,7 +238,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
           {response.page > 1 ? (
             <Link
               className="btn btn-secondary btn-sm"
-              href={buildSupportListHref(statuses, response.page - 1)}
+              href={buildSupportListHref(statuses, response.page - 1, requesterRole)}
             >
               ← Önceki
             </Link>
@@ -212,7 +251,7 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
           {response.hasNextPage ? (
             <Link
               className="btn btn-secondary btn-sm"
-              href={buildSupportListHref(statuses, response.page + 1)}
+              href={buildSupportListHref(statuses, response.page + 1, requesterRole)}
             >
               Sonraki →
             </Link>
@@ -227,10 +266,29 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
 
 function SupportTicketRow({ ticket }: { ticket: SupportTicketListEntry }) {
   return (
-    <tr data-testid="support-ticket-row" data-status={ticket.status}>
+    <tr
+      data-testid="support-ticket-row"
+      data-status={ticket.status}
+      data-requester-role={ticket.requesterRole}
+    >
       <td>
         <span className={supportTicketStatusBadgeClass(ticket.status)}>
           {supportTicketStatusLabel(ticket.status)}
+        </span>
+      </td>
+      {/*
+        Which desk, in its own column and as a badge rather than as a word
+        tucked under the name. The queue is scanned rather than read, and the
+        rules an operator is about to apply — what the ticket can be about, what
+        the answer may say — depend on this before they depend on anything else
+        in the row.
+      */}
+      <td>
+        <span
+          className={supportTicketRequesterRoleBadgeClass(ticket.requesterRole)}
+          data-testid="support-ticket-requester-role"
+        >
+          {supportTicketRequesterRoleLabel(ticket.requesterRole)}
         </span>
       </td>
       <td data-testid="support-ticket-subject">{ticket.subject}</td>
@@ -241,10 +299,10 @@ function SupportTicketRow({ ticket }: { ticket: SupportTicketListEntry }) {
           printing an invented placeholder would make the two cases
           indistinguishable.
         */}
-        <div>{ticket.customer.name ?? <span className="cell-muted">İsimsiz hesap</span>}</div>
-        {ticket.customer.email ? (
+        <div>{ticket.requester.name ?? <span className="cell-muted">İsimsiz hesap</span>}</div>
+        {ticket.requester.email ? (
           <div className="cell-muted" style={{ fontSize: 12 }}>
-            {ticket.customer.email}
+            {ticket.requester.email}
           </div>
         ) : null}
       </td>

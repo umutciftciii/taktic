@@ -89,17 +89,29 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'provider-claim',
   'request-expiring',
   'package-purchase-confirmation',
-  // The five support-ticket messages. Two go to the operator inbox and three to
-  // the customer, and they are deliberately five templates rather than one
-  // parameterised by audience: the pair a single event produces say different
-  // things to different people, and a template that decided which of the two it
-  // was at render time would be one edit away from telling a customer what only
-  // an operator may read.
+  // The support-ticket messages: five per desk. Two of each five go to the
+  // operator inbox and three to the person who opened the ticket, and they are
+  // deliberately separate templates rather than one parameterised by audience —
+  // the pair a single event produces say different things to different people,
+  // and a template that decided which of the two it was at render time would be
+  // one edit away from telling the person waiting what only an operator may
+  // read.
+  //
+  // The two desks are separate for a second reason on top of that one. A hizmet
+  // alan's ticket is about a talep and a hizmet veren's is about teklifler,
+  // krediler and their işletme profili, so the two are not the same sentence
+  // with a different noun in it — and the hizmet veren's copies link into the
+  // panel they actually use.
   'support-ticket-created',
   'support-ticket-new-for-support',
   'support-ticket-customer-reply',
   'support-ticket-admin-reply',
   'support-ticket-status-changed',
+  'support-ticket-provider-created',
+  'support-ticket-provider-new-for-support',
+  'support-ticket-provider-reply',
+  'support-ticket-provider-admin-reply',
+  'support-ticket-provider-status-changed',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -184,6 +196,22 @@ export function transactionalSubject(
     case 'support-ticket-admin-reply':
       return withSuffix('Destek talebinize yanıt', ticketSubject(data));
     case 'support-ticket-status-changed':
+      return withSuffix(statusChangeSubject(data), ticketSubject(data));
+    // The hizmet veren half. The two that reach the support mailbox say which
+    // desk they came from in the subject line itself, because an operator
+    // triaging an inbox sorts on subjects and should not have to open a message
+    // to find out which side of the marketplace is waiting. The three that go to
+    // the hizmet veren say nothing of the kind — they are addressed to somebody
+    // who already knows who they are.
+    case 'support-ticket-provider-created':
+      return withSuffix('Destek talebiniz alındı', ticketSubject(data));
+    case 'support-ticket-provider-new-for-support':
+      return withSuffix('Yeni destek talebi (hizmet veren)', ticketSubject(data));
+    case 'support-ticket-provider-reply':
+      return withSuffix('Destek talebine hizmet veren yanıtı', ticketSubject(data));
+    case 'support-ticket-provider-admin-reply':
+      return withSuffix('Destek talebinize yanıt', ticketSubject(data));
+    case 'support-ticket-provider-status-changed':
       return withSuffix(statusChangeSubject(data), ticketSubject(data));
   }
 }
@@ -279,6 +307,16 @@ export function buildDocument(
       return supportTicketAdminReply(subject, fullName, data);
     case 'support-ticket-status-changed':
       return supportTicketStatusChanged(subject, fullName, data);
+    case 'support-ticket-provider-created':
+      return supportTicketProviderCreated(subject, fullName, data);
+    case 'support-ticket-provider-new-for-support':
+      return supportTicketProviderNewForSupport(subject, fullName, data);
+    case 'support-ticket-provider-reply':
+      return supportTicketProviderReply(subject, fullName, data);
+    case 'support-ticket-provider-admin-reply':
+      return supportTicketProviderAdminReply(subject, fullName, data);
+    case 'support-ticket-provider-status-changed':
+      return supportTicketProviderStatusChanged(subject, fullName, data);
   }
 }
 
@@ -1097,11 +1135,33 @@ function quotedMessage(label: string, excerpt: string | null): (EmailBlock | nul
   return excerpt ? [sectionLabel(label), paragraph(excerpt)] : [];
 }
 
-/** The ticket's identity rows, shared by all five messages. */
+/** The ticket's identity rows, shared by every one of these messages. */
 function ticketRows(data: Data): (EmailDataRow | null)[] {
   return [
     row('Talep referansı', text(data.ticketReference)),
     row('Konu', text(data.ticketSubject)),
+  ];
+}
+
+/**
+ * Who is waiting, on the four messages that go to the support mailbox.
+ *
+ * The desk comes first and is spelled out — "Hizmet alan" or "Hizmet veren" —
+ * because it is the fact that decides which screen an operator opens and which
+ * rules apply to the answer. It is printed from `requesterRoleLabel`, which the
+ * payload builder fills from the ticket's own snapshot; this template never
+ * infers it from which of the four it happens to be, so a message and the
+ * ticket behind it cannot come to disagree.
+ *
+ * Never rendered on a message to the person who opened the ticket. Those go to
+ * somebody who knows their own name and address, and repeating them there only
+ * widens what a forwarded or leaked message says.
+ */
+function requesterRows(data: Data): (EmailDataRow | null)[] {
+  return [
+    row('Talep sahibi', text(data.requesterRoleLabel)),
+    row('Ad', text(data.requesterName)),
+    row('E-posta', text(data.requesterEmail)),
   ];
 }
 
@@ -1158,19 +1218,18 @@ function supportTicketCreated(subject: string, fullName: string, data: Data): Em
 function supportTicketNewForSupport(subject: string, fullName: string, data: Data): EmailDocument {
   return {
     subject,
-    preheader: 'Bir müşteri yeni bir destek talebi açtı.',
+    preheader: 'Bir hizmet alan yeni bir destek talebi açtı.',
     audience: 'DESTEK',
     kicker: 'Yeni talep',
     heading: 'Yeni destek talebi',
     fullName,
     accountUrl: null,
     blocks: compact([
-      paragraph('Bir müşteri yeni bir destek talebi açtı.'),
+      paragraph('Bir hizmet alan yeni bir destek talebi açtı.'),
       spacer(4),
       dataTable([
         ...ticketRows(data),
-        row('Müşteri', text(data.customerName)),
-        row('Müşteri e-postası', text(data.customerEmail)),
+        ...requesterRows(data),
         row('Durum', supportStatusLabel(data.status)),
         row('Oluşturulma', formatDateTime(data.createdAt)),
       ]),
@@ -1186,19 +1245,18 @@ function supportTicketNewForSupport(subject: string, fullName: string, data: Dat
 function supportTicketCustomerReply(subject: string, fullName: string, data: Data): EmailDocument {
   return {
     subject,
-    preheader: 'Açık bir destek talebine müşteri yanıtı geldi.',
+    preheader: 'Açık bir destek talebine hizmet alan yanıtı geldi.',
     audience: 'DESTEK',
-    kicker: 'Müşteri yanıtı',
+    kicker: 'Hizmet alan yanıtı',
     heading: 'Destek talebine yeni mesaj',
     fullName,
     accountUrl: null,
     blocks: compact([
-      paragraph('Bir müşteri kendi destek talebine yeni bir mesaj ekledi.'),
+      paragraph('Bir hizmet alan kendi destek talebine yeni bir mesaj ekledi.'),
       spacer(4),
       dataTable([
         ...ticketRows(data),
-        row('Müşteri', text(data.customerName)),
-        row('Müşteri e-postası', text(data.customerEmail)),
+        ...requesterRows(data),
         row('Durum', supportStatusLabel(data.status)),
         row('Mesaj zamanı', formatDateTime(data.messageAt)),
       ]),
@@ -1288,6 +1346,203 @@ function supportTicketStatusChanged(subject: string, fullName: string, data: Dat
         closed
           ? 'Kapatılan bir talebe yeni mesaj eklenemez. Aynı konu sürüyorsa panelinizden yeni bir ' +
               'talep açabilirsiniz.'
+          : 'Talebinizle ilgili her gelişmeyi bu talep üzerinden ileteceğiz.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * 22 · support.ticket_created — the hizmet veren's copy.
+ *
+ * The hizmet alan's version of this message with two differences, and they are
+ * the reason it is its own template rather than a parameter. The audience strip
+ * reads HİZMET VEREN, so a forwarded message says which panel it belongs to.
+ * And the note at the bottom points at the hizmet veren panel rather than at a
+ * talep screen a hizmet veren has no access to.
+ *
+ * What it does *not* differ in is anything about the ticket itself: same
+ * reference, same subject, same quoted opening message, same absence of a
+ * promised answering time this product does not measure.
+ */
+function supportTicketProviderCreated(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Destek talebinizi aldık; yanıtlarımızı bu talep üzerinden ileteceğiz.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Destek talebi',
+    heading: 'Destek talebiniz alındı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Destek talebinizi aldık. Yanıtlarımızı ve talebinizle ilgili her gelişmeyi bu talep ' +
+          'üzerinden ileteceğiz.',
+      ),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Oluşturulma', formatDateTime(data.createdAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('Mesajınız', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.ticketUrl), 'primary'),
+      spacer(20),
+      note(
+        'Eklemek istediğiniz bir şey olursa bu e-postayı yanıtlayabilir veya talebi hizmet veren ' +
+          'panelinizden açarak yazabilirsiniz.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * 23 · support.ticket_created — the operator's copy, hizmet veren edition.
+ *
+ * Separate from the hizmet alan's inbox copy for one operational reason: the
+ * two are triaged differently, and an operator sorting a shared mailbox by
+ * subject should be able to see which desk a ticket came from without opening
+ * it. The body says it too, in the `requesterRows` block, so a message read out
+ * of order still says who is waiting.
+ */
+function supportTicketProviderNewForSupport(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  return {
+    subject,
+    preheader: 'Bir hizmet veren yeni bir destek talebi açtı.',
+    audience: 'DESTEK',
+    kicker: 'Yeni talep',
+    heading: 'Yeni destek talebi (hizmet veren)',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph('Bir hizmet veren yeni bir destek talebi açtı.'),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        ...requesterRows(data),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Oluşturulma', formatDateTime(data.createdAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('İlk mesaj', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi panelde aç', text(data.ticketUrl), 'primary'),
+    ]),
+  };
+}
+
+/** 24 · support.requester_message — the operator's copy, hizmet veren edition. */
+function supportTicketProviderReply(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Açık bir destek talebine hizmet veren yanıtı geldi.',
+    audience: 'DESTEK',
+    kicker: 'Hizmet veren yanıtı',
+    heading: 'Destek talebine yeni mesaj',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph('Bir hizmet veren kendi destek talebine yeni bir mesaj ekledi.'),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        ...requesterRows(data),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Mesaj zamanı', formatDateTime(data.messageAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('Mesaj', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi panelde aç', text(data.ticketUrl), 'primary'),
+    ]),
+  };
+}
+
+/**
+ * 25 · support.admin_message — the hizmet veren's copy.
+ *
+ * What is absent is the whole point, exactly as it is on the hizmet alan's
+ * version: the answer is quoted, and who wrote it is not. This template reads
+ * four fields and none of them can carry an operator's identity — the payload
+ * builder never loads one.
+ */
+function supportTicketProviderAdminReply(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  return {
+    subject,
+    preheader: 'Destek talebinize yeni bir yanıt eklendi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Yanıt',
+    heading: 'Destek talebinize yanıt verdik',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph('Destek ekibimiz talebinize yanıt verdi.'),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Durum', supportStatusLabel(data.status)),
+        row('Yanıt zamanı', formatDateTime(data.messageAt)),
+      ]),
+      spacer(22),
+      ...quotedMessage('Yanıtımız', supportExcerpt(data)),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.ticketUrl), 'primary'),
+      spacer(20),
+      note(
+        'Yanıtınızı bu e-postayı yanıtlayarak veya talebi hizmet veren panelinizden açarak ' +
+          'iletebilirsiniz.',
+      ),
+    ]),
+  };
+}
+
+/** 26 · support.status_changed — the hizmet veren's copy. */
+function supportTicketProviderStatusChanged(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  const to = supportStatusLabel(data.status);
+  const closed = text(data.status) === 'CLOSED';
+
+  return {
+    subject,
+    preheader: to
+      ? `Destek talebinizin durumu "${to}" olarak güncellendi.`
+      : 'Destek talebinizin durumu güncellendi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Durum güncellemesi',
+    heading: 'Destek talebinizin durumu değişti',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        to ? `Destek talebiniz "${to}" durumuna alındı.` : 'Destek talebinizin durumu güncellendi.',
+      ),
+      spacer(4),
+      dataTable([
+        ...ticketRows(data),
+        row('Önceki durum', supportStatusLabel(data.fromStatus)),
+        row('Yeni durum', to),
+        row('Güncelleme zamanı', formatDateTime(data.changedAt)),
+      ]),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.ticketUrl), 'primary'),
+      spacer(20),
+      note(
+        closed
+          ? 'Kapatılan bir talebe yeni mesaj eklenemez. Aynı konu sürüyorsa hizmet veren ' +
+              'panelinizden yeni bir talep açabilirsiniz.'
           : 'Talebinizle ilgili her gelişmeyi bu talep üzerinden ileteceğiz.',
       ),
     ]),

@@ -161,8 +161,10 @@ describe('a customer opens a ticket', () => {
     // The operator's copy names the person waiting; the queue screen shows the
     // same two fields.
     expect(toSupport.data).toMatchObject({
-      customerName: 'Deniz Yılmaz',
-      customerEmail: customer.email,
+      requesterName: 'Deniz Yılmaz',
+      requesterEmail: customer.email,
+      // And which desk, so a shared mailbox can be triaged without opening it.
+      requesterRoleLabel: 'Hizmet alan',
       ticketReference: ticket.id,
     });
     expect(toSupport.data?.ticketUrl).toContain(`/support/${ticket.id}`);
@@ -245,7 +247,7 @@ describe('a customer writes on their ticket', () => {
       select: { id: true },
     });
 
-    await mail().sendSupportTicketCustomerMessage(written?.id as string);
+    await mail().sendSupportTicketRequesterMessage(written?.id as string);
 
     expect(sentOf('support-ticket-customer-reply')).toHaveLength(1);
     const logs = (await supportLogs()).filter(
@@ -467,15 +469,20 @@ describe('what produces no notification at all', () => {
     ctx.notifications.clear();
     await ctx.prisma.notificationLog.deleteMany({});
 
+    // Anonymous on the requester routes.
     await request(ctx.server)
       .post('/support/tickets')
-      .set('Cookie', provider.cookie)
       .send({ subject: 'Konu', message: 'Mesaj' })
-      .expect(403);
+      .expect(401);
     await request(ctx.server)
       .post(`/support/tickets/${ticket.id}/messages`)
       .send({ body: 'Anonim mesaj' })
       .expect(401);
+    // A hizmet veren may open tickets of their own now, but not write into a
+    // hizmet alan's — and a refusal that produces an e-mail would tell the
+    // support mailbox about a message nobody was allowed to send.
+    await customerReply(provider, ticket.id, 'Bu talep benim değil.').expect(404);
+    // And neither marketplace role reaches the operator's routes at all.
     await adminReply(provider, ticket.id, 'Yetkim yok.').expect(403);
     await moveStatus(provider, ticket.id, SupportTicketStatus.IN_PROGRESS).expect(403);
 

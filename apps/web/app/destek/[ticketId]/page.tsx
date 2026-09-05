@@ -12,7 +12,7 @@ import {
   type SupportTicketTimelineEntry,
 } from '../../../lib/api';
 import { IconArrowLeft } from '../../landing-icons';
-import { CustomerShell } from '../../requests/customer-shell';
+import { PanelShell } from '../../panel-shell';
 import { ReplyForm } from '../reply-form';
 
 type SupportTicketPageProps = {
@@ -24,10 +24,16 @@ type SupportTicketPageProps = {
  * One support ticket, and everything that has happened to it.
  *
  * The whole screen is served from a single API call that already refused
- * anybody who is not this ticket's owner, so this page never has to decide who
- * may read it. `fetchOrNotFound` turns that refusal into the shared 404, which
- * says the same thing to somebody who guessed an id as to somebody whose ticket
- * really is gone: nothing.
+ * anybody who is not this ticket's owner — including somebody on the other side
+ * of the marketplace, whose own desk this ticket is not on — so this page never
+ * has to decide who may read it. `fetchOrNotFound` turns that refusal into the
+ * shared 404, which says the same thing to a hizmet veren who guessed a hizmet
+ * alan's id as to somebody whose ticket really is gone: nothing.
+ *
+ * That is why the role check below is only about being signed in as one of the
+ * two marketplace roles. Deciding here which tickets belong to whom would be a
+ * second answer to a question the API has already answered, and a second answer
+ * is the one that eventually disagrees.
  */
 export default async function SupportTicketPage({ params, searchParams }: SupportTicketPageProps) {
   const { ticketId } = await params;
@@ -36,7 +42,7 @@ export default async function SupportTicketPage({ params, searchParams }: Suppor
   if (!user) {
     redirect(`/login?redirectTo=/destek/${ticketId}`);
   }
-  if (user.role !== 'CUSTOMER') {
+  if (user.role !== 'CUSTOMER' && user.role !== 'PROVIDER') {
     redirect('/');
   }
 
@@ -49,7 +55,7 @@ export default async function SupportTicketPage({ params, searchParams }: Suppor
   const justCreated = readParam(query, 'created') === '1';
 
   return (
-    <CustomerShell user={user} active="support">
+    <PanelShell user={user} active="support">
       <div className="cdash-support" data-testid="support-screen">
         <Link className="cdash-page-back" href="/destek">
           <IconArrowLeft size={14} />
@@ -102,7 +108,7 @@ export default async function SupportTicketPage({ params, searchParams }: Suppor
           )}
         </div>
       </div>
-    </CustomerShell>
+    </PanelShell>
   );
 }
 

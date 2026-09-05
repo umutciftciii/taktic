@@ -1,4 +1,9 @@
-import { SupportTicketStatus, UserRole } from '@prisma/client';
+import {
+  SupportTicketAuthorRole,
+  SupportTicketRequesterRole,
+  SupportTicketStatus,
+  UserRole,
+} from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -44,10 +49,10 @@ async function signIn(role: UserRole): Promise<Party> {
   return { userId: user.id, cookie: await loginAs(ctx.prisma, user.id) };
 }
 
-async function openTicket(customer: Party, overrides: { subject?: string; message?: string } = {}) {
+async function openTicket(requester: Party, overrides: { subject?: string; message?: string } = {}) {
   const response = await request(ctx.server)
     .post('/support/tickets')
-    .set('Cookie', customer.cookie)
+    .set('Cookie', requester.cookie)
     .send({
       subject: overrides.subject ?? 'Faturam ulaşmadı',
       message: overrides.message ?? 'Geçen haftaki talebimin faturası elime geçmedi.',
@@ -131,11 +136,11 @@ describe('a customer and their own tickets', () => {
       .send({
         subject: 'Başkasının adına',
         message: 'Bu talep başkasına yazılsın.',
-        customerId: other.userId,
+        requesterId: other.userId,
       })
       .expect(400);
 
-    const stolen = await ctx.prisma.supportTicket.findMany({ where: { customerId: other.userId } });
+    const stolen = await ctx.prisma.supportTicket.findMany({ where: { requesterId: other.userId } });
     expect(stolen).toHaveLength(0);
   });
 });
@@ -178,27 +183,140 @@ describe('another customer, a provider, and a stranger', () => {
     expect(messages).toHaveLength(1);
   });
 
-  it('refuses a provider and an anonymous caller on every customer route', async () => {
-    const owner = await signIn(UserRole.CUSTOMER);
+  /**
+   * The cross-role rule, in both directions.
+   *
+   * The two marketplace roles now share one route, so "you may not read this"
+   * is no longer the guard's answer — it is the ownership scope's, and it says
+   * exactly what it says to a stranger: 404. The point of running it both ways
+   * round is that a scope keyed only on the account id would pass one direction
+   * and a scope keyed only on the desk would pass the other; only a scope that
+   * carries both passes both.
+   */
+  it('shows each marketplace role a 404 on the other role\'s ticket', async () => {
+    const customer = await signIn(UserRole.CUSTOMER);
     const provider = await signIn(UserRole.PROVIDER);
+
+    const customerTicket = await openTicket(customer, { subject: 'Hizmet alan konusu' });
+    const providerTicket = await openTicket(provider, { subject: 'Hizmet veren konusu' });
+
+    // Each list holds exactly one ticket: their own.
+    const customerList = await request(ctx.server)
+      .get('/support/tickets')
+      .set('Cookie', customer.cookie)
+      .expect(200);
+    expect(customerList.body.map((item: { id: string }) => item.id)).toEqual([customerTicket.id]);
+
+    const providerList = await request(ctx.server)
+      .get('/support/tickets')
+      .set('Cookie', provider.cookie)
+      .expect(200);
+    expect(providerList.body.map((item: { id: string }) => item.id)).toEqual([providerTicket.id]);
+
+    // And neither can reach the other's by id — the same 404 an invented id
+    // gets, so the response cannot be used to find out that a ticket exists.
+    for (const [caller, other] of [
+      [customer, providerTicket],
+      [provider, customerTicket],
+    ] as const) {
+      await request(ctx.server)
+        .get(`/support/tickets/${other.id}`)
+        .set('Cookie', caller.cookie)
+        .expect(404);
+
+      await request(ctx.server)
+        .get('/support/tickets/does-not-exist')
+        .set('Cookie', caller.cookie)
+        .expect(404);
+
+      await request(ctx.server)
+        .post(`/support/tickets/${other.id}/messages`)
+        .set('Cookie', caller.cookie)
+        .send({ body: 'Bu benim talebim değil.' })
+        .expect(404);
+    }
+
+    // Nothing was written into either conversation by the other side.
+    for (const ticket of [customerTicket, providerTicket]) {
+      const messages = await ctx.prisma.supportTicketMessage.findMany({
+        where: { ticketId: ticket.id },
+      });
+      expect(messages).toHaveLength(1);
+    }
+  });
+
+  it('stamps each ticket with the desk of the account that opened it', async () => {
+    const customer = await signIn(UserRole.CUSTOMER);
+    const provider = await signIn(UserRole.PROVIDER);
+
+    const customerTicket = await openTicket(customer);
+    const providerTicket = await openTicket(provider);
+
+    const stored = await ctx.prisma.supportTicket.findMany({
+      where: { id: { in: [customerTicket.id, providerTicket.id] } },
+      select: { id: true, requesterId: true, requesterRole: true, messages: true },
+    });
+
+    const byId = new Map(stored.map((row) => [row.id, row]));
+
+    expect(byId.get(customerTicket.id)).toMatchObject({
+      requesterId: customer.userId,
+      requesterRole: SupportTicketRequesterRole.CUSTOMER,
+    });
+    expect(byId.get(providerTicket.id)).toMatchObject({
+      requesterId: provider.userId,
+      requesterRole: SupportTicketRequesterRole.PROVIDER,
+    });
+
+    // And the opening message is stamped with the same side, so the timeline
+    // reads as having come from where it came from.
+    expect(byId.get(customerTicket.id)?.messages[0]?.authorRole).toBe(
+      SupportTicketAuthorRole.CUSTOMER,
+    );
+    expect(byId.get(providerTicket.id)?.messages[0]?.authorRole).toBe(
+      SupportTicketAuthorRole.PROVIDER,
+    );
+  });
+
+  it('refuses an anonymous caller on every requester route', async () => {
+    const owner = await signIn(UserRole.CUSTOMER);
     const ticket = await openTicket(owner);
 
-    await request(ctx.server).get('/support/tickets').set('Cookie', provider.cookie).expect(403);
-    await request(ctx.server)
-      .get(`/support/tickets/${ticket.id}`)
-      .set('Cookie', provider.cookie)
-      .expect(403);
-    await request(ctx.server)
-      .post('/support/tickets')
-      .set('Cookie', provider.cookie)
-      .send({ subject: 'Konu', message: 'Mesaj' })
-      .expect(403);
-
     await request(ctx.server).get('/support/tickets').expect(401);
+    await request(ctx.server).get(`/support/tickets/${ticket.id}`).expect(401);
     await request(ctx.server)
       .post('/support/tickets')
       .send({ subject: 'Konu', message: 'Mesaj' })
       .expect(401);
+    await request(ctx.server)
+      .post(`/support/tickets/${ticket.id}/messages`)
+      .send({ body: 'Mesaj' })
+      .expect(401);
+  });
+
+  /**
+   * An operator has no desk, so the requester routes give them nothing.
+   *
+   * The guard refuses them outright, which is the design: an operator's queue
+   * is a different surface with a different service. This is stated as a test
+   * because widening the requester guard "so admins can see it too" is exactly
+   * the change that would silently subject an operator to the ownership scope.
+   */
+  it('refuses a SUPER_ADMIN on the requester routes', async () => {
+    const admin = await signIn(UserRole.SUPER_ADMIN);
+    const owner = await signIn(UserRole.CUSTOMER);
+    const ticket = await openTicket(owner);
+
+    await request(ctx.server).get('/support/tickets').set('Cookie', admin.cookie).expect(403);
+    await request(ctx.server)
+      .get(`/support/tickets/${ticket.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(403);
+    await request(ctx.server)
+      .post('/support/tickets')
+      .set('Cookie', admin.cookie)
+      .send({ subject: 'Konu', message: 'Mesaj' })
+      .expect(403);
   });
 
   it('refuses every role but SUPER_ADMIN on the admin routes', async () => {
@@ -240,8 +358,10 @@ describe('the operator', () => {
     expect(list.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
       [a.id, b.id].sort(),
     );
-    // The list carries the owner an operator needs in order to answer.
-    expect(list.body.items[0].customer.id).toBeTruthy();
+    // The list carries the owner an operator needs in order to answer, and
+    // which side of the marketplace they are on.
+    expect(list.body.items[0].requester.id).toBeTruthy();
+    expect(list.body.items[0].requesterRole).toBe(SupportTicketRequesterRole.CUSTOMER);
     expect(list.body.statusCounts.OPEN).toBe(2);
 
     // An operator answers one of them and marks it in progress.
@@ -385,7 +505,7 @@ describe('the operator', () => {
       .send({ subject: 'Müşteri adına', message: 'Müşteri adına açılan talep.' })
       .expect(404);
 
-    expect(await ctx.prisma.supportTicket.count({ where: { customerId: customer.userId } })).toBe(
+    expect(await ctx.prisma.supportTicket.count({ where: { requesterId: customer.userId } })).toBe(
       0,
     );
   });
@@ -643,7 +763,7 @@ describe('integrity', () => {
       include: { messages: true, statusChanges: true },
     });
 
-    expect(stored.customerId).toBe(customer.userId);
+    expect(stored.requesterId).toBe(customer.userId);
     expect(stored.messages.map((message) => message.authorUserId).sort()).toEqual(
       [customer.userId, admin.userId].sort(),
     );
