@@ -1600,6 +1600,13 @@ input[readonly] {
   letter-spacing: -0.03em;
 }
 
+/**
+ * Each sentence of the hero slogan is its own line. A block rather than a
+ * `<br>`, so a sentence too long for the screen still wraps inside its own
+ * line, and so the heading stays one continuous run of text to a reader.
+ */
+.lp-h1-line { display: block; }
+
 .lp-accent { color: var(--color-accent-700); }
 
 .lp-hero-sub {
