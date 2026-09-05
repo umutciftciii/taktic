@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   PackagePurchase,
   ProviderCredits,
@@ -34,11 +35,23 @@ export default async function ProviderPackagePurchasesPage({
     apiFetch<ProviderCredits>(`/providers/${id}/credits`),
   ]);
 
-  if (purchasesResult.status === 'rejected') {
-    throw purchasesResult.reason;
-  }
+  /*
+   * The two halves are settled separately because they matter differently: the
+   * purchases are the screen, and the credit balance is a box beside it that is
+   * simply not drawn when it cannot be read.
+   *
+   * The purchases' failure now goes through the same mapper as every other
+   * provider-scoped screen. It used to be rethrown as-is, so a 403 from
+   * ProviderAccessGuard — another provider's id, or one that names nothing —
+   * surfaced as the generic error boundary instead of the shared 404.
+   */
+  const purchases = await fetchOrNotFound(async () => {
+    if (purchasesResult.status === 'rejected') {
+      throw purchasesResult.reason;
+    }
+    return purchasesResult.value;
+  });
 
-  const purchases = purchasesResult.value;
   const credits = creditsResult.status === 'fulfilled' ? creditsResult.value : null;
 
   const allPurchases = [...purchases].sort((a, b) => b.createdAt.localeCompare(a.createdAt));

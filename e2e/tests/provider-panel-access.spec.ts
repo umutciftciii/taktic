@@ -1,36 +1,41 @@
 import { expect, test, type Page } from '@playwright/test';
-import { Actor, expectNotFoundScreen } from '../src/actors';
+import { Actor, assertNoErrorScreen, expectNotFoundScreen } from '../src/actors';
 import { createCategory, createCustomer, createProvider, uniqueLocation } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
 
 /**
- * Two provider-panel screens, opened by somebody they do not belong to.
+ * Every provider-panel screen, opened by somebody it does not belong to.
  *
- * `/providers/:id/credits` and `/providers/:id/offers` are provider-scoped, and
- * the API has always refused them correctly: ProviderAccessGuard answers 403 for
- * another provider's id, for a customer, and for an id that names nothing. What
- * these two screens did with that answer was the defect. Every other scoped page
- * in this app runs its fetch through `fetchOrNotFound`; these two called
- * `apiFetch` bare, so the 403 became an unhandled rejection in a server
- * component — the generic error boundary in a built app, and the Next dev
- * overlay in the runtime staging is currently started with.
+ * All four are provider-scoped, and the API has always refused them correctly:
+ * ProviderAccessGuard answers 403 for another provider's id, for a customer, and
+ * for an id that names nothing. What these screens did with that answer was the
+ * defect. The rest of the app runs a scoped fetch through `fetchOrNotFound`;
+ * these four called `apiFetch` bare — `package-purchases` by rethrowing the
+ * rejection out of a `Promise.allSettled` — so the 403 became an unhandled
+ * rejection in a server component: the generic error boundary in a built app,
+ * and the Next dev overlay in the runtime staging is currently started with.
  *
  * That overlay is the reason the body is scanned here rather than only the
  * heading. It is a debugging surface, not a page: it names internal module
  * paths, `rsc://` request URLs and the framework's own portal element, and none
  * of that belongs in front of somebody who just tried an id that was not theirs.
  *
- * The credit balance is asserted to be absent as well. A 404 that still rendered
- * the shell would be a 404 that leaked the number it was refusing to show.
+ * The provider shell is asserted to be absent as well. A 404 that still rendered
+ * it would be a 404 that leaked the credit balance it was refusing to show.
+ *
+ * The list is written once and every case iterates it, so a fifth scoped screen
+ * is covered by adding one line rather than by remembering to.
  */
 
 /** Strings that only appear when a framework internal has reached the page. */
 const DEV_INTERNALS = ['nextjs-portal', 'webpack-internal', 'rsc://'];
 
-/** The two paths under test, as a function of the provider id in the URL. */
+/** Every provider-scoped screen, as a function of the provider id in the URL. */
 const SCOPED_PATHS = (providerId: string) => [
   `/providers/${providerId}/credits`,
   `/providers/${providerId}/offers`,
+  `/providers/${providerId}/subscriptions`,
+  `/providers/${providerId}/package-purchases`,
 ];
 
 /**
@@ -54,7 +59,7 @@ async function expectQuiet404(page: Page, url: string) {
 }
 
 test.describe('another party’s provider panel', () => {
-  test('a customer gets 404 on the credits and offers screens, not an error page', async ({
+  test('a customer gets 404 on every scoped screen, not an error page', async ({
     browser,
   }) => {
     const category = await createCategory(2);
@@ -81,7 +86,7 @@ test.describe('another party’s provider panel', () => {
     }
   });
 
-  test('a provider gets 404 on another provider’s credits and offers screens', async ({
+  test('a provider gets 404 on another provider’s scoped screens', async ({
     browser,
   }) => {
     const category = await createCategory(2);
@@ -125,7 +130,7 @@ test.describe('another party’s provider panel', () => {
     }
   });
 
-  test('a provider’s own credits and offers screens still work', async ({ browser }) => {
+  test('a provider’s own scoped screens all still work', async ({ browser }) => {
     const category = await createCategory(2);
     const provider = await createProvider({
       categoryId: category.id,
@@ -137,14 +142,33 @@ test.describe('another party’s provider panel', () => {
     try {
       await actor.loginToWeb(provider.email, provider.password);
 
-      await actor.gotoWeb(`/providers/${provider.id}/credits`);
-      await expect(
-        actor.page.getByRole('heading', { name: 'Krediler ve paketler' }),
-      ).toBeVisible();
-      await expect(actor.page.locator('.credit-balance')).toContainText('9');
+      // Each screen named by the heading it is supposed to render, so a page
+      // that merely stopped erroring — an empty shell, a redirect — is still a
+      // failure here. Matched exactly: the subscriptions page also has a
+      // section called "Aktif paketlerim", and a substring match would find two.
+      const OWN_SCREENS: Array<[string, string]> = [
+        ['credits', 'Krediler ve paketler'],
+        ['offers', 'Tekliflerim'],
+        ['subscriptions', 'Paketlerim'],
+        ['package-purchases', 'Paket Satın Alma Geçmişi'],
+      ];
 
-      await actor.gotoWeb(`/providers/${provider.id}/offers`);
-      await expect(actor.page.getByRole('heading', { name: 'Tekliflerim' })).toBeVisible();
+      for (const [segment, heading] of OWN_SCREENS) {
+        const response = await actor.page.goto(
+          actor.webUrl(`/providers/${provider.id}/${segment}`),
+          { waitUntil: 'domcontentloaded' },
+        );
+
+        expect(response?.status(), `${segment} must answer 200 for its owner`).toBe(200);
+        await expect(
+          actor.page.getByRole('heading', { name: heading, exact: true }),
+        ).toBeVisible();
+        await assertNoErrorScreen(actor.page);
+      }
+
+      // The balance the panel exists to show, read from the screen that shows it.
+      await actor.gotoWeb(`/providers/${provider.id}/credits`);
+      await expect(actor.page.locator('.credit-balance')).toContainText('9');
     } finally {
       await actor.close();
     }
