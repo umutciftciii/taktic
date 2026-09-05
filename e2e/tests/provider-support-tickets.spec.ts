@@ -60,10 +60,16 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
  * Read off the DOM rather than asserted one by one, so "Destek comes after
  * Mesajlar" is a statement about the order somebody tabs through rather than
  * about two elements both happening to exist.
+ *
+ * The child combinator matters. A section's counter badge is a `<span>` *inside*
+ * the entry carrying `<prefix>-nav-count-<key>`, which a descendant selector
+ * picks up as well — and the interleaved counters then make the order read as
+ * "requests > count-requests > offers > …", which contains no adjacent pair of
+ * sections at all. Only the entries themselves are direct children of `.nav`.
  */
 async function navOrder(page: Page, prefix: 'cdash' | 'pdash'): Promise<string[]> {
   return page
-    .locator(`.${prefix}-nav [data-testid^="${prefix}-nav-"]`)
+    .locator(`.${prefix}-nav > [data-testid^="${prefix}-nav-"]`)
     .evaluateAll((nodes) =>
       nodes.map((node) => (node as HTMLElement).dataset.testid as string),
     );
