@@ -116,6 +116,41 @@ export function isWriteConflictError(error: unknown): boolean {
   );
 }
 
+/**
+ * True for the exception {@link runSerializable} raises when its retry budget is
+ * exhausted.
+ *
+ * The seam exists because "we could not commit" and "we refused" are different
+ * answers, and only the caller knows which of the two its own protocol should
+ * report. Most callers want the 409 to travel: a person pressing a button can
+ * press it again. A caller whose peer is a machine that retries on any non-2xx
+ * — the payment webhook — has to decide from committed state instead, and it
+ * cannot decide what it cannot recognise.
+ *
+ * Duck-typed on the response body rather than `instanceof ConflictException`,
+ * for the reason {@link isWriteConflictError} gives about Prisma errors: a
+ * second copy of a module makes `instanceof` lie, and this predicate guards a
+ * branch where lying means answering the wrong thing to a payment provider.
+ */
+export function isConcurrentModificationError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const getResponse = (error as { getResponse?: unknown }).getResponse;
+  if (typeof getResponse !== 'function') {
+    return false;
+  }
+
+  const response = (getResponse as () => unknown).call(error);
+
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    (response as { code?: unknown }).code === CONCURRENT_MODIFICATION_CODE
+  );
+}
+
 export function concurrentModificationException() {
   return new ConflictException({
     statusCode: HttpStatus.CONFLICT,
