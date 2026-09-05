@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   OfferCreditPackage,
   PaymentMode,
@@ -27,7 +28,12 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
   }
 
   const [credits, packages, paymentMode, refundPolicy] = await Promise.all([
-    apiFetch<ProviderCredits>(`/providers/${id}/credits`),
+    // Provider-scoped, so it is `fetchOrNotFound` rather than a bare fetch:
+    // somebody else's provider id — or one that never existed — is refused with
+    // 403 by ProviderAccessGuard, and an unwrapped 403 here became the generic
+    // error boundary. A 404 is both the honest answer and the quiet one: it does
+    // not confirm that the id names a real provider.
+    fetchOrNotFound(() => apiFetch<ProviderCredits>(`/providers/${id}/credits`)),
     apiFetch<OfferCreditPackage[]>('/credit-packages'),
     apiFetch<PaymentMode>('/payments/mode'),
     // The window a new offer would carry: this panel describes the promise

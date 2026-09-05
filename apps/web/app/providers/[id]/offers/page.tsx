@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   getRefundPolicy,
   ProviderOffer,
@@ -22,7 +23,11 @@ export default async function ProviderOffersPage({ params }: ProviderOffersPageP
   }
 
   const [offers, creditBalance, refundPolicy] = await Promise.all([
-    apiFetch<ProviderOffer[]>(`/providers/${id}/offers`),
+    // The same provider-scoped rule as the credits screen: a 403 from
+    // ProviderAccessGuard is another provider's panel (or no provider at all),
+    // and that is the shared 404 rather than an error boundary. `readCreditBalance`
+    // below needs no wrapper — it already answers null and simply hides the box.
+    fetchOrNotFound(() => apiFetch<ProviderOffer[]>(`/providers/${id}/offers`)),
     readCreditBalance(id),
     getRefundPolicy(),
   ]);
