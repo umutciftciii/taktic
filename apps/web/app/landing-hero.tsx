@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { AuthUser } from '../lib/api';
+import { heroHeadlineLines } from '../lib/hero-headline';
 import { IconArrowRight, IconCheck, IconSearch } from './landing-icons';
 import { StartChoiceModal } from './start-choice-modal';
 
@@ -157,7 +158,21 @@ export function LandingHero({
         <div className="lp-hero-left">
           <span className="lp-eyebrow">Yerel hizmet pazaryeri</span>
 
-          <h1 className="lp-h1">İhtiyacını tarif et. Doğru usta sana teklif versin.</h1>
+          <h1 className="lp-h1">
+            {heroHeadlineLines.map((line) => (
+              <span className="lp-h1-line" key={line.map((segment) => segment.text).join('')}>
+                {line.map((segment) =>
+                  segment.accent ? (
+                    <span className="lp-accent" key={segment.text}>
+                      {segment.text}
+                    </span>
+                  ) : (
+                    segment.text
+                  ),
+                )}
+              </span>
+            ))}
+          </h1>
           <p className="lp-hero-sub">
             Talebin kategoriye özel sorularla netleşir, kalite skoruyla puanlanır ve yalnızca
             bölgende çalışan onaylı işletmelere iletilir. Teklif almak ücretsiz.
