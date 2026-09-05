@@ -52,6 +52,39 @@ afterEach(() => {
   restoreDefaults();
 });
 
+/**
+ * The variables that name the public web origin.
+ *
+ * Cleared for the duration of this file because the session cookie's `Secure`
+ * is derived from them (see common/cookie-security.ts), and a developer with a
+ * staging `WEB_ORIGIN` exported in their shell would otherwise see this suite
+ * fail for a reason that has nothing to do with sessions. Restored afterwards.
+ * The `Secure` decision itself is asserted in session-cookie-security.spec.ts,
+ * where both configurations are set explicitly.
+ */
+const WEB_ORIGIN_VARIABLES = ['WEB_APP_URL', 'WEB_ORIGIN', 'NEXT_PUBLIC_WEB_URL'] as const;
+
+let originalWebOrigins: Record<string, string | undefined>;
+
+beforeAll(() => {
+  originalWebOrigins = Object.fromEntries(
+    WEB_ORIGIN_VARIABLES.map((key) => [key, process.env[key]]),
+  );
+  for (const key of WEB_ORIGIN_VARIABLES) {
+    delete process.env[key];
+  }
+});
+
+afterAll(() => {
+  for (const [key, value] of Object.entries(originalWebOrigins)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+});
+
 function restoreDefaults() {
   delete process.env.SESSION_IDLE_TIMEOUT_SECONDS;
   delete process.env.SESSION_ABSOLUTE_TTL_SECONDS;
@@ -108,9 +141,12 @@ describe('session cookie', () => {
     // nothing and means an unremembered session does not outlive the browser.
     expect(setCookie).not.toContain('Max-Age');
     expect(setCookie).not.toContain('Expires');
-    // NODE_ENV is "test" here, which is exactly why Secure is absent: the suite
-    // and the local stack speak plain HTTP, and a Secure cookie would simply be
-    // dropped. Production sets it — see cookie.ts.
+    // No public web origin is configured here, so the base URL resolves to the
+    // local `http://localhost:3000` default — and over plain HTTP a Secure
+    // cookie is simply dropped. It is the configured origin that decides this,
+    // not NODE_ENV: a public https deployment gets Secure whatever it is
+    // started as. See common/cookie-security.ts, pinned in
+    // session-cookie-security.spec.ts.
     expect(setCookie).not.toContain('Secure');
   });
 

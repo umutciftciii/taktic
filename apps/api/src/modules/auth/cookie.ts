@@ -1,3 +1,4 @@
+import { sessionCookieIsSecure } from '../../common/cookie-security';
 import { AUTH_COOKIE_NAME } from './auth.constants';
 
 export function parseCookieHeader(cookieHeader: string | undefined) {
@@ -43,6 +44,16 @@ export function sessionCookie(sessionId: string, expiresAt: Date, rememberMe: bo
   return serializeCookie(AUTH_COOKIE_NAME, sessionId, { expires: expiresAt, maxAge });
 }
 
+/**
+ * The expiry cookie that ends a session in the browser.
+ *
+ * Serialized by the same function as the one that creates it, so the two agree
+ * on every attribute by construction. That matters for `Secure` in particular: a
+ * browser matches a replacement cookie on name, path and domain, but a clearing
+ * cookie sent without `Secure` over a connection where the original had it is
+ * one more way for the two to disagree — and the way to be sure they never do is
+ * to have only one place that decides.
+ */
 export function clearSessionCookie() {
   return serializeCookie(AUTH_COOKIE_NAME, '', { expires: new Date(0), maxAge: 0 });
 }
@@ -52,7 +63,9 @@ function serializeCookie(
   value: string,
   options: { expires?: Date; maxAge?: number },
 ) {
-  const secure = process.env.NODE_ENV === 'production';
+  // Derived from the configured public web origin, never from NODE_ENV and
+  // never from a request header. See common/cookie-security.ts.
+  const secure = sessionCookieIsSecure();
   return [
     `${name}=${encodeURIComponent(value)}`,
     'Path=/',

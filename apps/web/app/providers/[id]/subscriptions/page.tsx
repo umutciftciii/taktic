@@ -6,6 +6,7 @@ import {
   ProviderEntitlements,
   PurchasableOfferPackage,
   apiFetch,
+  fetchOrNotFound,
   formatDateTime,
   formatPrice,
   getCurrentUser,
@@ -54,9 +55,13 @@ export default async function ProviderSubscriptionsPage({ params }: PageProps) {
     redirect(`/login?redirectTo=/providers/${id}/subscriptions`);
   }
 
+  // Both provider-scoped, so both go through `fetchOrNotFound`, exactly as the
+  // credits and offers screens do: ProviderAccessGuard answers 403 for another
+  // provider's id and for one that names nothing, and that is the shared 404
+  // rather than an error boundary.
   const [entitlements, catalogue] = await Promise.all([
-    apiFetch<ProviderEntitlements>(`/providers/${id}/entitlements`),
-    apiFetch<OfferPackageCatalogue>(`/providers/${id}/offer-packages`),
+    fetchOrNotFound(() => apiFetch<ProviderEntitlements>(`/providers/${id}/entitlements`)),
+    fetchOrNotFound(() => apiFetch<OfferPackageCatalogue>(`/providers/${id}/offer-packages`)),
   ]);
 
   const active = entitlements.entitlements.filter((item) => item.usable || item.queued);
