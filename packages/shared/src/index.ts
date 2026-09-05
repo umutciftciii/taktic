@@ -7,6 +7,12 @@ export {
   SUPPORT_TICKET_SUBJECT_MAX_LENGTH,
 } from './support-tickets';
 
+export {
+  DEFAULT_SAFE_REDIRECT,
+  safeRedirectPath,
+  safeRedirectPathOrNull,
+} from './safe-redirect';
+
 export { URGENCY_LABELS, isUrgencyCode, urgencyLabel } from './urgency';
 export type { UrgencyCode } from './urgency';
 
