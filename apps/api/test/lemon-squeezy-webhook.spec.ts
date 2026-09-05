@@ -6,7 +6,7 @@ import {
 } from '@prisma/client';
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
 import { LEMON_SQUEEZY_SIGNATURE_HEADER } from '../src/modules/payments/lemon-squeezy.webhook';
 import { MANUAL_REVIEW_REASON } from '../src/modules/payments/payments-webhook.service';
@@ -199,6 +199,32 @@ function deliver(payload: unknown, options: { signature?: string; secret?: strin
     .send(body);
 }
 
+/**
+ * Runs `body` with every Serializable attempt failing as PostgreSQL fails one
+ * under contention.
+ *
+ * P2034 is the code Prisma reports for SQLSTATE 40001, and `runSerializable`
+ * retries exactly it — so rejecting every attempt exhausts the budget with no
+ * timing dependency at all. The spy is always restored, including when the
+ * request throws.
+ */
+async function withExhaustedWriteConflicts<T>(body: () => Promise<T>): Promise<T> {
+  const conflict = Object.assign(
+    new Error('Transaction failed due to a write conflict or a deadlock.'),
+    { code: 'P2034' },
+  );
+  const host = ctx.prisma as unknown as {
+    $transaction: (...args: unknown[]) => Promise<unknown>;
+  };
+  const spy = vi.spyOn(host, '$transaction').mockRejectedValue(conflict);
+
+  try {
+    return await body();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 async function packageLedgerRows(providerId: string) {
   return ctx.prisma.providerCreditTransaction.findMany({
     where: { providerId, type: CreditTransactionType.PACKAGE_PURCHASE },
@@ -358,26 +384,145 @@ describe('a settled order loads credits exactly once', () => {
     expect(refused.detail).toBe('PURCHASE_NOT_PENDING');
   });
 
-  it('loads once when the same delivery arrives concurrently', async () => {
+  /**
+   * The concurrency contract, asserted as an invariant rather than as one
+   * lucky run.
+   *
+   * Every round seeds its own purchase and delivers the same signed bytes from
+   * several connections at once. What must hold is the same every round: every
+   * response is a 200 the provider will not retry, exactly one of them settled
+   * the order, and exactly one of everything downstream exists. The rounds are
+   * a repetition of the whole scenario, not a retry of a failed one — a round
+   * that needed a second go would be a failure.
+   */
+  it.each([2, 4, 8])(
+    'answers %i concurrent copies of one delivery without ever refusing the provider',
+    async (parallelism) => {
+      for (let round = 1; round <= 3; round += 1) {
+        const { provider, purchase, reference } = await pendingPurchaseFixture({ creditAmount: 25 });
+        // A provider order id of its own per round. `providerOrderId` is
+        // unique-indexed, so reusing the default across rounds would make every
+        // round after the first a refusal about the *previous* round's order
+        // rather than a test of this one.
+        const payload = orderPayload({ reference, orderId: `order-${uniqueSuffix()}` });
+        const where = { round, parallelism };
+        // Per round, so the receipt assertion below counts this settlement
+        // rather than every settlement the loop has produced so far.
+        ctx.notifications.clear();
+
+        const responses = await Promise.all(
+          Array.from({ length: parallelism }, () => deliver(payload)),
+        );
+
+        // Not one delivery may be told to come back. 409 is the answer this
+        // endpoint used to give when its rivals exhausted its retry budget, and
+        // a payment provider answers a non-2xx by redelivering — into exactly
+        // the contention that produced it.
+        expect(
+          responses.map((response) => response.status),
+          `${JSON.stringify(where)}: every delivery must be answered 200`,
+        ).toEqual(Array.from({ length: parallelism }, () => 200));
+
+        const statuses = responses.map((response) => response.body.status as string);
+        expect(statuses.filter((status) => status === 'processed'), JSON.stringify(where)).toHaveLength(1);
+        expect(statuses.filter((status) => status === 'duplicate'), JSON.stringify(where)).toHaveLength(
+          parallelism - 1,
+        );
+
+        // One of everything, and the same one every round.
+        const events = await ctx.prisma.paymentWebhookEvent.findMany({
+          where: { purchaseId: purchase.id },
+        });
+        expect(events, JSON.stringify(where)).toHaveLength(1);
+        expect(events[0]!.status).toBe(PaymentWebhookEventStatus.PROCESSED);
+        // Every copy is on the audit trail: the one that settled it, and one
+        // per redelivery that found it already terminal.
+        expect(events[0]!.attemptCount, JSON.stringify(where)).toBe(parallelism);
+
+        expect(await packageLedgerRows(provider.id), JSON.stringify(where)).toHaveLength(1);
+        expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(25);
+
+        const paid = await ctx.prisma.packagePurchase.findMany({
+          where: { providerId: provider.id, status: PackagePurchaseStatus.PAID },
+        });
+        expect(paid, JSON.stringify(where)).toHaveLength(1);
+
+        // Exactly one receipt, however many deliveries arrived.
+        expect(
+          ctx.notifications.ofTemplate('package-purchase-confirmation'),
+          `${JSON.stringify(where)}: one receipt per settlement`,
+        ).toHaveLength(1);
+      }
+    },
+  );
+
+  /**
+   * The mechanism behind the flake, pinned deterministically.
+   *
+   * The scenario above depends on the database actually producing a write
+   * conflict, which is a race and therefore not something a test may rely on
+   * happening. This one removes the race: every serializable attempt is made to
+   * fail the way PostgreSQL does under contention (SQLSTATE 40001 → Prisma
+   * P2034), so the retry budget is guaranteed to be exhausted. No sleeps, no
+   * repetition, no reliance on scheduling.
+   *
+   * Before the fix this answered 409 CONCURRENT_MODIFICATION — for a delivery
+   * whose event was already committed as PROCESSED.
+   */
+  it('answers a redelivery from committed state even when its own transaction cannot commit', async () => {
     const { provider, reference } = await pendingPurchaseFixture({ creditAmount: 25 });
     const payload = orderPayload({ reference });
 
-    const responses = await Promise.all([
-      deliver(payload),
-      deliver(payload),
-      deliver(payload),
-      deliver(payload),
-    ]);
+    await deliver(payload).expect(200);
+    const settledEvent = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow();
+    expect(settledEvent.status).toBe(PaymentWebhookEventStatus.PROCESSED);
+    expect(settledEvent.attemptCount).toBe(1);
+    ctx.notifications.clear();
 
-    for (const response of responses) {
-      expect(response.status).toBe(200);
-      expect(['processed', 'duplicate']).toContain(response.body.status);
-    }
+    const response = await withExhaustedWriteConflicts(() => deliver(payload));
 
-    expect(responses.filter((r) => r.body.status === 'processed')).toHaveLength(1);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: 'duplicate' });
+
+    // The redelivery is on the audit trail, and nothing else moved.
+    const after = await ctx.prisma.paymentWebhookEvent.findUniqueOrThrow({
+      where: { id: settledEvent.id },
+    });
+    expect(after.attemptCount).toBe(2);
+    expect(after.status).toBe(PaymentWebhookEventStatus.PROCESSED);
+
+    expect(await ctx.prisma.paymentWebhookEvent.count()).toBe(1);
     expect(await packageLedgerRows(provider.id)).toHaveLength(1);
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(25);
-    expect(await ctx.prisma.paymentWebhookEvent.count()).toBe(1);
+    expect(ctx.notifications.ofTemplate('package-purchase-confirmation')).toHaveLength(0);
+  });
+
+  /**
+   * The other half of that rule: an exhausted budget is only allowed to become
+   * `duplicate` when something committed says so.
+   *
+   * Here nothing settled the order, so the honest answer is the conflict — the
+   * provider redelivers and the order settles then. Reporting `duplicate` would
+   * tell Lemon Squeezy a payment was handled on the strength of this process
+   * having failed to commit, and the paid order would silently load no credits.
+   */
+  it('still refuses a delivery it could not commit when nothing settled it', async () => {
+    const { provider, reference } = await pendingPurchaseFixture({ creditAmount: 25 });
+
+    const response = await withExhaustedWriteConflicts(() =>
+      deliver(orderPayload({ reference })),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('CONCURRENT_MODIFICATION');
+
+    // And nothing was written on the way to saying so.
+    expect(await ctx.prisma.paymentWebhookEvent.count()).toBe(0);
+    expect(await packageLedgerRows(provider.id)).toHaveLength(0);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);
+
+    const purchase = await ctx.prisma.packagePurchase.findFirstOrThrow();
+    expect(purchase.status).toBe(PackagePurchaseStatus.PENDING);
   });
 
   it('lets one settled order load credits onto one purchase only', async () => {

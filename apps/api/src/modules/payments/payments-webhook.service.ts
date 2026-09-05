@@ -13,7 +13,10 @@ import {
   PaymentWebhookEventStatus,
   Prisma,
 } from '@prisma/client';
-import { runSerializable } from '../../common/serializable-transaction';
+import {
+  isConcurrentModificationError,
+  runSerializable,
+} from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
@@ -115,6 +118,13 @@ const RECOVERABLE_STATUSES: ReadonlySet<PaymentWebhookEventStatus> = new Set([
 /** The purchase a committed settlement produced, or null when there was none. */
 type SettledPurchase = string | null;
 
+/**
+ * The event whose redelivery has to be counted once the transaction that
+ * recognised it has committed, or null when this delivery was not a redelivery
+ * of a terminal event.
+ */
+type RedeliveredEvent = string | null;
+
 type SettlementResult = {
   mismatch: MismatchCode | null;
   /** Known as soon as the correlation token resolves, mismatch or not. */
@@ -189,12 +199,24 @@ export class PaymentsWebhookService {
   /**
    * The settlement path.
    *
-   * The whole sequence — the terminal check, every business check, the ledger
-   * row, the purchase update and the attempt record — runs inside one
-   * Serializable transaction. Reading the event's own row first is what makes
-   * `PROCESSED` terminal without a constraint violation standing in for the
-   * decision: a settled event is answered from its recorded state, and an event
-   * that never settled is judged again from the top.
+   * The whole settling sequence — every business check, the ledger row, the
+   * purchase update and the attempt record — runs inside one Serializable
+   * transaction. Reading the event's own row first is what makes `PROCESSED`
+   * terminal without a constraint violation standing in for the decision: a
+   * settled event is answered from its recorded state, and an event that never
+   * settled is judged again from the top.
+   *
+   * What is deliberately *outside* that transaction is everything a delivery
+   * does when it settles nothing: the audit count for a redelivery, and the
+   * receipt. Neither decides anything, and both used to be able to turn a
+   * correctly-handled delivery into a failure — the receipt by throwing, and
+   * the count by making N redeliveries of one event contend for one row until
+   * the retry budget ran out and the loser was handed a 409.
+   *
+   * The rule this method keeps, whatever happens underneath it: a delivery is
+   * only ever refused when nothing committed says it was handled. Lemon Squeezy
+   * answers a non-2xx by redelivering, so a 409 raised over an event that is
+   * already `PROCESSED` is not a retry — it is a loop.
    */
   private async loadCredits(
     event: LemonSqueezyEvent,
@@ -202,6 +224,7 @@ export class PaymentsWebhookService {
     variantsBySlug: ReadonlyMap<string, string>,
   ): Promise<WebhookOutcome> {
     let settled: SettledPurchase = null;
+    let redelivered: RedeliveredEvent = null;
     let outcome: WebhookOutcome;
 
     try {
@@ -212,14 +235,25 @@ export class PaymentsWebhookService {
           // and replays it, and a note left over from the rolled-back attempt
           // would be a receipt for a settlement that never committed.
           settled = null;
+          redelivered = null;
 
           const now = new Date();
           const existing = await readEvent(tx, event);
 
           if (existing?.status === PaymentWebhookEventStatus.PROCESSED) {
-            // Terminal. The delivery is counted so the audit trail shows the
-            // provider retried, and not one other field moves.
-            await countAttempt(tx, existing.id, now);
+            // Terminal, and deliberately a read-only transaction from here.
+            //
+            // The attempt still has to be counted, but counting it *here* is
+            // what used to make a redelivery storm eat itself: every redelivery
+            // of one event updates one row, so N of them arriving together
+            // serialize-conflict with each other, burn the retry budget on work
+            // that decides nothing, and the loser is handed a 409 for a
+            // delivery that was in fact already handled. Nothing about this
+            // branch needs Serializable — the row it reads is terminal — so the
+            // count is deferred to {@link countRedelivery} after the
+            // transaction, where concurrent increments simply queue on the row
+            // lock.
+            redelivered = existing.id;
             this.logger.log(
               `webhook ${event.eventName} was redelivered after settling; nothing to do`,
             );
@@ -280,11 +314,20 @@ export class PaymentsWebhookService {
         return this.reportSettledState(event);
       }
 
+      if (isConcurrentModificationError(error)) {
+        // This attempt could not be serialized against its rivals often enough
+        // to give up. That is a statement about *this* transaction, not about
+        // the event — so the answer is read from what is actually committed,
+        // and the 409 travels only if nothing committed says otherwise.
+        return this.reportSettledOrRethrow(event, error);
+      }
+
       throw error;
     }
 
-    // Outside the try, so a failure here can never be mistaken for the write
-    // conflict the catch above is written to interpret.
+    // Both outside the try, so a failure in either can never be mistaken for
+    // the write conflict the catch above is written to interpret.
+    await this.countRedelivery(redelivered);
     await this.notifySettled(settled);
     return outcome;
   }
@@ -462,18 +505,24 @@ export class PaymentsWebhookService {
    * a person looking at the audit trail.
    */
   private async flagForManualReview(event: LemonSqueezyEvent): Promise<WebhookOutcome> {
+    let redelivered: RedeliveredEvent = null;
+    let outcome: WebhookOutcome;
+
     try {
-      return await runSerializable(
+      outcome = await runSerializable(
         this.prisma,
         async (tx) => {
+          redelivered = null;
+
           const now = new Date();
           const existing = await readEvent(tx, event);
 
           if (existing?.status === PaymentWebhookEventStatus.MANUAL_REVIEW_REQUIRED) {
             // Terminal for the same reason PROCESSED is: a person owns this
             // one now, and re-flagging a purchase somebody is already looking
-            // at would only move the timestamp.
-            await countAttempt(tx, existing.id, now);
+            // at would only move the timestamp. The attempt is counted after
+            // the transaction, for the reason loadCredits gives.
+            redelivered = existing.id;
             return { status: 'duplicate' } as const;
           }
 
@@ -509,8 +558,18 @@ export class PaymentsWebhookService {
         return { status: 'manual_review_required' };
       }
 
+      if (isConcurrentModificationError(error)) {
+        // The reversal is flagged by whichever delivery committed; this one
+        // reports what is actually stored rather than a 409 the provider would
+        // answer by redelivering into the same contention.
+        return this.reportFlaggedOrRethrow(event, error);
+      }
+
       throw error;
     }
+
+    await this.countRedelivery(redelivered);
+    return outcome;
   }
 
   /**
@@ -527,15 +586,20 @@ export class PaymentsWebhookService {
     purchaseId: string | null,
     detail: string | null,
   ): Promise<WebhookOutcome> {
+    let redelivered: RedeliveredEvent = null;
+
     try {
       await runSerializable(
         this.prisma,
         async (tx) => {
+          redelivered = null;
+
           const now = new Date();
           const existing = await readEvent(tx, event);
 
           if (existing?.status === PaymentWebhookEventStatus.PROCESSED) {
-            await countAttempt(tx, existing.id, now);
+            // Deferred out of the transaction for the reason loadCredits gives.
+            redelivered = existing.id;
             return;
           }
 
@@ -548,10 +612,101 @@ export class PaymentsWebhookService {
         return this.reportSettledState(event);
       }
 
+      if (isConcurrentModificationError(error)) {
+        return this.reportSettledOrRethrow(event, error);
+      }
+
       throw error;
     }
 
+    await this.countRedelivery(redelivered);
+
     return { status: status === PaymentWebhookEventStatus.IGNORED ? 'ignored' : 'mismatched' };
+  }
+
+  /**
+   * The audit increment for a redelivery whose outcome was already terminal.
+   *
+   * Deliberately a plain statement rather than part of a Serializable
+   * transaction. It decides nothing — the row it touches is terminal, and its
+   * only effect is `attemptCount` and `lastAttemptAt` — so it needs no
+   * isolation beyond the row lock PostgreSQL takes for the update itself.
+   * Concurrent redeliveries therefore queue instead of aborting each other,
+   * which is what makes both the answer and the count deterministic however
+   * many copies of one delivery arrive at once.
+   *
+   * Best-effort, like the receipt below and for the same reason: the delivery
+   * has already been answered correctly from committed state, and a failure to
+   * bump a counter must not turn it into one the provider will retry.
+   */
+  private async countRedelivery(eventId: RedeliveredEvent): Promise<void> {
+    if (!eventId) {
+      return;
+    }
+
+    try {
+      await this.prisma.paymentWebhookEvent.update({
+        where: { id: eventId },
+        data: { attemptCount: { increment: 1 }, lastAttemptAt: new Date() },
+      });
+    } catch (error) {
+      this.logger.error(
+        `failed to count a webhook redelivery on event ${eventId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * The answer for a delivery whose own transaction could not be serialized,
+   * decided by what is actually committed.
+   *
+   * The distinction from {@link reportSettledState} is the fallback, and it is
+   * the whole point of having two methods. A unique violation proves somebody
+   * else committed, so reading their record is the answer. An exhausted retry
+   * budget proves nothing about anybody: if the committed state does not say
+   * this event settled, then as far as this application knows it did not, and
+   * the 409 is rethrown so the provider redelivers. Answering `duplicate` there
+   * would tell a payment provider that a payment was handled on the strength of
+   * this process having failed to commit — which is how a paid order silently
+   * loads no credits.
+   */
+  private async reportSettledOrRethrow(
+    event: LemonSqueezyEvent,
+    error: unknown,
+  ): Promise<WebhookOutcome> {
+    const stored = await readEvent(this.prisma, event);
+
+    if (stored?.status !== PaymentWebhookEventStatus.PROCESSED) {
+      this.logger.error(
+        `webhook ${event.eventName} could not be committed and is not settled; asking for a redelivery`,
+      );
+      throw error;
+    }
+
+    this.logger.log(
+      `webhook ${event.eventName} could not be committed, but a concurrent delivery had already settled it`,
+    );
+    await this.countRedelivery(stored.id);
+    return { status: 'duplicate' };
+  }
+
+  /** The same, for the reversal path's own terminal status. */
+  private async reportFlaggedOrRethrow(
+    event: LemonSqueezyEvent,
+    error: unknown,
+  ): Promise<WebhookOutcome> {
+    const stored = await readEvent(this.prisma, event);
+
+    if (stored?.status !== PaymentWebhookEventStatus.MANUAL_REVIEW_REQUIRED) {
+      this.logger.error(
+        `webhook ${event.eventName} could not be committed and is not flagged; asking for a redelivery`,
+      );
+      throw error;
+    }
+
+    await this.countRedelivery(stored.id);
+    return { status: 'manual_review_required' };
   }
 
   /**
@@ -564,6 +719,16 @@ export class PaymentsWebhookService {
    */
   private async reportSettledState(event: LemonSqueezyEvent): Promise<WebhookOutcome> {
     const stored = await readEvent(this.prisma, event);
+
+    // A delivery answered from a stored row is still a delivery of that event,
+    // and the audit trail says every one of them is counted — see the
+    // `attemptCount` assertions in lemon-squeezy-webhook.spec.ts. It used not
+    // to be counted here, which left the figure dependent on *which* way a
+    // redelivery happened to lose its race: the same six deliveries could
+    // report six attempts or four.
+    if (stored) {
+      await this.countRedelivery(stored.id);
+    }
 
     if (stored?.status === PaymentWebhookEventStatus.PROCESSED) {
       this.logger.log(`webhook ${event.eventName} was already settled by a concurrent delivery`);
@@ -590,13 +755,6 @@ function readEvent(host: EventReader, event: LemonSqueezyEvent): Promise<Existin
   });
 }
 
-/** A redelivery of an event whose outcome is not up for re-judgement. */
-function countAttempt(tx: Prisma.TransactionClient, id: string, now: Date) {
-  return tx.paymentWebhookEvent.update({
-    where: { id },
-    data: { attemptCount: { increment: 1 }, lastAttemptAt: now },
-  });
-}
 
 /**
  * The attempt record.
