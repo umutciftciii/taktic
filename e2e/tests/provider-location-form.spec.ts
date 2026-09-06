@@ -296,4 +296,55 @@ test.describe('provider profile service areas', () => {
       await provider.close();
     }
   });
+
+  test('an overlapping pair inherited from before is shown, saves untouched, and can be removed', async ({
+    browser,
+  }) => {
+    // The shape the migration deliberately left alone: a whole province beside
+    // a district inside it. The API refuses a *new* overlap; this one is on
+    // file, so the screen has to show both and the form has to save.
+    const location = uniqueLocation();
+    const category = await createCategory(3);
+    const seeded = await createProvider({ categoryId: category.id, location, credits: 0 });
+    await prisma().providerServiceArea.create({
+      data: { providerId: seeded.id, scope: 'CITY', city: location.city, district: null },
+    });
+    const provider = await Actor.open(browser, 'area-overlap', primaryRuntime);
+
+    try {
+      await provider.loginToWeb(seeded.email, seeded.password);
+      await provider.gotoWeb(`/providers/${seeded.id}/edit`);
+
+      const form = provider.page.locator('form.pdash-form');
+      const list = form.getByTestId('service-area-list');
+      await expect(list).toContainText(`${location.city} geneli`);
+      await expect(list).toContainText(`${location.district}, ${location.city}`);
+
+      // Saved without touching the areas at all.
+      await form.getByRole('button', { name: 'Profili Kaydet' }).click();
+      await expect(provider.page).toHaveURL(new RegExp(`/providers/${seeded.id}$`));
+      await assertNoErrorScreen(provider.page);
+      expect(
+        await prisma().providerServiceArea.count({ where: { providerId: seeded.id } }),
+      ).toBe(2);
+
+      // The redundant half comes off when the provider decides it should, one
+      // row at a time, from the same list.
+      await provider.gotoWeb(`/providers/${seeded.id}/edit`);
+      await form
+        .getByRole('button', { name: `${location.district}, ${location.city} bölgesini kaldır` })
+        .click();
+      await form.getByRole('button', { name: 'Profili Kaydet' }).click();
+      await expect(provider.page).toHaveURL(new RegExp(`/providers/${seeded.id}$`));
+
+      expect(
+        await prisma().providerServiceArea.findMany({
+          where: { providerId: seeded.id },
+          select: { scope: true, city: true, district: true },
+        }),
+      ).toEqual([{ scope: 'CITY', city: location.city, district: null }]);
+    } finally {
+      await provider.close();
+    }
+  });
 });

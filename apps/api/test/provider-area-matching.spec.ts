@@ -275,10 +275,11 @@ describe('GET /providers/:providerId/requests', () => {
 });
 
 describe('GET /providers?city= — the operator list', () => {
-  it('selects on coverage, not on the office address', async () => {
+  it('selects on coverage, not on the profile\'s legacy location', async () => {
     const category = await createCategory(ctx.prisma);
-    // Registered in Kocaeli by way of the default profile address, covering
-    // Ankara. An operator asking who serves Ankara has to be shown this one.
+    // The profile's own city/district is the İstanbul/Kadıköy every fixture
+    // carries; its only service area is Ankara. An operator asking who serves
+    // Ankara has to be shown this one.
     const ankara = await createDiscoverableProvider(ctx.prisma, {
       categoryId: category.id,
       areas: [{ city: 'Ankara' }],

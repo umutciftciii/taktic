@@ -280,8 +280,9 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                         <div className="cell-stack">
                           {/*
                             Two different facts, and the second is the one that
-                            decides anything: the office address, then the areas
-                            the business actually covers. The Şehir filter above
+                            decides anything: the location the profile has
+                            carried since before coverage was a list, then the
+                            areas matching actually reads. The filter above
                             selects on the areas, so a row surfaced by it has to
                             show why.
                           */}

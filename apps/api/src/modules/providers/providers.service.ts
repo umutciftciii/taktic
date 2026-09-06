@@ -344,12 +344,13 @@ export class ProvidersService {
     const providers = await this.prisma.providerProfile.findMany({
       where: {
         ...(status ? { status } : {}),
-        // "Providers who serve this city", not "providers registered in it".
-        // A business whose office is in Kocaeli and whose only service area is
-        // İstanbul is an İstanbul provider to everyone who matters — the
-        // customer, the matching rule, and the operator asking who covers a
-        // province. The office address is what the row prints, never what it
-        // is selected by.
+        // "Providers who serve this city", not "providers whose profile names
+        // it". A business whose profile location is in Kocaeli and whose only
+        // service area is İstanbul is an İstanbul provider to everyone who
+        // matters — the customer, the matching rule, and the operator asking
+        // who covers a province. Since coverage became a list, the legacy
+        // location can no longer answer that question, so it is what the row
+        // prints and never what it is selected by.
         ...(city
           ? { serviceAreas: { some: { city: { equals: city, mode: 'insensitive' } } } }
           : {}),
@@ -766,7 +767,14 @@ export class ProvidersService {
   async updateProvider(id: string, dto: UpdateProviderDto, user: AuthUser | null = null) {
     const existingProvider = await this.getProviderForUpdate(id);
     ensureProviderUpdateAccess(existingProvider, user);
-    const payload = await this.normalizeAndValidatePayload(dto);
+    // Read before the payload is checked, because one of the checks is about
+    // them: an overlapping pair this profile already holds is not something
+    // this save is introducing, so it must not be what this save is refused for.
+    const storedAreas = await this.prisma.providerServiceArea.findMany({
+      where: { providerId: id },
+      select: { city: true, district: true, neighborhood: true },
+    });
+    const payload = await this.normalizeAndValidatePayload(dto, undefined, storedAreas);
     ensureContactEmailStable(existingProvider, payload.email);
 
     // The same rule as at submission time, from the other side. An unowned
@@ -1365,9 +1373,15 @@ export class ProvidersService {
   private async normalizeAndValidatePayload(
     dto: ProviderApplicationInput,
     serverChosenCategoryIds?: string[],
+    /**
+     * The areas the profile already holds, on an edit. Only the overlap rule
+     * reads them, and only to leave a pair it did not create alone — see
+     * normalizeServiceAreas. A new application passes nothing.
+     */
+    alreadyStoredAreas: readonly ScopedArea[] = [],
   ): Promise<NormalizedProviderPayload> {
     const categoryIds = normalizeCategoryIds(serverChosenCategoryIds ?? dto.categoryIds ?? []);
-    const serviceAreas = normalizeServiceAreas(dto.serviceAreas ?? []);
+    const serviceAreas = normalizeServiceAreas(dto.serviceAreas ?? [], alreadyStoredAreas);
     const address = normalizeBusinessAddress(dto);
 
     if (!serverChosenCategoryIds) {
@@ -1941,9 +1955,21 @@ function normalizeBusinessAddress(dto: Pick<CreateProviderDto, 'city' | 'distric
  *    not richer coverage than "İstanbul geneli" alone — it is the same coverage
  *    with a row that can only ever mislead whoever reads the profile next.
  *
+ * `alreadyStored` is what the provider's profile holds right now, and it exists
+ * so the third refusal only ever refuses something *new*. A profile that came
+ * out of the migration holding an overlapping pair keeps it — the migration
+ * deletes nothing — and its owner must be able to open that form, change a
+ * phone number and save. So an overlap whose both halves are already stored is
+ * let through untouched, and the provider removes it from the list when they
+ * decide to, with the remove button beside it. Creating a profile passes
+ * nothing here, so nothing is grandfathered into a new one.
+ *
  * The scope is decided here and nowhere else, from the levels that resolved.
  */
-function normalizeServiceAreas(serviceAreas: ProviderServiceAreaDto[]) {
+function normalizeServiceAreas(
+  serviceAreas: ProviderServiceAreaDto[],
+  alreadyStored: readonly ScopedArea[] = [],
+) {
   if (!Array.isArray(serviceAreas) || serviceAreas.length === 0) {
     throw new BadRequestException('En az bir hizmet bölgesi eklemelisiniz.');
   }
@@ -1967,7 +1993,7 @@ function normalizeServiceAreas(serviceAreas: ProviderServiceAreaDto[]) {
     return resolved;
   });
 
-  assertAreasAreDistinctAndUncovered(normalized);
+  assertNewAreasAreDistinctAndUncovered(normalized, alreadyStored);
 
   return normalized.map(toServiceAreaRow);
 }
@@ -1978,8 +2004,21 @@ function normalizeServiceAreas(serviceAreas: ProviderServiceAreaDto[]) {
  * Quadratic on purpose: the list is the areas one business ticked on one form,
  * and a message that names the offending pair is worth far more here than an
  * index would be.
+ *
+ * The duplicate check is absolute — the same area written twice in one payload
+ * is a row the database would refuse anyway, and no stored profile can hold one
+ * because the migration stops rather than create a table that does. The overlap
+ * check is not: a pair both of whose halves are already stored is a pair this
+ * save did not create, and refusing it would lock its owner out of their own
+ * profile until they worked out which of their rows the API disliked.
  */
-function assertAreasAreDistinctAndUncovered(areas: readonly ScopedArea[]) {
+function assertNewAreasAreDistinctAndUncovered(
+  areas: readonly ScopedArea[],
+  alreadyStored: readonly ScopedArea[],
+) {
+  const isStored = (area: ScopedArea) =>
+    alreadyStored.some((stored) => areaCovers(stored, area) && areaCovers(area, stored));
+
   for (const [i, first] of areas.entries()) {
     for (const second of areas.slice(i + 1)) {
       if (areaCovers(first, second) && areaCovers(second, first)) {
@@ -1988,17 +2027,15 @@ function assertAreasAreDistinctAndUncovered(areas: readonly ScopedArea[]) {
         );
       }
 
-      if (areaCovers(first, second)) {
-        throw new BadRequestException(
-          `${describeArea(first)} zaten ${describeArea(second)} bölgesini kapsıyor. İkisini birlikte ekleyemezsiniz.`,
-        );
+      const overlaps = areaCovers(first, second) || areaCovers(second, first);
+      if (!overlaps || (isStored(first) && isStored(second))) {
+        continue;
       }
 
-      if (areaCovers(second, first)) {
-        throw new BadRequestException(
-          `${describeArea(second)} zaten ${describeArea(first)} bölgesini kapsıyor. İkisini birlikte ekleyemezsiniz.`,
-        );
-      }
+      const [wider, narrower] = areaCovers(first, second) ? [first, second] : [second, first];
+      throw new BadRequestException(
+        `${describeArea(wider)} zaten ${describeArea(narrower)} bölgesini kapsıyor. İkisini birlikte ekleyemezsiniz.`,
+      );
     }
   }
 }

@@ -265,6 +265,121 @@ describe('PATCH /providers/:id — replacing the coverage', () => {
     ]);
   });
 
+  it('saves a stored overlapping pair back unchanged', async () => {
+    // The pair the migration deliberately did not collapse. Its owner has to be
+    // able to open this form, change something else, and save — so an overlap
+    // that was already on file is not what the save is refused for.
+    const provider = await createProviderProfile(ctx.prisma, { userId: null });
+    await ctx.prisma.providerServiceArea.createMany({
+      data: [
+        { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul' }) },
+        { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul', district: 'Kadıköy' }) },
+      ],
+    });
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const cookie = await loginAs(ctx.prisma, admin.id);
+    const category = await createCategory(ctx.prisma);
+
+    await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({
+        ...providerPayload([category.id]),
+        businessName: 'Yeni Ad',
+        serviceAreas: [{ city: 'İstanbul' }, { city: 'İstanbul', district: 'Kadıköy' }],
+      })
+      .expect(200);
+
+    // District first: the ordering is city, district, neighbourhood ascending,
+    // and PostgreSQL sorts the province-wide row's NULL district last.
+    expect(await storedAreas(provider.id)).toEqual([
+      {
+        scope: ProviderServiceAreaScope.DISTRICT,
+        city: 'İstanbul',
+        district: 'Kadıköy',
+        neighborhood: null,
+      },
+      {
+        scope: ProviderServiceAreaScope.CITY,
+        city: 'İstanbul',
+        district: null,
+        neighborhood: null,
+      },
+    ]);
+  });
+
+  it('lets one half of a stored overlap be removed', async () => {
+    const provider = await createProviderProfile(ctx.prisma, { userId: null });
+    await ctx.prisma.providerServiceArea.createMany({
+      data: [
+        { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul' }) },
+        { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul', district: 'Kadıköy' }) },
+      ],
+    });
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const cookie = await loginAs(ctx.prisma, admin.id);
+    const category = await createCategory(ctx.prisma);
+
+    await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({ ...providerPayload([category.id]), serviceAreas: [{ city: 'İstanbul' }] })
+      .expect(200);
+
+    expect(await storedAreas(provider.id)).toEqual([
+      {
+        scope: ProviderServiceAreaScope.CITY,
+        city: 'İstanbul',
+        district: null,
+        neighborhood: null,
+      },
+    ]);
+  });
+
+  it('still refuses a new overlap over an area that was already stored', async () => {
+    // Grandfathering covers the pair that was on file, and only that pair. A
+    // third area under the same province is one this save is introducing, so
+    // the rule applies to it in full.
+    const provider = await createProviderProfile(ctx.prisma, { userId: null });
+    await ctx.prisma.providerServiceArea.createMany({
+      data: [
+        { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul' }) },
+        { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul', district: 'Kadıköy' }) },
+      ],
+    });
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const cookie = await loginAs(ctx.prisma, admin.id);
+    const category = await createCategory(ctx.prisma);
+
+    const response = await request(ctx.server)
+      .patch(`/providers/${provider.id}`)
+      .set('Cookie', cookie)
+      .send({
+        ...providerPayload([category.id]),
+        serviceAreas: [
+          { city: 'İstanbul' },
+          { city: 'İstanbul', district: 'Kadıköy' },
+          { city: 'İstanbul', district: 'Beşiktaş' },
+        ],
+      })
+      .expect(400);
+
+    expect(response.body.message).toBe(
+      'İstanbul geneli zaten Beşiktaş, İstanbul bölgesini kapsıyor. İkisini birlikte ekleyemezsiniz.',
+    );
+    expect(await storedAreas(provider.id)).toHaveLength(2);
+  });
+
+  it('grandfathers nothing into a brand new application', async () => {
+    const response = await postApplication([
+      { city: 'İstanbul' },
+      { city: 'İstanbul', district: 'Kadıköy' },
+    ]);
+
+    expect(response.status).toBe(400);
+    expect(await ctx.prisma.providerProfile.count()).toBe(0);
+  });
+
   it('returns the areas with their scope, so a screen can label them', async () => {
     const provider = await createProviderProfile(ctx.prisma, { userId: null });
     await ctx.prisma.providerServiceArea.create({
@@ -381,9 +496,9 @@ describe('ProviderServiceArea constraints', () => {
   });
 
   it('leaves no provider without coverage, which is what the backfill guarantees', async () => {
-    // The migration inserts an area at the business address for any provider
-    // that had none, so "at least one area" is true of stored rows and not only
-    // of what the endpoint accepts. Nothing the API can be asked to do
+    // The migration copies a provider's legacy single location into an area row
+    // when it has none, so "at least one area" is true of stored rows and not
+    // only of what the endpoint accepts. Nothing the API can be asked to do
     // reintroduces a coverage-less provider: a save with an empty list is
     // refused before the delete-and-recreate runs.
     const provider = await createProviderProfile(ctx.prisma, { userId: null });

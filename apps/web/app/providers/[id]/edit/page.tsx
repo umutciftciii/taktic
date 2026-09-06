@@ -180,8 +180,8 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
         <section className="pdash-form-section">
           <h2>Hizmet Bölgeleri</h2>
           <p className="pdash-form-hint">
-            Talepler yalnızca buradaki bölgelerle eşleşir. Merkez adresiniz bir bölge sayılmaz —
-            çalıştığınız her yeri ayrıca ekleyin.
+            Talepler yalnızca buradaki bölgelerle eşleşir. Çalıştığınız her yeri ekleyin; il
+            geneli, ilçe geneli veya tek bir mahalle seçebilirsiniz.
           </p>
           {/* Optional district and neighbourhood, for the reason given on the
               application form: leaving a level out is how a provider says "the
