@@ -4643,8 +4643,21 @@ input[readonly] {
 
 /*
  * Panel routes carry their own shell (sidebar + topbar), which is the whole
- * navigation surface in the handoff. The public header and footer stay in the
- * layout for every other screen and simply step aside here.
+ * navigation surface in the handoff.
+ *
+ * This used to be how the public header stepped aside there, and hiding it was
+ * all it did: the markup stayed, so every panel screen carried a second account
+ * menu and a second "Çıkış yap" — both 0×0, both ahead of the working ones in
+ * document order, which is how signing out stopped being reachable by pointer.
+ * The layout no longer renders either piece of chrome on a panel route at all
+ * (`app/public-chrome.tsx`), so on a correct build these selectors match
+ * nothing.
+ *
+ * They stay as the failure mode of last resort. If a new panel route is ever
+ * added without being listed in `lib/panel-routes.ts`, the unit test there fails
+ * and the end-to-end suite fails — and until somebody acts on that, this keeps
+ * the screen looking the way it did rather than stacking two headers. It is a
+ * net under a tested guarantee, not the guarantee.
  */
 .app-shell:has(.cdash-shell) > .lp-header,
 .app-shell:has(.pdash-shell) > .lp-header,
@@ -4732,6 +4745,25 @@ a.seg-opt:hover { text-decoration: none; color: var(--color-text); }
 /* The header's "create request" shortcut yields first on narrow viewports. */
 @media (max-width: 720px) {
   .lp-cta-mobile-hide { display: none; }
+
+  /*
+   * With the shortcut gone the account menu is alone in the header's action
+   * group, and a wrapped header row left it sitting against the left edge. Its
+   * dropdown is 220px and hangs from the trigger's right edge, so on a 320px
+   * screen the panel started a few pixels off the left of the window and was
+   * clipped there.
+   *
+   * Sending the group to the end of its row is the fix, and it is a fix rather
+   * than a nudge: the dropdown's left edge becomes `width - padding - 220`,
+   * which is inside the window at every size this rule covers and at every name
+   * length, where anchoring to wherever the trigger happened to land was inside
+   * it only for short names. It is also where the panels already keep their own
+   * account menu (`.cdash-topbar-actions` has the same `margin-left: auto`), so
+   * the two headers now agree. Above this width the row is not wrapped and the
+   * logo's `margin-right: auto` already does the same job, which is why this
+   * stays inside the media query.
+   */
+  .lp-header-cta { margin-left: auto; }
 }
 
 .pdash-back-icon {

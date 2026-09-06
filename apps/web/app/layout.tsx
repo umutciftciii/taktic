@@ -3,6 +3,7 @@ import { Archivo } from 'next/font/google';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { apiFetch, getCurrentUser, type ProviderDashboard } from '../lib/api';
+import { PublicChrome } from './public-chrome';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
 
@@ -45,11 +46,21 @@ export default async function RootLayout({ children }: RootLayoutProps) {
     <html lang="tr" className={archivo.variable}>
       <body>
         <div className="app-shell">
-          <SiteHeader user={user} providerId={providerId} />
+          {/*
+            A panel screen draws its own sidebar and topbar, account menu
+            included, so it is handed no header and no footer at all. Rendering
+            them and hiding them in CSS is what used to leave a second, 0×0
+            account menu and logout on every panel route.
+          */}
+          <PublicChrome>
+            <SiteHeader user={user} providerId={providerId} />
+          </PublicChrome>
 
           {children}
 
-          <SiteFooter isAuthenticated={!!user} />
+          <PublicChrome>
+            <SiteFooter isAuthenticated={!!user} />
+          </PublicChrome>
         </div>
       </body>
     </html>
