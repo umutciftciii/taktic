@@ -1949,6 +1949,160 @@ input[readonly] {
 
 .lp-rc-cta { margin: 0 var(--space-4) var(--space-4); width: calc(100% - var(--space-8)); justify-content: flex-start; }
 
+/*
+ * The hero card's process demo.
+ *
+ * The card walks three states on a loop, and the whole of the motion is here:
+ * the marks along the step rail filling in, the quality bar growing, and the
+ * offer rows fading up one after another. Nothing appears or disappears — every
+ * row is in the document at its final size from the first paint, hidden only by
+ * opacity — so a state change never moves anything else on the page.
+ *
+ * `prefers-reduced-motion: reduce` is answered twice over. The site-wide rule
+ * near the end of this file already flattens the transitions; the block below
+ * additionally shows every offer row outright, so a visitor who has refused
+ * motion sees the finished process even in the instant before the script has
+ * read their preference.
+ */
+.lp-rc-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  list-style: none;
+}
+
+.lp-rc-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--color-neutral-700);
+  transition: color 0.35s ease;
+}
+
+.lp-rc-step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  flex: none;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--color-bg);
+  color: transparent;
+  transition:
+    background-color 0.35s ease,
+    border-color 0.35s ease,
+    box-shadow 0.35s ease,
+    color 0.35s ease;
+}
+
+.lp-rc-step[data-state='done'] { color: var(--color-text); }
+
+/* The step being held is the only one in the accent; the mark is the same
+   check whether it is being held or already behind us, because the caption is
+   a thing that has happened either way. */
+.lp-rc-step[data-current='true'] { color: var(--color-accent); }
+
+.lp-rc-step[data-state='done'] .lp-rc-step-mark {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* Tall enough for the longest of the three lines, so swapping never shifts. */
+.lp-rc-step-detail {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-4);
+  min-height: 2.9em;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-neutral-700);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.lp-rc-offer-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * Three slots, drawn from the first paint and never resized. What arrives is
+ * the content inside them, one row after another; the boxes themselves are the
+ * card saying where the offers will go, which is true before any have come.
+ */
+.lp-rc-offer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px var(--space-2);
+  border: 1px solid var(--color-divider);
+  font-size: 12px;
+}
+
+.lp-rc-offer > * {
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 0.4s ease,
+    transform 0.4s ease;
+  transition-delay: var(--lp-rc-offer-delay, 0ms);
+}
+
+.lp-rc-offer[data-visible='true'] > * {
+  opacity: 1;
+  transform: none;
+}
+
+.lp-rc-offer-mark {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background: var(--color-accent);
+}
+
+.lp-rc-offer-title {
+  flex: none;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.lp-rc-offer-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-neutral-700);
+}
+
+.lp-rc-demo .lp-rc-bar-fill { transition: width 0.6s ease; }
+
+/* Motion refused: the card is a still, and it is the finished one. */
+.lp-rc-demo[data-motion='static'] .lp-rc-offer > *,
+.lp-rc-demo[data-motion='static'] .lp-rc-step,
+.lp-rc-demo[data-motion='static'] .lp-rc-step-mark,
+.lp-rc-demo[data-motion='static'] .lp-rc-bar-fill { transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-rc-offer > * {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .lp-hero-mockup-wrap { display: flex; flex-direction: column; gap: var(--space-3); }
 
 .lp-hero-bg,
