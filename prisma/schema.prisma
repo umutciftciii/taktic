@@ -163,6 +163,27 @@ enum ProviderStatus {
   SUSPENDED
 }
 
+/// How wide one `ProviderServiceArea` row reaches.
+///
+/// The column is redundant with the nullability of `district` and
+/// `neighborhood` — and that is the point. PostgreSQL treats NULLs as distinct
+/// in a unique index, so "one row per province" cannot be expressed over a
+/// nullable district at all; it can be expressed over a scope that is never
+/// NULL. The three partial unique indexes documented on the model key on this
+/// column, and a CHECK constraint keeps it from ever disagreeing with the
+/// levels it names.
+///
+/// It is written by the API only, from the levels the applicant chose — see
+/// `serviceAreaScopeOf` — never accepted from a request body.
+enum ProviderServiceAreaScope {
+  /// City named, district and neighbourhood NULL: every request in the province.
+  CITY
+  /// City and district named, neighbourhood NULL: every request in the district.
+  DISTRICT
+  /// All three named: only requests at that neighbourhood.
+  NEIGHBORHOOD
+}
+
 enum OfferStatus {
   SUBMITTED
   VIEWED
@@ -991,6 +1012,19 @@ model ProviderProfile {
   email           String?
   taxType         String?
   taxNumber       String?
+  /// The business's own postal address — where the company sits, not where it
+  /// works.
+  ///
+  /// It used to be both, because a provider had exactly one service area and it
+  /// was usually this one. It is not both any more: coverage lives in
+  /// `ProviderServiceArea` and nothing else, so a plumber registered in Kadıköy
+  /// who covers all of İstanbul is matched on the areas and printed on the
+  /// address, and the two are allowed to differ without either being wrong.
+  ///
+  /// Still required, still canonical (resolved against the shipped location
+  /// list), and still what the admin provider detail prints as "Merkez adres".
+  /// Nothing in matching reads it — see `matchesProviderArea`, whose only input
+  /// is the area rows.
   city            String
   district        String
   addressNote     String?
@@ -1047,18 +1081,40 @@ model ProviderServiceCategory {
   @@index([categoryId])
 }
 
+/// One area a provider covers. A provider has many, and together they are the
+/// *only* thing request matching reads — `ProviderProfile.city`/`district` is
+/// the business's own postal address and is never consulted for coverage.
+///
+/// Three partial unique indexes live in raw SQL, in the
+/// add_provider_service_area_scope migration, because Prisma cannot express a
+/// partial index in this schema:
+///
+///   ProviderServiceArea_one_city_area   (providerId, city)                        WHERE scope = 'CITY'
+///   ProviderServiceArea_one_district_area (providerId, city, district)            WHERE scope = 'DISTRICT'
+///   ProviderServiceArea_one_neighborhood_area (providerId, city, district, neighborhood) WHERE scope = 'NEIGHBORHOOD'
+///
+/// They replace the plain `@@unique([providerId, city, district, neighborhood])`
+/// this model used to carry, which enforced nothing for the two scopes that
+/// leave a column NULL: a provider could hold "all of İstanbul" twice and the
+/// database was happy.
+///
+/// A CHECK constraint — ProviderServiceArea_scope_levels — pins the scope to
+/// the levels it claims, so no writer can store a NEIGHBORHOOD row with a NULL
+/// district or a CITY row that secretly names one.
 model ProviderServiceArea {
-  id           String   @id @default(cuid())
+  id           String                   @id @default(cuid())
   providerId   String
+  /// Derived from the levels below by the API, never taken from a client.
+  scope        ProviderServiceAreaScope
   city         String
   district     String?
   neighborhood String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
 
   provider ProviderProfile @relation(fields: [providerId], references: [id])
 
-  @@unique([providerId, city, district, neighborhood])
+  @@index([providerId])
   @@index([city])
   @@index([district])
 }

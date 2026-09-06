@@ -7,6 +7,7 @@ import {
   CustomerOrigin,
   OfferPackageType,
   PrismaClient,
+  ProviderServiceAreaScope,
   ProviderStatus,
   ProviderEntitlementStatus,
   ServiceCategoryKind,
@@ -398,15 +399,53 @@ export async function createProviderProfile(
 }
 
 /**
+ * The scope a service area row carries, worked out from the levels it names —
+ * the same rule `serviceAreaScopeOf` applies in the application. Fixtures write
+ * areas straight through Prisma, and the database CHECK refuses a scope that
+ * disagrees with its levels, so they cannot simply leave it out.
+ */
+export function serviceAreaRow(area: {
+  city: string;
+  district?: string | null;
+  neighborhood?: string | null;
+}) {
+  const district = area.district ?? null;
+  const neighborhood = district ? (area.neighborhood ?? null) : null;
+
+  return {
+    city: area.city,
+    district,
+    neighborhood,
+    scope:
+      district === null
+        ? ProviderServiceAreaScope.CITY
+        : neighborhood === null
+          ? ProviderServiceAreaScope.DISTRICT
+          : ProviderServiceAreaScope.NEIGHBORHOOD,
+  };
+}
+
+/**
  * An approved provider that can actually discover requests: it needs the
  * category and a service area that matches the request's city/district.
+ *
+ * `areas` replaces the single city/district pair when a case needs a provider
+ * covering more than one place — a province-wide row beside a district one, say.
+ * The default is unchanged: one district-scoped area at İstanbul/Kadıköy.
  */
 export async function createDiscoverableProvider(
   prisma: PrismaClient,
-  options: { userId?: string | null; categoryId: string; city?: string; district?: string },
+  options: {
+    userId?: string | null;
+    categoryId: string;
+    city?: string;
+    district?: string;
+    areas?: Array<{ city: string; district?: string | null; neighborhood?: string | null }>;
+  },
 ) {
-  const city = options.city ?? 'İstanbul';
-  const district = options.district ?? 'Kadıköy';
+  const areas = options.areas ?? [
+    { city: options.city ?? 'İstanbul', district: options.district ?? 'Kadıköy' },
+  ];
   const provider = await createProviderProfile(prisma, {
     userId: options.userId ?? null,
     status: ProviderStatus.APPROVED,
@@ -415,8 +454,8 @@ export async function createDiscoverableProvider(
   await prisma.providerServiceCategory.create({
     data: { providerId: provider.id, categoryId: options.categoryId },
   });
-  await prisma.providerServiceArea.create({
-    data: { providerId: provider.id, city, district },
+  await prisma.providerServiceArea.createMany({
+    data: areas.map((area) => ({ providerId: provider.id, ...serviceAreaRow(area) })),
   });
 
   return provider;
@@ -435,6 +474,8 @@ export async function createApprovedRequest(
     customerId?: string | null;
     city?: string;
     district?: string;
+    /** Requests may name one; a provider area at neighbourhood scope needs it. */
+    neighborhood?: string | null;
     approvedAt?: Date | null;
     customerEmail?: string | null;
   },
@@ -453,6 +494,7 @@ export async function createApprovedRequest(
           : options.customerEmail,
       city: options.city ?? 'İstanbul',
       district: options.district ?? 'Kadıköy',
+      neighborhood: options.neighborhood ?? null,
       status: ServiceRequestStatus.APPROVED,
       approvedAt: options.approvedAt ?? null,
       qualityScore: 80,

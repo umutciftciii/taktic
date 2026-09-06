@@ -454,7 +454,13 @@ export async function createProvider(options: {
       status: 'APPROVED',
       serviceCategories: { create: { categoryId: options.categoryId } },
       serviceAreas: {
-        create: { city: options.location.city, district: options.location.district },
+        // DISTRICT scope: the pair names a district, and the CHECK on the table
+        // refuses a scope that disagrees with the levels beside it.
+        create: {
+          scope: 'DISTRICT',
+          city: options.location.city,
+          district: options.location.district,
+        },
       },
     },
     select: { id: true },

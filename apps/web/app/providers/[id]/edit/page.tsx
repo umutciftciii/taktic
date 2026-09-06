@@ -9,6 +9,7 @@ import {
 } from '../../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../../lib/locations';
 import { CityDistrictFields } from '../../city-district-fields';
+import { ServiceAreaFields } from '../../service-area-fields';
 import { updateProviderAction } from '../../actions';
 import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
@@ -50,7 +51,16 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
     ...provider.serviceCategories.map((item) => item.category.id),
     ...(provider.upcomingServiceCategories ?? []).map((item) => item.category.id),
   ]);
-  const firstArea = provider.serviceAreas[0];
+  // Every stored area, in the order the API returns them, so the form opens on
+  // exactly the coverage the profile has — and saving without touching this
+  // section stores it back unchanged. Before multiple areas the screen showed
+  // the first row only, which meant a provider with three areas silently lost
+  // two of them on any profile save.
+  const currentAreas = provider.serviceAreas.map((area) => ({
+    city: area.city,
+    district: area.district,
+    neighborhood: area.neighborhood,
+  }));
 
   return (
     <ProviderShell
@@ -168,24 +178,15 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
         </section>
 
         <section className="pdash-form-section">
-          <h2>Hizmet Bölgesi</h2>
-          <div className="pdash-form-grid">
-            {/* Optional district, for the reason given on the application form. */}
-            <CityDistrictFields
-              provinces={provinces}
-              cityName="serviceAreaCity"
-              districtName="serviceAreaDistrict"
-              defaultCity={firstArea?.city ?? provider.city}
-              defaultDistrict={firstArea?.district ?? provider.district}
-              districtRequired={false}
-              districtPlaceholder="Tüm il"
-              labels={{ city: 'İl *', district: 'İlçe' }}
-            />
-            <label className="pdash-form-row">
-              <span>Mahalle</span>
-              <input name="serviceAreaNeighborhood" defaultValue={firstArea?.neighborhood ?? ''} />
-            </label>
-          </div>
+          <h2>Hizmet Bölgeleri</h2>
+          <p className="pdash-form-hint">
+            Talepler yalnızca buradaki bölgelerle eşleşir. Merkez adresiniz bir bölge sayılmaz —
+            çalıştığınız her yeri ayrıca ekleyin.
+          </p>
+          {/* Optional district and neighbourhood, for the reason given on the
+              application form: leaving a level out is how a provider says "the
+              whole province" or "the whole district". */}
+          <ServiceAreaFields provinces={provinces} defaultAreas={currentAreas} />
         </section>
 
         <div className="pdash-form-foot">

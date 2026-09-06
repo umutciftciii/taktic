@@ -3,6 +3,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { APPLY_HINT_COOKIE, isProviderClaimEnabled, maskEmail } from '../../../lib/provider-claim';
+import { readServiceAreas } from '../../../lib/service-area-payload';
 import { appCookieOptions } from '../../session-cookie';
 
 const apiUrl =
@@ -54,13 +55,7 @@ export async function submitInvitedApplicationAction(formData: FormData) {
       district: readFormString(formData, 'district'),
       addressNote: readOptionalFormString(formData, 'addressNote'),
       description: readOptionalFormString(formData, 'description'),
-      serviceAreas: [
-        {
-          city: readFormString(formData, 'serviceAreaCity'),
-          district: readOptionalFormString(formData, 'serviceAreaDistrict'),
-          neighborhood: readOptionalFormString(formData, 'serviceAreaNeighborhood'),
-        },
-      ],
+      serviceAreas: readServiceAreas(formData),
     }),
   });
 

@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, ProviderProfile } from '../../lib/api';
 import { APPLY_HINT_COOKIE, isProviderClaimEnabled, maskEmail } from '../../lib/provider-claim';
+import { readServiceAreas } from '../../lib/service-area-payload';
 import { appCookieOptions } from '../session-cookie';
 
 export async function createProviderAction(formData: FormData) {
@@ -78,13 +79,7 @@ function providerPayload(formData: FormData) {
     addressNote: readOptionalFormString(formData, 'addressNote'),
     description: readOptionalFormString(formData, 'description'),
     categoryIds: formData.getAll('categoryIds').filter((value): value is string => typeof value === 'string'),
-    serviceAreas: [
-      {
-        city: readFormString(formData, 'serviceAreaCity'),
-        district: readOptionalFormString(formData, 'serviceAreaDistrict'),
-        neighborhood: readOptionalFormString(formData, 'serviceAreaNeighborhood'),
-      },
-    ],
+    serviceAreas: readServiceAreas(formData),
   };
 }
 

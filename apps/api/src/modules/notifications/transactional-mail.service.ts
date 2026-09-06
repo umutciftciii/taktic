@@ -15,6 +15,7 @@ import {
   matchesProviderArea,
   phoneVerifiedRequestFilter,
 } from '../../common/provider-request-matching';
+import { describeArea } from '../../common/provider-service-area-scope';
 import {
   adminSupportTicketUrl,
   customerAccountUrl,
@@ -1148,8 +1149,8 @@ async function loadProvider(prisma: PrismaService, providerId: string) {
           select: { category: { select: { name: true } } },
         },
         serviceAreas: {
-          orderBy: [{ city: 'asc' }, { district: 'asc' }],
-          select: { city: true, district: true },
+          orderBy: [{ city: 'asc' }, { district: 'asc' }, { neighborhood: 'asc' }],
+          select: { city: true, district: true, neighborhood: true },
         },
       },
     });
@@ -1164,9 +1165,15 @@ async function loadProvider(prisma: PrismaService, providerId: string) {
       categories: joinDistinct(
         provider.serviceCategories.map((entry) => entry.category.name),
       ),
-      // The provider's own service areas, so nothing here is a disclosure. A
-      // row with no district covers its whole city and is shown as the city.
-      areas: joinDistinct(provider.serviceAreas.map((area) => area.district ?? area.city)),
+      // The provider's own service areas, so nothing here is a disclosure.
+      //
+      // Printed with the same sentence every screen uses — "İstanbul geneli",
+      // "Kadıköy, İstanbul" — rather than the bare district name it used to be.
+      // With one area that read fine; with several it became a list of place
+      // names at three different scopes with nothing to tell them apart, so a
+      // provider covering all of İstanbul and one covering only Kadıköy were
+      // told the same thing.
+      areas: joinDistinct(provider.serviceAreas.map(describeArea)),
     };
   }
 

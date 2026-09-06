@@ -15,6 +15,7 @@ import {
   OfferRejectionReason,
   OfferStatus,
   Prisma,
+  ProviderServiceAreaScope,
   ProviderStatus,
   ServiceCategoryKind,
   ServiceCategoryStatus,
@@ -60,6 +61,12 @@ import { ProviderClaimService } from '../provider-claim/provider-claim.service';
 import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
+import {
+  areaCovers,
+  describeArea,
+  toServiceAreaRow,
+  type ScopedArea,
+} from '../../common/provider-service-area-scope';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
 
@@ -93,7 +100,9 @@ type NormalizedProviderPayload = {
   addressNote: string | null;
   description: string | null;
   categoryIds: string[];
+  /** Scope included, because it is derived here and written verbatim. */
   serviceAreas: Array<{
+    scope: ProviderServiceAreaScope;
     city: string;
     district: string | null;
     neighborhood: string | null;
@@ -335,7 +344,15 @@ export class ProvidersService {
     const providers = await this.prisma.providerProfile.findMany({
       where: {
         ...(status ? { status } : {}),
-        ...(city ? { city: { equals: city, mode: 'insensitive' } } : {}),
+        // "Providers who serve this city", not "providers registered in it".
+        // A business whose office is in Kocaeli and whose only service area is
+        // İstanbul is an İstanbul provider to everyone who matters — the
+        // customer, the matching rule, and the operator asking who covers a
+        // province. The office address is what the row prints, never what it
+        // is selected by.
+        ...(city
+          ? { serviceAreas: { some: { city: { equals: city, mode: 'insensitive' } } } }
+          : {}),
         ...(categoryId
           ? {
               serviceCategories: {
@@ -1908,9 +1925,27 @@ function normalizeBusinessAddress(dto: Pick<CreateProviderDto, 'city' | 'distric
   return { city: resolved.city, district: resolved.district };
 }
 
+/**
+ * Every service area an application carries, canonical, scoped and checked
+ * against each other.
+ *
+ * Three refusals, and they are three different mistakes:
+ *
+ *  - an area that names no real place — discovery compares these against a
+ *    request as plain text, so an area at a place that does not exist is an
+ *    area that matches nothing, silently and forever;
+ *  - the same area twice, which the three partial unique indexes refuse at the
+ *    database as well;
+ *  - an area already covered by a wider one in the same list, or a wider one
+ *    added over areas it swallows. "İstanbul geneli" plus "İstanbul/Kadıköy" is
+ *    not richer coverage than "İstanbul geneli" alone — it is the same coverage
+ *    with a row that can only ever mislead whoever reads the profile next.
+ *
+ * The scope is decided here and nowhere else, from the levels that resolved.
+ */
 function normalizeServiceAreas(serviceAreas: ProviderServiceAreaDto[]) {
   if (!Array.isArray(serviceAreas) || serviceAreas.length === 0) {
-    throw new BadRequestException('At least one service area is required');
+    throw new BadRequestException('En az bir hizmet bölgesi eklemelisiniz.');
   }
 
   const normalized = serviceAreas.map((area) => {
@@ -1925,21 +1960,47 @@ function normalizeServiceAreas(serviceAreas: ProviderServiceAreaDto[]) {
 
     if (!resolved) {
       throw new BadRequestException(
-        'Seçilen hizmet bölgesi geçerli bir il/ilçe birleşimi değil.',
+        'Seçilen hizmet bölgesi geçerli bir il/ilçe/mahalle birleşimi değil.',
       );
     }
 
     return resolved;
   });
-  const keys = normalized.map((area) =>
-    [area.city.toLocaleLowerCase('tr-TR'), area.district?.toLocaleLowerCase('tr-TR') ?? '', area.neighborhood?.toLocaleLowerCase('tr-TR') ?? ''].join('|'),
-  );
 
-  if (new Set(keys).size !== keys.length) {
-    throw new BadRequestException('Duplicate service areas are not allowed');
+  assertAreasAreDistinctAndUncovered(normalized);
+
+  return normalized.map(toServiceAreaRow);
+}
+
+/**
+ * The pairwise check behind the two "you already have this" refusals.
+ *
+ * Quadratic on purpose: the list is the areas one business ticked on one form,
+ * and a message that names the offending pair is worth far more here than an
+ * index would be.
+ */
+function assertAreasAreDistinctAndUncovered(areas: readonly ScopedArea[]) {
+  for (const [i, first] of areas.entries()) {
+    for (const second of areas.slice(i + 1)) {
+      if (areaCovers(first, second) && areaCovers(second, first)) {
+        throw new BadRequestException(
+          `Aynı hizmet bölgesini iki kez ekleyemezsiniz: ${describeArea(first)}.`,
+        );
+      }
+
+      if (areaCovers(first, second)) {
+        throw new BadRequestException(
+          `${describeArea(first)} zaten ${describeArea(second)} bölgesini kapsıyor. İkisini birlikte ekleyemezsiniz.`,
+        );
+      }
+
+      if (areaCovers(second, first)) {
+        throw new BadRequestException(
+          `${describeArea(second)} zaten ${describeArea(first)} bölgesini kapsıyor. İkisini birlikte ekleyemezsiniz.`,
+        );
+      }
+    }
   }
-
-  return normalized;
 }
 
 function normalizeOptionalStatus(value: string | undefined) {

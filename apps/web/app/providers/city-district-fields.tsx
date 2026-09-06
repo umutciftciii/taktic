@@ -6,36 +6,33 @@ import type { ProvinceWithDistricts } from '../../lib/locations';
 type CityDistrictFieldsProps = {
   /** Every province with its districts, loaded by the page from the API. */
   provinces: ProvinceWithDistricts[];
-  /** Form field names, so one component serves both the address and the area. */
+  /** Form field names, so the two application forms post the keys the API reads. */
   cityName: string;
   districtName: string;
   labels: { city: ReactNode; district: ReactNode };
   /** Pre-selected values, for the edit screen. */
   defaultCity?: string;
   defaultDistrict?: string;
-  /** The address requires a district; a service area may name a province alone. */
-  districtRequired?: boolean;
-  /** What the district placeholder says when no district is chosen. */
-  districtPlaceholder?: string;
   classNames?: { field?: string; label?: string; select?: string };
   /** Told when a value changed, for a form that watches its own fields. */
   onChange?: () => void;
 };
 
 /**
- * Province and district, as two dependent selects.
+ * Province and district, as two dependent selects — the business's own postal
+ * address, and only that.
  *
- * A provider's address and service area used to be free text, and the service
- * area is what discovery matches a request against — as plain text, in
- * `matchesProviderArea`. So a provider who typed "Kadikoy" was not slightly
- * wrong: they were invisible to every request in Kadıköy, with nothing on any
- * screen to say why. Choosing from the canonical list makes that unreachable
- * from the form, and the API checks the same relation on its own because the
- * endpoint takes a plain JSON body.
+ * It used to serve the service area as well, which is why it once had an
+ * optional district. It does not any more: coverage is a list of areas at three
+ * scopes and has its own editor in `service-area-fields.tsx`. An address is one
+ * place and always names both levels, so both are required here.
  *
- * Two levels rather than the request form's three: provider matching keys on
- * city and district, so a neighbourhood here would be data the product does not
- * read.
+ * Free text is gone for the same reason it is gone everywhere else these names
+ * are stored: they are compared against the canonical list as plain text, so a
+ * typed "Kadikoy" is not slightly wrong, it is a place that does not exist.
+ * Choosing from the shipped list makes that unreachable from the form, and the
+ * API checks the same relation on its own because the endpoint takes a plain
+ * JSON body.
  *
  * Native `<select>` elements, and the same field names as before — the server
  * actions read the form by those keys and are untouched.
@@ -47,8 +44,6 @@ export function CityDistrictFields({
   labels,
   defaultCity = '',
   defaultDistrict = '',
-  districtRequired = true,
-  districtPlaceholder,
   classNames,
   onChange,
 }: CityDistrictFieldsProps) {
@@ -100,14 +95,14 @@ export function CityDistrictFields({
         <select
           className={selectClass}
           name={districtName}
-          required={districtRequired}
+          required
           disabled={!city}
           value={district}
           onChange={(event) => setDistrict(event.target.value)}
           data-testid={`location-district-${districtName}`}
         >
           <option value="">
-            {city ? (districtPlaceholder ?? 'İlçe seçiniz') : 'Önce il seçiniz'}
+            {city ? 'İlçe seçiniz' : 'Önce il seçiniz'}
           </option>
           {districts.map((name) => (
             <option key={name} value={name}>

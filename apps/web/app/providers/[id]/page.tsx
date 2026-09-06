@@ -1,3 +1,4 @@
+import { serviceAreaLabel } from '@taktic/shared';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -164,9 +165,7 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
               ) : (
                 provider.serviceAreas.map((area) => (
                   <span className="tag tag-neutral" key={area.id}>
-                    {area.city}
-                    {area.district ? `/${area.district}` : ''}
-                    {area.neighborhood ? `/${area.neighborhood}` : ''}
+                    {serviceAreaLabel(area)}
                   </span>
                 ))
               )}

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { ProvinceWithDistricts } from '../../lib/locations';
 import { CityDistrictFields } from './city-district-fields';
+import { ServiceAreaFields } from './service-area-fields';
 
 type ProviderApplicationFieldsProps = {
   /** Every province with its districts, loaded by the page from the API. */
@@ -27,9 +28,9 @@ type ProviderApplicationFieldsProps = {
  *
  * Extracted rather than copied when the invitation flow gained a second form.
  * Two hand-maintained copies of a form whose field names are the API contract
- * is how one of them quietly stops sending `serviceAreaNeighborhood`, or asks
- * for a district the address validator will refuse — and the applicant finds
- * out as a 400 with no field attached to it. One component means the invited
+ * is how one of them quietly stops sending a service area, or asks for a
+ * district the address validator will refuse — and the applicant finds out as a
+ * 400 with no field attached to it. One component means the invited
  * form cannot drift from the form this marketplace has been taking applications
  * with all along.
  *
@@ -179,45 +180,28 @@ export function ProviderApplicationFields({
         <div className="provider-apply-card-head">
           <h2 className="provider-apply-card-title">
             <span className="provider-apply-card-num">05</span>
-            Hizmet bölgesi
+            Hizmet bölgeleri
           </h2>
           <p className="provider-apply-card-subtitle">
-            İlk hizmet vermek istediğiniz bölgeyi belirtin. Onay sonrası genişletebilirsiniz.
+            Hizmet vermek istediğiniz bölgeleri ekleyin. İl geneli, ilçe geneli veya tek bir
+            mahalle seçebilirsiniz; en az bir bölge gerekir.
           </p>
         </div>
-        <div className="provider-apply-grid-3">
-          {/*
-            The district stays optional here, unlike the address above: a
-            service area with no district means the whole province, which
-            is what `matchesProviderArea` reads a null district as. Making
-            it mandatory would quietly take province-wide coverage away
-            from anyone who wanted it.
-          */}
-          <CityDistrictFields
-            provinces={provinces}
-            cityName="serviceAreaCity"
-            districtName="serviceAreaDistrict"
-            districtRequired={false}
-            districtPlaceholder="Tüm il"
-            labels={{
-              city: (
-                <>
-                  İl <span className="provider-apply-required">*</span>
-                </>
-              ),
-              district: 'İlçe',
-            }}
-            classNames={{
-              field: 'provider-apply-field',
-              label: 'provider-apply-label',
-              select: 'sel',
-            }}
-          />
-          <label className="provider-apply-field">
-            <span className="provider-apply-label">Mahalle</span>
-            <input className="provider-apply-input" name="serviceAreaNeighborhood" />
-          </label>
-        </div>
+        {/*
+          The district stays optional, and so does the neighbourhood under it: a
+          service area with no district means the whole province, and one with
+          no neighbourhood means the whole district — which is what
+          `matchesProviderArea` reads those nulls as. Making either mandatory
+          would quietly take the wider coverage away from anyone who wanted it.
+        */}
+        <ServiceAreaFields
+          provinces={provinces}
+          classNames={{
+            field: 'provider-apply-field',
+            label: 'provider-apply-label',
+            select: 'sel',
+          }}
+        />
       </section>
     </>
   );

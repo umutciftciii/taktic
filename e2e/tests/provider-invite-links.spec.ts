@@ -89,8 +89,11 @@ async function submitInvitedApplication(
   await form.locator('input[name="email"]').fill(`e2e-invite-${uniqueSuffix()}@example.test`);
   await form.locator('select[name="city"]').selectOption(values.city);
   await form.locator('select[name="district"]').selectOption(values.district);
-  await form.locator('select[name="serviceAreaCity"]').selectOption(values.city);
-  await form.locator('select[name="serviceAreaDistrict"]').selectOption(values.district);
+  // The service area is chosen and then added, which is what makes it one of a
+  // list: the form posts nothing for an area that was picked and never added.
+  await form.getByTestId('service-area-city').selectOption(values.city);
+  await form.getByTestId('service-area-district').selectOption(values.district);
+  await form.getByTestId('service-area-add').click();
 
   await form.getByRole('button', { name: 'Başvuruyu Gönder' }).click();
 }

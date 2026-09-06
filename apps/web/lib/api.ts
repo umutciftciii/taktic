@@ -1,4 +1,5 @@
 export * from './formatters';
+import type { ServiceAreaScope } from '@taktic/shared';
 import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   unviewedOfferRefundNotice,
@@ -196,6 +197,8 @@ export type ProviderServiceCategory = {
 
 export type ProviderServiceArea = {
   id: string;
+  /** Derived by the API from the levels below; a client never sends it. */
+  scope: ServiceAreaScope;
   city: string;
   district: string | null;
   neighborhood: string | null;

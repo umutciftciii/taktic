@@ -1,3 +1,4 @@
+import { serviceAreaLabel } from '@taktic/shared';
 import Link from 'next/link';
 import {
   apiFetch,
@@ -455,9 +456,7 @@ export default async function ProviderDetailPage({
             <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
               {provider.serviceAreas.map((area) => (
                 <span className="badge badge-muted" key={area.id}>
-                  {area.city}
-                  {area.district ? `/${area.district}` : ''}
-                  {area.neighborhood ? `/${area.neighborhood}` : ''}
+                  {serviceAreaLabel(area)}
                 </span>
               ))}
             </div>

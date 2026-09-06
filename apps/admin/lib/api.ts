@@ -1,3 +1,4 @@
+import type { ServiceAreaScope } from '@taktic/shared';
 import { urgencyLabel as sharedUrgencyLabel } from '@taktic/shared';
 import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
@@ -337,6 +338,8 @@ export type AdminProviderServiceCategories = {
 
 export type ProviderServiceArea = {
   id: string;
+  /** Derived by the API from the levels below; a client never sends it. */
+  scope: ServiceAreaScope;
   city: string;
   district: string | null;
   neighborhood: string | null;
