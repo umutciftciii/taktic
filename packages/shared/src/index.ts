@@ -25,3 +25,11 @@ export {
   formatTime,
 } from './datetime';
 export type { DateInput } from './datetime';
+
+export {
+  serviceAreaCovers,
+  serviceAreaLabel,
+  serviceAreaRejectionReason,
+  serviceAreaScope,
+} from './provider-service-areas';
+export type { ServiceAreaLike, ServiceAreaScope } from './provider-service-areas';

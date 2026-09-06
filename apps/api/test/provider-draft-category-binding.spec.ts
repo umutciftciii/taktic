@@ -18,6 +18,7 @@ import {
   offerPayload,
   providerPayload,
   resetDatabase,
+  serviceAreaRow,
   type TestContext,
 } from './harness';
 
@@ -71,7 +72,7 @@ async function approvedProvider(overrides: { userId?: string | null } = {}) {
   });
 
   await ctx.prisma.providerServiceArea.create({
-    data: { providerId: provider.id, city: 'İstanbul', district: 'Kadıköy' },
+    data: { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul', district: 'Kadıköy' }) },
   });
 
   return provider;

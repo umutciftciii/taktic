@@ -2804,6 +2804,115 @@ input[readonly] {
 
 .provider-apply-field-full { grid-column: 1 / -1; }
 
+/* The multi-area service-region editor.
+
+   Four controls on one row on a desktop — province, district, neighbourhood and
+   the add button — collapsing to a single column long before a phone gets
+   narrow. `min(180px, 100%)` rather than a bare 180px is what keeps it inside a
+   320px screen: auto-fit will not shrink a track below its minimum, so a fixed
+   one overflows the viewport instead of wrapping.
+
+   The button sits in its own field so it lines up with the selects rather than
+   with their labels; the empty label span above it holds that space and is
+   hidden from assistive technology, which reads the button's own text. */
+.service-areas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.service-areas-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: var(--space-4);
+  align-items: end;
+}
+
+.service-areas-add {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 10px 16px;
+  min-height: 42px;
+  border: 1px solid var(--color-text);
+  background: var(--color-text);
+  color: var(--color-bg);
+  cursor: pointer;
+}
+
+.service-areas-add:hover {
+  background: var(--color-neutral-800);
+  border-color: var(--color-neutral-800);
+}
+
+.service-areas-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--error);
+}
+
+/* The chips carry their own text, which is a place name and can be long, so
+   they wrap inside themselves rather than pushing the list sideways. */
+.service-areas-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.service-areas-list:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 4px;
+}
+
+.service-areas-empty {
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
+.service-areas-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 8px 6px 12px;
+  font-size: 13px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  overflow-wrap: anywhere;
+}
+
+.service-areas-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 28px square: small enough not to dominate the chip, large enough to be a
+     comfortable touch target beside its own text. */
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  border: 0;
+  background: transparent;
+  color: var(--color-neutral-800);
+  cursor: pointer;
+}
+
+.service-areas-remove:hover {
+  color: var(--color-text);
+}
+
+.pdash-form-hint {
+  margin: 0 0 var(--space-3);
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
 /* Phone verification well inside the form. */
 .verify-well {
   display: flex;

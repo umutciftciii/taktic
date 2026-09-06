@@ -1,3 +1,4 @@
+import { serviceAreaLabel } from '@taktic/shared';
 import Link from 'next/link';
 import {
   apiFetch,
@@ -153,7 +154,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
           </select>
         </div>
         <div className="admin-toolbar-field">
-          <label htmlFor="provider-city">Şehir</label>
+          <label htmlFor="provider-city">Hizmet ili</label>
           <input
             id="provider-city"
             name="city"
@@ -234,7 +235,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                   <th>Oluşturulma</th>
                   <th>İşletme</th>
                   <th>İletişim</th>
-                  <th>Konum</th>
+                  <th>Konum ve bölgeler</th>
                   <th>Kategoriler</th>
                   <th>Durum</th>
                   <th>Sahiplik</th>
@@ -277,8 +278,21 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                       </td>
                       <td>
                         <div className="cell-stack">
+                          {/*
+                            Two different facts, and the second is the one that
+                            decides anything: the location the profile has
+                            carried since before coverage was a list, then the
+                            areas matching actually reads. The filter above
+                            selects on the areas, so a row surfaced by it has to
+                            show why.
+                          */}
                           <span>
                             {provider.city}/{provider.district}
+                          </span>
+                          <span className="cell-muted">
+                            {provider.serviceAreas.length === 0
+                              ? 'Bölge tanımlı değil'
+                              : provider.serviceAreas.map(serviceAreaLabel).join(' · ')}
                           </span>
                           {provider.addressNote ? (
                             <span className="cell-muted">{provider.addressNote}</span>

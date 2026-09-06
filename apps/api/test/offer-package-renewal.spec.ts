@@ -26,6 +26,7 @@ import {
   createUser,
   loginAs,
   resetDatabase,
+  serviceAreaRow,
   type TestContext,
 } from './harness';
 
@@ -394,7 +395,7 @@ describe('turning auto-renew on and off', () => {
       data: { providerId: provider.id, categoryId: category.id },
     });
     await defaultCtx.prisma.providerServiceArea.create({
-      data: { providerId: provider.id, city: 'İstanbul', district: 'Kadıköy' },
+      data: { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul', district: 'Kadıköy' }) },
     });
     const pkg = await createOfferPackage(defaultCtx.prisma, {
       type: OfferPackageType.MONTHLY_QUOTA,

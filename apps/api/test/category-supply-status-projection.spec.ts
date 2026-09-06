@@ -17,6 +17,7 @@ import {
   offerPayload,
   resetDatabase,
   serviceRequestPayload,
+  serviceAreaRow,
   type TestContext,
 } from './harness';
 
@@ -239,7 +240,7 @@ describe('a LAUNCH_READY draft is still a draft', () => {
 
     const provider = await createProviderProfile(ctx.prisma, { status: ProviderStatus.APPROVED });
     await ctx.prisma.providerServiceArea.create({
-      data: { providerId: provider.id, city: 'İstanbul', district: 'Kadıköy' },
+      data: { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul', district: 'Kadıköy' }) },
     });
     await ctx.prisma.providerServiceCategory.create({
       data: { providerId: provider.id, categoryId: category.id },
@@ -302,7 +303,7 @@ describe('a LAUNCH_READY draft is still a draft', () => {
       status: ProviderStatus.APPROVED,
     });
     await ctx.prisma.providerServiceArea.create({
-      data: { providerId: provider.id, city: 'İstanbul', district: 'Kadıköy' },
+      data: { providerId: provider.id, ...serviceAreaRow({ city: 'İstanbul', district: 'Kadıköy' }) },
     });
     await ctx.prisma.providerServiceCategory.create({
       data: { providerId: provider.id, categoryId: category.id },

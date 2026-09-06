@@ -163,6 +163,27 @@ enum ProviderStatus {
   SUSPENDED
 }
 
+/// How wide one `ProviderServiceArea` row reaches.
+///
+/// The column is redundant with the nullability of `district` and
+/// `neighborhood` — and that is the point. PostgreSQL treats NULLs as distinct
+/// in a unique index, so "one row per province" cannot be expressed over a
+/// nullable district at all; it can be expressed over a scope that is never
+/// NULL. The three partial unique indexes documented on the model key on this
+/// column, and a CHECK constraint keeps it from ever disagreeing with the
+/// levels it names.
+///
+/// It is written by the API only, from the levels the applicant chose — see
+/// `serviceAreaScopeOf` — never accepted from a request body.
+enum ProviderServiceAreaScope {
+  /// City named, district and neighbourhood NULL: every request in the province.
+  CITY
+  /// City and district named, neighbourhood NULL: every request in the district.
+  DISTRICT
+  /// All three named: only requests at that neighbourhood.
+  NEIGHBORHOOD
+}
+
 enum OfferStatus {
   SUBMITTED
   VIEWED
@@ -991,6 +1012,28 @@ model ProviderProfile {
   email           String?
   taxType         String?
   taxNumber       String?
+  /// The single service location a provider used to have, kept as it is.
+  ///
+  /// This is a historical field, not a newly-defined one. Before
+  /// `ProviderServiceArea` carried a list, these two columns *were* the
+  /// provider's service area — the form asked for one place and matching read
+  /// it — and the screens that print them have always printed them under
+  /// "adres". This work does not redefine what they mean; there is no separate
+  /// business-address model to promote them into, and inventing one would be a
+  /// claim about data nobody ever collected under that name. (There is no
+  /// `neighborhood` column here to go with them: the single service area was
+  /// only ever a province and a district.)
+  ///
+  /// What did change is what reads them. Coverage is `ProviderServiceArea` and
+  /// nothing else — `matchesProviderArea` takes area rows and no profile — and
+  /// the migration copied this pair into an area row for every provider that
+  /// had none, so no provider depends on it being read as an implicit area any
+  /// more. They stay for backwards compatibility: existing screens, exports and
+  /// filters that print them keep working, and no new write derives coverage
+  /// from them.
+  ///
+  /// Still required and still canonical, resolved against the shipped location
+  /// list like every other place name the product stores.
   city            String
   district        String
   addressNote     String?
@@ -1047,18 +1090,49 @@ model ProviderServiceCategory {
   @@index([categoryId])
 }
 
+/// One area a provider covers. A provider has many, and together they are the
+/// *only* thing request matching reads: `ProviderProfile.city`/`district` is
+/// the historical single service area, and since the migration copied it into a
+/// row here for every provider that lacked one, nothing consults it for
+/// coverage any more.
+///
+/// Three partial unique indexes live in raw SQL, in the
+/// add_provider_service_area_scope migration, because Prisma cannot express a
+/// partial index in this schema:
+///
+///   ProviderServiceArea_one_city_area   (providerId, city)                        WHERE scope = 'CITY'
+///   ProviderServiceArea_one_district_area (providerId, city, district)            WHERE scope = 'DISTRICT'
+///   ProviderServiceArea_one_neighborhood_area (providerId, city, district, neighborhood) WHERE scope = 'NEIGHBORHOOD'
+///
+/// They replace the plain `@@unique([providerId, city, district, neighborhood])`
+/// this model used to carry, which enforced nothing for the two scopes that
+/// leave a column NULL: a provider could hold "all of İstanbul" twice and the
+/// database was happy.
+///
+/// A CHECK constraint — ProviderServiceArea_scope_levels — pins the scope to
+/// the levels it claims, so no writer can store a NEIGHBORHOOD row with a NULL
+/// district or a CITY row that secretly names one.
+///
+/// The indexes bind duplicates and nothing else. A provider may hold both "all
+/// of İstanbul" and "İstanbul/Kadıköy": redundant, not contradictory, and
+/// matching reads it as the wider of the two. Rows like that survived the
+/// migration untouched, so the API's overlap rule refuses a *new* one while
+/// leaving a stored pair alone — otherwise its owner could not save their own
+/// profile.
 model ProviderServiceArea {
-  id           String   @id @default(cuid())
+  id           String                   @id @default(cuid())
   providerId   String
+  /// Derived from the levels below by the API, never taken from a client.
+  scope        ProviderServiceAreaScope
   city         String
   district     String?
   neighborhood String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
 
   provider ProviderProfile @relation(fields: [providerId], references: [id])
 
-  @@unique([providerId, city, district, neighborhood])
+  @@index([providerId])
   @@index([city])
   @@index([district])
 }
