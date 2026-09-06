@@ -16,9 +16,17 @@ import { heroHeadlineLines, heroHeadlineText } from '../lib/hero-headline';
  */
 const SENTENCES = [
   'İhtiyacını tarif et.',
-  'Tak diye doğru ustadan teklif al.',
+  'Tak diye teklif al.',
   'Tick diye işini hallet.',
 ];
+
+/**
+ * The wordings this replaced, both of them. The middle sentence was once "Tak
+ * diye doğru ustadan teklif al." — half again as long as the other two, which
+ * made the heading a short line, a wrapped line and a short line rather than
+ * the three it is meant to be.
+ */
+const RETIRED = ['Doğru usta sana teklif versin', 'doğru ustadan teklif al'];
 
 describe('the hero headline', () => {
   it('is the three sentences of the slogan, one per line', () => {
@@ -50,7 +58,20 @@ describe('the hero headline', () => {
     }
   });
 
-  it('has retired the previous slogan', () => {
-    expect(heroHeadlineText()).not.toContain('Doğru usta sana teklif versin');
+  it('has retired every previous wording', () => {
+    for (const wording of RETIRED) {
+      expect(heroHeadlineText()).not.toContain(wording);
+    }
+  });
+
+  it('keeps the three sentences within a line of each other in length', () => {
+    // Not a style preference: the heading is 64px on a desktop, so a sentence
+    // much longer than the other two wraps and the slogan stops being three
+    // lines. Twenty-four characters is what the column fits at that size.
+    for (const sentence of SENTENCES) {
+      expect(sentence.length, `"${sentence}" is too long to hold its own line`).toBeLessThanOrEqual(
+        24,
+      );
+    }
   });
 });
