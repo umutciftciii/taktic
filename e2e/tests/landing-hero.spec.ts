@@ -11,10 +11,15 @@ import { artifactsDir, primaryRuntime } from '../src/runtime';
  * the unit test on the headline data cannot make.
  *
  * **It fits a phone.** The heading is the largest type on the site — 40px at
- * its floor — and the longest of the three sentences is thirty-three
- * characters. A heading that cannot break where it needs to does not look
+ * its floor — so a heading that cannot break where it needs to does not look
  * wrong, it makes the whole document wider than the screen and every other
  * thing on the page starts sliding sideways with it.
+ *
+ * **It is three lines on a desktop, not four.** At 64px the sentences are close
+ * to as wide as the column they sit in, and the middle one used to be long
+ * enough to wrap — which is the defect this spec was extended for. Each
+ * sentence is measured against the height of one line of its own type, so a
+ * sentence that wraps is caught wherever the wrapping starts.
  *
  * **The accent is the site's, not a new one.** The two words are compared
  * against `--color-accent-700` read from the document itself, so a hand-picked
@@ -27,15 +32,15 @@ import { artifactsDir, primaryRuntime } from '../src/runtime';
 /** The three sentences, in order, exactly as they must be read. */
 const SENTENCES = [
   'İhtiyacını tarif et.',
-  'Tak diye doğru ustadan teklif al.',
+  'Tak diye teklif al.',
   'Tick diye işini hallet.',
 ];
 
 /** The slogan as one run of text — how it is heard rather than how it is laid out. */
 const SLOGAN = SENTENCES.join(' ');
 
-/** The wording this replaced. It may not survive anywhere in the hero. */
-const RETIRED_SLOGAN = 'Doğru usta sana teklif versin';
+/** The wordings this replaced. Neither may survive anywhere in the hero. */
+const RETIRED_WORDINGS = ['Doğru usta sana teklif versin', 'doğru ustadan teklif al'];
 
 /** The phone widths the brief names, narrowest first. */
 const PHONE_WIDTHS = [320, 375, 390] as const;
@@ -99,6 +104,25 @@ test.describe('the home page hero slogan', () => {
       expect(secondTop, 'the second sentence starts below the first').toBeGreaterThan(firstTop);
       expect(thirdTop, 'the third sentence starts below the second').toBeGreaterThan(secondTop);
 
+      // And each sentence holds its own line rather than wrapping onto a
+      // second: a wrapped sentence is twice the height of the type it is set
+      // in, so this is measured against the font size the line actually has.
+      const heights = await lines.evaluateAll((elements) =>
+        elements.map((element) => ({
+          text: element.textContent ?? '',
+          height: element.getBoundingClientRect().height,
+          fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+        })),
+      );
+      for (const line of heights) {
+        expect(line.fontSize, 'the heading is set at its desktop size').toBeGreaterThan(40);
+        expect(
+          line.height,
+          `"${line.text}" wraps onto a second line at 1280px (${Math.round(line.height)}px tall, ` +
+            `type is ${Math.round(line.fontSize)}px)`,
+        ).toBeLessThan(line.fontSize * 1.6);
+      }
+
       // Exactly two words are accented, and they are the two brand words.
       const accents = heading.locator('.lp-accent');
       await expect(accents).toHaveCount(2);
@@ -146,7 +170,9 @@ test.describe('the home page hero slogan', () => {
         left!.x + left!.width - 1,
       );
 
-      await expect(visitor.page.locator('#lp-hero')).not.toContainText(RETIRED_SLOGAN);
+      for (const wording of RETIRED_WORDINGS) {
+        await expect(visitor.page.locator('#lp-hero')).not.toContainText(wording);
+      }
       await expectNoHorizontalOverflow(visitor.page, 'home @1280');
       await visitor.page.screenshot({ path: resolve(SHOTS, 'hero-1280.png'), fullPage: false });
     } finally {
@@ -169,7 +195,9 @@ test.describe('the home page hero slogan', () => {
 
         // Still the whole slogan, however many lines it took to get there.
         expect(collapse(await heading.innerText()), `hero text @${width}`).toBe(SLOGAN);
-        await expect(visitor.page.locator('#lp-hero')).not.toContainText(RETIRED_SLOGAN);
+        for (const wording of RETIRED_WORDINGS) {
+          await expect(visitor.page.locator('#lp-hero')).not.toContainText(wording);
+        }
 
         await expectNoHorizontalOverflow(visitor.page, `home @${width}`);
         await expectWithinViewport(visitor.page, 'h1.lp-h1', `slogan @${width}`);

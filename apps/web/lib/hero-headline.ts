@@ -27,7 +27,7 @@ export type HeroHeadlineSegment = {
  */
 export const heroHeadlineLines: readonly (readonly HeroHeadlineSegment[])[] = [
   [{ text: 'İhtiyacını tarif et.' }],
-  [{ text: 'Tak', accent: true }, { text: ' diye doğru ustadan teklif al.' }],
+  [{ text: 'Tak', accent: true }, { text: ' diye teklif al.' }],
   [{ text: 'Tick', accent: true }, { text: ' diye işini hallet.' }],
 ];
 
