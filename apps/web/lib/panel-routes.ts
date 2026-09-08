@@ -50,6 +50,12 @@ const PANEL_ROUTES = [
   '/providers/:id/package-purchases',
   '/providers/:id/package-purchases/:purchaseId',
   '/providers/:id/package-purchases/:purchaseId/checkout',
+  '/providers/:id/vitrin',
+  // Static before dynamic, exactly as Next resolves it: `/vitrin/yeni` is the
+  // new-card form and `/vitrin/:cardId` is an existing card. Both draw the
+  // provider panel, so the order matters here only for readability.
+  '/providers/:id/vitrin/yeni',
+  '/providers/:id/vitrin/:cardId',
   '/requests/my',
   '/requests/offers',
   '/requests/matches',
