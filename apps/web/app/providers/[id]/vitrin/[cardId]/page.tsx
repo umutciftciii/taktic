@@ -209,10 +209,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
               çıkarmak onaysız uygulanır.
             </p>
 
-            <EditShowcaseCardForm
-              kind={card.kind}
-              version={formSource}
-            />
+            <EditShowcaseCardForm card={card} version={formSource} />
 
             <section className="pdash-form-section">
               <h2>Kartın bölgeleri</h2>

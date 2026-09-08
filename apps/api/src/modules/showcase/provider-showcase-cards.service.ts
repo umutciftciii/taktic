@@ -22,7 +22,11 @@ import {
   UpdateShowcaseCardDto,
 } from './dto/create-showcase-card.dto';
 import { SubmitShowcaseCardDto } from './dto/submit-showcase-card.dto';
-import { isLiveProviderBinding } from '../categories/category-taxonomy';
+import {
+  canReceiveRequests,
+  isActiveFor,
+  isLiveProviderBinding,
+} from '../categories/category-taxonomy';
 import {
   showcaseAreaDuplicate,
   showcaseAreaNotCovered,
@@ -82,6 +86,86 @@ export class ProviderShowcaseCardsService {
   /** The terms the submit endpoint requires acceptance of, for the form to show. */
   getPriceTerms() {
     return { version: SHOWCASE_PRICE_TERMS_VERSION, text: SHOWCASE_PRICE_TERMS_TEXT };
+  }
+
+  /**
+   * The categories this provider may open a card under, per card kind.
+   *
+   * Derived here rather than assembled by the form, and that is the point: the
+   * eligible set is a fact about the provider's bindings *and* the category
+   * tree, and a client that guessed at it would be a client deciding what a
+   * business is allowed to advertise. The form renders this list; the write
+   * endpoints re-derive the same rule and refuse anything outside it, so the
+   * list is a convenience and never the authority.
+   *
+   * Two lists rather than one flagged list, because the two card kinds accept
+   * genuinely different shapes and a form that had to filter by a flag would be
+   * a second place where that rule lives:
+   *
+   * - `service` — the provider's own leaves that can take a request.
+   * - `promotion` — those leaves, plus every ACTIVE group above them.
+   *
+   * A group reached through three different leaves appears once. Ordering is the
+   * catalogue's own, applied down the tree: each entry sorts by its ancestors'
+   * `(sortOrder, name)` and then its own, so a group is immediately followed by
+   * what sits under it and `depth` is enough for the form to indent by.
+   */
+  async listEligibleCategories(providerId: string) {
+    const bindings = await this.prisma.providerServiceCategory.findMany({
+      where: { providerId },
+      select: { category: { select: eligibleCategorySelect } },
+    });
+
+    const leaves = bindings
+      .map((binding) => binding.category)
+      .filter(
+        (category) => isLiveProviderBinding(category) && canReceiveRequests(category, false),
+      );
+
+    // Every ancestor of every offerable leaf, gathered level by level so the
+    // number of queries is the tree's depth rather than the number of leaves.
+    const known = new Map<string, EligibleCategoryRow>();
+    for (const leaf of leaves) {
+      known.set(leaf.id, leaf);
+    }
+
+    let frontier = [...new Set(leaves.map((leaf) => leaf.parentId).filter(isPresent))];
+    for (let depth = 0; frontier.length > 0 && depth < SHOWCASE_MAX_CATEGORY_DEPTH; depth += 1) {
+      const parents = await this.prisma.serviceCategory.findMany({
+        where: { id: { in: frontier } },
+        select: eligibleCategorySelect,
+      });
+
+      const next: string[] = [];
+      for (const parent of parents) {
+        if (known.has(parent.id)) continue;
+        known.set(parent.id, parent);
+        if (parent.parentId) next.push(parent.parentId);
+      }
+
+      frontier = [...new Set(next)];
+    }
+
+    // An ancestor is offerable for a promotion card when it is an ACTIVE group.
+    // Its own ancestors are judged the same way and independently: the rule is
+    // about the shelf the card points at, which is exactly what
+    // `assertCategoryIsOffered` asks, so the list and the guard cannot drift.
+    const groups = [...known.values()].filter(
+      (category) =>
+        category.kind === ServiceCategoryKind.GROUP &&
+        isActiveFor(category.status) &&
+        !leaves.some((leaf) => leaf.id === category.id),
+    );
+
+    const service = leaves.map((leaf) => toEligibleCategory(leaf, known));
+    const promotion = [...leaves, ...groups].map((category) =>
+      toEligibleCategory(category, known),
+    );
+
+    return {
+      service: service.sort(compareEligibleCategories),
+      promotion: promotion.sort(compareEligibleCategories),
+    };
   }
 
   async listCards(providerId: string) {
@@ -731,43 +815,80 @@ export class ProviderShowcaseCardsService {
       select: { id: true, kind: true, status: true },
     });
 
-    if (
-      !category ||
-      !isLiveProviderBinding(category) ||
-      category.kind === ServiceCategoryKind.ROUTER ||
-      (kind === ShowcaseCardKind.SERVICE && category.kind !== ServiceCategoryKind.LEAF)
-    ) {
+    if (!category) {
       throw showcaseCategoryNotOffered();
     }
 
-    // The provider's live bindings. DRAFT ones are excluded by the same
-    // predicate `visibleServiceCategories` applies, so this list is exactly what
-    // their own panel calls their service categories.
-    const bindings = await this.prisma.providerServiceCategory.findMany({
-      where: {
-        providerId,
-        category: { status: { not: ServiceCategoryStatus.DRAFT } },
-      },
-      select: { categoryId: true, category: { select: { kind: true } } },
-    });
+    const offerableLeafIds = await this.offerableLeafIds(providerId);
 
     if (category.kind === ServiceCategoryKind.LEAF) {
-      if (!bindings.some((binding) => binding.categoryId === categoryId)) {
+      // Membership in this set is both facts at once: the provider is bound to
+      // it, and it is a leaf that can take requests. Checking the category's own
+      // status again here would be a second copy of a rule that is already the
+      // reason it is in the set.
+      if (!offerableLeafIds.has(categoryId)) {
         throw showcaseCategoryNotOffered();
       }
       return;
     }
 
-    // A GROUP, reachable only for a PROMOTION card. Only LEAF bindings count as
-    // something the business performs; a provider bound to a group would be
-    // bound to a shelf, which nothing else in this product treats as supply.
-    const leafIds = bindings
-      .filter((binding) => binding.category.kind === ServiceCategoryKind.LEAF)
-      .map((binding) => binding.categoryId);
-
-    if (leafIds.length === 0 || !(await this.someCategoryIsUnder(categoryId, leafIds))) {
+    // A GROUP, and only for a PROMOTION card: a service card names one service.
+    // A ROUTER is neither and falls through to the refusal below.
+    if (category.kind !== ServiceCategoryKind.GROUP || kind !== ShowcaseCardKind.PROMOTION) {
       throw showcaseCategoryNotOffered();
     }
+
+    // The shelf itself has to be open. A DRAFT group is unreleased catalogue and
+    // an INACTIVE one is a branch the platform has closed; a general card
+    // pointing at either would point at somewhere the customer surface will not
+    // render.
+    if (!isActiveFor(category.status)) {
+      throw showcaseCategoryNotOffered();
+    }
+
+    // Only LEAF bindings count as something the business performs. Being bound
+    // to the group itself is being bound to a shelf, which nothing else in this
+    // product treats as supply.
+    if (
+      offerableLeafIds.size === 0 ||
+      !(await this.someCategoryIsUnder(categoryId, [...offerableLeafIds]))
+    ) {
+      throw showcaseCategoryNotOffered();
+    }
+  }
+
+  /**
+   * The provider's own service leaves that can actually take a request.
+   *
+   * Two filters, and the second is what this round added. `isLiveProviderBinding`
+   * says the binding is supply rather than an operator's release preparation;
+   * `canReceiveRequests` says the category is one a request may land on at all.
+   * A vitrin card is a surface that will take leads, so pointing it at a leaf
+   * the platform has closed would be advertising a service nobody can ask for.
+   *
+   * `isAdmin` is `false` even when a SUPER_ADMIN is acting on a provider's
+   * behalf. The flag exists so an operator can walk a DRAFT category end to end
+   * before release; a card is not a walk-through, it is a claim the business
+   * makes in public, and it must be judged by what a customer could reach.
+   */
+  private async offerableLeafIds(providerId: string): Promise<Set<string>> {
+    const bindings = await this.prisma.providerServiceCategory.findMany({
+      where: { providerId },
+      select: {
+        categoryId: true,
+        category: { select: { kind: true, status: true } },
+      },
+    });
+
+    return new Set(
+      bindings
+        .filter(
+          (binding) =>
+            isLiveProviderBinding(binding.category) &&
+            canReceiveRequests(binding.category, false),
+        )
+        .map((binding) => binding.categoryId),
+    );
   }
 
   /**
@@ -815,6 +936,69 @@ export class ProviderShowcaseCardsService {
  * for any tree, and this is what stops it if the tree is ever not one.
  */
 const SHOWCASE_MAX_CATEGORY_DEPTH = 12;
+
+/** The columns an eligibility decision and its ordering read. */
+const eligibleCategorySelect = {
+  id: true,
+  name: true,
+  slug: true,
+  kind: true,
+  status: true,
+  parentId: true,
+  sortOrder: true,
+} satisfies Prisma.ServiceCategorySelect;
+
+type EligibleCategoryRow = Prisma.ServiceCategoryGetPayload<{
+  select: typeof eligibleCategorySelect;
+}>;
+
+function isPresent<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
+}
+
+/**
+ * One eligible category, with the ancestry the form needs to render it.
+ *
+ * `path` is the names from the root down, so a group and the leaves under it
+ * read as a tree rather than as a flat list of words. `depth` is the same fact
+ * as a number, because indenting by `path.length` in three places is three
+ * places that can disagree.
+ *
+ * `sortKey` is what the ordering below compares: each ancestor's `sortOrder`
+ * padded to a fixed width and then its name, joined down the chain. Padding
+ * matters — without it "10" sorts before "9".
+ */
+function toEligibleCategory(
+  category: EligibleCategoryRow,
+  known: ReadonlyMap<string, EligibleCategoryRow>,
+) {
+  const chain: EligibleCategoryRow[] = [];
+  let cursor: EligibleCategoryRow | undefined = category;
+
+  for (let depth = 0; cursor && depth < SHOWCASE_MAX_CATEGORY_DEPTH; depth += 1) {
+    chain.unshift(cursor);
+    cursor = cursor.parentId ? known.get(cursor.parentId) : undefined;
+  }
+
+  return {
+    id: category.id,
+    name: category.name,
+    slug: category.slug,
+    kind: category.kind,
+    depth: chain.length - 1,
+    path: chain.map((node) => node.name),
+    sortKey: chain
+      .map((node) => `${String(node.sortOrder).padStart(6, '0')}|${node.name}`)
+      .join('/'),
+  };
+}
+
+type EligibleCategory = ReturnType<typeof toEligibleCategory>;
+
+/** The catalogue's own order — `(sortOrder, name)` — applied down the tree. */
+function compareEligibleCategories(left: EligibleCategory, right: EligibleCategory): number {
+  return left.sortKey.localeCompare(right.sortKey, 'tr-TR');
+}
 
 type NormalizedContent = {
   kind: ShowcaseCardKind;

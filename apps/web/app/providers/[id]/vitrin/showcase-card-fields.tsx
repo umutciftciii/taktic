@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   completeLiraAmount,
   formatLiraDraft,
@@ -11,6 +11,19 @@ type ShowcaseCardFieldsProps = {
   /** Fixed on an edit; chosen on the create form. */
   kind: ShowcaseCardKind;
   onKindChange?: (kind: ShowcaseCardKind) => void;
+  /**
+   * The category control, rendered immediately under the kind.
+   *
+   * A slot rather than a prop pair, because the two forms need genuinely
+   * different controls there: the create form picks from a list that depends on
+   * the kind, and the edit form has nothing to pick — a card's category is fixed
+   * for its life — so it shows what was chosen and says why it cannot change.
+   *
+   * Its position is the point. The kind decides which categories are on offer,
+   * so it has to be answered first and the answer has to be visible while the
+   * category is chosen.
+   */
+  categorySlot?: ReactNode;
   defaultTitle?: string;
   defaultSummary?: string;
   defaultScopeIncluded?: string[];
@@ -46,6 +59,7 @@ type ShowcaseCardFieldsProps = {
 export function ShowcaseCardFields({
   kind,
   onKindChange,
+  categorySlot,
   defaultTitle = '',
   defaultSummary = '',
   defaultScopeIncluded = [],
@@ -96,6 +110,8 @@ export function ShowcaseCardFields({
           </span>
         ) : null}
       </section>
+
+      {categorySlot}
 
       <section className="pdash-form-section">
         <h2>Kart içeriği</h2>

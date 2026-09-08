@@ -60,6 +60,23 @@ export class ProviderShowcaseCardsController {
     return this.cards.getPriceTerms();
   }
 
+  /**
+   * The categories this provider may open a card under, per card kind.
+   *
+   * Declared above `:cardId` for the same reason `price-terms` is: Nest matches
+   * routes in declaration order, and a literal segment that comes after a
+   * parameter would be swallowed by it.
+   *
+   * On this controller rather than its own, because it is the same resource
+   * seen from the other end — "what may a card of mine point at" — and it needs
+   * the identical guard chain. A second controller would be a second place for
+   * that chain to be got wrong.
+   */
+  @Get('eligible-categories')
+  listEligibleCategories(@Param('providerId') providerId: string) {
+    return this.cards.listEligibleCategories(providerId);
+  }
+
   @Get()
   listCards(@Param('providerId') providerId: string) {
     return this.cards.listCards(providerId);

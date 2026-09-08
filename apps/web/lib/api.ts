@@ -1280,6 +1280,32 @@ export type ShowcaseCard = {
 
 export type ShowcasePriceTerms = { version: string; text: string };
 
+/**
+ * One category a card may point at, with the ancestry needed to render it.
+ *
+ * `depth` and `path` come from the API so the form can show a tree without
+ * knowing the category tree — which it must not, because guessing at it would
+ * be guessing at what a business is allowed to advertise.
+ */
+export type ShowcaseEligibleCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  kind: CategoryKind;
+  depth: number;
+  path: string[];
+};
+
+/**
+ * Two lists rather than one flagged list: the card kinds accept genuinely
+ * different shapes, and a form filtering by a flag would be a second place that
+ * rule lives.
+ */
+export type ShowcaseEligibleCategories = {
+  service: ShowcaseEligibleCategory[];
+  promotion: ShowcaseEligibleCategory[];
+};
+
 export const SHOWCASE_CARD_STATUS_LABELS: Record<ShowcaseCardStatus, string> = {
   DRAFT: 'Taslak',
   PENDING_REVIEW: 'İncelemede',

@@ -153,7 +153,8 @@ export type SeededCategory = {
   id: string;
   name: string;
   slug: string;
-  offerCreditCost: number;
+  /** Null for a GROUP, which never receives an offer. */
+  offerCreditCost: number | null;
 };
 
 export type CategoryKind = 'GROUP' | 'LEAF' | 'ROUTER';
@@ -317,7 +318,11 @@ export async function createAdmin(): Promise<SeededCustomer> {
  * offering, so every test states the number it expects to be charged.
  */
 export async function createCategory(
-  offerCreditCost: number,
+  /**
+   * Null for a GROUP, which never receives an offer and whose price column a
+   * database CHECK requires to be absent rather than zero.
+   */
+  offerCreditCost: number | null,
   options: {
     /** Defaults to LEAF and ACTIVE — a plain, live service, as before. */
     kind?: CategoryKind;
@@ -327,6 +332,12 @@ export async function createCategory(
     providerEnrollmentOpen?: boolean;
     /** Defaults to false, exactly as the column does. */
     unlimitedPackageEligible?: boolean;
+    /**
+     * The GROUP this category sits under, for the cases that need a tree rather
+     * than a flat list of leaves — a vitrin general card is anchored on a shelf,
+     * and a shelf only exists if something is on it.
+     */
+    parentId?: string | null;
   } = {},
 ): Promise<SeededCategory> {
   const suffix = uniqueSuffix();
@@ -347,6 +358,7 @@ export async function createCategory(
       offerCreditCost,
       providerEnrollmentOpen: options.providerEnrollmentOpen ?? false,
       unlimitedPackageEligible: options.unlimitedPackageEligible ?? false,
+      parentId: options.parentId ?? null,
     },
     select: { id: true, name: true, slug: true },
   });

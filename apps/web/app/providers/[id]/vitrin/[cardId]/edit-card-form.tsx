@@ -1,6 +1,6 @@
 'use client';
 
-import type { ShowcaseCardKind, ShowcaseCardVersion } from '../../../../../lib/api';
+import type { ShowcaseCard, ShowcaseCardVersion } from '../../../../../lib/api';
 import { ShowcaseCardFields } from '../showcase-card-fields';
 
 /**
@@ -14,19 +14,38 @@ import { ShowcaseCardFields } from '../showcase-card-fields';
  * The kind also travels as a hidden field so the server action can decide
  * whether to send a price at all. Reading it from the disabled radios would send
  * nothing — a disabled control submits no value.
+ *
+ * The category is shown and not offered. It is fixed for a card's life, so there
+ * is nothing here to choose: it lives on the card rather than on a version,
+ * which means a change to it could not be put in front of an operator the way
+ * every other change is. Showing it read-only says that plainly; leaving it off
+ * the form entirely would make a provider wonder where it went.
  */
 export function EditShowcaseCardForm({
-  kind,
+  card,
   version,
 }: {
-  kind: ShowcaseCardKind;
+  card: ShowcaseCard;
   version: ShowcaseCardVersion;
 }) {
   return (
     <>
-      <input type="hidden" name="kind" value={kind} />
+      <input type="hidden" name="kind" value={card.kind} />
       <ShowcaseCardFields
-        kind={kind}
+        kind={card.kind}
+        categorySlot={
+          <section className="pdash-form-section">
+            <h2>Hizmet kategorisi</h2>
+            <label className="pdash-form-row">
+              <span>Kategori</span>
+              <input value={card.category.name} readOnly disabled />
+            </label>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Kategori kart oluşturulduktan sonra değiştirilemez. Farklı bir kategori için yeni
+              kart açın.
+            </span>
+          </section>
+        }
         defaultTitle={version.title}
         defaultSummary={version.summary}
         defaultScopeIncluded={version.scopeIncluded}

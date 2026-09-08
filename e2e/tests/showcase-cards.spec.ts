@@ -316,6 +316,78 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
     }
   });
 
+  test('genel tanıtım kartı, altında hizmet verilen grupla açılabilir', async ({ browser }) => {
+    const location = uniqueLocation();
+    const group = await createCategory(null, {
+      kind: 'GROUP',
+      namePrefix: 'E2E Ev Bakimi Grubu',
+    });
+    const leaf = await createCategory(3, {
+      namePrefix: 'E2E Grup Altindaki Hizmet',
+      parentId: group.id,
+    });
+    const providerAccount = await createProvider({
+      categoryId: leaf.id,
+      location,
+      credits: 0,
+    });
+
+    const provider = await Actor.open(browser, 'web', primaryRuntime);
+
+    try {
+      await provider.loginToWeb(providerAccount.email, providerAccount.password);
+      await provider.gotoWeb(`/providers/${providerAccount.id}/vitrin/yeni`);
+      await assertNoErrorScreen(provider.page);
+
+      const select = provider.page.getByTestId('showcase-category-select');
+
+      // SERVICE is the default, and a group is not a service: only the leaf the
+      // business is bound to is on offer.
+      await expect(select.getByRole('option', { name: leaf.name })).toHaveCount(1);
+      await expect(
+        select.getByRole('option', { name: new RegExp(group.name) }),
+      ).toHaveCount(0);
+
+      // Switching to the general card opens the shelf above it.
+      await provider.page.getByRole('radio', { name: 'Genel tanıtım' }).check();
+      const groupOption = select.getByRole('option', { name: new RegExp(group.name) });
+      await expect(groupOption).toHaveCount(1);
+      await expect(select.getByRole('option', { name: leaf.name })).toHaveCount(1);
+
+      // And it is really selectable, all the way to a stored card.
+      await select.selectOption({ label: `${group.name} (grup)` });
+      await provider.page.getByLabel('Başlık *').fill('E2E Genel tanitim karti');
+      await provider.page
+        .getByLabel('Özet *')
+        .fill('İşletmemizi tanıtan genel vitrin kartı.');
+      await provider.page
+        .getByLabel('Dahil olanlar * (her satır bir madde)')
+        .fill('Yerinde keşif');
+      await provider.page
+        .getByLabel('Hariç olanlar * (her satır bir madde)')
+        .fill('Malzeme bedeli');
+      // A general card carries no price at all, so the field is not on screen.
+      await expect(provider.page.getByLabel('Sabit hizmet bedeli (₺) *')).toHaveCount(0);
+
+      await addArea(provider.page, location.city, location.district);
+      await provider.page.getByRole('button', { name: 'Taslağı kaydet' }).click();
+      await assertNoErrorScreen(provider.page);
+
+      await expect(
+        provider.page.getByRole('heading', { name: 'E2E Genel tanitim karti' }),
+      ).toBeVisible();
+
+      const stored = await prisma().showcaseCard.findFirstOrThrow({
+        where: { providerId: providerAccount.id },
+        select: { kind: true, categoryId: true },
+      });
+      expect(stored.kind).toBe('PROMOTION');
+      expect(stored.categoryId).toBe(group.id);
+    } finally {
+      await provider.close();
+    }
+  });
+
   test('yalnız bölge daraltma incelemeye düşmeden yeni canlı sürüm üretir', async ({
     browser,
   }) => {
@@ -427,6 +499,15 @@ test.describe('vitrin ekranları dar ekranda', () => {
         await provider.gotoWeb(`/providers/${providerAccount.id}/vitrin/yeni`);
         await assertNoErrorScreen(provider.page);
         await expectNoHorizontalOverflow(provider.page, `yeni kart formu @${width}`);
+
+        // The category select carries indented, potentially long category names,
+        // so it is the control most likely to widen this form.
+        const categorySelect = provider.page.getByTestId('showcase-category-select');
+        await expect(categorySelect).toBeVisible();
+        await provider.page.getByRole('radio', { name: 'Genel tanıtım' }).check();
+        await expectNoHorizontalOverflow(provider.page, `genel tanıtım kategorileri @${width}`);
+        await provider.page.getByRole('radio', { name: 'Hizmet vitrini' }).check();
+        await expectNoHorizontalOverflow(provider.page, `hizmet kategorileri @${width}`);
 
         // The form filled in, because a form only overflows once it has content:
         // a long scope line and an added area chip are what push it wide.

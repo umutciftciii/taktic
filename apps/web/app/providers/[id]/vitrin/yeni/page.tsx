@@ -5,6 +5,7 @@ import {
   fetchOrNotFound,
   getCurrentUser,
   type ProviderProfile,
+  type ShowcaseEligibleCategories,
 } from '../../../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../../../lib/locations';
 import { ProviderShell } from '../../../provider-shell';
@@ -22,16 +23,12 @@ type NewShowcaseCardPageProps = {
 /**
  * A new vitrin card.
  *
- * The category list is the provider's own live service categories, which is also
- * the rule the API enforces: a card may not advertise a service the business
- * does not offer, and the check runs again on every edit and at submit time.
- * What the form does is spare the provider a refusal they cannot act on from a
- * dropdown; it is not what makes the rule true.
- *
- * The list is LEAF-only, because that is what a provider's bindings are. A
- * general card anchored on a GROUP is a shape the API accepts — when one of
- * those leaves sits under the group — and this form does not yet offer it; see
- * the phase-one notes.
+ * The categories on offer come from the API, per card kind: the provider's own
+ * leaves that can take a request, and — for a general card — every open group
+ * above them. Working that out here would mean this page knowing the category
+ * tree and deciding what a business may advertise; the write endpoint re-derives
+ * the same rule and refuses anything outside it, so the list is a convenience
+ * rather than the authority.
  *
  * The areas use the same picker and the same `serviceAreas` field the profile
  * form uses, so a provider adds a card's coverage in exactly the vocabulary they
@@ -48,8 +45,16 @@ export default async function NewShowcaseCardPage({
     redirect(`/login?redirectTo=/providers/${id}/vitrin/yeni`);
   }
 
-  const [provider, creditBalance, provinces] = await Promise.all([
+  const [provider, categories, creditBalance, provinces] = await Promise.all([
     fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
+    // Which categories this business may open a card under, per card kind,
+    // worked out on the server from its own live bindings and the category
+    // tree. The form renders it; the write endpoint decides it.
+    fetchOrNotFound(() =>
+      apiFetch<ShowcaseEligibleCategories>(
+        `/providers/${id}/showcase/cards/eligible-categories`,
+      ),
+    ),
     readCreditBalance(id),
     apiFetch<ProvinceWithDistricts[]>('/locations/provinces'),
   ]);
@@ -61,7 +66,6 @@ export default async function NewShowcaseCardPage({
     redirect(`/providers/${id}/vitrin`);
   }
 
-  const categories = provider.serviceCategories.map((entry) => entry.category);
 
   return (
     <ProviderShell
@@ -95,11 +99,11 @@ export default async function NewShowcaseCardPage({
         </div>
       ) : null}
 
-      {categories.length === 0 ? (
+      {categories.service.length === 0 && categories.promotion.length === 0 ? (
         <div className="pdash-detail-card">
           <p className="muted">
-            Vitrin kartı açmak için önce işletme profilinizde en az bir hizmet kategorisi
-            seçmelisiniz.
+            Vitrin kartı açmak için önce işletme profilinizde talep alabilen en az bir hizmet
+            kategorisi seçmelisiniz.
           </p>
           <div className="pdash-form-foot">
             <Link className="pdash-btn pdash-btn-primary" href={`/providers/${id}/edit`}>
@@ -111,28 +115,7 @@ export default async function NewShowcaseCardPage({
         <form action={createShowcaseCardAction} className="pdash-detail-card pdash-form">
           <input type="hidden" name="providerId" value={id} />
 
-          <section className="pdash-form-section">
-            <h2>Hizmet kategorisi</h2>
-            <p className="pdash-form-hint">
-              Kategori kart oluşturulduktan sonra değiştirilemez. Farklı bir kategori için yeni
-              kart açın.
-            </p>
-            <label className="pdash-form-row">
-              <span>Kategori *</span>
-              <select name="categoryId" required defaultValue="">
-                <option value="" disabled>
-                  Seçiniz
-                </option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
-
-          <NewShowcaseCardForm />
+          <NewShowcaseCardForm categories={categories} />
 
           <section className="pdash-form-section">
             <h2>Kartın bölgeleri</h2>
