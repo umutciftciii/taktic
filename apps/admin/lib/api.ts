@@ -1979,6 +1979,93 @@ export type OperationsSettings = {
 
 export const OPERATIONS_SETTING_LABELS: Record<string, string> = {
   unviewedOfferRefundWindowHours: 'Görüntülenmeyen teklif için kredi iade süresi (saat)',
+  entitlementRenewalSchedulerEnabled: 'Paket yenileme işi',
+  unviewedOfferRefundSchedulerEnabled: 'Görüntülenmeyen teklif iade işi',
+  requestExpirySchedulerEnabled: 'Talep süresi dolum işi',
+  requestReminderSchedulerEnabled: 'Talep hatırlatma işi',
+};
+
+/* ---- scheduled jobs ------------------------------------------------------ */
+
+/**
+ * The four background jobs a super admin switches on and off.
+ *
+ * The keys are the API's, verbatim: they are the path segment a toggle posts
+ * to and the identity the audit trail keeps, so they are never translated. The
+ * Turkish copy lives below, next to the rest of this panel's copy.
+ */
+export const SCHEDULER_JOB_KEYS = [
+  'entitlement-renewal',
+  'unviewed-offer-refund',
+  'request-expiry',
+  'request-reminder',
+] as const;
+
+export type SchedulerJobKey = (typeof SCHEDULER_JOB_KEYS)[number];
+
+export type SchedulerRunRecord = {
+  startedAt: string;
+  finishedAt: string;
+  outcome: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  /** Counts only — never an id, an address or a provider's error text. */
+  summary: string | null;
+};
+
+export type SchedulerJob = {
+  key: SchedulerJobKey;
+  enabled: boolean;
+  /** The deployment's schedule. Shown, never edited here. */
+  cron: string;
+  /** True for the two jobs whose passes move credits. */
+  movesMoney: boolean;
+  /** What the API instance that answered last saw this job do, or null. */
+  lastRun: SchedulerRunRecord | null;
+};
+
+export type SchedulerSettings = {
+  jobs: SchedulerJob[];
+  recentChanges: OperationsSettingsChange[];
+};
+
+/**
+ * What each job is, in one line, and what switching it on actually starts.
+ *
+ * `impact` is written for somebody deciding whether to flip the switch during
+ * an incident, so it says what the job *does to the data* rather than what it
+ * is called. The two that move credits say so first.
+ */
+export const SCHEDULER_JOB_COPY: Record<
+  SchedulerJobKey,
+  { name: string; impact: string; confirmation?: string }
+> = {
+  'entitlement-renewal': {
+    name: 'Paket yenileme',
+    impact:
+      'Süresi dolan dönemsel paketleri yeniler veya sona erdirir; yenileme tahsilatı başlatır.',
+    confirmation:
+      'Bu iş para hareketi üretir: açtığınızda, dönem sonu gelen paketler için yenileme ' +
+      'denemesi başlar ve hizmet verenlerin erişim süresi buna göre değişir.',
+  },
+  'unviewed-offer-refund': {
+    name: 'Görüntülenmeyen teklif iadesi',
+    impact:
+      'Müşterinin süresi içinde açmadığı teklifler için hizmet verenin teklif kredisini iade eder.',
+    confirmation:
+      'Bu iş kredi hareketi üretir: açtığınızda, iade süresi dolmuş görüntülenmemiş teklifler ' +
+      'için krediler hizmet verenlere geri yüklenir ve iade e-postası gönderilir.',
+  },
+  'request-expiry': {
+    name: 'Talep süresi dolumu',
+    impact:
+      '14 gündür açık olan onaylı talepleri kapatır; müşteriye ve teklif vermiş hizmet ' +
+      'verenlere bilgilendirme e-postası gönderir.',
+  },
+  'request-reminder': {
+    name: 'Talep hatırlatması',
+    impact:
+      '7 gündür teklif almamış onaylı talepler için müşteriye tek bir hatırlatma e-postası ' +
+      'gönderir.',
+  },
 };
 
 /* ---- support tickets ----------------------------------------------------- */

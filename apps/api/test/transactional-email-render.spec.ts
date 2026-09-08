@@ -174,6 +174,26 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     remainingDays: '7',
     expiresAt: '2026-09-05T11:12:00.000Z',
   },
+  'request-expired-customer': {
+    fullName: 'Deniz Yılmaz',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    openDays: '14',
+    expiredAt: '2026-09-05T11:12:00.000Z',
+    newRequestUrl: `${WEB}/categories`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'request-expired-provider': {
+    fullName: 'Murat Şahin',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    city: 'Ankara',
+    district: 'Çankaya',
+    offerAmountMinor: '240000',
+    refundWindowHours: '48',
+    requestsUrl: `${WEB}/providers/p1/requests`,
+    accountUrl: `${WEB}/providers/me`,
+  },
   'package-purchase-confirmation': {
     fullName: 'Murat Şahin',
     packageName: 'Başlangıç Paketi',
@@ -375,7 +395,7 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('covers every template the port accepts', () => {
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(26);
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(28);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -604,6 +624,8 @@ describe('transactional e-mail rendering', () => {
       'customer-activation': 'TakTic hesabınızı etkinleştirin',
       'provider-claim': 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın',
       'request-expiring': 'Talebiniz için süre dolmak üzere',
+      'request-expired-customer': 'Talebinizin süresi doldu — #T-90412',
+      'request-expired-provider': 'Teklif verdiğiniz talebin süresi doldu — #T-90412',
       'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
       'support-ticket-created': 'Destek talebiniz alındı — Faturam ulaşmadı',
       'support-ticket-new-for-support': 'Yeni destek talebi — Faturam ulaşmadı',

@@ -1,19 +1,16 @@
 import {
   NotificationChannel,
   NotificationStatus,
+  OfferStatus,
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { readSchedulerCron } from '../src/common/scheduler-cron';
+import { TransactionalMailService } from '../src/modules/notifications/transactional-mail.service';
 import { RequestExpiryService } from '../src/modules/request-lifecycle/request-expiry.service';
-import {
-  isRequestExpirySchedulerEnabled,
-  isRequestReminderSchedulerEnabled,
-  readRequestExpiryCron,
-  readRequestLifecycleScanLimit,
-  readRequestReminderCron,
-} from '../src/modules/request-lifecycle/request-lifecycle.constants';
+import { readRequestLifecycleScanLimit } from '../src/modules/request-lifecycle/request-lifecycle.constants';
 import { RequestReminderService } from '../src/modules/request-lifecycle/request-reminder.service';
 import {
   createApprovedRequest,
@@ -86,7 +83,7 @@ async function addOffer(categoryId: string, requestId: string) {
     .send(offerPayload())
     .expect(201);
 
-  return { provider, cookie, offerId: created.body.id as string };
+  return { provider, cookie, ownerUserId: ownerUser.id, offerId: created.body.id as string };
 }
 
 async function adminCookie() {
@@ -514,10 +511,206 @@ describe('reminder job', () => {
   });
 });
 
+/**
+ * Who hears about an expiry, and who does not.
+ *
+ * The recipient list is the point of these cases. Expiring a request is a clock
+ * decision nobody made, and it reaches exactly two kinds of person: the customer
+ * whose request closed, and each provider who spent a credit on an offer that
+ * was still standing when it did. Everybody else the request ever touched — the
+ * whole matched audience that was mailed "bölgenizde yeni talep" and never
+ * acted, and the provider who took their offer back — hears nothing.
+ */
+describe('expiry notifications', () => {
+  function customerMails() {
+    return ctx.notifications.ofTemplate('request-expired-customer');
+  }
+
+  function providerMails() {
+    return ctx.notifications.ofTemplate('request-expired-provider');
+  }
+
+  function expiryLogs(template: string) {
+    return ctx.prisma.notificationLog.findMany({ where: { template } });
+  }
+
+  it('tells the customer and every provider who left an offer standing', async () => {
+    const { category, customer, serviceRequest } = await approvedRequest({ days: 14 });
+    const first = await addOffer(category.id, serviceRequest.id);
+    const second = await addOffer(category.id, serviceRequest.id);
+
+    expect(await expiry.execute()).toMatchObject({ expired: 1, notified: 3 });
+
+    expect(customerMails()).toHaveLength(1);
+    expect(customerMails()[0]!.to).toBe(serviceRequest.customerEmail);
+
+    const providerRecipients = providerMails().map((message) => message.to).sort();
+    const expected = await ctx.prisma.user
+      .findMany({
+        where: { id: { in: [first.ownerUserId, second.ownerUserId] } },
+        select: { email: true },
+      })
+      .then((rows) => rows.map((r) => r.email).sort());
+    expect(providerRecipients).toEqual(expected);
+
+    const customerLog = (await expiryLogs('request-expired-customer'))[0]!;
+    expect(customerLog.status).toBe(NotificationStatus.SENT);
+    expect(customerLog.channel).toBe(NotificationChannel.EMAIL);
+    expect(customerLog.requestId).toBe(serviceRequest.id);
+    expect(customerLog.userId).toBe(customer!.id);
+
+    const providerLogs = await expiryLogs('request-expired-provider');
+    expect(providerLogs.map((log) => log.providerId).sort()).toEqual(
+      [first.provider.id, second.provider.id].sort(),
+    );
+  });
+
+  it('leaves a provider who only saw the request out of it', async () => {
+    const { category, serviceRequest } = await approvedRequest({ days: 14 });
+    // Discoverable, matched, mailed when the request was published — and never
+    // offered. There is nothing here for them to be told the end of.
+    const bystander = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    await createDiscoverableProvider(ctx.prisma, {
+      userId: bystander.id,
+      categoryId: category.id,
+    });
+
+    expect(await expiry.execute()).toMatchObject({ expired: 1, notified: 1 });
+
+    expect(customerMails()).toHaveLength(1);
+    expect(providerMails()).toHaveLength(0);
+  });
+
+  it('leaves out a provider who withdrew their offer', async () => {
+    const { category, serviceRequest } = await approvedRequest({ days: 14 });
+    const standing = await addOffer(category.id, serviceRequest.id);
+    const withdrawn = await addOffer(category.id, serviceRequest.id);
+
+    await request(ctx.server)
+      .post(`/providers/${withdrawn.provider.id}/offers/${withdrawn.offerId}/withdraw`)
+      .set('Cookie', withdrawn.cookie)
+      .send({})
+      .expect(201);
+
+    expect(await expiry.execute()).toMatchObject({ expired: 1, notified: 2 });
+
+    const logs = await expiryLogs('request-expired-provider');
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.providerId).toBe(standing.provider.id);
+  });
+
+  it('produces nothing for a transition it did not make', async () => {
+    const { category, serviceRequest } = await approvedRequest({ days: 14 });
+    await addOffer(category.id, serviceRequest.id);
+    // Already closed by somebody else between the scan and the update. The
+    // conditional UPDATE matches nothing, so nothing is announced.
+    await ctx.prisma.serviceRequest.update({
+      where: { id: serviceRequest.id },
+      data: { status: ServiceRequestStatus.CANCELLED },
+    });
+
+    expect(await expiry.execute()).toMatchObject({ expired: 0, skipped: 0, notified: 0 });
+    expect(customerMails()).toHaveLength(0);
+    expect(providerMails()).toHaveLength(0);
+    expect(await expiryLogs('request-expired-customer')).toHaveLength(0);
+  });
+
+  for (const status of [
+    ServiceRequestStatus.MATCHED,
+    ServiceRequestStatus.CANCELLED,
+    ServiceRequestStatus.COMPLETED,
+  ]) {
+    it(`announces nothing for a ${status} request`, async () => {
+      const { category, serviceRequest } = await approvedRequest({ days: 20 });
+      await addOffer(category.id, serviceRequest.id);
+      await ctx.prisma.serviceRequest.update({
+        where: { id: serviceRequest.id },
+        data: { status },
+      });
+      ctx.notifications.clear();
+
+      expect(await expiry.execute()).toMatchObject({ processed: 0, expired: 0, notified: 0 });
+      expect(customerMails()).toHaveLength(0);
+      expect(providerMails()).toHaveLength(0);
+    });
+  }
+
+  it('sends nothing a second time when the job runs again', async () => {
+    const { category, serviceRequest } = await approvedRequest({ days: 14 });
+    await addOffer(category.id, serviceRequest.id);
+
+    await expiry.execute();
+    ctx.notifications.clear();
+
+    // A second pass finds no candidate at all, and even a direct re-announce —
+    // the shape a crashed-and-restarted run takes — is refused by the unique
+    // index on (template, dedupeKey).
+    expect(await expiry.execute()).toMatchObject({ processed: 0, notified: 0 });
+    const mail = ctx.app.get(TransactionalMailService);
+    expect(await mail.sendRequestExpired(serviceRequest.id)).toEqual({ notified: 0 });
+
+    expect(customerMails()).toHaveLength(0);
+    expect(providerMails()).toHaveLength(0);
+    expect(await expiryLogs('request-expired-customer')).toHaveLength(1);
+    expect(await expiryLogs('request-expired-provider')).toHaveLength(1);
+  });
+
+  it('keeps the expiry when the transport is down', async () => {
+    const { serviceRequest } = await approvedRequest({ days: 14 });
+    ctx.notifications.failNextSend = true;
+
+    expect(await expiry.execute()).toMatchObject({ expired: 1, failed: 0, notified: 0 });
+
+    expect((await storedRequest(serviceRequest.id)).status).toBe(ServiceRequestStatus.EXPIRED);
+    const logs = await expiryLogs('request-expired-customer');
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.status).toBe(NotificationStatus.FAILED);
+  });
+
+  it('tells a provider nothing about the customer or about other providers', async () => {
+    const { category, serviceRequest } = await approvedRequest({ days: 14 });
+    await addOffer(category.id, serviceRequest.id);
+    const rival = await addOffer(category.id, serviceRequest.id);
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    const rivalProfile = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: rival.provider.id },
+    });
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+
+    await expiry.execute();
+
+    for (const message of providerMails()) {
+      const payload = JSON.stringify(message);
+      expect(payload).not.toContain(stored.customerName);
+      expect(payload).not.toContain(stored.customerPhone);
+      expect(payload).not.toContain(stored.customerEmail);
+      expect(payload).not.toContain(stored.neighborhood ?? '@@none@@');
+      expect(payload).not.toContain(stored.addressNote ?? '@@none@@');
+      // Not whose offer beat theirs, not how many there were…
+      expect(payload).not.toContain(rivalProfile.businessName);
+      // …and no operator: an expiry has none.
+      expect(payload).not.toContain(admin.name!);
+      expect(payload).not.toContain(admin.email);
+    }
+  });
+
+  it('greets the customer and states the closure without inventing a reason', async () => {
+    const { serviceRequest } = await approvedRequest({ days: 14 });
+
+    await expiry.execute();
+
+    const message = customerMails()[0]!;
+    expect(message.subject).toContain('süresi doldu');
+    const payload = JSON.stringify(message);
+    expect(payload).not.toContain('reddedildi');
+    expect(payload).not.toContain('iptal');
+  });
+});
+
 describe('scheduler configuration', () => {
   const KEYS = [
-    'REQUEST_EXPIRY_SCHEDULER_ENABLED',
-    'REQUEST_REMINDER_SCHEDULER_ENABLED',
     'REQUEST_EXPIRY_SCHEDULER_CRON',
     'REQUEST_REMINDER_SCHEDULER_CRON',
     'REQUEST_LIFECYCLE_SCAN_LIMIT',
@@ -542,38 +735,35 @@ describe('scheduler configuration', () => {
     }
   });
 
-  it('defaults both jobs to disabled', () => {
+  it('keeps the shipped schedules and scan limit when nothing is configured', () => {
     for (const key of KEYS) {
       delete process.env[key];
     }
 
-    expect(isRequestExpirySchedulerEnabled()).toBe(false);
-    expect(isRequestReminderSchedulerEnabled()).toBe(false);
-    expect(readRequestExpiryCron()).toBe('15 * * * *');
-    expect(readRequestReminderCron()).toBe('45 * * * *');
+    expect(readSchedulerCron('request-expiry')).toBe('15 * * * *');
+    expect(readSchedulerCron('request-reminder')).toBe('45 * * * *');
     expect(readRequestLifecycleScanLimit()).toBe(200);
-  });
-
-  it('keeps both jobs disabled in the test environment', () => {
-    // The suite drives the services directly; no cron may act on its fixtures.
-    expect(isRequestExpirySchedulerEnabled()).toBe(false);
-    expect(isRequestReminderSchedulerEnabled()).toBe(false);
-  });
-
-  it('refuses a flag that is not exactly true or false', () => {
-    process.env.REQUEST_EXPIRY_SCHEDULER_ENABLED = 'yes';
-    expect(() => isRequestExpirySchedulerEnabled()).toThrow(/must be exactly "true" or "false"/);
-
-    process.env.REQUEST_REMINDER_SCHEDULER_ENABLED = '1';
-    expect(() => isRequestReminderSchedulerEnabled()).toThrow(/must be exactly "true" or "false"/);
   });
 
   it('refuses an unreadable cron expression instead of falling back', () => {
     process.env.REQUEST_EXPIRY_SCHEDULER_CRON = 'every hour please';
-    expect(() => readRequestExpiryCron()).toThrow(/not a valid cron expression/);
+    expect(() => readSchedulerCron('request-expiry')).toThrow(/not a valid cron expression/);
 
     process.env.REQUEST_REMINDER_SCHEDULER_CRON = '99 99 * * *';
-    expect(() => readRequestReminderCron()).toThrow(/not a valid cron expression/);
+    expect(() => readSchedulerCron('request-reminder')).toThrow(/not a valid cron expression/);
+  });
+
+  it('never quotes the rejected cron value back', () => {
+    process.env.REQUEST_EXPIRY_SCHEDULER_CRON = 'postgres://user:secret@host/db';
+
+    expect(() => readSchedulerCron('request-expiry')).toThrow(
+      /deliberately not shown/,
+    );
+    try {
+      readSchedulerCron('request-expiry');
+    } catch (error) {
+      expect((error as Error).message).not.toContain('secret');
+    }
   });
 
   it('refuses a scan limit outside its range', () => {

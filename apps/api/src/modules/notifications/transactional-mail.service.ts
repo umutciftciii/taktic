@@ -19,6 +19,7 @@ import { describeArea } from '../../common/provider-service-area-scope';
 import {
   adminSupportTicketUrl,
   customerAccountUrl,
+  customerNewRequestUrl,
   customerRequestUrl,
   customerSupportTicketUrl,
   providerAccountUrl,
@@ -34,6 +35,7 @@ import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   refundReasonLabel,
 } from '../offers/refund-policy';
+import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.constants';
 import {
   readSupportInboxEmail,
   supportReplyToEmail,
@@ -442,6 +444,96 @@ export class TransactionalMailService {
         dedupeKey: `credit-refunded:${transaction.id}`,
       },
     );
+  }
+
+  // ──────────── 15b + 15c · request.expired → the customer and the bidders ────
+
+  /**
+   * The messages one expiry produces, on both sides of it.
+   *
+   * Called by the expiry job **after** the transition has committed, never
+   * inside it. The status is then re-read here and has to be EXPIRED: a request
+   * the job skipped because it had already become MATCHED, CANCELLED or
+   * COMPLETED produces nothing, and neither does a caller that got the id
+   * wrong. That check is the whole guard against telling a matched customer
+   * their request expired.
+   *
+   * The audience is deliberately narrow on the provider side: **only providers
+   * who actually offered and did not withdraw**. The far larger group who were
+   * mailed "bölgenizde yeni talep" and never acted has nothing to be told the
+   * end of, and mailing them would turn one expiry into a fan-out the size of a
+   * whole city's supply. One provider cannot appear twice — the unique index on
+   * (providerId, requestId) allows a provider one offer per request — and if
+   * that ever changed, the dedupe key names the provider rather than the offer,
+   * so the second attempt would be refused before anything was sent.
+   *
+   * Each recipient gets one key of its own, so a retried run, a second API
+   * instance and two overlapping expiry passes all collide in the unique index
+   * on (template, dedupeKey) and send nothing the second time.
+   */
+  async sendRequestExpired(requestId: string) {
+    const request = await loadRequest(this.prisma, requestId);
+    if (!request || request.status !== ServiceRequestStatus.EXPIRED) {
+      return { notified: 0 };
+    }
+
+    let notified = 0;
+
+    if (request.customerEmail) {
+      const outcome = await this.send(
+        'request-expired-customer',
+        request.customerEmail,
+        requestExpiredCustomerData(request),
+        {
+          requestId: request.id,
+          userId: request.customerId,
+          dedupeKey: `request-expired-customer:${request.id}`,
+        },
+      );
+
+      if (outcome?.status === NotificationStatus.SENT) {
+        notified += 1;
+      }
+    }
+
+    // Withdrawn offers are excluded and nothing else is: a provider whose offer
+    // was still open when the clock ran out is exactly who this is for, and one
+    // who took their offer back has already left the conversation.
+    const offers = await this.prisma.offer.findMany({
+      where: { requestId: request.id, status: { not: OfferStatus.WITHDRAWN } },
+      orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
+      select: { id: true },
+    });
+
+    for (const { id } of offers) {
+      const offer = await loadOffer(this.prisma, id);
+      if (!offer) {
+        continue;
+      }
+
+      const recipient = recipientFor(offer.provider);
+      if (!recipient) {
+        continue;
+      }
+
+      const outcome = await this.send(
+        'request-expired-provider',
+        recipient,
+        requestExpiredProviderData(request, offer),
+        {
+          requestId: request.id,
+          providerId: offer.providerId,
+          userId: offer.provider.userId,
+          dedupeKey: `request-expired-provider:${request.id}:${offer.providerId}`,
+        },
+      );
+
+      if (outcome?.status === NotificationStatus.SENT) {
+        notified += 1;
+      }
+    }
+
+    return { notified };
   }
 
   // ────────────────── 16 · credits.package_purchase_settled ──────────────────
@@ -1194,6 +1286,8 @@ function loadRequest(prisma: PrismaService, requestId: string) {
         preferredDate: true,
         urgency: true,
         qualityScore: true,
+        /** Written by the expiry job in the same update that sets EXPIRED. */
+        expiredAt: true,
         category: { select: { name: true, offerCreditCost: true } },
       },
     });
@@ -1669,6 +1763,46 @@ function requestPublishedData(request: LoadedRequest, reachedProviderCount: numb
     reachedProviderCount: String(reachedProviderCount),
     requestUrl: customerRequestUrl(request.id),
     accountUrl: customerAccountUrl(),
+  };
+}
+
+function requestExpiredCustomerData(request: LoadedRequest): MailData {
+  return {
+    fullName: request.customerName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    openDays: String(REQUEST_EXPIRY_DAYS),
+    expiredAt: request.expiredAt?.toISOString() ?? null,
+    // The catalogue, not the closed request: an expired request has nothing
+    // left to do on its own page.
+    newRequestUrl: customerNewRequestUrl(),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+/**
+ * The provider half, and the field list is the point of it.
+ *
+ * Everything here is either the provider's own (their contact name, their offer
+ * amount, their refund window) or already on the discovery card they bought the
+ * request from (its number, its category, its city and district). No customer
+ * name, e-mail, phone, neighbourhood or address note; no other provider's
+ * existence, count or price; and no operator — an expiry has none.
+ */
+function requestExpiredProviderData(request: LoadedRequest, offer: LoadedOffer): MailData {
+  return {
+    fullName: offer.provider.contactName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    city: request.city,
+    district: request.district,
+    offerAmountMinor: String(offer.priceAmount),
+    // Null for an offer the policy does not govern, and the template then
+    // prints no refund note at all rather than a promise this offer never
+    // carried.
+    refundWindowHours: refundWindowHoursFor(offer),
+    requestsUrl: providerRequestsUrl(offer.providerId),
+    accountUrl: providerAccountUrl(),
   };
 }
 

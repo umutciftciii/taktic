@@ -243,7 +243,9 @@ değişikliği bunları değiştirmez.
   `capabilities.automaticRenewal = true`.
 - Webhook doğrulayıcı: `X-IYZ-SIGNATURE-V3`, HMAC-SHA256/HEX.
 - Kayıt akışına ayrı rıza kutusu + rıza sürümü/zaman damgası.
-- `ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED=true`.
+- Yenileme scheduler'ının admin panelindeki **Zamanlanmış İşler** bölümünden
+  açılması (eski `ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED` değişkeninin bir
+  etkisi kalmadı).
 - Yenileme hatırlatma e-postaları ve fatura tetikleme.
 - **Not:** `EntitlementRenewalService`, `PackageRenewalAttempt`, kısmi UNIQUE
   index ve claim lease bugün yazılı ve testli. Faz 2'nin işi motoru yazmak değil,

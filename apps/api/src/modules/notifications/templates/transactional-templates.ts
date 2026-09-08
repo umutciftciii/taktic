@@ -88,6 +88,15 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'customer-activation',
   'provider-claim',
   'request-expiring',
+  // The two halves of one clock event: an approved request reached the end of
+  // its fourteen days. Two templates rather than one parameterised by audience,
+  // for the reason the support-ticket pairs are two — the customer is told what
+  // happened to *their* request and how to open another, the provider is told
+  // that a request they spent a credit on closed with no decision, and a
+  // template that chose between those at render time would be one edit away
+  // from putting a customer's contact row in a provider's inbox.
+  'request-expired-customer',
+  'request-expired-provider',
   'package-purchase-confirmation',
   // The support-ticket messages: five per desk. Two of each five go to the
   // operator inbox and three to the person who opened the ticket, and they are
@@ -181,6 +190,10 @@ export function transactionalSubject(
       return 'TakTic hizmet veren başvurunuzu hesabınıza bağlayın';
     case 'request-expiring':
       return 'Talebiniz için süre dolmak üzere';
+    case 'request-expired-customer':
+      return withSuffix('Talebinizin süresi doldu', text(data.requestNumber));
+    case 'request-expired-provider':
+      return withSuffix('Teklif verdiğiniz talebin süresi doldu', text(data.requestNumber));
     case 'package-purchase-confirmation':
       return 'Kredi paketiniz hesabınıza yüklendi';
     // The ticket's own subject is the suffix on all five, because it is the one
@@ -295,6 +308,10 @@ export function buildDocument(
       return providerClaim(subject, fullName, data, message.actionUrl);
     case 'request-expiring':
       return requestExpiring(subject, fullName, data);
+    case 'request-expired-customer':
+      return requestExpiredCustomer(subject, fullName, data);
+    case 'request-expired-provider':
+      return requestExpiredProvider(subject, fullName, data);
     case 'package-purchase-confirmation':
       return packagePurchaseConfirmation(subject, fullName, data);
     case 'support-ticket-created':
@@ -1026,6 +1043,126 @@ function openRequestLine(
   }
 
   return requestNumber ? `${requestNumber} numaralı talebiniz hâlâ açık.` : 'Talebiniz hâlâ açık.';
+}
+
+// ────────────── 15b · request.expired → the customer who asked ───────────────
+
+/**
+ * The other end of the clock the day-7 reminder warned about.
+ *
+ * Sent once, after the transition to EXPIRED has committed, and only then: this
+ * message is the customer's notice that their request closed on its own, so it
+ * must never go out for a request that was matched, cancelled or completed.
+ *
+ * Editorially it states a fact and offers the one thing that is actually
+ * available — opening a new request. It does not apologise for the market, it
+ * does not claim anybody looked at the request, and it does not say offers were
+ * coming: nothing here knows either of those things.
+ */
+function requestExpiredCustomer(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const categoryName = text(data.categoryName);
+  const openDays = int(data.openDays);
+
+  return {
+    subject,
+    preheader: 'Talebiniz açık kalma süresini doldurdu ve kapatıldı.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Süre doldu',
+    heading: 'Talebinizin süresi doldu',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(expiredRequestLine(requestNumber, categoryName, openDays)),
+      spacer(4),
+      dataTable([
+        row('Talep', requestNumber),
+        row('Kategori', categoryName),
+        row('Açık kalma süresi', openDays === null ? null : `${openDays} gün`),
+        row('Kapanış zamanı', formatDateTime(data.expiredAt)),
+      ]),
+      spacer(24),
+      cta('Yeni talep oluştur', text(data.newRequestUrl), 'primary'),
+      spacer(20),
+      note(
+        'Süresi dolan talepler yeni teklif alamaz. İhtiyacınız sürüyorsa aynı hizmet için ' +
+          'yeni bir talep oluşturabilirsiniz.',
+      ),
+    ]),
+  };
+}
+
+// ───────────── 15c · request.expired → the providers who did offer ───────────
+
+/**
+ * The same clock event, told to a provider who spent a credit on it.
+ *
+ * It reaches exactly the providers who made an offer and did not withdraw it —
+ * never the far larger group who were merely told the request existed. Somebody
+ * who only saw it on their discovery list has nothing to be notified the end of.
+ *
+ * What this message must not contain is the reason it is a separate template:
+ * no customer name, e-mail, phone or address, nothing about how many other
+ * providers offered or at what price, and no operator's name — an expiry is a
+ * clock decision, and there is no administrator behind it to name.
+ *
+ * The refund note is the provider's own offer's promise, printed only for an
+ * offer the policy actually governs. Expiry itself decides nothing about the
+ * credit: what decides it is whether the customer ever opened the offer, which
+ * is the refund worker's business and not this message's.
+ */
+function requestExpiredProvider(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const refundWindowHours = int(data.refundWindowHours);
+
+  return {
+    subject,
+    preheader: 'Teklif verdiğiniz talep karara bağlanmadan kapandı.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Süre doldu',
+    heading: 'Teklif verdiğiniz talebin süresi doldu',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${requestNumber ? `${requestNumber} numaralı talep` : 'Teklif verdiğiniz talep'} ` +
+          'açık kalma süresini doldurduğu için kapatıldı. Müşteri bu talep için bir teklif ' +
+          'seçmedi; talep artık yeni teklif almıyor.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        // City and district only, exactly as the discovery mail carries them.
+        // The neighbourhood, the address note and every customer contact field
+        // stay out of a message about somebody else's request.
+        row('Konum', formatLocation(text(data.city), text(data.district))),
+        row('Teklifiniz', formatMoneyMinor(int(data.offerAmountMinor))),
+        row('Sonuç', 'Süre doldu, teklif seçilmedi'),
+      ]),
+      spacer(24),
+      cta('Uygun talepleri gör', text(data.requestsUrl), 'primary'),
+      spacer(20),
+      refundWindowHours === null ? null : note(unviewedOfferRefundNotice(refundWindowHours)),
+    ]),
+  };
+}
+
+/** The opening sentence, narrowed to whatever of the facts is actually held. */
+function expiredRequestLine(
+  requestNumber: string | null,
+  categoryName: string | null,
+  openDays: number | null,
+): string {
+  const subject =
+    requestNumber && categoryName
+      ? `${categoryName} kategorisindeki ${requestNumber} numaralı talebiniz`
+      : requestNumber
+        ? `${requestNumber} numaralı talebiniz`
+        : 'Talebiniz';
+
+  return openDays === null
+    ? `${subject} açık kalma süresini doldurduğu için kapatıldı.`
+    : `${subject} ${openDays} gün açık kaldıktan sonra süresi dolduğu için kapatıldı.`;
 }
 
 // ─────────────────── 16 · credits.package_purchase_settled ───────────────────

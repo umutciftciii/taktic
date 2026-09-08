@@ -1,19 +1,24 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { validateCronExpression } from 'cron';
+import { warnIfLegacySchedulerFlagSet } from '../../common/legacy-scheduler-flags';
+import { readSchedulerCron } from '../../common/scheduler-cron';
+import { SchedulerRunRegistry } from '../operations-settings/scheduler-run-registry.service';
+import { SchedulerSettingsService } from '../operations-settings/scheduler-settings.service';
 import { UnviewedOfferRefundService } from '../offers/unviewed-offer-refund.service';
 
-const DEFAULT_CRON = '0 * * * *';
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
-const schedulerCron = readCronEnv();
+const schedulerCron = readSchedulerCron('unviewed-offer-refund');
 
 /**
  * Runs the unviewed-offer refund on a schedule.
  *
- * Off unless `UNVIEWED_OFFER_REFUND_ENABLED` is exactly `"true"`. A worker that
- * moves money must be turned on by somebody, in one environment at a time, and
- * never by a default that follows a deploy into production.
+ * Off until a super admin switches it on from the admin panel, and re-read on
+ * every tick. A worker that moves money must be turned on by somebody, in one
+ * environment at a time, and never by a default that follows a deploy into
+ * production — the switch used to be an environment flag, which said the same
+ * thing but could only be answered by reading a deploy config over somebody's
+ * shoulder.
  *
  * There is no window setting here, and the configurable one does not belong
  * here either. The scheduler decides *when to look*, never *how far back to
@@ -29,20 +34,21 @@ export class UnviewedOfferRefundSchedulerService implements OnModuleInit {
   constructor(
     @Inject(UnviewedOfferRefundService)
     private readonly unviewedOfferRefund: UnviewedOfferRefundService,
+    @Inject(SchedulerSettingsService) private readonly settings: SchedulerSettingsService,
+    @Inject(SchedulerRunRegistry) private readonly runs: SchedulerRunRegistry,
   ) {}
 
   onModuleInit() {
-    if (!isSchedulerEnabled()) {
-      this.logger.log('Unviewed-offer refund scheduler disabled');
-      return;
-    }
-
-    this.logger.log(`Unviewed-offer refund scheduler enabled with cron "${schedulerCron}"`);
+    this.logger.log(
+      `Unviewed-offer refund registered with cron "${schedulerCron}"; ` +
+        'runs only while the operations setting says so',
+    );
+    warnIfLegacySchedulerFlagSet(this.logger, 'UNVIEWED_OFFER_REFUND_ENABLED');
   }
 
   @Cron(schedulerCron, { name: 'unviewed-offer-refund' })
   async runScheduledRefund() {
-    if (!isSchedulerEnabled()) {
+    if (!(await this.settings.isJobEnabled('unviewed-offer-refund'))) {
       return;
     }
 
@@ -56,29 +62,41 @@ export class UnviewedOfferRefundSchedulerService implements OnModuleInit {
     });
 
     this.isRunning = true;
+    const startedAt = new Date();
     this.logger.log(`Unviewed-offer refund started limit=${limit}`);
 
     try {
       const result = await this.unviewedOfferRefund.execute({ limit });
       const failed = result.results.filter((item) => item.status === 'FAILED').length;
+      const summary =
+        `processed=${result.processed} refunded=${result.refunded} ` +
+        `skipped=${result.skipped} failed=${failed}`;
 
-      this.logger.log(
-        `Unviewed-offer refund summary processed=${result.processed} refunded=${result.refunded} skipped=${result.skipped} failed=${failed}`,
-      );
+      this.logger.log(`Unviewed-offer refund summary ${summary}`);
+      this.runs.record('unviewed-offer-refund', {
+        startedAt,
+        finishedAt: new Date(),
+        outcome: 'SUCCESS',
+        summary,
+      });
     } catch (err) {
       this.logger.error(
         'Unviewed-offer refund failed',
         err instanceof Error ? err.stack : String(err),
       );
+      // The class only. The panel shows this to an operator, and a driver's
+      // error text can carry a connection string.
+      this.runs.record('unviewed-offer-refund', {
+        startedAt,
+        finishedAt: new Date(),
+        outcome: 'FAILED',
+        summary: err instanceof Error ? err.name : 'UnknownError',
+      });
     } finally {
       this.isRunning = false;
       this.logger.log('Unviewed-offer refund finished');
     }
   }
-}
-
-function isSchedulerEnabled() {
-  return process.env.UNVIEWED_OFFER_REFUND_ENABLED === 'true';
 }
 
 function readPositiveIntegerEnv(key: string, fallback: number, options: { max?: number } = {}) {
@@ -97,14 +115,4 @@ function readPositiveIntegerEnv(key: string, fallback: number, options: { max?: 
   }
 
   return parsed;
-}
-
-function readCronEnv() {
-  const rawValue = process.env.UNVIEWED_OFFER_REFUND_CRON;
-  if (!rawValue) {
-    return DEFAULT_CRON;
-  }
-
-  const result = validateCronExpression(rawValue);
-  return result.valid ? rawValue : DEFAULT_CRON;
 }
