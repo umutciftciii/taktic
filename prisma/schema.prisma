@@ -444,19 +444,35 @@ model CompanySettings {
 /// (see `Offer.unviewedRefundEligibleAt`), and the worker reads that snapshot;
 /// this row only decides what the *next* offer is sold under.
 model OperationsSettings {
-  id                             String   @id @default("singleton")
+  id                                  String   @id @default("singleton")
   /// How many whole hours a customer has to open an offer before its credit is
   /// automatically refunded. Whole hours only — the value is written verbatim
   /// into provider-facing sentences ("... 48 saat içinde ..."), and a fractional
   /// window has no sentence.
-  unviewedOfferRefundWindowHours Int
-  createdAt                      DateTime @default(now())
-  updatedAt                      DateTime @updatedAt
+  unviewedOfferRefundWindowHours      Int
+  /// Whether each background job may act, as four independent switches.
+  ///
+  /// These replace the environment flags the four schedulers used to read. A
+  /// job's cron *expression* is still deployment configuration — when it wakes
+  /// up is an infrastructure decision — but whether it does anything when it
+  /// wakes up is an operations decision, and it belongs where the other
+  /// operations decisions are, with OperationsSettingsChange behind it.
+  ///
+  /// False by default, and read fail-closed: no row, an unreadable row or a
+  /// false column all mean the job does nothing. Every tick re-reads these, so
+  /// a super admin's toggle takes effect on the next natural tick without a
+  /// restart, and no process holds a cached "on" the panel disagrees with.
+  entitlementRenewalSchedulerEnabled  Boolean  @default(false)
+  unviewedOfferRefundSchedulerEnabled Boolean  @default(false)
+  requestExpirySchedulerEnabled       Boolean  @default(false)
+  requestReminderSchedulerEnabled     Boolean  @default(false)
+  createdAt                           DateTime @default(now())
+  updatedAt                           DateTime @updatedAt
   /// Who last saved this. Nullable and SetNull for the same reason
   /// CompanySettings uses: an operator's account may be removed long after they
   /// changed a term. The permanent record of *what* changed is
   /// OperationsSettingsChange, which does not lose its operator.
-  updatedById                    String?
+  updatedById                         String?
 
   updatedBy User? @relation("OperationsSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
@@ -976,6 +992,12 @@ model NotificationLog {
   @@index([channel, createdAt])
   @@index([status, createdAt])
   @@index([template, createdAt])
+  /// The expiry outbox's sweep: "PENDING rows of these two templates, oldest
+  /// claim first". Leads on `template` because that is the selective column —
+  /// the sweep looks at two of twenty-eight — and carries `lastAttemptAt` so
+  /// the never-attempted rows and the ones whose claim has gone stale are both
+  /// found by the index rather than by a scan of every PENDING row.
+  @@index([template, status, lastAttemptAt])
   @@index([requestId])
   @@index([userId])
   @@index([providerId])

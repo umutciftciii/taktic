@@ -1,5 +1,3 @@
-import { validateCronExpression } from 'cron';
-
 /**
  * Timing and configuration for the approved-request lifecycle jobs.
  *
@@ -11,6 +9,12 @@ import { validateCronExpression } from 'cron';
  * Both are measured from ServiceRequest.approvedAt — never from submittedAt or
  * moderatedAt. A request approved before that column existed carries NULL and
  * is deliberately invisible to both jobs.
+ *
+ * What is deliberately *not* here any more is whether either job runs. That was
+ * a pair of environment flags; it is now a persistent operations setting a
+ * super admin maintains, read on every tick — see SchedulerSettingsService. The
+ * cron expressions moved to common/scheduler-cron.ts, where all four jobs'
+ * schedules are read the same way.
  */
 
 /** How long an APPROVED request stays open before the expiry job closes it. */
@@ -23,9 +27,6 @@ export const REQUEST_REMINDER_AFTER_DAYS = 7;
 export const DEFAULT_REQUEST_LIFECYCLE_SCAN_LIMIT = 200;
 export const MAX_REQUEST_LIFECYCLE_SCAN_LIMIT = 1000;
 
-const DEFAULT_EXPIRY_CRON = '15 * * * *';
-const DEFAULT_REMINDER_CRON = '45 * * * *';
-
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 export function requestExpiryCutoff(now: Date = new Date()): Date {
@@ -34,31 +35,6 @@ export function requestExpiryCutoff(now: Date = new Date()): Date {
 
 export function requestReminderCutoff(now: Date = new Date()): Date {
   return new Date(now.getTime() - REQUEST_REMINDER_AFTER_DAYS * DAY_IN_MS);
-}
-
-/**
- * Both jobs are off unless the deployment says otherwise.
- *
- * Off is the safe default because these are the only two writers that close a
- * request or mail a customer without a human in the loop: a half-configured
- * environment must do nothing rather than expire live requests. Only the two
- * literals are accepted, so a typo fails at boot instead of silently disabling
- * a job that the operator believes is running.
- */
-export function isRequestExpirySchedulerEnabled(): boolean {
-  return readStrictBoolean('REQUEST_EXPIRY_SCHEDULER_ENABLED', false);
-}
-
-export function isRequestReminderSchedulerEnabled(): boolean {
-  return readStrictBoolean('REQUEST_REMINDER_SCHEDULER_ENABLED', false);
-}
-
-export function readRequestExpiryCron(): string {
-  return readCron('REQUEST_EXPIRY_SCHEDULER_CRON', DEFAULT_EXPIRY_CRON);
-}
-
-export function readRequestReminderCron(): string {
-  return readCron('REQUEST_REMINDER_SCHEDULER_CRON', DEFAULT_REMINDER_CRON);
 }
 
 export function readRequestLifecycleScanLimit(): number {
@@ -75,40 +51,4 @@ export function readRequestLifecycleScanLimit(): number {
   }
 
   return parsed;
-}
-
-/**
- * An unreadable cron expression is a configuration error, not a reason to fall
- * back: a job silently running on a default schedule the operator never chose
- * is worse than a boot that refuses to start.
- */
-function readCron(name: string, fallback: string): string {
-  const raw = process.env[name]?.trim();
-  if (raw === undefined || raw === '') {
-    return fallback;
-  }
-
-  const result = validateCronExpression(raw);
-  if (!result.valid) {
-    throw new Error(`${name} is not a valid cron expression (received "${raw}")`);
-  }
-
-  return raw;
-}
-
-function readStrictBoolean(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]?.trim();
-  if (raw === undefined || raw === '') {
-    return fallback;
-  }
-
-  if (raw === 'true') {
-    return true;
-  }
-
-  if (raw === 'false') {
-    return false;
-  }
-
-  throw new Error(`${name} must be exactly "true" or "false" (received "${raw}")`);
 }

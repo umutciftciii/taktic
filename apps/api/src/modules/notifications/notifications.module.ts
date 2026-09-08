@@ -7,6 +7,7 @@ import { FileOutboxSmsAdapter } from './file-outbox-sms.adapter';
 import { EmailBrandingService } from './email-branding.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationPort } from './notification.port';
+import { RequestExpiryOutbox } from './request-expiry-outbox.service';
 import { isNotificationOutboxEnabled } from './notification-outbox';
 import { resolveEmailTransportKind } from './email-transport';
 import { ResendNotificationAdapter } from './resend-notification.adapter';
@@ -52,6 +53,11 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     EmailBrandingService,
     NotificationDispatcher,
     TransactionalMailService,
+    // The durable half of the request-expiry notice. Provided here, beside the
+    // dispatcher and the mail service it is built from, so the request
+    // lifecycle module reaches it the way it reaches everything else in this
+    // @Global module — without acquiring an edge to it.
+    RequestExpiryOutbox,
   ],
   exports: [
     NotificationPort,
@@ -59,6 +65,7 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     EmailBrandingService,
     NotificationDispatcher,
     TransactionalMailService,
+    RequestExpiryOutbox,
   ],
 })
 export class NotificationsModule {}

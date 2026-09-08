@@ -3993,3 +3993,194 @@ button:disabled {
   min-width: 0;
   overflow-x: auto;
 }
+
+/* ---- Operations settings: the scheduled jobs panel ---- */
+
+/*
+ * Both audit tables on this screen scroll inside their own box.
+ *
+ * `.table-scroll` gets its `overflow-x` from `.table-card`, and these tables sit
+ * in a `.section-card` instead — so on a 320px phone five columns would widen
+ * the document rather than scroll. Scoped to this screen, like the support
+ * queue's own rule, because changing where the other admin lists overflow is a
+ * separate decision.
+ */
+.operations-settings-page .table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/*
+ * …and the column they sit in can actually be that narrow.
+ *
+ * `.admin-main-column` is a grid with no declared columns, so its single
+ * implicit track is `auto` — sized to the widest child's min-content, which a
+ * five-column table happily makes 470px wide. `min-width: 0` on the container
+ * lets the *container* shrink and does nothing for the track, so at 320px the
+ * cards overflowed their own column and dragged the document with them, scroll
+ * container and all. Naming the track `minmax(0, 1fr)` lets it shrink to the
+ * column, and the rule above then does its job. Scoped to this screen for the
+ * same reason as the rule above.
+ */
+.operations-settings-page .admin-main-column,
+.operations-settings-page .admin-side-column {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.scheduler-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.scheduler-item {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+/*
+ * The name and the switch sit side by side when there is room and stack when
+ * there is not. `wrap` rather than a media query because what decides it is the
+ * width of this card, which the side column changes independently of the
+ * viewport.
+ */
+.scheduler-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.scheduler-item-text {
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+.scheduler-item-name {
+  margin: 0 0 4px;
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.scheduler-item-impact {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.scheduler-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scheduler-item-meta .meta-pill {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.scheduler-item-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.scheduler-toggle-form {
+  flex: 0 0 auto;
+}
+
+/*
+ * The switch: a real button with `role="switch"`, so it submits without
+ * JavaScript and announces its own state. The track is decorative — the label
+ * beside it carries the same answer in words, which is what keeps it readable
+ * when colour is not available.
+ */
+.scheduler-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: #475569;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.scheduler-switch:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.scheduler-switch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.scheduler-switch:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.scheduler-switch-track {
+  display: inline-flex;
+  align-items: center;
+  width: 34px;
+  height: 18px;
+  padding: 2px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background 0.15s ease;
+}
+
+.scheduler-switch-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.scheduler-switch.is-on {
+  border-color: #bbf7d0;
+  background: #ecfdf5;
+  color: #166534;
+}
+
+.scheduler-switch.is-on .scheduler-switch-track {
+  background: var(--success);
+}
+
+.scheduler-switch.is-on .scheduler-switch-thumb {
+  transform: translateX(16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scheduler-switch,
+  .scheduler-switch-track,
+  .scheduler-switch-thumb {
+    transition: none;
+  }
+}

@@ -65,6 +65,18 @@ export function customerAccountUrl(): string {
   return publicWebUrl('/account/profile');
 }
 
+/**
+ * Where a customer starts a new request: the service catalogue.
+ *
+ * There is no "new request" form to link to directly — a request is always
+ * created from the category the customer picked, and the form's shape depends
+ * on it. This is the same destination every "Talep oluştur" control on the site
+ * points at.
+ */
+export function customerNewRequestUrl(): string {
+  return publicWebUrl('/categories');
+}
+
 /** The customer's request, with its offers. `apps/web/app/requests/[id]/offers`. */
 export function customerRequestUrl(requestId: string): string {
   return publicWebUrl(`/requests/${encodeURIComponent(requestId)}/offers`);

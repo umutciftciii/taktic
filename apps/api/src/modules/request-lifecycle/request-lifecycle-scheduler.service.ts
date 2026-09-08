@@ -1,33 +1,34 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { warnIfLegacySchedulerFlagSet } from '../../common/legacy-scheduler-flags';
+import { readSchedulerCron } from '../../common/scheduler-cron';
+import { SchedulerRunRegistry } from '../operations-settings/scheduler-run-registry.service';
+import { SchedulerSettingsService } from '../operations-settings/scheduler-settings.service';
 import { RequestExpiryService } from './request-expiry.service';
-import {
-  isRequestExpirySchedulerEnabled,
-  isRequestReminderSchedulerEnabled,
-  readRequestExpiryCron,
-  readRequestLifecycleScanLimit,
-  readRequestReminderCron,
-} from './request-lifecycle.constants';
+import { readRequestLifecycleScanLimit } from './request-lifecycle.constants';
 import { RequestReminderService } from './request-reminder.service';
 
 // Read at import time, because @Cron needs the expression before an instance
 // exists. That is also what turns a malformed REQUEST_*_SCHEDULER_CRON into a
 // boot failure rather than a job quietly running on a schedule nobody chose.
-const expiryCron = readRequestExpiryCron();
-const reminderCron = readRequestReminderCron();
+const expiryCron = readSchedulerCron('request-expiry');
+const reminderCron = readSchedulerCron('request-reminder');
 
 /**
  * Wakes the two approved-request jobs.
  *
- * Same shape as the refund scheduler: an env flag per job, a validated cron
- * expression, an in-process reentrancy guard, and log lines that carry counts
- * and ids only. Both jobs are disabled unless the deployment enables them, so
- * importing this module changes nothing on its own — CI and the test suite
- * never trigger either one.
+ * Same shape as the other two schedulers: a static cron expression the
+ * deployment owns, a persistent operations setting the super admin owns, an
+ * in-process reentrancy guard, and log lines that carry counts and ids only.
  *
- * The guards are per-process. Two API instances with the scheduler enabled
- * would both wake up, which is safe by construction: each job's writes are
- * conditional updates, so a second runner finds nothing left to do.
+ * The tick always happens; whether it *does* anything is re-read from the
+ * settings row every time. So a switch flipped in the admin panel takes effect
+ * on the next natural tick with no restart, and a database the job cannot reach
+ * reads as "off" — see SchedulerSettingsService.
+ *
+ * The guards are per-process. Two API instances with the job enabled would both
+ * wake up, which is safe by construction: each job's writes are conditional
+ * updates, so a second runner finds nothing left to do.
  */
 @Injectable()
 export class RequestLifecycleSchedulerService implements OnModuleInit {
@@ -38,28 +39,34 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
   constructor(
     @Inject(RequestExpiryService) private readonly expiry: RequestExpiryService,
     @Inject(RequestReminderService) private readonly reminder: RequestReminderService,
+    @Inject(SchedulerSettingsService) private readonly settings: SchedulerSettingsService,
+    @Inject(SchedulerRunRegistry) private readonly runs: SchedulerRunRegistry,
   ) {}
 
   onModuleInit() {
     // Reading the limit here surfaces an out-of-range value at boot even when
-    // both jobs are disabled.
+    // both jobs are switched off.
     const limit = readRequestLifecycleScanLimit();
 
+    // Not "enabled" or "disabled": whether either job acts is a database
+    // answer that can change between now and the next tick, and a boot line
+    // claiming otherwise would be stale the first time somebody used the panel.
     this.logger.log(
-      isRequestExpirySchedulerEnabled()
-        ? `Request expiry scheduler enabled with cron "${expiryCron}" limit=${limit}`
-        : 'Request expiry scheduler disabled',
+      `Request expiry registered with cron "${expiryCron}" limit=${limit}; ` +
+        'runs only while the operations setting says so',
     );
     this.logger.log(
-      isRequestReminderSchedulerEnabled()
-        ? `Request reminder scheduler enabled with cron "${reminderCron}" limit=${limit}`
-        : 'Request reminder scheduler disabled',
+      `Request reminder registered with cron "${reminderCron}" limit=${limit}; ` +
+        'runs only while the operations setting says so',
     );
+
+    warnIfLegacySchedulerFlagSet(this.logger, 'REQUEST_EXPIRY_SCHEDULER_ENABLED');
+    warnIfLegacySchedulerFlagSet(this.logger, 'REQUEST_REMINDER_SCHEDULER_ENABLED');
   }
 
   @Cron(expiryCron, { name: 'request-expiry-scheduler' })
   async runScheduledExpiry() {
-    if (!isRequestExpirySchedulerEnabled()) {
+    if (!(await this.settings.isJobEnabled('request-expiry'))) {
       return;
     }
 
@@ -69,18 +76,35 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
     }
 
     this.isExpiryRunning = true;
+    const startedAt = new Date();
 
     try {
       const limit = readRequestLifecycleScanLimit();
       const result = await this.expiry.execute({ limit });
-      this.logger.log(
-        `Request expiry summary processed=${result.processed} expired=${result.expired} skipped=${result.skipped} failed=${result.failed}`,
-      );
+      const summary =
+        `processed=${result.processed} expired=${result.expired} ` +
+        `skipped=${result.skipped} failed=${result.failed} ` +
+        `enqueued=${result.enqueued} notified=${result.notified}`;
+      this.logger.log(`Request expiry summary ${summary}`);
+      this.runs.record('request-expiry', {
+        startedAt,
+        finishedAt: new Date(),
+        outcome: 'SUCCESS',
+        summary,
+      });
     } catch (error) {
       this.logger.error(
         'Request expiry run failed',
         error instanceof Error ? error.stack : String(error),
       );
+      // The class only. The panel shows this to an operator, and a driver's
+      // error text can carry a connection string.
+      this.runs.record('request-expiry', {
+        startedAt,
+        finishedAt: new Date(),
+        outcome: 'FAILED',
+        summary: error instanceof Error ? error.name : 'UnknownError',
+      });
     } finally {
       this.isExpiryRunning = false;
     }
@@ -88,7 +112,7 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
 
   @Cron(reminderCron, { name: 'request-reminder-scheduler' })
   async runScheduledReminder() {
-    if (!isRequestReminderSchedulerEnabled()) {
+    if (!(await this.settings.isJobEnabled('request-reminder'))) {
       return;
     }
 
@@ -98,18 +122,32 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
     }
 
     this.isReminderRunning = true;
+    const startedAt = new Date();
 
     try {
       const limit = readRequestLifecycleScanLimit();
       const result = await this.reminder.execute({ limit });
-      this.logger.log(
-        `Request reminder summary processed=${result.processed} reminded=${result.reminded} skipped=${result.skipped} failedToSend=${result.failedToSend}`,
-      );
+      const summary =
+        `processed=${result.processed} reminded=${result.reminded} ` +
+        `skipped=${result.skipped} failedToSend=${result.failedToSend}`;
+      this.logger.log(`Request reminder summary ${summary}`);
+      this.runs.record('request-reminder', {
+        startedAt,
+        finishedAt: new Date(),
+        outcome: 'SUCCESS',
+        summary,
+      });
     } catch (error) {
       this.logger.error(
         'Request reminder run failed',
         error instanceof Error ? error.stack : String(error),
       );
+      this.runs.record('request-reminder', {
+        startedAt,
+        finishedAt: new Date(),
+        outcome: 'FAILED',
+        summary: error instanceof Error ? error.name : 'UnknownError',
+      });
     } finally {
       this.isReminderRunning = false;
     }

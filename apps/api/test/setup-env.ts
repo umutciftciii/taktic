@@ -10,13 +10,25 @@ assertIsTestDatabase(databaseUrl);
 
 process.env.DATABASE_URL = databaseUrl;
 process.env.NODE_ENV = 'test';
-// No scheduled worker may start inside the suite. All three already default to
-// disabled; setting them explicitly means a stray value in the developer's
-// shell cannot let a cron fire mid-test and rewrite rows a case is asserting on.
-// The lifecycle specs drive their jobs by calling the services directly.
-process.env.UNVIEWED_OFFER_REFUND_ENABLED = 'false';
-process.env.REQUEST_EXPIRY_SCHEDULER_ENABLED = 'false';
-process.env.REQUEST_REMINDER_SCHEDULER_ENABLED = 'false';
+// No cron may fire inside the suite.
+//
+// Whether a job acts is a database setting now, and the scheduler suite really
+// does switch jobs on — so "the flags are false" is no longer what keeps a
+// worker away from a fixture. What does is the half that stayed deployment
+// configuration: every schedule is pinned to one minute a year, so no timer
+// this process registers can reach a running test. The specs invoke each job's
+// own cron handler directly instead, which is the seam that matters.
+process.env.ENTITLEMENT_RENEWAL_CRON = '0 0 1 1 *';
+process.env.UNVIEWED_OFFER_REFUND_CRON = '0 0 1 1 *';
+process.env.REQUEST_EXPIRY_SCHEDULER_CRON = '0 0 1 1 *';
+process.env.REQUEST_REMINDER_SCHEDULER_CRON = '0 0 1 1 *';
+// The flags that used to decide this are gone from the application. Dropped
+// rather than pinned, so a developer's exported value cannot make the boot log
+// of every spec file carry a deprecation warning.
+delete process.env.ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED;
+delete process.env.UNVIEWED_OFFER_REFUND_ENABLED;
+delete process.env.REQUEST_EXPIRY_SCHEDULER_ENABLED;
+delete process.env.REQUEST_REMINDER_SCHEDULER_ENABLED;
 // A small, explicit auth budget keeps the rate-limit test fast. Each spec file
 // boots its own Nest app, so the in-memory counters never leak between files.
 process.env.AUTH_RATE_LIMIT_MAX ??= '5';

@@ -2,7 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { apiFetch, OperationsSettings } from '../../lib/api';
+import {
+  apiFetch,
+  OperationsSettings,
+  SCHEDULER_JOB_KEYS,
+  SchedulerSettings,
+} from '../../lib/api';
 
 /**
  * Saves the operations settings.
@@ -40,6 +45,54 @@ export async function saveOperationsSettingsAction(formData: FormData) {
 
   revalidatePath('/operations-settings');
   redirect('/operations-settings?ok=saved');
+}
+
+/**
+ * Switches one background job on or off.
+ *
+ * The form posts the job it means and the state it wants; neither is derived
+ * from anything the operator typed. The key is checked against the closed list
+ * before a request is made — not because the API would accept an unknown one
+ * (it answers 404) but because a mistyped key should not turn into a redirect
+ * carrying an upstream error message.
+ *
+ * Nothing about who is doing this travels in the payload: the API takes the
+ * operator from the session and writes that name into the audit row.
+ */
+export async function toggleSchedulerAction(formData: FormData) {
+  const job = readString(formData, 'job').trim();
+  const enabled = readString(formData, 'enabled').trim();
+
+  if (!(SCHEDULER_JOB_KEYS as readonly string[]).includes(job)) {
+    redirect(schedulerUrl({ error: 'Böyle bir zamanlanmış iş yok.' }));
+  }
+
+  if (enabled !== 'true' && enabled !== 'false') {
+    redirect(schedulerUrl({ error: 'Zamanlanmış iş durumu yalnızca açık veya kapalı olabilir.' }));
+  }
+
+  let errorMessage: string | null = null;
+  try {
+    await apiFetch<SchedulerSettings>(
+      `/operations-settings/schedulers/${encodeURIComponent(job)}`,
+      { method: 'PUT', body: JSON.stringify({ enabled: enabled === 'true' }) },
+    );
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    errorMessage = extractApiMessage(error);
+  }
+
+  if (errorMessage) {
+    redirect(schedulerUrl({ error: errorMessage }));
+  }
+
+  revalidatePath('/operations-settings');
+  redirect(schedulerUrl({ ok: enabled === 'true' ? 'scheduler-on' : 'scheduler-off' }));
+}
+
+/** Always back to the jobs card, so the operator lands on what they changed. */
+function schedulerUrl(params: Record<string, string>): string {
+  return `/operations-settings?${new URLSearchParams(params).toString()}#zamanlanmis-isler`;
 }
 
 /** The same three rules the DTO enforces: a number, whole hours, in range. */

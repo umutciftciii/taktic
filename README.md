@@ -246,19 +246,14 @@ A change reaches the next offer and nothing else. When an offer is created it sn
 
 Only offers created after this policy shipped are covered. `Offer.unviewedRefundPolicy` records that per row, so an offer sold under the earlier terms is out of scope permanently and no clock comparison decides it. The migration that added the snapshot backfilled `submittedAt + 48 hours` onto in-policy offers only — the rule they were already governed by — and widened nobody's scope.
 
-The worker is disabled by default. It uses the same execution logic as the admin refund-scan endpoint, so both share one set of eligibility checks, one transaction and one database-level idempotency guarantee (`ProviderCreditTransaction_one_refund_per_offer`, a partial unique index that makes a second refund row for one offer impossible).
-
-To enable it locally:
-
-```bash
-UNVIEWED_OFFER_REFUND_ENABLED=true
-```
+The worker is disabled by default and is switched on by a SUPER_ADMIN from **Yönetim → Operasyon Ayarları → Zamanlanmış İşler** — see [Scheduled jobs](#scheduled-jobs). It uses the same execution logic as the admin refund-scan endpoint, so both share one set of eligibility checks, one transaction and one database-level idempotency guarantee (`ProviderCreditTransaction_one_refund_per_offer`, a partial unique index that makes a second refund row for one offer impossible).
 
 Relevant environment variables:
 
-- `UNVIEWED_OFFER_REFUND_ENABLED=false`
 - `UNVIEWED_OFFER_REFUND_CRON=0 * * * *`
 - `UNVIEWED_OFFER_REFUND_LIMIT=100`
+
+`UNVIEWED_OFFER_REFUND_ENABLED` no longer has any effect. A deployment that still sets it gets one warning line at boot naming the variable; remove it.
 
 The scheduler decides *when to look*, never *how far back to look*: there is no window parameter on the worker, the scan or the cron, so a late run refunds on its next pass and an aggressive one cannot refund early. Ledger rows written by the worker carry the reason `UNVIEWED_OFFER_48H` — an identifier kept for the historical rows that already hold it, not a statement that the window is still 48 hours.
 
@@ -276,24 +271,58 @@ The manual and automatic paths cannot double-pay in either order: both write thr
 
 An approved request stays open for **14 days**. Two independent jobs act on that window, and both are disabled by default:
 
-- **Expiry** — a request that is still `APPROVED` 14 days after its approval becomes `EXPIRED` and gets an `expiredAt` stamp. This is the only writer of `EXPIRED`; the admin moderation controls refuse that status by design.
-- **Reminder** — a request that is still `APPROVED` 7 days after its approval and has **no offer at all** earns exactly one customer e-mail. A request with even one offer (including a withdrawn one) is never reminded.
+- **Expiry** — a request that is still `APPROVED` 14 days after its approval becomes `EXPIRED` and gets an `expiredAt` stamp. This is the only writer of `EXPIRED`; the admin moderation controls refuse that status by design. Once the transition has committed the platform sends one notice to the customer and one to **each provider whose offer was still standing** — never to the far larger audience that was only told the request existed, and never to a provider who withdrew.
+- **Reminder** — a request that is still `APPROVED` 7 days after its approval and has **no offer at all** earns exactly one customer e-mail (`request-expiring`). A request with even one offer (including a withdrawn one) is never reminded.
+
+Both are switched on by a SUPER_ADMIN from **Yönetim → Operasyon Ayarları → Zamanlanmış İşler** — see [Scheduled jobs](#scheduled-jobs).
 
 Relevant environment variables:
 
-- `REQUEST_EXPIRY_SCHEDULER_ENABLED=false`
 - `REQUEST_EXPIRY_SCHEDULER_CRON=15 * * * *`
-- `REQUEST_REMINDER_SCHEDULER_ENABLED=false`
 - `REQUEST_REMINDER_SCHEDULER_CRON=45 * * * *`
 - `REQUEST_LIFECYCLE_SCAN_LIMIT=200` (1–1000)
 
-Both flags accept only `true` or `false`, and both cron expressions are validated: an unreadable value fails at boot instead of leaving a job silently off, or running on a schedule nobody chose.
+Both cron expressions are validated: an unreadable value fails at boot rather than leaving a job running on a schedule nobody chose. `REQUEST_EXPIRY_SCHEDULER_ENABLED` and `REQUEST_REMINDER_SCHEDULER_ENABLED` no longer have any effect; a deployment that still sets one gets a warning line at boot.
 
 Both jobs measure from `ServiceRequest.approvedAt`, which is written in the same statement that sets `APPROVED`. Requests approved before that column existed carry `NULL` and are deliberately never picked up — neither `submittedAt` nor `moderatedAt` is the approval moment, so backfilling one would expire live requests on a fabricated clock.
 
 Both jobs are idempotent by construction: every write is a conditional update that still requires the row to be in the state the job found it in. A second run, a second instance, or a request that was matched, cancelled or completed in the meantime changes nothing.
 
 Reminder delivery is best-effort and the claim is not: `reminderSentAt` is committed before the send, so a transport failure leaves a `FAILED` row in `NotificationLog` and never re-mails the customer. Without a delivering transport (see [Transactional E-mail](#transactional-e-mail)) sends fail visibly rather than silently — the scheduling logic is still correct.
+
+Expiry notices are durable rather than best-effort, and the difference is where the record of "a message is owed" is written. The expiry tick has two phases:
+
+1. **Expire and record.** The conditional `APPROVED → EXPIRED` update and one `NotificationLog` row per recipient — PENDING, `attemptCount = 0`, never handed to a transport — commit in **one transaction**. A transition that survives always has its intents beside it; one that rolls back leaves none, so a skipped candidate produces exactly zero.
+2. **Deliver.** A sweep over PENDING expiry intents, this tick's and every earlier tick's, at the end of the same tick. It runs even when nothing was expired — which is exactly the tick that has to notice what an interrupted run left behind.
+
+That closes a real durability hole: the messages used to be composed *after* the commit, so a process that died in between left an expired request no later run could ever notice — the candidate query only looks at `APPROVED` rows — with no record that anything had been owed.
+
+There is no new table and no new queue: a PENDING `NotificationLog` row is the intent. Delivery claims each row with a conditional update, so two API instances sweeping at once send once; a claim is honoured for a 15-minute lease, after which a runner that never came back loses the row (the transport is offered the same log-derived idempotency key both times, so an attempt that really did deliver is de-duplicated by the provider). Each recipient has its own dedupe key — `request-expired-customer:<requestId>` and `request-expired-provider:<requestId>:<providerId>` — and the unique index on `(template, dedupeKey)` is what makes "one message per recipient per expiry" a database guarantee.
+
+The sweep touches PENDING rows only. **A FAILED row stays FAILED** and is re-sent by an operator from the notification history or by nobody — the same contract every other message here has, and what stops a broken transport turning one undelivered notice into a flood. Each message is rebuilt from live domain data through the same path the admin re-send uses, with every recipient rule re-applied: a provider who withdrew between the enqueue and the send is settled as `SOURCE_UNAVAILABLE` rather than mailed.
+
+### Scheduled jobs
+
+Four background jobs exist, and whether each one runs is a **persistent operations setting**, not an environment flag:
+
+| Job | What a pass does |
+| --- | --- |
+| `entitlement-renewal` | Renews or ends period packages whose term is up; starts renewal charges. |
+| `unviewed-offer-refund` | Refunds the offer credit for offers the customer never opened in time. |
+| `request-expiry` | Closes approved requests at 14 days and notifies the customer and the providers who offered. |
+| `request-reminder` | Sends the single day-7 reminder for a request with no offers. |
+
+A SUPER_ADMIN switches them from **Yönetim → Operasyon Ayarları → Zamanlanmış İşler** (`GET /operations-settings/schedulers`, `PUT /operations-settings/schedulers/:job`). Nobody else reaches either the screen or the endpoint.
+
+- **Off by default, fail-closed.** The four columns on `OperationsSettings` default to `false`, and a missing row or an unreadable one is read as "off" too. A deployment that upgrades into this comes up with every job off, whatever its old flags said.
+- **Read on every tick.** A job wakes on its cron, reads the setting, and acts or does nothing. A switch therefore takes effect on the next natural tick with no restart, and no process holds a cached answer the panel disagrees with.
+- **Cron stays deployment configuration.** The expressions above are read from the environment, shown read-only on the screen, and cannot be edited from a browser: when a job wakes up decides load, and that is an infrastructure decision.
+- **No "run now".** Every one of these jobs moves credits, closes requests or mails people. The only thing that triggers a pass is the schedule.
+- **Every change is recorded.** A toggle writes an `OperationsSettingsChange` row — the job, the old state, the new state, the operator and the moment — in the same transaction as the setting. A write that changes nothing writes nothing, so a refreshed form does not become a decision, and a tick never writes to that table at all.
+
+The four flags that used to decide this — `ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED`, `UNVIEWED_OFFER_REFUND_ENABLED`, `REQUEST_EXPIRY_SCHEDULER_ENABLED`, `REQUEST_REMINDER_SCHEDULER_ENABLED` — are ignored. Each one that is still set produces one warning line at boot naming it.
+
+The panel also shows what the answering API instance last saw each job do. That is held in memory, not in the database: it resets on restart and is per-instance, and the screen says so — a run record on every tick of every job would be exactly the audit noise the change trail is kept free of.
 
 ## Phase 0 Scope
 

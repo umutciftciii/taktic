@@ -4,10 +4,13 @@ import {
   OPERATIONS_SETTING_LABELS,
   OperationsSettings,
   requireAdmin,
+  SCHEDULER_JOB_COPY,
+  SchedulerSettings,
 } from '../../lib/api';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { saveOperationsSettingsAction } from './actions';
+import { SchedulerToggle } from './scheduler-toggle';
 
 /**
  * The commercial terms an operator maintains, starting with the one this
@@ -41,6 +44,16 @@ type OperationsSettingsPageProps = {
 const OK_MESSAGES: Record<string, string> = {
   saved:
     'Operasyon ayarları kaydedildi. Yeni süre yalnızca bundan sonra oluşturulan teklifler için geçerlidir.',
+  'scheduler-on':
+    'Zamanlanmış iş açıldı. İş, kendi cron zamanındaki ilk çalışmasından itibaren devreye girer.',
+  'scheduler-off':
+    'Zamanlanmış iş kapatıldı. Sıradaki cron çalışması hiçbir işlem yapmaz; sunucu yeniden başlatmaya gerek yoktur.',
+};
+
+const RUN_OUTCOME_LABELS: Record<string, string> = {
+  SUCCESS: 'Tamamlandı',
+  FAILED: 'Hata',
+  SKIPPED: 'Atlandı',
 };
 
 export default async function OperationsSettingsPage({
@@ -52,7 +65,10 @@ export default async function OperationsSettingsPage({
   const errorMessage = (params.error ?? '').trim();
   const okMessage = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
 
-  const settings = await apiFetch<OperationsSettings>('/operations-settings');
+  const [settings, schedulers] = await Promise.all([
+    apiFetch<OperationsSettings>('/operations-settings'),
+    apiFetch<SchedulerSettings>('/operations-settings/schedulers'),
+  ]);
 
   // A rejected save carries the operator's own value back in the query, so the
   // form re-hydrates with what they typed rather than with what is stored.
@@ -61,7 +77,7 @@ export default async function OperationsSettingsPage({
     String(settings.unviewedOfferRefundWindowHours);
 
   return (
-    <main>
+    <main className="operations-settings-page">
       <PageHeader
         breadcrumbs={[{ label: 'Yönetim' }, { label: 'Operasyon Ayarları' }]}
         title="Operasyon Ayarları"
@@ -180,6 +196,104 @@ export default async function OperationsSettingsPage({
               </div>
             )}
           </SectionCard>
+
+          <SectionCard
+            id="zamanlanmis-isler"
+            title="Zamanlanmış İşler"
+            subtitle="Arka plan işlerinin açık/kapalı durumu. Cron zamanları dağıtım ayarıdır ve buradan değiştirilemez."
+          >
+            <ul className="scheduler-list" data-testid="scheduler-list">
+              {schedulers.jobs.map((job) => {
+                const copy = SCHEDULER_JOB_COPY[job.key];
+
+                return (
+                  <li className="scheduler-item" key={job.key} data-testid={`scheduler-${job.key}`}>
+                    <div className="scheduler-item-head">
+                      <div className="scheduler-item-text">
+                        <h3 className="scheduler-item-name">{copy.name}</h3>
+                        <p className="scheduler-item-impact">{copy.impact}</p>
+                      </div>
+                      <SchedulerToggle job={job.key} jobName={copy.name} enabled={job.enabled} />
+                    </div>
+
+                    <div className="scheduler-item-meta">
+                      <span
+                        className={
+                          job.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'
+                        }
+                        data-testid={`scheduler-state-${job.key}`}
+                      >
+                        {job.enabled ? 'Açık' : 'Kapalı'}
+                      </span>
+                      <span className="meta-pill">
+                        cron <code>{job.cron}</code>
+                      </span>
+                      {job.lastRun ? (
+                        <span className="meta-pill">
+                          son çalışma {formatDateTime(job.lastRun.finishedAt)} ·{' '}
+                          {RUN_OUTCOME_LABELS[job.lastRun.outcome] ?? job.lastRun.outcome}
+                          {job.lastRun.summary ? ` · ${job.lastRun.summary}` : ''}
+                        </span>
+                      ) : (
+                        <span className="meta-pill meta-pill-muted">bu sunucuda çalışmadı</span>
+                      )}
+                    </div>
+
+                    {/* Shown before the switch is used, not after: an operator
+                        deciding whether to flip a money job needs to read what
+                        it will start while the switch is still off. */}
+                    {copy.confirmation ? (
+                      <p className="scheduler-item-warning" role="note">
+                        {copy.confirmation}
+                      </p>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </SectionCard>
+
+          <SectionCard
+            title="Zamanlanmış iş değişiklikleri"
+            subtitle="Her açma/kapama işleminde iş, eski durum, yeni durum, yönetici ve zaman kaydedilir."
+          >
+            {schedulers.recentChanges.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }} data-testid="scheduler-audit-empty">
+                Henüz bir değişiklik kaydı yok.
+              </p>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table" data-testid="scheduler-audit">
+                  <thead>
+                    <tr>
+                      <th>İş</th>
+                      <th>Eski</th>
+                      <th>Yeni</th>
+                      <th>Yönetici</th>
+                      <th>Zaman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schedulers.recentChanges.map((change) => (
+                      <tr key={change.id}>
+                        <td>{OPERATIONS_SETTING_LABELS[change.setting] ?? change.setting}</td>
+                        <td>
+                          {change.previousValue === null ? (
+                            <span className="muted">varsayılan (kapalı)</span>
+                          ) : (
+                            schedulerStateLabel(change.previousValue)
+                          )}
+                        </td>
+                        <td>{schedulerStateLabel(change.newValue)}</td>
+                        <td>{change.changedBy?.name ?? '-'}</td>
+                        <td>{formatDateTime(change.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
         </div>
 
         <div className="admin-side-column">
@@ -192,6 +306,24 @@ export default async function OperationsSettingsPage({
             </p>
           </SectionCard>
 
+          <SectionCard title="Zamanlanmış işler nasıl çalışır">
+            <p className="muted" style={{ margin: 0 }}>
+              Her iş kendi cron zamanında uyanır ve o anda bu ayarı okur. Açtığınız bir iş
+              sıradaki cron çalışmasında devreye girer, kapattığınız iş sıradaki çalışmada hiçbir
+              şey yapmaz; sunucuyu yeniden başlatmanız gerekmez. Ayar okunamazsa iş kapalı kabul
+              edilir. Cron zamanları dağıtım ayarıdır ve buradan değiştirilemez; elle çalıştırma
+              düğmesi bilinçli olarak yoktur.
+            </p>
+          </SectionCard>
+
+          <SectionCard title="Son çalışma bilgisi">
+            <p className="muted" style={{ margin: 0 }}>
+              Son çalışma bilgisi bu API sunucusunun belleğinde tutulur: yeniden başlatmada
+              sıfırlanır ve birden fazla sunucu varsa her biri kendi çalışmasını gösterir. Kalıcı
+              kayıt yalnızca yönetici değişiklikleri için tutulur.
+            </p>
+          </SectionCard>
+
           <SectionCard title="Hizmet verene gösterilen metin">
             <p className="muted" style={{ margin: 0 }} data-testid="operations-settings-notice">
               {settings.unviewedOfferRefundNotice}
@@ -201,4 +333,9 @@ export default async function OperationsSettingsPage({
       </div>
     </main>
   );
+}
+
+/** `true`/`false` as the audit trail stores them, in the panel's own words. */
+function schedulerStateLabel(value: string): string {
+  return value === 'true' ? 'Açık' : 'Kapalı';
 }

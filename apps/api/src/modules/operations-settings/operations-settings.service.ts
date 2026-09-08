@@ -35,13 +35,19 @@ export const UNVIEWED_OFFER_REFUND_WINDOW_SETTING = 'unviewedOfferRefundWindowHo
 
 const settingsSelect = {
   unviewedOfferRefundWindowHours: true,
-  createdAt: true,
-  updatedAt: true,
-  updatedBy: { select: { id: true, name: true } },
 } satisfies Prisma.OperationsSettingsSelect;
 
 export type OperationsSettingsView = {
-  /** False until an operator has saved once; the values below are the defaults. */
+  /**
+   * False until an operator has saved the window once; the values below are the
+   * defaults.
+   *
+   * Derived from the audit trail rather than from the existence of the settings
+   * row, because the row is now shared: switching a background job on creates
+   * it, and a screen that read "Kayıtlı" off that would tell an operator they
+   * had chosen 48 hours when nobody had. A change row for this setting is
+   * written by — and only by — a real save of it, including the first.
+   */
   configured: boolean;
   unviewedOfferRefundWindowHours: number;
   /** The bounds the form and the database both enforce. */
@@ -50,9 +56,17 @@ export type OperationsSettingsView = {
   defaultUnviewedOfferRefundWindowHours: number;
   /** The exact sentence a provider is shown for an offer created right now. */
   unviewedOfferRefundNotice: string;
+  /**
+   * When this setting was last saved, and by whom.
+   *
+   * Taken from the newest change row rather than from the settings row's own
+   * `updatedAt`/`updatedBy`, for the reason `configured` is: the row is shared
+   * with the scheduler switches, and its columns answer "who last touched this
+   * row" — which is not the same question as "who last set the refund window".
+   */
   updatedAt: Date | null;
   updatedBy: { id: string; name: string | null } | null;
-  /** The most recent changes, newest first, for the screen's own audit panel. */
+  /** The most recent changes to this setting, newest first, for the audit panel. */
   recentChanges: OperationsSettingsChangeView[];
 };
 
@@ -96,7 +110,11 @@ export class OperationsSettingsService {
         where: { id: OPERATIONS_SETTINGS_ID },
         select: settingsSelect,
       }),
+      // This screen's own audit panel shows the window's history and nothing
+      // else. The scheduler switches share the table and have their own panel;
+      // mixing the two lists would make either one harder to read.
       this.prisma.operationsSettingsChange.findMany({
+        where: { setting: UNVIEWED_OFFER_REFUND_WINDOW_SETTING },
         orderBy: { createdAt: 'desc' },
         take: RECENT_CHANGE_LIMIT,
         select: {
@@ -110,18 +128,20 @@ export class OperationsSettingsService {
       }),
     ]);
 
+    const lastChange = changes[0] ?? null;
+
     const windowHours =
       row?.unviewedOfferRefundWindowHours ?? DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS;
 
     return {
-      configured: Boolean(row),
+      configured: lastChange !== null,
       unviewedOfferRefundWindowHours: windowHours,
       minUnviewedOfferRefundWindowHours: MIN_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
       maxUnviewedOfferRefundWindowHours: MAX_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
       defaultUnviewedOfferRefundWindowHours: DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
       unviewedOfferRefundNotice: unviewedOfferRefundNotice(windowHours),
-      updatedAt: row?.updatedAt ?? null,
-      updatedBy: row?.updatedBy ? { id: row.updatedBy.id, name: row.updatedBy.name } : null,
+      updatedAt: lastChange?.createdAt ?? null,
+      updatedBy: lastChange?.changedBy ?? null,
       recentChanges: changes,
     };
   }

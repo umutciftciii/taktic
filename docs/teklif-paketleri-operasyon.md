@@ -188,12 +188,20 @@ Yetenek kazanan bir adaptör geldiğinde çalışacak akış hazırdır ve testl
 - İdempotency anahtarı `<entitlementId>:<periodIndex>` olarak sağlayıcıya
   gönderilir; ayrıca 10 dakikalık claim lease + kısmi UNIQUE index vardır.
 
-Scheduler varsayılan olarak **kapalıdır**:
+Scheduler varsayılan olarak **kapalıdır** ve artık bir environment flag ile
+değil, SUPER_ADMIN'in **Yönetim → Operasyon Ayarları → Zamanlanmış İşler**
+ekranından açtığı kalıcı bir operasyon ayarı ile yönetilir. İş her cron
+tick'inde bu ayarı yeniden okur; açma/kapama bir sonraki doğal tick'te geçerli
+olur, yeniden başlatma gerekmez. Ayar okunamazsa iş kapalı kabul edilir.
+
+Cron ifadesi dağıtım sorumluluğunda kalır ve ekrandan değiştirilemez:
 
 ```bash
-ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED=true
 ENTITLEMENT_RENEWAL_CRON="*/15 * * * *"   # opsiyonel, varsayılan */15
 ```
+
+`ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED` artık hiçbir etkisi olmayan eski bir
+değişkendir; hâlâ tanımlıysa boot sırasında tek bir uyarı satırı üretir.
 
 Doğruluk buna bağlı değildir: her okuyucu `endAt`'ı kendisi kontrol eder, yani
 scheduler hiç çalışmasa bile bir gün fazla erişim verilmez.
@@ -264,8 +272,8 @@ alma `FAILED` olur.
    çalıştırılmamıştır).
 4. Lemon Squeezy tarafında her yeni paket slug'ı için variant açılır ve
    `LEMON_SQUEEZY_VARIANT_MAP` güncellenir.
-5. Yenileme scheduler'ı isteğe bağlı olarak
-   `ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED=true` ile açılır. Bu build'de her dönem
+5. Yenileme scheduler'ı isteğe bağlı olarak admin panelindeki **Zamanlanmış
+   İşler** bölümünden açılır. Bu build'de her dönem
    sonunda `UNSUPPORTED` deneme kaydı yazıp dönemi `PAST_DUE` yapacaktır; bu
    davranış istenmiyorsa kapalı bırakılır ve dönemler `EXPIRED` olarak süzülür.
 6. Otomatik yenilemenin gerçekten çalışması için önce ödeme sağlayıcısı tarafında

@@ -19,6 +19,7 @@ import { describeArea } from '../../common/provider-service-area-scope';
 import {
   adminSupportTicketUrl,
   customerAccountUrl,
+  customerNewRequestUrl,
   customerRequestUrl,
   customerSupportTicketUrl,
   providerAccountUrl,
@@ -34,6 +35,7 @@ import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   refundReasonLabel,
 } from '../offers/refund-policy';
+import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.constants';
 import {
   readSupportInboxEmail,
   supportReplyToEmail,
@@ -772,6 +774,62 @@ export class TransactionalMailService {
         };
       }
 
+      case 'request-expired-customer': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        // The message says the request expired, so it may only be composed
+        // while that is still true. Nothing in this product moves a request out
+        // of EXPIRED, but the check is what keeps the rebuild honest rather
+        // than trusting the audit row's own claim about the past.
+        if (
+          !request?.customerEmail ||
+          request.status !== ServiceRequestStatus.EXPIRED
+        ) {
+          return null;
+        }
+
+        return { to: request.customerEmail, data: requestExpiredCustomerData(request) };
+      }
+
+      case 'request-expired-provider': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        if (!request || request.status !== ServiceRequestStatus.EXPIRED) {
+          return null;
+        }
+
+        // parseRetrySource already refused a key without both segments; the
+        // guard is here because the tuple type cannot say so, and a lookup on
+        // `undefined` would be a worse way to find that out.
+        const providerId = source.ids[1];
+        if (!providerId) {
+          return null;
+        }
+
+        // Eligibility is re-derived here, not taken from the audit row: the
+        // provider must still have an offer on this request and it must still
+        // not be withdrawn. A provider who took their offer back between the
+        // enqueue and the send is no longer in the audience and gets nothing.
+        const offerId = await this.prisma.offer
+          .findUnique({
+            where: { providerId_requestId: { providerId, requestId: request.id } },
+            select: { id: true, status: true },
+          })
+          .then((row) => (row && row.status !== OfferStatus.WITHDRAWN ? row.id : null));
+
+        if (!offerId) {
+          return null;
+        }
+
+        const offer = await loadOffer(this.prisma, offerId);
+        if (!offer) {
+          return null;
+        }
+
+        const recipient = recipientFor(offer.provider);
+        return recipient
+          ? { to: recipient, data: requestExpiredProviderData(request, offer) }
+          : null;
+      }
+
       case 'offer-received': {
         const offer = await loadOffer(this.prisma, source.ids[0]);
         // An offer the provider has since withdrawn is not news the customer
@@ -1194,6 +1252,8 @@ function loadRequest(prisma: PrismaService, requestId: string) {
         preferredDate: true,
         urgency: true,
         qualityScore: true,
+        /** Written by the expiry job in the same update that sets EXPIRED. */
+        expiredAt: true,
         category: { select: { name: true, offerCreditCost: true } },
       },
     });
@@ -1672,6 +1732,46 @@ function requestPublishedData(request: LoadedRequest, reachedProviderCount: numb
   };
 }
 
+function requestExpiredCustomerData(request: LoadedRequest): MailData {
+  return {
+    fullName: request.customerName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    openDays: String(REQUEST_EXPIRY_DAYS),
+    expiredAt: request.expiredAt?.toISOString() ?? null,
+    // The catalogue, not the closed request: an expired request has nothing
+    // left to do on its own page.
+    newRequestUrl: customerNewRequestUrl(),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+/**
+ * The provider half, and the field list is the point of it.
+ *
+ * Everything here is either the provider's own (their contact name, their offer
+ * amount, their refund window) or already on the discovery card they bought the
+ * request from (its number, its category, its city and district). No customer
+ * name, e-mail, phone, neighbourhood or address note; no other provider's
+ * existence, count or price; and no operator — an expiry has none.
+ */
+function requestExpiredProviderData(request: LoadedRequest, offer: LoadedOffer): MailData {
+  return {
+    fullName: offer.provider.contactName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    city: request.city,
+    district: request.district,
+    offerAmountMinor: String(offer.priceAmount),
+    // Null for an offer the policy does not govern, and the template then
+    // prints no refund note at all rather than a promise this offer never
+    // carried.
+    refundWindowHours: refundWindowHoursFor(offer),
+    requestsUrl: providerRequestsUrl(offer.providerId),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
 function requestAvailableData(
   request: LoadedRequest,
   provider: MatchedProvider,
@@ -1936,6 +2036,15 @@ const RETRY_DEDUPE_PREFIXES = {
   'offer-not-selected': 'offer-not-selected',
   'credit-refunded': 'credit-refunded',
   'package-purchase-confirmation': 'package-purchase',
+  // The two halves of an expiry. Reproducible in full — both are composed from
+  // the request row and, for the provider, their own offer, all of which
+  // persist — and reproducible is not optional for these two: the expiry
+  // outbox rebuilds them from exactly this table when it delivers an intent
+  // some earlier tick enqueued but never sent. The prefixes are the dedupe
+  // keys themselves, unchanged, so rows written before the outbox existed
+  // rebuild the same way.
+  'request-expired-customer': 'request-expired-customer',
+  'request-expired-provider': 'request-expired-provider',
   // The support-ticket family is reproducible in full: every one of them is
   // composed from a ticket, a message or a status-change row, all of which are
   // permanent — this product deletes none of the three — and none of them
@@ -1988,6 +2097,9 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'offer-not-selected': 1,
   'credit-refunded': 1,
   'package-purchase-confirmation': 1,
+  'request-expired-customer': 1,
+  /** The request and the provider: one notice per bidder, not one per expiry. */
+  'request-expired-provider': 2,
   'support-ticket-created': 1,
   'support-ticket-new-for-support': 1,
   'support-ticket-customer-reply': 1,
@@ -2059,7 +2171,7 @@ function parseRetrySource(template: string, dedupeKey: string | null): RetrySour
  * is no account behind it yet and it is the only address there is. That is the
  * case the claim invitation is for, and it is unchanged.
  */
-function recipientFor(provider: {
+export function recipientFor(provider: {
   email: string | null;
   user?: { email: string | null } | null;
 }): string | null {

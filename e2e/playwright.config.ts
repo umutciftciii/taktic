@@ -61,11 +61,18 @@ const sharedEnv = {
   TZ: 'UTC',
   DATABASE_URL: databaseUrl,
   AUTH_COOKIE_NAME: 'taktic_session',
-  // Both schedulers stay off: a cron firing mid-run could expire a fixture
-  // while a test is asserting on it.
-  UNVIEWED_OFFER_REFUND_ENABLED: 'false',
-  REQUEST_EXPIRY_SCHEDULER_ENABLED: 'false',
-  REQUEST_REMINDER_SCHEDULER_ENABLED: 'false',
+  // No cron may fire during the run.
+  //
+  // Whether a job acts is a database setting a super admin owns now, and the
+  // scheduler spec really does switch jobs on through the admin panel — so
+  // "the flags are false" is no longer what keeps a worker away from a fixture.
+  // What does is the half that stayed deployment configuration: every schedule
+  // is pinned to one minute a year, so no timer these API processes register
+  // can reach a running test.
+  ENTITLEMENT_RENEWAL_CRON: '0 0 1 1 *',
+  UNVIEWED_OFFER_REFUND_CRON: '0 0 1 1 *',
+  REQUEST_EXPIRY_SCHEDULER_CRON: '0 0 1 1 *',
+  REQUEST_REMINDER_SCHEDULER_CRON: '0 0 1 1 *',
   // The credential throttle keys on the client IP, and every actor in the suite
   // is 127.0.0.1 — at the shipped budget of 10 per minute the run would only be
   // measuring how many people it signed in. The limit itself is a configurable
