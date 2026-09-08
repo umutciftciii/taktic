@@ -290,7 +290,16 @@ Both jobs are idempotent by construction: every write is a conditional update th
 
 Reminder delivery is best-effort and the claim is not: `reminderSentAt` is committed before the send, so a transport failure leaves a `FAILED` row in `NotificationLog` and never re-mails the customer. Without a delivering transport (see [Transactional E-mail](#transactional-e-mail)) sends fail visibly rather than silently — the scheduling logic is still correct.
 
-Expiry notices follow the same boundary from the other side: the status transition commits first, and the messages are composed afterwards, outside it. A send that fails cannot un-expire a request, and a request that was not expired by this run produces no message at all. Each recipient has its own dedupe key — `request-expired-customer:<requestId>` and `request-expired-provider:<requestId>:<providerId>` — so a re-run, a second API instance or two overlapping passes collide in the unique index on `(template, dedupeKey)` and send nothing twice.
+Expiry notices are durable rather than best-effort, and the difference is where the record of "a message is owed" is written. The expiry tick has two phases:
+
+1. **Expire and record.** The conditional `APPROVED → EXPIRED` update and one `NotificationLog` row per recipient — PENDING, `attemptCount = 0`, never handed to a transport — commit in **one transaction**. A transition that survives always has its intents beside it; one that rolls back leaves none, so a skipped candidate produces exactly zero.
+2. **Deliver.** A sweep over PENDING expiry intents, this tick's and every earlier tick's, at the end of the same tick. It runs even when nothing was expired — which is exactly the tick that has to notice what an interrupted run left behind.
+
+That closes a real durability hole: the messages used to be composed *after* the commit, so a process that died in between left an expired request no later run could ever notice — the candidate query only looks at `APPROVED` rows — with no record that anything had been owed.
+
+There is no new table and no new queue: a PENDING `NotificationLog` row is the intent. Delivery claims each row with a conditional update, so two API instances sweeping at once send once; a claim is honoured for a 15-minute lease, after which a runner that never came back loses the row (the transport is offered the same log-derived idempotency key both times, so an attempt that really did deliver is de-duplicated by the provider). Each recipient has its own dedupe key — `request-expired-customer:<requestId>` and `request-expired-provider:<requestId>:<providerId>` — and the unique index on `(template, dedupeKey)` is what makes "one message per recipient per expiry" a database guarantee.
+
+The sweep touches PENDING rows only. **A FAILED row stays FAILED** and is re-sent by an operator from the notification history or by nobody — the same contract every other message here has, and what stops a broken transport turning one undelivered notice into a flood. Each message is rebuilt from live domain data through the same path the admin re-send uses, with every recipient rule re-applied: a provider who withdrew between the enqueue and the send is settled as `SOURCE_UNAVAILABLE` rather than mailed.
 
 ### Scheduled jobs
 

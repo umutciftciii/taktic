@@ -446,96 +446,6 @@ export class TransactionalMailService {
     );
   }
 
-  // ──────────── 15b + 15c · request.expired → the customer and the bidders ────
-
-  /**
-   * The messages one expiry produces, on both sides of it.
-   *
-   * Called by the expiry job **after** the transition has committed, never
-   * inside it. The status is then re-read here and has to be EXPIRED: a request
-   * the job skipped because it had already become MATCHED, CANCELLED or
-   * COMPLETED produces nothing, and neither does a caller that got the id
-   * wrong. That check is the whole guard against telling a matched customer
-   * their request expired.
-   *
-   * The audience is deliberately narrow on the provider side: **only providers
-   * who actually offered and did not withdraw**. The far larger group who were
-   * mailed "bölgenizde yeni talep" and never acted has nothing to be told the
-   * end of, and mailing them would turn one expiry into a fan-out the size of a
-   * whole city's supply. One provider cannot appear twice — the unique index on
-   * (providerId, requestId) allows a provider one offer per request — and if
-   * that ever changed, the dedupe key names the provider rather than the offer,
-   * so the second attempt would be refused before anything was sent.
-   *
-   * Each recipient gets one key of its own, so a retried run, a second API
-   * instance and two overlapping expiry passes all collide in the unique index
-   * on (template, dedupeKey) and send nothing the second time.
-   */
-  async sendRequestExpired(requestId: string) {
-    const request = await loadRequest(this.prisma, requestId);
-    if (!request || request.status !== ServiceRequestStatus.EXPIRED) {
-      return { notified: 0 };
-    }
-
-    let notified = 0;
-
-    if (request.customerEmail) {
-      const outcome = await this.send(
-        'request-expired-customer',
-        request.customerEmail,
-        requestExpiredCustomerData(request),
-        {
-          requestId: request.id,
-          userId: request.customerId,
-          dedupeKey: `request-expired-customer:${request.id}`,
-        },
-      );
-
-      if (outcome?.status === NotificationStatus.SENT) {
-        notified += 1;
-      }
-    }
-
-    // Withdrawn offers are excluded and nothing else is: a provider whose offer
-    // was still open when the clock ran out is exactly who this is for, and one
-    // who took their offer back has already left the conversation.
-    const offers = await this.prisma.offer.findMany({
-      where: { requestId: request.id, status: { not: OfferStatus.WITHDRAWN } },
-      orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
-      select: { id: true },
-    });
-
-    for (const { id } of offers) {
-      const offer = await loadOffer(this.prisma, id);
-      if (!offer) {
-        continue;
-      }
-
-      const recipient = recipientFor(offer.provider);
-      if (!recipient) {
-        continue;
-      }
-
-      const outcome = await this.send(
-        'request-expired-provider',
-        recipient,
-        requestExpiredProviderData(request, offer),
-        {
-          requestId: request.id,
-          providerId: offer.providerId,
-          userId: offer.provider.userId,
-          dedupeKey: `request-expired-provider:${request.id}:${offer.providerId}`,
-        },
-      );
-
-      if (outcome?.status === NotificationStatus.SENT) {
-        notified += 1;
-      }
-    }
-
-    return { notified };
-  }
-
   // ────────────────── 16 · credits.package_purchase_settled ──────────────────
 
   /**
@@ -862,6 +772,62 @@ export class TransactionalMailService {
           to: provider.recipient,
           data: requestAvailableData(request, provider, await creditBalance(this.prisma, provider.id)),
         };
+      }
+
+      case 'request-expired-customer': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        // The message says the request expired, so it may only be composed
+        // while that is still true. Nothing in this product moves a request out
+        // of EXPIRED, but the check is what keeps the rebuild honest rather
+        // than trusting the audit row's own claim about the past.
+        if (
+          !request?.customerEmail ||
+          request.status !== ServiceRequestStatus.EXPIRED
+        ) {
+          return null;
+        }
+
+        return { to: request.customerEmail, data: requestExpiredCustomerData(request) };
+      }
+
+      case 'request-expired-provider': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        if (!request || request.status !== ServiceRequestStatus.EXPIRED) {
+          return null;
+        }
+
+        // parseRetrySource already refused a key without both segments; the
+        // guard is here because the tuple type cannot say so, and a lookup on
+        // `undefined` would be a worse way to find that out.
+        const providerId = source.ids[1];
+        if (!providerId) {
+          return null;
+        }
+
+        // Eligibility is re-derived here, not taken from the audit row: the
+        // provider must still have an offer on this request and it must still
+        // not be withdrawn. A provider who took their offer back between the
+        // enqueue and the send is no longer in the audience and gets nothing.
+        const offerId = await this.prisma.offer
+          .findUnique({
+            where: { providerId_requestId: { providerId, requestId: request.id } },
+            select: { id: true, status: true },
+          })
+          .then((row) => (row && row.status !== OfferStatus.WITHDRAWN ? row.id : null));
+
+        if (!offerId) {
+          return null;
+        }
+
+        const offer = await loadOffer(this.prisma, offerId);
+        if (!offer) {
+          return null;
+        }
+
+        const recipient = recipientFor(offer.provider);
+        return recipient
+          ? { to: recipient, data: requestExpiredProviderData(request, offer) }
+          : null;
       }
 
       case 'offer-received': {
@@ -2070,6 +2036,15 @@ const RETRY_DEDUPE_PREFIXES = {
   'offer-not-selected': 'offer-not-selected',
   'credit-refunded': 'credit-refunded',
   'package-purchase-confirmation': 'package-purchase',
+  // The two halves of an expiry. Reproducible in full — both are composed from
+  // the request row and, for the provider, their own offer, all of which
+  // persist — and reproducible is not optional for these two: the expiry
+  // outbox rebuilds them from exactly this table when it delivers an intent
+  // some earlier tick enqueued but never sent. The prefixes are the dedupe
+  // keys themselves, unchanged, so rows written before the outbox existed
+  // rebuild the same way.
+  'request-expired-customer': 'request-expired-customer',
+  'request-expired-provider': 'request-expired-provider',
   // The support-ticket family is reproducible in full: every one of them is
   // composed from a ticket, a message or a status-change row, all of which are
   // permanent — this product deletes none of the three — and none of them
@@ -2122,6 +2097,9 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'offer-not-selected': 1,
   'credit-refunded': 1,
   'package-purchase-confirmation': 1,
+  'request-expired-customer': 1,
+  /** The request and the provider: one notice per bidder, not one per expiry. */
+  'request-expired-provider': 2,
   'support-ticket-created': 1,
   'support-ticket-new-for-support': 1,
   'support-ticket-customer-reply': 1,
@@ -2193,7 +2171,7 @@ function parseRetrySource(template: string, dedupeKey: string | null): RetrySour
  * is no account behind it yet and it is the only address there is. That is the
  * case the claim invitation is for, and it is unchanged.
  */
-function recipientFor(provider: {
+export function recipientFor(provider: {
   email: string | null;
   user?: { email: string | null } | null;
 }): string | null {

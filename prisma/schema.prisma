@@ -992,6 +992,12 @@ model NotificationLog {
   @@index([channel, createdAt])
   @@index([status, createdAt])
   @@index([template, createdAt])
+  /// The expiry outbox's sweep: "PENDING rows of these two templates, oldest
+  /// claim first". Leads on `template` because that is the selective column —
+  /// the sweep looks at two of twenty-eight — and carries `lastAttemptAt` so
+  /// the never-attempted rows and the ones whose claim has gone stale are both
+  /// found by the index rather than by a scan of every PENDING row.
+  @@index([template, status, lastAttemptAt])
   @@index([requestId])
   @@index([userId])
   @@index([providerId])

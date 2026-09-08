@@ -83,7 +83,8 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
       const result = await this.expiry.execute({ limit });
       const summary =
         `processed=${result.processed} expired=${result.expired} ` +
-        `skipped=${result.skipped} failed=${result.failed} notified=${result.notified}`;
+        `skipped=${result.skipped} failed=${result.failed} ` +
+        `enqueued=${result.enqueued} notified=${result.notified}`;
       this.logger.log(`Request expiry summary ${summary}`);
       this.runs.record('request-expiry', {
         startedAt,
