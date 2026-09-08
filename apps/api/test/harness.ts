@@ -192,6 +192,16 @@ export function resetAuthThrottle(app: INestApplication): void {
 
 const TRUNCATED_TABLES = [
   'CompanySettings',
+  // Vitrin, in dependency order. The audit rows and the review reference
+  // versions; the card and its versions reference each other, which TRUNCATE …
+  // CASCADE handles regardless of the order here — the order is kept anyway so
+  // the list stays readable as a dependency graph.
+  'ShowcaseSubmissionWithdrawal',
+  'ShowcaseCardAutoPublishAudit',
+  'ShowcaseCardReview',
+  'ShowcaseCardVersionArea',
+  'ShowcaseCardVersion',
+  'ShowcaseCard',
   'ServiceCategoryRouterRule',
   'ServiceRequestQuestionCondition',
   'Message',
@@ -611,6 +621,61 @@ export function serviceRequestPayload(categorySlug: string, overrides: Record<st
     ...overrides,
   };
 }
+
+/**
+ * A valid SERVICE vitrin card body: one district area, a price, and both scope
+ * lists filled in.
+ *
+ * SERVICE rather than PROMOTION as the default because it is the shape with more
+ * rules on it — a price that must be present and positive, and a category that
+ * must be a LEAF — so a case that does not care which kind it uses is testing
+ * against the stricter one.
+ */
+export function showcaseCardPayload(
+  categoryId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const suffix = uniqueSuffix();
+  return {
+    kind: 'SERVICE',
+    categoryId,
+    title: `Vitrin kartı ${suffix}`,
+    summary: 'Standart kapsamda klima bakımı ve temizliği.',
+    scopeIncluded: ['Filtre temizliği', 'Gaz kontrolü'],
+    scopeExcluded: ['Gaz dolumu', 'Parça değişimi'],
+    listedServicePriceAmount: 150000,
+    responseSlaUrgentHours: 3,
+    responseSlaNormalHours: 24,
+    areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
+    ...overrides,
+  };
+}
+
+/**
+ * The same content as an edit body: no `kind` and no `categoryId`.
+ *
+ * Both are fixed for the life of a card, so the update DTO does not carry them —
+ * and the global ValidationPipe runs with `forbidNonWhitelisted`, so a body that
+ * included them would be a 400 rather than a silently ignored field. That is the
+ * behaviour under test elsewhere; here it just means the edit body has to be
+ * built from the create one rather than reused verbatim.
+ */
+export function showcaseUpdatePayload(
+  categoryId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const { kind: _kind, categoryId: _categoryId, ...content } = showcaseCardPayload(
+    categoryId,
+    overrides,
+  );
+  return content;
+}
+
+/** The acceptance body the submit endpoint requires. */
+export const SHOWCASE_SUBMIT_BODY = {
+  priceTermsAccepted: true,
+  priceTermsVersion: 'v1',
+} as const;
 
 export function providerPayload(categoryIds: string[] = []) {
   const suffix = uniqueSuffix();

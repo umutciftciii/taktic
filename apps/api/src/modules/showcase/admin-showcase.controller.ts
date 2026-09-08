@@ -1,0 +1,87 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AuthGuard } from '../auth/auth.guard';
+import { AuthUser } from '../auth/auth.types';
+import { RolesGuard } from '../auth/roles.guard';
+import { AdminShowcaseService } from './admin-showcase.service';
+import {
+  ListShowcaseCardsDto,
+  ListShowcaseVersionsDto,
+  RejectShowcaseVersionDto,
+} from './dto/review-showcase-version.dto';
+
+/**
+ * Vitrin cards, for the operator. SUPER_ADMIN only.
+ *
+ * A separate prefix, separate guards and a separate service from the provider's
+ * routes, for the reason the support desk splits the same way: nothing an
+ * operator may do is reachable by widening a provider endpoint, and nothing a
+ * provider may do is reachable by calling an operator one.
+ *
+ * Note what is absent. There is no create and no edit, so an operator cannot
+ * author a card in a business's name or change what one says about its own
+ * price. There is no delete, so nothing here removes the record of what was
+ * claimed. And there is no route that un-decides a version: a refused version
+ * stays refused, with its reason attached, and the provider's answer to it is
+ * their next version.
+ */
+@Controller('admin/showcase')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
+export class AdminShowcaseController {
+  constructor(@Inject(AdminShowcaseService) private readonly showcase: AdminShowcaseService) {}
+
+  /** The queue. Defaults to PENDING — what is actually waiting on somebody. */
+  @Get('versions')
+  listVersions(@Query() query: ListShowcaseVersionsDto) {
+    return this.showcase.listVersions(query);
+  }
+
+  @Get('versions/:versionId')
+  getVersion(@Param('versionId') versionId: string) {
+    return this.showcase.getVersion(versionId);
+  }
+
+  /**
+   * 200 rather than 201 for both decisions: the review row is a side effect of
+   * the decision, not a resource the caller addressed. What comes back is the
+   * version in its new state.
+   */
+  @Post('versions/:versionId/approve')
+  @HttpCode(HttpStatus.OK)
+  approveVersion(@Param('versionId') versionId: string, @CurrentUser() user: AuthUser) {
+    return this.showcase.approveVersion(versionId, user);
+  }
+
+  @Post('versions/:versionId/reject')
+  @HttpCode(HttpStatus.OK)
+  rejectVersion(
+    @Param('versionId') versionId: string,
+    @Body() dto: RejectShowcaseVersionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.showcase.rejectVersion(versionId, user, dto.note);
+  }
+
+  @Get('cards')
+  listCards(@Query() query: ListShowcaseCardsDto) {
+    return this.showcase.listCards(query);
+  }
+
+  @Get('cards/:cardId')
+  getCard(@Param('cardId') cardId: string) {
+    return this.showcase.getCard(cardId);
+  }
+}

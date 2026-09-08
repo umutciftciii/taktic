@@ -14,6 +14,7 @@ import {
   IconProfile,
   IconSearch,
   IconSend,
+  IconStore,
 } from '../landing-icons';
 import { PanelDrawer } from '../panel-drawer';
 import { providerDashboardLogoutAction } from '../login/actions';
@@ -24,6 +25,7 @@ type ProviderShellActive =
   | 'dashboard'
   | 'requests'
   | 'offers'
+  | 'showcase'
   | 'messages'
   | 'support'
   | 'credits'
@@ -72,6 +74,7 @@ export async function ProviderShell({
   const creditsHref = providerId ? `/providers/${providerId}/credits` : null;
   const subscriptionsHref = providerId ? `/providers/${providerId}/subscriptions` : null;
   const packagesHref = providerId ? `/providers/${providerId}/package-purchases` : null;
+  const showcaseHref = providerId ? `/providers/${providerId}/vitrin` : null;
   const profileHref = providerId ? `/providers/${providerId}` : null;
   const unread = await loadUnreadMessageCount();
 
@@ -91,6 +94,11 @@ export async function ProviderShell({
       count: counts.requests,
     },
     { key: 'offers', label: 'Tekliflerim', Icon: IconSend, href: offersHref, count: counts.offers },
+    // Vitrin sits with the other things the business owns rather than with the
+    // ones it answers. It is gated on the provider profile like every other
+    // entry that needs an id: a card belongs to a business, and an account with
+    // no business has nowhere to put one.
+    { key: 'showcase', label: 'Vitrin kartlarım', Icon: IconStore, href: showcaseHref },
     // New, and deliberately not gated on the provider profile: a provider who
     // won a job can write to that customer, and the entry has to be reachable
     // from every screen in the panel rather than only from the offer they won.

@@ -5381,3 +5381,53 @@ body.has-drawer-open {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* ---- Vitrin (showcase) ---- */
+
+/*
+ * The price-responsibility acceptance.
+ *
+ * Not a `.check-chip`: a chip is a short label in the heading font, and this is
+ * two sentences of terms somebody is agreeing to. It borrows the chip's
+ * checkbox alignment and nothing else, so the text reads as prose rather than as
+ * a category tag that happens to be long.
+ */
+.showcase-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-divider);
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.showcase-consent input {
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: var(--color-accent);
+  flex: none;
+}
+
+.showcase-consent:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * The scope and area lists on a card summary. They hold whatever a provider
+ * typed, so they must wrap rather than push the panel wider than the phone.
+ */
+.showcase-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

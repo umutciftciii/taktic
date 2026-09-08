@@ -25,6 +25,7 @@ import {
   Snowflake,
   Sparkles,
   SquareUser,
+  Store,
   Coins,
   Compass,
   ScrollText,
@@ -99,6 +100,7 @@ export const IconCoins = wrap(Coins, 18);
 export const IconPackage = wrap(Boxes, 18);
 export const IconProfile = wrap(SquareUser, 18);
 export const IconMessage = wrap(MessageSquare, 18);
+export const IconStore = wrap(Store, 18);
 export const IconSettings = wrap(Settings, 18);
 export const IconBell = wrap(Bell, 16);
 export const IconHelp = wrap(CircleHelp, 16);
