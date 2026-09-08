@@ -1095,6 +1095,7 @@ model ProviderProfile {
   packageEntitlements ProviderPackageEntitlement[]
   showcaseCards       ShowcaseCard[]
   showcaseAutoPublish ShowcaseCardAutoPublishAudit[]
+  showcaseWithdrawals ShowcaseSubmissionWithdrawal[]
 
   @@index([status])
   @@index([city])
@@ -2300,6 +2301,7 @@ model ShowcaseCard {
 
   versions          ShowcaseCardVersion[]          @relation("ShowcaseCardVersions")
   autoPublishAudits ShowcaseCardAutoPublishAudit[]
+  withdrawals       ShowcaseSubmissionWithdrawal[]
 
   @@index([providerId, status])
   @@index([providerId, createdAt])
@@ -2384,6 +2386,7 @@ model ShowcaseCardVersion {
 
   autoPublishAudit   ShowcaseCardAutoPublishAudit?  @relation("ShowcaseAutoPublishVersion")
   supersededByAudits ShowcaseCardAutoPublishAudit[] @relation("ShowcaseAutoPublishPreviousVersion")
+  withdrawals        ShowcaseSubmissionWithdrawal[]
 
   @@unique([cardId, versionNumber])
   @@index([cardId, createdAt])
@@ -2473,6 +2476,44 @@ model ShowcaseCardReview {
 /// `removedAreaKeys` is the evidence, not a summary: the exact keys that went
 /// away, so an auditor can see what was narrowed without reconstructing it from
 /// two versions' area lists.
+/// One provider pulling one submission back out of the review queue.
+///
+/// A submission is not a decision, and withdrawing it is not one either — so
+/// this is not a `ShowcaseCardReview`. That table's `reviewedById` is NOT NULL
+/// precisely so every row in it is a person's judgement about a text; a
+/// withdrawal has no reviewer, and inventing one would make "who decided this"
+/// unanswerable for every row beside it.
+///
+/// Append-only, and deliberately as small as the question it answers: which
+/// provider pulled which submission back, and when. Nothing about the card's
+/// content is copied here — the version still holds all of it.
+///
+/// `cardVersionId` is **not** unique. One version may be submitted, withdrawn,
+/// corrected, submitted again and withdrawn again; each of those is a separate
+/// event and the second must not overwrite the first.
+///
+/// `submittedAtSnapshot` is what tells two such rows apart. Withdrawing clears
+/// the version's own `submittedAt` — that is the point of it — so without this
+/// copy the record of *which* submission was pulled would be destroyed by the
+/// act of pulling it.
+model ShowcaseSubmissionWithdrawal {
+  id                  String   @id @default(cuid())
+  cardVersionId       String
+  cardId              String
+  providerId          String
+  /// The moment the withdrawn submission was made, copied before it is cleared.
+  submittedAtSnapshot DateTime
+  createdAt           DateTime @default(now())
+
+  version  ShowcaseCardVersion @relation(fields: [cardVersionId], references: [id], onDelete: Restrict)
+  card     ShowcaseCard        @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  provider ProviderProfile     @relation(fields: [providerId], references: [id])
+
+  @@index([cardId, createdAt])
+  @@index([providerId, createdAt])
+  @@index([cardVersionId, createdAt])
+}
+
 model ShowcaseCardAutoPublishAudit {
   id                String   @id @default(cuid())
   /// The version that went live. One audit row per version.

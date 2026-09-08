@@ -22,11 +22,16 @@ type NewShowcaseCardPageProps = {
 /**
  * A new vitrin card.
  *
- * The category list offered here is the provider's own — the categories they are
- * actually enrolled in — rather than the whole catalogue. A card advertising a
- * service the business has not signed up for is not a card an operator would
- * approve, and offering it would be inviting a rejection the form could have
- * prevented. (The API does not enforce that link; see the phase-one notes.)
+ * The category list is the provider's own live service categories, which is also
+ * the rule the API enforces: a card may not advertise a service the business
+ * does not offer, and the check runs again on every edit and at submit time.
+ * What the form does is spare the provider a refusal they cannot act on from a
+ * dropdown; it is not what makes the rule true.
+ *
+ * The list is LEAF-only, because that is what a provider's bindings are. A
+ * general card anchored on a GROUP is a shape the API accepts — when one of
+ * those leaves sits under the group — and this form does not yet offer it; see
+ * the phase-one notes.
  *
  * The areas use the same picker and the same `serviceAreas` field the profile
  * form uses, so a provider adds a card's coverage in exactly the vocabulary they

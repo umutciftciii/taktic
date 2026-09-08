@@ -18,7 +18,11 @@ import type { ProvinceWithDistricts } from '../../../../../lib/locations';
 import { ProviderShell } from '../../../provider-shell';
 import { readCreditBalance } from '../../../provider-data';
 import { ServiceAreaFields } from '../../../service-area-fields';
-import { submitShowcaseCardAction, updateShowcaseCardAction } from '../actions';
+import {
+  submitShowcaseCardAction,
+  updateShowcaseCardAction,
+  withdrawShowcaseSubmissionAction,
+} from '../actions';
 import { SHOWCASE_ERROR_MESSAGES } from '../showcase-errors';
 import {
   editableVersion,
@@ -31,7 +35,12 @@ import { EditShowcaseCardForm } from './edit-card-form';
 
 type ShowcaseCardPageProps = {
   params: Promise<{ id: string; cardId: string }>;
-  searchParams: Promise<{ error?: string; saved?: string; submitted?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    saved?: string;
+    submitted?: string;
+    withdrawn?: string;
+  }>;
 };
 
 /**
@@ -51,7 +60,7 @@ type ShowcaseCardPageProps = {
  */
 export default async function ShowcaseCardPage({ params, searchParams }: ShowcaseCardPageProps) {
   const { id, cardId } = await params;
-  const { error, saved, submitted } = await searchParams;
+  const { error, saved, submitted, withdrawn } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/vitrin/${cardId}`);
@@ -117,6 +126,43 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
         <div className="pdash-notice" role="status">
           Kart incelemeye gönderildi. Sonuçlanana kadar bu sürüm değiştirilemez.
         </div>
+      ) : null}
+      {withdrawn ? (
+        <div className="pdash-notice" role="status">
+          İnceleme talebi geri çekildi. Sürüm yeniden taslak; düzenleyip tekrar
+          gönderebilirsiniz.
+        </div>
+      ) : null}
+
+      {/*
+        The way back out of the queue, offered exactly where the provider hits
+        the wall: the edit form is hidden while a version is with an operator, so
+        without this the screen would say "you cannot change this" and stop.
+      */}
+      {underReview ? (
+        <form action={withdrawShowcaseSubmissionAction} className="pdash-detail-card pdash-form">
+          <input type="hidden" name="providerId" value={id} />
+          <input type="hidden" name="cardId" value={cardId} />
+
+          <header className="pdash-section-head">
+            <h2 className="pdash-section-title">İnceleme sürüyor</h2>
+          </header>
+          <p className="pdash-form-hint">
+            Bu sürüm yönetimde ve sonuçlanana kadar düzenlenemez. Bir düzeltme yapmanız
+            gerekiyorsa incelemeyi geri çekebilirsiniz: sürüm yeniden taslak olur, onayladığınız
+            hizmet bedeli sorumluluk metni sıfırlanır ve tekrar göndermek için yeniden onay
+            vermeniz gerekir.
+            {card.liveVersion
+              ? ' Onaylı sürümünüz bundan etkilenmez; yayına hazır kalmaya devam eder.'
+              : ''}
+          </p>
+
+          <div className="pdash-form-foot">
+            <button className="pdash-btn pdash-btn-secondary" type="submit">
+              İncelemeyi geri çek
+            </button>
+          </div>
+        </form>
       ) : null}
 
       {rejection ? (

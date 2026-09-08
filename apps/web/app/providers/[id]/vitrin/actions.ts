@@ -93,6 +93,31 @@ export async function submitShowcaseCardAction(formData: FormData) {
 }
 
 /**
+ * Takes the submission back out of the review queue.
+ *
+ * No payload beyond the two ids, and deliberately so: which version is in play
+ * is whatever the card's own draft pointer names, decided by the API. A form
+ * field naming a version would be a form field naming somebody else's.
+ */
+export async function withdrawShowcaseSubmissionAction(formData: FormData) {
+  const providerId = readString(formData, 'providerId');
+  const cardId = readString(formData, 'cardId');
+  const target = `/providers/${providerId}/vitrin/${cardId}`;
+
+  try {
+    await apiFetch<ShowcaseCard>(
+      `/providers/${providerId}/showcase/cards/${cardId}/withdraw-submission`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  } catch (error) {
+    redirect(`${target}?error=${errorCode(error)}`);
+  }
+
+  revalidatePath(target);
+  redirect(`${target}?withdrawn=1`);
+}
+
+/**
  * The card content every write shares.
  *
  * The price is sent only for a SERVICE card, and as `null` for a PROMOTION one.

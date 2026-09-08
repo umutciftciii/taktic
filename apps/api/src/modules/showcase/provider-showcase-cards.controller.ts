@@ -104,4 +104,24 @@ export class ProviderShowcaseCardsController {
   ) {
     return this.cards.submitCard(providerId, cardId, dto);
   }
+
+  /**
+   * Takes a submission back before anybody has ruled on it.
+   *
+   * No body: there is nothing to say. The card comes from the path, the
+   * provider from the guard, and which version is in play is whatever the card's
+   * own `draftVersionId` points at — a client that could name a version could
+   * name somebody else's.
+   *
+   * 200 rather than 201: nothing is created that the caller addressed. The same
+   * card comes back with its draft returned to them.
+   */
+  @Post(':cardId/withdraw-submission')
+  @HttpCode(HttpStatus.OK)
+  withdrawSubmission(
+    @Param('providerId') providerId: string,
+    @Param('cardId') cardId: string,
+  ) {
+    return this.cards.withdrawSubmission(providerId, cardId);
+  }
 }

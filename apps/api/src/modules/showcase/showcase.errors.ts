@@ -23,8 +23,11 @@ export const SHOWCASE_PRICE_TERMS_REQUIRED_CODE = 'SHOWCASE_PRICE_TERMS_REQUIRED
 export const SHOWCASE_AREA_NOT_COVERED_CODE = 'SHOWCASE_AREA_NOT_COVERED';
 export const SHOWCASE_AREA_UNKNOWN_CODE = 'SHOWCASE_AREA_UNKNOWN';
 export const SHOWCASE_AREA_DUPLICATE_CODE = 'SHOWCASE_AREA_DUPLICATE';
-export const SHOWCASE_CATEGORY_INVALID_CODE = 'SHOWCASE_CATEGORY_INVALID';
+export const SHOWCASE_AREA_OVERLAP_CODE = 'SHOWCASE_AREA_OVERLAP';
+export const SHOWCASE_CATEGORY_NOT_OFFERED_CODE = 'SHOWCASE_CATEGORY_NOT_OFFERED';
+export const SHOWCASE_CONTENT_INVALID_CODE = 'SHOWCASE_CONTENT_INVALID';
 export const SHOWCASE_CARD_LOCKED_CODE = 'SHOWCASE_CARD_LOCKED';
+export const SHOWCASE_NOTHING_TO_WITHDRAW_CODE = 'SHOWCASE_NOTHING_TO_WITHDRAW';
 
 /**
  * A card the caller may not read, and a card that does not exist, answer
@@ -149,12 +152,83 @@ export function showcaseAreaDuplicate(label: string) {
   });
 }
 
-export function showcaseCategoryInvalid(message: string) {
+/**
+ * Two areas on one version where one already reaches everywhere the other does.
+ *
+ * Both are named, because both are the provider's own choices and neither on
+ * its own is the mistake — the pair is. "İstanbul geneli" beside
+ * "İstanbul/Kadıköy" is not a wider card, it is the same card written twice,
+ * and which of the two to drop is the provider's decision to make.
+ */
+export function showcaseAreaOverlap(outer: string, inner: string) {
   return new BadRequestException({
     statusCode: HttpStatus.BAD_REQUEST,
     error: 'Bad Request',
-    code: SHOWCASE_CATEGORY_INVALID_CODE,
+    code: SHOWCASE_AREA_OVERLAP_CODE,
+    message: `${outer}, ${inner} bölgesini zaten kapsıyor. İkisinden birini kaldırın.`,
+  });
+}
+
+/**
+ * The category is not one this business offers — or is not a category a card
+ * may be listed under at all.
+ *
+ * **One answer for every category refusal, on purpose.** A category that does
+ * not exist, one that is still an operator's DRAFT, a router, a group with
+ * nothing of this provider's underneath it, and a service they simply have not
+ * signed up for all produce this exact body. Telling them apart would answer
+ * two questions nobody outside the admin surface may ask: whether a given id
+ * names a real category, and what an unreleased catalogue contains.
+ *
+ * The sentence is written for the case that is nearly always the real one — a
+ * provider reaching for a service they have not added to their profile — and
+ * points at the screen where they can fix it.
+ */
+export function showcaseCategoryNotOffered() {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: SHOWCASE_CATEGORY_NOT_OFFERED_CODE,
+    message:
+      'Bu kategoride vitrin kartı açamazsınız. Kart yalnız işletme profilinizde seçili olan ' +
+      'hizmet kategorilerinde açılabilir.',
+  });
+}
+
+/**
+ * The card's own content does not hold together — a price on a card that makes
+ * no price claim, a scope list that emptied out, an urgent promise slower than
+ * the ordinary one.
+ *
+ * Separate from the category refusal above because these are safe to describe:
+ * every one of them is about values the caller just sent, so saying which is
+ * wrong discloses nothing they did not already have.
+ */
+export function showcaseContentInvalid(message: string) {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: SHOWCASE_CONTENT_INVALID_CODE,
     message,
+  });
+}
+
+/**
+ * There is no submission of this card to withdraw.
+ *
+ * Undifferentiated on purpose, exactly as `showcaseVersionNotPending` is: the
+ * card may have no draft at all, its draft may never have been submitted, or an
+ * operator may have decided it a second ago. In every case the answer to the
+ * provider is the same — there is nothing with the operator right now — and the
+ * third case is the one this must not describe, because the decision is the
+ * operator's to publish, not this endpoint's to leak early.
+ */
+export function showcaseNothingToWithdraw() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_NOTHING_TO_WITHDRAW_CODE,
+    message: 'Geri çekilecek, incelemede bekleyen bir sürüm yok.',
   });
 }
 

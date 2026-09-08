@@ -9,7 +9,11 @@ import {
 } from '@prisma/client';
 import { areaCovers, describeArea } from '../../common/provider-service-area-scope';
 import { runSerializable } from '../../common/serializable-transaction';
-import { showcaseAreaKey, toShowcaseAreaRow } from '../../common/showcase-area-key';
+import {
+  showcaseAreaKey,
+  toShowcaseAreaRow,
+  type ShowcaseAreaLevels,
+} from '../../common/showcase-area-key';
 import { PrismaService } from '../../prisma/prisma.service';
 import { resolveArea } from '../locations/turkey-locations';
 import {
@@ -18,14 +22,18 @@ import {
   UpdateShowcaseCardDto,
 } from './dto/create-showcase-card.dto';
 import { SubmitShowcaseCardDto } from './dto/submit-showcase-card.dto';
+import { isLiveProviderBinding } from '../categories/category-taxonomy';
 import {
   showcaseAreaDuplicate,
   showcaseAreaNotCovered,
+  showcaseAreaOverlap,
   showcaseAreaUnknown,
   showcaseCardLocked,
   showcaseCardNotFound,
-  showcaseCategoryInvalid,
+  showcaseCategoryNotOffered,
+  showcaseContentInvalid,
   showcaseNothingToSubmit,
+  showcaseNothingToWithdraw,
   showcasePriceTermsRequired,
   showcaseVersionUnderReview,
 } from './showcase.errors';
@@ -102,7 +110,7 @@ export class ProviderShowcaseCardsService {
    * are in one transaction, so no reader sees a card with no draft.
    */
   async createCard(providerId: string, dto: CreateShowcaseCardDto) {
-    await this.assertCategoryFitsKind(dto.categoryId, dto.kind);
+    await this.assertCategoryIsOffered(providerId, dto.categoryId, dto.kind);
     const content = await this.normalizeContent(providerId, dto, dto.kind);
 
     const cardId = await this.prisma.$transaction(async (tx) => {
@@ -158,6 +166,12 @@ export class ProviderShowcaseCardsService {
     if (card.draftVersion && card.draftVersion.reviewStatus !== ShowcaseVersionReview.DRAFT) {
       throw showcaseVersionUnderReview();
     }
+
+    // Re-checked on every edit, not only at creation. A provider may have
+    // dropped the service from their profile since the card was opened, and a
+    // card is a claim about what the business does now — including a narrowing,
+    // which is still a change to what is live.
+    await this.assertCategoryIsOffered(providerId, card.categoryId, card.kind);
 
     const content = await this.normalizeContent(providerId, dto, card.kind);
 
@@ -229,6 +243,12 @@ export class ProviderShowcaseCardsService {
       throw showcaseVersionUnderReview();
     }
 
+    // The category is re-checked here as well as at write time, and this is the
+    // check that matters most: a draft written weeks ago may name a service the
+    // business has since removed from its profile, and an operator must not be
+    // asked to approve a claim nobody backs any more.
+    await this.assertCategoryIsOffered(providerId, card.categoryId, card.kind);
+
     if (!dto.priceTermsAccepted || dto.priceTermsVersion !== SHOWCASE_PRICE_TERMS_VERSION) {
       throw showcasePriceTermsRequired();
     }
@@ -273,6 +293,111 @@ export class ProviderShowcaseCardsService {
         });
       }
     });
+
+    return this.getCard(providerId, cardId);
+  }
+
+  /**
+   * Takes a submission back out of the review queue, before anybody has ruled
+   * on it.
+   *
+   * ## Why this exists
+   *
+   * A submitted version is frozen — that is what makes `ShowcaseCardReview`
+   * mean something. But frozen and *stuck* are different things: without a way
+   * back, a provider who spots their own typo has to wait for an operator to
+   * refuse it, which wastes the operator's time and teaches the provider to
+   * submit carelessly. Withdrawing is the author retrieving their own draft, not
+   * a decision about it.
+   *
+   * ## What it is not
+   *
+   * It writes no `ShowcaseCardReview`. Nobody judged anything, and a review row
+   * with a fabricated reviewer would make "who decided this" unanswerable for
+   * every row in that table. The record is a
+   * `ShowcaseSubmissionWithdrawal` — the provider, the version, the submission
+   * that was pulled, and when.
+   *
+   * ## The race with an operator
+   *
+   * Approve, reject and this all move a version *out of* PENDING under a
+   * conditional update, inside a Serializable transaction. Whichever commits
+   * first wins; the other either finds no row matching `reviewStatus = PENDING`
+   * and refuses, or is retried by `runSerializable` and then finds none. There
+   * is no ordering in which both land, and no ordering in which one silently
+   * overwrites the other.
+   *
+   * ## What the provider gets back
+   *
+   * The same version, in DRAFT, with its price-terms acceptance cleared. That
+   * clearing is deliberate rather than tidy-mindedness: the acceptance is an
+   * acceptance *of a submission*, and the text may have changed by the time they
+   * submit again. Re-submitting means accepting the current terms again, and a
+   * DRAFT carrying an acceptance nobody has re-given would be a record of a
+   * consent that no longer stands. A database CHECK insists on the same thing.
+   */
+  async withdrawSubmission(providerId: string, cardId: string) {
+    const card = await this.loadOwnedCard(providerId, cardId);
+    assertCardIsEditable(card);
+
+    if (!card.draftVersion || card.draftVersion.reviewStatus !== ShowcaseVersionReview.PENDING) {
+      throw showcaseNothingToWithdraw();
+    }
+
+    const versionId = card.draftVersion.id;
+
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        // Read inside the transaction: `submittedAt` is about to be cleared, and
+        // the audit row's copy of it has to be the value this transaction is
+        // actually replacing rather than one read before a competing write.
+        const pending = await tx.showcaseCardVersion.findFirst({
+          where: { id: versionId, reviewStatus: ShowcaseVersionReview.PENDING },
+          select: { id: true, submittedAt: true },
+        });
+
+        if (!pending?.submittedAt) {
+          throw showcaseNothingToWithdraw();
+        }
+
+        const moved = await tx.showcaseCardVersion.updateMany({
+          where: { id: versionId, reviewStatus: ShowcaseVersionReview.PENDING },
+          data: {
+            reviewStatus: ShowcaseVersionReview.DRAFT,
+            submittedAt: null,
+            priceTermsVersion: null,
+            priceTermsAcceptedAt: null,
+          },
+        });
+
+        if (moved.count !== 1) {
+          throw showcaseNothingToWithdraw();
+        }
+
+        // The card goes back to what it was before the submission: still
+        // APPROVED if it has something live — the live version is untouched and
+        // this was only ever about its replacement — and DRAFT if it does not.
+        await tx.showcaseCard.update({
+          where: { id: card.id },
+          data: {
+            status: card.liveVersionId
+              ? ShowcaseCardStatus.APPROVED
+              : ShowcaseCardStatus.DRAFT,
+          },
+        });
+
+        await tx.showcaseSubmissionWithdrawal.create({
+          data: {
+            cardVersionId: versionId,
+            cardId: card.id,
+            providerId,
+            submittedAtSnapshot: pending.submittedAt,
+          },
+        });
+      },
+      { label: 'showcase.withdrawSubmission' },
+    );
 
     return this.getCard(providerId, cardId);
   }
@@ -493,14 +618,16 @@ export class ProviderShowcaseCardsService {
       seen.add(key);
     }
 
+    assertAreasDoNotSwallowEachOther(resolved);
+
     await this.assertAreasAreCovered(providerId, resolved);
 
     const price = dto.listedServicePriceAmount ?? null;
     if (kind === ShowcaseCardKind.SERVICE && price === null) {
-      throw showcaseCategoryInvalid('Hizmet vitrini kartı için sabit hizmet bedeli zorunludur.');
+      throw showcaseContentInvalid('Hizmet vitrini kartı için sabit hizmet bedeli zorunludur.');
     }
     if (kind === ShowcaseCardKind.PROMOTION && price !== null) {
-      throw showcaseCategoryInvalid(
+      throw showcaseContentInvalid(
         'Genel tanıtım kartı sabit hizmet bedeli taşıyamaz; müşteri hizmeti talep sırasında seçer.',
       );
     }
@@ -508,7 +635,7 @@ export class ProviderShowcaseCardsService {
     const urgent = dto.responseSlaUrgentHours ?? SHOWCASE_SLA_URGENT_DEFAULT_HOURS;
     const normal = dto.responseSlaNormalHours ?? SHOWCASE_SLA_NORMAL_DEFAULT_HOURS;
     if (urgent > normal) {
-      throw showcaseCategoryInvalid(
+      throw showcaseContentInvalid(
         'Acil talep yanıt süresi, normal talep yanıt süresinden uzun olamaz.',
       );
     }
@@ -556,9 +683,12 @@ export class ProviderShowcaseCardsService {
   }
 
   /**
-   * The category a card may be listed under.
+   * The category a card may be listed under — and whether this business
+   * actually offers it.
    *
-   * A SERVICE card names one service, so it needs a LEAF — the same node a
+   * ## The shape rules
+   *
+   * A SERVICE card names one service, so it needs a LEAF: the same node a
    * request, an offer and a price already attach to. A PROMOTION card is the
    * business itself on a shelf, so a GROUP is allowed too.
    *
@@ -569,32 +699,122 @@ export class ProviderShowcaseCardsService {
    * A DRAFT category is refused for the reason `fanOutApprovedRequest` already
    * refuses one: it is an operator's release preparation, and an unreleased
    * service's name must not leave the admin surface.
+   *
+   * ## The binding rule
+   *
+   * **A card may not advertise a service the business does not offer.** Which
+   * services it offers is `ProviderServiceCategory`, narrowed by
+   * `isLiveProviderBinding` — the same rule that decides which bindings the
+   * provider's own panel prints and which ones request matching reads. A DRAFT
+   * binding is release preparation on the operator's side and buys nothing here.
+   *
+   * For a LEAF the test is direct membership. For a GROUP — only ever a
+   * PROMOTION card — it is "at least one live LEAF binding sits under this
+   * node": a general card on a shelf the business has nothing on is an
+   * advertisement for services it does not perform.
+   *
+   * ## Why every refusal answers identically
+   *
+   * There is one exception body for all of it. A category that does not exist,
+   * a DRAFT, a router, an unrelated group and a service they simply have not
+   * signed up for are the same 400 with the same code and the same sentence.
+   * Telling them apart would answer two questions this endpoint must not: does
+   * this id name a real category, and what is in the unreleased catalogue.
    */
-  private async assertCategoryFitsKind(categoryId: string, kind: ShowcaseCardKind) {
+  private async assertCategoryIsOffered(
+    providerId: string,
+    categoryId: string,
+    kind: ShowcaseCardKind,
+  ) {
     const category = await this.prisma.serviceCategory.findUnique({
       where: { id: categoryId },
       select: { id: true, kind: true, status: true },
     });
 
-    if (!category) {
-      throw showcaseCategoryInvalid('Seçilen kategori bulunamadı.');
+    if (
+      !category ||
+      !isLiveProviderBinding(category) ||
+      category.kind === ServiceCategoryKind.ROUTER ||
+      (kind === ShowcaseCardKind.SERVICE && category.kind !== ServiceCategoryKind.LEAF)
+    ) {
+      throw showcaseCategoryNotOffered();
     }
 
-    if (category.status === ServiceCategoryStatus.DRAFT) {
-      throw showcaseCategoryInvalid('Bu kategori henüz yayında değil.');
+    // The provider's live bindings. DRAFT ones are excluded by the same
+    // predicate `visibleServiceCategories` applies, so this list is exactly what
+    // their own panel calls their service categories.
+    const bindings = await this.prisma.providerServiceCategory.findMany({
+      where: {
+        providerId,
+        category: { status: { not: ServiceCategoryStatus.DRAFT } },
+      },
+      select: { categoryId: true, category: { select: { kind: true } } },
+    });
+
+    if (category.kind === ServiceCategoryKind.LEAF) {
+      if (!bindings.some((binding) => binding.categoryId === categoryId)) {
+        throw showcaseCategoryNotOffered();
+      }
+      return;
     }
 
-    if (category.kind === ServiceCategoryKind.ROUTER) {
-      throw showcaseCategoryInvalid('Yönlendirme kategorisi altında vitrin kartı açılamaz.');
-    }
+    // A GROUP, reachable only for a PROMOTION card. Only LEAF bindings count as
+    // something the business performs; a provider bound to a group would be
+    // bound to a shelf, which nothing else in this product treats as supply.
+    const leafIds = bindings
+      .filter((binding) => binding.category.kind === ServiceCategoryKind.LEAF)
+      .map((binding) => binding.categoryId);
 
-    if (kind === ShowcaseCardKind.SERVICE && category.kind !== ServiceCategoryKind.LEAF) {
-      throw showcaseCategoryInvalid(
-        'Hizmet vitrini kartı yalnız tek bir hizmet kategorisine bağlanabilir.',
-      );
+    if (leafIds.length === 0 || !(await this.someCategoryIsUnder(categoryId, leafIds))) {
+      throw showcaseCategoryNotOffered();
     }
   }
+
+  /**
+   * Whether any of `categoryIds` sits somewhere under `ancestorId`.
+   *
+   * Walked upwards, one level of the whole frontier per query, rather than by
+   * expanding the ancestor downwards. A provider has a handful of bindings and
+   * the tree is a few levels deep, so this is three or four queries whatever the
+   * catalogue's size — where expanding a top-level group means pulling every
+   * category beneath it to answer a yes/no question.
+   *
+   * The depth bound is the same guard `assertNotDescendant` uses: a tree that
+   * has somehow become a ring stops the walk instead of hanging it.
+   */
+  private async someCategoryIsUnder(ancestorId: string, categoryIds: string[]): Promise<boolean> {
+    let frontier = categoryIds.filter((id) => id !== ancestorId);
+    const seen = new Set(frontier);
+
+    for (let depth = 0; frontier.length > 0 && depth < SHOWCASE_MAX_CATEGORY_DEPTH; depth += 1) {
+      const parents = await this.prisma.serviceCategory.findMany({
+        where: { id: { in: frontier } },
+        select: { parentId: true },
+      });
+
+      const next: string[] = [];
+      for (const { parentId } of parents) {
+        if (!parentId) continue;
+        if (parentId === ancestorId) return true;
+        if (seen.has(parentId)) continue;
+        seen.add(parentId);
+        next.push(parentId);
+      }
+
+      frontier = next;
+    }
+
+    return false;
+  }
 }
+
+/**
+ * How far up the category tree the binding check will walk.
+ *
+ * A bound rather than a fact about the taxonomy: the walk terminates on its own
+ * for any tree, and this is what stops it if the tree is ever not one.
+ */
+const SHOWCASE_MAX_CATEGORY_DEPTH = 12;
 
 type NormalizedContent = {
   kind: ShowcaseCardKind;
@@ -648,7 +868,7 @@ function normalizeScope(items: string[]): string[] {
   const cleaned = items.map((item) => item.trim()).filter((item) => item.length > 0);
 
   if (cleaned.length === 0) {
-    throw showcaseCategoryInvalid('Kapsam listeleri boş bırakılamaz.');
+    throw showcaseContentInvalid('Kapsam listeleri boş bırakılamaz.');
   }
 
   return cleaned;
@@ -657,6 +877,44 @@ function normalizeScope(items: string[]): string[] {
 function normalizeOptional(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? '';
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * No area on a version may already reach everywhere another one does.
+ *
+ * "İstanbul geneli" beside "İstanbul/Kadıköy" is not a wider card: it is the
+ * same card written twice, and the narrower row buys nothing the wider one has
+ * not already claimed. The `(cardVersionId, areaKey)` unique index catches the
+ * exact repeat; this catches the containment above it, which that index cannot
+ * see because the two rows have genuinely different keys.
+ *
+ * `areaCovers` is the same containment test the provider's own profile form
+ * applies to its own list, so a card is judged by the rule the business already
+ * knows. It is reflexive — an area covers itself — but an exact repeat has
+ * already been refused by key, so any pair reaching here is strict containment.
+ *
+ * This says nothing about `ProviderServiceArea`. A provider may hold "İstanbul
+ * geneli" and "İstanbul/Kadıköy" together — rows that predate the rule refusing
+ * new ones, and redundant rather than contradictory — and coverage still reads
+ * as the wider of the two. That legacy pair is not a card, and nothing here
+ * makes it one.
+ */
+function assertAreasDoNotSwallowEachOther(areas: readonly ShowcaseAreaLevels[]) {
+  for (let outer = 0; outer < areas.length; outer += 1) {
+    for (let inner = outer + 1; inner < areas.length; inner += 1) {
+      const first = areas[outer];
+      const second = areas[inner];
+      if (!first || !second) continue;
+
+      if (areaCovers(first, second)) {
+        throw showcaseAreaOverlap(describeArea(first), describeArea(second));
+      }
+
+      if (areaCovers(second, first)) {
+        throw showcaseAreaOverlap(describeArea(second), describeArea(first));
+      }
+    }
+  }
 }
 
 /**

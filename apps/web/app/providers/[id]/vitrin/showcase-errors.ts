@@ -18,7 +18,13 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
     'Seçtiğiniz bölgelerden biri işletme profilinizdeki hizmet bölgelerinin dışında. Önce profilinize ekleyin.',
   SHOWCASE_AREA_UNKNOWN: 'Seçilen il, ilçe ve mahalle birlikte geçerli bir bölge oluşturmuyor.',
   SHOWCASE_AREA_DUPLICATE: 'Aynı bölgeyi listeye birden fazla kez eklediniz.',
-  SHOWCASE_CATEGORY_INVALID: 'Kart bilgileri kabul edilmedi. Kategori, tür ve fiyat uyumunu kontrol edin.',
+  SHOWCASE_AREA_OVERLAP:
+    'Seçtiğiniz bölgelerden biri diğerini zaten kapsıyor. Geniş olanı ya da dar olanı kaldırın.',
+  SHOWCASE_CATEGORY_NOT_OFFERED:
+    'Bu kategoride vitrin kartı açamazsınız. Kart yalnız işletme profilinizde seçili olan hizmet kategorilerinde açılabilir.',
+  SHOWCASE_CONTENT_INVALID:
+    'Kart bilgileri kabul edilmedi. Tür, fiyat, kapsam ve yanıt sürelerini kontrol edin.',
+  SHOWCASE_NOTHING_TO_WITHDRAW: 'Geri çekilecek, incelemede bekleyen bir sürüm yok.',
   SHOWCASE_CARD_LOCKED: 'Bu kart şu anda düzenlenemez.',
   SHOWCASE_SAVE_FAILED: 'Kaydedilemedi. Alanları kontrol edip tekrar deneyin.',
 };

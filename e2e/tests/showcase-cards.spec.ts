@@ -7,7 +7,7 @@ import { primaryRuntime } from '../src/runtime';
  * A vitrin card from the business's keyboard to the operator's decision, and
  * back.
  *
- * Three things this journey proves that a unit test cannot:
+ * Four things these journeys prove that a unit test cannot:
  *
  * 1. The two screens agree. What a provider writes is what an operator reads,
  *    down to the scope bullets and the price — the API's projection is shared,
@@ -17,6 +17,10 @@ import { primaryRuntime } from '../src/runtime';
  *    of, and the browser enforces it before the API ever has to.
  * 3. Narrowing publishes itself. A provider removing a district gets a new live
  *    version with no operator involved, and nothing lands in the review queue.
+ * 4. Withdrawing is reachable at the moment it is needed. The edit form is gone
+ *    while a version is under review, so a provider who spots their own typo has
+ *    exactly one control on that screen — and it has to work, leave the queue,
+ *    and ask for the consent again on the way back in.
  *
  * The 320px checks are here rather than in a separate file because the widths a
  * form breaks at are the widths its own journey walks through: the create form,
@@ -73,6 +77,17 @@ async function addArea(page: Page, city: string, district: string) {
   await page.getByTestId('service-area-city').selectOption(city);
   await page.getByTestId('service-area-district').selectOption(district);
   await page.getByTestId('service-area-add').click();
+}
+
+/**
+ * Ticks the price-responsibility consent.
+ *
+ * By its text rather than by a label, because the sentence *is* the control: it
+ * is what the API records an acceptance of, so a locator that could still find
+ * the box after the wording changed would be testing the wrong thing.
+ */
+async function acceptPriceTerms(page: Page) {
+  await page.getByText('TakTick bu hizmet bedelini tahsil etmez', { exact: false }).click();
 }
 
 /** Removes an added area chip by the sentence the product prints for it. */
@@ -137,9 +152,7 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
         provider.page.getByText('İncelemeye gönderildi', { exact: false }),
       ).toHaveCount(0);
 
-      await provider.page
-        .getByText('TakTick bu hizmet bedelini tahsil etmez', { exact: false })
-        .click();
+      await acceptPriceTerms(provider.page);
       await submitButton.click();
       await assertNoErrorScreen(provider.page);
       await expect(
@@ -202,6 +215,107 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
     }
   });
 
+  test('hizmet veren incelemeyi geri çeker, düzeltir ve yeniden gönderir', async ({
+    browser,
+  }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(3, { namePrefix: 'E2E Geri Cekme' });
+    const providerAccount = await createProvider({
+      categoryId: category.id,
+      location,
+      credits: 0,
+    });
+    const adminAccount = await createAdmin();
+
+    const provider = await Actor.open(browser, 'web', primaryRuntime);
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+
+    try {
+      await provider.loginToWeb(providerAccount.email, providerAccount.password);
+      await provider.gotoWeb(`/providers/${providerAccount.id}/vitrin/yeni`);
+
+      await provider.page.getByLabel('Kategori *').selectOption({ label: category.name });
+      await fillCardContent(provider.page, {
+        title: 'E2E Yanlis basli kart',
+        summary: 'Geri çekilip düzeltilecek bir kart.',
+        included: 'Yerinde inceleme',
+        excluded: 'Malzeme bedeli',
+        price: '750,00',
+      });
+      await addArea(provider.page, location.city, location.district);
+      await provider.page.getByRole('button', { name: 'Taslağı kaydet' }).click();
+      await assertNoErrorScreen(provider.page);
+
+      await acceptPriceTerms(provider.page);
+      await provider.page.getByRole('button', { name: 'Onaya gönder' }).click();
+      await assertNoErrorScreen(provider.page);
+
+      // It really is with an operator.
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin('/showcase/reviews');
+      await expect(
+        admin.page.getByRole('link', { name: 'E2E Yanlis basli kart' }),
+      ).toBeVisible();
+
+      // The provider spots their own mistake. The edit form is gone while the
+      // version is under review, so the way out has to be on this screen.
+      await expect(
+        provider.page.getByRole('button', { name: 'Kaydet' }),
+      ).toHaveCount(0);
+      await provider.page.getByRole('button', { name: 'İncelemeyi geri çek' }).click();
+      await assertNoErrorScreen(provider.page);
+      await expect(
+        provider.page.getByText('İnceleme talebi geri çekildi', { exact: false }),
+      ).toBeVisible();
+
+      // Out of the queue, without anybody having decided anything.
+      await admin.gotoAdmin('/showcase/reviews');
+      await expect(
+        admin.page.getByRole('link', { name: 'E2E Yanlis basli kart' }),
+      ).toHaveCount(0);
+
+      // Editable again, and the correction lands on the same version.
+      await provider.page.getByLabel('Başlık *').fill('E2E Duzeltilmis kart');
+      await provider.page.getByRole('button', { name: 'Kaydet' }).click();
+      await assertNoErrorScreen(provider.page);
+      await expect(
+        provider.page.getByText('Değişiklikler kaydedildi.', { exact: false }),
+      ).toBeVisible();
+
+      // Re-submitting needs the acceptance again: withdrawing cleared it.
+      await acceptPriceTerms(provider.page);
+      await provider.page.getByRole('button', { name: 'Onaya gönder' }).click();
+      await assertNoErrorScreen(provider.page);
+      await expect(
+        provider.page.getByText('Kart incelemeye gönderildi.', { exact: false }),
+      ).toBeVisible();
+
+      await admin.gotoAdmin('/showcase/reviews');
+      await expect(
+        admin.page.getByRole('link', { name: 'E2E Duzeltilmis kart' }),
+      ).toBeVisible();
+
+      // One version throughout — a withdrawal is a retrieval, not a new draft.
+      const versions = await prisma().showcaseCardVersion.count({
+        where: { card: { providerId: providerAccount.id } },
+      });
+      expect(versions).toBe(1);
+
+      // And the record of it is a withdrawal, not somebody's decision.
+      const withdrawals = await prisma().showcaseSubmissionWithdrawal.count({
+        where: { providerId: providerAccount.id },
+      });
+      expect(withdrawals).toBe(1);
+      const reviews = await prisma().showcaseCardReview.count({
+        where: { version: { card: { providerId: providerAccount.id } } },
+      });
+      expect(reviews).toBe(0);
+    } finally {
+      await provider.close();
+      await admin.close();
+    }
+  });
+
   test('yalnız bölge daraltma incelemeye düşmeden yeni canlı sürüm üretir', async ({
     browser,
   }) => {
@@ -236,9 +350,7 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
       await provider.page.getByRole('button', { name: 'Taslağı kaydet' }).click();
       await assertNoErrorScreen(provider.page);
 
-      await provider.page
-        .getByText('TakTick bu hizmet bedelini tahsil etmez', { exact: false })
-        .click();
+      await acceptPriceTerms(provider.page);
       await provider.page.getByRole('button', { name: 'Onaya gönder' }).click();
       await assertNoErrorScreen(provider.page);
 
@@ -333,6 +445,28 @@ test.describe('vitrin ekranları dar ekranda', () => {
         await provider.page.getByRole('button', { name: 'Taslağı kaydet' }).click();
         await assertNoErrorScreen(provider.page);
         await expectNoHorizontalOverflow(provider.page, `kart detayı @${width}`);
+
+        // The consent sentence is two lines of terms rather than a chip's worth
+        // of label, so it is the control most likely to widen this screen.
+        await acceptPriceTerms(provider.page);
+        await provider.page.getByRole('button', { name: 'Onaya gönder' }).click();
+        await assertNoErrorScreen(provider.page);
+        await expectNoHorizontalOverflow(provider.page, `incelemedeki kart @${width}`);
+
+        // The way out of the queue has to be reachable on a phone: this is the
+        // one screen where the edit form is gone, so a button that fell off the
+        // side here would leave the provider with nothing to do.
+        const withdraw = provider.page.getByRole('button', { name: 'İncelemeyi geri çek' });
+        await expect(withdraw).toBeVisible();
+        await expect(withdraw).toBeEnabled();
+        // Reachable, not necessarily above the fold: a phone scrolls, and
+        // demanding that a page this long fit one screen would be asserting a
+        // layout nobody designed rather than that the control works.
+        await withdraw.scrollIntoViewIfNeeded();
+
+        await withdraw.click();
+        await assertNoErrorScreen(provider.page);
+        await expectNoHorizontalOverflow(provider.page, `geri çekilmiş kart @${width}`);
       } finally {
         await provider.close();
       }
@@ -366,9 +500,7 @@ test.describe('vitrin ekranları dar ekranda', () => {
         });
         await addArea(provider.page, location.city, location.district);
         await provider.page.getByRole('button', { name: 'Taslağı kaydet' }).click();
-        await provider.page
-          .getByText('TakTick bu hizmet bedelini tahsil etmez', { exact: false })
-          .click();
+        await acceptPriceTerms(provider.page);
         await provider.page.getByRole('button', { name: 'Onaya gönder' }).click();
         await assertNoErrorScreen(provider.page);
 

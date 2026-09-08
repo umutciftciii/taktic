@@ -25,7 +25,16 @@ import { showcaseAreaKey } from '../src/common/showcase-area-key';
  *   promotion is a fixed-price claim the product says that card does not make.
  * - **A card may not claim reach the business has not claimed.** Every area is
  *   checked against the provider's own `ProviderServiceArea` rows with the same
- *   containment test their profile form uses.
+ *   containment test their profile form uses, and no two areas on one version
+ *   may swallow each other.
+ * - **A card may not advertise a service the business does not offer.** The
+ *   category has to be one of the provider's live `ProviderServiceCategory`
+ *   bindings — or, for a general card on a group, a group with one of those
+ *   bindings underneath it.
+ *
+ * Every category refusal answers with one body, so this endpoint cannot be used
+ * to ask whether an id names a real category or what the unreleased catalogue
+ * contains.
  */
 let ctx: TestContext;
 
@@ -92,7 +101,7 @@ describe('vitrin kartı oluşturma', () => {
       .send(showcaseCardPayload(category.id, { listedServicePriceAmount: null }))
       .expect(400);
 
-    expect(response.body.code).toBe('SHOWCASE_CATEGORY_INVALID');
+    expect(response.body.code).toBe('SHOWCASE_CONTENT_INVALID');
   });
 
   it('PROMOTION kartına sabit fiyat yazılmasını kabul etmez', async () => {
@@ -109,7 +118,7 @@ describe('vitrin kartı oluşturma', () => {
       )
       .expect(400);
 
-    expect(response.body.code).toBe('SHOWCASE_CATEGORY_INVALID');
+    expect(response.body.code).toBe('SHOWCASE_CONTENT_INVALID');
   });
 
   it('PROMOTION kartını fiyatsız açar', async () => {
@@ -172,7 +181,7 @@ describe('vitrin kartı oluşturma', () => {
       )
       .expect(400);
 
-    expect(response.body.code).toBe('SHOWCASE_CATEGORY_INVALID');
+    expect(response.body.code).toBe('SHOWCASE_CONTENT_INVALID');
   });
 
   it('SLA sınırlarının dışındaki değerleri reddeder', async () => {
@@ -205,22 +214,107 @@ describe('vitrin kartı kategorisi', () => {
       .send(showcaseCardPayload(category.id))
       .expect(400);
 
-    expect(response.body.code).toBe('SHOWCASE_CATEGORY_INVALID');
+    expect(response.body.code).toBe('SHOWCASE_CATEGORY_NOT_OFFERED');
   });
 
-  it('PROMOTION kartını GROUP kategoriye bağlar', async () => {
+  it('PROMOTION kartını, altında bağlı hizmeti olan GROUP kategoriye bağlar', async () => {
+    const group = await createCategory(ctx.prisma, 'Ev Bakımı', {
+      kind: ServiceCategoryKind.GROUP,
+    });
+    const leaf = await createCategory(ctx.prisma, 'Klima', {
+      kind: ServiceCategoryKind.LEAF,
+      parentId: group.id,
+    });
+    const user = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    // Sağlayıcı gruba değil, grubun altındaki hizmete bağlı — ürünün "arz"
+    // saydığı tek bağ budur.
+    const provider = await createDiscoverableProvider(ctx.prisma, {
+      userId: user.id,
+      categoryId: leaf.id,
+      areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
+    });
+    const cookie = await loginAs(ctx.prisma, user.id);
+
+    await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(showcaseCardPayload(group.id, { kind: 'PROMOTION', listedServicePriceAmount: null }))
+      .expect(201);
+  });
+
+  it('PROMOTION kartını, altında bağlı hizmeti olmayan GROUP kategoriye açtırmaz', async () => {
+    const group = await createCategory(ctx.prisma, 'Nakliyat', {
+      kind: ServiceCategoryKind.GROUP,
+    });
+    // Sağlayıcının bağlı olduğu hizmet bu grubun altında değil, ayrı bir kök.
+    const { provider, cookie } = await providerFixture();
+
+    const response = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(showcaseCardPayload(group.id, { kind: 'PROMOTION', listedServicePriceAmount: null }))
+      .expect(400);
+
+    expect(response.body.code).toBe('SHOWCASE_CATEGORY_NOT_OFFERED');
+  });
+
+  it('gruba doğrudan bağlı olmak, grubun altında hizmet verildiği anlamına gelmez', async () => {
+    // Sağlayıcı grubun kendisine bağlı ama altında hiçbir LEAF bağı yok.
+    // "Rafın kendisine bağlı olmak" ürünün hiçbir yerinde arz sayılmaz.
     const { category, provider, cookie } = await providerFixture({
       categoryKind: ServiceCategoryKind.GROUP,
     });
 
-    await request(ctx.server)
+    const response = await request(ctx.server)
       .post(`/providers/${provider.id}/showcase/cards`)
       .set('Cookie', cookie)
       .send(
         showcaseCardPayload(category.id, { kind: 'PROMOTION', listedServicePriceAmount: null }),
       )
-      .expect(201);
+      .expect(400);
+
+    expect(response.body.code).toBe('SHOWCASE_CATEGORY_NOT_OFFERED');
   });
+
+  it('sağlayıcının sunmadığı LEAF kategoriye SERVICE kartı açtırmaz', async () => {
+    const { provider, cookie } = await providerFixture();
+    // Gerçek, yayında ve LEAF — ama bu işletmenin hizmet listesinde yok.
+    const unrelated = await createCategory(ctx.prisma, 'Boya', {
+      kind: ServiceCategoryKind.LEAF,
+    });
+
+    const response = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(showcaseCardPayload(unrelated.id))
+      .expect(400);
+
+    expect(response.body.code).toBe('SHOWCASE_CATEGORY_NOT_OFFERED');
+  });
+
+  it('bağlı olmayan kategori ile hiç var olmayan kategori aynı cevabı verir', async () => {
+    const { provider, cookie } = await providerFixture();
+    const unrelated = await createCategory(ctx.prisma, 'Boya', {
+      kind: ServiceCategoryKind.LEAF,
+    });
+
+    const real = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(showcaseCardPayload(unrelated.id))
+      .expect(400);
+
+    const fabricated = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(showcaseCardPayload('olmayan-kategori'))
+      .expect(400);
+
+    // Gövde bit düzeyinde aynı: "bu kimlik gerçek bir kategori mi" sorusu
+    // cevaplanmıyor.
+    expect(fabricated.body).toEqual(real.body);
+  });
+
 
   it('ROUTER kategorisini her iki tür için de reddeder', async () => {
     const { category, provider, cookie } = await providerFixture({
@@ -237,11 +331,14 @@ describe('vitrin kartı kategorisi', () => {
         .send(body)
         .expect(400);
 
-      expect(response.body.code).toBe('SHOWCASE_CATEGORY_INVALID');
+      expect(response.body.code).toBe('SHOWCASE_CATEGORY_NOT_OFFERED');
     }
   });
 
-  it('DRAFT kategoriyi reddeder — yayınlanmamış katalog sızmaz', async () => {
+  it('DRAFT kategoriyi reddeder — bağ olsa bile, yayınlanmamış katalog sızmaz', async () => {
+    // Bağ var ama kategori DRAFT: operatörün release hazırlığı, arz değil.
+    // `visibleServiceCategories` de bu bağı sağlayıcının hizmet listesinde
+    // saymaz, ve burada da saymıyoruz — aynı `isLiveProviderBinding` kuralı.
     const { category, provider, cookie } = await providerFixture({
       categoryStatus: ServiceCategoryStatus.DRAFT,
     });
@@ -252,7 +349,7 @@ describe('vitrin kartı kategorisi', () => {
       .send(showcaseCardPayload(category.id))
       .expect(400);
 
-    expect(response.body.code).toBe('SHOWCASE_CATEGORY_INVALID');
+    expect(response.body.code).toBe('SHOWCASE_CATEGORY_NOT_OFFERED');
   });
 });
 
@@ -375,6 +472,94 @@ describe('vitrin kartı bölgeleri', () => {
       .expect(400);
 
     expect(response.body.code).toBe('SHOWCASE_AREA_DUPLICATE');
+  });
+
+  it('kapsayan ve kapsanan iki bölgeyi birlikte kabul etmez', async () => {
+    const { category, provider, cookie } = await providerFixture({
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+
+    // İl geneli, ilçeyi zaten kapsıyor.
+    const cityAndDistrict = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(
+        showcaseCardPayload(category.id, {
+          areas: [{ city: 'İstanbul' }, { city: 'İstanbul', district: 'Kadıköy' }],
+        }),
+      )
+      .expect(400);
+    expect(cityAndDistrict.body.code).toBe('SHOWCASE_AREA_OVERLAP');
+
+    // Sıra fark etmez: dar olan önce gelse de aynı çift.
+    const reversed = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(
+        showcaseCardPayload(category.id, {
+          areas: [{ city: 'İstanbul', district: 'Kadıköy' }, { city: 'İstanbul' }],
+        }),
+      )
+      .expect(400);
+    expect(reversed.body.code).toBe('SHOWCASE_AREA_OVERLAP');
+
+    // İlçe, altındaki mahalleyi kapsıyor.
+    const districtAndNeighborhood = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(
+        showcaseCardPayload(category.id, {
+          areas: [
+            { city: 'İstanbul', district: 'Kadıköy' },
+            { city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Caferağa Mah' },
+          ],
+        }),
+      )
+      .expect(400);
+    expect(districtAndNeighborhood.body.code).toBe('SHOWCASE_AREA_OVERLAP');
+  });
+
+  it('aynı hiyerarşide olmayan kardeş bölgeleri kabul eder', async () => {
+    const { category, provider, cookie } = await providerFixture({
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+
+    const response = await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(
+        showcaseCardPayload(category.id, {
+          areas: [
+            { city: 'İstanbul', district: 'Kadıköy' },
+            { city: 'İstanbul', district: 'Beşiktaş' },
+            { city: 'İstanbul', district: 'Üsküdar', neighborhood: 'Kuzguncuk Mah' },
+          ],
+        }),
+      )
+      .expect(201);
+
+    expect(response.body.draftVersion.areas).toHaveLength(3);
+  });
+
+  it('sağlayıcının kendi örtüşen bölge kayıtları kartı engellemez', async () => {
+    // ProviderServiceArea, kural gelmeden önce yazılmış örtüşen çiftleri
+    // taşıyabilir ("İstanbul geneli" + "İstanbul/Kadıköy"). Bu kural yalnız
+    // kart sürümünün kendi alan listesine uygulanır; profilin geçmişi bir kart
+    // değildir ve buradan bir karta dönüşmez.
+    const { category, provider, cookie } = await providerFixture({
+      areas: [
+        { city: 'İstanbul', district: null },
+        { city: 'İstanbul', district: 'Kadıköy' },
+      ],
+    });
+
+    await request(ctx.server)
+      .post(`/providers/${provider.id}/showcase/cards`)
+      .set('Cookie', cookie)
+      .send(
+        showcaseCardPayload(category.id, { areas: [{ city: 'İstanbul', district: 'Kadıköy' }] }),
+      )
+      .expect(201);
   });
 
   it('en az bir bölge ister', async () => {

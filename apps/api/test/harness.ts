@@ -196,6 +196,7 @@ const TRUNCATED_TABLES = [
   // versions; the card and its versions reference each other, which TRUNCATE …
   // CASCADE handles regardless of the order here — the order is kept anyway so
   // the list stays readable as a dependency graph.
+  'ShowcaseSubmissionWithdrawal',
   'ShowcaseCardAutoPublishAudit',
   'ShowcaseCardReview',
   'ShowcaseCardVersionArea',
