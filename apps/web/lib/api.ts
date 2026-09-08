@@ -1193,3 +1193,110 @@ export async function loadSupportTickets(): Promise<SupportTicketSummary[] | nul
     return null;
   }
 }
+
+// ── Vitrin (showcase) ───────────────────────────────────────────────────────
+
+export type ShowcaseCardKind = 'SERVICE' | 'PROMOTION';
+
+export type ShowcaseCardStatus =
+  | 'DRAFT'
+  | 'PENDING_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'SUSPENDED'
+  | 'ARCHIVED';
+
+export type ShowcaseVersionReview = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export type ShowcaseCardArea = {
+  id: string;
+  scope: ServiceAreaScope;
+  city: string;
+  district: string | null;
+  neighborhood: string | null;
+  /** Server-derived comparison key. Read-only here; never posted back. */
+  areaKey: string;
+  /** "İstanbul geneli", "Moda, Kadıköy, İstanbul" — composed by the API. */
+  label: string;
+};
+
+export type ShowcaseCardReviewRecord = {
+  id: string;
+  decision: ShowcaseVersionReview;
+  /** Present on a rejection and null on an approval. Written for the provider. */
+  note: string | null;
+  createdAt: string;
+  reviewedBy: { id: string; name: string | null; email: string } | null;
+};
+
+export type ShowcaseCardVersion = {
+  id: string;
+  versionNumber: number;
+  kind: ShowcaseCardKind;
+  title: string;
+  summary: string;
+  scopeIncluded: string[];
+  scopeExcluded: string[];
+  /**
+   * Minor units. The provider's own price to their own customer — TakTick does
+   * not collect it and is not a party to it. Null on a PROMOTION card, where the
+   * product says no fixed-price claim is made at all.
+   */
+  listedServicePriceAmount: number | null;
+  listedServiceCurrency: string;
+  imageUrl: string | null;
+  responseSlaUrgentHours: number;
+  responseSlaNormalHours: number;
+  /** Null on a draft: nobody has accepted anything for a version never submitted. */
+  priceTermsVersion: string | null;
+  priceTermsAcceptedAt: string | null;
+  reviewStatus: ShowcaseVersionReview;
+  submittedAt: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  areas: ShowcaseCardArea[];
+  review: ShowcaseCardReviewRecord | null;
+};
+
+/**
+ * A card carries two versions at once, and the pair is the whole model: the one
+ * being served and the one being written. A screen that showed only "the current
+ * version" could not say what a customer sees while an edit is in review.
+ */
+export type ShowcaseCard = {
+  id: string;
+  kind: ShowcaseCardKind;
+  status: ShowcaseCardStatus;
+  category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
+  liveVersion: ShowcaseCardVersion | null;
+  draftVersion: ShowcaseCardVersion | null;
+  suspendedAt: string | null;
+  suspendReason: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShowcasePriceTerms = { version: string; text: string };
+
+export const SHOWCASE_CARD_STATUS_LABELS: Record<ShowcaseCardStatus, string> = {
+  DRAFT: 'Taslak',
+  PENDING_REVIEW: 'İncelemede',
+  APPROVED: 'Onaylı',
+  REJECTED: 'Reddedildi',
+  SUSPENDED: 'Askıya alındı',
+  ARCHIVED: 'Arşivlendi',
+};
+
+export const SHOWCASE_VERSION_REVIEW_LABELS: Record<ShowcaseVersionReview, string> = {
+  DRAFT: 'Taslak',
+  PENDING: 'İncelemede',
+  APPROVED: 'Onaylı',
+  REJECTED: 'Reddedildi',
+};
+
+export const SHOWCASE_CARD_KIND_LABELS: Record<ShowcaseCardKind, string> = {
+  SERVICE: 'Hizmet vitrini',
+  PROMOTION: 'Genel tanıtım',
+};

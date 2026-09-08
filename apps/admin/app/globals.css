@@ -3994,6 +3994,51 @@ button:disabled {
   overflow-x: auto;
 }
 
+/* ---- Vitrin (showcase) ---- */
+
+/*
+ * The same workaround the support queue needs, for the same reason:
+ * `.table-scroll` only gets its `overflow-x` inside a `.table-card`, and these
+ * tables live in a `.section-card`. Without it the columns widen the document
+ * itself on a 320px phone instead of scrolling inside their own box.
+ *
+ * A scoped class rather than a general `.section-card .table-scroll` rule,
+ * deliberately: several existing screens put a table-scroll in a section-card
+ * and generalising the rule would change their layout as a side effect of a
+ * feature that has nothing to do with them.
+ */
+.showcase-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/*
+ * A version's scope and area lists. Plain lists that must not push the card
+ * wider than the viewport when a provider writes a long line.
+ */
+.showcase-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.showcase-compare {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4, 16px);
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .showcase-compare {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 /* ---- Operations settings: the scheduled jobs panel ---- */
 
 /*

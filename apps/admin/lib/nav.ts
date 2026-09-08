@@ -22,6 +22,11 @@ export const navGroups: NavGroup[] = [
       { href: '/offers', label: 'Teklifler' },
       { href: '/providers', label: 'Hizmet Verenler' },
       { href: '/support', label: 'Destek Talepleri' },
+      // Vitrin sits in Operasyon rather than Katalog: the queue is work waiting
+      // on an operator, like the request and provider queues beside it, not a
+      // catalogue somebody maintains.
+      { href: '/showcase/reviews', label: 'Vitrin İncelemeleri' },
+      { href: '/showcase/cards', label: 'Vitrin Kartları' },
     ],
   },
   {

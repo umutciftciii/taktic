@@ -2240,3 +2240,173 @@ export type SupportTicketDetail = SupportTicketListEntry & {
   allowedTransitions: SupportTicketStatus[];
   timeline: SupportTicketTimelineEntry[];
 };
+
+// ── Vitrin (showcase) ───────────────────────────────────────────────────────
+
+export type ShowcaseCardKind = 'SERVICE' | 'PROMOTION';
+
+export type ShowcaseCardStatus =
+  | 'DRAFT'
+  | 'PENDING_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'SUSPENDED'
+  | 'ARCHIVED';
+
+export type ShowcaseVersionReview = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export type ShowcaseCardArea = {
+  id: string;
+  scope: 'CITY' | 'DISTRICT' | 'NEIGHBORHOOD';
+  city: string;
+  district: string | null;
+  neighborhood: string | null;
+  /** Server-derived comparison key; the identity the narrowing rule uses. */
+  areaKey: string;
+  label: string;
+};
+
+export type ShowcaseCardReviewRecord = {
+  id: string;
+  decision: ShowcaseVersionReview;
+  note: string | null;
+  createdAt: string;
+  reviewedBy: { id: string; name: string | null; email: string } | null;
+};
+
+export type ShowcaseCardVersion = {
+  id: string;
+  versionNumber: number;
+  kind: ShowcaseCardKind;
+  title: string;
+  summary: string;
+  scopeIncluded: string[];
+  scopeExcluded: string[];
+  /**
+   * The provider's own price to their own customer, in minor units. Not money
+   * TakTick handles — it is deliberately named apart from
+   * `PackagePurchase.priceAmountSnapshot`, which is what the platform charges.
+   */
+  listedServicePriceAmount: number | null;
+  listedServiceCurrency: string;
+  imageUrl: string | null;
+  responseSlaUrgentHours: number;
+  responseSlaNormalHours: number;
+  priceTermsVersion: string | null;
+  priceTermsAcceptedAt: string | null;
+  reviewStatus: ShowcaseVersionReview;
+  submittedAt: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  areas: ShowcaseCardArea[];
+  review: ShowcaseCardReviewRecord | null;
+};
+
+export type ShowcaseCard = {
+  id: string;
+  kind: ShowcaseCardKind;
+  status: ShowcaseCardStatus;
+  category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
+  liveVersion: ShowcaseCardVersion | null;
+  draftVersion: ShowcaseCardVersion | null;
+  suspendedAt: string | null;
+  suspendReason: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShowcaseProviderSummary = {
+  id: string;
+  businessName: string;
+  status: ProviderStatus;
+};
+
+export type ShowcaseVersionListEntry = ShowcaseCardVersion & {
+  card: ShowcaseCard;
+  provider: ShowcaseProviderSummary;
+};
+
+/**
+ * One version with everything an operator needs to decide about it.
+ *
+ * `provider.serviceAreas` is the reason this is a different shape from the list:
+ * judging a claim about "İstanbul/Kadıköy" means seeing the coverage the
+ * business itself declared, so the operator can tell a legitimate card from one
+ * reaching past what its owner does.
+ *
+ * `autoPublish` is non-null only on a version the narrowing rule published
+ * without an operator. It is here so a reviewer looking at a card's history can
+ * tell those apart from the ones somebody decided.
+ */
+export type ShowcaseVersionDetail = ShowcaseCardVersion & {
+  card: ShowcaseCard;
+  provider: ShowcaseProviderSummary & {
+    contactName: string;
+    city: string;
+    district: string;
+    serviceAreas: Array<{
+      scope: 'CITY' | 'DISTRICT' | 'NEIGHBORHOOD';
+      city: string;
+      district: string | null;
+      neighborhood: string | null;
+    }>;
+  };
+  autoPublish: {
+    id: string;
+    previousVersionId: string;
+    removedAreaKeys: string[];
+    createdAt: string;
+  } | null;
+};
+
+export type ShowcaseCardListEntry = ShowcaseCard & { provider: ShowcaseProviderSummary };
+
+export const SHOWCASE_CARD_STATUS_LABELS: Record<ShowcaseCardStatus, string> = {
+  DRAFT: 'Taslak',
+  PENDING_REVIEW: 'İncelemede',
+  APPROVED: 'Onaylı',
+  REJECTED: 'Reddedildi',
+  SUSPENDED: 'Askıya alındı',
+  ARCHIVED: 'Arşivlendi',
+};
+
+export const SHOWCASE_VERSION_REVIEW_LABELS: Record<ShowcaseVersionReview, string> = {
+  DRAFT: 'Taslak',
+  PENDING: 'İncelemede',
+  APPROVED: 'Onaylı',
+  REJECTED: 'Reddedildi',
+};
+
+export const SHOWCASE_CARD_KIND_LABELS: Record<ShowcaseCardKind, string> = {
+  SERVICE: 'Hizmet vitrini',
+  PROMOTION: 'Genel tanıtım',
+};
+
+export function showcaseStatusBadgeClass(status: ShowcaseCardStatus): string {
+  switch (status) {
+    case 'APPROVED':
+      return 'badge badge-good';
+    case 'PENDING_REVIEW':
+      return 'badge badge-warn';
+    case 'REJECTED':
+    case 'SUSPENDED':
+      return 'badge badge-bad';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
+export function showcaseReviewBadgeClass(review: ShowcaseVersionReview): string {
+  switch (review) {
+    case 'APPROVED':
+      return 'badge badge-good';
+    case 'PENDING':
+      return 'badge badge-warn';
+    case 'REJECTED':
+      return 'badge badge-bad';
+    default:
+      return 'badge badge-muted';
+  }
+}

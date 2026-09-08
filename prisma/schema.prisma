@@ -370,6 +370,7 @@ model User {
   supportTickets             SupportTicket[]             @relation("SupportTicketRequester")
   supportTicketMessages      SupportTicketMessage[]      @relation("SupportTicketMessageAuthor")
   supportTicketStatusChanges SupportTicketStatusChange[] @relation("SupportTicketStatusChangedBy")
+  showcaseCardReviews        ShowcaseCardReview[]        @relation("ShowcaseCardReviewedBy")
 
   @@index([role])
   @@index([isActive])
@@ -637,6 +638,7 @@ model ServiceCategory {
   providerInvites   ProviderInviteToken[]
   packageScopes     OfferPackageScopeCategory[]
   entitlementScopes ProviderPackageEntitlementScope[]
+  showcaseCards     ShowcaseCard[]
 
   @@index([parentId])
   @@index([isActive, sortOrder])
@@ -1079,7 +1081,7 @@ model ProviderProfile {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user                User?                        @relation(fields: [userId], references: [id])
+  user                User?                          @relation(fields: [userId], references: [id])
   serviceCategories   ProviderServiceCategory[]
   serviceAreas        ProviderServiceArea[]
   offers              Offer[]
@@ -1091,6 +1093,8 @@ model ProviderProfile {
   notificationLogs    NotificationLog[]
   messageThreads      MessageThread[]
   packageEntitlements ProviderPackageEntitlement[]
+  showcaseCards       ShowcaseCard[]
+  showcaseAutoPublish ShowcaseCardAutoPublishAudit[]
 
   @@index([status])
   @@index([city])
@@ -2187,4 +2191,309 @@ model SupportTicketStatusChange {
   @@index([ticketId, createdAt, id])
   /// The foreign key's own column, for the reason above.
   @@index([changedById, createdAt])
+}
+
+/// What a vitrin (showcase) card sells.
+///
+/// SERVICE names one LEAF service and carries a fixed price for a standard
+/// scope: the customer sees a number before they ask for anything. PROMOTION
+/// introduces the business itself and carries no price at all — the customer
+/// chooses the concrete service later, when the lead flow ships.
+///
+/// The two are not one type with a nullable price. A card that may or may not
+/// have a price would leave every reader — the provider's screen, the admin's
+/// review, and the customer surface still to come — deciding for itself what a
+/// missing number means. A pair of CHECK constraints on ShowcaseCardVersion
+/// pins the price to the kind in both directions instead.
+enum ShowcaseCardKind {
+  SERVICE
+  PROMOTION
+}
+
+/// Where a card is in its life, as opposed to where its content is in review.
+///
+/// The split is the point. `ShowcaseCardVersion.reviewStatus` is about one text;
+/// this is about the card the provider owns. An APPROVED card whose newest
+/// version is under review is still APPROVED — it has a live version and it goes
+/// on serving it — and that is exactly the state a status derived from the
+/// newest version could not express.
+///
+/// DRAFT          — created, never submitted. No live version.
+/// PENDING_REVIEW — its first version is with an operator. Still no live version.
+/// APPROVED       — has a live version. Stays here while later versions are reviewed.
+/// REJECTED       — its first version was refused and it has never had a live one.
+/// SUSPENDED      — an operator pulled it. Reserved: nothing publishes a card in
+///                  this phase, so nothing reads it yet, and no endpoint writes it.
+/// ARCHIVED       — the provider retired it. Reserved for the same reason.
+enum ShowcaseCardStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SUSPENDED
+  ARCHIVED
+}
+
+/// Where one version's content stands.
+///
+/// DRAFT    — the provider is still writing it. No price-terms acceptance on
+///            file yet, which is why `priceTermsVersion` is NULL exactly here.
+/// PENDING  — submitted, waiting for an operator.
+/// APPROVED — an operator said yes, or the narrowing rule published it (see
+///            ShowcaseCardAutoPublishAudit). Either way it is publishable text.
+/// REJECTED — an operator said no, with a note. Terminal: the provider edits by
+///            creating the next version, never by reopening this one.
+enum ShowcaseVersionReview {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A vitrin card's identity and life — never its content.
+///
+/// Everything a person reads lives on ShowcaseCardVersion, and this row holds
+/// two pointers into that history: the version being served and the version
+/// being written. Keeping them apart is what lets an approved card stay up
+/// while its replacement is in review — the alternative, one "current version",
+/// would take a live card down the moment its owner fixed a typo.
+model ShowcaseCard {
+  id         String             @id @default(cuid())
+  providerId String
+  /// Fixed at creation and never updated. Changing what a card *is* is not an
+  /// edit to a card, it is a different card — and a kind that could change would
+  /// let a priced SERVICE become a price-less PROMOTION while a customer was
+  /// looking at the price.
+  kind       ShowcaseCardKind
+  /// A LEAF for a SERVICE card. A LEAF or a GROUP for a PROMOTION card, which
+  /// sits on a shelf rather than naming one service. Never a ROUTER: a router is
+  /// a question, not a place a business can be listed under.
+  categoryId String
+  status     ShowcaseCardStatus @default(DRAFT)
+
+  /// The approved version being served. NULL until the first approval, and
+  /// never cleared afterwards — a rejection of a later version leaves the card
+  /// exactly as it was.
+  liveVersionId  String? @unique
+  /// The version the provider is writing or has submitted. At most one, which
+  /// is what the unique constraint says: a card with two open drafts has two
+  /// answers to "what happens when this is approved".
+  draftVersionId String? @unique
+
+  /// Reserved for the operator's pull-down. No endpoint writes these in this
+  /// phase; they exist so adding that action later is a controller change
+  /// rather than a migration on a table that by then has live rows.
+  suspendedAt   DateTime?
+  suspendReason String?
+  archivedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  provider     ProviderProfile      @relation(fields: [providerId], references: [id])
+  category     ServiceCategory      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  /// Restrict rather than the implicit SetNull on both pointers: silently
+  /// clearing the live version would take a card off the air with nothing on
+  /// record to say why. Nothing in the product deletes a version.
+  liveVersion  ShowcaseCardVersion? @relation("ShowcaseCardLiveVersion", fields: [liveVersionId], references: [id], onDelete: Restrict)
+  draftVersion ShowcaseCardVersion? @relation("ShowcaseCardDraftVersion", fields: [draftVersionId], references: [id], onDelete: Restrict)
+
+  versions          ShowcaseCardVersion[]          @relation("ShowcaseCardVersions")
+  autoPublishAudits ShowcaseCardAutoPublishAudit[]
+
+  @@index([providerId, status])
+  @@index([providerId, createdAt])
+  @@index([categoryId, status])
+  @@index([status])
+}
+
+/// One reviewable, freezable statement of what a card says.
+///
+/// A version is never edited once it leaves DRAFT. That is what makes
+/// `ShowcaseCardReview.cardVersionId` mean something: the row names the exact
+/// text an operator read, and no later change can rewrite what was approved.
+model ShowcaseCardVersion {
+  id            String @id @default(cuid())
+  cardId        String
+  /// 1, 2, 3 … per card. Ordering history by `createdAt` would tie two versions
+  /// written in the same millisecond; this cannot.
+  versionNumber Int
+
+  /// The card's kind, copied here so a version is readable on its own — the
+  /// admin review screen renders one of these and should not have to join to
+  /// find out whether a missing price is a fault or the whole point.
+  kindSnapshot ShowcaseCardKind
+
+  title   String
+  summary String
+
+  /// What the standard scope includes and what it deliberately does not.
+  /// Both are required to be non-empty by a CHECK: a fixed price for an
+  /// unstated scope is the fixed price this product must never carry.
+  scopeIncluded String[]
+  scopeExcluded String[]
+
+  /// The price the provider commits to, in minor units, for a SERVICE card.
+  /// NULL for a PROMOTION card, and a CHECK enforces both halves.
+  ///
+  /// **This is not money TakTick handles.** It is the provider's own price to
+  /// their own customer; the platform sells vitrin placement and nothing else,
+  /// is not a party to this amount and never settles it. The column is named
+  /// apart from `PackagePurchase.priceAmountSnapshot` — which *is* what TakTick
+  /// charges — so no reader can confuse the two.
+  listedServicePriceAmount Int?
+  /// TRY, and a CHECK says so. A second currency is a product decision about
+  /// which market this platform serves, not a column that should quietly admit
+  /// one.
+  listedServiceCurrency    String @default("TRY")
+
+  imageUrl String?
+
+  /// What the provider promises to answer inside, per urgency, once the lead
+  /// flow ships. Stored on the version because it is part of what an operator
+  /// approves — and because a promise made to a customer must be readable from
+  /// the text that made it, not from whatever the card says later.
+  responseSlaUrgentHours Int @default(3)
+  responseSlaNormalHours Int @default(24)
+
+  /// Which version of the price-responsibility text the provider accepted when
+  /// they submitted this one, and when.
+  ///
+  /// NULL means "no acceptance on file", and that is a real state rather than a
+  /// gap: a DRAFT has not been submitted, so nobody has accepted anything for
+  /// it. Writing the current version string into a draft would record a consent
+  /// that was never given. A CHECK requires both columns on every version that
+  /// has left DRAFT, which is what makes "submitted without accepting"
+  /// unrepresentable rather than merely refused.
+  priceTermsVersion    String?
+  priceTermsAcceptedAt DateTime?
+
+  reviewStatus ShowcaseVersionReview @default(DRAFT)
+  submittedAt  DateTime?
+  publishedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  card   ShowcaseCard              @relation("ShowcaseCardVersions", fields: [cardId], references: [id], onDelete: Restrict)
+  areas  ShowcaseCardVersionArea[]
+  review ShowcaseCardReview?
+
+  liveOnCard  ShowcaseCard? @relation("ShowcaseCardLiveVersion")
+  draftOnCard ShowcaseCard? @relation("ShowcaseCardDraftVersion")
+
+  autoPublishAudit   ShowcaseCardAutoPublishAudit?  @relation("ShowcaseAutoPublishVersion")
+  supersededByAudits ShowcaseCardAutoPublishAudit[] @relation("ShowcaseAutoPublishPreviousVersion")
+
+  @@unique([cardId, versionNumber])
+  @@index([cardId, createdAt])
+  /// The operator's queue: "everything waiting, oldest first".
+  @@index([reviewStatus, submittedAt])
+}
+
+/// One area a version claims, and the only place a card's coverage lives.
+///
+/// Deliberately hung off the version rather than the card. Coverage is content:
+/// it is what an operator approves and what a customer would be shown a card
+/// for, so widening it has to go through review like every other change. A card
+/// that owned its own areas could have its reach edited underneath an approval.
+model ShowcaseCardVersionArea {
+  id            String                   @id @default(cuid())
+  cardVersionId String
+  /// Derived by the API from the levels below, exactly as ProviderServiceArea's
+  /// is, and never accepted from a request body.
+  scope         ProviderServiceAreaScope
+  city          String
+  district      String?
+  neighborhood  String?
+
+  /// The canonical comparison key: the three levels folded with the same
+  /// Turkish-aware rule the location table uses, joined with "|", and using the
+  /// empty string — never NULL — for a level this area does not name.
+  ///
+  /// The empty string is load-bearing. PostgreSQL treats NULLs as distinct in a
+  /// unique index, so a key with NULL segments would not bind duplicates at all;
+  /// ProviderServiceArea needed three partial indexes to work around exactly
+  /// that. One non-null text column needs one ordinary unique index.
+  ///
+  /// Server-derived. A client posts places, never a key.
+  areaKey String
+
+  createdAt DateTime @default(now())
+
+  version ShowcaseCardVersion @relation(fields: [cardVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([cardVersionId, areaKey])
+  @@index([cardVersionId])
+  @@index([areaKey])
+}
+
+/// One operator's decision about one version. Never anything else.
+///
+/// `reviewedById` is NOT NULL and there is no system actor, which is the whole
+/// contract: a row here is a person's decision, and nothing the application does
+/// on its own may write one. The narrowing rule that publishes a version without
+/// an operator writes ShowcaseCardAutoPublishAudit instead, precisely so that
+/// reading this table never turns an automatic step into somebody's judgement.
+///
+/// Written in the same serializable transaction as the version and card updates
+/// it justifies, so a decision without its effect — or an effect without its
+/// decision — cannot exist.
+model ShowcaseCardReview {
+  id            String                @id @default(cuid())
+  /// One decision per version. A version leaves PENDING exactly once.
+  cardVersionId String                @unique
+  decision      ShowcaseVersionReview
+  reviewedById  String
+  /// Required by the API on a rejection and refused on an approval: a refusal
+  /// the provider cannot act on is not a review. Nullable in the column because
+  /// an approval genuinely has nothing to say.
+  note          String?
+  createdAt     DateTime              @default(now())
+
+  version    ShowcaseCardVersion @relation(fields: [cardVersionId], references: [id], onDelete: Restrict)
+  reviewedBy User                @relation("ShowcaseCardReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([reviewedById, createdAt])
+  @@index([createdAt])
+}
+
+/// The record of a version the system published without an operator.
+///
+/// There is exactly one such rule: a change that removes areas and alters
+/// nothing else. Narrowing your own reach needs no permission — refusing it
+/// would mean a provider had to ask an operator before serving fewer people —
+/// but it still changes what is live, and a change to live content with nobody's
+/// name on it must not be invisible.
+///
+/// So it is written here rather than as a ShowcaseCardReview with a fabricated
+/// reviewer. The two tables answer two different questions, and merging them
+/// would make "who approved this" unanswerable for every row.
+///
+/// `removedAreaKeys` is the evidence, not a summary: the exact keys that went
+/// away, so an auditor can see what was narrowed without reconstructing it from
+/// two versions' area lists.
+model ShowcaseCardAutoPublishAudit {
+  id                String   @id @default(cuid())
+  /// The version that went live. One audit row per version.
+  cardVersionId     String   @unique
+  cardId            String
+  /// The version it replaced. Not nullable: this rule only ever fires on a card
+  /// that already had a live version to narrow.
+  previousVersionId String
+  /// The provider whose action this was. Copied here rather than read through
+  /// the card, so the record of who acted survives independently of the card row.
+  providerId        String
+  /// The area keys the new version dropped. Never empty — a change that removes
+  /// nothing is not a narrowing and does not reach this path.
+  removedAreaKeys   String[]
+  createdAt         DateTime @default(now())
+
+  version         ShowcaseCardVersion @relation("ShowcaseAutoPublishVersion", fields: [cardVersionId], references: [id], onDelete: Restrict)
+  previousVersion ShowcaseCardVersion @relation("ShowcaseAutoPublishPreviousVersion", fields: [previousVersionId], references: [id], onDelete: Restrict)
+  card            ShowcaseCard        @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  provider        ProviderProfile     @relation(fields: [providerId], references: [id])
+
+  @@index([cardId, createdAt])
+  @@index([providerId, createdAt])
 }

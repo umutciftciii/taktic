@@ -22,10 +22,13 @@ import {
   CATEGORY_IMAGE_DIR,
   CATEGORY_IMAGE_MIME_TO_EXT,
   MAX_CATEGORY_IMAGE_BYTES,
+  MAX_SHOWCASE_IMAGE_BYTES,
+  SHOWCASE_IMAGE_DIR,
 } from './uploads.constants';
 import { UploadsService } from './uploads.service';
 
 mkdirSync(CATEGORY_IMAGE_DIR, { recursive: true });
+mkdirSync(SHOWCASE_IMAGE_DIR, { recursive: true });
 
 @Controller('admin/uploads')
 export class UploadsController {
