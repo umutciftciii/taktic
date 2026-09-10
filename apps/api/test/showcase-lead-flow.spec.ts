@@ -110,6 +110,32 @@ async function published(
   };
 }
 
+/**
+ * A second published card for the same business.
+ *
+ * One card holds one live run, and takes one lead per ten minutes from one
+ * person — both by design. So a case that needs several leads from one number
+ * needs several cards, exactly as a real customer writing to several businesses
+ * would.
+ */
+async function publishAnotherCard(providerId: string, categoryId: string, title: string) {
+  const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
+    providerId,
+    categoryId,
+    title,
+  });
+  const pkg = await createShowcasePackage(ctx.prisma);
+
+  await createLiveShowcasePlacement(ctx, {
+    providerId,
+    cardId: card.id,
+    versionId: version.id,
+    packageId: pkg.id,
+  });
+
+  return card;
+}
+
 /** Opens a lead, proving the telephone number first as the real flow does. */
 async function openLead(
   cardId: string,
@@ -282,7 +308,7 @@ describe('the telephone number has to be proved first', () => {
   });
 
   it('stamps the request as verified and spends the proof exactly once', async () => {
-    const { card, category } = await published();
+    const { card, category, owner } = await published();
     const payload = showcaseLeadPayload(category.slug);
     await proveShowcaseLeadPhone(ctx.prisma, payload.customerPhone as string);
 
@@ -294,14 +320,25 @@ describe('the telephone number has to be proved first', () => {
     const created = await ctx.prisma.serviceRequest.findFirstOrThrow({});
     expect(created.phoneVerifiedAt).not.toBeNull();
 
-    // The proof is the consumed row, and the lead binds it to the request it
-    // created. A second lead finds nothing unbound to redeem.
+    /*
+     * The proof is the consumed row, and the lead binds it to the request it
+     * created. A second lead finds nothing unbound to redeem.
+     *
+     * Aimed at a *different* card on purpose: on the same card the ten-minute
+     * dedupe window would answer first, with the lead that already exists —
+     * which is correct behaviour and is asserted separately. What is proved
+     * here is that one proved number buys one lead, and that has to be shown
+     * where nothing else would refuse the second attempt anyway.
+     */
+    const secondCard = await publishAnotherCard(owner.id, category.id, 'İkinci kart');
+
     const second = await request(ctx.server)
-      .post(`/showcase/cards/${card.id}/leads`)
+      .post(`/showcase/cards/${secondCard.id}/leads`)
       .send({ ...payload, description: 'İkinci deneme' });
 
     expect(second.status).toBe(409);
     expect(second.body.code).toBe('SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED');
+    expect(await ctx.prisma.showcaseLead.count()).toBe(1);
   });
 });
 
@@ -492,5 +529,85 @@ describe('answering a direct lead', () => {
     expect(offer.entitlementSource).toBe(OfferEntitlementSource.ONE_TIME_CREDIT);
     expect(offer.creditCost).toBe(2);
     expect(await currentCreditBalance(ctx.prisma, rival.id)).toBe(8);
+  });
+});
+
+describe('the rate limits and the double-submitted form', () => {
+  /**
+   * Both counters compare *numbers*, not spellings.
+   *
+   * `ServiceRequest.customerPhone` holds what the customer typed, lightly
+   * cleaned — "0555 111 22 33" stays a local number. A budget matched on that
+   * column would never fire for somebody writing the same number two different
+   * ways, so both counters go through the canonical form on the verification
+   * each lead redeemed.
+   */
+  it('counts two spellings of one number as one number', async () => {
+    const { card, category, owner } = await published();
+    const local = '05551112233';
+    const international = '+905551112233';
+
+    // Six cards, because the dedupe window means one card cannot take six
+    // leads from one person — which is the point of that window.
+    const cards = [card.id];
+    for (let index = 1; index < 6; index += 1) {
+      const extra = await publishAnotherCard(owner.id, category.id, `Kart ${index}`);
+      cards.push(extra.id);
+    }
+
+    for (let index = 0; index < 5; index += 1) {
+      // Alternating spellings of the same number. Both are matched through the
+      // canonical form on the verification, so the budget sees one number.
+      const phone = index % 2 === 0 ? local : international;
+      await proveShowcaseLeadPhone(ctx.prisma, phone);
+
+      const response = await request(ctx.server)
+        .post(`/showcase/cards/${cards[index]}/leads`)
+        .send(
+          showcaseLeadPayload(category.slug, {
+            customerPhone: phone,
+            description: `Talep ${index}`,
+          }),
+        );
+
+      expect(response.status).toBe(201);
+    }
+
+    await proveShowcaseLeadPhone(ctx.prisma, local);
+    const refused = await request(ctx.server)
+      .post(`/showcase/cards/${cards[5]}/leads`)
+      .send(showcaseLeadPayload(category.slug, { customerPhone: local }));
+
+    expect(refused.status).toBe(429);
+    expect(refused.body.code).toBe('SHOWCASE_LEAD_RATE_LIMITED');
+  });
+
+  /**
+   * A double-submitted form is one lead, not two.
+   *
+   * Deliberately an application rule with no unique index behind it: a genuine
+   * second request from the same person to the same business is perfectly
+   * possible, and a constraint would refuse something legitimate. The window is
+   * short enough that only a re-submitted form falls inside it.
+   */
+  it('answers a re-submitted form with the lead it already opened', async () => {
+    const { card, category } = await published();
+    const phone = '05552223344';
+
+    await proveShowcaseLeadPhone(ctx.prisma, phone);
+    const first = await request(ctx.server)
+      .post(`/showcase/cards/${card.id}/leads`)
+      .send(showcaseLeadPayload(category.slug, { customerPhone: phone }));
+    expect(first.status).toBe(201);
+
+    await proveShowcaseLeadPhone(ctx.prisma, phone);
+    const second = await request(ctx.server)
+      .post(`/showcase/cards/${card.id}/leads`)
+      .send(showcaseLeadPayload(category.slug, { customerPhone: phone }));
+
+    expect(second.status).toBe(201);
+    expect(second.body.id).toBe(first.body.id);
+    expect(await ctx.prisma.showcaseLead.count()).toBe(1);
+    expect(await ctx.prisma.serviceRequest.count()).toBe(1);
   });
 });

@@ -1983,22 +1983,31 @@ export const OPERATIONS_SETTING_LABELS: Record<string, string> = {
   unviewedOfferRefundSchedulerEnabled: 'Görüntülenmeyen teklif iade işi',
   requestExpirySchedulerEnabled: 'Talep süresi dolum işi',
   requestReminderSchedulerEnabled: 'Talep hatırlatma işi',
+  showcaseLeadSlaSchedulerEnabled: 'Vitrin talebi yanıt süresi işi',
+  showcasePlacementExpirySchedulerEnabled: 'Vitrin yerleşimi süre dolumu işi',
 };
 
 /* ---- scheduled jobs ------------------------------------------------------ */
 
 /**
- * The four background jobs a super admin switches on and off.
+ * The background jobs a super admin switches on and off.
  *
  * The keys are the API's, verbatim: they are the path segment a toggle posts
  * to and the identity the audit trail keeps, so they are never translated. The
  * Turkish copy lives below, next to the rest of this panel's copy.
+ *
+ * This list mirrors `SCHEDULER_JOB_KEYS` on the API side, and the mirroring is
+ * checked by the type below rather than by anybody remembering: a job the API
+ * returns and this panel has no copy for renders an undefined name, so adding
+ * one there means adding one here.
  */
 export const SCHEDULER_JOB_KEYS = [
   'entitlement-renewal',
   'unviewed-offer-refund',
   'request-expiry',
   'request-reminder',
+  'showcase-lead-sla',
+  'showcase-placement-expiry',
 ] as const;
 
 export type SchedulerJobKey = (typeof SCHEDULER_JOB_KEYS)[number];
@@ -2065,6 +2074,22 @@ export const SCHEDULER_JOB_COPY: Record<
     impact:
       '7 gündür teklif almamış onaylı talepler için müşteriye tek bir hatırlatma e-postası ' +
       'gönderir.',
+  },
+  'showcase-lead-sla': {
+    name: 'Vitrin talebi yanıt süresi',
+    // Written for somebody deciding during an incident: what it does to the
+    // data, and — just as important — what it deliberately does not do.
+    impact:
+      'Kart sahibinin taahhüt ettiği süre içinde yanıtlanmayan vitrin taleplerini “süre doldu” ' +
+      'olarak işaretler ve müşteriye kararını sorar. Talebi kendiliğinden genel pazara açmaz; ' +
+      'bunu yalnız müşterinin kendi kararı yapar. 14 gün karar verilmeyen talepler kapanır.',
+  },
+  'showcase-placement-expiry': {
+    name: 'Vitrin yerleşimi süre dolumu',
+    impact:
+      'Satın alınan süresi biten vitrin yerleşimlerini kapatır ve kartı sonraki paket için ' +
+      'serbest bırakır. Yayın açısından gerekli değildir: ana sayfa süreyi kendisi kontrol ' +
+      'eder, bu yüzden iş kapalıyken de süresi dolmuş bir kart gösterilmez.',
   },
 };
 

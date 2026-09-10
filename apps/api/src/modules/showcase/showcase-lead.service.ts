@@ -533,8 +533,26 @@ export class ShowcaseLeadService {
       now.getTime() - SHOWCASE_LEAD_RATE_LIMIT_WINDOW_MINUTES * 60 * 1000,
     );
 
+    /*
+     * Both counters are matched through the verification each lead redeemed,
+     * never through `ServiceRequest.customerPhone`.
+     *
+     * That column holds what the customer typed, lightly cleaned — "0555 111 22
+     * 33" stays a local number — while a rate limit has to compare *numbers*
+     * rather than spellings, or one person writes to five businesses in five
+     * different formats and the budget never fires. `PhoneVerification` already
+     * stores the canonical E.164 form for exactly this reason, and every direct
+     * lead has one bound to it by construction.
+     *
+     * The address comes off the same row, because that is where this
+     * application already records it: the lead itself stores no address, and
+     * adding one would widen what this table holds for no gain.
+     */
     const byPhone = await this.prisma.showcaseLead.count({
-      where: { createdAt: { gte: since }, request: { customerPhone: normalizedPhone } },
+      where: {
+        createdAt: { gte: since },
+        request: { phoneVerifications: { some: { normalizedPhone } } },
+      },
     });
 
     if (byPhone >= SHOWCASE_LEAD_RATE_LIMIT_PER_PHONE) {
@@ -545,10 +563,6 @@ export class ShowcaseLeadService {
       return;
     }
 
-    // The address is read off the verifications those leads redeemed, because
-    // that is where this application already records it — the lead itself
-    // stores no address, and adding one would widen what this table holds for
-    // no gain.
     const byIp = await this.prisma.showcaseLead.count({
       where: {
         createdAt: { gte: since },
@@ -561,6 +575,7 @@ export class ShowcaseLeadService {
     }
   }
 
+  /** Matched on the canonical number, for the reason the rate limits are. */
   private findRecentLead(placementId: string, normalizedPhone: string, now: Date) {
     const since = new Date(now.getTime() - SHOWCASE_LEAD_DEDUPE_WINDOW_MINUTES * 60 * 1000);
 
@@ -569,7 +584,7 @@ export class ShowcaseLeadService {
         placementId,
         status: ShowcaseLeadStatus.OPEN,
         createdAt: { gte: since },
-        request: { customerPhone: normalizedPhone },
+        request: { phoneVerifications: { some: { normalizedPhone } } },
       },
       orderBy: { createdAt: 'desc' },
       select: { id: true },

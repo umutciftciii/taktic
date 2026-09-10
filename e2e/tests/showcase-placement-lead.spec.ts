@@ -128,6 +128,24 @@ function areaKey(city: string, district: string): string {
   return `${fold(city)}|${fold(district)}|`;
 }
 
+/**
+ * The canonical form the API stores a proved number in.
+ *
+ * Restated here rather than imported, for the reason `areaKey` is: this suite
+ * talks to the application over HTTP and to the database through Prisma, and
+ * importing an API module would make it depend on internals rather than on
+ * behaviour. Only the one shape these tests generate — a Turkish national
+ * number — is handled, and anything else fails loudly rather than being
+ * guessed at.
+ */
+function toE164(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('0')) {
+    return `+90${digits.slice(1)}`;
+  }
+  throw new Error(`e2e fixture produced a phone number it cannot canonicalise: ${phone}`);
+}
+
 /** A settled vitrin purchase and the live run it produced. */
 async function seedLivePlacement(options: {
   providerId: string;
@@ -215,7 +233,7 @@ async function seedLivePlacement(options: {
  * proof single-use here too.
  */
 async function proveLeadPhone(phone: string) {
-  const normalized = phone.replace(/[^\d+]/g, '');
+  const normalized = toE164(phone);
   const now = new Date();
 
   await prisma().phoneVerification.create({
@@ -353,9 +371,21 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await expect(
         providerActor.page.getByRole('heading', { name: 'Vitrin talepleri' }),
       ).toBeVisible();
-      await expect(providerActor.page.getByText('Acil', { exact: true }).first()).toBeVisible();
 
-      await providerActor.page.getByRole('link', { name: /^TR-/ }).first().click();
+      /*
+       * The urgency and the promise behind it, asserted as a substring of the
+       * cell rather than as an exact element text.
+       *
+       * `getByText(…, { exact: true })` matches an element's *whole* text, and
+       * the cell deliberately carries both the choice and the hours it commits
+       * to — "Acil" above "3 saat taahhüt" — because a provider reading an
+       * inbox needs the deadline, not just the word.
+       */
+      const inboxRow = providerActor.page.locator('table tbody tr').first();
+      await expect(inboxRow).toContainText('Acil');
+      await expect(inboxRow).toContainText('3 saat taahhüt');
+
+      await inboxRow.getByRole('link').first().click();
       await assertNoErrorScreen(providerActor.page);
 
       // The sentence that matters most on this screen: answering costs nothing.
