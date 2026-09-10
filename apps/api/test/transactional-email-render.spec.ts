@@ -322,6 +322,45 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     ticketUrl: `${WEB}/destek/tkt_c1a2b3`,
     accountUrl: `${WEB}/account/profile`,
   },
+  'showcase-placement-activated': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    packageName: 'Vitrin Standart 30 Gün',
+    areaSummary: 'Moda, Kadıköy, İstanbul · Kadıköy, İstanbul',
+    startAt: '2026-08-27T11:12:00.000Z',
+    endAt: '2026-09-26T11:12:00.000Z',
+    placementUrl: `${WEB}/providers/p1/vitrin`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-lead-received': {
+    fullName: 'Murat Şahin',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    locationLabel: 'Moda, Kadıköy, İstanbul',
+    urgencyLabel: 'Acil',
+    slaHours: '3',
+    slaDueAt: '2026-08-27T14:12:00.000Z',
+    leadUrl: `${WEB}/providers/p1/vitrin/talepler/l1`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-lead-breached-customer': {
+    fullName: 'Deniz Yılmaz',
+    requestNumber: '#T-90412',
+    businessName: 'Şahin Isı Sistemleri',
+    slaLabel: 'Acil — 3 saat',
+    slaDueAt: '2026-08-27T14:12:00.000Z',
+    decisionUrl: `${WEB}/requests/r1/vitrin-karar`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'showcase-lead-breached-provider': {
+    fullName: 'Murat Şahin',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    slaLabel: 'Acil — 3 saat',
+    slaDueAt: '2026-08-27T14:12:00.000Z',
+    leadUrl: `${WEB}/providers/p1/vitrin/talepler/l1`,
+    accountUrl: `${WEB}/providers/me`,
+  },
 };
 
 /**
@@ -395,7 +434,10 @@ describe('transactional e-mail rendering', () => {
   });
 
   it('covers every template the port accepts', () => {
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(28);
+    // The literal count is the point of this line: a template added without a
+    // payload here would still render, silently, with every field missing.
+    // Twenty-eight before vitrin's four.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(32);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -638,6 +680,10 @@ describe('transactional e-mail rendering', () => {
       'support-ticket-provider-reply': 'Destek talebine hizmet veren yanıtı — Faturam ulaşmadı',
       'support-ticket-provider-admin-reply': 'Destek talebinize yanıt — Faturam ulaşmadı',
       'support-ticket-provider-status-changed': 'Destek talebiniz çözümlendi — Faturam ulaşmadı',
+      'showcase-placement-activated': 'Vitrin kartınız yayında — Kombi bakım paketi',
+      'showcase-lead-received': 'Vitrin kartınızdan yeni talep — Acil',
+      'showcase-lead-breached-customer': 'Yanıt süresi doldu — ne yapmak istersiniz?',
+      'showcase-lead-breached-provider': 'Vitrin talebine yanıt süresi doldu — #T-90412',
     });
   });
 

@@ -134,3 +134,45 @@ export function customerSupportTicketUrl(ticketId: string): string {
 export function adminSupportTicketUrl(ticketId: string): string {
   return `${getAdminAppBaseUrl()}/support/${encodeURIComponent(ticketId)}`;
 }
+
+// ───────────────────────────── vitrin, phase two ─────────────────────────────
+
+/** The provider's own vitrin cards and runs. `apps/web/app/providers/[id]/vitrin`. */
+export function providerShowcaseUrl(providerId: string): string {
+  return publicWebUrl(`/providers/${encodeURIComponent(providerId)}/vitrin`);
+}
+
+/**
+ * The provider's inbox of direct vitrin leads.
+ * `apps/web/app/providers/[id]/vitrin/talepler`.
+ *
+ * A page of its own rather than a filter on the matching-request list, because
+ * the two read different rows: a direct lead is `SUBMITTED` until its addressee
+ * answers it, and the discovery list is `APPROVED` by definition.
+ */
+export function providerShowcaseLeadsUrl(providerId: string): string {
+  return publicWebUrl(`/providers/${encodeURIComponent(providerId)}/vitrin/talepler`);
+}
+
+export function providerShowcaseLeadUrl(providerId: string, leadId: string): string {
+  return publicWebUrl(
+    `/providers/${encodeURIComponent(providerId)}/vitrin/talepler/${encodeURIComponent(leadId)}`,
+  );
+}
+
+/**
+ * Where the customer answers the fallback question.
+ * `apps/web/app/requests/[id]/vitrin-karar`.
+ *
+ * Their own request, on their own account. The link grants nothing — it is a
+ * page behind the ordinary customer session, exactly like the offers page — so
+ * a forwarded mail hands nobody a decision they could not already make.
+ */
+export function customerShowcaseDecisionUrl(requestId: string): string {
+  return publicWebUrl(`/requests/${encodeURIComponent(requestId)}/vitrin-karar`);
+}
+
+/** One card's public page. `apps/web/app/vitrin/[cardId]`. */
+export function publicShowcaseCardUrl(cardId: string): string {
+  return publicWebUrl(`/vitrin/${encodeURIComponent(cardId)}`);
+}

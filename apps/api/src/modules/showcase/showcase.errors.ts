@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
@@ -246,5 +247,304 @@ export function showcaseCardLocked() {
     error: 'Conflict',
     code: SHOWCASE_CARD_LOCKED_CODE,
     message: 'Bu kart şu anda düzenlenemez.',
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase two: buying a placement, publishing it, and the direct lead
+// ────────────────────────────────────────────────────────────────────────────
+
+export const SHOWCASE_PACKAGE_NOT_FOUND_CODE = 'SHOWCASE_PACKAGE_NOT_FOUND';
+export const SHOWCASE_PACKAGE_KIND_MISMATCH_CODE = 'SHOWCASE_PACKAGE_KIND_MISMATCH';
+export const SHOWCASE_PACKAGE_SLUG_INVALID_CODE = 'SHOWCASE_PACKAGE_SLUG_INVALID';
+export const SHOWCASE_CARD_NOT_PUBLISHABLE_CODE = 'SHOWCASE_CARD_NOT_PUBLISHABLE';
+export const SHOWCASE_CARD_ALREADY_PLACED_CODE = 'SHOWCASE_CARD_ALREADY_PLACED';
+export const SHOWCASE_PROVIDER_NOT_APPROVED_CODE = 'SHOWCASE_PROVIDER_NOT_APPROVED';
+export const SHOWCASE_PLACEMENT_NOT_FOUND_CODE = 'SHOWCASE_PLACEMENT_NOT_FOUND';
+export const SHOWCASE_PLACEMENT_NOT_SUSPENDABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_SUSPENDABLE';
+export const SHOWCASE_PLACEMENT_NOT_RESUMABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_RESUMABLE';
+export const SHOWCASE_PLACEMENT_NOT_CANCELLABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_CANCELLABLE';
+export const SHOWCASE_LOCATION_REQUIRED_CODE = 'SHOWCASE_LOCATION_REQUIRED';
+export const SHOWCASE_LEAD_NOT_FOUND_CODE = 'SHOWCASE_LEAD_NOT_FOUND';
+export const SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED_CODE =
+  'SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED';
+export const SHOWCASE_LEAD_RATE_LIMITED_CODE = 'SHOWCASE_LEAD_RATE_LIMITED';
+export const SHOWCASE_FALLBACK_NOT_AVAILABLE_CODE = 'SHOWCASE_FALLBACK_NOT_AVAILABLE';
+export const SHOWCASE_FALLBACK_ALREADY_DECIDED_CODE = 'SHOWCASE_FALLBACK_ALREADY_DECIDED';
+
+export function showcasePackageNotFound() {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: SHOWCASE_PACKAGE_NOT_FOUND_CODE,
+    message: 'Etkin bir vitrin paketi bulunamadı.',
+  });
+}
+
+/**
+ * The package does not sell placements for this kind of card.
+ *
+ * Safe to describe, because both halves are things the caller just chose: their
+ * own card and the package they picked next to it.
+ */
+export function showcasePackageKindMismatch() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_PACKAGE_KIND_MISMATCH_CODE,
+    message: 'Bu paket bu kart tipi için satılmıyor. Kart tipine uygun bir paket seçin.',
+  });
+}
+
+/**
+ * The operator tried to create a vitrin package whose slug does not carry the
+ * reserved prefix.
+ *
+ * The prefix is not decoration. `LEMON_SQUEEZY_VARIANT_MAP` is keyed by slug
+ * across both catalogues, so a vitrin package sharing a slug namespace with an
+ * offer package makes it possible — by configuration alone, with no database
+ * constraint able to see it — for one payment variant to stand for two
+ * different products. Both CHECK constraints in the database say the same
+ * thing; this is the readable half.
+ */
+export function showcasePackageSlugInvalid() {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: SHOWCASE_PACKAGE_SLUG_INVALID_CODE,
+    message:
+      'Vitrin paketinin kısa adı "vitrin-" ile başlamak zorundadır. Bu ön ek, ödeme ' +
+      'sağlayıcısındaki ürün eşlemesinin teklif paketleriyle çakışmasını engeller.',
+  });
+}
+
+/**
+ * The card cannot go on the air: it has never been approved, or it has no live
+ * version to publish.
+ *
+ * Distinct from `showcaseCardNotFound` because by the time this fires the
+ * caller has already been confirmed as the card's owner — they are looking at
+ * it on their own screen — so naming the reason discloses nothing.
+ */
+export function showcaseCardNotPublishable() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_CARD_NOT_PUBLISHABLE_CODE,
+    message:
+      'Bu kart yayına alınamaz. Vitrin paketi almak için kartın onaylanmış ve yayında bir ' +
+      'sürümü olmalıdır.',
+  });
+}
+
+/**
+ * The card already has a live placement.
+ *
+ * **Not a limit on how many cards a provider may publish.** A provider may open
+ * as many cards as they want and buy a package for every one of them; this
+ * refusal is only about paying twice for the same card's single slot, where the
+ * second payment would add nothing to what the first one already publishes.
+ * That is why the sentence points at the other cards rather than at a cap.
+ */
+export function showcaseCardAlreadyPlaced() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_CARD_ALREADY_PLACED_CODE,
+    message:
+      'Bu kartın yayında olan bir vitrin süresi zaten var. Süre bitince yenileyebilir ya da ' +
+      'başka bir kartınız için paket alabilirsiniz.',
+  });
+}
+
+export function showcaseProviderNotApproved() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_PROVIDER_NOT_APPROVED_CODE,
+    message: 'Vitrin paketi almak için işletme başvurunuzun onaylanmış olması gerekir.',
+  });
+}
+
+/** The same 404 discipline as a card: unreachable and non-existent read alike. */
+export function showcasePlacementNotFound() {
+  return new NotFoundException({
+    statusCode: HttpStatus.NOT_FOUND,
+    error: 'Not Found',
+    code: SHOWCASE_PLACEMENT_NOT_FOUND_CODE,
+    message: 'Vitrin yerleşimi bulunamadı.',
+  });
+}
+
+export function showcasePlacementNotSuspendable() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_PLACEMENT_NOT_SUSPENDABLE_CODE,
+    message: 'Yalnız yayında olan bir yerleşim durdurulabilir.',
+  });
+}
+
+/**
+ * Resume refuses anything that is not an operator's own hold.
+ *
+ * The other five reasons lift by themselves when the condition behind them goes
+ * away — a category reopening, a card leaving the archive, an area coming back
+ * into coverage, a profile being re-approved. An operator "resuming" one of
+ * those would put a card on the air while the thing that took it down is still
+ * true.
+ */
+export function showcasePlacementNotResumable() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_PLACEMENT_NOT_RESUMABLE_CODE,
+    message:
+      'Bu yerleşim operatör kararıyla durdurulmuş bir yerleşim değil. Diğer durdurma ' +
+      'sebepleri, sebep ortadan kalktığında kendiliğinden kalkar.',
+  });
+}
+
+export function showcasePlacementNotCancellable() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_PLACEMENT_NOT_CANCELLABLE_CODE,
+    message: 'Yalnız süresi devam eden bir yerleşim iptal edilebilir.',
+  });
+}
+
+/**
+ * The feed was asked for without a location.
+ *
+ * A refusal rather than a nationwide list. Showing a visitor a business that
+ * cannot reach them is the exact opposite of what a vitrin placement sells, and
+ * a provider paying for İstanbul/Kadıköy would be paying to appear in Erzurum.
+ */
+export function showcaseLocationRequired() {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: SHOWCASE_LOCATION_REQUIRED_CODE,
+    message: 'Vitrin listesi için en az il bilgisi gerekir.',
+  });
+}
+
+export function showcaseLeadNotFound() {
+  return new NotFoundException({
+    statusCode: HttpStatus.NOT_FOUND,
+    error: 'Not Found',
+    code: SHOWCASE_LEAD_NOT_FOUND_CODE,
+    message: 'Vitrin talebi bulunamadı.',
+  });
+}
+
+/**
+ * A direct lead was opened without a verified telephone number.
+ *
+ * **Mandatory here whatever REQUIRE_PHONE_VERIFICATION says**, which is the one
+ * place in this product where that flag is not the whole answer. Two reasons,
+ * and they compound:
+ *
+ * 1. This message goes straight to a business with no operator between. Every
+ *    other route to a provider's inbox passes through moderation; this one
+ *    does not, so the one identity check that costs the sender something has to
+ *    hold.
+ * 2. The request will have to become APPROVED for the provider's own offer to
+ *    land, and that transition already refuses an unverified number. Letting
+ *    the lead open anyway would start an SLA clock on something that could
+ *    never progress — a promise made to somebody it cannot be kept for.
+ */
+export function showcaseLeadPhoneVerificationRequired() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED_CODE,
+    message:
+      'Vitrin kartından talep göndermek için telefon numaranızı doğrulamanız gerekir.',
+  });
+}
+
+/**
+ * Too many lead attempts from one telephone number or one address.
+ *
+ * Deliberately says nothing about which limit was hit or how much of it is
+ * left: a rate limit that reports its own state is a rate limit that can be
+ * measured and worked around.
+ */
+export function showcaseLeadRateLimited() {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.TOO_MANY_REQUESTS,
+      error: 'Too Many Requests',
+      code: SHOWCASE_LEAD_RATE_LIMITED_CODE,
+      message: 'Çok fazla talep gönderildi. Lütfen bir süre sonra tekrar deneyin.',
+    },
+    HttpStatus.TOO_MANY_REQUESTS,
+  );
+}
+
+/**
+ * A fallback decision on a lead that is not waiting for one.
+ *
+ * Undifferentiated on purpose, exactly as `showcaseVersionNotPending` is: the
+ * lead may still be inside its window, may have been answered, or may have been
+ * decided a moment ago. In every case the answer is the same — there is no
+ * decision for this customer to make right now.
+ */
+export function showcaseFallbackNotAvailable() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_FALLBACK_NOT_AVAILABLE_CODE,
+    message: 'Bu talep için şu anda verilecek bir karar yok.',
+  });
+}
+
+/** The second submission of a decision the customer has already made. */
+export function showcaseFallbackAlreadyDecided() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_FALLBACK_ALREADY_DECIDED_CODE,
+    message: 'Bu talep için kararınız zaten kaydedildi.',
+  });
+}
+
+export const SHOWCASE_CARD_ALREADY_SUSPENDED_CODE = 'SHOWCASE_CARD_ALREADY_SUSPENDED';
+export const SHOWCASE_CARD_NOT_SUSPENDED_CODE = 'SHOWCASE_CARD_NOT_SUSPENDED';
+export const SHOWCASE_CARD_ALREADY_ARCHIVED_CODE = 'SHOWCASE_CARD_ALREADY_ARCHIVED';
+
+export function showcaseCardAlreadySuspended() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_CARD_ALREADY_SUSPENDED_CODE,
+    message: 'Bu kart zaten yayından kaldırılmış.',
+  });
+}
+
+export function showcaseCardNotSuspended() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_CARD_NOT_SUSPENDED_CODE,
+    message: 'Bu kart operatör kararıyla yayından kaldırılmış bir kart değil.',
+  });
+}
+
+/**
+ * The provider retired a card that is already retired.
+ *
+ * Separate from `showcaseCardLocked`, which is about editing: a provider whose
+ * archive button is clicked twice is told the plain truth, because both facts
+ * are their own.
+ */
+export function showcaseCardAlreadyArchived() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_CARD_ALREADY_ARCHIVED_CODE,
+    message: 'Bu kart zaten arşivlenmiş.',
   });
 }

@@ -2410,3 +2410,219 @@ export function showcaseReviewBadgeClass(review: ShowcaseVersionReview): string 
       return 'badge badge-muted';
   }
 }
+
+// ── Vitrin phase two: the catalogue, the paid runs and the direct leads ──────
+
+export type ShowcasePlacementStatus =
+  | 'PENDING_ACTIVATION'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'EXPIRED'
+  | 'CANCELLED';
+
+export type ShowcasePlacementSuspendReason =
+  | 'ADMIN_ACTION'
+  | 'CATEGORY_CLOSED'
+  | 'SYSTEM_PUBLISH_BLOCK'
+  | 'CARD_ARCHIVED'
+  | 'AREA_NO_LONGER_COVERED'
+  | 'PROVIDER_NOT_APPROVED';
+
+export type ShowcaseLeadStatus =
+  | 'OPEN'
+  | 'ANSWERED'
+  | 'BREACHED'
+  | 'RELEASED'
+  | 'CLOSED_UNANSWERED';
+
+export type ShowcaseLeadUrgency = 'URGENT' | 'NORMAL';
+
+export type ShowcaseLeadFallbackDecision = 'RELEASE' | 'KEEP_CLOSED';
+
+export type ShowcaseLeadCloseReason =
+  | 'CUSTOMER_KEPT_CLOSED'
+  | 'CUSTOMER_CANCELLED'
+  | 'MODERATION_REJECTED'
+  | 'REQUEST_EXPIRED';
+
+/**
+ * A vitrin package as the operator maintains it.
+ *
+ * The slug is read-only after creation, and the screen says why: it is the key
+ * into the payment provider's variant map, so renaming one detaches every
+ * future checkout from the variant it was mapped to — and the failure surfaces
+ * as a provider who paid and got a VARIANT_MISMATCH.
+ */
+export type ShowcasePackage = {
+  id: string;
+  name: string;
+  slug: string;
+  priceAmount: number;
+  currency: string;
+  durationDays: number;
+  allowedCardKind: ShowcaseCardKind | null;
+  maxAreas: number | null;
+  requiresAdminApproval: boolean;
+  description: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShowcasePlacementSuspension = {
+  id: string;
+  reason: ShowcasePlacementSuspendReason;
+  /** Whether this interval pushed the run's end forward. Snapshotted, not derived. */
+  extendsClock: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  endAtBefore: string;
+  endAtAfter: string | null;
+  note: string | null;
+  actor: { id: string; name: string | null } | null;
+};
+
+export type ShowcasePlacement = {
+  id: string;
+  status: ShowcasePlacementStatus;
+  cardId: string;
+  kind: ShowcaseCardKind;
+  category: { id: string; name: string; slug: string };
+  version: { id: string; versionNumber: number; title: string };
+  packageName: string;
+  priceAmount: number;
+  currency: string;
+  durationDays: number;
+  startAt: string;
+  endAt: string;
+  suspendedAt: string | null;
+  suspendReason: ShowcasePlacementSuspendReason | null;
+  extendedDays: number;
+  cancelledAt: string | null;
+  createdAt: string;
+  leadCount: number;
+  areas: Array<{ id: string; scope: string; active: boolean; label: string }>;
+  provider?: ShowcaseProviderSummary & { city: string; district: string };
+  suspensions?: ShowcasePlacementSuspension[];
+  versionChanges?: Array<{
+    id: string;
+    fromVersionId: string;
+    toVersionId: string;
+    trigger: 'ADMIN_APPROVAL' | 'AREA_NARROWING';
+    createdAt: string;
+  }>;
+};
+
+/**
+ * A direct lead, for the operator's queue.
+ *
+ * Read-only. An operator's power over a lead is exercised through the request
+ * it belongs to — refusing the request closes the lead in the same transaction
+ * — and there is deliberately no route that releases one on the customer's
+ * behalf: the database refuses a release without their own decision, and an
+ * admin endpoint bypassing that would make the constraint decorative.
+ *
+ * No customer telephone number or e-mail address, exactly as on the provider's
+ * inbox.
+ */
+export type ShowcaseAdminLead = {
+  id: string;
+  status: ShowcaseLeadStatus;
+  urgencyBucket: ShowcaseLeadUrgency;
+  slaHoursSnapshot: number;
+  slaDueAt: string;
+  breachedAt: string | null;
+  fallbackAskedAt: string | null;
+  fallbackDecision: ShowcaseLeadFallbackDecision | null;
+  fallbackDecidedAt: string | null;
+  releasedAt: string | null;
+  closedAt: string | null;
+  closeReason: ShowcaseLeadCloseReason | null;
+  respondedAt: string | null;
+  createdAt: string;
+  kindSnapshot: ShowcaseCardKind;
+  listedPriceSnapshot: number | null;
+  cardId: string;
+  cardVersion: { id: string; versionNumber: number; title: string };
+  provider: ShowcaseProviderSummary;
+  request: {
+    id: string;
+    requestNumber: string | null;
+    status: string;
+    qualityScore: number;
+    city: string;
+    district: string;
+    /** Non-null while the request is still reserved for one business. */
+    directShowcaseProviderId: string | null;
+    category: { id: string; name: string; slug: string };
+    submittedAt: string;
+  };
+};
+
+export const SHOWCASE_PLACEMENT_STATUS_LABELS: Record<ShowcasePlacementStatus, string> = {
+  PENDING_ACTIVATION: 'Başlatılıyor',
+  ACTIVE: 'Yayında',
+  SUSPENDED: 'Yayında değil',
+  EXPIRED: 'Süresi doldu',
+  CANCELLED: 'İptal edildi',
+};
+
+/**
+ * Why a run is off the air — and whether the paid clock is running.
+ *
+ * The clock is stated in the label rather than left to a second column, because
+ * it is the operationally important half: an operator deciding whether to
+ * compensate a provider needs to know whether the platform already did.
+ */
+export const SHOWCASE_SUSPEND_REASON_LABELS: Record<ShowcasePlacementSuspendReason, string> = {
+  ADMIN_ACTION: 'Operatör kararı — süre durdu',
+  CATEGORY_CLOSED: 'Kategori kapalı — süre durdu',
+  SYSTEM_PUBLISH_BLOCK: 'Sistemsel yayın engeli — süre durdu',
+  CARD_ARCHIVED: 'Sağlayıcı kartı arşivledi — süre işliyor',
+  AREA_NO_LONGER_COVERED: 'Kart bölgesi kapsam dışı — süre işliyor',
+  PROVIDER_NOT_APPROVED: 'Sağlayıcı onaylı değil — süre işliyor',
+};
+
+export const SHOWCASE_LEAD_STATUS_LABELS: Record<ShowcaseLeadStatus, string> = {
+  OPEN: 'Yanıt bekliyor',
+  ANSWERED: 'Teklif verildi',
+  BREACHED: 'Süre doldu',
+  RELEASED: 'Pazara açıldı',
+  CLOSED_UNANSWERED: 'Kapandı',
+};
+
+export const SHOWCASE_LEAD_URGENCY_LABELS: Record<ShowcaseLeadUrgency, string> = {
+  URGENT: 'Acil',
+  NORMAL: 'Normal',
+};
+
+export function showcasePlacementBadgeClass(status: ShowcasePlacementStatus): string {
+  switch (status) {
+    case 'ACTIVE':
+      return 'badge badge-good';
+    case 'PENDING_ACTIVATION':
+      return 'badge badge-warn';
+    case 'SUSPENDED':
+      return 'badge badge-warn';
+    case 'CANCELLED':
+      return 'badge badge-bad';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
+export function showcaseLeadBadgeClass(status: ShowcaseLeadStatus): string {
+  switch (status) {
+    case 'OPEN':
+      return 'badge badge-warn';
+    case 'ANSWERED':
+      return 'badge badge-good';
+    case 'BREACHED':
+      return 'badge badge-bad';
+    case 'RELEASED':
+      return 'badge badge-muted';
+    default:
+      return 'badge badge-muted';
+  }
+}

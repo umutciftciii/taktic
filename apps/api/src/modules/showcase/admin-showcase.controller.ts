@@ -20,6 +20,7 @@ import {
   ListShowcaseCardsDto,
   ListShowcaseVersionsDto,
   RejectShowcaseVersionDto,
+  SuspendShowcaseCardDto,
 } from './dto/review-showcase-version.dto';
 
 /**
@@ -83,5 +84,33 @@ export class AdminShowcaseController {
   @Get('cards/:cardId')
   getCard(@Param('cardId') cardId: string) {
     return this.showcase.getCard(cardId);
+  }
+
+  /**
+   * Pulls a card off the air, and every paid run of it with it.
+   *
+   * Phase one reserved this state and left it with no writer, on the grounds
+   * that nothing rendered a card to anybody. Phase two puts approved cards on
+   * the home page and lets them collect leads, so an operator who could not
+   * pull one they had already approved would be an operator whose moderation
+   * stopped mattering the moment somebody paid.
+   *
+   * The clock **stops** while the card is down: this is the platform pulling
+   * it, so the days the provider cannot use are not billed to them.
+   */
+  @Post('cards/:cardId/suspend')
+  @HttpCode(HttpStatus.OK)
+  suspendCard(
+    @Param('cardId') cardId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SuspendShowcaseCardDto,
+  ) {
+    return this.showcase.suspendCard(cardId, user, dto.note ?? null);
+  }
+
+  @Post('cards/:cardId/unsuspend')
+  @HttpCode(HttpStatus.OK)
+  unsuspendCard(@Param('cardId') cardId: string) {
+    return this.showcase.unsuspendCard(cardId);
   }
 }

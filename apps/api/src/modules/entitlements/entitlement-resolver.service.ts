@@ -32,6 +32,12 @@ export type EntitlementDecision =
       creditCost: number;
       /** Read in the same serialisation window the charge happens in. */
       balanceBefore: number;
+    }
+  | {
+      source: typeof OfferEntitlementSource.SHOWCASE_PLACEMENT;
+      entitlementId: null;
+      /** Always zero. The placement was already paid for. */
+      creditCost: 0;
     };
 
 export type ResolveInput = {
@@ -39,6 +45,14 @@ export type ResolveInput = {
   categoryId: string;
   creditCost: number;
   now: Date;
+  /**
+   * The provider this request is reserved for, when it is reserved for one.
+   *
+   * Read straight off `ServiceRequest.directShowcaseProviderId` by the caller
+   * and passed through unchanged. NULL for every ordinary marketplace request,
+   * which is what keeps the four existing branches exactly as they were.
+   */
+  directShowcaseProviderId?: string | null;
 };
 
 /**
@@ -78,6 +92,45 @@ export class EntitlementResolverService {
    * everything it is about to rely on.
    */
   async resolve(tx: Prisma.TransactionClient, input: ResolveInput): Promise<EntitlementDecision> {
+    /*
+     * The vitrin card owner answering their own direct lead. Free, and first.
+     *
+     * ## Why free
+     *
+     * They already paid for the placement this lead arrived through. Charging
+     * an offer credit on top would be taking money twice for one introduction,
+     * which is the double charge this product's "provider-friendly lead
+     * economics" promise exists to refuse.
+     *
+     * ## Why the condition is exactly this one column
+     *
+     * The rule reads one field and is one sentence with no exceptions: **the
+     * provider this request is reserved for offers for nothing.** The moment a
+     * fallback clears `directShowcaseProviderId` — the only thing that ever
+     * clears it — this branch stops matching, and from then on everybody,
+     * including the card's own owner, pays the ordinary category price. A rule
+     * that instead looked up "does this provider have a placement" would keep
+     * paying out after the request had become an ordinary one.
+     *
+     * ## Why it is first
+     *
+     * So that holding an unlimited period cannot silently consume a daily cap
+     * on an offer that costs nothing, and so that a provider with no balance at
+     * all can still answer the lead they paid to receive. The 402 below is for
+     * the marketplace; it must never refuse a business the right to reply to
+     * somebody who wrote to them directly.
+     */
+    if (
+      input.directShowcaseProviderId &&
+      input.directShowcaseProviderId === input.providerId
+    ) {
+      return {
+        source: OfferEntitlementSource.SHOWCASE_PLACEMENT,
+        entitlementId: null,
+        creditCost: 0,
+      };
+    }
+
     const unlimited = await this.findUnlimited(tx, input);
     if (unlimited) {
       await this.assertDailyLimit(tx, unlimited, input.now);
@@ -127,6 +180,14 @@ export class EntitlementResolverService {
     decision: EntitlementDecision,
     context: { providerId: string; offerId: string; reason: string; now: Date },
   ): Promise<{ creditTransactionId: string | null }> {
+    if (decision.source === OfferEntitlementSource.SHOWCASE_PLACEMENT) {
+      // Nothing is spent, nothing is decremented and no ledger row is written.
+      // The offer's own `entitlementSource` is the whole record that a paid
+      // placement covered it — there is no quota to count against and no
+      // balance that moved.
+      return { creditTransactionId: null };
+    }
+
     if (decision.source === OfferEntitlementSource.UNLIMITED) {
       // Nothing is spent. The offer's own entitlementId is the record that this
       // period covered it, and the daily cap is counted off those rows.

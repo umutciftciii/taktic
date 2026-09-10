@@ -41,3 +41,23 @@ export class ListShowcaseCardsDto {
   @MaxLength(64)
   providerId?: string;
 }
+
+/**
+ * The note an operator leaves when pulling a card.
+ *
+ * Optional and free text, and it is the only field. There is deliberately no
+ * `reason` code: an operator's pull is `ADMIN_ACTION` by definition, and a body
+ * that could name a different reason could name one that does not stop the
+ * paid clock.
+ *
+ * The note is stored on the card rather than sent anywhere. Telling a provider
+ * their card was pulled is a product decision with its own message; a free-text
+ * field routed straight into somebody's inbox is not that decision being made
+ * carefully.
+ */
+export class SuspendShowcaseCardDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(SHOWCASE_REVIEW_NOTE_MAX_LENGTH)
+  note?: string;
+}

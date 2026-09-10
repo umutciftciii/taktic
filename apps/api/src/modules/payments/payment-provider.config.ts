@@ -54,6 +54,27 @@ export const CREDIT_PRODUCT_DESCRIPTION_EN =
   'Prepaid software usage credits for a service provider account. Credits are spent to send ' +
   'offers inside the application. This is not a service purchase and no money is transferred ' +
   'from a customer to a provider.';
+/**
+ * The same discipline for the second thing this platform sells: a run of vitrin
+ * visibility on the home page.
+ *
+ * Named apart from the credit product because it is a different transaction and
+ * the payment provider's records should say which one happened. And spelled out
+ * in the same terms, for the same reason: this is the platform's own listing
+ * fee, not the price of the work the provider advertises. That price is on the
+ * card, it is the provider's own, and TakTick neither collects it nor is a party
+ * to it.
+ */
+export const SHOWCASE_PRODUCT_NAME = 'Provider vitrin placement';
+export const SHOWCASE_PRODUCT_DESCRIPTION_EN =
+  'A fixed-length listing placement for a service provider on the platform home page. This is a ' +
+  'platform listing fee paid by the provider. It is not a service purchase and no money is ' +
+  'transferred from a customer to a provider.';
+export const SHOWCASE_PRODUCT_DESCRIPTION_TR =
+  'Hizmet verenin ana sayfada süreli vitrin yerleşimi. Bu, hizmet verenin platforma ödediği ' +
+  'yerleşim bedelidir. Bir hizmet satışı değildir ve müşteriden hizmet verene para transferi ' +
+  'içermez.';
+
 export const CREDIT_PRODUCT_DESCRIPTION_TR =
   'Hizmet veren hesabı için ön ödemeli yazılım kullanım kredisi. Krediler uygulama içinde teklif ' +
   'göndermek için harcanır. Bu bir hizmet satışı değildir ve müşteriden hizmet verene para ' +

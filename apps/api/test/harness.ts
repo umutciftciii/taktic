@@ -13,6 +13,7 @@ import {
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestStatus,
+  ShowcaseCardKind,
   UserRole,
 } from '@prisma/client';
 import bcrypt from 'bcryptjs';
@@ -27,6 +28,9 @@ import {
 } from '../src/modules/notifications/notification.port';
 import { SmsMessage, SmsPort, SmsSendResult } from '../src/modules/notifications/sms.port';
 import { PaymentProviderPort } from '../src/modules/payments/payment-provider.port';
+import { normalizePhoneNumber } from '../src/modules/phone-verification/phone.util';
+import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
+import { toShowcaseAreaRow } from '../src/common/showcase-area-key';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -199,6 +203,15 @@ const TRUNCATED_TABLES = [
   'ShowcaseSubmissionWithdrawal',
   'ShowcaseCardAutoPublishAudit',
   'ShowcaseCardReview',
+  // Phase two, listed before the version and card rows they reference. The
+  // TRUNCATE … CASCADE handles the order regardless; it is kept readable as a
+  // dependency graph, exactly as the phase-one block above is.
+  'ShowcaseLead',
+  'ShowcasePlacementVersionChange',
+  'ShowcasePlacementSuspension',
+  'ShowcasePlacementShelf',
+  'ShowcasePlacement',
+  'ShowcasePackage',
   'ShowcaseCardVersionArea',
   'ShowcaseCardVersion',
   'ShowcaseCard',
@@ -813,4 +826,234 @@ export async function createEntitlement(
     },
     include: { scopes: true },
   });
+}
+
+// ── Vitrin phase two ────────────────────────────────────────────────────────
+
+/**
+ * A vitrin package, written straight to the catalogue.
+ *
+ * The slug carries the reserved prefix because the database insists on it: a
+ * CHECK refuses a `ShowcasePackage` slug that does not begin with `vitrin-`, and
+ * a second CHECK refuses an `OfferCreditPackage` slug that does. The pair is
+ * what stops one payment-provider variant standing for two different products.
+ */
+export async function createShowcasePackage(
+  prisma: PrismaClient,
+  options: {
+    priceAmount?: number;
+    durationDays?: number;
+    allowedCardKind?: ShowcaseCardKind | null;
+    maxAreas?: number | null;
+    isActive?: boolean;
+    name?: string;
+  } = {},
+) {
+  const suffix = uniqueSuffix();
+
+  return prisma.showcasePackage.create({
+    data: {
+      name: `${options.name ?? 'Vitrin Paketi'} ${suffix}`,
+      slug: `vitrin-test-${suffix}`,
+      priceAmount: options.priceAmount ?? 49_900,
+      currency: 'TRY',
+      durationDays: options.durationDays ?? 30,
+      allowedCardKind: options.allowedCardKind ?? null,
+      maxAreas: options.maxAreas ?? null,
+      isActive: options.isActive ?? true,
+    },
+  });
+}
+
+/**
+ * An approved card with one approved version and its areas — the state every
+ * placement test needs and none of them is about reaching.
+ *
+ * Written directly rather than driven through the authoring endpoints for the
+ * reason `createEntitlement` exists: the review lifecycle has its own specs, and
+ * replaying it in every placement case would make those cases fail for reasons
+ * that are somebody else's.
+ */
+export async function createApprovedShowcaseCard(
+  prisma: PrismaClient,
+  options: {
+    providerId: string;
+    categoryId: string;
+    kind?: ShowcaseCardKind;
+    title?: string;
+    areas?: Array<{ city: string; district?: string | null; neighborhood?: string | null }>;
+    listedServicePriceAmount?: number | null;
+    responseSlaUrgentHours?: number;
+    responseSlaNormalHours?: number;
+  },
+) {
+  const suffix = uniqueSuffix();
+  const kind = options.kind ?? 'SERVICE';
+  const areas = options.areas ?? [{ city: 'İstanbul', district: 'Kadıköy' }];
+  const now = new Date();
+
+  const card = await prisma.showcaseCard.create({
+    data: {
+      providerId: options.providerId,
+      kind,
+      categoryId: options.categoryId,
+      status: 'APPROVED',
+    },
+  });
+
+  const version = await prisma.showcaseCardVersion.create({
+    data: {
+      cardId: card.id,
+      versionNumber: 1,
+      kindSnapshot: kind,
+      title: options.title ?? `Vitrin kartı ${suffix}`,
+      summary: `Test vitrin kartı ${suffix} açıklaması.`,
+      scopeIncluded: ['Keşif', 'Montaj'],
+      scopeExcluded: ['Malzeme bedeli'],
+      listedServicePriceAmount:
+        kind === 'SERVICE' ? (options.listedServicePriceAmount ?? 150_000) : null,
+      listedServiceCurrency: 'TRY',
+      responseSlaUrgentHours: options.responseSlaUrgentHours ?? 3,
+      responseSlaNormalHours: options.responseSlaNormalHours ?? 24,
+      priceTermsVersion: 'v1',
+      priceTermsAcceptedAt: now,
+      reviewStatus: 'APPROVED',
+      submittedAt: now,
+      publishedAt: now,
+      areas: {
+        create: areas.map((area) =>
+          toShowcaseAreaRow({
+            city: area.city,
+            district: area.district ?? null,
+            neighborhood: area.neighborhood ?? null,
+          }),
+        ),
+      },
+    },
+  });
+
+  await prisma.showcaseCard.update({
+    where: { id: card.id },
+    data: { liveVersionId: version.id },
+  });
+
+  return { card, version };
+}
+
+/**
+ * A settled vitrin purchase and the live run it produced.
+ *
+ * Goes through `ShowcasePlacementService.createForPurchase` rather than writing
+ * the rows by hand, so every test that starts from "this card is on the air"
+ * starts from a placement built by the same code a real payment builds — the
+ * shelves included. A hand-written fixture would be a second definition of what
+ * a placement is, and the first thing to drift.
+ */
+export async function createLiveShowcasePlacement(
+  ctx: TestContext,
+  options: {
+    providerId: string;
+    cardId: string;
+    versionId: string;
+    packageId: string;
+    durationDays?: number;
+    paidAt?: Date;
+  },
+) {
+  const pkg = await ctx.prisma.showcasePackage.findUniqueOrThrow({
+    where: { id: options.packageId },
+  });
+  const paidAt = options.paidAt ?? new Date();
+
+  const purchase = await ctx.prisma.packagePurchase.create({
+    data: {
+      providerId: options.providerId,
+      kind: 'SHOWCASE_PACKAGE',
+      showcasePackageId: pkg.id,
+      showcaseCardId: options.cardId,
+      showcaseCardVersionId: options.versionId,
+      durationDaysSnapshot: options.durationDays ?? pkg.durationDays,
+      creditAmountSnapshot: 0,
+      priceAmountSnapshot: pkg.priceAmount,
+      currencySnapshot: pkg.currency,
+      packageNameSnapshot: pkg.name,
+      status: 'PAID',
+      paidAt,
+      paymentProvider: 'mock',
+    },
+  });
+
+  const placements = ctx.app.get(ShowcasePlacementService);
+  const { placementId } = await ctx.prisma.$transaction((tx) =>
+    placements.createForPurchase(
+      tx,
+      {
+        id: purchase.id,
+        providerId: purchase.providerId,
+        showcasePackageId: pkg.id,
+        showcaseCardId: options.cardId,
+        showcaseCardVersionId: options.versionId,
+        durationDaysSnapshot: purchase.durationDaysSnapshot ?? pkg.durationDays,
+        packageNameSnapshot: purchase.packageNameSnapshot,
+        priceAmountSnapshot: purchase.priceAmountSnapshot,
+        currencySnapshot: purchase.currencySnapshot,
+      },
+      paidAt,
+    ),
+  );
+
+  return {
+    purchase,
+    placement: await ctx.prisma.showcasePlacement.findUniqueOrThrow({
+      where: { id: placementId },
+      include: { shelves: true },
+    }),
+  };
+}
+
+/**
+ * Proves a telephone number the way the vitrin lead flow requires.
+ *
+ * The real flow sends a code by SMS and the customer types it back. The suite
+ * cannot read an SMS, so it writes the row the verified step would have left:
+ * consumed, unbound to any request, and recent. That is exactly what
+ * `findRedeemableVerification` looks for, so the lead endpoint redeems it the
+ * same way it redeems a real one — and binds it, which is what makes it
+ * single-use here too.
+ */
+export async function proveShowcaseLeadPhone(prisma: PrismaClient, phone: string) {
+  const now = new Date();
+
+  return prisma.phoneVerification.create({
+    data: {
+      normalizedPhone: normalizePhoneNumber(phone),
+      // Never checked on this path: the row is already consumed, and the code
+      // is what `verifyStandaloneCode` compares before consuming it.
+      codeHash: 'test-consumed',
+      expiresAt: new Date(now.getTime() + 5 * 60 * 1000),
+      consumedAt: now,
+      requestId: null,
+    },
+  });
+}
+
+/** The body the public lead endpoint takes, with everything a valid one needs. */
+export function showcaseLeadPayload(
+  categorySlug: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const suffix = uniqueSuffix();
+
+  return {
+    categorySlug,
+    urgencyBucket: 'NORMAL',
+    customerName: `Vitrin Müşterisi ${suffix}`,
+    customerPhone: `0555777${suffix.padStart(4, '0')}`,
+    customerEmail: `vitrin-${suffix}@example.test`,
+    city: 'İstanbul',
+    district: 'Kadıköy',
+    description: 'Vitrin kartından gönderilen test talebi.',
+    answers: [],
+    ...overrides,
+  };
 }

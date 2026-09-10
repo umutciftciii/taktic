@@ -344,33 +344,34 @@ model User {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  serviceRequests            ServiceRequest[]
-  providerProfile            ProviderProfile?
-  creditTransactions         ProviderCreditTransaction[]
-  sessions                   Session[]
-  customerNotes              CustomerNote[]              @relation("CustomerNoteCustomer")
-  createdCustomerNotes       CustomerNote[]              @relation("CustomerNoteCreatedBy")
-  activationTokens           CustomerActivationToken[]   @relation("CustomerActivationTokenCustomer")
-  createdActivationTokens    CustomerActivationToken[]   @relation("CustomerActivationTokenCreatedBy")
-  adminInviteTokens          AdminInviteToken[]          @relation("AdminInviteTokenUser")
-  passwordResetTokens        PasswordResetToken[]
-  emailVerificationTokens    EmailVerificationToken[]
-  createdAdminInviteTokens   AdminInviteToken[]          @relation("AdminInviteTokenCreatedBy")
-  notificationLogs           NotificationLog[]
-  contactRevealEvents        ContactRevealEvent[]
-  createdProviderClaimTokens ProviderClaimToken[]        @relation("ProviderClaimTokenCreatedBy")
-  createdProviderInvites     ProviderInviteToken[]       @relation("ProviderInviteTokenCreatedBy")
-  companySettingsUpdates     CompanySettings[]           @relation("CompanySettingsUpdatedBy")
-  operationsSettingsUpdates  OperationsSettings[]        @relation("OperationsSettingsUpdatedBy")
-  operationsSettingsChanges  OperationsSettingsChange[]  @relation("OperationsSettingsChangedBy")
-  customerMessageThreads     MessageThread[]             @relation("MessageThreadCustomer")
-  manualOfferRefunds         ManualOfferRefundAudit[]    @relation("ManualOfferRefundPerformedBy")
-  providerMessageThreads     MessageThread[]             @relation("MessageThreadProviderUser")
-  sentMessages               Message[]                   @relation("MessageSender")
-  supportTickets             SupportTicket[]             @relation("SupportTicketRequester")
-  supportTicketMessages      SupportTicketMessage[]      @relation("SupportTicketMessageAuthor")
-  supportTicketStatusChanges SupportTicketStatusChange[] @relation("SupportTicketStatusChangedBy")
-  showcaseCardReviews        ShowcaseCardReview[]        @relation("ShowcaseCardReviewedBy")
+  serviceRequests              ServiceRequest[]
+  providerProfile              ProviderProfile?
+  creditTransactions           ProviderCreditTransaction[]
+  sessions                     Session[]
+  customerNotes                CustomerNote[]                @relation("CustomerNoteCustomer")
+  createdCustomerNotes         CustomerNote[]                @relation("CustomerNoteCreatedBy")
+  activationTokens             CustomerActivationToken[]     @relation("CustomerActivationTokenCustomer")
+  createdActivationTokens      CustomerActivationToken[]     @relation("CustomerActivationTokenCreatedBy")
+  adminInviteTokens            AdminInviteToken[]            @relation("AdminInviteTokenUser")
+  passwordResetTokens          PasswordResetToken[]
+  emailVerificationTokens      EmailVerificationToken[]
+  createdAdminInviteTokens     AdminInviteToken[]            @relation("AdminInviteTokenCreatedBy")
+  notificationLogs             NotificationLog[]
+  contactRevealEvents          ContactRevealEvent[]
+  createdProviderClaimTokens   ProviderClaimToken[]          @relation("ProviderClaimTokenCreatedBy")
+  createdProviderInvites       ProviderInviteToken[]         @relation("ProviderInviteTokenCreatedBy")
+  companySettingsUpdates       CompanySettings[]             @relation("CompanySettingsUpdatedBy")
+  operationsSettingsUpdates    OperationsSettings[]          @relation("OperationsSettingsUpdatedBy")
+  operationsSettingsChanges    OperationsSettingsChange[]    @relation("OperationsSettingsChangedBy")
+  customerMessageThreads       MessageThread[]               @relation("MessageThreadCustomer")
+  manualOfferRefunds           ManualOfferRefundAudit[]      @relation("ManualOfferRefundPerformedBy")
+  providerMessageThreads       MessageThread[]               @relation("MessageThreadProviderUser")
+  sentMessages                 Message[]                     @relation("MessageSender")
+  supportTickets               SupportTicket[]               @relation("SupportTicketRequester")
+  supportTicketMessages        SupportTicketMessage[]        @relation("SupportTicketMessageAuthor")
+  supportTicketStatusChanges   SupportTicketStatusChange[]   @relation("SupportTicketStatusChangedBy")
+  showcaseCardReviews          ShowcaseCardReview[]          @relation("ShowcaseCardReviewedBy")
+  showcasePlacementSuspensions ShowcasePlacementSuspension[] @relation("ShowcasePlacementSuspendedBy")
 
   @@index([role])
   @@index([isActive])
@@ -445,12 +446,12 @@ model CompanySettings {
 /// (see `Offer.unviewedRefundEligibleAt`), and the worker reads that snapshot;
 /// this row only decides what the *next* offer is sold under.
 model OperationsSettings {
-  id                                  String   @id @default("singleton")
+  id                                      String   @id @default("singleton")
   /// How many whole hours a customer has to open an offer before its credit is
   /// automatically refunded. Whole hours only — the value is written verbatim
   /// into provider-facing sentences ("... 48 saat içinde ..."), and a fractional
   /// window has no sentence.
-  unviewedOfferRefundWindowHours      Int
+  unviewedOfferRefundWindowHours          Int
   /// Whether each background job may act, as four independent switches.
   ///
   /// These replace the environment flags the four schedulers used to read. A
@@ -463,17 +464,23 @@ model OperationsSettings {
   /// false column all mean the job does nothing. Every tick re-reads these, so
   /// a super admin's toggle takes effect on the next natural tick without a
   /// restart, and no process holds a cached "on" the panel disagrees with.
-  entitlementRenewalSchedulerEnabled  Boolean  @default(false)
-  unviewedOfferRefundSchedulerEnabled Boolean  @default(false)
-  requestExpirySchedulerEnabled       Boolean  @default(false)
-  requestReminderSchedulerEnabled     Boolean  @default(false)
-  createdAt                           DateTime @default(now())
-  updatedAt                           DateTime @updatedAt
+  entitlementRenewalSchedulerEnabled      Boolean  @default(false)
+  unviewedOfferRefundSchedulerEnabled     Boolean  @default(false)
+  requestExpirySchedulerEnabled           Boolean  @default(false)
+  requestReminderSchedulerEnabled         Boolean  @default(false)
+  /// The two vitrin jobs, added under exactly the same contract as the four
+  /// above: false by default, read fail-closed on every tick, and switched on
+  /// by a person on a screen — never by a migration and never by an
+  /// environment variable.
+  showcaseLeadSlaSchedulerEnabled         Boolean  @default(false)
+  showcasePlacementExpirySchedulerEnabled Boolean  @default(false)
+  createdAt                               DateTime @default(now())
+  updatedAt                               DateTime @updatedAt
   /// Who last saved this. Nullable and SetNull for the same reason
   /// CompanySettings uses: an operator's account may be removed long after they
   /// changed a term. The permanent record of *what* changed is
   /// OperationsSettingsChange, which does not lose its operator.
-  updatedById                         String?
+  updatedById                             String?
 
   updatedBy User? @relation("OperationsSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
@@ -628,17 +635,18 @@ model ServiceCategory {
   /// category tree loses a whole branch without anybody being told. A parent
   /// with children cannot be deleted — the API says so with a 409, and the
   /// database says so even if something bypasses the API.
-  parent            ServiceCategory?                  @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children          ServiceCategory[]                 @relation("ServiceCategoryTree")
-  questions         ServiceRequestQuestion[]
-  requests          ServiceRequest[]
-  entryRequests     ServiceRequest[]                  @relation("ServiceRequestEntryCategory")
-  providers         ProviderServiceCategory[]
-  routerRulesIn     ServiceCategoryRouterRule[]       @relation("ServiceCategoryRouterTarget")
-  providerInvites   ProviderInviteToken[]
-  packageScopes     OfferPackageScopeCategory[]
-  entitlementScopes ProviderPackageEntitlementScope[]
-  showcaseCards     ShowcaseCard[]
+  parent             ServiceCategory?                  @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children           ServiceCategory[]                 @relation("ServiceCategoryTree")
+  questions          ServiceRequestQuestion[]
+  requests           ServiceRequest[]
+  entryRequests      ServiceRequest[]                  @relation("ServiceRequestEntryCategory")
+  providers          ProviderServiceCategory[]
+  routerRulesIn      ServiceCategoryRouterRule[]       @relation("ServiceCategoryRouterTarget")
+  providerInvites    ProviderInviteToken[]
+  packageScopes      OfferPackageScopeCategory[]
+  entitlementScopes  ProviderPackageEntitlementScope[]
+  showcaseCards      ShowcaseCard[]
+  showcasePlacements ShowcasePlacement[]
 
   @@index([parentId])
   @@index([isActive, sortOrder])
@@ -817,6 +825,25 @@ model ServiceRequest {
   /// content exists behind CONTACT_DISCLOSURE_URL.
   contactDisclosureVersion    String?
   contactDisclosureAcceptedAt DateTime?
+  /// The vitrin lead this request was opened from, when it was.
+  ///
+  /// **Never cleared.** It is the record of where the request came from, and a
+  /// fallback that erased it would destroy the only evidence that a placement
+  /// produced this lead — the number a provider's renewal decision rests on.
+  showcaseLeadId              String?              @unique
+  /// The only provider allowed to see this request, when one is named.
+  ///
+  /// The gate, and deliberately a *second* column rather than a reading of the
+  /// one above: one says where the request came from and never changes, the
+  /// other says who may see it and changes exactly once. Merged into one
+  /// column, releasing a lead to the market would erase its origin.
+  ///
+  /// NULL is the ordinary marketplace request — every request that predates
+  /// vitrin, and every request that will ever be submitted through the normal
+  /// form. Nothing about matching, fan-out or offer pricing changes for those.
+  /// The single writer that clears it is the customer's explicit RELEASE
+  /// decision after an SLA breach; a breach on its own never does.
+  directShowcaseProviderId    String?
   /// The single accepted offer. Unique so the request can never point at two
   /// winners; the accept cascade is what writes it.
   matchedOfferId              String?              @unique
@@ -828,16 +855,22 @@ model ServiceRequest {
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
-  category           ServiceCategory        @relation(fields: [categoryId], references: [id])
-  entryCategory      ServiceCategory?       @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
-  customer           User?                  @relation(fields: [customerId], references: [id])
-  answers            ServiceRequestAnswer[]
-  offers             Offer[]
-  matchedOffer       Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
-  phoneVerifications PhoneVerification[]
-  notificationLogs   NotificationLog[]
-  contactRevealEvent ContactRevealEvent?
-  messageThread      MessageThread?
+  category               ServiceCategory        @relation(fields: [categoryId], references: [id])
+  entryCategory          ServiceCategory?       @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
+  customer               User?                  @relation(fields: [customerId], references: [id])
+  answers                ServiceRequestAnswer[]
+  offers                 Offer[]
+  matchedOffer           Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
+  phoneVerifications     PhoneVerification[]
+  notificationLogs       NotificationLog[]
+  contactRevealEvent     ContactRevealEvent?
+  messageThread          MessageThread?
+  /// Restrict both ways. The lead carries the customer's urgency choice, the
+  /// SLA they were promised and their fallback decision; none of it may be
+  /// removed by removing something else.
+  showcaseLead           ShowcaseLead?          @relation("ServiceRequestShowcaseLead", fields: [showcaseLeadId], references: [id], onDelete: Restrict)
+  showcaseLeadSource     ShowcaseLead?          @relation("ShowcaseLeadRequest")
+  directShowcaseProvider ProviderProfile?       @relation("ServiceRequestDirectShowcaseProvider", fields: [directShowcaseProviderId], references: [id], onDelete: Restrict)
 
   @@index([categoryId])
   @@index([entryCategoryId])
@@ -853,6 +886,9 @@ model ServiceRequest {
   /// claimed yet. reminderSentAt leads approvedAt because it is the equality
   /// predicate.
   @@index([status, reminderSentAt, approvedAt])
+  /// The direct-lead gate, as the discovery query reads it: "requests reserved
+  /// for this provider, in this state".
+  @@index([directShowcaseProviderId, status])
 }
 
 /// The moment a matched request opened both sides' contact details to each
@@ -1081,21 +1117,24 @@ model ProviderProfile {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user                User?                          @relation(fields: [userId], references: [id])
-  serviceCategories   ProviderServiceCategory[]
-  serviceAreas        ProviderServiceArea[]
-  offers              Offer[]
-  creditTransactions  ProviderCreditTransaction[]
-  manualOfferRefunds  ManualOfferRefundAudit[]
-  packagePurchases    PackagePurchase[]
-  contactRevealEvents ContactRevealEvent[]
-  claimTokens         ProviderClaimToken[]
-  notificationLogs    NotificationLog[]
-  messageThreads      MessageThread[]
-  packageEntitlements ProviderPackageEntitlement[]
-  showcaseCards       ShowcaseCard[]
-  showcaseAutoPublish ShowcaseCardAutoPublishAudit[]
-  showcaseWithdrawals ShowcaseSubmissionWithdrawal[]
+  user                   User?                          @relation(fields: [userId], references: [id])
+  serviceCategories      ProviderServiceCategory[]
+  serviceAreas           ProviderServiceArea[]
+  offers                 Offer[]
+  creditTransactions     ProviderCreditTransaction[]
+  manualOfferRefunds     ManualOfferRefundAudit[]
+  packagePurchases       PackagePurchase[]
+  contactRevealEvents    ContactRevealEvent[]
+  claimTokens            ProviderClaimToken[]
+  notificationLogs       NotificationLog[]
+  messageThreads         MessageThread[]
+  packageEntitlements    ProviderPackageEntitlement[]
+  showcaseCards          ShowcaseCard[]
+  showcaseAutoPublish    ShowcaseCardAutoPublishAudit[]
+  showcaseWithdrawals    ShowcaseSubmissionWithdrawal[]
+  showcasePlacements     ShowcasePlacement[]
+  showcaseLeads          ShowcaseLead[]
+  directShowcaseRequests ServiceRequest[]               @relation("ServiceRequestDirectShowcaseProvider")
 
   @@index([status])
   @@index([city])
@@ -1247,6 +1286,9 @@ model Offer {
   contactRevealEvent ContactRevealEvent?
   messageThread      MessageThread?
   manualRefundAudit  ManualOfferRefundAudit?
+  /// The vitrin lead this offer answered, when it answered one. Unique on the
+  /// lead's side: a lead has one response.
+  showcaseLead       ShowcaseLead?               @relation("ShowcaseLeadRespondedOffer")
   // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
   // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
   // add_request_matching migration. Prisma cannot express partial indexes in
@@ -1341,10 +1383,19 @@ enum EntitlementRenewalFailureCode {
 ///
 /// Existing offers are backfilled to ONE_TIME_CREDIT, which is what every offer
 /// submitted before this enum existed actually spent.
+///
+/// SHOWCASE_PLACEMENT is the fourth and it is not a package at all: it is the
+/// direct vitrin lead, where the provider already paid for the placement the
+/// lead came through and charging them a second time for answering it would be
+/// the double charge this product's lead economics exist to refuse. It is
+/// reachable on exactly one condition — `ServiceRequest.directShowcaseProviderId`
+/// equals the offering provider — and the moment a fallback clears that gate
+/// every provider, the card owner included, pays the ordinary price.
 enum OfferEntitlementSource {
   UNLIMITED
   MONTHLY_QUOTA
   ONE_TIME_CREDIT
+  SHOWCASE_PLACEMENT
 }
 
 model OfferCreditPackage {
@@ -1411,11 +1462,45 @@ model OfferPackageScopeCategory {
   @@index([categoryId])
 }
 
+/// One provider's payment for one product — a credit package or a vitrin
+/// placement, and never both.
+///
+/// **There is one money rail and there are two catalogues.** A second purchase
+/// table for vitrin would have been the easier change and the wrong one:
+/// `providerOrderId` and `paymentReference` are unique *on this table*, which
+/// is what makes "one Lemon order settles one purchase" a database fact. Split
+/// across two tables, one order could close a row in each and no constraint
+/// anywhere would see it.
+///
+/// `kind` is the discriminator and three CHECK constraints hold it honest — see
+/// the add_purchase_kind_discriminator migration. The one worth naming here is
+/// `PackagePurchase_showcase_grants_no_credit`: a vitrin purchase may never
+/// carry a credit amount or a ledger row, so a settlement path that forgot to
+/// branch fails on a constraint rather than silently handing out offer credit.
 model PackagePurchase {
   id                        String                @id @default(cuid())
   purchaseNumber            String?               @unique
   providerId                String
-  packageId                 String
+  /// The offer package this purchase bought. NULL exactly on a
+  /// SHOWCASE_PACKAGE row, and NOT NULL on every OFFER_PACKAGE one — including
+  /// every row that predates the discriminator, which is why dropping the NOT
+  /// NULL changed nothing about what an existing purchase means.
+  packageId                 String?
+  /// What was bought. Defaults to OFFER_PACKAGE, which is what this table held
+  /// before vitrin existed, so the default *is* the backfill.
+  kind                      PackagePurchaseKind   @default(OFFER_PACKAGE)
+  /// The vitrin catalogue row, and the card and version this placement was
+  /// bought for. All four are NULL on an OFFER_PACKAGE row and all four are
+  /// required on a SHOWCASE_PACKAGE one.
+  ///
+  /// `showcaseCardVersionId` is the version that was live when the checkout was
+  /// opened. The placement pins its own version at settlement and may be
+  /// re-pinned later; this column is the record of what the provider was
+  /// looking at when they paid, and it never moves.
+  showcasePackageId         String?
+  showcaseCardId            String?
+  showcaseCardVersionId     String?
+  durationDaysSnapshot      Int?
   status                    PackagePurchaseStatus @default(PENDING)
   creditAmountSnapshot      Int
   priceAmountSnapshot       Int
@@ -1455,14 +1540,23 @@ model PackagePurchase {
   createdAt                 DateTime              @default(now())
   updatedAt                 DateTime              @updatedAt
 
-  provider       ProviderProfile             @relation(fields: [providerId], references: [id])
-  package        OfferCreditPackage          @relation(fields: [packageId], references: [id])
+  provider            ProviderProfile             @relation(fields: [providerId], references: [id])
+  package             OfferCreditPackage?         @relation(fields: [packageId], references: [id])
+  /// Restrict on all three: a catalogue row, a card or a version that a
+  /// settled payment points at is part of the record of what was sold, and a
+  /// cascade here would erase the answer to "what did this provider pay for".
+  showcasePackage     ShowcasePackage?            @relation(fields: [showcasePackageId], references: [id], onDelete: Restrict)
+  showcaseCard        ShowcaseCard?               @relation(fields: [showcaseCardId], references: [id], onDelete: Restrict)
+  showcaseCardVersion ShowcaseCardVersion?        @relation(fields: [showcaseCardVersionId], references: [id], onDelete: Restrict)
   /// The period this purchase paid for, when it paid for one. A ONE_TIME_CREDITS
   /// purchase has none.
-  entitlement    ProviderPackageEntitlement? @relation("PackagePurchaseEntitlement")
+  entitlement         ProviderPackageEntitlement? @relation("PackagePurchaseEntitlement")
+  /// The placement this purchase paid for, when it was a vitrin purchase.
+  /// Unique on the placement side: one payment, one placement.
+  showcasePlacement   ShowcasePlacement?
   /// The renewal attempt this purchase settled, when it was a renewal rather
   /// than a first purchase.
-  renewalAttempt PackageRenewalAttempt?
+  renewalAttempt      PackageRenewalAttempt?
 
   @@index([providerId])
   @@index([packageId])
@@ -1470,6 +1564,8 @@ model PackagePurchase {
   @@index([createdAt])
   @@index([mockPaymentReference])
   @@index([paymentProvider, status])
+  @@index([kind, status])
+  @@index([showcaseCardId])
 }
 
 /**
@@ -2302,6 +2398,9 @@ model ShowcaseCard {
   versions          ShowcaseCardVersion[]          @relation("ShowcaseCardVersions")
   autoPublishAudits ShowcaseCardAutoPublishAudit[]
   withdrawals       ShowcaseSubmissionWithdrawal[]
+  purchases         PackagePurchase[]
+  placements        ShowcasePlacement[]
+  leads             ShowcaseLead[]
 
   @@index([providerId, status])
   @@index([providerId, createdAt])
@@ -2384,9 +2483,14 @@ model ShowcaseCardVersion {
   liveOnCard  ShowcaseCard? @relation("ShowcaseCardLiveVersion")
   draftOnCard ShowcaseCard? @relation("ShowcaseCardDraftVersion")
 
-  autoPublishAudit   ShowcaseCardAutoPublishAudit?  @relation("ShowcaseAutoPublishVersion")
-  supersededByAudits ShowcaseCardAutoPublishAudit[] @relation("ShowcaseAutoPublishPreviousVersion")
+  autoPublishAudit   ShowcaseCardAutoPublishAudit?    @relation("ShowcaseAutoPublishVersion")
+  supersededByAudits ShowcaseCardAutoPublishAudit[]   @relation("ShowcaseAutoPublishPreviousVersion")
   withdrawals        ShowcaseSubmissionWithdrawal[]
+  purchases          PackagePurchase[]
+  pinnedPlacements   ShowcasePlacement[]
+  versionChangesFrom ShowcasePlacementVersionChange[] @relation("ShowcasePlacementVersionFrom")
+  versionChangesTo   ShowcasePlacementVersionChange[] @relation("ShowcasePlacementVersionTo")
+  leads              ShowcaseLead[]
 
   @@unique([cardId, versionNumber])
   @@index([cardId, createdAt])
@@ -2537,4 +2641,494 @@ model ShowcaseCardAutoPublishAudit {
 
   @@index([cardId, createdAt])
   @@index([providerId, createdAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Vitrin, phase two: the catalogue, the paid placement, and the direct lead.
+//
+// Phase one shipped a card: a reviewed text that nothing rendered and nobody
+// paid for. This is what turns it into a product — an operator's package, a
+// provider's payment, a bounded run on the home page, and a lead that reaches
+// exactly one business with a clock on it.
+//
+// Three separations run through everything below and each one is load-bearing:
+//
+//  1. **The catalogue is separate; the money rail is not.** ShowcasePackage is
+//     its own table because a vitrin package is never an offering right, and
+//     the enum that decides offering rights is read on the offer hot path. But
+//     the payment is still a PackagePurchase, because `providerOrderId` unique
+//     on one table is what makes one Lemon order settle one purchase.
+//  2. **What was sold is snapshotted; what is shown is not.** A placement
+//     freezes the price, the duration and the package name it was sold under,
+//     and re-reads none of them from the catalogue afterwards. Its *content*
+//     is the opposite: it points at a version and shows whatever that version
+//     says, so a card's own page and the home page can never disagree.
+//  3. **Response urgency and job urgency are different facts.**
+//     `ShowcaseLead.urgencyBucket` is how fast the customer expects an answer;
+//     `ServiceRequest.urgency` is when they want the work done. No code path
+//     derives one from the other, in either direction.
+// ────────────────────────────────────────────────────────────────────────────
+
+/// What a PackagePurchase bought.
+///
+/// The default is OFFER_PACKAGE because that is what every row in the table
+/// meant before vitrin existed — so the column's default is the whole of its
+/// backfill, and no existing purchase changed meaning when it appeared.
+enum PackagePurchaseKind {
+  OFFER_PACKAGE
+  SHOWCASE_PACKAGE
+}
+
+/// Where a paid placement stands.
+///
+/// PENDING_ACTIVATION exists for the instant between the payment settling and
+/// the placement going live, both of which happen in one transaction. It is a
+/// state a reader can hold rather than one they can observe for long, and it
+/// is in the "live" set of the one-per-card unique index precisely so a second
+/// checkout cannot slip through that instant.
+///
+/// SUSPENDED is "paid for but not on the air". Whether the clock stops while it
+/// is there depends on *why* — see ShowcasePlacementSuspendReason.
+///
+/// No reader trusts this column on its own. Every publish query also asks
+/// `startAt <= now < endAt`, exactly as `isEntitlementUsable` does, so a
+/// stopped sweeper cannot buy anybody an extra day of visibility.
+enum ShowcasePlacementStatus {
+  PENDING_ACTIVATION
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  CANCELLED
+}
+
+/// Why a placement is off the air — and, by the table below, whether its paid
+/// time keeps running while it is.
+///
+/// The split is one sentence: **the platform's own obstacles stop the clock;
+/// the provider's own actions do not.** A provider who could stop the clock by
+/// archiving their card could park a placement indefinitely and spend it when
+/// the season suited them, which is buying a run and using it as a voucher.
+///
+/// | reason                   | clock  | why                                      |
+/// |--------------------------|--------|------------------------------------------|
+/// | ADMIN_ACTION             | stops  | we pulled it; they could not use the day |
+/// | CATEGORY_CLOSED          | stops  | we closed the shelf; nothing of theirs   |
+/// | SYSTEM_PUBLISH_BLOCK     | stops  | our fault, not billed to them            |
+/// | CARD_ARCHIVED            | runs   | their own decision                       |
+/// | AREA_NO_LONGER_COVERED   | runs   | narrowing must not freeze time           |
+/// | PROVIDER_NOT_APPROVED    | runs   | a sanction is not rewarded with credit   |
+///
+/// The verdict is computed by `suspensionExtendsClock` and then **copied** onto
+/// each suspension row, never re-derived. If the policy changes, what happened
+/// to a placement last March must not change with it.
+enum ShowcasePlacementSuspendReason {
+  ADMIN_ACTION
+  CATEGORY_CLOSED
+  SYSTEM_PUBLISH_BLOCK
+  CARD_ARCHIVED
+  AREA_NO_LONGER_COVERED
+  PROVIDER_NOT_APPROVED
+}
+
+/// Why a placement moved to a different version of its card.
+///
+/// Both triggers are somebody's decision about live content — an operator's
+/// approval, or the provider's own narrowing — which is why re-pinning happens
+/// at all: the alternative is the home page showing text the card's own page no
+/// longer says.
+enum ShowcaseVersionChangeTrigger {
+  ADMIN_APPROVAL
+  AREA_NARROWING
+}
+
+/// How fast the customer expects to hear back — their own explicit choice on
+/// the card's call to action, and nothing else.
+///
+/// Not derived from `ServiceRequest.urgency`, in either direction. That field
+/// says when the work is wanted ("bugün", "bu hafta"); this says how long the
+/// customer is prepared to wait for a reply, and a same-day job is very often
+/// one somebody is happy to be called about tomorrow.
+enum ShowcaseLeadUrgency {
+  URGENT
+  NORMAL
+}
+
+/// Where a direct lead stands.
+///
+/// OPEN              — the clock is running and only the card owner can see it.
+/// ANSWERED          — the card owner offered inside the window.
+/// BREACHED          — the window closed with no offer; the customer has been
+///                     asked what to do and nothing has been opened up.
+/// RELEASED          — the customer said yes; the gate is cleared and the
+///                     request enters ordinary moderation.
+/// CLOSED_UNANSWERED — it ended without reaching the market: the customer kept
+///                     it closed, cancelled, never answered, or an operator
+///                     refused the request.
+enum ShowcaseLeadStatus {
+  OPEN
+  ANSWERED
+  BREACHED
+  RELEASED
+  CLOSED_UNANSWERED
+}
+
+/// What the customer decided after a breach. There is no third option and no
+/// default: silence is handled by a timeout that produces CLOSED_UNANSWERED,
+/// never a RELEASE.
+enum ShowcaseLeadFallbackDecision {
+  RELEASE
+  KEEP_CLOSED
+}
+
+enum ShowcaseLeadCloseReason {
+  CUSTOMER_KEPT_CLOSED
+  CUSTOMER_CANCELLED
+  MODERATION_REJECTED
+  REQUEST_EXPIRED
+}
+
+/// What an operator sells: a run of vitrin visibility, for a fixed price and a
+/// fixed number of days.
+///
+/// **Deliberately not a fourth `OfferPackageType`.** Three things made that the
+/// wrong shape. `OfferCreditPackage` carries CHECK constraints that pair the
+/// three existing types with their NULL columns, and a fourth would mean
+/// loosening guarantees the other three depend on. `OfferPackageType` is read
+/// on the offer hot path by the entitlement resolver, and a vitrin package is
+/// never an offering right — one missed `switch` branch there is a vitrin
+/// purchase quietly granting offer capacity. And
+/// `ProviderPackageEntitlementScope` means "may offer in this category", which
+/// is meaningless for a placement.
+///
+/// The slug must begin with `vitrin-`, and `OfferCreditPackage.slug` must not —
+/// two CHECK constraints, in two migrations. The reason is a configuration
+/// hazard rather than tidiness: `LEMON_SQUEEZY_VARIANT_MAP` is keyed by slug
+/// across both catalogues, so without the prefix rule one map entry could serve
+/// a credit package and a vitrin package at once and nothing in the database
+/// would see it.
+model ShowcasePackage {
+  id                    String            @id @default(cuid())
+  name                  String
+  /// `vitrin-` prefixed, and a CHECK says so. See the note above.
+  slug                  String            @unique
+  /// Minor units, and what TakTick actually charges. Never comparable with
+  /// `ShowcaseCardVersion.listedServicePriceAmount`, which is the provider's
+  /// own price to their own customer and money this platform never touches.
+  priceAmount           Int
+  currency              String            @default("TRY")
+  /// How long one purchased run lasts, in whole days. Snapshotted onto the
+  /// purchase and again onto the placement, so repricing or reshaping a package
+  /// cannot lengthen or shorten a run somebody already paid for.
+  durationDays          Int
+  /// Which card kind this package may be bought for. NULL means either.
+  allowedCardKind       ShowcaseCardKind?
+  /// The largest number of areas one placement bought with this package may
+  /// publish. NULL means every area the pinned version claims.
+  maxAreas              Int?
+  /// Reserved, and shipped today at `false` deliberately: a placement needs no
+  /// second approval, because the card's text is already approved and a second
+  /// read would be an operator re-reading their own decision while the provider
+  /// waits after paying. It exists so that deciding otherwise for a
+  /// high-priced package later is a controller change rather than a migration
+  /// against a table that by then has live rows.
+  requiresAdminApproval Boolean           @default(false)
+  description           String?
+  isActive              Boolean           @default(true)
+  sortOrder             Int               @default(0)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  purchases  PackagePurchase[]
+  placements ShowcasePlacement[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// One paid run of one card on the home page.
+///
+/// Born from a settled payment and from nothing else: there is no endpoint that
+/// creates a placement, no endpoint that extends one, and no endpoint that
+/// deletes one. Time is sold, not granted — the only thing that ever moves
+/// `endAt` forward is `resume()` paying back a clock-stopping suspension, and
+/// even an operator cannot type a new date.
+///
+/// ## Why `pinnedVersionId` follows the card
+///
+/// The placement pins whatever version was live when the payment settled. When
+/// that changes — an operator approves a new version, or the narrowing rule
+/// publishes one — the placement is re-pinned **in the same transaction** and a
+/// ShowcasePlacementVersionChange row records it. Either way a person decided
+/// the new text should be live, and a placement still serving the old one would
+/// mean the card's own page and the home page were saying different things.
+/// Content has one source: the version. The placement shows it, never copies it.
+///
+/// ## Why the SLA is not copied here
+///
+/// The promise is made to a customer at the moment a lead is opened, and it
+/// freezes on `ShowcaseLead`. A copy on the placement would be a second answer
+/// to the same question, going stale the first time a version changed.
+model ShowcasePlacement {
+  id                String           @id @default(cuid())
+  /// The payment that produced this run. Unique: one settled payment can never
+  /// produce two placements — the same guarantee, and the same mechanism, as
+  /// `ProviderPackageEntitlement.purchaseId`.
+  purchaseId        String           @unique
+  providerId        String
+  showcasePackageId String
+  cardId            String
+  /// The version being published right now. Restrict, because it is the record
+  /// of what is on the air.
+  pinnedVersionId   String
+  /// Denormalised from the card so the publish query can filter without a join.
+  /// Safe to copy because a card's category is fixed at creation and no
+  /// endpoint changes it.
+  categoryId        String
+  kindSnapshot      ShowcaseCardKind
+
+  packageNameSnapshot  String
+  priceAmountSnapshot  Int
+  currencySnapshot     String @default("TRY")
+  durationDaysSnapshot Int
+
+  startAt DateTime
+  endAt   DateTime
+
+  status          ShowcasePlacementStatus         @default(PENDING_ACTIVATION)
+  /// Non-NULL means "not on the air right now". Paired with `suspendReason`,
+  /// and a CHECK insists both are set together or neither is.
+  suspendedAt     DateTime?
+  suspendReason   ShowcasePlacementSuspendReason?
+  /// How much time in total has been given back for clock-stopping
+  /// suspensions. Written only by `resume()`, only for reasons that stop the
+  /// clock, and kept as its own column so "this run was extended" is a fact an
+  /// operator can read without replaying the suspension history.
+  totalExtendedMs Int                             @default(0)
+  cancelledAt     DateTime?
+  createdAt       DateTime                        @default(now())
+  updatedAt       DateTime                        @updatedAt
+
+  purchase      PackagePurchase     @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  provider      ProviderProfile     @relation(fields: [providerId], references: [id])
+  package       ShowcasePackage     @relation(fields: [showcasePackageId], references: [id], onDelete: Restrict)
+  card          ShowcaseCard        @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  pinnedVersion ShowcaseCardVersion @relation(fields: [pinnedVersionId], references: [id], onDelete: Restrict)
+  category      ServiceCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  shelves        ShowcasePlacementShelf[]
+  suspensions    ShowcasePlacementSuspension[]
+  versionChanges ShowcasePlacementVersionChange[]
+  leads          ShowcaseLead[]
+
+  // A PostgreSQL partial unique index — "ShowcasePlacement_one_live_per_card",
+  // UNIQUE ("cardId") WHERE status IN ('PENDING_ACTIVATION','ACTIVE','SUSPENDED')
+  // — is created by the add_showcase_placements migration. It is NOT an
+  // anti-boost rule: a provider may open as many cards as they like and buy a
+  // package for each. It says only that one card's single slot cannot be sold
+  // twice at once, because the second payment would add nothing to what the
+  // first one already publishes.
+
+  @@index([providerId, status, endAt])
+  @@index([status, endAt])
+  @@index([categoryId, status, endAt])
+  @@index([pinnedVersionId])
+}
+
+/// One (category, area) pair a placement publishes into — the home page's index.
+///
+/// Derived from the pinned version's own areas and refreshed, in the same
+/// transaction, whenever the placement is re-pinned. It exists so the feed is an
+/// index lookup rather than a coverage scan: a visitor in
+/// İstanbul/Kadıköy/Moda produces exactly three candidate keys and the query
+/// asks `areaKey IN (…)`. `ProviderServiceArea` is the counter-example — request
+/// matching pulls every area a provider holds and filters them in JavaScript,
+/// which is fine for one provider's panel and unacceptable for a public page.
+///
+/// **There is deliberately no unique index on (providerId, categoryId,
+/// areaKey).** An earlier draft had one, and it would have meant a provider
+/// could never publish a second card on the same shelf — cutting off the whole
+/// "more cards, more reach" model at the point of sale. Balance is a *ranking*
+/// problem and it is solved in the feed query's `provider_rank`, which spreads
+/// one provider's cards across successive rounds instead of refusing them.
+model ShowcasePlacementShelf {
+  id           String                   @id @default(cuid())
+  placementId  String
+  providerId   String
+  categoryId   String
+  /// The canonical key, produced by `showcaseAreaKey()` and never accepted from
+  /// a request body. NOT NULL with empty-string segments, so one ordinary
+  /// unique index binds duplicates — see ShowcaseCardVersionArea for the full
+  /// reasoning.
+  areaKey      String
+  scope        ProviderServiceAreaScope
+  city         String
+  district     String?
+  neighborhood String?
+  /// Whether this row is on the air. Denormalised from the placement so the
+  /// feed's index can be partial, and rewritten in the same transaction as
+  /// every status change that affects it.
+  active       Boolean                  @default(true)
+  /// Denormalised from the placement, so a row that a stopped sweeper left
+  /// `active` is still excluded by the feed's own `endAt > now()`.
+  endAt        DateTime
+  createdAt    DateTime                 @default(now())
+
+  placement ShowcasePlacement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+
+  @@unique([placementId, categoryId, areaKey])
+  @@index([placementId])
+  @@index([providerId])
+  @@index([areaKey, categoryId, endAt])
+}
+
+/// One interval a placement spent off the air, and what it cost its owner.
+///
+/// Append-only and never rewritten except to close it. `extendsClock` is copied
+/// from `suspensionExtendsClock(reason)` at the moment the suspension opens
+/// rather than derived when it closes: the rule may change, and what happened to
+/// this placement must not change with it. It is the same snapshot discipline
+/// the refund window and the entitlement period already use.
+model ShowcasePlacementSuspension {
+  id           String                         @id @default(cuid())
+  placementId  String
+  reason       ShowcasePlacementSuspendReason
+  /// Whether this interval pushed `endAt` forward. Snapshotted, not derived.
+  extendsClock Boolean
+  startedAt    DateTime                       @default(now())
+  endedAt      DateTime?
+  /// `endAt` as it stood when this suspension opened, and as it stands when it
+  /// closes. A CHECK refuses a row where the clock did not stop but the two
+  /// differ, so "a provider's own action bought them time" is unrepresentable
+  /// rather than merely refused by the service.
+  endAtBefore  DateTime
+  endAtAfter   DateTime?
+  /// The operator, when this was somebody's decision. NULL when the system
+  /// acted on a category closing, a card being archived or a profile changing
+  /// status — and NULL there is a fact, not a gap.
+  actorUserId  String?
+  note         String?
+  createdAt    DateTime                       @default(now())
+
+  placement ShowcasePlacement @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  actor     User?             @relation("ShowcasePlacementSuspendedBy", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  // A partial unique index — "ShowcasePlacementSuspension_one_open_per_placement",
+  // UNIQUE ("placementId") WHERE "endedAt" IS NULL — is created by the
+  // migration: a placement can be off the air for one reason at a time.
+
+  @@index([placementId, startedAt])
+}
+
+/// One re-pin: the placement moved from one version of its card to another.
+///
+/// Unique on `(placementId, toVersionId)`, so an approval delivered twice
+/// records one move rather than two.
+model ShowcasePlacementVersionChange {
+  id            String                       @id @default(cuid())
+  placementId   String
+  fromVersionId String
+  toVersionId   String
+  trigger       ShowcaseVersionChangeTrigger
+  createdAt     DateTime                     @default(now())
+
+  placement   ShowcasePlacement   @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  fromVersion ShowcaseCardVersion @relation("ShowcasePlacementVersionFrom", fields: [fromVersionId], references: [id], onDelete: Restrict)
+  toVersion   ShowcaseCardVersion @relation("ShowcasePlacementVersionTo", fields: [toVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([placementId, toVersionId])
+  @@index([placementId, createdAt])
+}
+
+/// A request opened from a vitrin card, and everything about it that is not a
+/// request.
+///
+/// The request itself is an ordinary `ServiceRequest`; what makes it a lead is
+/// two columns on that row and this one beside it. This table carries the three
+/// facts the request has no place for: which urgency the customer chose, what
+/// answer time they were promised, and what they decided when that promise was
+/// missed.
+///
+/// ## The card content is frozen here
+///
+/// `cardVersionId` and `listedPriceSnapshot` record what the customer actually
+/// read. The card may be re-pinned to a newer version an hour later; what the
+/// customer was looking at when they wrote to this business does not change.
+///
+/// ## The SLA is derived on the server, always
+///
+/// The client sends a bucket and never an hour count. The hours come from the
+/// *pinned version's* own `responseSlaUrgentHours` / `responseSlaNormalHours`,
+/// which are the numbers the provider committed to and an operator approved, and
+/// `slaDueAt` is `createdAt` plus that. The sweeper reads `slaDueAt` and never
+/// the live setting, so nothing that changes later can move a promise already
+/// made.
+///
+/// ## Release requires consent, in the database
+///
+/// `ShowcaseLead_release_needs_decision` refuses a `releasedAt` without
+/// `fallbackDecision = 'RELEASE'`. A missed deadline on its own opens nothing:
+/// the customer wrote to one business, and handing their request to the market
+/// because that business was slow is a decision only they can make.
+model ShowcaseLead {
+  id                  String           @id @default(cuid())
+  /// The request this lead is about. Unique here and unique again as
+  /// `ServiceRequest.showcaseLeadId`, so the pairing is one-to-one from both
+  /// sides.
+  requestId           String           @unique
+  placementId         String
+  cardId              String
+  /// The exact text the customer read, and the price they read on it. Never
+  /// re-read from the card.
+  cardVersionId       String
+  /// The card's kind, copied so the price rule below is expressible on this row
+  /// alone. A lead is read by the provider's inbox and by the customer's own
+  /// panel, and neither should have to join through two tables to find out
+  /// whether a missing price is a fault or the whole point.
+  kindSnapshot        ShowcaseCardKind
+  /// NULL on a PROMOTION card and required on a SERVICE one; a CHECK enforces
+  /// both halves, exactly as the version's own price column does.
+  listedPriceSnapshot Int?
+  /// The card owner: the one and only provider this lead is addressed to.
+  providerId          String
+
+  /// The customer's own choice on the card. See ShowcaseLeadUrgency.
+  urgencyBucket    ShowcaseLeadUrgency
+  /// The promised answer time in whole hours, read from the pinned version at
+  /// creation and frozen.
+  slaHoursSnapshot Int
+  /// `createdAt + slaHoursSnapshot`. The breach sweeper's only clock.
+  slaDueAt         DateTime
+
+  status           ShowcaseLeadStatus @default(OPEN)
+  respondedAt      DateTime?
+  /// The offer that answered it. Unique: one lead, one response.
+  respondedOfferId String?            @unique
+  /// When the breach was claimed, by a conditional UPDATE that only matches an
+  /// OPEN lead. A card owner who answered in the last second finds the row
+  /// already ANSWERED and the sweeper matches nothing — the race is settled by
+  /// the database rather than by ordering.
+  breachedAt       DateTime?
+
+  fallbackAskedAt   DateTime?
+  fallbackDecision  ShowcaseLeadFallbackDecision?
+  fallbackDecidedAt DateTime?
+  releasedAt        DateTime?
+
+  closedAt    DateTime?
+  closeReason ShowcaseLeadCloseReason?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  request        ServiceRequest      @relation("ShowcaseLeadRequest", fields: [requestId], references: [id], onDelete: Restrict)
+  requestGate    ServiceRequest?     @relation("ServiceRequestShowcaseLead")
+  placement      ShowcasePlacement   @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  card           ShowcaseCard        @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  cardVersion    ShowcaseCardVersion @relation(fields: [cardVersionId], references: [id], onDelete: Restrict)
+  provider       ProviderProfile     @relation(fields: [providerId], references: [id])
+  respondedOffer Offer?              @relation("ShowcaseLeadRespondedOffer", fields: [respondedOfferId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, status, slaDueAt])
+  @@index([status, slaDueAt])
+  @@index([placementId, createdAt])
+  @@index([status, breachedAt])
 }

@@ -9,6 +9,7 @@ import {
 import {
   CreditTransactionType,
   OfferPackageType,
+  PackagePurchaseKind,
   PackagePurchaseStatus,
   PaymentWebhookEventStatus,
   Prisma,
@@ -21,6 +22,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
+import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { LEMON_SQUEEZY_PROVIDER_KIND, readLemonSqueezyConfig } from './lemon-squeezy.config';
 import {
   LEMON_SQUEEZY_PAYMENT_EVENTS,
@@ -153,6 +155,7 @@ export class PaymentsWebhookService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CreditsService) private readonly credits: CreditsService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(ShowcasePlacementService) private readonly placements: ShowcasePlacementService,
   ) {}
 
   async handleLemonSqueezyDelivery(
@@ -366,7 +369,14 @@ export class PaymentsWebhookService {
 
     const purchase = await tx.packagePurchase.findUnique({
       where: { paymentReference: event.reference },
-      include: { package: { select: { slug: true, type: true } } },
+      include: {
+        package: { select: { slug: true, type: true } },
+        // The vitrin catalogue's slug, for the same variant comparison. Two
+        // catalogues, one map, and one lookup: the reserved `vitrin-` prefix —
+        // enforced by a CHECK on each table — is what makes it impossible for
+        // both to produce the same key.
+        showcasePackage: { select: { slug: true } },
+      },
     });
 
     if (!purchase) {
@@ -400,9 +410,29 @@ export class PaymentsWebhookService {
       return { mismatch: 'CURRENCY_MISMATCH', purchaseId: purchase.id };
     }
 
-    // Only checked when the payload carried it: the mapping is the allow-list
-    // that decides which sandbox variant may stand for which credit package.
-    const expectedVariantId = variantsBySlug.get(purchase.package.slug);
+    /*
+     * Only checked when the payload carried it: the mapping is the allow-list
+     * that decides which sandbox variant may stand for which package.
+     *
+     * Which catalogue's slug is read follows the purchase's own `kind`. The two
+     * namespaces cannot collide — a vitrin slug must begin with `vitrin-` and an
+     * offer package's must not, and a CHECK on each table says so — so one map
+     * entry can never serve both products.
+     *
+     * A purchase whose discriminator does not line up with its columns cannot
+     * exist (`PackagePurchase_kind_matches_package`), so the null branch below
+     * is a type narrowing rather than a case that can happen.
+     */
+    const purchaseSlug =
+      purchase.kind === PackagePurchaseKind.SHOWCASE_PACKAGE
+        ? purchase.showcasePackage?.slug
+        : purchase.package?.slug;
+
+    if (!purchaseSlug) {
+      return { mismatch: 'UNKNOWN_REFERENCE', purchaseId: purchase.id };
+    }
+
+    const expectedVariantId = variantsBySlug.get(purchaseSlug);
     if (event.variantId !== null && event.variantId !== expectedVariantId) {
       return { mismatch: 'VARIANT_MISMATCH', purchaseId: purchase.id };
     }
@@ -421,22 +451,73 @@ export class PaymentsWebhookService {
     }
 
     /*
-     * What the settlement grants depends on what was sold, and only one of the
-     * two ever happens.
+     * ── The one place the two catalogues part company ──────────────────────
      *
-     * A ONE_TIME_CREDITS package loads the ledger — the behaviour this method
-     * has always had, unchanged down to the reason string. A period package
-     * grants an entitlement instead and moves no balance: its
-     * `creditAmountSnapshot` is zero by construction, and a zero-credit ledger
-     * row would be a transaction in the provider's history that records
-     * nothing.
+     * What a settlement grants depends on what was sold, and exactly one of
+     * three things happens:
      *
-     * Both are written inside the same Serializable transaction as the purchase
-     * update and the audit row, so a redelivered event that got past the
-     * PROCESSED short-circuit still cannot produce a second period: the unique
-     * index on ProviderPackageEntitlement.purchaseId refuses it at the database.
+     *   SHOWCASE_PACKAGE — a placement is created and **no balance moves at
+     *     all**. `creditAmountSnapshot` is zero by construction and a CHECK
+     *     constraint refuses a vitrin row that carries credit or names a ledger
+     *     transaction, so a future edit that forgot this branch fails loudly
+     *     rather than quietly handing out offer capacity.
+     *
+     *   ONE_TIME_CREDITS — the ledger is loaded, exactly as it always has been,
+     *     unchanged down to the reason string.
+     *
+     *   the two period packages — an entitlement is granted and no balance
+     *     moves: a zero-credit ledger row would be a transaction in the
+     *     provider's history that records nothing.
+     *
+     * All three are written inside the same Serializable transaction as the
+     * purchase update and the audit row, and each has a unique index behind it
+     * — `ShowcasePlacement.purchaseId` and
+     * `ProviderPackageEntitlement.purchaseId` — so a redelivered event that got
+     * past the PROCESSED short-circuit still cannot produce a second one.
      */
-    const isOneTime = purchase.package.type === OfferPackageType.ONE_TIME_CREDITS;
+    if (purchase.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
+      // Narrowed rather than asserted: the four columns are nullable on the
+      // model and NOT NULL in every case that can reach here, and the CHECK
+      // constraint is what makes that true. A purchase that somehow reached
+      // settlement without them is a data fault, not a payment to accept.
+      if (
+        !purchase.showcasePackageId ||
+        !purchase.showcaseCardId ||
+        !purchase.showcaseCardVersionId ||
+        purchase.durationDaysSnapshot === null
+      ) {
+        return { mismatch: 'UNKNOWN_REFERENCE', purchaseId: purchase.id };
+      }
+
+      await this.placements.createForPurchase(
+        tx,
+        {
+          id: purchase.id,
+          providerId: purchase.providerId,
+          showcasePackageId: purchase.showcasePackageId,
+          showcaseCardId: purchase.showcaseCardId,
+          showcaseCardVersionId: purchase.showcaseCardVersionId,
+          durationDaysSnapshot: purchase.durationDaysSnapshot,
+          packageNameSnapshot: purchase.packageNameSnapshot,
+          priceAmountSnapshot: purchase.priceAmountSnapshot,
+          currencySnapshot: purchase.currencySnapshot,
+        },
+        now,
+      );
+
+      await tx.packagePurchase.update({
+        where: { id: purchase.id },
+        data: {
+          status: PackagePurchaseStatus.PAID,
+          paidAt: now,
+          providerOrderId: event.objectId,
+        },
+      });
+
+      return { mismatch: null, purchaseId: purchase.id };
+    }
+
+    const isOneTime = purchase.package?.type === OfferPackageType.ONE_TIME_CREDITS;
 
     const creditTransaction = isOneTime
       ? await this.credits.createProviderCreditTransactionInTransaction(tx, {
@@ -450,6 +531,10 @@ export class PaymentsWebhookService {
       : null;
 
     if (!isOneTime) {
+      if (!purchase.packageId) {
+        return { mismatch: 'UNKNOWN_REFERENCE', purchaseId: purchase.id };
+      }
+
       await grantEntitlementForPurchase(tx, {
         providerId: purchase.providerId,
         purchaseId: purchase.id,
@@ -490,6 +575,28 @@ export class PaymentsWebhookService {
    */
   private async notifySettled(purchaseId: SettledPurchase): Promise<void> {
     if (!purchaseId) {
+      return;
+    }
+
+    /*
+     * Two receipts, and exactly one of them applies to any given purchase.
+     *
+     * `sendPackagePurchaseConfirmation` refuses anything that is not a settled
+     * ONE_TIME_CREDITS purchase with a ledger row behind it, so a vitrin
+     * purchase falls out of it by construction rather than by this branch —
+     * which is the belt to that method's braces, not a substitute for it.
+     *
+     * The vitrin notice is about the placement rather than the payment: what
+     * the provider needs to know is that their card is on the air and when the
+     * run ends.
+     */
+    const placement = await this.prisma.showcasePlacement.findUnique({
+      where: { purchaseId },
+      select: { id: true },
+    });
+
+    if (placement) {
+      await this.mail.sendShowcasePlacementActivated(placement.id);
       return;
     }
 

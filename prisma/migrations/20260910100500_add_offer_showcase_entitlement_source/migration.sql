@@ -1,0 +1,23 @@
+-- Vitrin phase two, step 6 of 7: the fourth thing that can pay for an offer.
+--
+-- One statement, one migration, on purpose. PostgreSQL requires that
+-- `ALTER TYPE … ADD VALUE` commits before the new value may be used, so any DDL
+-- or DML in this file that referenced 'SHOWCASE_PLACEMENT' would fail. Nothing
+-- here does.
+--
+-- Data effect: none. No existing `Offer` row changes, and the new value is
+-- written only by the direct-lead path, which does not exist until its code is
+-- deployed.
+--
+-- Rolling back: PostgreSQL cannot remove an enum value. The rollback plan for
+-- this feature is to revert the code, not the type — a value nothing writes is
+-- inert.
+--
+-- What SHOWCASE_PLACEMENT means, and its one condition: the provider already
+-- paid for the placement this lead arrived through, so answering it costs
+-- nothing. It is reachable when — and only when —
+-- `ServiceRequest.directShowcaseProviderId` equals the offering provider. Once
+-- a fallback clears that column, every provider including the card's owner pays
+-- the ordinary category price.
+
+ALTER TYPE "OfferEntitlementSource" ADD VALUE 'SHOWCASE_PLACEMENT';

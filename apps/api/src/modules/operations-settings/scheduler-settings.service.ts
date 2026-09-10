@@ -18,8 +18,8 @@ import { SchedulerRunRecord, SchedulerRunRegistry } from './scheduler-run-regist
  * Whether each background job may act, as one persistent answer.
  *
  * This is the whole of the decision. There is no environment flag beside it and
- * no second switch a deployment can disagree with: the four schedulers ask this
- * service on every tick and do nothing at all unless the answer is a stored
+ * no second switch a deployment can disagree with: every scheduler asks this
+ * service on every tick and does nothing at all unless the answer is a stored
  * `true`.
  *
  * **Fail-closed, three ways.** No settings row means off, because a fresh
@@ -50,7 +50,7 @@ export type SchedulerJobView = {
 
 export type SchedulerSettingsView = {
   jobs: SchedulerJobView[];
-  /** The toggle history, newest first — only these four settings. */
+  /** The toggle history, newest first — only the scheduler settings. */
   recentChanges: SchedulerSettingsChangeView[];
 };
 
@@ -69,11 +69,11 @@ const RECENT_CHANGE_LIMIT = 20;
 const SETTING_NAMES = SCHEDULER_JOB_KEYS.map((job) => SCHEDULER_JOB_SETTINGS[job]);
 
 /**
- * All four flags, always, however few the caller needs.
+ * Every flag, always, however few the caller needs.
  *
  * A per-job `select` built from a computed key would be one string away from
  * reading a column that is not a scheduler flag at all, and it types as
- * `Record<string, unknown>`. Four booleans on a primary-key lookup cost
+ * `Record<string, unknown>`. A handful of booleans on a primary-key lookup cost
  * nothing, and the result is a shape the compiler can index by job key.
  */
 const flagsSelect = {
@@ -81,6 +81,8 @@ const flagsSelect = {
   unviewedOfferRefundSchedulerEnabled: true,
   requestExpirySchedulerEnabled: true,
   requestReminderSchedulerEnabled: true,
+  showcaseLeadSlaSchedulerEnabled: true,
+  showcasePlacementExpirySchedulerEnabled: true,
 } satisfies Prisma.OperationsSettingsSelect;
 
 /**
@@ -98,6 +100,10 @@ const FLAG_PATCHES: Record<SchedulerJobKey, (enabled: boolean) => FlagPatch> = {
   'unviewed-offer-refund': (enabled) => ({ unviewedOfferRefundSchedulerEnabled: enabled }),
   'request-expiry': (enabled) => ({ requestExpirySchedulerEnabled: enabled }),
   'request-reminder': (enabled) => ({ requestReminderSchedulerEnabled: enabled }),
+  'showcase-lead-sla': (enabled) => ({ showcaseLeadSlaSchedulerEnabled: enabled }),
+  'showcase-placement-expiry': (enabled) => ({
+    showcasePlacementExpirySchedulerEnabled: enabled,
+  }),
 };
 
 @Injectable()

@@ -35,9 +35,11 @@ import { ProviderShowcaseCardsService } from './provider-showcase-cards.service'
  * legitimately own is caught one level down, in the service, and answers 404
  * rather than 403 — see `showcaseCardNotFound`.
  *
- * There is no delete route. A card's versions are the record of what was
- * claimed and what was approved, and a product that can erase that has no audit
- * trail. Retiring a card is `ARCHIVED`, which no endpoint writes yet.
+ * There is no delete route, and there will not be one. A card's versions are
+ * the record of what was claimed and what was approved, and a product that can
+ * erase that has no audit trail. Retiring a card is `ARCHIVED` — which this
+ * phase does give an endpoint, because cards are now on a public page and a
+ * business has to be able to take its own down.
  */
 @Controller('providers/:providerId/showcase/cards')
 @UseGuards(AuthGuard, RolesGuard, ProviderAccessGuard)
@@ -140,5 +142,33 @@ export class ProviderShowcaseCardsController {
     @Param('cardId') cardId: string,
   ) {
     return this.cards.withdrawSubmission(providerId, cardId);
+  }
+
+  /**
+   * Retires a card, and takes whatever it is publishing off the air with it.
+   *
+   * There is still no delete — the versions are the record of what was claimed
+   * and what was approved — but a business that cannot take its own card down
+   * is a business advertising work it has stopped doing.
+   *
+   * **The paid clock keeps running.** A provider who could freeze a run by
+   * archiving its card could park a dated placement and spend it whenever the
+   * season suited. The two weeks a card spends archived are two weeks of the
+   * run, and that is the price of a run being a run.
+   *
+   * 200 rather than 201: nothing is created, and the same card comes back
+   * archived.
+   */
+  @Post(':cardId/archive')
+  @HttpCode(HttpStatus.OK)
+  archiveCard(@Param('providerId') providerId: string, @Param('cardId') cardId: string) {
+    return this.cards.archiveCard(providerId, cardId);
+  }
+
+  /** Brings a retired card back, and resumes whatever is left of its run. */
+  @Post(':cardId/unarchive')
+  @HttpCode(HttpStatus.OK)
+  unarchiveCard(@Param('providerId') providerId: string, @Param('cardId') cardId: string) {
+    return this.cards.unarchiveCard(providerId, cardId);
   }
 }

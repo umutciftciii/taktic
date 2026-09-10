@@ -8,6 +8,9 @@ import {
   ProviderStatus,
   ServiceCategoryStatus,
   ServiceRequestStatus,
+  ShowcaseLeadStatus,
+  ShowcaseLeadUrgency,
+  ShowcasePlacementStatus,
   SupportTicketAuthorRole,
   SupportTicketRequesterRole,
 } from '@prisma/client';
@@ -21,6 +24,7 @@ import {
   customerAccountUrl,
   customerNewRequestUrl,
   customerRequestUrl,
+  customerShowcaseDecisionUrl,
   customerSupportTicketUrl,
   providerAccountUrl,
   providerCreditsUrl,
@@ -28,6 +32,8 @@ import {
   providerProfileUrl,
   providerRequestUrl,
   providerRequestsUrl,
+  providerShowcaseLeadUrl,
+  providerShowcaseUrl,
 } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { readContactSharingConfig } from '../contact-sharing/contact-sharing.config';
@@ -494,6 +500,176 @@ export class TransactionalMailService {
         dedupeKey: `package-purchase:${purchase.id}`,
       },
     );
+  }
+
+  // ───────────────────────────── vitrin, phase two ────────────────────────────
+
+  /**
+   * The placement is live — to the provider who paid for it.
+   *
+   * Re-reads everything from the committed rows and checks the precondition
+   * again rather than trusting the caller: a placement that is not ACTIVE has
+   * nothing this message's heading would be true of.
+   *
+   * `dedupeKey` names the placement. One payment produces one run — the unique
+   * index on `purchaseId` says so — and the index on (template, dedupeKey)
+   * turns a redelivered webhook into exactly one notice.
+   */
+  async sendShowcasePlacementActivated(placementId: string) {
+    const placement = await loadShowcasePlacement(this.prisma, placementId);
+    if (!placement || placement.status !== ShowcasePlacementStatus.ACTIVE) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, placement.providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    await this.send(
+      'showcase-placement-activated',
+      provider.recipient,
+      {
+        fullName: provider.contactName ?? provider.businessName,
+        cardTitle: placement.pinnedVersion.title,
+        packageName: placement.packageNameSnapshot,
+        areaSummary: placement.shelves
+          .map((shelf) =>
+            describeArea({
+              city: shelf.city,
+              district: shelf.district,
+              neighborhood: shelf.neighborhood,
+            }),
+          )
+          .join(' · '),
+        startAt: placement.startAt.toISOString(),
+        endAt: placement.endAt.toISOString(),
+        placementUrl: providerShowcaseUrl(provider.id),
+        accountUrl: providerAccountUrl(),
+      },
+      {
+        providerId: provider.id,
+        userId: provider.userId,
+        dedupeKey: `showcase-placement-activated:${placement.id}`,
+      },
+    );
+  }
+
+  /**
+   * A direct lead — to the one business it was addressed to, and to nobody
+   * else.
+   *
+   * This is the method `fanOutApprovedRequest` is deliberately **not** for. A
+   * placement's whole promise is that the lead it produces is not shared out,
+   * so there is no audience to resolve here and no loop: one recipient, decided
+   * by the card's ownership.
+   *
+   * No customer telephone number and no e-mail address travels. Contact opens
+   * through `ContactRevealEvent`, and a direct lead is not an exception to it.
+   */
+  async sendShowcaseLeadReceived(leadId: string) {
+    const lead = await loadShowcaseLead(this.prisma, leadId);
+    if (!lead) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, lead.providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    await this.send(
+      'showcase-lead-received',
+      provider.recipient,
+      {
+        fullName: provider.contactName ?? provider.businessName,
+        requestNumber: lead.request.requestNumber,
+        categoryName: lead.request.category.name,
+        locationLabel: describeArea({
+          city: lead.request.city,
+          district: lead.request.district,
+          neighborhood: lead.request.neighborhood,
+        }),
+        urgencyLabel: showcaseUrgencyLabel(lead.urgencyBucket),
+        slaHours: String(lead.slaHoursSnapshot),
+        slaDueAt: lead.slaDueAt.toISOString(),
+        leadUrl: providerShowcaseLeadUrl(provider.id, lead.id),
+        accountUrl: providerAccountUrl(),
+      },
+      {
+        requestId: lead.requestId,
+        providerId: provider.id,
+        userId: provider.userId,
+        dedupeKey: `showcase-lead-received:${lead.id}`,
+      },
+    );
+  }
+
+  /**
+   * The deadline passed: the customer's question and the provider's record,
+   * both from one call.
+   *
+   * One event, two messages, and they are sent together for the reason the
+   * support-ticket pairs are — a caller that could send half of it eventually
+   * would. Each carries its own template and dedupe key, so a replay that
+   * managed the customer's copy and failed on the provider's re-sends only the
+   * second.
+   *
+   * The customer's copy is the one that matters: it is the *only* thing that
+   * can lead to this request reaching the market, because a breach on its own
+   * opens nothing.
+   */
+  async sendShowcaseLeadBreached(leadId: string) {
+    const lead = await loadShowcaseLead(this.prisma, leadId);
+    if (!lead || lead.status !== ShowcaseLeadStatus.BREACHED) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, lead.providerId);
+    const slaLabel = `${showcaseUrgencyLabel(lead.urgencyBucket)} — ${lead.slaHoursSnapshot} saat`;
+
+    if (lead.request.customerEmail) {
+      await this.send(
+        'showcase-lead-breached-customer',
+        lead.request.customerEmail,
+        {
+          fullName: lead.request.customerName,
+          requestNumber: lead.request.requestNumber,
+          businessName: provider?.businessName ?? null,
+          slaLabel,
+          slaDueAt: lead.slaDueAt.toISOString(),
+          decisionUrl: customerShowcaseDecisionUrl(lead.requestId),
+          accountUrl: customerAccountUrl(),
+        },
+        {
+          requestId: lead.requestId,
+          userId: lead.request.customerId,
+          dedupeKey: `showcase-lead-breached-customer:${lead.id}`,
+        },
+      );
+    }
+
+    if (provider?.recipient) {
+      await this.send(
+        'showcase-lead-breached-provider',
+        provider.recipient,
+        {
+          fullName: provider.contactName ?? provider.businessName,
+          requestNumber: lead.request.requestNumber,
+          categoryName: lead.request.category.name,
+          slaLabel,
+          slaDueAt: lead.slaDueAt.toISOString(),
+          leadUrl: providerShowcaseLeadUrl(provider.id, lead.id),
+          accountUrl: providerAccountUrl(),
+        },
+        {
+          requestId: lead.requestId,
+          providerId: provider.id,
+          userId: provider.userId,
+          dedupeKey: `showcase-lead-breached-provider:${lead.id}`,
+        },
+      );
+    }
   }
 
   // ───────────────────────── 17-21 · support tickets ─────────────────────────
@@ -1983,10 +2159,14 @@ async function loadPackagePurchase(prisma: PrismaService, purchaseId: string) {
     },
   });
 
+  // A vitrin purchase has no `package` at all and no credit transaction, so it
+  // falls out here — which is correct: it loaded no balance, and this receipt's
+  // heading would be a false statement about it. Its own notice is
+  // `sendShowcasePlacementActivated`.
   if (
     !purchase ||
     purchase.status !== PackagePurchaseStatus.PAID ||
-    purchase.package.type !== OfferPackageType.ONE_TIME_CREDITS ||
+    purchase.package?.type !== OfferPackageType.ONE_TIME_CREDITS ||
     !purchase.creditTransactionId
   ) {
     return null;
@@ -2231,4 +2411,69 @@ const PROVIDER_STATUS_LABELS: Partial<Record<ProviderStatus, string>> = {
 
 function providerStatusLabel(status: ProviderStatus): string | null {
   return PROVIDER_STATUS_LABELS[status] ?? null;
+}
+
+/**
+ * How an urgency bucket reads to a person.
+ *
+ * One function, so the provider's inbox, the customer's message and the
+ * screens all print the same two words. The hours are never baked in here —
+ * they come from the card's own version and travel beside this label.
+ */
+function showcaseUrgencyLabel(bucket: ShowcaseLeadUrgency): string {
+  return bucket === ShowcaseLeadUrgency.URGENT ? 'Acil' : 'Normal';
+}
+
+function loadShowcasePlacement(prisma: PrismaService, placementId: string) {
+  return prisma.showcasePlacement.findUnique({
+    where: { id: placementId },
+    select: {
+      id: true,
+      status: true,
+      providerId: true,
+      packageNameSnapshot: true,
+      startAt: true,
+      endAt: true,
+      pinnedVersion: { select: { title: true } },
+      shelves: {
+        orderBy: [{ city: 'asc' }, { district: 'asc' }, { neighborhood: 'asc' }],
+        select: { city: true, district: true, neighborhood: true },
+      },
+    },
+  });
+}
+
+/**
+ * Everything a vitrin notification needs, and nothing it does not.
+ *
+ * `customerPhone` is deliberately absent even though both messages are about a
+ * customer's request: the provider's copy renders no contact detail, and a
+ * projection that carried one would be one template edit away from putting it
+ * in an inbox before the reveal.
+ */
+function loadShowcaseLead(prisma: PrismaService, leadId: string) {
+  return prisma.showcaseLead.findUnique({
+    where: { id: leadId },
+    select: {
+      id: true,
+      status: true,
+      providerId: true,
+      requestId: true,
+      urgencyBucket: true,
+      slaHoursSnapshot: true,
+      slaDueAt: true,
+      request: {
+        select: {
+          requestNumber: true,
+          customerId: true,
+          customerName: true,
+          customerEmail: true,
+          city: true,
+          district: true,
+          neighborhood: true,
+          category: { select: { name: true } },
+        },
+      },
+    },
+  });
 }

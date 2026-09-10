@@ -121,6 +121,24 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'support-ticket-provider-reply',
   'support-ticket-provider-admin-reply',
   'support-ticket-provider-status-changed',
+  // Vitrin, phase two. Four messages, and each one belongs to exactly one
+  // person for exactly one reason:
+  //
+  //  - the placement went live      → the provider who paid for it
+  //  - a direct lead arrived        → the one business it was addressed to
+  //  - the answer window closed     → the customer, who has a decision to make
+  //  - the answer window closed     → the provider, who missed a promise
+  //
+  // The last two are the same event and are deliberately two templates rather
+  // than one parameterised by audience. What the customer is told is "here is
+  // your choice"; what the provider is told is "you missed this, here is the
+  // record". A template that decided which of the two it was at render time
+  // would be one edit away from putting the customer's fallback options in the
+  // provider's inbox.
+  'showcase-placement-activated',
+  'showcase-lead-received',
+  'showcase-lead-breached-customer',
+  'showcase-lead-breached-provider',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -196,6 +214,14 @@ export function transactionalSubject(
       return withSuffix('Teklif verdiğiniz talebin süresi doldu', text(data.requestNumber));
     case 'package-purchase-confirmation':
       return 'Kredi paketiniz hesabınıza yüklendi';
+    case 'showcase-placement-activated':
+      return withSuffix('Vitrin kartınız yayında', text(data.cardTitle));
+    case 'showcase-lead-received':
+      return withSuffix('Vitrin kartınızdan yeni talep', text(data.urgencyLabel));
+    case 'showcase-lead-breached-customer':
+      return 'Yanıt süresi doldu — ne yapmak istersiniz?';
+    case 'showcase-lead-breached-provider':
+      return withSuffix('Vitrin talebine yanıt süresi doldu', text(data.requestNumber));
     // The ticket's own subject is the suffix on all five, because it is the one
     // thing that tells two tickets apart in a mailbox — and it is truncated,
     // because a customer may type two hundred characters into it and a subject
@@ -314,6 +340,14 @@ export function buildDocument(
       return requestExpiredProvider(subject, fullName, data);
     case 'package-purchase-confirmation':
       return packagePurchaseConfirmation(subject, fullName, data);
+    case 'showcase-placement-activated':
+      return showcasePlacementActivated(subject, fullName, data);
+    case 'showcase-lead-received':
+      return showcaseLeadReceived(subject, fullName, data);
+    case 'showcase-lead-breached-customer':
+      return showcaseLeadBreachedCustomer(subject, fullName, data);
+    case 'showcase-lead-breached-provider':
+      return showcaseLeadBreachedProvider(subject, fullName, data);
     case 'support-ticket-created':
       return supportTicketCreated(subject, fullName, data);
     case 'support-ticket-new-for-support':
@@ -1222,6 +1256,217 @@ function packagePurchaseConfirmation(
       cta('Bakiyemi gör', text(data.creditsUrl), 'primary'),
       spacer(20),
       note('Bu satın alma kredi geçmişinizde paket yüklemesi olarak listelenir.'),
+    ]),
+  };
+}
+
+// ───────────────────────────── vitrin, phase two ─────────────────────────────
+
+/**
+ * The run is live.
+ *
+ * Says what was bought and when it ends, and deliberately not what it cost per
+ * day or how it ranks. The end date is here because it is the provider's own
+ * information and the one thing they need in order to plan a renewal — it is
+ * kept out of the *public* feed for the opposite reason, where it would be a
+ * competitor's information.
+ */
+function showcasePlacementActivated(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  const cardTitle = text(data.cardTitle);
+
+  return {
+    subject,
+    preheader: cardTitle
+      ? `${cardTitle} kartınız ana sayfada yayında.`
+      : 'Vitrin kartınız ana sayfada yayında.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: 'Vitrin kartınız yayında',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Ödemeniz alındı ve kartınız, seçtiğiniz bölgelerde arayan müşterilere gösterilmeye ' +
+          'başladı.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Kart', cardTitle),
+        row('Paket', text(data.packageName)),
+        row('Bölgeler', text(data.areaSummary)),
+        row('Başlangıç', formatDateTime(data.startAt)),
+        row('Bitiş', formatDateTime(data.endAt)),
+      ]),
+      spacer(24),
+      cta('Vitrin kartlarım', text(data.placementUrl), 'primary'),
+      spacer(20),
+      note(
+        'Kartınızdan gelen talepler yalnız size iletilir ve bu talepler için teklif kredisi ' +
+          'harcanmaz.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * A direct lead arrived.
+ *
+ * The deadline is the point of this message, so it is in the preheader as well
+ * as the table: the provider is being told a clock is running, not merely that
+ * a request exists.
+ *
+ * There is no customer telephone number and no e-mail address anywhere in it.
+ * Contact details open through `ContactRevealEvent` and through nothing else,
+ * and a direct lead is not an exception — the provider answers with an offer,
+ * the customer accepts, and the reveal happens on the path it always has.
+ */
+function showcaseLeadReceived(subject: string, fullName: string, data: Data): EmailDocument {
+  const urgencyLabel = text(data.urgencyLabel);
+  const slaHours = int(data.slaHours);
+
+  return {
+    subject,
+    preheader: slaHours
+      ? `${slaHours} saat içinde yanıtlamanız bekleniyor.`
+      : 'Vitrin kartınızdan yeni bir talep geldi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin talebi',
+    heading: 'Vitrin kartınızdan yeni talep',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Bir müşteri doğrudan vitrin kartınızdan talep gönderdi. Bu talep yalnız size ' +
+          'iletildi ve yanıtlamanız için teklif kredisi harcanmaz.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep no', text(data.requestNumber)),
+        row('Hizmet', text(data.categoryName)),
+        row('Bölge', text(data.locationLabel)),
+        row('Aciliyet', urgencyLabel),
+        row('Son yanıt zamanı', formatDateTime(data.slaDueAt)),
+      ]),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.leadUrl), 'primary'),
+      spacer(20),
+      note(
+        'Süre içinde yanıt verilmezse müşteriye talebini genel pazara açmak isteyip ' +
+          'istemediği sorulur.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * The window closed — the customer's copy.
+ *
+ * This message asks a question and does not announce an outcome, because
+ * nothing has happened to the request yet: the deadline passing opens nothing,
+ * and the customer's own answer is the only thing that can.
+ *
+ * Both options are stated plainly, including the one where nothing further
+ * happens. A message that only offered "open it to everyone" would be a nudge
+ * dressed as a choice.
+ */
+function showcaseLeadBreachedCustomer(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  const businessName = text(data.businessName);
+
+  return {
+    subject,
+    preheader: 'Talebinizi diğer hizmet verenlere açmak isteyip istemediğinizi soruyoruz.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Vitrin talebi',
+    heading: 'Yanıt süresi doldu',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        joinNonEmpty(
+          [
+            businessName
+              ? `${businessName}, talebinize taahhüt ettiği süre içinde dönmedi.`
+              : 'Talebinize taahhüt edilen süre içinde dönülmedi.',
+            'Talebiniz şu anda yalnız bu işletmeye açık ve başka kimseye gönderilmedi.',
+          ],
+          ' ',
+        ) as string,
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep no', text(data.requestNumber)),
+        row('İşletme', businessName),
+        row('Taahhüt edilen süre', text(data.slaLabel)),
+        row('Süre bitişi', formatDateTime(data.slaDueAt)),
+      ]),
+      spacer(20),
+      paragraph(
+        'İki seçeneğiniz var: talebinizi bölgenizdeki diğer hizmet verenlere açabilir ya da ' +
+          'kapalı bırakıp kapatabilirsiniz. Karar tamamen sizin; siz seçmedikçe talebiniz ' +
+          'kimseye gönderilmez.',
+      ),
+      spacer(24),
+      cta('Kararımı bildir', text(data.decisionUrl), 'primary'),
+      spacer(20),
+      note(
+        'Talebinizi diğer hizmet verenlere açmayı seçerseniz, yayına alınmadan önce ' +
+          'ekibimiz tarafından incelenir.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * The window closed — the provider's copy.
+ *
+ * A record, not a sanction. Phase two counts breaches and does nothing else
+ * with them; what a repeated breach should cost is a separate product decision
+ * and this message deliberately does not pre-empt it by threatening one.
+ *
+ * It says what happens next honestly: the customer has been asked, and the
+ * provider may still answer until they decide.
+ */
+function showcaseLeadBreachedProvider(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  return {
+    subject,
+    preheader: 'Vitrin talebine taahhüt ettiğiniz süre içinde dönülmedi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin talebi',
+    heading: 'Yanıt süresi doldu',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Vitrin kartınızdan gelen bir talebe, kartınızda taahhüt ettiğiniz süre içinde ' +
+          'dönülmedi. Müşteriye talebini diğer hizmet verenlere açmak isteyip istemediği ' +
+          'soruldu.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep no', text(data.requestNumber)),
+        row('Hizmet', text(data.categoryName)),
+        row('Taahhüt edilen süre', text(data.slaLabel)),
+        row('Süre bitişi', formatDateTime(data.slaDueAt)),
+      ]),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.leadUrl), 'primary'),
+      spacer(20),
+      note(
+        'Müşteri kararını verene kadar hâlâ teklif verebilirsiniz. Bu talep için teklif ' +
+          'kredisi harcanmaz.',
+      ),
     ]),
   };
 }

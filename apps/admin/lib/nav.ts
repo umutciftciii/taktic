@@ -27,12 +27,22 @@ export const navGroups: NavGroup[] = [
       // catalogue somebody maintains.
       { href: '/showcase/reviews', label: 'Vitrin İncelemeleri' },
       { href: '/showcase/cards', label: 'Vitrin Kartları' },
+      // The paid side of vitrin. Under Operasyon with the rest of it rather
+      // than under Finans: a placement is something an operator suspends,
+      // resumes and investigates, and the money it represents is already
+      // visible on the purchase it came from.
+      { href: '/showcase/placements', label: 'Vitrin Yerleşimleri' },
+      { href: '/showcase/leads', label: 'Vitrin Talepleri' },
     ],
   },
   {
     title: 'Katalog',
     items: [
       { href: '/categories', label: 'Kategoriler' },
+      // The vitrin catalogue is a catalogue: an operator maintains it the way
+      // they maintain credit packages, and it belongs beside them rather than
+      // with the runs it produces.
+      { href: '/showcase/packages', label: 'Vitrin Paketleri' },
       { href: '/credit-packages', label: 'Kredi Paketleri' },
     ],
   },
