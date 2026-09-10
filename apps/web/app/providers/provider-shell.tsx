@@ -26,6 +26,7 @@ type ProviderShellActive =
   | 'requests'
   | 'offers'
   | 'showcase'
+  | 'showcase-leads'
   | 'messages'
   | 'support'
   | 'credits'
@@ -44,7 +45,7 @@ type ProviderShellProps = {
    */
   creditBalance?: number | null;
   status?: ProviderStatus | null;
-  counts?: Partial<Record<'requests' | 'offers', number>>;
+  counts?: Partial<Record<'requests' | 'offers' | 'showcaseLeads', number>>;
   children: ReactNode;
 };
 
@@ -75,6 +76,7 @@ export async function ProviderShell({
   const subscriptionsHref = providerId ? `/providers/${providerId}/subscriptions` : null;
   const packagesHref = providerId ? `/providers/${providerId}/package-purchases` : null;
   const showcaseHref = providerId ? `/providers/${providerId}/vitrin` : null;
+  const showcaseLeadsHref = providerId ? `/providers/${providerId}/vitrin/talepler` : null;
   const profileHref = providerId ? `/providers/${providerId}` : null;
   const unread = await loadUnreadMessageCount();
 
@@ -99,6 +101,22 @@ export async function ProviderShell({
     // entry that needs an id: a card belongs to a business, and an account with
     // no business has nowhere to put one.
     { key: 'showcase', label: 'Vitrin kartlarım', Icon: IconStore, href: showcaseHref },
+    // A separate entry rather than a tab inside the card list, because it is a
+    // different kind of thing: the cards are what the business owns, and these
+    // are what came back. It also has to be reachable in one click — a direct
+    // lead carries a deadline, and burying it a level down would be the panel
+    // making a promise harder to keep.
+    //
+    // The count is the leads still waiting for an answer, and it is the only
+    // badge in this list that means "somebody is waiting on you with a clock
+    // running".
+    {
+      key: 'showcase-leads',
+      label: 'Vitrin talepleri',
+      Icon: IconCompass,
+      href: showcaseLeadsHref,
+      count: counts.showcaseLeads,
+    },
     // New, and deliberately not gated on the provider profile: a provider who
     // won a job can write to that customer, and the entry has to be reachable
     // from every screen in the panel rather than only from the offer they won.

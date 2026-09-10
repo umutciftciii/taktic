@@ -5,6 +5,8 @@ import {
   ServiceCategoryStatus,
   ShowcaseCardKind,
   ShowcaseCardStatus,
+  ShowcasePlacementSuspendReason,
+  ShowcaseVersionChangeTrigger,
   ShowcaseVersionReview,
 } from '@prisma/client';
 import { areaCovers, describeArea } from '../../common/provider-service-area-scope';
@@ -29,6 +31,7 @@ import {
 } from '../categories/category-taxonomy';
 import {
   showcaseAreaDuplicate,
+  showcaseCardAlreadyArchived,
   showcaseAreaNotCovered,
   showcaseAreaOverlap,
   showcaseAreaUnknown,
@@ -49,6 +52,7 @@ import {
   SHOWCASE_SLA_URGENT_DEFAULT_HOURS,
 } from './showcase.constants';
 import { classifyShowcaseEdit, type ShowcaseVersionShape } from './showcase-version.rules';
+import { ShowcasePlacementService } from './showcase-placement.service';
 
 /**
  * A provider's own vitrin cards: creating them, editing them, and handing one to
@@ -81,7 +85,11 @@ import { classifyShowcaseEdit, type ShowcaseVersionShape } from './showcase-vers
  */
 @Injectable()
 export class ProviderShowcaseCardsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ShowcasePlacementService)
+    private readonly placements: ShowcasePlacementService,
+  ) {}
 
   /** The terms the submit endpoint requires acceptance of, for the form to show. */
   getPriceTerms() {
@@ -486,6 +494,103 @@ export class ProviderShowcaseCardsService {
     return this.getCard(providerId, cardId);
   }
 
+  /**
+   * The provider retires a card.
+   *
+   * Phase one reserved `ARCHIVED` and left it with no writer. It gets one here
+   * for the same reason `SUSPENDED` does: cards are now on a public page, and a
+   * business that cannot take its own card down is a business advertising work
+   * it has stopped doing.
+   *
+   * ## The clock keeps running, and that is the whole point
+   *
+   * Archiving takes every run of this card off the air, and the paid days go on
+   * being spent. If they did not, a provider could archive a card in February,
+   * bring it back in June and have their thirty days start then — turning a
+   * dated run into an undated voucher, which is not what was sold. The cost is
+   * real and is accepted: two weeks archived is two weeks lost.
+   *
+   * Bringing the card back resumes what is left, automatically, because
+   * `CARD_ARCHIVED` is an observable condition rather than somebody's
+   * judgement.
+   *
+   * There is still no delete. The versions are the record of what was claimed
+   * and what was approved.
+   */
+  async archiveCard(providerId: string, cardId: string) {
+    const card = await this.loadOwnedCard(providerId, cardId);
+
+    if (card.status === ShowcaseCardStatus.ARCHIVED) {
+      throw showcaseCardAlreadyArchived();
+    }
+
+    // An operator's hold outranks the provider's own retirement: a card pulled
+    // by moderation is not theirs to file away.
+    if (card.status === ShowcaseCardStatus.SUSPENDED) {
+      throw showcaseCardLocked();
+    }
+
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        await tx.showcaseCard.update({
+          where: { id: cardId },
+          data: { status: ShowcaseCardStatus.ARCHIVED, archivedAt: new Date() },
+        });
+
+        await this.placements.suspendLiveFor(
+          tx,
+          { cardId },
+          { reason: ShowcasePlacementSuspendReason.CARD_ARCHIVED, actorUserId: null },
+        );
+      },
+      { label: 'showcase.archiveCard' },
+    );
+
+    return this.getCard(providerId, cardId);
+  }
+
+  /**
+   * The provider brings a retired card back, and whatever is left of its run
+   * comes back with it.
+   *
+   * Only from ARCHIVED, and only their own: a card an operator suspended stays
+   * suspended until that operator lifts it.
+   */
+  async unarchiveCard(providerId: string, cardId: string) {
+    const card = await this.loadOwnedCard(providerId, cardId);
+
+    if (card.status !== ShowcaseCardStatus.ARCHIVED) {
+      throw showcaseCardLocked();
+    }
+
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        await tx.showcaseCard.update({
+          where: { id: cardId },
+          data: {
+            status: card.liveVersionId
+              ? ShowcaseCardStatus.APPROVED
+              : ShowcaseCardStatus.DRAFT,
+            archivedAt: null,
+          },
+        });
+
+        // Only suspensions this action caused. A run also held down by a closed
+        // category stays down, and correctly so.
+        await this.placements.resumeSuspendedFor(
+          tx,
+          { cardId },
+          ShowcasePlacementSuspendReason.CARD_ARCHIVED,
+        );
+      },
+      { label: 'showcase.unarchiveCard' },
+    );
+
+    return this.getCard(providerId, cardId);
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Internals
   // ──────────────────────────────────────────────────────────────────────────
@@ -622,6 +727,26 @@ export class ProviderShowcaseCardsService {
           removedAreaKeys,
         },
       });
+
+      /*
+       * A paid run follows its card here too, in the same transaction.
+       *
+       * The provider narrowed their own claim and the system published it
+       * without an operator, so what is live has genuinely changed and the home
+       * page has to say the same thing the card's own page does. The shelves
+       * are rebuilt from the new version, so the run stops appearing in the
+       * areas that were dropped.
+       *
+       * `endAt` is untouched, deliberately. Narrowing is the provider's own
+       * choice; giving time back for it would let a run be shrunk to nothing on
+       * Monday and restored on Friday with the clock stopped in between.
+       */
+      await this.placements.repinToVersion(
+        tx,
+        card.id,
+        version.id,
+        ShowcaseVersionChangeTrigger.AREA_NARROWING,
+      );
     }, { label: 'showcase.publishNarrowedVersion' });
   }
 

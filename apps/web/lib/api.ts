@@ -164,6 +164,36 @@ export type CustomerServiceRequest = {
     name: string;
     slug: string;
   };
+  /**
+   * The vitrin lead this request came from, when it came from one.
+   *
+   * Null on every request submitted through the ordinary form, which is nearly
+   * all of them. It is on the customer's own list rather than behind a second
+   * endpoint because the decision it can carry has to be findable: the fallback
+   * question is mailed once and never chased.
+   */
+  showcaseLead?: CustomerRequestShowcaseLead | null;
+};
+
+/** The customer's own view of their vitrin lead. Nothing about the placement. */
+export type CustomerRequestShowcaseLead = {
+  id: string;
+  status: ShowcaseLeadStatus;
+  urgencyBucket: ShowcaseLeadUrgency;
+  slaHours: number;
+  slaDueAt: string;
+  breachedAt: string | null;
+  fallbackAskedAt: string | null;
+  fallbackDecision: ShowcaseLeadFallbackDecision | null;
+  fallbackDecidedAt: string | null;
+  releasedAt: string | null;
+  closedAt: string | null;
+  closeReason: ShowcaseLeadCloseReason | null;
+  createdAt: string;
+  cardTitle: string;
+  kind: ShowcaseCardKind;
+  listedServicePriceAmount?: number | null;
+  provider: { id: string; businessName: string };
 };
 
 export type ProviderStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
@@ -1281,6 +1311,26 @@ export type ShowcaseCard = {
 export type ShowcasePriceTerms = { version: string; text: string };
 
 /**
+ * The same terms, asked about one card: is there an acceptance on file for the
+ * version in force?
+ *
+ * `accepted` answers what the buying screen needs rather than "has this card
+ * ever accepted anything" — an acceptance of superseded terms reports `false`
+ * with a null `acceptance`, because for the purpose of opening a checkout it is
+ * not an acceptance at all.
+ */
+export type ShowcaseCardPriceTerms = ShowcasePriceTerms & {
+  accepted: boolean;
+  acceptance: {
+    id: string;
+    cardId: string;
+    termsVersion: string;
+    termsText: string;
+    acceptedAt: string;
+  } | null;
+};
+
+/**
  * One category a card may point at, with the ancestry needed to render it.
  *
  * `depth` and `path` come from the API so the form can show a tree without
@@ -1325,4 +1375,279 @@ export const SHOWCASE_VERSION_REVIEW_LABELS: Record<ShowcaseVersionReview, strin
 export const SHOWCASE_CARD_KIND_LABELS: Record<ShowcaseCardKind, string> = {
   SERVICE: 'Hizmet vitrini',
   PROMOTION: 'Genel tanıtım',
+};
+
+// ── Vitrin phase two: packages, placements, the feed and direct leads ────────
+
+/**
+ * A service request's own lifecycle, as these screens read it.
+ *
+ * Named here rather than imported because the vitrin screens are the first to
+ * need the whole set — a direct lead sits at SUBMITTED until its addressee
+ * answers it, which is a state no other provider-facing screen renders.
+ */
+export type ServiceRequestLifecycleStatus =
+  | 'SUBMITTED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'MATCHED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'EXPIRED';
+
+export type ShowcasePlacementStatus =
+  | 'PENDING_ACTIVATION'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'EXPIRED'
+  | 'CANCELLED';
+
+export type ShowcasePlacementSuspendReason =
+  | 'ADMIN_ACTION'
+  | 'CATEGORY_CLOSED'
+  | 'SYSTEM_PUBLISH_BLOCK'
+  | 'CARD_ARCHIVED'
+  | 'AREA_NO_LONGER_COVERED'
+  | 'PROVIDER_NOT_APPROVED';
+
+export type ShowcaseLeadUrgency = 'URGENT' | 'NORMAL';
+
+export type ShowcaseLeadStatus =
+  | 'OPEN'
+  | 'ANSWERED'
+  | 'BREACHED'
+  | 'RELEASED'
+  | 'CLOSED_UNANSWERED';
+
+export type ShowcaseLeadFallbackDecision = 'RELEASE' | 'KEEP_CLOSED';
+
+export type ShowcaseLeadCloseReason =
+  | 'CUSTOMER_KEPT_CLOSED'
+  | 'CUSTOMER_CANCELLED'
+  | 'MODERATION_REJECTED'
+  | 'REQUEST_EXPIRED';
+
+/**
+ * What an operator sells.
+ *
+ * `priceAmount` is what TakTick charges for the placement, in minor units. It is
+ * never rendered beside `ShowcaseCardVersion.listedServicePriceAmount`, which is
+ * the provider's own price to their own customer — the two are different money
+ * and the screens keep them apart.
+ */
+export type ShowcasePackage = {
+  id: string;
+  name: string;
+  slug: string;
+  priceAmount: number;
+  currency: string;
+  durationDays: number;
+  allowedCardKind: ShowcaseCardKind | null;
+  maxAreas: number | null;
+  requiresAdminApproval: boolean;
+  description: string | null;
+  sortOrder: number;
+};
+
+export type ShowcasePlacementArea = {
+  id: string;
+  scope: ServiceAreaScope;
+  active: boolean;
+  label: string;
+};
+
+export type ShowcasePlacementSuspension = {
+  id: string;
+  reason: ShowcasePlacementSuspendReason;
+  /** Whether this interval pushed the run's end date forward. Snapshotted. */
+  extendsClock: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  endAtBefore: string;
+  endAtAfter: string | null;
+  note: string | null;
+  actor: { id: string; name: string | null } | null;
+};
+
+/**
+ * One paid run.
+ *
+ * `extendedDays` is whole days, computed by the API. Two screens computing it
+ * from milliseconds would be two places it could be rounded differently.
+ */
+export type ShowcasePlacement = {
+  id: string;
+  status: ShowcasePlacementStatus;
+  cardId: string;
+  kind: ShowcaseCardKind;
+  category: { id: string; name: string; slug: string };
+  version: { id: string; versionNumber: number; title: string };
+  packageName: string;
+  priceAmount: number;
+  currency: string;
+  durationDays: number;
+  startAt: string;
+  endAt: string;
+  suspendedAt: string | null;
+  suspendReason: ShowcasePlacementSuspendReason | null;
+  extendedDays: number;
+  cancelledAt: string | null;
+  createdAt: string;
+  leadCount: number;
+  areas: ShowcasePlacementArea[];
+  suspensions?: ShowcasePlacementSuspension[];
+};
+
+/**
+ * A card as a visitor sees it.
+ *
+ * `listedServicePriceAmount` is **absent** rather than null on a promotion
+ * card: the API does not add the key at all, so a client cannot render a price
+ * it was never given or mistake a null for "free".
+ *
+ * Deliberately absent throughout: the placement id, what the provider paid,
+ * when the run ends, and the provider's telephone number or e-mail address.
+ */
+export type ShowcaseFeedCard = {
+  cardId: string;
+  kind: ShowcaseCardKind;
+  title: string;
+  summary: string;
+  scopeIncluded: string[];
+  scopeExcluded: string[];
+  imageUrl: string | null;
+  responseSlaUrgentHours: number;
+  responseSlaNormalHours: number;
+  category: { id: string; name: string; slug: string };
+  areaLabel: string;
+  areaScope: ServiceAreaScope;
+  provider: { id: string; businessName: string; city: string; district: string };
+  listedServicePriceAmount?: number | null;
+  listedServiceCurrency?: string;
+};
+
+export type ShowcaseFeed = {
+  location: {
+    city: string;
+    district: string | null;
+    neighborhood: string | null;
+    label: string;
+  };
+  cards: ShowcaseFeedCard[];
+  nextCursor: string | null;
+};
+
+/**
+ * One direct lead, as the card's owner sees it.
+ *
+ * There is no customer telephone number and no e-mail address here, and there
+ * will not be: contact opens through the accepted-offer path, and a direct lead
+ * is not an exception to that rule.
+ */
+export type ShowcaseProviderLead = {
+  id: string;
+  status: ShowcaseLeadStatus;
+  urgencyBucket: ShowcaseLeadUrgency;
+  slaHours: number;
+  slaDueAt: string;
+  breachedAt: string | null;
+  respondedAt: string | null;
+  respondedOfferId: string | null;
+  closedAt: string | null;
+  closeReason: ShowcaseLeadCloseReason | null;
+  createdAt: string;
+  card: { id: string; versionId: string; title: string };
+  kind: ShowcaseCardKind;
+  listedServicePriceAmount?: number | null;
+  request: {
+    id: string;
+    requestNumber: string | null;
+    status: ServiceRequestLifecycleStatus;
+    categoryId: string;
+    category: { id: string; name: string; slug: string; offerCreditCost: number | null };
+    city: string;
+    district: string;
+    neighborhood: string | null;
+    description: string | null;
+    urgency: string | null;
+    preferredDate: string | null;
+    budgetMin: number | null;
+    budgetMax: number | null;
+    qualityScore: number;
+    customerName: string;
+    submittedAt: string;
+    answers: Array<{
+      id: string;
+      questionKey: string;
+      questionLabel: string;
+      questionType: string;
+      value: unknown;
+    }>;
+  };
+};
+
+/** The customer's own view of their lead, including the decision they may owe. */
+export type ShowcaseCustomerLead = {
+  id: string;
+  status: ShowcaseLeadStatus;
+  urgencyBucket: ShowcaseLeadUrgency;
+  slaHours: number;
+  slaDueAt: string;
+  breachedAt: string | null;
+  fallbackAskedAt: string | null;
+  fallbackDecision: ShowcaseLeadFallbackDecision | null;
+  fallbackDecidedAt: string | null;
+  releasedAt: string | null;
+  closedAt: string | null;
+  closeReason: ShowcaseLeadCloseReason | null;
+  createdAt: string;
+  cardTitle: string;
+  kind: ShowcaseCardKind;
+  listedServicePriceAmount?: number | null;
+  request: { id: string; requestNumber: string | null; status: ServiceRequestLifecycleStatus };
+  provider: { id: string; businessName: string };
+};
+
+export const SHOWCASE_PLACEMENT_STATUS_LABELS: Record<ShowcasePlacementStatus, string> = {
+  PENDING_ACTIVATION: 'Başlatılıyor',
+  ACTIVE: 'Yayında',
+  SUSPENDED: 'Yayında değil',
+  EXPIRED: 'Süresi doldu',
+  CANCELLED: 'İptal edildi',
+};
+
+/**
+ * Why a run is off the air, written for the person who has to read it.
+ *
+ * Each sentence also says whether the paid clock is running, because that is the
+ * first thing a provider wants to know and the difference is not something they
+ * should have to infer from the reason's name.
+ */
+export const SHOWCASE_SUSPEND_REASON_LABELS: Record<ShowcasePlacementSuspendReason, string> = {
+  ADMIN_ACTION: 'Yönetim kararıyla durduruldu — süre işlemiyor',
+  CATEGORY_CLOSED: 'Kategori kapatıldı — süre işlemiyor',
+  SYSTEM_PUBLISH_BLOCK: 'Sistemsel yayın engeli — süre işlemiyor',
+  CARD_ARCHIVED: 'Kartı arşivlediniz — süre işlemeye devam ediyor',
+  AREA_NO_LONGER_COVERED: 'Kartın bölgesi hizmet bölgelerinizden çıktı — süre işlemeye devam ediyor',
+  PROVIDER_NOT_APPROVED: 'İşletme başvurunuz onaylı değil — süre işlemeye devam ediyor',
+};
+
+export const SHOWCASE_LEAD_STATUS_LABELS: Record<ShowcaseLeadStatus, string> = {
+  OPEN: 'Yanıt bekliyor',
+  ANSWERED: 'Teklif verildi',
+  BREACHED: 'Süre doldu',
+  RELEASED: 'Genel pazara açıldı',
+  CLOSED_UNANSWERED: 'Kapandı',
+};
+
+export const SHOWCASE_LEAD_URGENCY_LABELS: Record<ShowcaseLeadUrgency, string> = {
+  URGENT: 'Acil',
+  NORMAL: 'Normal',
+};
+
+export const SHOWCASE_LEAD_CLOSE_REASON_LABELS: Record<ShowcaseLeadCloseReason, string> = {
+  CUSTOMER_KEPT_CLOSED: 'Müşteri talebini kapalı tutmayı seçti',
+  CUSTOMER_CANCELLED: 'Müşteri talebini iptal etti',
+  MODERATION_REJECTED: 'Talep incelemede reddedildi',
+  REQUEST_EXPIRED: 'Müşteri karar vermeden süre doldu',
 };

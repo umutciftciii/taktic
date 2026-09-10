@@ -4229,3 +4229,29 @@ button:disabled {
     transition: none;
   }
 }
+
+/*
+ * A field that has to span the whole form grid — a textarea, a checkbox row, an
+ * action bar. `1 / -1` rather than a column count, so it stays correct however
+ * many tracks `auto-fit` produced at this width.
+ */
+.form-grid-wide {
+  grid-column: 1 / -1;
+}
+
+/*
+ * A list inside a definition value — the shelves a placement publishes into,
+ * the areas a version claims. Unbulleted and unindented, because it is data in
+ * a cell rather than prose, and it wraps: an area label is whatever the location
+ * table calls a place.
+ */
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

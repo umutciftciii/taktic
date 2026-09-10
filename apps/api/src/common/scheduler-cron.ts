@@ -35,6 +35,18 @@ export const SCHEDULER_CRON_CONFIG = {
   'unviewed-offer-refund': { variable: 'UNVIEWED_OFFER_REFUND_CRON', fallback: '0 * * * *' },
   'request-expiry': { variable: 'REQUEST_EXPIRY_SCHEDULER_CRON', fallback: '15 * * * *' },
   'request-reminder': { variable: 'REQUEST_REMINDER_SCHEDULER_CRON', fallback: '45 * * * *' },
+  // Every five minutes, and deliberately the tightest schedule of the six. An
+  // urgent lead promises an answer in three hours; a sweeper that woke hourly
+  // could add most of an hour to a deadline the customer was shown to the
+  // minute, and "we told you three hours and asked you at four" is not a
+  // promise kept.
+  'showcase-lead-sla': { variable: 'SHOWCASE_LEAD_SLA_CRON', fallback: '*/5 * * * *' },
+  // Twice a day is plenty: nothing depends on this having run, because every
+  // publish path checks the window itself.
+  'showcase-placement-expiry': {
+    variable: 'SHOWCASE_PLACEMENT_EXPIRY_CRON',
+    fallback: '20 3,15 * * *',
+  },
 } as const satisfies Record<SchedulerJobKey, CronConfig>;
 
 export function readSchedulerCron(job: SchedulerJobKey): string {

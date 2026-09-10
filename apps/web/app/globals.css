@@ -5431,3 +5431,161 @@ body.has-drawer-open {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Vitrin, phase two — the public shelf and one card's page
+   ══════════════════════════════════════════════════════════════════════════
+
+   Everything here is written against a 320px viewport first, which is the one
+   the responsive suite asserts on and the width where a grid with a fixed
+   minimum quietly widens the document. The rules that matter:
+
+   - the shelf grid's track minimum is `min(260px, 100%)`, not `260px`. The
+     bare value wins over the container below 260px and pushes the page wider
+     than the phone; `min()` lets the track collapse to whatever there is.
+   - every cell that can hold text somebody typed carries `min-width: 0` and
+     `overflow-wrap: anywhere`. A long unbroken word — a business name, a URL
+     in a summary — is otherwise an unbreakable box wider than the screen.
+   - the picker is a flex column on a phone and a row from 640px. A row of
+     three selects at 320px is three overflowing selects.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.showcase-shelf-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.showcase-shelf-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.showcase-shelf-picker select {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .showcase-shelf-picker {
+    flex-direction: row;
+    align-items: flex-end;
+  }
+
+  .showcase-shelf-picker label {
+    flex: 1 1 0;
+  }
+}
+
+.showcase-shelf-grid {
+  display: grid;
+  /* `min(260px, 100%)` rather than `260px` — see the block comment above. */
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: var(--space-4);
+}
+
+.showcase-shelf-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.showcase-shelf-card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.showcase-shelf-provider {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.showcase-shelf-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-neutral-800);
+}
+
+.showcase-shelf-price {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 18px;
+}
+
+.showcase-shelf-sla,
+.showcase-shelf-area {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* The card's own page: one readable column, and the CTA below it. */
+.showcase-public {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.showcase-public-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.showcase-public-scopes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: var(--space-5);
+}
+
+.showcase-public-scopes h2 {
+  font-size: 15px;
+  margin: 0 0 var(--space-2);
+}
+
+.showcase-public-cta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+/*
+ * The urgency choice is a fieldset of radios rather than a select, so both
+ * promises are readable at once — the customer is choosing between two
+ * sentences, not between two words in a dropdown.
+ */
+.showcase-public-cta fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.showcase-public-cta legend {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 0;
+  margin-bottom: var(--space-2);
+}

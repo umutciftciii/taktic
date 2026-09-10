@@ -116,12 +116,23 @@ export class PaymentsService {
       reference,
     });
 
+    // `package` became nullable on the model when vitrin purchases joined this
+    // table, and it is NOT NULL on every OFFER_PACKAGE row —
+    // `PackagePurchase_kind_matches_package` says so, and the row above was
+    // just created as one. Narrowed rather than asserted, because the slug is
+    // what the variant allow-list is keyed by and a checkout opened without it
+    // would be a payment mapped to nothing.
+    if (!purchase.package) {
+      throw new BadRequestException('Active credit package not found');
+    }
+
     try {
       const session = await this.provider.createCheckoutSession({
         purchaseId: purchase.id,
         reference,
         packageSlug: purchase.package.slug,
         packageName: purchase.packageNameSnapshot,
+        productKind: 'offer-credits',
         creditAmount: purchase.creditAmountSnapshot,
         priceAmount: purchase.priceAmountSnapshot,
         currency: purchase.currencySnapshot,

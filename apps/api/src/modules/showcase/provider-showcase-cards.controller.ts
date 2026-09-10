@@ -11,13 +11,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { Roles } from '../auth/auth.decorators';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateShowcaseCardDto, UpdateShowcaseCardDto } from './dto/create-showcase-card.dto';
+import { AcceptShowcasePriceTermsDto } from './dto/showcase-price-terms.dto';
 import { SubmitShowcaseCardDto } from './dto/submit-showcase-card.dto';
+import { AuthUser } from '../auth/auth.types';
 import { ProviderShowcaseCardsService } from './provider-showcase-cards.service';
+import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 
 /**
  * A provider's own vitrin cards.
@@ -35,9 +38,11 @@ import { ProviderShowcaseCardsService } from './provider-showcase-cards.service'
  * legitimately own is caught one level down, in the service, and answers 404
  * rather than 403 — see `showcaseCardNotFound`.
  *
- * There is no delete route. A card's versions are the record of what was
- * claimed and what was approved, and a product that can erase that has no audit
- * trail. Retiring a card is `ARCHIVED`, which no endpoint writes yet.
+ * There is no delete route, and there will not be one. A card's versions are
+ * the record of what was claimed and what was approved, and a product that can
+ * erase that has no audit trail. Retiring a card is `ARCHIVED` — which this
+ * phase does give an endpoint, because cards are now on a public page and a
+ * business has to be able to take its own down.
  */
 @Controller('providers/:providerId/showcase/cards')
 @UseGuards(AuthGuard, RolesGuard, ProviderAccessGuard)
@@ -45,6 +50,7 @@ import { ProviderShowcaseCardsService } from './provider-showcase-cards.service'
 export class ProviderShowcaseCardsController {
   constructor(
     @Inject(ProviderShowcaseCardsService) private readonly cards: ProviderShowcaseCardsService,
+    @Inject(ShowcasePriceTermsService) private readonly priceTerms: ShowcasePriceTermsService,
   ) {}
 
   /**
@@ -94,6 +100,50 @@ export class ProviderShowcaseCardsController {
   }
 
   /**
+   * What this card is being asked to agree to before its next placement is
+   * bought, and whether it already has.
+   *
+   * Card-scoped, unlike the `price-terms` route above it, and the two answer
+   * different questions on purpose. That one serves the sentence the *review*
+   * submission requires; this one also says whether this particular card has an
+   * acceptance for the version in force — which is what the buying screen needs
+   * in order to offer the acceptance rather than a button the checkout refuses.
+   */
+  @Get(':cardId/price-terms')
+  getCardPriceTerms(
+    @Param('providerId') providerId: string,
+    @Param('cardId') cardId: string,
+  ) {
+    return this.priceTerms.getForCard(providerId, cardId);
+  }
+
+  /**
+   * Accepts the price-responsibility text for this card.
+   *
+   * **200 on both the first call and every repeat, and never 201.** What this
+   * addresses is the card's acceptance of the terms in force, and after either
+   * call it exists; a status that differed between two identical requests would
+   * report to the caller a difference they cannot act on and do not have. The
+   * body is the acceptance itself either way — the same row, with the same
+   * `acceptedAt`, because a re-acceptance does not move the record of when
+   * consent was actually given.
+   *
+   * Nothing about the card changes here. No version is written, no review is
+   * opened, no placement is touched: that separation is the whole reason this
+   * route exists rather than a second submit.
+   */
+  @Post(':cardId/price-terms-acceptances')
+  @HttpCode(HttpStatus.OK)
+  acceptCardPriceTerms(
+    @Param('providerId') providerId: string,
+    @Param('cardId') cardId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: AcceptShowcasePriceTermsDto,
+  ) {
+    return this.priceTerms.acceptForCard(providerId, cardId, user, dto);
+  }
+
+  /**
    * An edit. What it produces — a rewritten draft, a new draft for review, or a
    * new live version — is the service's decision, not the caller's: a client
    * that could ask for "publish this without review" would be the whole of the
@@ -140,5 +190,33 @@ export class ProviderShowcaseCardsController {
     @Param('cardId') cardId: string,
   ) {
     return this.cards.withdrawSubmission(providerId, cardId);
+  }
+
+  /**
+   * Retires a card, and takes whatever it is publishing off the air with it.
+   *
+   * There is still no delete — the versions are the record of what was claimed
+   * and what was approved — but a business that cannot take its own card down
+   * is a business advertising work it has stopped doing.
+   *
+   * **The paid clock keeps running.** A provider who could freeze a run by
+   * archiving its card could park a dated placement and spend it whenever the
+   * season suited. The two weeks a card spends archived are two weeks of the
+   * run, and that is the price of a run being a run.
+   *
+   * 200 rather than 201: nothing is created, and the same card comes back
+   * archived.
+   */
+  @Post(':cardId/archive')
+  @HttpCode(HttpStatus.OK)
+  archiveCard(@Param('providerId') providerId: string, @Param('cardId') cardId: string) {
+    return this.cards.archiveCard(providerId, cardId);
+  }
+
+  /** Brings a retired card back, and resumes whatever is left of its run. */
+  @Post(':cardId/unarchive')
+  @HttpCode(HttpStatus.OK)
+  unarchiveCard(@Param('providerId') providerId: string, @Param('cardId') cardId: string) {
+    return this.cards.unarchiveCard(providerId, cardId);
   }
 }

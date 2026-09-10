@@ -3,6 +3,8 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { CreditsModule } from '../credits/credits.module';
 import { PackagePurchasesModule } from '../package-purchases/package-purchases.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
 import { LemonSqueezyCheckoutAdapter } from './lemon-squeezy.adapter';
 import { LemonSqueezyWebhookController } from './lemon-squeezy-webhook.controller';
 import { MockPaymentAdapter } from './mock-payment.adapter';
@@ -30,7 +32,19 @@ import { PaymentsWebhookService } from './payments-webhook.service';
  * throughout.
  */
 @Module({
-  imports: [PrismaModule, AuthModule, CreditsModule, PackagePurchasesModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    CreditsModule,
+    PackagePurchasesModule,
+    NotificationsModule,
+    // The webhook turns a settled vitrin purchase into a placement, inside the
+    // settlement transaction. The lifecycle module rather than the whole of
+    // vitrin, because vitrin's checkout opens its session through this
+    // module's own provider port — importing the whole thing would make the
+    // two mutually dependent for no gain.
+    ShowcaseLifecycleModule,
+  ],
   controllers: [PaymentsController, LemonSqueezyWebhookController],
   providers: [
     MockPaymentAdapter,

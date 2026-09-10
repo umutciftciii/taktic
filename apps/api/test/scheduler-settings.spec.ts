@@ -11,6 +11,7 @@ import { SchedulerRunRegistry } from '../src/modules/operations-settings/schedul
 import { SchedulerSettingsService } from '../src/modules/operations-settings/scheduler-settings.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { RequestLifecycleSchedulerService } from '../src/modules/request-lifecycle/request-lifecycle-scheduler.service';
+import { ShowcaseSchedulerService } from '../src/modules/showcase/showcase-scheduler.service';
 import { UnviewedOfferRefundSchedulerService } from '../src/modules/unviewed-offer-refund/unviewed-offer-refund.scheduler';
 import {
   createApprovedRequest,
@@ -43,6 +44,7 @@ import {
 let ctx: TestContext;
 let schedulers: SchedulerSettingsService;
 let lifecycle: RequestLifecycleSchedulerService;
+let showcase: ShowcaseSchedulerService;
 let renewal: EntitlementRenewalScheduler;
 let refund: UnviewedOfferRefundSchedulerService;
 
@@ -50,6 +52,7 @@ beforeAll(async () => {
   ctx = await createTestApp();
   schedulers = ctx.app.get(SchedulerSettingsService);
   lifecycle = ctx.app.get(RequestLifecycleSchedulerService);
+  showcase = ctx.app.get(ShowcaseSchedulerService);
   renewal = ctx.app.get(EntitlementRenewalScheduler);
   refund = ctx.app.get(UnviewedOfferRefundSchedulerService);
 });
@@ -382,6 +385,8 @@ describe('the natural tick', () => {
     'unviewed-offer-refund': () => refund.runScheduledRefund(),
     'request-expiry': () => lifecycle.runScheduledExpiry(),
     'request-reminder': () => lifecycle.runScheduledReminder(),
+    'showcase-lead-sla': () => showcase.runScheduledSla(),
+    'showcase-placement-expiry': () => showcase.runScheduledExpiry(),
   };
 
   /** One approved request old enough for both lifecycle jobs to want it. */

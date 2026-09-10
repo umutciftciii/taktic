@@ -193,3 +193,133 @@ function errorCode(error: unknown): string {
 
   return 'SHOWCASE_SAVE_FAILED';
 }
+
+// ── Phase two: buying a run, and retiring a card ────────────────────────────
+
+/**
+ * Opens a checkout for one card and one package.
+ *
+ * Nothing about price, duration or coverage is sent. All three are read
+ * server-side from the package and the card's live version, so this form cannot
+ * decide what a placement costs or how far it reaches — see
+ * `CreateShowcaseCheckoutDto`.
+ *
+ * Where the provider goes next depends on the adapter: a hosted checkout has a
+ * URL and the browser is sent to it; the mock adapter has none, and the
+ * purchase's own screen renders the in-app form. The action does not decide
+ * which — it follows whatever the API said.
+ */
+/**
+ * Accepts the current price-responsibility text for one card.
+ *
+ * Its own action rather than a step folded into the checkout, and that is the
+ * point of the whole feature: agreeing to the platform's terms is a legal act,
+ * and one a provider can perform without buying anything, without touching what
+ * their card says, and without sending it back to an operator. The API writes a
+ * row in a table of its own and changes nothing else.
+ *
+ * Lands back on the card, where the buy button now works.
+ */
+export async function acceptShowcasePriceTermsAction(formData: FormData) {
+  const providerId = readString(formData, 'providerId');
+  const cardId = readString(formData, 'cardId');
+  const target = `/providers/${providerId}/vitrin/${cardId}`;
+
+  try {
+    await apiFetch(
+      `/providers/${providerId}/showcase/cards/${cardId}/price-terms-acceptances`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          priceTermsAccepted: formData.get('priceTermsAccepted') === 'on',
+          priceTermsVersion: readString(formData, 'priceTermsVersion'),
+        }),
+      },
+    );
+  } catch (error) {
+    redirect(`${target}?error=${errorCode(error)}`);
+  }
+
+  revalidatePath(target);
+  redirect(`${target}?priceTermsAccepted=1`);
+}
+
+export async function startShowcaseCheckoutAction(formData: FormData) {
+  const providerId = readString(formData, 'providerId');
+  const cardId = readString(formData, 'cardId');
+  const base = `/providers/${providerId}/vitrin/${cardId}`;
+
+  let outcome: ShowcaseCheckoutResult;
+  try {
+    outcome = await apiFetch<ShowcaseCheckoutResult>(
+      `/providers/${providerId}/showcase/placements/checkout`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          cardId,
+          showcasePackageId: readString(formData, 'showcasePackageId'),
+        }),
+      },
+    );
+  } catch (error) {
+    redirect(`${base}?error=${errorCode(error)}`);
+  }
+
+  revalidatePath(`/providers/${providerId}/vitrin`);
+
+  if (outcome.checkout.url) {
+    redirect(outcome.checkout.url);
+  }
+
+  // No hosted page: the purchase's own screen carries the clearly-labelled mock
+  // form, exactly as it does for a credit package.
+  redirect(`/providers/${providerId}/package-purchases/${outcome.purchase.id}`);
+}
+
+/**
+ * Retires a card and takes its run off the air.
+ *
+ * The paid clock keeps running while it is archived, and the screen says so
+ * before this is submitted — a provider who expected the time to pause would be
+ * a provider surprised by a bill they had already paid.
+ */
+export async function archiveShowcaseCardAction(formData: FormData) {
+  const providerId = readString(formData, 'providerId');
+  const cardId = readString(formData, 'cardId');
+  const target = `/providers/${providerId}/vitrin/${cardId}`;
+
+  try {
+    await apiFetch<ShowcaseCard>(
+      `/providers/${providerId}/showcase/cards/${cardId}/archive`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  } catch (error) {
+    redirect(`${target}?error=${errorCode(error)}`);
+  }
+
+  revalidatePath(target);
+  redirect(`${target}?archived=1`);
+}
+
+export async function unarchiveShowcaseCardAction(formData: FormData) {
+  const providerId = readString(formData, 'providerId');
+  const cardId = readString(formData, 'cardId');
+  const target = `/providers/${providerId}/vitrin/${cardId}`;
+
+  try {
+    await apiFetch<ShowcaseCard>(
+      `/providers/${providerId}/showcase/cards/${cardId}/unarchive`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  } catch (error) {
+    redirect(`${target}?error=${errorCode(error)}`);
+  }
+
+  revalidatePath(target);
+  redirect(`${target}?unarchived=1`);
+}
+
+type ShowcaseCheckoutResult = {
+  purchase: { id: string };
+  checkout: { url: string | null; reused: boolean };
+};

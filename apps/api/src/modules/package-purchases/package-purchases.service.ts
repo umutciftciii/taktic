@@ -9,6 +9,7 @@ import {
   CreditTransactionType,
   NumberedEntityType,
   OfferPackageType,
+  PackagePurchaseKind,
   PackagePurchaseStatus,
   Prisma,
 } from '@prisma/client';
@@ -22,6 +23,7 @@ import { resolvePaymentProviderKind } from '../payments/payment-provider.config'
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
+import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
 import { UpdatePackagePurchaseStatusDto } from './dto/update-package-purchase-status.dto';
@@ -39,6 +41,7 @@ export class PackagePurchasesService {
     @Inject(CreditsService) private readonly creditsService: CreditsService,
     @Inject(NumberingService) private readonly numbering: NumberingService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(ShowcasePlacementService) private readonly placements: ShowcasePlacementService,
   ) {}
 
   /**
@@ -193,19 +196,66 @@ export class PackagePurchasesService {
         }
 
         /*
-         * What a settled purchase produces depends on what was bought, and the
-         * two are mutually exclusive.
+         * What a settled purchase produces depends on what was bought, and
+         * exactly one of three things happens.
          *
-         * A ONE_TIME_CREDITS package loads the ledger, exactly as it always
-         * has. A period package grants an entitlement and touches no balance at
-         * all: writing a zero-credit ledger row for it would put a transaction
-         * in the provider's history that says nothing happened, and a non-zero
-         * one would hand out credits the package did not sell.
+         * A vitrin package creates a placement and moves no balance at all —
+         * `creditAmountSnapshot` is zero by construction and a CHECK refuses a
+         * vitrin row that carries credit. A ONE_TIME_CREDITS package loads the
+         * ledger, exactly as it always has. A period package grants an
+         * entitlement and touches no balance either: writing a zero-credit
+         * ledger row for it would put a transaction in the provider's history
+         * that says nothing happened.
          *
-         * Both happen inside this Serializable transaction, so a purchase can
-         * never be PAID without whatever it bought existing beside it.
+         * All of it happens inside this Serializable transaction, so a purchase
+         * can never be PAID without whatever it bought existing beside it.
+         *
+         * This is the mock adapter's settlement path, and it branches the same
+         * way the webhook does. Two settlement paths with one branching rule
+         * between them would be one deploy away from the mock form quietly
+         * doing something the real one does not.
          */
-        const isOneTime = purchase.package.type === OfferPackageType.ONE_TIME_CREDITS;
+        if (purchase.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
+          if (
+            !purchase.showcasePackageId ||
+            !purchase.showcaseCardId ||
+            !purchase.showcaseCardVersionId ||
+            !purchase.showcasePriceTermsAcceptanceId ||
+            purchase.durationDaysSnapshot === null
+          ) {
+            throw new ConflictException('This vitrin purchase is missing its placement details');
+          }
+
+          await this.placements.createForPurchase(
+            tx,
+            {
+              id: purchase.id,
+              providerId: purchase.providerId,
+              showcasePackageId: purchase.showcasePackageId,
+              showcaseCardId: purchase.showcaseCardId,
+              showcaseCardVersionId: purchase.showcaseCardVersionId,
+              durationDaysSnapshot: purchase.durationDaysSnapshot,
+              packageNameSnapshot: purchase.packageNameSnapshot,
+              priceAmountSnapshot: purchase.priceAmountSnapshot,
+              currencySnapshot: purchase.currencySnapshot,
+              showcasePriceTermsAcceptanceId: purchase.showcasePriceTermsAcceptanceId,
+            },
+            now,
+          );
+
+          return tx.packagePurchase.update({
+            where: { id: purchase.id },
+            data: {
+              status: PackagePurchaseStatus.PAID,
+              paidAt: now,
+              mockPaymentReference: buildMockPaymentReference(now, purchase.id),
+            },
+            include: packagePurchaseInclude,
+            omit: packagePurchaseOmit,
+          });
+        }
+
+        const isOneTime = purchase.package?.type === OfferPackageType.ONE_TIME_CREDITS;
 
         const creditTransaction = isOneTime
           ? await this.creditsService.createProviderCreditTransactionInTransaction(tx, {
@@ -219,6 +269,14 @@ export class PackagePurchasesService {
           : null;
 
         if (!isOneTime) {
+          if (!purchase.packageId) {
+            // Unrepresentable: `PackagePurchase_kind_matches_package` requires a
+            // package on every OFFER_PACKAGE row, and the vitrin branch above
+            // has already returned. Narrowed rather than asserted, because a
+            // settlement is not a place to discover a null.
+            throw new ConflictException('This purchase is missing its package');
+          }
+
           await grantEntitlementForPurchase(tx, {
             providerId: purchase.providerId,
             purchaseId: purchase.id,
@@ -253,7 +311,21 @@ export class PackagePurchasesService {
     // own transport failures, so nothing here can turn a loaded balance into a
     // failed HTTP response.
     if (settled.status === PackagePurchaseStatus.PAID) {
-      await this.mail.sendPackagePurchaseConfirmation(settled.id);
+      // The same two-receipts rule the webhook applies, for the same reason: a
+      // vitrin purchase's notice is about the placement being on the air, not
+      // about a balance that never moved.
+      if (settled.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
+        const placement = await this.prisma.showcasePlacement.findUnique({
+          where: { purchaseId: settled.id },
+          select: { id: true },
+        });
+
+        if (placement) {
+          await this.mail.sendShowcasePlacementActivated(placement.id);
+        }
+      } else {
+        await this.mail.sendPackagePurchaseConfirmation(settled.id);
+      }
     }
 
     return settled;
@@ -390,6 +462,42 @@ const packagePurchaseInclude = {
       periodDays: true,
       dailyOfferLimit: true,
     },
+  },
+  /*
+   * The vitrin half of the same row.
+   *
+   * Both catalogues travel on every projection rather than being selected by
+   * `kind`, so a screen rendering a mixed list reads one shape: exactly one of
+   * the two is non-null on any given row, and the CHECK constraint is what
+   * makes that a guarantee rather than a convention.
+   *
+   * `ShowcasePackage.priceAmount` is what TakTick charges for the placement. It
+   * is never rendered beside `ShowcaseCardVersion.listedServicePriceAmount`,
+   * which is the provider's own price to their own customer and money this
+   * platform does not touch — the two live on different tables under different
+   * names precisely so no projection can confuse them.
+   */
+  showcasePackage: {
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      priceAmount: true,
+      currency: true,
+      durationDays: true,
+      allowedCardKind: true,
+    },
+  },
+  showcaseCard: {
+    select: {
+      id: true,
+      kind: true,
+      status: true,
+      category: { select: { id: true, name: true, slug: true } },
+    },
+  },
+  showcasePlacement: {
+    select: { id: true, status: true, startAt: true, endAt: true },
   },
 } satisfies Prisma.PackagePurchaseInclude;
 

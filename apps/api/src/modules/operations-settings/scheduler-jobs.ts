@@ -16,6 +16,10 @@ export const SCHEDULER_JOB_KEYS = [
   'unviewed-offer-refund',
   'request-expiry',
   'request-reminder',
+  // The two vitrin jobs, added by being added here — no new endpoint and no new
+  // table, which is exactly what this list was written to make possible.
+  'showcase-lead-sla',
+  'showcase-placement-expiry',
 ] as const;
 
 export type SchedulerJobKey = (typeof SCHEDULER_JOB_KEYS)[number];
@@ -37,6 +41,8 @@ export const SCHEDULER_JOB_SETTINGS = {
   'unviewed-offer-refund': 'unviewedOfferRefundSchedulerEnabled',
   'request-expiry': 'requestExpirySchedulerEnabled',
   'request-reminder': 'requestReminderSchedulerEnabled',
+  'showcase-lead-sla': 'showcaseLeadSlaSchedulerEnabled',
+  'showcase-placement-expiry': 'showcasePlacementExpirySchedulerEnabled',
 } as const satisfies Record<SchedulerJobKey, string>;
 
 export type SchedulerJobSetting = (typeof SCHEDULER_JOB_SETTINGS)[SchedulerJobKey];
@@ -53,4 +59,11 @@ export const SCHEDULER_JOB_MOVES_MONEY = {
   'unviewed-offer-refund': true,
   'request-expiry': false,
   'request-reminder': false,
+  // Neither moves money. The SLA job breaches a lead and asks a customer a
+  // question; the expiry job closes a run whose paid time is already spent, and
+  // every reader already checks that window for itself. Cancelling a placement
+  // is the operation that would touch money, and it is a person's decision with
+  // no automatic refund behind it.
+  'showcase-lead-sla': false,
+  'showcase-placement-expiry': false,
 } as const satisfies Record<SchedulerJobKey, boolean>;

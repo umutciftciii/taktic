@@ -12,6 +12,9 @@ import {
   type ProviderProfile,
   type ShowcaseCard,
   type ShowcaseCardVersion,
+  type ShowcasePackage,
+  type ShowcasePlacement,
+  type ShowcaseCardPriceTerms,
   type ShowcasePriceTerms,
 } from '../../../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../../../lib/locations';
@@ -31,7 +34,9 @@ import {
   showcaseReviewBadgeClass,
   showcaseStatusBadgeClass,
 } from '../showcase-ui';
+import { PlacementPanel } from '../placement-panel';
 import { EditShowcaseCardForm } from './edit-card-form';
+import { archiveShowcaseCardAction, unarchiveShowcaseCardAction } from '../actions';
 
 type ShowcaseCardPageProps = {
   params: Promise<{ id: string; cardId: string }>;
@@ -40,7 +45,17 @@ type ShowcaseCardPageProps = {
     saved?: string;
     submitted?: string;
     withdrawn?: string;
+    archived?: string;
+    unarchived?: string;
+    priceTermsAccepted?: string;
   }>;
+};
+
+/** What the eligibility dry run answers. See the call site for why it exists. */
+type ShowcaseEligibility = {
+  eligible: boolean;
+  code: string | null;
+  message: string | null;
 };
 
 /**
@@ -60,22 +75,86 @@ type ShowcaseCardPageProps = {
  */
 export default async function ShowcaseCardPage({ params, searchParams }: ShowcaseCardPageProps) {
   const { id, cardId } = await params;
-  const { error, saved, submitted, withdrawn } = await searchParams;
+  const { error, saved, submitted, withdrawn, archived, unarchived, priceTermsAccepted } =
+    await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/vitrin/${cardId}`);
   }
 
-  const [provider, card, creditBalance, provinces, priceTerms] = await Promise.all([
-    fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
-    fetchOrNotFound(() => apiFetch<ShowcaseCard>(`/providers/${id}/showcase/cards/${cardId}`)),
-    readCreditBalance(id),
-    apiFetch<ProvinceWithDistricts[]>('/locations/provinces'),
-    // The exact sentence the API records an acceptance of. Fetched rather than
-    // written into this page, so the text a provider agrees to and the text the
-    // acceptance names are one string and not two expected to match.
-    apiFetch<ShowcasePriceTerms>(`/providers/${id}/showcase/cards/price-terms`),
-  ]);
+  const [
+    provider,
+    card,
+    creditBalance,
+    provinces,
+    priceTerms,
+    cardPriceTerms,
+    placements,
+    eligibility,
+  ] = await Promise.all([
+      fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
+      fetchOrNotFound(() => apiFetch<ShowcaseCard>(`/providers/${id}/showcase/cards/${cardId}`)),
+      readCreditBalance(id),
+      apiFetch<ProvinceWithDistricts[]>('/locations/provinces'),
+      // The exact sentence the API records an acceptance of. Fetched rather than
+      // written into this page, so the text a provider agrees to and the text the
+      // acceptance names are one string and not two expected to match.
+      apiFetch<ShowcasePriceTerms>(`/providers/${id}/showcase/cards/price-terms`),
+      /*
+       * The same terms asked about *this* card: is there an acceptance on file
+       * for the version in force?
+       *
+       * A second call rather than a field on the one above, because the two
+       * answer different questions — that one is what the review submission
+       * requires, this one is what the next purchase requires — and folding them
+       * together would make a change to either silently a change to both.
+       *
+       * A failure to answer is treated as "no opinion" rather than as a broken
+       * page: the panel then falls back to the eligibility check's own refusal,
+       * which carries the same code.
+       */
+      apiFetch<ShowcaseCardPriceTerms>(
+        `/providers/${id}/showcase/cards/${cardId}/price-terms`,
+      ).catch(() => null),
+      apiFetch<{ placements: ShowcasePlacement[] }>(`/providers/${id}/showcase/placements`),
+      /*
+       * The dry run behind the buy button.
+       *
+       * Asked of the API rather than worked out here, because "can this card be
+       * published" is a question about the provider's approval, the card's
+       * review state, the category's status and the coverage — and a screen
+       * guessing at it would be a screen offering a button the checkout then
+       * refuses. A failure to answer is treated as "not eligible, no reason
+       * given" rather than as a broken page.
+       */
+      apiFetch<ShowcaseEligibility>(
+        `/providers/${id}/showcase/placements/eligibility?cardId=${encodeURIComponent(cardId)}`,
+      ).catch(() => null),
+    ]);
+
+  /*
+   * The run this card is publishing, if any.
+   *
+   * "Live" here means the same set the one-per-card unique index calls live —
+   * a run that is starting, on the air, or temporarily off it. An expired or
+   * cancelled run is history, and the panel offers the next package instead.
+   */
+  const livePlacement =
+    placements.placements.find(
+      (placement) =>
+        placement.cardId === cardId &&
+        (placement.status === 'ACTIVE' ||
+          placement.status === 'PENDING_ACTIVATION' ||
+          placement.status === 'SUSPENDED'),
+    ) ?? null;
+
+  const packages = livePlacement
+    ? []
+    : await apiFetch<{ packages: ShowcasePackage[] }>(
+        `/providers/${id}/showcase/packages?cardKind=${card.kind}`,
+      )
+        .then((body) => body.packages)
+        .catch(() => []);
 
   const draft = card.draftVersion;
   const underReview = draft?.reviewStatus === 'PENDING';
@@ -133,6 +212,34 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
           gönderebilirsiniz.
         </div>
       ) : null}
+      {archived ? (
+        <div className="pdash-notice" role="status">
+          Kart arşivlendi ve yayından kaldırıldı. Satın aldığınız vitrin süresi işlemeye devam
+          ediyor.
+        </div>
+      ) : null}
+      {unarchived ? (
+        <div className="pdash-notice" role="status">
+          Kart arşivden çıkarıldı. Vitrin süresinden kalan varsa yayın yeniden başladı.
+        </div>
+      ) : null}
+      {priceTermsAccepted ? (
+        <div className="pdash-notice" role="status">
+          Hizmet bedeli sorumluluk metnini onayladınız. Kartınızın içeriği ve inceleme durumu
+          değişmedi.
+        </div>
+      ) : null}
+
+      <PlacementPanel
+        providerId={id}
+        cardId={cardId}
+        canPublish={eligibility?.eligible ?? false}
+        publishBlockedReason={eligibility?.message ?? null}
+        publishBlockedCode={eligibility?.code ?? null}
+        placement={livePlacement}
+        packages={packages}
+        priceTerms={cardPriceTerms}
+      />
 
       {/*
         The way back out of the queue, offered exactly where the provider hits
@@ -260,6 +367,61 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             </form>
           ) : null}
         </>
+      ) : null}
+
+      {/*
+        Retiring the card, and the sentence that has to be read before it.
+
+        The cost is stated plainly and up front, because it is the part a
+        provider would otherwise discover afterwards: archiving takes the card
+        off the air and the paid days go on being spent. That is deliberate —
+        a run that could be frozen and resumed at will would be a voucher rather
+        than a dated placement — but it is only fair if it is said first.
+
+        There is no delete, here or anywhere. The versions are the record of
+        what was claimed and what an operator approved.
+      */}
+      {card.status === 'ARCHIVED' ? (
+        <form action={unarchiveShowcaseCardAction} className="pdash-detail-card pdash-form">
+          <input type="hidden" name="providerId" value={id} />
+          <input type="hidden" name="cardId" value={cardId} />
+
+          <header className="pdash-section-head">
+            <h2 className="pdash-section-title">Kart arşivde</h2>
+          </header>
+          <p className="pdash-form-hint">
+            Bu kart arşivde ve yayında değil. Geri getirdiğinizde, satın aldığınız vitrin
+            süresinden kalan varsa yayın kaldığı yerden devam eder.
+          </p>
+
+          <div className="pdash-form-foot">
+            <button className="pdash-btn pdash-btn-secondary" type="submit">
+              Arşivden çıkar
+            </button>
+          </div>
+        </form>
+      ) : card.status !== 'SUSPENDED' ? (
+        <form action={archiveShowcaseCardAction} className="pdash-detail-card pdash-form">
+          <input type="hidden" name="providerId" value={id} />
+          <input type="hidden" name="cardId" value={cardId} />
+
+          <header className="pdash-section-head">
+            <h2 className="pdash-section-title">Kartı arşivle</h2>
+          </header>
+          <p className="pdash-form-hint">
+            Arşivlenen kart yayından kalkar ve yeni talep almaz. Kartın geçmişi ve sürümleri
+            silinmez; istediğinizde geri getirebilirsiniz.
+            {livePlacement
+              ? ' Satın aldığınız vitrin süresi arşivdeyken de işlemeye devam eder — arşivde geçen günler süreye eklenmez.'
+              : ''}
+          </p>
+
+          <div className="pdash-form-foot">
+            <button className="pdash-btn pdash-btn-secondary" type="submit">
+              Kartı arşivle
+            </button>
+          </div>
+        </form>
       ) : null}
     </ProviderShell>
   );

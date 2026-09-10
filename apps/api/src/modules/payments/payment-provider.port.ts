@@ -19,9 +19,27 @@ export type CheckoutSessionRequest = {
   purchaseId: string;
   /** Opaque correlation token minted by this application for this purchase. */
   reference: string;
-  /** Resolved server-side from the active credit package allow-list. */
+  /** Resolved server-side from the active package allow-list. */
   packageSlug: string;
   packageName: string;
+  /**
+   * Which of the two things this platform sells is being bought.
+   *
+   * It decides only what the hosted page and the payment provider's records
+   * call the transaction — the two are genuinely different purchases and a
+   * receipt that called a vitrin placement "software usage credits" would
+   * misdescribe it to the buyer and to the provider's own accounting.
+   *
+   * It decides nothing about settlement. The variant allow-list is still keyed
+   * by slug, and the slug namespaces are kept apart by a CHECK on each
+   * catalogue table, so this field cannot be what makes a payment land on the
+   * wrong product.
+   *
+   * Defaulted at the call site rather than here, so an adapter reading it never
+   * has to handle `undefined`.
+   */
+  productKind: 'offer-credits' | 'showcase-placement';
+  /** Zero for a vitrin placement, which grants no credit by construction. */
   creditAmount: number;
   /** Minor units (kuruş for TRY), from the purchase's own snapshot. */
   priceAmount: number;

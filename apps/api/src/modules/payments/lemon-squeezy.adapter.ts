@@ -3,6 +3,8 @@ import {
   CREDIT_PRODUCT_DESCRIPTION_EN,
   CREDIT_PRODUCT_NAME,
   PaymentProviderKind,
+  SHOWCASE_PRODUCT_DESCRIPTION_EN,
+  SHOWCASE_PRODUCT_NAME,
 } from './payment-provider.config';
 import {
   CheckoutSession,
@@ -125,8 +127,19 @@ export class LemonSqueezyCheckoutAdapter extends PaymentProviderPort {
           test_mode: true,
           custom_price: request.priceAmount,
           product_options: {
-            name: `${CREDIT_PRODUCT_NAME} — ${request.packageName}`,
-            description: CREDIT_PRODUCT_DESCRIPTION_EN,
+            // Which product the buyer sees on the hosted page, and which
+            // description ends up in the payment provider's own records. The
+            // two purchases are different transactions and must not describe
+            // themselves as each other.
+            name: `${
+              request.productKind === 'showcase-placement'
+                ? SHOWCASE_PRODUCT_NAME
+                : CREDIT_PRODUCT_NAME
+            } — ${request.packageName}`,
+            description:
+              request.productKind === 'showcase-placement'
+                ? SHOWCASE_PRODUCT_DESCRIPTION_EN
+                : CREDIT_PRODUCT_DESCRIPTION_EN,
             redirect_url: request.returnUrl,
           },
           checkout_options: { embed: false },

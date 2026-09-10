@@ -71,3 +71,35 @@ export function phoneVerifiedRequestFilter(): Prisma.ServiceRequestWhereInput {
 export function isRequestVisibleToProviders(request: { phoneVerifiedAt: Date | null }): boolean {
   return !isPhoneVerificationRequired() || request.phoneVerifiedAt !== null;
 }
+
+/**
+ * The vitrin visibility gate, as a query fragment.
+ *
+ * `ServiceRequest.directShowcaseProviderId` names the one provider a request is
+ * reserved for. NULL — which is every request the public form has ever produced
+ * and every one it will produce — means "reserved for nobody", so this filter
+ * leaves ordinary marketplace matching exactly as it was.
+ *
+ * Written as an `OR` rather than as two queries because it is one rule: a
+ * provider sees the requests nobody reserved, plus the ones reserved for them.
+ *
+ * The gate is cleared by exactly one thing — the customer's explicit RELEASE
+ * after their lead's deadline passed — and from that moment the request is
+ * ordinary in every respect, this filter included.
+ */
+export function directShowcaseVisibilityFilter(
+  providerId: string,
+): Prisma.ServiceRequestWhereInput {
+  return {
+    OR: [{ directShowcaseProviderId: null }, { directShowcaseProviderId: providerId }],
+  };
+}
+
+/** The same gate, applied to a row already in hand. */
+export function isRequestVisibleToDirectGate(
+  request: { directShowcaseProviderId?: string | null },
+  providerId: string,
+): boolean {
+  const gate = request.directShowcaseProviderId ?? null;
+  return gate === null || gate === providerId;
+}

@@ -8,7 +8,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'node:crypto';
 import { runSerializable } from '../../common/serializable-transaction';
@@ -196,6 +196,219 @@ export class PhoneVerificationService {
 
     void meta;
     return { status: 'verified' as const, phoneVerifiedAt: outcome.verifiedAt };
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Verification before a request exists
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Issues a code against a telephone number with no request behind it yet.
+   *
+   * ## Why this exists at all
+   *
+   * The two methods above verify a number that is already written on a stored
+   * request: the request comes first, the proof comes after, and what the proof
+   * gates is *moderation* — an unverified request simply does not get approved.
+   * That ordering is right for the marketplace form, where an operator stands
+   * between the customer and every business.
+   *
+   * The vitrin lead has no operator in the middle. It reaches one business
+   * directly, the moment it is written, and it starts a clock that business is
+   * measured against. So the proof has to come **first**, and that needs a
+   * verification that can exist before the request does.
+   *
+   * `PhoneVerification.requestId` has always been nullable, so a request-less
+   * row was already representable; nothing wrote one until now.
+   *
+   * ## What makes it single-use
+   *
+   * There is no token and nothing to store. The proof *is* the consumed row:
+   * {@link findRedeemableVerification} looks for a row that is consumed,
+   * recent, and **not yet bound to a request**, and the lead transaction binds
+   * it to the request it creates. A second lead finds nothing to redeem.
+   *
+   * The rate budgets are the same two counters the request-bound path uses, on
+   * the same window, so opening this path adds no new send capacity to a
+   * telephone number or an address.
+   */
+  async sendStandaloneCode(rawPhone: string, meta: VerificationRequestMeta) {
+    const normalizedPhone = normalizePhoneNumber(rawPhone);
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - OTP_RATE_WINDOW_MINUTES * 60 * 1000);
+
+    const [phoneSends, ipSends] = await Promise.all([
+      this.prisma.phoneVerification.count({
+        where: { normalizedPhone, createdAt: { gte: windowStart } },
+      }),
+      meta.ipAddress
+        ? this.prisma.phoneVerification.count({
+            where: { ipAddress: meta.ipAddress, createdAt: { gte: windowStart } },
+          })
+        : Promise.resolve(0),
+    ]);
+
+    if (
+      phoneSends >= OTP_MAX_SENDS_PER_PHONE_PER_HOUR ||
+      ipSends >= OTP_MAX_SENDS_PER_IP_PER_HOUR
+    ) {
+      throw new HttpException(
+        'Çok fazla doğrulama kodu istendi. Lütfen bir süre sonra tekrar deneyin.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const code = generateCode();
+    const codeHash = await bcrypt.hash(code, BCRYPT_ROUNDS);
+    const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
+
+    await this.prisma.$transaction(async (tx) => {
+      // At most one live code per number on this path, exactly as on the other:
+      // issuing a new one retires whatever was outstanding, so an old SMS
+      // cannot be replayed. Scoped to `requestId: null` so it can never retire
+      // a code somebody is in the middle of using on one of their requests.
+      await tx.phoneVerification.updateMany({
+        where: { requestId: null, normalizedPhone, consumedAt: null },
+        data: { consumedAt: now },
+      });
+
+      await tx.phoneVerification.create({
+        data: {
+          normalizedPhone,
+          codeHash,
+          expiresAt,
+          resendCount: phoneSends,
+          lastSentAt: now,
+          requestId: null,
+          ipAddress: meta.ipAddress,
+          userAgent: meta.userAgent,
+        },
+      });
+    });
+
+    const outcome = await this.notifications.sendSms({
+      template: 'phone-verification-code',
+      to: normalizedPhone,
+      code,
+      expiresInMinutes: OTP_TTL_MINUTES,
+    });
+
+    return {
+      status: 'sent' as const,
+      delivery: outcome.status,
+      maskedPhone: maskPhone(normalizedPhone),
+      expiresAt,
+    };
+  }
+
+  /**
+   * Checks a code against a request-less verification and marks it consumed.
+   *
+   * Consuming is all it does. Nothing is stamped anywhere else, because there
+   * is no request yet to stamp — the consumed row is the receipt, and the lead
+   * endpoint redeems it.
+   *
+   * The window between consuming and redeeming is deliberately short (see
+   * {@link findRedeemableVerification}). A proof that stayed good for a day
+   * would be a proof somebody could collect once and spend whenever.
+   */
+  async verifyStandaloneCode(rawPhone: string, rawCode: string, meta: VerificationRequestMeta) {
+    const normalizedPhone = normalizePhoneNumber(rawPhone);
+    const code = normalizeCode(rawCode);
+
+    const outcome = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const now = new Date();
+        const candidate = await tx.phoneVerification.findFirst({
+          where: { requestId: null, normalizedPhone, consumedAt: null },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!candidate || candidate.expiresAt <= now) {
+          return { ok: false as const };
+        }
+
+        if (candidate.lockedUntil && candidate.lockedUntil > now) {
+          return { ok: false as const };
+        }
+
+        const matches = await bcrypt.compare(code, candidate.codeHash);
+
+        if (!matches) {
+          const attemptCount = candidate.attemptCount + 1;
+          // Committed by this transaction, and the caller throws afterwards.
+          // Throwing here would roll the counter back and hand an attacker
+          // unlimited guesses — the same reasoning as the request-bound path.
+          await tx.phoneVerification.update({
+            where: { id: candidate.id },
+            data: {
+              attemptCount,
+              ...(attemptCount >= OTP_MAX_ATTEMPTS
+                ? { lockedUntil: new Date(now.getTime() + OTP_LOCK_MINUTES * 60 * 1000) }
+                : {}),
+            },
+          });
+
+          return { ok: false as const };
+        }
+
+        await tx.phoneVerification.update({
+          where: { id: candidate.id },
+          data: { consumedAt: now },
+        });
+
+        return { ok: true as const, verifiedAt: now };
+      },
+      { label: 'phoneVerification.verifyStandaloneCode' },
+    );
+
+    if (!outcome.ok) {
+      throw invalidCodeException();
+    }
+
+    void meta;
+    return {
+      status: 'verified' as const,
+      verifiedAt: outcome.verifiedAt,
+      maskedPhone: maskPhone(normalizedPhone),
+    };
+  }
+
+  /**
+   * The proof a vitrin lead redeems: a consumed, recent, still-unbound
+   * verification for this number.
+   *
+   * Three conditions and each one closes a different door.
+   *
+   * - **`consumedAt` is not null** — somebody entered the code.
+   * - **`requestId` is null** — it has not already paid for a lead. The lead
+   *   transaction sets this column, which is what makes one code buy one lead
+   *   with no extra table and no token to leak.
+   * - **consumed inside the window** — a proof collected this morning cannot
+   *   open a lead this evening.
+   *
+   * Read inside the caller's transaction, and bound in the same one, so two
+   * simultaneous submissions cannot both redeem it.
+   */
+  async findRedeemableVerification(
+    tx: Prisma.TransactionClient,
+    rawPhone: string,
+    now: Date,
+    windowMinutes: number,
+  ): Promise<{ id: string } | null> {
+    const normalizedPhone = normalizePhoneNumber(rawPhone);
+    const since = new Date(now.getTime() - windowMinutes * 60 * 1000);
+
+    return tx.phoneVerification.findFirst({
+      where: {
+        requestId: null,
+        normalizedPhone,
+        consumedAt: { not: null, gte: since },
+      },
+      orderBy: { consumedAt: 'desc' },
+      select: { id: true },
+    });
   }
 
   /**

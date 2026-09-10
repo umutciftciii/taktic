@@ -13,8 +13,11 @@ import {
   ServiceCategory,
   ServiceCategoryKind,
   ServiceCategoryStatus,
+  ShowcasePlacementSuspendReason,
 } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { activeProviderInviteFilter } from '../provider-invites/provider-invites.constants';
 import {
   canEnterFlow,
@@ -276,7 +279,11 @@ export type ProviderEnrollmentCategory = {
 
 @Injectable()
 export class CategoriesService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ShowcasePlacementService)
+    private readonly placements: ShowcasePlacementService,
+  ) {}
 
   /**
    * The catalogue.
@@ -757,13 +764,64 @@ export class CategoriesService {
     }
   }
 
+  /**
+   * Opens or closes a category — and, with it, whatever vitrin runs sit on that
+   * shelf.
+   *
+   * The placement half is in the same transaction as the status change, so
+   * there is no window in which a closed category still has paid cards on the
+   * home page pointing at it.
+   *
+   * **The clock stops while the shelf is shut.** Closing a category is the
+   * platform's decision and the provider has no part in it, so the days they
+   * cannot use are not billed to them: the suspension records
+   * `extendsClock: true` and reopening pays them back to the day. That is the
+   * opposite of what happens when a *provider* takes their own card down, and
+   * the difference is the whole of the clock rule — see
+   * `showcase-placement-suspension.ts`.
+   *
+   * Reopening resumes automatically, because a closed category is an
+   * observable condition rather than somebody's judgement about a particular
+   * card. A run an operator has separately held down with `ADMIN_ACTION` stays
+   * down.
+   */
   async updateCategoryStatus(id: string, status: ServiceCategoryStatus) {
-    await this.ensureCategoryExists(id);
+    const existing = await this.ensureCategoryExists(id);
+    const now = new Date();
 
-    return this.prisma.serviceCategory.update({
-      where: { id },
-      data: { status, isActive: isActiveFor(status) },
-    });
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        const updated = await tx.serviceCategory.update({
+          where: { id },
+          data: { status, isActive: isActiveFor(status) },
+        });
+
+        if (isActiveFor(existing.status) && !isActiveFor(status)) {
+          await this.placements.suspendLiveFor(
+            tx,
+            { categoryId: id },
+            {
+              reason: ShowcasePlacementSuspendReason.CATEGORY_CLOSED,
+              actorUserId: null,
+              now,
+            },
+          );
+        }
+
+        if (!isActiveFor(existing.status) && isActiveFor(status)) {
+          await this.placements.resumeSuspendedFor(
+            tx,
+            { categoryId: id },
+            ShowcasePlacementSuspendReason.CATEGORY_CLOSED,
+            now,
+          );
+        }
+
+        return updated;
+      },
+      { label: 'categories.updateStatus' },
+    );
   }
 
   /**

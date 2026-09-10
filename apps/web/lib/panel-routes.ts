@@ -56,11 +56,20 @@ const PANEL_ROUTES = [
   // provider panel, so the order matters here only for readability.
   '/providers/:id/vitrin/yeni',
   '/providers/:id/vitrin/:cardId',
+  // Same precedence rule one line up: `talepler` is the lead inbox and comes
+  // before `:cardId` would ever be consulted for it.
+  '/providers/:id/vitrin/talepler',
+  '/providers/:id/vitrin/talepler/:leadId',
   '/requests/my',
   '/requests/offers',
   '/requests/matches',
   '/requests/:id/offers',
   '/requests/:id/offers/:offerId',
+  // The customer's answer after a vitrin lead's deadline passed. A panel screen
+  // rather than a public one, and deliberately: releasing a request to the
+  // whole market is irreversible, so it lives behind the ordinary customer
+  // session rather than behind a link.
+  '/requests/:id/vitrin-karar',
 ] as const;
 
 /**
@@ -71,7 +80,24 @@ const PANEL_ROUTES = [
  * visitor filling in the provider application would lose the site header, which
  * is the only navigation that screen has.
  */
-const PUBLIC_ROUTES = ['/providers/register', '/providers/success', '/requests/success'] as const;
+const PUBLIC_ROUTES = [
+  '/providers/register',
+  '/providers/success',
+  '/requests/success',
+  /*
+   * One vitrin card, as a visitor meets it.
+   *
+   * Genuinely public: it is the page a placement is bought to put in front of
+   * people who have never signed in, and it carries the form they write to the
+   * business with. It needs the site header for the same reason the provider
+   * application does — that navigation is the only navigation it has.
+   *
+   * No dynamic pattern above swallows it today; it is listed because this file
+   * is the statement of which screens are public, and a route absent from both
+   * lists is a route nobody decided about.
+   */
+  '/vitrin/:cardId',
+] as const;
 
 /**
  * Whether the page at this path draws its own panel chrome, and so must not be

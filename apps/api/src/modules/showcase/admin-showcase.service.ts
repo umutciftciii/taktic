@@ -1,11 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ShowcaseCardStatus, ShowcaseVersionReview } from '@prisma/client';
+import {
+  ShowcaseCardStatus,
+  ShowcasePlacementSuspendReason,
+  ShowcaseVersionChangeTrigger,
+  ShowcaseVersionReview,
+} from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { ShowcasePlacementService } from './showcase-placement.service';
 import { ListShowcaseCardsDto, ListShowcaseVersionsDto } from './dto/review-showcase-version.dto';
 import {
+  showcaseCardAlreadySuspended,
   showcaseCardNotFound,
+  showcaseCardNotSuspended,
   showcaseVersionNotFound,
   showcaseVersionNotPending,
 } from './showcase.errors';
@@ -42,7 +50,11 @@ import {
  */
 @Injectable()
 export class AdminShowcaseService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ShowcasePlacementService)
+    private readonly placements: ShowcasePlacementService,
+  ) {}
 
   /**
    * The review queue. Defaults to what is actually waiting.
@@ -212,9 +224,148 @@ export class AdminShowcaseService {
           note: null,
         },
       });
+
+      /*
+       * Every paid run of this card moves to the text that was just approved,
+       * in this same transaction.
+       *
+       * The operator decided this version should be what the card says. A
+       * placement still publishing the previous one would mean the home page
+       * and the card's own page disagreeing about the same business — and the
+       * home page would be showing text nobody currently stands behind.
+       *
+       * The shelves are rebuilt from the new version's areas, so an approval
+       * that widened coverage widens the run's reach and one that narrowed it
+       * narrows it. `endAt` is untouched: re-pinning is a change to what is
+       * shown, never to what was bought.
+       */
+      await this.placements.repinToVersion(
+        tx,
+        version.cardId,
+        versionId,
+        ShowcaseVersionChangeTrigger.ADMIN_APPROVAL,
+      );
     }, { label: 'showcase.approveVersion' });
 
     return this.getVersion(versionId);
+  }
+
+  /**
+   * Takes a card off the air, and every run it is publishing with it.
+   *
+   * Phase one reserved `SUSPENDED` and left it with no writer, on the grounds
+   * that nothing rendered a card to anybody. That is no longer true — this
+   * phase puts approved cards on the home page and lets them collect leads —
+   * and an operator who cannot pull a card they have already approved would be
+   * an operator whose moderation stops mattering the moment somebody pays.
+   *
+   * The clock **stops** while it is down. This is the platform pulling the
+   * card, so the days the provider cannot use are not billed to them; the
+   * suspension row records `extendsClock: true` and `resume()` pays them back.
+   */
+  async suspendCard(cardId: string, user: AuthUser, note: string | null) {
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const card = await tx.showcaseCard.findUnique({
+          where: { id: cardId },
+          select: { id: true, status: true },
+        });
+
+        if (!card) {
+          throw showcaseCardNotFound();
+        }
+
+        if (card.status === ShowcaseCardStatus.SUSPENDED) {
+          throw showcaseCardAlreadySuspended();
+        }
+
+        await tx.showcaseCard.update({
+          where: { id: cardId },
+          data: {
+            status: ShowcaseCardStatus.SUSPENDED,
+            suspendedAt: new Date(),
+            suspendReason: note?.trim() || null,
+          },
+        });
+
+        await this.placements.suspendLiveFor(
+          tx,
+          { cardId },
+          {
+            reason: ShowcasePlacementSuspendReason.ADMIN_ACTION,
+            actorUserId: user.id,
+            note: note?.trim() || null,
+          },
+        );
+      },
+      { label: 'showcase.suspendCard' },
+    );
+
+    return this.getCard(cardId);
+  }
+
+  /**
+   * Puts a suspended card back, and resumes what it was publishing.
+   *
+   * Only an operator can do this, and only for a hold an operator placed —
+   * `ADMIN_ACTION` is the one suspension reason that does not lift by itself,
+   * because it is a judgement rather than an observable condition.
+   *
+   * The card returns to APPROVED only when it still has a live version. One
+   * that never had one goes back to where it was, which for the only case that
+   * can reach here is DRAFT.
+   */
+  async unsuspendCard(cardId: string) {
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const card = await tx.showcaseCard.findUnique({
+          where: { id: cardId },
+          select: { id: true, status: true, liveVersionId: true },
+        });
+
+        if (!card) {
+          throw showcaseCardNotFound();
+        }
+
+        if (card.status !== ShowcaseCardStatus.SUSPENDED) {
+          throw showcaseCardNotSuspended();
+        }
+
+        await tx.showcaseCard.update({
+          where: { id: cardId },
+          data: {
+            status: card.liveVersionId
+              ? ShowcaseCardStatus.APPROVED
+              : ShowcaseCardStatus.DRAFT,
+            suspendedAt: null,
+            suspendReason: null,
+          },
+        });
+
+        // Resumed by reason, so lifting an operator's hold cannot accidentally
+        // put a card back on a shelf the platform has closed for some other
+        // reason.
+        const placements = await tx.showcasePlacement.findMany({
+          where: {
+            cardId,
+            status: 'SUSPENDED',
+            suspendReason: ShowcasePlacementSuspendReason.ADMIN_ACTION,
+          },
+          select: { id: true },
+        });
+
+        for (const placement of placements) {
+          await this.placements.resume(tx, placement.id, {
+            expectedReason: ShowcasePlacementSuspendReason.ADMIN_ACTION,
+          });
+        }
+      },
+      { label: 'showcase.unsuspendCard' },
+    );
+
+    return this.getCard(cardId);
   }
 
   /**

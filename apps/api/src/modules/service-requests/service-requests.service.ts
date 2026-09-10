@@ -9,7 +9,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
-import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
@@ -22,6 +23,7 @@ import { TransactionalMailService } from '../notifications/transactional-mail.se
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
+import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import {
   hasSystemFieldValue,
   SystemFieldRequestValues,
@@ -90,6 +92,31 @@ type QualityScoringInput = {
   answers: { questionId: string; value: unknown }[];
 };
 
+/**
+ * What a caller other than the public form needs to add to a request.
+ *
+ * Only the vitrin lead path passes one, and everything in it is about the same
+ * single fact: this request came from one business's card and, for now, belongs
+ * to that business alone.
+ *
+ * `onCreated` runs inside the creation transaction. That is the point of it —
+ * the lead row, the SLA it freezes and the verification it redeems all have to
+ * commit with the request or not at all.
+ */
+export type ServiceRequestCreationContext = {
+  /** The one provider allowed to see this request. */
+  directShowcaseProviderId?: string;
+  /**
+   * When the customer proved control of the number, established *before* the
+   * request existed. See `PhoneVerificationService.sendStandaloneCode`.
+   */
+  phoneVerifiedAt?: Date;
+  onCreated?: (
+    tx: Prisma.TransactionClient,
+    request: { id: string; customerId: string | null },
+  ) => Promise<void>;
+};
+
 const moderatedStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.IN_REVIEW,
   ServiceRequestStatus.APPROVED,
@@ -128,9 +155,31 @@ export class ServiceRequestsService {
     private readonly customerActivation: CustomerActivationService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
     @Inject(CategoriesService) private readonly categories: CategoriesService,
+    @Inject(ShowcaseLeadLifecycleService)
+    private readonly showcaseLeads: ShowcaseLeadLifecycleService,
   ) {}
 
-  async createServiceRequest(dto: CreateServiceRequestDto, user: AuthUser | null = null) {
+  /**
+   * Creates a request from the public form, or from a vitrin card.
+   *
+   * `context` is how the second one differs, and it is deliberately the only
+   * difference. Everything else — routing, the category's own questions, the
+   * answer validation, the quality score, the contact resolution and the
+   * customer account behind a guest submission — is identical, because a direct
+   * lead **is** an ordinary service request. What makes it a lead is a
+   * visibility gate on the row and a `ShowcaseLead` beside it, not a different
+   * kind of request.
+   *
+   * That is why this method was extended rather than copied. A second creation
+   * path would be a second place for the quality score, the router walk and the
+   * contact rules to be got right, and the first time they drifted apart the
+   * lead would be the one with the bug.
+   */
+  async createServiceRequest(
+    dto: CreateServiceRequestDto,
+    user: AuthUser | null = null,
+    context: ServiceRequestCreationContext = {},
+  ) {
     if (user && user.role === UserRole.PROVIDER) {
       throw new ForbiddenException('Providers cannot create customer service requests');
     }
@@ -223,14 +272,16 @@ export class ServiceRequestsService {
       answers,
     });
 
-    const request = await this.prisma.$transaction(async (tx) => {
+    const request = await runSerializable(
+      this.prisma,
+      async (tx) => {
       const customerId = await resolveCustomerForCreate(tx, requestData, user);
       const requestNumber = await this.numbering.generateDisplayNumber(
         tx,
         NumberedEntityType.SERVICE_REQUEST,
       );
 
-      return tx.serviceRequest.create({
+      const created = await tx.serviceRequest.create({
         data: {
           categoryId: category.id,
           // Only when routing actually moved the request. NULL keeps meaning
@@ -242,6 +293,19 @@ export class ServiceRequestsService {
           requestNumber,
           ...requestData,
           ...disclosure,
+          // The visibility gate. NULL on every request from the public form,
+          // which is what keeps the marketplace's behaviour exactly as it was:
+          // an ordinary request goes to every matching provider, and nothing
+          // about matching, fan-out or offer pricing reads this column when it
+          // is null.
+          ...(context.directShowcaseProviderId
+            ? { directShowcaseProviderId: context.directShowcaseProviderId }
+            : {}),
+          // Written by the vitrin path in the same transaction, before anything
+          // is committed: a lead reaches a business having already proved its
+          // telephone number, because there is no operator in that flow to
+          // catch what a false number would cost.
+          ...(context.phoneVerifiedAt ? { phoneVerifiedAt: context.phoneVerifiedAt } : {}),
           qualityScore: quality.score,
           qualityScoreBreakdown: quality.breakdown,
           answers: {
@@ -262,7 +326,19 @@ export class ServiceRequestsService {
           },
         },
       });
-    });
+
+      // The vitrin lead, its SLA and the verification it redeemed, all inside
+      // the transaction that created the request. A request carrying a
+      // `directShowcaseProviderId` with no lead beside it would be a request
+      // one business can see and nobody can explain.
+      if (context.onCreated) {
+        await context.onCreated(tx, { id: created.id, customerId: created.customerId });
+      }
+
+      return created;
+      },
+      { label: 'serviceRequests.create' },
+    );
 
     // A guest request creates a password-less customer account behind the
     // scenes. Mail them a claim link straight away, otherwise they can never
@@ -391,12 +467,70 @@ export class ServiceRequestsService {
           // keeps the unfiltered total on purpose.
           select: { offers: { where: { status: { not: OfferStatus.WITHDRAWN } } } },
         },
+        /*
+         * The vitrin lead, when the request came from a card.
+         *
+         * On the customer's own list rather than behind a second endpoint,
+         * because the decision it carries has to be *findable*: the fallback
+         * question is mailed once and never chased, so a customer who deleted
+         * the message needs to meet it again where they already look.
+         *
+         * Narrow on purpose. The customer is told which business they wrote to,
+         * what they were promised and where the lead stands — and nothing about
+         * the placement: not its id, not what it cost, not when it ends.
+         */
+        showcaseLeadSource: {
+          select: {
+            id: true,
+            status: true,
+            urgencyBucket: true,
+            slaHoursSnapshot: true,
+            slaDueAt: true,
+            breachedAt: true,
+            fallbackAskedAt: true,
+            fallbackDecision: true,
+            fallbackDecidedAt: true,
+            releasedAt: true,
+            closedAt: true,
+            closeReason: true,
+            createdAt: true,
+            kindSnapshot: true,
+            listedPriceSnapshot: true,
+            cardVersion: { select: { title: true } },
+            provider: { select: { id: true, businessName: true } },
+          },
+        },
       },
     });
 
-    return requests.map((request) => ({
+    return requests.map(({ showcaseLeadSource, ...request }) => ({
       ...withQualityLabel(request),
       offersCount: request._count.offers,
+      showcaseLead: showcaseLeadSource
+        ? {
+            id: showcaseLeadSource.id,
+            status: showcaseLeadSource.status,
+            urgencyBucket: showcaseLeadSource.urgencyBucket,
+            slaHours: showcaseLeadSource.slaHoursSnapshot,
+            slaDueAt: showcaseLeadSource.slaDueAt,
+            breachedAt: showcaseLeadSource.breachedAt,
+            fallbackAskedAt: showcaseLeadSource.fallbackAskedAt,
+            fallbackDecision: showcaseLeadSource.fallbackDecision,
+            fallbackDecidedAt: showcaseLeadSource.fallbackDecidedAt,
+            releasedAt: showcaseLeadSource.releasedAt,
+            closedAt: showcaseLeadSource.closedAt,
+            closeReason: showcaseLeadSource.closeReason,
+            createdAt: showcaseLeadSource.createdAt,
+            cardTitle: showcaseLeadSource.cardVersion.title,
+            kind: showcaseLeadSource.kindSnapshot,
+            // Absent rather than null on a promotion card, exactly as the feed
+            // does it: a client cannot render a price it was never given.
+            ...(showcaseLeadSource.kindSnapshot === 'SERVICE'
+              ? { listedServicePriceAmount: showcaseLeadSource.listedPriceSnapshot }
+              : {}),
+            provider: showcaseLeadSource.provider,
+          }
+        : null,
     }));
   }
 
@@ -458,7 +592,10 @@ export class ServiceRequestsService {
     const shouldModerate = moderatedStatuses.has(dto.status);
     const now = new Date();
 
-    const request = await this.prisma.serviceRequest.update({
+    const request = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const updated = await tx.serviceRequest.update({
       where: { id },
       data: {
         status: dto.status,
@@ -487,14 +624,51 @@ export class ServiceRequestsService {
       },
     });
 
-    // Only a real transition mails anybody. Re-saving an already-approved
-    // request from the moderation screen rewrites `approvedAt` and nothing
-    // else: the customer is not told twice that their request went live, and no
-    // provider is invited to it a second time. The dedupe key carries
-    // `approvedAt` as a second, database-level guard against the same thing.
+        /*
+         * A refused request closes the vitrin lead it came from, in the same
+         * transaction.
+         *
+         * Otherwise an SLA clock would keep running against a business over
+         * something an operator has already refused, and the breach sweeper
+         * would eventually ask the customer whether to release a request that
+         * no longer exists to release.
+         *
+         * Returns quietly for a request with no lead, which is nearly all of
+         * them.
+         */
+        if (dto.status === ServiceRequestStatus.REJECTED && existing.showcaseLeadId) {
+          await this.showcaseLeads.closeForRequest(
+            tx,
+            id,
+            ShowcaseLeadCloseReason.MODERATION_REJECTED,
+            now,
+          );
+        }
+
+        return updated;
+      },
+      { label: 'serviceRequests.updateStatus' },
+    );
+
+    /*
+     * Only a real transition mails anybody. Re-saving an already-approved
+     * request from the moderation screen rewrites `approvedAt` and nothing
+     * else: the customer is not told twice that their request went live, and no
+     * provider is invited to it a second time. The dedupe key carries
+     * `approvedAt` as a second, database-level guard against the same thing.
+     *
+     * **A direct vitrin lead is never fanned out**, and the gate is the whole
+     * of the test. A request reserved for one business must not be mailed to
+     * every business that matches it — that is the entire promise a placement
+     * sells. Note what the condition reads: the *gate*, not "did this come from
+     * a card". A released lead has a cleared gate by the time it is approved,
+     * and it fans out exactly like any other request, which is correct: by then
+     * it is one.
+     */
     if (
       dto.status === ServiceRequestStatus.APPROVED &&
-      existing.status !== ServiceRequestStatus.APPROVED
+      existing.status !== ServiceRequestStatus.APPROVED &&
+      request.directShowcaseProviderId === null
     ) {
       await this.notify(() => this.mail.fanOutApprovedRequest(request.id, now), request.id);
     }
@@ -538,14 +712,31 @@ export class ServiceRequestsService {
     }
 
     const now = new Date();
-    const updated = await this.prisma.serviceRequest.updateMany({
-      where: { id, status: { notIn: [...terminalStatuses] } },
-      data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
-    });
 
-    if (updated.count !== 1) {
-      throw new ConflictException('This request can no longer be cancelled');
-    }
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const updated = await tx.serviceRequest.updateMany({
+          where: { id, status: { notIn: [...terminalStatuses] } },
+          data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
+        });
+
+        if (updated.count !== 1) {
+          throw new ConflictException('This request can no longer be cancelled');
+        }
+
+        // The lead goes with it, for the reason a refusal closes one: a clock
+        // running against a business over a cancelled request measures nothing
+        // and asks the customer a question they have already answered.
+        await this.showcaseLeads.closeForRequest(
+          tx,
+          id,
+          ShowcaseLeadCloseReason.CUSTOMER_CANCELLED,
+          now,
+        );
+      },
+      { label: 'serviceRequests.cancel' },
+    );
 
     return this.getLifecycleProjection(id);
   }
@@ -649,7 +840,7 @@ export class ServiceRequestsService {
   private async ensureRequestExists(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      select: { id: true, status: true, phoneVerifiedAt: true },
+      select: { id: true, status: true, phoneVerifiedAt: true, showcaseLeadId: true },
     });
 
     if (!request) {

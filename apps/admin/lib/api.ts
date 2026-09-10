@@ -1983,22 +1983,31 @@ export const OPERATIONS_SETTING_LABELS: Record<string, string> = {
   unviewedOfferRefundSchedulerEnabled: 'Görüntülenmeyen teklif iade işi',
   requestExpirySchedulerEnabled: 'Talep süresi dolum işi',
   requestReminderSchedulerEnabled: 'Talep hatırlatma işi',
+  showcaseLeadSlaSchedulerEnabled: 'Vitrin talebi yanıt süresi işi',
+  showcasePlacementExpirySchedulerEnabled: 'Vitrin yerleşimi süre dolumu işi',
 };
 
 /* ---- scheduled jobs ------------------------------------------------------ */
 
 /**
- * The four background jobs a super admin switches on and off.
+ * The background jobs a super admin switches on and off.
  *
  * The keys are the API's, verbatim: they are the path segment a toggle posts
  * to and the identity the audit trail keeps, so they are never translated. The
  * Turkish copy lives below, next to the rest of this panel's copy.
+ *
+ * This list mirrors `SCHEDULER_JOB_KEYS` on the API side, and the mirroring is
+ * checked by the type below rather than by anybody remembering: a job the API
+ * returns and this panel has no copy for renders an undefined name, so adding
+ * one there means adding one here.
  */
 export const SCHEDULER_JOB_KEYS = [
   'entitlement-renewal',
   'unviewed-offer-refund',
   'request-expiry',
   'request-reminder',
+  'showcase-lead-sla',
+  'showcase-placement-expiry',
 ] as const;
 
 export type SchedulerJobKey = (typeof SCHEDULER_JOB_KEYS)[number];
@@ -2065,6 +2074,22 @@ export const SCHEDULER_JOB_COPY: Record<
     impact:
       '7 gündür teklif almamış onaylı talepler için müşteriye tek bir hatırlatma e-postası ' +
       'gönderir.',
+  },
+  'showcase-lead-sla': {
+    name: 'Vitrin talebi yanıt süresi',
+    // Written for somebody deciding during an incident: what it does to the
+    // data, and — just as important — what it deliberately does not do.
+    impact:
+      'Kart sahibinin taahhüt ettiği süre içinde yanıtlanmayan vitrin taleplerini “süre doldu” ' +
+      'olarak işaretler ve müşteriye kararını sorar. Talebi kendiliğinden genel pazara açmaz; ' +
+      'bunu yalnız müşterinin kendi kararı yapar. 14 gün karar verilmeyen talepler kapanır.',
+  },
+  'showcase-placement-expiry': {
+    name: 'Vitrin yerleşimi süre dolumu',
+    impact:
+      'Satın alınan süresi biten vitrin yerleşimlerini kapatır ve kartı sonraki paket için ' +
+      'serbest bırakır. Yayın açısından gerekli değildir: ana sayfa süreyi kendisi kontrol ' +
+      'eder, bu yüzden iş kapalıyken de süresi dolmuş bir kart gösterilmez.',
   },
 };
 
@@ -2406,6 +2431,242 @@ export function showcaseReviewBadgeClass(review: ShowcaseVersionReview): string 
       return 'badge badge-warn';
     case 'REJECTED':
       return 'badge badge-bad';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
+// ── Vitrin phase two: the catalogue, the paid runs and the direct leads ──────
+
+export type ShowcasePlacementStatus =
+  | 'PENDING_ACTIVATION'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'EXPIRED'
+  | 'CANCELLED';
+
+export type ShowcasePlacementSuspendReason =
+  | 'ADMIN_ACTION'
+  | 'CATEGORY_CLOSED'
+  | 'SYSTEM_PUBLISH_BLOCK'
+  | 'CARD_ARCHIVED'
+  | 'AREA_NO_LONGER_COVERED'
+  | 'PROVIDER_NOT_APPROVED';
+
+export type ShowcaseLeadStatus =
+  | 'OPEN'
+  | 'ANSWERED'
+  | 'BREACHED'
+  | 'RELEASED'
+  | 'CLOSED_UNANSWERED';
+
+export type ShowcaseLeadUrgency = 'URGENT' | 'NORMAL';
+
+export type ShowcaseLeadFallbackDecision = 'RELEASE' | 'KEEP_CLOSED';
+
+export type ShowcaseLeadCloseReason =
+  | 'CUSTOMER_KEPT_CLOSED'
+  | 'CUSTOMER_CANCELLED'
+  | 'MODERATION_REJECTED'
+  | 'REQUEST_EXPIRED';
+
+/**
+ * A vitrin package as the operator maintains it.
+ *
+ * The slug is read-only after creation, and the screen says why: it is the key
+ * into the payment provider's variant map, so renaming one detaches every
+ * future checkout from the variant it was mapped to — and the failure surfaces
+ * as a provider who paid and got a VARIANT_MISMATCH.
+ */
+export type ShowcasePackage = {
+  id: string;
+  name: string;
+  slug: string;
+  priceAmount: number;
+  currency: string;
+  durationDays: number;
+  allowedCardKind: ShowcaseCardKind | null;
+  maxAreas: number | null;
+  requiresAdminApproval: boolean;
+  description: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShowcasePlacementSuspension = {
+  id: string;
+  reason: ShowcasePlacementSuspendReason;
+  /** Whether this interval pushed the run's end forward. Snapshotted, not derived. */
+  extendsClock: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  endAtBefore: string;
+  endAtAfter: string | null;
+  note: string | null;
+  actor: { id: string; name: string | null } | null;
+};
+
+export type ShowcasePlacement = {
+  id: string;
+  status: ShowcasePlacementStatus;
+  cardId: string;
+  kind: ShowcaseCardKind;
+  category: { id: string; name: string; slug: string };
+  version: { id: string; versionNumber: number; title: string };
+  packageName: string;
+  priceAmount: number;
+  currency: string;
+  durationDays: number;
+  startAt: string;
+  endAt: string;
+  suspendedAt: string | null;
+  suspendReason: ShowcasePlacementSuspendReason | null;
+  extendedDays: number;
+  cancelledAt: string | null;
+  createdAt: string;
+  leadCount: number;
+  areas: Array<{ id: string; scope: string; active: boolean; label: string }>;
+  provider?: ShowcaseProviderSummary & { city: string; district: string };
+  suspensions?: ShowcasePlacementSuspension[];
+  versionChanges?: Array<{
+    id: string;
+    fromVersionId: string;
+    toVersionId: string;
+    trigger: 'ADMIN_APPROVAL' | 'AREA_NARROWING';
+    createdAt: string;
+  }>;
+};
+
+/**
+ * A direct lead, for the operator's queue.
+ *
+ * Read-only. An operator's power over a lead is exercised through the request
+ * it belongs to — refusing the request closes the lead in the same transaction
+ * — and there is deliberately no route that releases one on the customer's
+ * behalf: the database refuses a release without their own decision, and an
+ * admin endpoint bypassing that would make the constraint decorative.
+ *
+ * No customer telephone number or e-mail address, exactly as on the provider's
+ * inbox.
+ */
+/**
+ * One provider accepting one version of the price-responsibility text.
+ *
+ * Append-only on the API side and read-only here: there is no admin route that
+ * writes or clears one, deliberately. A record of consent an operator could
+ * edit would say what the platform wanted rather than what a business agreed
+ * to, and the table would stop being evidence.
+ */
+export type ShowcasePriceTermsAcceptance = {
+  id: string;
+  cardId: string;
+  providerId: string;
+  termsVersion: string;
+  termsTextSnapshot: string;
+  acceptedAt: string;
+  provider: { id: string; businessName: string; status: string };
+  card: { id: string; kind: string; status: string; categoryId: string };
+  acceptedByUser: { id: string; name: string | null; email: string | null };
+};
+
+export type ShowcaseAdminLead = {
+  id: string;
+  status: ShowcaseLeadStatus;
+  urgencyBucket: ShowcaseLeadUrgency;
+  slaHoursSnapshot: number;
+  slaDueAt: string;
+  breachedAt: string | null;
+  fallbackAskedAt: string | null;
+  fallbackDecision: ShowcaseLeadFallbackDecision | null;
+  fallbackDecidedAt: string | null;
+  releasedAt: string | null;
+  closedAt: string | null;
+  closeReason: ShowcaseLeadCloseReason | null;
+  respondedAt: string | null;
+  createdAt: string;
+  kindSnapshot: ShowcaseCardKind;
+  listedPriceSnapshot: number | null;
+  cardId: string;
+  cardVersion: { id: string; versionNumber: number; title: string };
+  provider: ShowcaseProviderSummary;
+  request: {
+    id: string;
+    requestNumber: string | null;
+    status: string;
+    qualityScore: number;
+    city: string;
+    district: string;
+    /** Non-null while the request is still reserved for one business. */
+    directShowcaseProviderId: string | null;
+    category: { id: string; name: string; slug: string };
+    submittedAt: string;
+  };
+};
+
+export const SHOWCASE_PLACEMENT_STATUS_LABELS: Record<ShowcasePlacementStatus, string> = {
+  PENDING_ACTIVATION: 'Başlatılıyor',
+  ACTIVE: 'Yayında',
+  SUSPENDED: 'Yayında değil',
+  EXPIRED: 'Süresi doldu',
+  CANCELLED: 'İptal edildi',
+};
+
+/**
+ * Why a run is off the air — and whether the paid clock is running.
+ *
+ * The clock is stated in the label rather than left to a second column, because
+ * it is the operationally important half: an operator deciding whether to
+ * compensate a provider needs to know whether the platform already did.
+ */
+export const SHOWCASE_SUSPEND_REASON_LABELS: Record<ShowcasePlacementSuspendReason, string> = {
+  ADMIN_ACTION: 'Operatör kararı — süre durdu',
+  CATEGORY_CLOSED: 'Kategori kapalı — süre durdu',
+  SYSTEM_PUBLISH_BLOCK: 'Sistemsel yayın engeli — süre durdu',
+  CARD_ARCHIVED: 'Sağlayıcı kartı arşivledi — süre işliyor',
+  AREA_NO_LONGER_COVERED: 'Kart bölgesi kapsam dışı — süre işliyor',
+  PROVIDER_NOT_APPROVED: 'Sağlayıcı onaylı değil — süre işliyor',
+};
+
+export const SHOWCASE_LEAD_STATUS_LABELS: Record<ShowcaseLeadStatus, string> = {
+  OPEN: 'Yanıt bekliyor',
+  ANSWERED: 'Teklif verildi',
+  BREACHED: 'Süre doldu',
+  RELEASED: 'Pazara açıldı',
+  CLOSED_UNANSWERED: 'Kapandı',
+};
+
+export const SHOWCASE_LEAD_URGENCY_LABELS: Record<ShowcaseLeadUrgency, string> = {
+  URGENT: 'Acil',
+  NORMAL: 'Normal',
+};
+
+export function showcasePlacementBadgeClass(status: ShowcasePlacementStatus): string {
+  switch (status) {
+    case 'ACTIVE':
+      return 'badge badge-good';
+    case 'PENDING_ACTIVATION':
+      return 'badge badge-warn';
+    case 'SUSPENDED':
+      return 'badge badge-warn';
+    case 'CANCELLED':
+      return 'badge badge-bad';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
+export function showcaseLeadBadgeClass(status: ShowcaseLeadStatus): string {
+  switch (status) {
+    case 'OPEN':
+      return 'badge badge-warn';
+    case 'ANSWERED':
+      return 'badge badge-good';
+    case 'BREACHED':
+      return 'badge badge-bad';
+    case 'RELEASED':
+      return 'badge badge-muted';
     default:
       return 'badge badge-muted';
   }

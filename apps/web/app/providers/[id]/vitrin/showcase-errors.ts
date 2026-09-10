@@ -27,4 +27,30 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
   SHOWCASE_NOTHING_TO_WITHDRAW: 'Geri çekilecek, incelemede bekleyen bir sürüm yok.',
   SHOWCASE_CARD_LOCKED: 'Bu kart şu anda düzenlenemez.',
   SHOWCASE_SAVE_FAILED: 'Kaydedilemedi. Alanları kontrol edip tekrar deneyin.',
+
+  // Phase two: buying a run, and what can be in the way.
+  SHOWCASE_PACKAGE_NOT_FOUND: 'Seçtiğiniz vitrin paketi artık satışta değil.',
+  SHOWCASE_PACKAGE_KIND_MISMATCH:
+    'Bu paket bu kart tipi için satılmıyor. Kart tipine uygun bir paket seçin.',
+  SHOWCASE_CARD_NOT_PUBLISHABLE:
+    'Bu kart yayına alınamaz. Paket almak için kartın onaylanmış ve yayında bir sürümü olmalı.',
+  SHOWCASE_CARD_ALREADY_PLACED:
+    'Bu kartın yayında olan bir vitrin süresi zaten var. Süre bitince yenileyebilir ya da başka bir kartınız için paket alabilirsiniz.',
+  SHOWCASE_PROVIDER_NOT_APPROVED:
+    'Vitrin paketi almak için işletme başvurunuzun onaylanmış olması gerekir.',
+  SHOWCASE_CATEGORY_NOT_OFFERED_FOR_PLACEMENT:
+    'Kartın kategorisi artık talep alamıyor, bu yüzden yayına alınamaz.',
+  SHOWCASE_CARD_ALREADY_ARCHIVED: 'Bu kart zaten arşivlenmiş.',
+  // Not a fault and not a block on anything already running: the platform's
+  // price-responsibility text has moved on and the next purchase is sold under
+  // the new one. The sentence says so explicitly, because "onay gerekiyor" on a
+  // screen that also shows a live run reads like the run is at risk.
+  SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED:
+    'Hizmet bedeli sorumluluk metni güncellendi. Yeni paket almadan önce güncel metni onaylayın. Yayında olan vitrin süreniz bundan etkilenmez.',
+  SHOWCASE_PRICE_TERMS_UNAVAILABLE:
+    'Vitrin paketi satın alma şu anda geçici olarak kapalı. Lütfen daha sonra tekrar deneyin.',
+  SHOWCASE_CHECKOUT_FAILED: 'Ödeme sayfası açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
+  PROVIDER_UNAVAILABLE: 'Ödeme sayfası şu anda açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
+  PACKAGE_NOT_MAPPED:
+    'Bu paket ödeme sağlayıcısında tanımlı değil. Lütfen destek ile iletişime geçin.',
 };

@@ -12,11 +12,14 @@ import {
 import {
   CreditTransactionType,
   NumberedEntityType,
+  OfferEntitlementSource,
   OfferRejectionReason,
   OfferStatus,
   Prisma,
   ProviderServiceAreaScope,
   ProviderStatus,
+  ShowcasePlacementStatus,
+  ShowcasePlacementSuspendReason,
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestStatus,
@@ -29,6 +32,8 @@ import {
 } from '../../common/provider-email';
 import { assertEmailFreeForAccountKind } from '../../common/account-email';
 import {
+  directShowcaseVisibilityFilter,
+  isRequestVisibleToDirectGate,
   isRequestVisibleToProviders,
   matchesProviderArea,
   phoneVerifiedRequestFilter,
@@ -58,6 +63,8 @@ import {
   isProviderClaimEnabled,
 } from '../provider-claim/provider-claim.config';
 import { ProviderClaimService } from '../provider-claim/provider-claim.service';
+import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
+import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -182,6 +189,10 @@ export class ProvidersService {
     private readonly entitlements: EntitlementResolverService,
     @Inject(OperationsSettingsService)
     private readonly operationsSettings: OperationsSettingsService,
+    @Inject(ShowcaseLeadLifecycleService)
+    private readonly showcaseLeads: ShowcaseLeadLifecycleService,
+    @Inject(ShowcasePlacementService)
+    private readonly showcasePlacements: ShowcasePlacementService,
   ) {}
 
   async createProvider(
@@ -833,6 +844,23 @@ export class ProvidersService {
         include: providerInclude,
       });
 
+      /*
+       * Coverage just changed, so every paid run of this business is re-judged
+       * against it — in this transaction.
+       *
+       * A card may only claim areas the business says it works in. Narrowing
+       * the profile can therefore leave a live placement advertising somewhere
+       * the provider no longer serves, and leaving it up would mean collecting
+       * leads for work they have said they cannot do.
+       *
+       * **The clock keeps running.** Stopping it would open the obvious hole:
+       * narrow your areas to one street, freeze the run, widen them again when
+       * it suits. `suspensionExtendsClock` says so and a CHECK makes the other
+       * outcome unstorable. A provider who widens their areas again gets the
+       * run back automatically, with the days that passed spent.
+       */
+      await this.syncShowcaseCoverage(tx, id, payload.serviceAreas);
+
       // The operator's screens read the bindings from the admin detail
       // endpoint, which keeps the drafts. Everybody else — the provider saving
       // their own profile — gets the same narrowed shape every other read
@@ -841,6 +869,64 @@ export class ProvidersService {
         ? updated
         : withVisibleServiceCategories(updated);
     });
+  }
+
+  /**
+   * Suspends the runs a narrowed profile no longer backs, and resumes the ones
+   * a widened profile backs again.
+   *
+   * The comparison is `areaCovers` — the same containment test the card form
+   * and the profile form already use — applied to the *pinned* version's areas,
+   * because that is what a run is actually publishing.
+   *
+   * Both directions are here rather than only the suspension, because a
+   * one-way rule would be a trap: a provider who removed a district by accident
+   * and put it straight back would find their paid run down until an operator
+   * noticed.
+   */
+  private async syncShowcaseCoverage(
+    tx: Prisma.TransactionClient,
+    providerId: string,
+    coverage: ReadonlyArray<{ city: string; district: string | null; neighborhood: string | null }>,
+  ) {
+    const placements = await tx.showcasePlacement.findMany({
+      where: {
+        providerId,
+        status: { in: [ShowcasePlacementStatus.ACTIVE, ShowcasePlacementStatus.SUSPENDED] },
+      },
+      select: {
+        id: true,
+        status: true,
+        suspendReason: true,
+        pinnedVersion: {
+          select: { areas: { select: { city: true, district: true, neighborhood: true } } },
+        },
+      },
+    });
+
+    for (const placement of placements) {
+      const stillCovered = placement.pinnedVersion.areas.every((area) =>
+        coverage.some((owned) => areaCovers(owned, area)),
+      );
+
+      if (!stillCovered && placement.status === ShowcasePlacementStatus.ACTIVE) {
+        await this.showcasePlacements.suspend(tx, placement.id, {
+          reason: ShowcasePlacementSuspendReason.AREA_NO_LONGER_COVERED,
+          actorUserId: null,
+        });
+        continue;
+      }
+
+      if (
+        stillCovered &&
+        placement.status === ShowcasePlacementStatus.SUSPENDED &&
+        placement.suspendReason === ShowcasePlacementSuspendReason.AREA_NO_LONGER_COVERED
+      ) {
+        await this.showcasePlacements.resume(tx, placement.id, {
+          expectedReason: ShowcasePlacementSuspendReason.AREA_NO_LONGER_COVERED,
+        });
+      }
+    }
   }
 
   async updateProviderStatus(id: string, dto: UpdateProviderStatusDto) {
@@ -877,6 +963,42 @@ export class ProvidersService {
         await this.providerClaim.invalidateActiveTokens(tx, id);
       }
 
+      /*
+       * A business that is not approved does not advertise.
+       *
+       * In the same transaction as the status change, so there is no window in
+       * which a suspended provider's card is still on the home page. Both
+       * directions are handled: leaving APPROVED takes their placements off the
+       * air, and coming back puts them on again.
+       *
+       * The paid clock keeps running while they are off. A suspension is a
+       * sanction, and banking the remaining days would reward being sanctioned;
+       * `suspensionExtendsClock` says so and a CHECK constraint makes the other
+       * outcome unstorable. Where a suspension turns out to have been a
+       * mistake, an operator has `ADMIN_ACTION` — which does stop the clock —
+       * and the compensation leaves a record.
+       */
+      if (dto.status !== ProviderStatus.APPROVED && existing.status === ProviderStatus.APPROVED) {
+        await this.showcasePlacements.suspendLiveFor(
+          tx,
+          { providerId: id },
+          {
+            reason: ShowcasePlacementSuspendReason.PROVIDER_NOT_APPROVED,
+            actorUserId: null,
+            now,
+          },
+        );
+      }
+
+      if (dto.status === ProviderStatus.APPROVED && existing.status !== ProviderStatus.APPROVED) {
+        await this.showcasePlacements.resumeSuspendedFor(
+          tx,
+          { providerId: id },
+          ShowcasePlacementSuspendReason.PROVIDER_NOT_APPROVED,
+          now,
+        );
+      }
+
       return updated;
     });
 
@@ -899,6 +1021,11 @@ export class ProvidersService {
       where: {
         status: ServiceRequestStatus.APPROVED,
         ...phoneVerifiedRequestFilter(),
+        // The vitrin gate. An ordinary request has NULL here and is matched
+        // exactly as it always was; a direct lead reserved for somebody else is
+        // invisible, and one reserved for *this* provider stays visible after
+        // their own offer moved it to APPROVED.
+        ...directShowcaseVisibilityFilter(providerId),
         categoryId: { in: provider.serviceCategories.map((item) => item.categoryId) },
         offers: { none: { providerId } },
         ...(normalizedFilters.categoryId ? { categoryId: normalizedFilters.categoryId } : {}),
@@ -941,6 +1068,9 @@ export class ProvidersService {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
       include: {
+        showcaseLeadSource: {
+          select: { id: true, urgencyBucket: true, slaHoursSnapshot: true, slaDueAt: true, status: true },
+        },
         category: {
           select: {
             id: true,
@@ -981,6 +1111,10 @@ export class ProvidersService {
       !request ||
       request.status !== ServiceRequestStatus.APPROVED ||
       !isRequestVisibleToProviders(request) ||
+      // Same predicate as the list, applied to a row already in hand. Without
+      // it, a provider who guessed a request id could read a lead addressed to
+      // a competitor.
+      !isRequestVisibleToDirectGate(request, providerId) ||
       !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
       !matchesProviderArea(provider.serviceAreas, request)
     ) {
@@ -1003,7 +1137,7 @@ export class ProvidersService {
   }
 
   private async createOfferRecord(providerId: string, requestId: string, dto: CreateOfferDto) {
-    await this.ensureProviderCanSeeRequest(providerId, requestId);
+    const gate = await this.ensureProviderCanSeeRequest(providerId, requestId);
     const payload = normalizeOfferPayload(dto);
 
     const existingOffer = await this.prisma.offer.findUnique({
@@ -1032,6 +1166,14 @@ export class ProvidersService {
           const request = await tx.serviceRequest.findUnique({
             where: { id: requestId },
             select: {
+              status: true,
+              // Re-read inside the transaction rather than trusted from the
+              // guard above. A fallback release could have cleared the gate in
+              // the meantime, and the difference decides whether this offer is
+              // free — reading it outside the serialisation window would let
+              // the charge and the decision come from two different moments.
+              directShowcaseProviderId: true,
+              showcaseLeadId: true,
               category: {
                 select: { id: true, slug: true, isActive: true, offerCreditCost: true },
               },
@@ -1099,6 +1241,7 @@ export class ProvidersService {
             categoryId: category.id,
             creditCost: actualCreditCost,
             now: new Date(),
+            directShowcaseProviderId: request.directShowcaseProviderId,
           });
 
           const offerNumber = await this.numbering.generateDisplayNumber(
@@ -1125,6 +1268,8 @@ export class ProvidersService {
           const refundWindowHours =
             await this.operationsSettings.getUnviewedOfferRefundWindowHours(tx);
           const submittedAt = new Date();
+          const isDirectLeadOffer =
+            decision.source === OfferEntitlementSource.SHOWCASE_PLACEMENT;
           const refundEligibleAt = new Date(
             submittedAt.getTime() + refundWindowHours * 60 * 60 * 1000,
           );
@@ -1141,9 +1286,22 @@ export class ProvidersService {
               message: payload.message,
               warrantyNote: payload.warrantyNote,
               internalNote: payload.internalNote,
-              // Immutable snapshot. Refunds read this, never the live category
-              // price, so a later price change cannot alter historical amounts.
-              creditCost: actualCreditCost,
+              /*
+               * What this offer cost, as the resolver decided it.
+               *
+               * For the three package sources this is the category's price,
+               * exactly as it always was — an unlimited period records the
+               * price without being charged it, and that is unchanged. For a
+               * direct vitrin lead it is **zero**, because the provider already
+               * paid for the placement the lead arrived through and the row
+               * should say what actually happened rather than what an ordinary
+               * offer would have cost.
+               *
+               * An immutable snapshot either way: refunds read this and never
+               * the live category price, so a later repricing cannot alter a
+               * historical amount.
+               */
+              creditCost: decision.creditCost,
               // What actually paid, recorded on the offer rather than inferred
               // later from the absence of a ledger row.
               entitlementSource: decision.source,
@@ -1153,10 +1311,20 @@ export class ProvidersService {
               // created from now on carries the promise the provider was shown;
               // every offer that predates this line keeps the column's false
               // default and is out of scope forever.
-              unviewedRefundPolicy: true,
+              //
+              // A direct-lead offer is deliberately outside the policy. The
+              // rule refunds a credit the customer never looked at; this offer
+              // spent no credit, so there is nothing to give back and a policy
+              // flag on it would put a refund promise on a screen that has no
+              // amount behind it.
+              unviewedRefundPolicy: !isDirectLeadOffer,
               submittedAt,
-              unviewedRefundWindowHours: refundWindowHours,
-              unviewedRefundEligibleAt: refundEligibleAt,
+              ...(isDirectLeadOffer
+                ? {}
+                : {
+                    unviewedRefundWindowHours: refundWindowHours,
+                    unviewedRefundEligibleAt: refundEligibleAt,
+                  }),
             },
           });
 
@@ -1170,6 +1338,44 @@ export class ProvidersService {
             reason: `Offer submitted (${category.slug}, ${actualCreditCost} kredi)`,
             now: new Date(),
           });
+
+          /*
+           * ── The direct lead's own transition ────────────────────────────
+           *
+           * A vitrin lead reaches its addressee at SUBMITTED, because nobody
+           * has read it. The card owner offering on it is what moves it to
+           * APPROVED, in this same transaction, and that is a deliberate choice
+           * over widening `acceptRequestOffer` — the most race-sensitive guard
+           * in the product, which will only ever match an APPROVED request.
+           *
+           * What justifies the approval is that both halves of what moderation
+           * asserts are already true: an operator approved the card this lead
+           * came from, and the business it was addressed to has just treated it
+           * as real enough to price. The useful side effect is `approvedAt`,
+           * which puts the request into the ordinary fourteen-day expiry and
+           * reminder machinery instead of leaving it stranded at SUBMITTED.
+           *
+           * **The gate is not touched.** `directShowcaseProviderId` stays set,
+           * so an APPROVED direct lead is still invisible to every other
+           * business — and the fan-out that an ordinary APPROVED transition
+           * would trigger is skipped for exactly that reason.
+           */
+          if (isDirectLeadOffer && request.status === ServiceRequestStatus.SUBMITTED) {
+            // Conditional, so two offers racing here cannot both claim the
+            // transition and write two `approvedAt` values.
+            await tx.serviceRequest.updateMany({
+              where: { id: requestId, status: ServiceRequestStatus.SUBMITTED },
+              data: { status: ServiceRequestStatus.APPROVED, approvedAt: submittedAt },
+            });
+          }
+
+          if (isDirectLeadOffer && request.showcaseLeadId) {
+            // The lead is marked ANSWERED under a conditional that only matches
+            // an OPEN one, which is what settles the race with the breach
+            // sweeper: whoever commits first wins, and the loser changes
+            // nothing.
+            await this.showcaseLeads.markAnswered(tx, requestId, offer.id, submittedAt);
+          }
 
           const updatedOffer = await tx.offer.update({
             where: { id: offer.id },
@@ -1513,6 +1719,23 @@ export class ProvidersService {
     return provider;
   }
 
+  /**
+   * Whether this provider may act on this request at all.
+   *
+   * One clause changed for vitrin, and it is the interesting one: a request
+   * reserved for **this** provider is reachable while it is still SUBMITTED.
+   *
+   * That is not a relaxation of moderation. A direct lead has no moderation
+   * step before it reaches the business it was addressed to — the card it came
+   * from is already approved, and the customer chose that business by name —
+   * so waiting for APPROVED would mean the addressee could not answer a lead
+   * they can already see. Everybody else still needs APPROVED, including the
+   * same provider on any other request, and a released lead re-enters ordinary
+   * moderation before any second business sees it.
+   *
+   * Returns the request's gate so the offer path can hand it to the resolver
+   * without reading the row twice.
+   */
   private async ensureProviderCanSeeRequest(providerId: string, requestId: string) {
     const provider = await this.getApprovedProviderForDiscovery(providerId);
     const request = await this.prisma.serviceRequest.findUnique({
@@ -1525,18 +1748,28 @@ export class ProvidersService {
         district: true,
         neighborhood: true,
         phoneVerifiedAt: true,
+        directShowcaseProviderId: true,
       },
     });
 
+    const isOwnDirectLead =
+      request !== null && request.directShowcaseProviderId === providerId;
+
     if (
       !request ||
-      request.status !== ServiceRequestStatus.APPROVED ||
       !isRequestVisibleToProviders(request) ||
+      !isRequestVisibleToDirectGate(request, providerId) ||
+      !(
+        request.status === ServiceRequestStatus.APPROVED ||
+        (isOwnDirectLead && request.status === ServiceRequestStatus.SUBMITTED)
+      ) ||
       !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
       !matchesProviderArea(provider.serviceAreas, request)
     ) {
       throw new NotFoundException('Request not found');
     }
+
+    return { directShowcaseProviderId: request.directShowcaseProviderId };
   }
 
   private async getProviderCreditBalance(providerId: string) {
