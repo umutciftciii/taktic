@@ -476,14 +476,19 @@ export class PaymentsWebhookService {
      * past the PROCESSED short-circuit still cannot produce a second one.
      */
     if (purchase.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
-      // Narrowed rather than asserted: the four columns are nullable on the
+      // Narrowed rather than asserted: the five columns are nullable on the
       // model and NOT NULL in every case that can reach here, and the CHECK
       // constraint is what makes that true. A purchase that somehow reached
       // settlement without them is a data fault, not a payment to accept.
+      //
+      // The acceptance is one of the five. A vitrin run whose terms nobody
+      // agreed to must not go on the air, and a settlement is the last moment
+      // that refusal is still free.
       if (
         !purchase.showcasePackageId ||
         !purchase.showcaseCardId ||
         !purchase.showcaseCardVersionId ||
+        !purchase.showcasePriceTermsAcceptanceId ||
         purchase.durationDaysSnapshot === null
       ) {
         return { mismatch: 'UNKNOWN_REFERENCE', purchaseId: purchase.id };
@@ -501,6 +506,7 @@ export class PaymentsWebhookService {
           packageNameSnapshot: purchase.packageNameSnapshot,
           priceAmountSnapshot: purchase.priceAmountSnapshot,
           currencySnapshot: purchase.currencySnapshot,
+          showcasePriceTermsAcceptanceId: purchase.showcasePriceTermsAcceptanceId,
         },
         now,
       );

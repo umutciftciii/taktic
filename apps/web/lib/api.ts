@@ -1311,6 +1311,26 @@ export type ShowcaseCard = {
 export type ShowcasePriceTerms = { version: string; text: string };
 
 /**
+ * The same terms, asked about one card: is there an acceptance on file for the
+ * version in force?
+ *
+ * `accepted` answers what the buying screen needs rather than "has this card
+ * ever accepted anything" — an acceptance of superseded terms reports `false`
+ * with a null `acceptance`, because for the purpose of opening a checkout it is
+ * not an acceptance at all.
+ */
+export type ShowcaseCardPriceTerms = ShowcasePriceTerms & {
+  accepted: boolean;
+  acceptance: {
+    id: string;
+    cardId: string;
+    termsVersion: string;
+    termsText: string;
+    acceptedAt: string;
+  } | null;
+};
+
+/**
  * One category a card may point at, with the ancestry needed to render it.
  *
  * `depth` and `path` come from the API so the form can show a tree without

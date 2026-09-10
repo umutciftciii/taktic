@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
 import { LEMON_SQUEEZY_SIGNATURE_HEADER } from '../src/modules/payments/lemon-squeezy.webhook';
 import {
+  acceptShowcasePriceTerms,
   createApprovedShowcaseCard,
   createCategory,
   createDiscoverableProvider,
@@ -115,6 +116,13 @@ async function pendingShowcasePurchase() {
     categoryId: category.id,
   });
   const pkg = await createShowcasePackage(ctx.prisma, { priceAmount: PRICE, durationDays: 30 });
+  // The sale's own precondition, asserted in
+  // `showcase-price-terms-acceptance.spec.ts` and satisfied here.
+  await acceptShowcasePriceTerms(ctx.prisma, {
+    providerId: provider.id,
+    cardId: card.id,
+    userId: ownerUser.id,
+  });
 
   configureLemonSqueezy(`${pkg.slug}:${VARIANT_ID}`);
   const cookie = await loginAs(ctx.prisma, ownerUser.id);
@@ -132,6 +140,7 @@ async function pendingShowcasePurchase() {
   return {
     category,
     provider,
+    ownerUser,
     cookie,
     card,
     version,
@@ -302,6 +311,11 @@ describe('a settled vitrin payment', () => {
       providerId: first.provider.id,
       categoryId: first.category.id,
       title: 'İkinci kart',
+    });
+    await acceptShowcasePriceTerms(ctx.prisma, {
+      providerId: first.provider.id,
+      cardId: second.card.id,
+      userId: first.ownerUser.id,
     });
     const opened = await request(ctx.server)
       .post(`/providers/${first.provider.id}/showcase/placements/checkout`)

@@ -169,6 +169,33 @@ async function seedLivePlacement(options: {
     },
   });
 
+  /*
+   * Every vitrin sale is made against an acceptance of the price-responsibility
+   * text: the purchase CHECK insists on one and the placement snapshots what it
+   * said. The seed writes the row the buying screen would have written.
+   *
+   * The version and the sentence are restated here rather than imported, the
+   * same way the card seed above restates them and `areaKey` restates the fold
+   * — this suite talks to the application over HTTP and must not share a
+   * constant with the code it is testing.
+   */
+  const owner = await db.providerProfile.findUniqueOrThrow({
+    where: { id: options.providerId },
+    select: { userId: true },
+  });
+
+  const acceptance = await db.showcaseCardPriceTermsAcceptance.create({
+    data: {
+      providerId: options.providerId,
+      cardId: options.cardId,
+      acceptedByUserId: owner.userId!,
+      termsVersion: 'v1',
+      termsTextSnapshot:
+        'Kartta belirtilen hizmet bedeli ve kapsam hizmet verenin sorumluluğundadır. ' +
+        'TakTick bu hizmet bedelini tahsil etmez ve taraflar arasındaki ödemeye müdahil olmaz.',
+    },
+  });
+
   const purchase = await db.packagePurchase.create({
     data: {
       providerId: options.providerId,
@@ -181,6 +208,7 @@ async function seedLivePlacement(options: {
       priceAmountSnapshot: pkg.priceAmount,
       currencySnapshot: 'TRY',
       packageNameSnapshot: pkg.name,
+      showcasePriceTermsAcceptanceId: acceptance.id,
       status: 'PAID',
       paidAt: now,
       paymentProvider: 'mock',
@@ -200,6 +228,8 @@ async function seedLivePlacement(options: {
       priceAmountSnapshot: pkg.priceAmount,
       currencySnapshot: 'TRY',
       durationDaysSnapshot: 30,
+      priceTermsVersionSnapshot: acceptance.termsVersion,
+      priceTermsTextSnapshot: acceptance.termsTextSnapshot,
       startAt: now,
       endAt,
       status: 'ACTIVE',

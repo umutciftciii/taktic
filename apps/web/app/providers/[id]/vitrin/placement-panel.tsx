@@ -3,10 +3,11 @@ import {
   formatPrice,
   SHOWCASE_PLACEMENT_STATUS_LABELS,
   SHOWCASE_SUSPEND_REASON_LABELS,
+  type ShowcaseCardPriceTerms,
   type ShowcasePackage,
   type ShowcasePlacement,
 } from '../../../../lib/api';
-import { startShowcaseCheckoutAction } from './actions';
+import { acceptShowcasePriceTermsAction, startShowcaseCheckoutAction } from './actions';
 
 /**
  * The vitrin economy on one card's own screen: what it is publishing now, or
@@ -25,6 +26,16 @@ import { startShowcaseCheckoutAction } from './actions';
  *
  * A provider deciding whether to archive a card needs to know it costs them the
  * days, and finding that out afterwards is finding out too late.
+ *
+ * ## Why the terms acceptance is a form here rather than a refusal
+ *
+ * When the price-responsibility text has moved on, the checkout refuses. A
+ * panel that only reported that refusal would be a dead end — the provider
+ * would read "onay gerekiyor" with nothing on the screen to onaylamak. So the
+ * package table is replaced by the acceptance itself, and the copy says what
+ * the refusal does *not* mean: a run already on the air is untouched by any of
+ * this, and finding that out from a support ticket would be finding it out too
+ * late in the other direction.
  */
 export function PlacementPanel({
   providerId,
@@ -33,16 +44,39 @@ export function PlacementPanel({
   publishBlockedReason,
   placement,
   packages,
+  priceTerms,
+  publishBlockedCode,
 }: {
   providerId: string;
   cardId: string;
   canPublish: boolean;
   publishBlockedReason: string | null;
+  publishBlockedCode: string | null;
   placement: ShowcasePlacement | null;
   packages: ShowcasePackage[];
+  priceTerms: ShowcaseCardPriceTerms | null;
 }) {
   if (placement) {
     return <LivePlacement placement={placement} />;
+  }
+
+  /*
+   * The acceptance form stands in for the package table when — and only when —
+   * the terms are the *only* thing in the way.
+   *
+   * The condition is the eligibility check's own code rather than
+   * `!priceTerms.accepted`, and the difference matters. A card that has not been
+   * approved yet cannot be published for a reason the provider fixes elsewhere,
+   * and asking them to agree to the sales terms first would be asking for
+   * something that buys them nothing — while putting a second copy of the same
+   * sentence on a page that is already showing it above the "İncelemeye gönder"
+   * consent. The server decides which refusal is the operative one; this screen
+   * renders it.
+   */
+  if (publishBlockedCode === 'SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED' && priceTerms) {
+    return (
+      <PriceTermsAcceptance providerId={providerId} cardId={cardId} priceTerms={priceTerms} />
+    );
   }
 
   return (
@@ -112,6 +146,57 @@ export function PlacementPanel({
           </p>
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * The acceptance, standing where the package table would be.
+ *
+ * The sentence is rendered from the API's own copy of it — the same string the
+ * acceptance row snapshots — rather than written into this component, so what a
+ * provider reads and what the platform records an agreement to cannot be two
+ * texts expected to match.
+ */
+function PriceTermsAcceptance({
+  providerId,
+  cardId,
+  priceTerms,
+}: {
+  providerId: string;
+  cardId: string;
+  priceTerms: ShowcaseCardPriceTerms;
+}) {
+  return (
+    <section className="pdash-detail-card">
+      <h2 className="pdash-section-title">Vitrin yayını</h2>
+
+      <p className="notice" role="status">
+        Hizmet bedeli sorumluluk metni güncellendi. Bu kart için yeni bir vitrin paketi almadan
+        önce güncel metni onaylamanız gerekiyor.
+      </p>
+
+      <p className="muted">
+        Bu onay yalnız hukuki bir kabuldür: kartınızın içeriğini değiştirmez, kartı yeniden
+        incelemeye göndermez ve yayında olan bir vitrin sürenizi durdurmaz ya da kısaltmaz.
+      </p>
+
+      <form action={acceptShowcasePriceTermsAction} className="pdash-form">
+        <input type="hidden" name="providerId" value={providerId} />
+        <input type="hidden" name="cardId" value={cardId} />
+        <input type="hidden" name="priceTermsVersion" value={priceTerms.version} />
+
+        <label className="showcase-consent">
+          <input type="checkbox" name="priceTermsAccepted" required />
+          <span>{priceTerms.text}</span>
+        </label>
+
+        <div className="pdash-form-foot">
+          <button className="pdash-btn pdash-btn-primary" type="submit">
+            Metni onayla
+          </button>
+        </div>
+      </form>
     </section>
   );
 }

@@ -143,11 +143,19 @@ describe('a settled payment produces exactly one live run', () => {
           packageNameSnapshot: placement.packageNameSnapshot,
           priceAmountSnapshot: placement.priceAmountSnapshot,
           durationDaysSnapshot: placement.durationDaysSnapshot,
+          // Copied so the row is complete in every other respect: what must
+          // refuse this insert is the unique index on `purchaseId`, and a row
+          // that also violated a NOT NULL would pass the assertion for the
+          // wrong reason.
+          priceTermsVersionSnapshot: placement.priceTermsVersionSnapshot,
+          priceTermsTextSnapshot: placement.priceTermsTextSnapshot,
           startAt: placement.startAt,
           endAt: placement.endAt,
         },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(
+      expect.objectContaining({ code: 'P2002' }),
+    );
   });
 });
 

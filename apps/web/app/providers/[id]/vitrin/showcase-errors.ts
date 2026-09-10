@@ -41,6 +41,14 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
   SHOWCASE_CATEGORY_NOT_OFFERED_FOR_PLACEMENT:
     'Kartın kategorisi artık talep alamıyor, bu yüzden yayına alınamaz.',
   SHOWCASE_CARD_ALREADY_ARCHIVED: 'Bu kart zaten arşivlenmiş.',
+  // Not a fault and not a block on anything already running: the platform's
+  // price-responsibility text has moved on and the next purchase is sold under
+  // the new one. The sentence says so explicitly, because "onay gerekiyor" on a
+  // screen that also shows a live run reads like the run is at risk.
+  SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED:
+    'Hizmet bedeli sorumluluk metni güncellendi. Yeni paket almadan önce güncel metni onaylayın. Yayında olan vitrin süreniz bundan etkilenmez.',
+  SHOWCASE_PRICE_TERMS_UNAVAILABLE:
+    'Vitrin paketi satın alma şu anda geçici olarak kapalı. Lütfen daha sonra tekrar deneyin.',
   SHOWCASE_CHECKOUT_FAILED: 'Ödeme sayfası açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
   PROVIDER_UNAVAILABLE: 'Ödeme sayfası şu anda açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
   PACKAGE_NOT_MAPPED:

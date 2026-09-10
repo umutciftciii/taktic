@@ -220,6 +220,7 @@ export class PackagePurchasesService {
             !purchase.showcasePackageId ||
             !purchase.showcaseCardId ||
             !purchase.showcaseCardVersionId ||
+            !purchase.showcasePriceTermsAcceptanceId ||
             purchase.durationDaysSnapshot === null
           ) {
             throw new ConflictException('This vitrin purchase is missing its placement details');
@@ -237,6 +238,7 @@ export class PackagePurchasesService {
               packageNameSnapshot: purchase.packageNameSnapshot,
               priceAmountSnapshot: purchase.priceAmountSnapshot,
               currencySnapshot: purchase.currencySnapshot,
+              showcasePriceTermsAcceptanceId: purchase.showcasePriceTermsAcceptanceId,
             },
             now,
           );

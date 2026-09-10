@@ -11,13 +11,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { Roles } from '../auth/auth.decorators';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateShowcaseCardDto, UpdateShowcaseCardDto } from './dto/create-showcase-card.dto';
+import { AcceptShowcasePriceTermsDto } from './dto/showcase-price-terms.dto';
 import { SubmitShowcaseCardDto } from './dto/submit-showcase-card.dto';
+import { AuthUser } from '../auth/auth.types';
 import { ProviderShowcaseCardsService } from './provider-showcase-cards.service';
+import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 
 /**
  * A provider's own vitrin cards.
@@ -47,6 +50,7 @@ import { ProviderShowcaseCardsService } from './provider-showcase-cards.service'
 export class ProviderShowcaseCardsController {
   constructor(
     @Inject(ProviderShowcaseCardsService) private readonly cards: ProviderShowcaseCardsService,
+    @Inject(ShowcasePriceTermsService) private readonly priceTerms: ShowcasePriceTermsService,
   ) {}
 
   /**
@@ -93,6 +97,50 @@ export class ProviderShowcaseCardsController {
   @HttpCode(HttpStatus.CREATED)
   createCard(@Param('providerId') providerId: string, @Body() dto: CreateShowcaseCardDto) {
     return this.cards.createCard(providerId, dto);
+  }
+
+  /**
+   * What this card is being asked to agree to before its next placement is
+   * bought, and whether it already has.
+   *
+   * Card-scoped, unlike the `price-terms` route above it, and the two answer
+   * different questions on purpose. That one serves the sentence the *review*
+   * submission requires; this one also says whether this particular card has an
+   * acceptance for the version in force — which is what the buying screen needs
+   * in order to offer the acceptance rather than a button the checkout refuses.
+   */
+  @Get(':cardId/price-terms')
+  getCardPriceTerms(
+    @Param('providerId') providerId: string,
+    @Param('cardId') cardId: string,
+  ) {
+    return this.priceTerms.getForCard(providerId, cardId);
+  }
+
+  /**
+   * Accepts the price-responsibility text for this card.
+   *
+   * **200 on both the first call and every repeat, and never 201.** What this
+   * addresses is the card's acceptance of the terms in force, and after either
+   * call it exists; a status that differed between two identical requests would
+   * report to the caller a difference they cannot act on and do not have. The
+   * body is the acceptance itself either way — the same row, with the same
+   * `acceptedAt`, because a re-acceptance does not move the record of when
+   * consent was actually given.
+   *
+   * Nothing about the card changes here. No version is written, no review is
+   * opened, no placement is touched: that separation is the whole reason this
+   * route exists rather than a second submit.
+   */
+  @Post(':cardId/price-terms-acceptances')
+  @HttpCode(HttpStatus.OK)
+  acceptCardPriceTerms(
+    @Param('providerId') providerId: string,
+    @Param('cardId') cardId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: AcceptShowcasePriceTermsDto,
+  ) {
+    return this.priceTerms.acceptForCard(providerId, cardId, user, dto);
   }
 
   /**

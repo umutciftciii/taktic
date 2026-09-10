@@ -14,6 +14,7 @@ import {
   type ShowcaseCardVersion,
   type ShowcasePackage,
   type ShowcasePlacement,
+  type ShowcaseCardPriceTerms,
   type ShowcasePriceTerms,
 } from '../../../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../../../lib/locations';
@@ -46,6 +47,7 @@ type ShowcaseCardPageProps = {
     withdrawn?: string;
     archived?: string;
     unarchived?: string;
+    priceTermsAccepted?: string;
   }>;
 };
 
@@ -73,14 +75,23 @@ type ShowcaseEligibility = {
  */
 export default async function ShowcaseCardPage({ params, searchParams }: ShowcaseCardPageProps) {
   const { id, cardId } = await params;
-  const { error, saved, submitted, withdrawn, archived, unarchived } = await searchParams;
+  const { error, saved, submitted, withdrawn, archived, unarchived, priceTermsAccepted } =
+    await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/vitrin/${cardId}`);
   }
 
-  const [provider, card, creditBalance, provinces, priceTerms, placements, eligibility] =
-    await Promise.all([
+  const [
+    provider,
+    card,
+    creditBalance,
+    provinces,
+    priceTerms,
+    cardPriceTerms,
+    placements,
+    eligibility,
+  ] = await Promise.all([
       fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
       fetchOrNotFound(() => apiFetch<ShowcaseCard>(`/providers/${id}/showcase/cards/${cardId}`)),
       readCreditBalance(id),
@@ -89,6 +100,22 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
       // written into this page, so the text a provider agrees to and the text the
       // acceptance names are one string and not two expected to match.
       apiFetch<ShowcasePriceTerms>(`/providers/${id}/showcase/cards/price-terms`),
+      /*
+       * The same terms asked about *this* card: is there an acceptance on file
+       * for the version in force?
+       *
+       * A second call rather than a field on the one above, because the two
+       * answer different questions — that one is what the review submission
+       * requires, this one is what the next purchase requires — and folding them
+       * together would make a change to either silently a change to both.
+       *
+       * A failure to answer is treated as "no opinion" rather than as a broken
+       * page: the panel then falls back to the eligibility check's own refusal,
+       * which carries the same code.
+       */
+      apiFetch<ShowcaseCardPriceTerms>(
+        `/providers/${id}/showcase/cards/${cardId}/price-terms`,
+      ).catch(() => null),
       apiFetch<{ placements: ShowcasePlacement[] }>(`/providers/${id}/showcase/placements`),
       /*
        * The dry run behind the buy button.
@@ -196,14 +223,22 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
           Kart arşivden çıkarıldı. Vitrin süresinden kalan varsa yayın yeniden başladı.
         </div>
       ) : null}
+      {priceTermsAccepted ? (
+        <div className="pdash-notice" role="status">
+          Hizmet bedeli sorumluluk metnini onayladınız. Kartınızın içeriği ve inceleme durumu
+          değişmedi.
+        </div>
+      ) : null}
 
       <PlacementPanel
         providerId={id}
         cardId={cardId}
         canPublish={eligibility?.eligible ?? false}
         publishBlockedReason={eligibility?.message ?? null}
+        publishBlockedCode={eligibility?.code ?? null}
         placement={livePlacement}
         packages={packages}
+        priceTerms={cardPriceTerms}
       />
 
       {/*

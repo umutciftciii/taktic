@@ -17,6 +17,7 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { areaCovers, describeArea } from '../../common/provider-service-area-scope';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
@@ -33,6 +34,8 @@ import {
 import { CheckoutSessionError, PaymentProviderPort } from '../payments/payment-provider.port';
 import { CreateShowcaseCheckoutDto } from './dto/showcase-checkout.dto';
 import { packageAllowsCardKind } from './showcase-placement.service';
+import { resolveShowcasePriceTerms } from './showcase.constants';
+import { findCurrentPriceTermsAcceptance } from './showcase-price-terms.service';
 import {
   showcaseAreaNotCovered,
   showcaseCardAlreadyPlaced,
@@ -41,6 +44,7 @@ import {
   showcaseCategoryNotOffered,
   showcasePackageKindMismatch,
   showcasePackageNotFound,
+  showcasePriceTermsReacceptRequired,
   showcaseProviderNotApproved,
 } from './showcase.errors';
 
@@ -65,7 +69,18 @@ import {
  * - the category is still one a card may sit under and still open;
  * - every area the live version claims is still inside the provider's own
  *   service areas;
- * - and the card does not already have a live run.
+ * - the card does not already have a live run;
+ * - and there is an acceptance of the price-responsibility text **in the
+ *   version in force** on file for this card.
+ *
+ * ## What the terms gate does and does not reach
+ *
+ * The last check is the only place a bump of `SHOWCASE_PRICE_TERMS_VERSION` is
+ * felt. It gates the *next* sale and nothing that has already been paid for: a
+ * run bought under superseded terms stays on the air with the same `endAt`, its
+ * card stays approved, and no version is re-opened for review. That asymmetry
+ * is the product rule — the platform may change what it asks of the next buyer,
+ * and may not change the terms of a sale already made.
  *
  * ## What is deliberately *not* checked
  *
@@ -102,6 +117,7 @@ export class ShowcaseCheckoutService {
 
     try {
       const { card, pkg } = await this.assertPurchasable(
+        this.prisma,
         providerId,
         cardId,
         showcasePackageId ?? null,
@@ -154,51 +170,85 @@ export class ShowcaseCheckoutService {
 
     const kind = resolvePaymentProviderKind();
     const now = new Date();
-    const { card, pkg } = await this.assertPurchasable(
-      providerId,
-      dto.cardId,
-      dto.showcasePackageId,
-      now,
-    );
-
-    if (!pkg) {
-      throw showcasePackageNotFound();
-    }
-
-    const reusable = await this.findReusableCheckout(providerId, pkg.id, card.id, kind);
-    if (reusable) {
-      return present(reusable, kind, true);
-    }
 
     // Held locally and never read back off the row: the purchase projection
     // drops the token, so this is the only place it exists outside the database
     // column and the payment provider's checkout metadata.
     const reference = randomBytes(32).toString('base64url');
 
-    const purchase = await this.prisma.packagePurchase.create({
-      data: {
-        providerId,
-        kind: 'SHOWCASE_PACKAGE',
-        packageId: null,
-        showcasePackageId: pkg.id,
-        showcaseCardId: card.id,
-        // The version that is live *now*. The record of what the provider was
-        // looking at when they paid; the placement pins the version live at
-        // settlement, which may be a newer one.
-        showcaseCardVersionId: card.liveVersionId,
-        durationDaysSnapshot: pkg.durationDays,
-        // Zero, and a CHECK constraint agrees: a vitrin purchase sells
-        // visibility and may never load an offer-credit balance.
-        creditAmountSnapshot: 0,
-        priceAmountSnapshot: pkg.priceAmount,
-        currencySnapshot: pkg.currency,
-        packageNameSnapshot: pkg.name,
-        paymentProvider: kind,
-        paymentReference: reference,
+    /*
+     * Every precondition and the purchase row, in one Serializable transaction.
+     *
+     * The preflight used to run on the client and the insert followed it; that
+     * left the terms check and the row it authorises in two separate reads of
+     * the database. Inside one transaction there is no ordering of writes in
+     * which a vitrin purchase exists and the acceptance it was sold against
+     * does not — and the row records *which* acceptance, so the answer survives
+     * the next bump.
+     *
+     * The payment provider is called after this commits, never inside it: a
+     * network round trip holding a Serializable transaction open is how a
+     * settlement path acquires a timeout it cannot explain.
+     */
+    const opened = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const { card, pkg, acceptance } = await this.assertPurchasable(
+          tx,
+          providerId,
+          dto.cardId,
+          dto.showcasePackageId,
+          now,
+        );
+
+        if (!pkg || !acceptance) {
+          throw showcasePackageNotFound();
+        }
+
+        const reusable = await this.findReusableCheckout(tx, providerId, pkg.id, card.id, kind);
+        if (reusable) {
+          return { purchase: reusable, pkg, reused: true as const };
+        }
+
+        const created = await tx.packagePurchase.create({
+          data: {
+            providerId,
+            kind: 'SHOWCASE_PACKAGE',
+            packageId: null,
+            showcasePackageId: pkg.id,
+            showcaseCardId: card.id,
+            // The version that is live *now*. The record of what the provider was
+            // looking at when they paid; the placement pins the version live at
+            // settlement, which may be a newer one.
+            showcaseCardVersionId: card.liveVersionId,
+            durationDaysSnapshot: pkg.durationDays,
+            // The terms this sale was made under. Read in this same
+            // transaction, so the two facts cannot come apart.
+            showcasePriceTermsAcceptanceId: acceptance.id,
+            // Zero, and a CHECK constraint agrees: a vitrin purchase sells
+            // visibility and may never load an offer-credit balance.
+            creditAmountSnapshot: 0,
+            priceAmountSnapshot: pkg.priceAmount,
+            currencySnapshot: pkg.currency,
+            packageNameSnapshot: pkg.name,
+            paymentProvider: kind,
+            paymentReference: reference,
+          },
+          include: showcasePurchaseInclude,
+          omit: packagePurchaseOmit,
+        });
+
+        return { purchase: created, pkg, reused: false as const };
       },
-      include: showcasePurchaseInclude,
-      omit: packagePurchaseOmit,
-    });
+      { label: 'showcase.createCheckout', logger: this.logger },
+    );
+
+    if (opened.reused) {
+      return present(opened.purchase, kind, true);
+    }
+
+    const purchase = opened.purchase;
+    const pkg = opened.pkg;
 
     try {
       const session = await this.payments.createCheckoutSession({
@@ -268,12 +318,13 @@ export class ShowcaseCheckoutService {
    * advertise what is exactly the disclosure this feature cannot allow.
    */
   private async assertPurchasable(
+    db: Prisma.TransactionClient,
     providerId: string,
     cardId: string,
     showcasePackageId: string | null,
     now: Date,
   ) {
-    const card = await this.prisma.showcaseCard.findFirst({
+    const card = await db.showcaseCard.findFirst({
       where: { id: cardId, providerId },
       select: {
         id: true,
@@ -319,7 +370,7 @@ export class ShowcaseCheckoutService {
     // And the same for coverage. A provider who narrowed their service areas
     // after the card was approved must not be able to buy visibility somewhere
     // they no longer work.
-    const coverage = await this.prisma.providerServiceArea.findMany({
+    const coverage = await db.providerServiceArea.findMany({
       where: { providerId },
       select: { city: true, district: true, neighborhood: true },
     });
@@ -332,7 +383,7 @@ export class ShowcaseCheckoutService {
 
     // One card, one live run. Not a cap on how many cards a provider publishes
     // — see the class comment.
-    const live = await this.prisma.showcasePlacement.findFirst({
+    const live = await db.showcasePlacement.findFirst({
       where: {
         cardId: card.id,
         status: {
@@ -350,11 +401,36 @@ export class ShowcaseCheckoutService {
       throw showcaseCardAlreadyPlaced();
     }
 
-    if (!showcasePackageId) {
-      return { card: { ...card, liveVersionId: card.liveVersionId }, pkg: null };
+    /*
+     * The terms in force, and this card's acceptance of them.
+     *
+     * Last of the card-level checks, and after the ownership check on purpose:
+     * a caller who does not own the card has already been answered with the
+     * same 404 an unknown id gets, so nothing here can be used to probe.
+     *
+     * Read through the caller's client, which for the sale itself is the
+     * transaction that writes the purchase. `resolveShowcasePriceTerms` refuses
+     * to produce a blank version, so a deployment with no terms configured
+     * cannot reach the comparison at all — a blank version would otherwise
+     * match an equally blank stored one and sell a run on no terms.
+     *
+     * The acceptance is keyed to the card, not to the business. A provider who
+     * accepted the current text for one card has not accepted it for another;
+     * the record says what was agreed and about what, and widening the match to
+     * the provider would make the card column decorative.
+     */
+    const terms = resolveShowcasePriceTerms();
+    const acceptance = await findCurrentPriceTermsAcceptance(db, card.id, terms.version);
+
+    if (!acceptance) {
+      throw showcasePriceTermsReacceptRequired(terms.version);
     }
 
-    const pkg = await this.prisma.showcasePackage.findFirst({
+    if (!showcasePackageId) {
+      return { card: { ...card, liveVersionId: card.liveVersionId }, pkg: null, acceptance };
+    }
+
+    const pkg = await db.showcasePackage.findFirst({
       where: { id: showcasePackageId, isActive: true },
       select: {
         id: true,
@@ -375,7 +451,7 @@ export class ShowcaseCheckoutService {
       throw showcasePackageKindMismatch();
     }
 
-    return { card: { ...card, liveVersionId: card.liveVersionId }, pkg };
+    return { card: { ...card, liveVersionId: card.liveVersionId }, pkg, acceptance };
   }
 
   /**
@@ -387,12 +463,13 @@ export class ShowcaseCheckoutService {
    * back a checkout opened for a different card would publish the wrong one.
    */
   private findReusableCheckout(
+    db: Prisma.TransactionClient,
     providerId: string,
     showcasePackageId: string,
     cardId: string,
     kind: PaymentProviderKind,
   ) {
-    return this.prisma.packagePurchase.findFirst({
+    return db.packagePurchase.findFirst({
       where: {
         providerId,
         kind: 'SHOWCASE_PACKAGE',

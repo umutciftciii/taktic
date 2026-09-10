@@ -33,6 +33,11 @@ export const navGroups: NavGroup[] = [
       // visible on the purchase it came from.
       { href: '/showcase/placements', label: 'Vitrin Yerleşimleri' },
       { href: '/showcase/leads', label: 'Vitrin Talepleri' },
+      // The consent ledger. Under Operasyon rather than Katalog because the
+      // question it answers is about a business — "did they agree to this, and
+      // when" — and it is asked while investigating one, not while maintaining
+      // the catalogue that produced the text.
+      { href: '/showcase/price-terms', label: 'Vitrin Metin Onayları' },
     ],
   },
   {

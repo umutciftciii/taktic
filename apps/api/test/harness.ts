@@ -29,6 +29,10 @@ import {
 import { SmsMessage, SmsPort, SmsSendResult } from '../src/modules/notifications/sms.port';
 import { PaymentProviderPort } from '../src/modules/payments/payment-provider.port';
 import { normalizePhoneNumber } from '../src/modules/phone-verification/phone.util';
+import {
+  SHOWCASE_PRICE_TERMS_TEXT,
+  SHOWCASE_PRICE_TERMS_VERSION,
+} from '../src/modules/showcase/showcase.constants';
 import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
 import { toShowcaseAreaRow } from '../src/common/showcase-area-key';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -207,6 +211,7 @@ const TRUNCATED_TABLES = [
   // TRUNCATE … CASCADE handles the order regardless; it is kept readable as a
   // dependency graph, exactly as the phase-one block above is.
   'ShowcaseLead',
+  'ShowcaseCardPriceTermsAcceptance',
   'ShowcasePlacementVersionChange',
   'ShowcasePlacementSuspension',
   'ShowcasePlacementShelf',
@@ -941,6 +946,38 @@ export async function createApprovedShowcaseCard(
 }
 
 /**
+ * One price-responsibility acceptance, written straight to the table.
+ *
+ * The endpoint refuses anything but the version in force, which is correct and
+ * makes it useless for the case this suite most needs to build: a card whose
+ * only acceptance names *superseded* terms — the state a bump produces. So this
+ * writes the row, and every test that needs a current acceptance goes through
+ * the endpoint instead.
+ */
+export async function acceptShowcasePriceTerms(
+  prisma: PrismaClient,
+  options: {
+    providerId: string;
+    cardId: string;
+    userId: string;
+    termsVersion?: string;
+    termsText?: string;
+    acceptedAt?: Date;
+  },
+) {
+  return prisma.showcaseCardPriceTermsAcceptance.create({
+    data: {
+      providerId: options.providerId,
+      cardId: options.cardId,
+      acceptedByUserId: options.userId,
+      termsVersion: options.termsVersion ?? SHOWCASE_PRICE_TERMS_VERSION,
+      termsTextSnapshot: options.termsText ?? SHOWCASE_PRICE_TERMS_TEXT,
+      ...(options.acceptedAt ? { acceptedAt: options.acceptedAt } : {}),
+    },
+  });
+}
+
+/**
  * A settled vitrin purchase and the live run it produced.
  *
  * Goes through `ShowcasePlacementService.createForPurchase` rather than writing
@@ -958,12 +995,45 @@ export async function createLiveShowcasePlacement(
     packageId: string;
     durationDays?: number;
     paidAt?: Date;
+    /**
+     * The acceptance this run was sold under. Defaults to a freshly written one
+     * naming the version in force — which is what an ordinary sale produces.
+     * Tests about a terms bump pass an older acceptance instead.
+     */
+    acceptanceId?: string;
   },
 ) {
   const pkg = await ctx.prisma.showcasePackage.findUniqueOrThrow({
     where: { id: options.packageId },
   });
   const paidAt = options.paidAt ?? new Date();
+
+  // Reused when the caller has already accepted for this card, because the
+  // unique index means a card has one acceptance per version and a fixture that
+  // insisted on writing its own would fail on the second call rather than
+  // describing the same state.
+  const acceptanceId =
+    options.acceptanceId ??
+    (
+      (await ctx.prisma.showcaseCardPriceTermsAcceptance.findUnique({
+        where: {
+          cardId_termsVersion: {
+            cardId: options.cardId,
+            termsVersion: SHOWCASE_PRICE_TERMS_VERSION,
+          },
+        },
+      })) ??
+      (await acceptShowcasePriceTerms(ctx.prisma, {
+        providerId: options.providerId,
+        cardId: options.cardId,
+        userId: (
+          await ctx.prisma.providerProfile.findUniqueOrThrow({
+            where: { id: options.providerId },
+            select: { userId: true },
+          })
+        ).userId!,
+      }))
+    ).id;
 
   const purchase = await ctx.prisma.packagePurchase.create({
     data: {
@@ -977,6 +1047,7 @@ export async function createLiveShowcasePlacement(
       priceAmountSnapshot: pkg.priceAmount,
       currencySnapshot: pkg.currency,
       packageNameSnapshot: pkg.name,
+      showcasePriceTermsAcceptanceId: acceptanceId,
       status: 'PAID',
       paidAt,
       paymentProvider: 'mock',
@@ -997,6 +1068,7 @@ export async function createLiveShowcasePlacement(
         packageNameSnapshot: purchase.packageNameSnapshot,
         priceAmountSnapshot: purchase.priceAmountSnapshot,
         currencySnapshot: purchase.currencySnapshot,
+        showcasePriceTermsAcceptanceId: acceptanceId,
       },
       paidAt,
     ),

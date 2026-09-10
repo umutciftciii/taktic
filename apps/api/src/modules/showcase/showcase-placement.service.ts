@@ -127,6 +127,26 @@ export class ShowcasePlacementService {
     });
 
     /*
+     * The price-responsibility terms this run is sold under.
+     *
+     * Read from the acceptance the *checkout* recorded, never from
+     * `SHOWCASE_PRICE_TERMS_VERSION` as it stands now. A provider who opened a
+     * checkout under v1 and paid an hour after the platform moved to v2 bought
+     * the run they were shown — the version they agreed to is a fact about the
+     * sale, and settlement is not the place to substitute a newer one.
+     *
+     * `findUniqueOrThrow` rather than a fallback: a vitrin purchase with no
+     * acceptance behind it is refused by a CHECK constraint, so reaching here
+     * without one means the row was written by something that bypassed the
+     * checkout. Failing the settlement is the correct answer to that; inventing
+     * a version would put terms nobody agreed to on a live card.
+     */
+    const acceptance = await tx.showcaseCardPriceTermsAcceptance.findUniqueOrThrow({
+      where: { id: purchase.showcasePriceTermsAcceptanceId },
+      select: { termsVersion: true, termsTextSnapshot: true },
+    });
+
+    /*
      * The version being published.
      *
      * Deliberately the card's *current* live version rather than the one
@@ -158,6 +178,8 @@ export class ShowcasePlacementService {
         priceAmountSnapshot: purchase.priceAmountSnapshot,
         currencySnapshot: purchase.currencySnapshot,
         durationDaysSnapshot: purchase.durationDaysSnapshot,
+        priceTermsVersionSnapshot: acceptance.termsVersion,
+        priceTermsTextSnapshot: acceptance.termsTextSnapshot,
         startAt,
         endAt,
         status: ShowcasePlacementStatus.PENDING_ACTIVATION,
@@ -628,6 +650,13 @@ export type SettledShowcasePurchase = {
   packageNameSnapshot: string;
   priceAmountSnapshot: number;
   currencySnapshot: string;
+  /**
+   * The acceptance the checkout was opened against. Non-nullable here for the
+   * same reason the four above are: the column is nullable on the model and
+   * NOT NULL for every SHOWCASE_PACKAGE row by CHECK, and naming it
+   * non-nullable is what forces the caller to narrow it before settling.
+   */
+  showcasePriceTermsAcceptanceId: string;
 };
 
 /** Province first, neighbourhood last: smaller number means wider reach. */

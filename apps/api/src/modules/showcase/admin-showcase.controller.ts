@@ -16,6 +16,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
 import { AdminShowcaseService } from './admin-showcase.service';
+import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 import {
   ListShowcaseCardsDto,
   ListShowcaseVersionsDto,
@@ -42,7 +43,33 @@ import {
 @UseGuards(AuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class AdminShowcaseController {
-  constructor(@Inject(AdminShowcaseService) private readonly showcase: AdminShowcaseService) {}
+  constructor(
+    @Inject(AdminShowcaseService) private readonly showcase: AdminShowcaseService,
+    @Inject(ShowcasePriceTermsService) private readonly priceTerms: ShowcasePriceTermsService,
+  ) {}
+
+  /**
+   * Who accepted which version of the price-responsibility text, and when.
+   *
+   * **Read-only, and there is deliberately no companion that writes or clears
+   * one.** The rows are a record of consent; an operator route that could add
+   * or remove one would make the record say what the platform wanted rather
+   * than what a business agreed to, and the table's whole point would be gone.
+   * A correction, if one is ever genuinely needed, is a migration somebody has
+   * to write down — not a button.
+   *
+   * Every version is listed, not only the one in force. The question asked here
+   * is historical, and a list narrowed to today's terms would hide exactly the
+   * history the table exists to keep.
+   */
+  @Get('price-terms-acceptances')
+  listPriceTermsAcceptances(
+    @Query('providerId') providerId?: string,
+    @Query('cardId') cardId?: string,
+    @Query('termsVersion') termsVersion?: string,
+  ) {
+    return this.priceTerms.listForAdmin({ providerId, cardId, termsVersion });
+  }
 
   /** The queue. Defaults to PENDING — what is actually waiting on somebody. */
   @Get('versions')

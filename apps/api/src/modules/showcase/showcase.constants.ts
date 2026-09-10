@@ -1,3 +1,5 @@
+import { showcasePriceTermsUnavailable } from './showcase.errors';
+
 /**
  * The fixed terms and bounds of a vitrin card, in one place.
  *
@@ -36,6 +38,36 @@ export const SHOWCASE_PRICE_TERMS_VERSION = 'v1';
 export const SHOWCASE_PRICE_TERMS_TEXT =
   'Kartta belirtilen hizmet bedeli ve kapsam hizmet verenin sorumluluğundadır. ' +
   'TakTick bu hizmet bedelini tahsil etmez ve taraflar arasındaki ödemeye müdahil olmaz.';
+
+/**
+ * The terms in force right now, refusing to answer when there are none.
+ *
+ * Fail-closed, and the reason is specific rather than defensive. The checkout
+ * asks "is there an acceptance naming this version"; a blank version turns that
+ * into a comparison against nothing. Worse, an equally blank stored version
+ * would *match* it — so the one state that must never sell a placement is the
+ * one state a naive comparison lets through. Refusing to produce a version at
+ * all closes both doors, and closes them at the top of the call rather than
+ * deep inside a query.
+ *
+ * The two parameters default to the constants above and exist so the guard can
+ * be exercised for what it refuses. Nothing in the application passes them.
+ */
+export function resolveShowcasePriceTerms(
+  version: string = SHOWCASE_PRICE_TERMS_VERSION,
+  text: string = SHOWCASE_PRICE_TERMS_TEXT,
+): ShowcasePriceTerms {
+  const trimmedVersion = version.trim();
+  const trimmedText = text.trim();
+
+  if (trimmedVersion === '' || trimmedText === '') {
+    throw showcasePriceTermsUnavailable();
+  }
+
+  return { version: trimmedVersion, text: trimmedText };
+}
+
+export type ShowcasePriceTerms = { version: string; text: string };
 
 /**
  * The response promises, and their bounds.

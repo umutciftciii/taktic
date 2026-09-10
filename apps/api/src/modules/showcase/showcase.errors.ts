@@ -4,6 +4,7 @@ import {
   HttpException,
   HttpStatus,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 
 /**
@@ -508,6 +509,61 @@ export function showcaseFallbackAlreadyDecided() {
     error: 'Conflict',
     code: SHOWCASE_FALLBACK_ALREADY_DECIDED_CODE,
     message: 'Bu talep için kararınız zaten kaydedildi.',
+  });
+}
+
+export const SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED_CODE =
+  'SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED';
+export const SHOWCASE_PRICE_TERMS_UNAVAILABLE_CODE = 'SHOWCASE_PRICE_TERMS_UNAVAILABLE';
+
+/**
+ * A vitrin checkout was opened without a current acceptance of the
+ * price-responsibility text.
+ *
+ * **This refusal reaches exactly one place: the point of sale.** It is not a
+ * hold on anything already bought. A run on the air stays on the air under the
+ * terms it was sold under, its card stays approved, and no version is re-opened
+ * for review — a bump means the *next* placement is sold on the new sentence,
+ * never that an old one is retro-fitted to it.
+ *
+ * 409 rather than 400, and deliberately: nothing the caller sent is malformed.
+ * They asked for something the current state of their own account does not
+ * allow yet, and the fix is an action they can take on the screen they are
+ * already looking at. The version is named in the body so that screen can offer
+ * the right acceptance rather than guessing at one — it is the platform's own
+ * public terms version, so naming it discloses nothing.
+ */
+export function showcasePriceTermsReacceptRequired(requiredVersion: string) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED_CODE,
+    requiredVersion,
+    message:
+      'Hizmet bedeli sorumluluk metni güncellendi. Bu kart için yeni vitrin paketi almadan ' +
+      'önce güncel metni onaylamanız gerekir. Yayında olan vitrin süreniz bu onaydan ' +
+      'etkilenmez ve kesintisiz devam eder.',
+  });
+}
+
+/**
+ * The platform has no usable price-responsibility text configured.
+ *
+ * Cannot happen from a well-formed build — the values are constants — which is
+ * exactly why the refusal exists: the failure mode it forecloses is silent. A
+ * blank version compared against a blank stored version matches, and would sell
+ * a placement on terms nobody ever agreed to. 503 rather than 500 because it is
+ * a deployment fault rather than a request fault, and the caller has done
+ * nothing wrong.
+ */
+export function showcasePriceTermsUnavailable() {
+  return new ServiceUnavailableException({
+    statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+    error: 'Service Unavailable',
+    code: SHOWCASE_PRICE_TERMS_UNAVAILABLE_CODE,
+    message:
+      'Hizmet bedeli sorumluluk metni şu anda okunamıyor. Vitrin paketi satın alma geçici ' +
+      'olarak kapalı.',
   });
 }
 

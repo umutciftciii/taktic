@@ -2551,6 +2551,26 @@ export type ShowcasePlacement = {
  * No customer telephone number or e-mail address, exactly as on the provider's
  * inbox.
  */
+/**
+ * One provider accepting one version of the price-responsibility text.
+ *
+ * Append-only on the API side and read-only here: there is no admin route that
+ * writes or clears one, deliberately. A record of consent an operator could
+ * edit would say what the platform wanted rather than what a business agreed
+ * to, and the table would stop being evidence.
+ */
+export type ShowcasePriceTermsAcceptance = {
+  id: string;
+  cardId: string;
+  providerId: string;
+  termsVersion: string;
+  termsTextSnapshot: string;
+  acceptedAt: string;
+  provider: { id: string; businessName: string; status: string };
+  card: { id: string; kind: string; status: string; categoryId: string };
+  acceptedByUser: { id: string; name: string | null; email: string | null };
+};
+
 export type ShowcaseAdminLead = {
   id: string;
   status: ShowcaseLeadStatus;

@@ -209,6 +209,41 @@ function errorCode(error: unknown): string {
  * purchase's own screen renders the in-app form. The action does not decide
  * which — it follows whatever the API said.
  */
+/**
+ * Accepts the current price-responsibility text for one card.
+ *
+ * Its own action rather than a step folded into the checkout, and that is the
+ * point of the whole feature: agreeing to the platform's terms is a legal act,
+ * and one a provider can perform without buying anything, without touching what
+ * their card says, and without sending it back to an operator. The API writes a
+ * row in a table of its own and changes nothing else.
+ *
+ * Lands back on the card, where the buy button now works.
+ */
+export async function acceptShowcasePriceTermsAction(formData: FormData) {
+  const providerId = readString(formData, 'providerId');
+  const cardId = readString(formData, 'cardId');
+  const target = `/providers/${providerId}/vitrin/${cardId}`;
+
+  try {
+    await apiFetch(
+      `/providers/${providerId}/showcase/cards/${cardId}/price-terms-acceptances`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          priceTermsAccepted: formData.get('priceTermsAccepted') === 'on',
+          priceTermsVersion: readString(formData, 'priceTermsVersion'),
+        }),
+      },
+    );
+  } catch (error) {
+    redirect(`${target}?error=${errorCode(error)}`);
+  }
+
+  revalidatePath(target);
+  redirect(`${target}?priceTermsAccepted=1`);
+}
+
 export async function startShowcaseCheckoutAction(formData: FormData) {
   const providerId = readString(formData, 'providerId');
   const cardId = readString(formData, 'cardId');

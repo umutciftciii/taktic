@@ -204,6 +204,8 @@ type FeedRow = {
   responseSlaNormalHours: number;
   listedServicePriceAmount: number | null;
   listedServiceCurrency: string;
+  priceTermsVersion: string;
+  priceTermsText: string;
   categoryId: string;
   categoryName: string;
   categorySlug: string;
@@ -239,6 +241,20 @@ type FeedRow = {
  * The SLA hours are present on both kinds, because the card's call to action
  * renders its two urgency options from them — "Acil — 3 saat içinde dönüş",
  * "Normal — 24 saat içinde dönüş". The customer chooses by seeing the promise.
+ *
+ * ## The price-responsibility sentence comes from the placement
+ *
+ * `priceTerms` is read off the run, never off `SHOWCASE_PRICE_TERMS_TEXT` as it
+ * stands today. A run sold under v1 goes on telling customers what v1 said
+ * after the platform has moved to v2 — the same snapshot rule the price and the
+ * duration follow, applied to a statement about who is answerable for the
+ * money. Rendering the current constant instead would mean a bump quietly
+ * rewriting what a customer was told about a card bought weeks earlier, which
+ * is the one thing a terms bump is not allowed to do.
+ *
+ * It is present on both kinds. A PROMOTION card carries no price, but it does
+ * carry a scope somebody will be paid for, and the sentence is about the
+ * platform's role in that rather than about a number.
  */
 function toFeedCard(row: FeedRow) {
   return {
@@ -258,6 +274,7 @@ function toFeedCard(row: FeedRow) {
       neighborhood: row.areaNeighborhood,
     }),
     areaScope: row.areaScope,
+    priceTerms: { version: row.priceTermsVersion, text: row.priceTermsText },
     provider: {
       id: row.providerId,
       businessName: row.providerBusinessName,
@@ -352,6 +369,8 @@ function buildFeedQuery(input: {
         v."responseSlaNormalHours"    AS "responseSlaNormalHours",
         v."listedServicePriceAmount"  AS "listedServicePriceAmount",
         v."listedServiceCurrency"     AS "listedServiceCurrency",
+        p."priceTermsVersionSnapshot" AS "priceTermsVersion",
+        p."priceTermsTextSnapshot"    AS "priceTermsText",
         cat."id"   AS "categoryId",
         cat."name" AS "categoryName",
         cat."slug" AS "categorySlug",
@@ -427,6 +446,8 @@ function buildSingleCardQuery(cardId: string, now: Date): Prisma.Sql {
       v."responseSlaNormalHours"    AS "responseSlaNormalHours",
       v."listedServicePriceAmount"  AS "listedServicePriceAmount",
       v."listedServiceCurrency"     AS "listedServiceCurrency",
+      p."priceTermsVersionSnapshot" AS "priceTermsVersion",
+      p."priceTermsTextSnapshot"    AS "priceTermsText",
       cat."id"   AS "categoryId",
       cat."name" AS "categoryName",
       cat."slug" AS "categorySlug",

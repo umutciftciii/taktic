@@ -7,6 +7,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  acceptShowcasePriceTerms,
   createApprovedShowcaseCard,
   createCategory,
   createDiscoverableProvider,
@@ -67,6 +68,15 @@ async function scenario(
     areas: options.areas ?? [{ city: 'İstanbul', district: 'Kadıköy' }],
   });
   const pkg = await createShowcasePackage(ctx.prisma);
+  // A sale needs an acceptance of the price-responsibility text in force. That
+  // gate has its own suite — `showcase-price-terms-acceptance.spec.ts` — so it
+  // is satisfied here rather than re-asserted, exactly as the card's approval
+  // is.
+  await acceptShowcasePriceTerms(ctx.prisma, {
+    providerId: profile.id,
+    cardId: card.id,
+    userId: user.id,
+  });
 
   return { category, user, profile, card, version, pkg, cookie: await loginAs(ctx.prisma, user.id) };
 }
@@ -244,7 +254,7 @@ describe('what has to be true before a checkout opens', () => {
  */
 describe('a provider may occupy the same shelf more than once', () => {
   it('sells a second card in the same category and district', async () => {
-    const { profile, cookie, category, card, version, pkg } = await scenario();
+    const { profile, cookie, category, card, version, pkg, user } = await scenario();
     await createLiveShowcasePlacement(ctx, {
       providerId: profile.id,
       cardId: card.id,
@@ -258,6 +268,12 @@ describe('a provider may occupy the same shelf more than once', () => {
       title: 'İkinci kart',
       areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
     });
+    // An acceptance names one card, so the second one needs its own.
+    await acceptShowcasePriceTerms(ctx.prisma, {
+      providerId: profile.id,
+      cardId: second.card.id,
+      userId: user.id,
+    });
 
     const response = await checkout(profile.id, cookie, {
       cardId: second.card.id,
@@ -268,7 +284,7 @@ describe('a provider may occupy the same shelf more than once', () => {
   });
 
   it('sells a district card beside a province-wide one', async () => {
-    const { profile, cookie, category, card, version, pkg } = await scenario({
+    const { profile, cookie, category, card, version, pkg, user } = await scenario({
       areas: [{ city: 'İstanbul', district: null }],
     });
     await createLiveShowcasePlacement(ctx, {
@@ -283,6 +299,11 @@ describe('a provider may occupy the same shelf more than once', () => {
       categoryId: category.id,
       title: 'Kadıköy kartı',
       areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
+    });
+    await acceptShowcasePriceTerms(ctx.prisma, {
+      providerId: profile.id,
+      cardId: narrow.card.id,
+      userId: user.id,
     });
 
     const response = await checkout(profile.id, cookie, {
