@@ -6,12 +6,12 @@ import {
   ShowcaseCardKind,
 } from '@prisma/client';
 import { describeArea } from '../../common/provider-service-area-scope';
-import { showcaseAreaKey } from '../../common/showcase-area-key';
+import { showcaseAreaKey, showcaseCandidateAreaKeys } from '../../common/showcase-area-key';
 import { PrismaService } from '../../prisma/prisma.service';
 import { resolveArea } from '../locations/turkey-locations';
 import { ShowcaseFeedQueryDto } from './dto/showcase-feed.dto';
 import { SHOWCASE_FEED_DEFAULT_LIMIT, SHOWCASE_FEED_MAX_LIMIT } from './showcase.constants';
-import { showcaseAreaUnknown, showcaseLocationRequired } from './showcase.errors';
+import { showcaseAreaUnknown } from './showcase.errors';
 
 /**
  * The home page's vitrin shelf: which paid cards a visitor in one place sees,
@@ -31,10 +31,17 @@ import { showcaseAreaUnknown, showcaseLocationRequired } from './showcase.errors
  * A visitor who names only a province gets a prefix scan, which the
  * `text_pattern_ops` index answers.
  *
- * A visitor who names nothing gets **a refusal, not a national list**. Showing
- * somebody a business that cannot reach them is the exact opposite of what a
- * placement sells, and a provider paying for Kadıköy would be paying to appear
- * in Erzurum.
+ * A visitor who names **nothing** gets every live card, in the same rotation.
+ * That is a deliberate reversal of the earlier design, which refused. The
+ * refusal treated vitrin as a directory whose job is to filter; it is not one.
+ * A business buys a card and the card goes on the home page — what keeps the
+ * promise honest is the service area printed on the card itself, and the server
+ * check that refuses a direct lead for an address the card does not serve.
+ * Hiding the card from everybody who had not yet picked a province protected
+ * nobody and hid what a provider had paid for.
+ *
+ * A location is therefore a *narrowing*, offered on the separate discovery
+ * surface at `/vitrin`, and never a precondition for the home page.
  *
  * ## Ordering: rounds, not runs
  *
@@ -83,20 +90,25 @@ export class ShowcaseFeedService {
 
   async list(query: ShowcaseFeedQueryDto) {
     const city = query.city?.trim();
-    if (!city) {
-      throw showcaseLocationRequired();
-    }
 
-    // Resolved against the shipped location list, so "ISTANBUL", "istanbul" and
-    // "İstanbul" are one place and a made-up district is a refusal rather than
-    // an empty shelf that looks like "nobody advertises here".
-    const area = resolveArea({
-      city,
-      district: query.district?.trim() || null,
-      neighborhood: query.neighborhood?.trim() || null,
-    });
+    /*
+     * No province named is the ordinary case now — it is what the home page
+     * asks for. Only a province that was named and cannot be resolved is a
+     * refusal, because that is a bad query string rather than an absent one.
+     *
+     * Resolved against the shipped location list, so "ISTANBUL", "istanbul" and
+     * "İstanbul" are one place and a made-up district is a refusal rather than
+     * an empty shelf that looks like "nobody advertises here".
+     */
+    const area = city
+      ? resolveArea({
+          city,
+          district: query.district?.trim() || null,
+          neighborhood: query.neighborhood?.trim() || null,
+        })
+      : null;
 
-    if (!area) {
+    if (city && !area) {
       throw showcaseAreaUnknown();
     }
 
@@ -106,8 +118,9 @@ export class ShowcaseFeedService {
 
     const rows = await this.prisma.$queryRaw<FeedRow[]>(
       buildFeedQuery({
-        keys: candidateAreaKeys(area),
-        prefix: area.district === null ? `${showcaseAreaKey(area).split('|')[0]}|` : null,
+        keys: area ? showcaseCandidateAreaKeys(area) : null,
+        prefix:
+          area && area.district === null ? `${showcaseAreaKey(area).split('|')[0]}|` : null,
         categoryId: query.categoryId?.trim() || null,
         kind: query.kind ?? null,
         now,
@@ -123,12 +136,16 @@ export class ShowcaseFeedService {
       rows.length > limit && page.length > 0 ? encodeCursor(page[page.length - 1]!) : null;
 
     return {
-      location: {
-        city: area.city,
-        district: area.district,
-        neighborhood: area.neighborhood,
-        label: describeArea(area),
-      },
+      // Null when the visitor named no place, so a client cannot render a
+      // heading about a location nobody chose.
+      location: area
+        ? {
+            city: area.city,
+            district: area.district,
+            neighborhood: area.neighborhood,
+            label: describeArea(area),
+          }
+        : null,
       cards: page.map(toFeedCard),
       nextCursor,
     };
@@ -155,32 +172,6 @@ export class ShowcaseFeedService {
 
     return toFeedCard(row);
   }
-}
-
-/**
- * The keys a visitor's location can match — at most three, and exactly the
- * three levels a card area can name.
- *
- * The empty-string segments are what make this an equality lookup. See
- * `showcase-area-key.ts`: a key assembled from nullable parts would bind
- * nothing in a unique index and could not be compared with `IN` at all.
- */
-function candidateAreaKeys(area: {
-  city: string;
-  district: string | null;
-  neighborhood: string | null;
-}): string[] {
-  const keys = [showcaseAreaKey({ city: area.city, district: null, neighborhood: null })];
-
-  if (area.district) {
-    keys.push(showcaseAreaKey({ city: area.city, district: area.district, neighborhood: null }));
-
-    if (area.neighborhood) {
-      keys.push(showcaseAreaKey(area));
-    }
-  }
-
-  return keys;
 }
 
 type FeedRow = {
@@ -212,6 +203,14 @@ type FeedRow = {
   providerBusinessName: string;
   providerCity: string;
   providerDistrict: string;
+  areas: ShelfArea[] | null;
+};
+
+type ShelfArea = {
+  scope: ProviderServiceAreaScope;
+  city: string;
+  district: string | null;
+  neighborhood: string | null;
 };
 
 /**
@@ -274,6 +273,26 @@ function toFeedCard(row: FeedRow) {
       neighborhood: row.areaNeighborhood,
     }),
     areaScope: row.areaScope,
+    /*
+     * The whole coverage, already worded. The label is built here rather than
+     * on the client for the same reason `areaLabel` always was: "İstanbul
+     * geneli" versus "Kadıköy, İstanbul" is a product decision about what a
+     * card promises, and two renderers of it would eventually disagree.
+     */
+    areas: (row.areas ?? [
+      {
+        scope: row.areaScope,
+        city: row.areaCity,
+        district: row.areaDistrict,
+        neighborhood: row.areaNeighborhood,
+      },
+    ]).map((area) => ({
+      scope: area.scope,
+      city: area.city,
+      district: area.district,
+      neighborhood: area.neighborhood,
+      label: describeArea(area),
+    })),
     priceTerms: { version: row.priceTermsVersion, text: row.priceTermsText },
     provider: {
       id: row.providerId,
@@ -314,7 +333,8 @@ type FeedCursor = {
  * page, and that is the one failure this feature must not have.
  */
 function buildFeedQuery(input: {
-  keys: string[];
+  /** Null when the visitor named no place: every live shelf row is a candidate. */
+  keys: string[] | null;
   prefix: string | null;
   categoryId: string | null;
   kind: ShowcaseCardKind | null;
@@ -324,7 +344,9 @@ function buildFeedQuery(input: {
 }): Prisma.Sql {
   const areaMatch = input.prefix
     ? Prisma.sql`s."areaKey" LIKE ${`${input.prefix}%`}`
-    : Prisma.sql`s."areaKey" IN (${Prisma.join(input.keys)})`;
+    : input.keys
+      ? Prisma.sql`s."areaKey" IN (${Prisma.join(input.keys)})`
+      : Prisma.sql`TRUE`;
 
   const categoryMatch = input.categoryId
     ? Prisma.sql`AND s."categoryId" = ${input.categoryId}`
@@ -376,7 +398,25 @@ function buildFeedQuery(input: {
         cat."slug" AS "categorySlug",
         pr."businessName" AS "providerBusinessName",
         pr."city"         AS "providerCity",
-        pr."district"     AS "providerDistrict"
+        pr."district"     AS "providerDistrict",
+        -- Every area this run is on the air in, not only the one that matched
+        -- the visitor. The card has to be able to state its whole coverage:
+        -- "Hizmet bölgesi" is the single most load-bearing line on it, and a
+        -- card that named only the matched area would understate what a
+        -- business bought on a shelf they browse without a location.
+        (
+          SELECT json_agg(
+                   json_build_object(
+                     'scope', a."scope",
+                     'city', a."city",
+                     'district', a."district",
+                     'neighborhood', a."neighborhood"
+                   )
+                   ORDER BY a."city", a."district" NULLS FIRST, a."neighborhood" NULLS FIRST
+                 )
+          FROM "ShowcasePlacementShelf" a
+          WHERE a."placementId" = p."id" AND a."active"
+        ) AS "areas"
       FROM "ShowcasePlacementShelf" s
       JOIN "ShowcasePlacement"   p   ON p."id" = s."placementId"
       JOIN "ShowcaseCard"        c   ON c."id" = p."cardId"
@@ -453,7 +493,20 @@ function buildSingleCardQuery(cardId: string, now: Date): Prisma.Sql {
       cat."slug" AS "categorySlug",
       pr."businessName" AS "providerBusinessName",
       pr."city"         AS "providerCity",
-      pr."district"     AS "providerDistrict"
+      pr."district"     AS "providerDistrict",
+      (
+        SELECT json_agg(
+                 json_build_object(
+                   'scope', a."scope",
+                   'city', a."city",
+                   'district', a."district",
+                   'neighborhood', a."neighborhood"
+                 )
+                 ORDER BY a."city", a."district" NULLS FIRST, a."neighborhood" NULLS FIRST
+               )
+        FROM "ShowcasePlacementShelf" a
+        WHERE a."placementId" = p."id" AND a."active"
+      ) AS "areas"
     FROM "ShowcasePlacement" p
     JOIN "ShowcasePlacementShelf" s ON s."placementId" = p."id" AND s."active"
     JOIN "ShowcaseCard"        c   ON c."id" = p."cardId"

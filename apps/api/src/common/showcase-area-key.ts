@@ -69,3 +69,32 @@ export function toShowcaseAreaRow(area: ShowcaseAreaLevels) {
     areaKey: showcaseAreaKey(area),
   };
 }
+
+/**
+ * The keys a *real* location can match, and the only definition of "this card
+ * serves that address" the product has.
+ *
+ * A visitor in Moda, Kadıköy, İstanbul is reached by exactly three card areas —
+ * "İstanbul geneli", "İstanbul/Kadıköy" and "İstanbul/Kadıköy/Moda" — so the
+ * question is an `IN` over three equality keys rather than a coverage scan.
+ *
+ * Lifted out of the feed service because the feed is no longer the only caller.
+ * A direct lead now has to be checked against the card's own shelf on the
+ * server, and the check has to be the *same* rule the shelf was built with: two
+ * implementations of "covers" would eventually disagree, and the disagreement
+ * would show up as a customer being shown a card they cannot buy from — or,
+ * far worse, as a lead reaching a business for an address it never sold.
+ */
+export function showcaseCandidateAreaKeys(area: ShowcaseAreaLevels): string[] {
+  const keys = [showcaseAreaKey({ city: area.city, district: null, neighborhood: null })];
+
+  if (area.district) {
+    keys.push(showcaseAreaKey({ city: area.city, district: area.district, neighborhood: null }));
+
+    if (area.neighborhood) {
+      keys.push(showcaseAreaKey(area));
+    }
+  }
+
+  return keys;
+}

@@ -25,6 +25,7 @@ import { ShowcasePackagesService } from './showcase-packages.service';
 import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 import { ShowcasePlacementExpiryService } from './showcase-placement-expiry.service';
 import { ShowcasePlacementReadService } from './showcase-placement-read.service';
+import { ShowcasePublicationService } from './showcase-publication.service';
 import { ShowcasePublicController } from './showcase-public.controller';
 import { ShowcaseSchedulerService } from './showcase-scheduler.service';
 import { ShowcaseUploadsController } from './showcase-uploads.controller';
@@ -119,6 +120,7 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
     ShowcasePackagesService,
     ShowcasePriceTermsService,
     ShowcasePlacementReadService,
+    ShowcasePublicationService,
     ShowcaseCheckoutService,
     ShowcaseFeedService,
     ShowcaseLeadService,

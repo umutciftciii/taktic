@@ -82,7 +82,7 @@ export default async function ShowcasePlacementPage({
         subtitle={`${SHOWCASE_CARD_KIND_LABELS[placement.kind]} · ${placement.category.name}`}
         breadcrumbs={[
           { label: 'Dashboard', href: '/' },
-          { label: 'Vitrin Yerleşimleri', href: '/showcase/placements' },
+          { label: 'Yayındaki Kartlar', href: '/showcase/placements' },
           { label: placement.version.title },
         ]}
       />

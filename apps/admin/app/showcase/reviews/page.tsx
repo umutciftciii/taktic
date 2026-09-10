@@ -35,14 +35,26 @@ export default async function ShowcaseReviewQueuePage() {
   return (
     <>
       <PageHeader
-        title="Vitrin İncelemeleri"
+        title="Kart İncelemeleri"
         subtitle="İnceleme bekleyen vitrin kartı sürümleri. En eski gönderim başta."
-        breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Vitrin İncelemeleri' }]}
+        breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Kart İncelemeleri' }]}
       />
 
       <SectionCard
         title="Bekleyen sürümler"
         subtitle={`${versions.length} sürüm inceleme bekliyor.`}
+        /*
+          The full card list, reachable from the queue rather than from the
+          sidebar. An operator comes looking for "every card, in every state"
+          while already inside vitrin — usually from a card they have just
+          decided about — and it does not earn a permanent row beside the three
+          jobs the sidebar names.
+        */
+        actions={
+          <Link className="btn btn-sm btn-secondary" href="/showcase/cards">
+            Tüm vitrin kartları
+          </Link>
+        }
         padded={false}
       >
         {versions.length === 0 ? (

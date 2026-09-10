@@ -29,6 +29,7 @@ import { ApiError, apiFetch } from '../../../lib/api';
 export async function startShowcaseLeadVerificationAction(formData: FormData) {
   const cardId = readString(formData, 'cardId');
   const phone = readString(formData, 'phone');
+  const place = readLocation(formData);
 
   try {
     await apiFetch('/showcase/lead-verification', {
@@ -36,19 +37,20 @@ export async function startShowcaseLeadVerificationAction(formData: FormData) {
       body: JSON.stringify({ phone }),
     });
   } catch (error) {
-    redirect(`/vitrin/${cardId}?step=phone&error=${errorCode(error)}`);
+    redirect(`/vitrin/${cardId}?step=phone&error=${errorCode(error)}${place}`);
   }
 
   // The number travels in the query string so the next step's form can prefill
   // it. It is the visitor's own number, they just typed it, and it grants
   // nothing — the code is what proves anything, and that is never in a URL.
-  redirect(`/vitrin/${cardId}?step=code&phone=${encodeURIComponent(phone)}`);
+  redirect(`/vitrin/${cardId}?step=code&phone=${encodeURIComponent(phone)}${place}`);
 }
 
 export async function confirmShowcaseLeadVerificationAction(formData: FormData) {
   const cardId = readString(formData, 'cardId');
   const phone = readString(formData, 'phone');
   const code = readString(formData, 'code');
+  const place = readLocation(formData);
 
   try {
     await apiFetch('/showcase/lead-verification/verify', {
@@ -57,11 +59,11 @@ export async function confirmShowcaseLeadVerificationAction(formData: FormData) 
     });
   } catch (error) {
     redirect(
-      `/vitrin/${cardId}?step=code&phone=${encodeURIComponent(phone)}&error=${errorCode(error)}`,
+      `/vitrin/${cardId}?step=code&phone=${encodeURIComponent(phone)}&error=${errorCode(error)}${place}`,
     );
   }
 
-  redirect(`/vitrin/${cardId}?step=form&phone=${encodeURIComponent(phone)}`);
+  redirect(`/vitrin/${cardId}?step=form&phone=${encodeURIComponent(phone)}${place}`);
 }
 
 /**
@@ -102,12 +104,45 @@ export async function createShowcaseLeadAction(formData: FormData) {
       }),
     });
   } catch (error) {
+    /*
+     * The refusal travels as a code, and the address the customer typed travels
+     * with it.
+     *
+     * `SHOWCASE_LEAD_AREA_NOT_SERVED` is the one the card page turns into a
+     * route onward rather than a red box: the work is real, it is simply not
+     * this business's, and the ordinary marketplace request is one click away.
+     * Every other code re-renders the form with what they had entered, which is
+     * why the location is carried here as well.
+     */
     redirect(
-      `/vitrin/${cardId}?step=form&phone=${encodeURIComponent(phone)}&error=${errorCode(error)}`,
+      `/vitrin/${cardId}?step=form&phone=${encodeURIComponent(phone)}&error=${errorCode(error)}` +
+        readLocation(formData),
     );
   }
 
   redirect(`/vitrin/${cardId}?sent=1`);
+}
+
+/**
+ * The location the customer chose, as a query-string fragment.
+ *
+ * Carried from step to step purely so nobody is asked the same question twice —
+ * and, on a refusal, so the form comes back with what they typed rather than
+ * blank. It is never authority: the API re-resolves it against the shipped
+ * location list and re-checks it against the run's own shelf on every
+ * submission, so a hand-edited URL buys no lead a real form could not open.
+ */
+function readLocation(formData: FormData): string {
+  const params = new URLSearchParams();
+  for (const key of ['city', 'district', 'neighborhood'] as const) {
+    const value = readString(formData, key);
+    if (value) {
+      params.set(key, value);
+    }
+  }
+
+  const query = params.toString();
+  return query ? `&${query}` : '';
 }
 
 function readString(formData: FormData, key: string): string {

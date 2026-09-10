@@ -97,6 +97,15 @@ const PUBLIC_ROUTES = [
    * lists is a route nobody decided about.
    */
   '/vitrin/:cardId',
+  /*
+   * The vitrin discovery surface: the same shelf, narrowed by province.
+   *
+   * The home page's shelf no longer asks for a location — it shows every live
+   * card, because that is what a business bought. Narrowing did not stop being
+   * useful, though, so it lives here, where it is the point of the screen
+   * rather than a gate in front of one.
+   */
+  '/vitrin',
 ] as const;
 
 /**

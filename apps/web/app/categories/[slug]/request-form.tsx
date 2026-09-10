@@ -7,6 +7,7 @@ import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
 import { BudgetFields } from './budget-fields';
 import { LocationFields } from './location-fields';
+import { ShowcaseMatches } from './showcase-matches';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
 /**
@@ -38,6 +39,15 @@ type RequestFormProps = {
   entryCategorySlug?: string;
   /** The routing steps taken to reach this form, in order. */
   routerSelections?: RouterSelection[];
+  /**
+   * The leaf category's own id.
+   *
+   * Only the vitrin block reads it, and only to ask "which cards are published
+   * for this service in this district". The request itself is still posted
+   * under the *entry* slug — see the hidden field below — so this cannot become
+   * a second, competing way of naming the category.
+   */
+  categoryId: string;
   questions: Question[];
   disclosure: ContactDisclosureConfig;
   showDisclosure: boolean;
@@ -87,6 +97,7 @@ const DESCRIPTION_NEAR_LIMIT_AT = 4500;
 export function RequestForm({
   categorySlug,
   entryCategorySlug,
+  categoryId,
   routerSelections = [],
   questions,
   disclosure,
@@ -126,6 +137,17 @@ export function RequestForm({
    * moment its trigger is chosen.
    */
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+
+  /*
+   * Where the work is, mirrored into state.
+   *
+   * The three selects remain the payload's source of truth — the server action
+   * reads the posted fields, exactly as before. This copy exists for the vitrin
+   * block, which has to ask the API a question keyed on the place and cannot
+   * read it out of the DOM during a change event without seeing a dependent
+   * select React has not cleared yet.
+   */
+  const [place, setPlace] = useState({ city: '', district: '', neighborhood: '' });
 
   /*
    * The description's length, mirrored into state purely so the counter can
@@ -453,7 +475,10 @@ export function RequestForm({
               <h2>Konum</h2>
               <LocationFields
                 provinces={provinces}
-                onChange={refreshSignals}
+                onChange={(value) => {
+                  setPlace(value);
+                  refreshSignals();
+                }}
                 neighborhoodRequired={addressQuestion?.isRequired ?? false}
                 neighborhoodHelpText={addressQuestion?.helpText}
               />
@@ -462,6 +487,25 @@ export function RequestForm({
                 <textarea name="addressNote" placeholder="Ek bilgi / yol tarifi" />
               </label>
             </section>
+
+            {/*
+              The vitrin cards published for this service in this district.
+
+              Directly after the location and before time and budget, because it
+              is the first moment the question can be asked at all — and because
+              a customer who would rather go straight to one business should
+              find that out before writing the rest of the form, not after.
+
+              It changes nothing about the request beside it. Picking a card
+              leaves this page; picking nothing submits the ordinary
+              marketplace request exactly as it always was.
+            */}
+            <ShowcaseMatches
+              categoryId={categoryId}
+              city={place.city}
+              district={place.district}
+              neighborhood={place.neighborhood}
+            />
 
             <section className="form-section">
               <h2>Zaman ve bütçe</h2>

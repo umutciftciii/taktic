@@ -21,6 +21,7 @@ import { ShowcaseCheckoutService } from './showcase-checkout.service';
 import { ShowcaseLeadService } from './showcase-lead.service';
 import { ShowcasePackagesService } from './showcase-packages.service';
 import { ShowcasePlacementReadService } from './showcase-placement-read.service';
+import { ShowcasePublicationService } from './showcase-publication.service';
 
 /**
  * A provider's own vitrin runs, and the leads they produce.
@@ -46,7 +47,23 @@ export class ProviderShowcasePlacementsController {
     @Inject(ShowcasePlacementReadService)
     private readonly placements: ShowcasePlacementReadService,
     @Inject(ShowcaseLeadService) private readonly leads: ShowcaseLeadService,
+    @Inject(ShowcasePublicationService)
+    private readonly publication: ShowcasePublicationService,
   ) {}
+
+  /**
+   * Where every card of this business stands, as one state and one next action
+   * each.
+   *
+   * The panel reads this instead of assembling the answer from the card list,
+   * the placement list, the purchase list and an eligibility dry run. See
+   * `ShowcasePublicationService` for why those four could disagree — and did,
+   * on the most common screen in the feature.
+   */
+  @Get('publication')
+  listPublication(@Param('providerId') providerId: string) {
+    return this.publication.listForProvider(providerId);
+  }
 
   /**
    * The catalogue, narrowed to what this card's kind can be sold.

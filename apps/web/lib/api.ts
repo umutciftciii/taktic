@@ -1519,22 +1519,85 @@ export type ShowcaseFeedCard = {
   responseSlaUrgentHours: number;
   responseSlaNormalHours: number;
   category: { id: string; name: string; slug: string };
+  /** The area that matched the visitor's query, or the closest one. */
   areaLabel: string;
   areaScope: ServiceAreaScope;
+  /**
+   * Every area this run is on the air in, already worded by the API.
+   *
+   * The single most load-bearing thing on a card now that the home page shows
+   * cards to visitors who have named no location: it is what tells somebody, at
+   * a glance, whether the card is for them. Worded server-side because "İstanbul
+   * geneli" versus "Kadıköy, İstanbul" is a statement about what the business
+   * promised, not a formatting choice.
+   */
+  areas: ShowcaseFeedCardArea[];
   provider: { id: string; businessName: string; city: string; district: string };
   listedServicePriceAmount?: number | null;
   listedServiceCurrency?: string;
 };
 
+export type ShowcaseFeedCardArea = {
+  scope: ServiceAreaScope;
+  city: string;
+  district: string | null;
+  neighborhood: string | null;
+  label: string;
+};
+
 export type ShowcaseFeed = {
+  /**
+   * Null when the visitor named no place — which is the home page's ordinary
+   * case. A client cannot render a heading about a location nobody chose.
+   */
   location: {
     city: string;
     district: string | null;
     neighborhood: string | null;
     label: string;
-  };
+  } | null;
   cards: ShowcaseFeedCard[];
   nextCursor: string | null;
+};
+
+/**
+ * Where one card stands, as the API resolved it: one state, one next action.
+ *
+ * The panel does not derive this any more. See `ShowcasePublicationService` on
+ * the API side for what went wrong when four screens each worked it out from
+ * the card status, the version pair, the placement list and an eligibility dry
+ * run — the four could disagree, and on the commonest screen in the feature
+ * they did.
+ */
+export type ShowcasePublicationState =
+  | 'DRAFT'
+  | 'IN_REVIEW'
+  | 'REJECTED'
+  | 'TERMS_REQUIRED'
+  | 'READY_TO_PUBLISH'
+  | 'EXPIRED'
+  | 'AWAITING_PAYMENT'
+  | 'ACTIVATING'
+  | 'LIVE'
+  | 'PAUSED'
+  | 'ARCHIVED'
+  | 'SUSPENDED';
+
+export type ShowcaseCardPublication = {
+  cardId: string;
+  state: ShowcasePublicationState;
+  endAt: string | null;
+  checkoutUrl: string | null;
+  purchaseId: string | null;
+  packageName: string | null;
+  areaLabels: string[];
+  leadCount: number;
+  hasPendingRevision: boolean;
+};
+
+export type ShowcasePublicationList = {
+  cards: ShowcaseCardPublication[];
+  hasPublicationHistory: boolean;
 };
 
 /**

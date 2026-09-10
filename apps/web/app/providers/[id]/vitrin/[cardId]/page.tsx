@@ -7,15 +7,13 @@ import {
   formatPrice,
   getCurrentUser,
   SHOWCASE_CARD_KIND_LABELS,
-  SHOWCASE_CARD_STATUS_LABELS,
-  SHOWCASE_VERSION_REVIEW_LABELS,
   type ProviderProfile,
   type ShowcaseCard,
   type ShowcaseCardVersion,
   type ShowcasePackage,
-  type ShowcasePlacement,
   type ShowcaseCardPriceTerms,
   type ShowcasePriceTerms,
+  type ShowcasePublicationList,
 } from '../../../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../../../lib/locations';
 import { ProviderShell } from '../../../provider-shell';
@@ -27,14 +25,9 @@ import {
   withdrawShowcaseSubmissionAction,
 } from '../actions';
 import { SHOWCASE_ERROR_MESSAGES } from '../showcase-errors';
-import {
-  editableVersion,
-  lastRejection,
-  showcaseCardSituation,
-  showcaseReviewBadgeClass,
-  showcaseStatusBadgeClass,
-} from '../showcase-ui';
-import { PlacementPanel } from '../placement-panel';
+import { editableVersion, lastRejection } from '../showcase-ui';
+import { showcaseStage, showcaseStageBadgeClass } from '../showcase-stage';
+import { PublishPanel } from '../publish-panel';
 import { EditShowcaseCardForm } from './edit-card-form';
 import { archiveShowcaseCardAction, unarchiveShowcaseCardAction } from '../actions';
 
@@ -89,7 +82,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
     provinces,
     priceTerms,
     cardPriceTerms,
-    placements,
+    publication,
     eligibility,
   ] = await Promise.all([
       fetchOrNotFound(() => apiFetch<ProviderProfile>(`/providers/${id}`)),
@@ -116,7 +109,17 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
       apiFetch<ShowcaseCardPriceTerms>(
         `/providers/${id}/showcase/cards/${cardId}/price-terms`,
       ).catch(() => null),
-      apiFetch<{ placements: ShowcasePlacement[] }>(`/providers/${id}/showcase/placements`),
+      /*
+       * Where this card stands, resolved once on the server.
+       *
+       * This is what the screen used to work out for itself out of the card's
+       * status, the pair of versions, the placement list and the eligibility
+       * dry run — four reads that could disagree, and did. See
+       * `ShowcasePublicationService`.
+       */
+      apiFetch<ShowcasePublicationList>(`/providers/${id}/showcase/publication`).catch(
+        () => null,
+      ),
       /*
        * The dry run behind the buy button.
        *
@@ -132,29 +135,35 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
       ).catch(() => null),
     ]);
 
-  /*
-   * The run this card is publishing, if any.
-   *
-   * "Live" here means the same set the one-per-card unique index calls live —
-   * a run that is starting, on the air, or temporarily off it. An expired or
-   * cancelled run is history, and the panel offers the next package instead.
-   */
-  const livePlacement =
-    placements.placements.find(
-      (placement) =>
-        placement.cardId === cardId &&
-        (placement.status === 'ACTIVE' ||
-          placement.status === 'PENDING_ACTIVATION' ||
-          placement.status === 'SUSPENDED'),
-    ) ?? null;
+  const cardPublication =
+    publication?.cards.find((entry) => entry.cardId === cardId) ?? null;
+  const stage = showcaseStage(
+    cardPublication ?? undefined,
+    `/providers/${id}/vitrin/${cardId}`,
+    id,
+  );
+  const onAir =
+    cardPublication?.state === 'LIVE' ||
+    cardPublication?.state === 'ACTIVATING' ||
+    cardPublication?.state === 'PAUSED';
 
-  const packages = livePlacement
+  const packages = onAir
     ? []
     : await apiFetch<{ packages: ShowcasePackage[] }>(
         `/providers/${id}/showcase/packages?cardKind=${card.kind}`,
       )
         .then((body) => body.packages)
         .catch(() => []);
+
+  /*
+   * An outstanding acceptance is not a refusal any more — it is a checkbox on
+   * the package the provider is about to buy. So the panel is opened for it,
+   * and the eligibility check's other refusals (a closed category, a coverage
+   * gap, an unapproved business) still close it.
+   */
+  const canPublish =
+    (eligibility?.eligible ?? false) ||
+    eligibility?.code === 'SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED';
 
   const draft = card.draftVersion;
   const underReview = draft?.reviewStatus === 'PENDING';
@@ -171,6 +180,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
       active="showcase"
       creditBalance={creditBalance}
       status={provider.status}
+      hasShowcaseHistory={publication?.hasPublicationHistory ?? false}
     >
       <nav className="pdash-crumbs" aria-label="Breadcrumb">
         <Link href="/providers/me">Panelim</Link>
@@ -185,10 +195,16 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
           {SHOWCASE_CARD_KIND_LABELS[card.kind]} · {card.category.name}
         </span>
         <h1 className="pdash-page-title">{formSource?.title ?? 'Vitrin kartı'}</h1>
-        <p className="pdash-page-sub">{showcaseCardSituation(card)}</p>
-        <span className={showcaseStatusBadgeClass(card.status)}>
-          {SHOWCASE_CARD_STATUS_LABELS[card.status]}
+        {/*
+          One state and one sentence, from the same resolution the card list
+          reads. The screen used to carry a status badge, a review badge and a
+          sentence naming two version numbers — three vocabularies for one card,
+          two of them the schema's.
+        */}
+        <span className={showcaseStageBadgeClass(cardPublication ?? undefined)}>
+          {stage.label}
         </span>
+        {stage.detail ? <p className="pdash-page-sub">{stage.detail}</p> : null}
       </header>
 
       {error ? (
@@ -203,7 +219,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
       ) : null}
       {submitted ? (
         <div className="pdash-notice" role="status">
-          Kart incelemeye gönderildi. Sonuçlanana kadar bu sürüm değiştirilemez.
+          Kart incelemeye gönderildi. Sonuçlanana kadar bu metin değiştirilemez.
         </div>
       ) : null}
       {withdrawn ? (
@@ -230,13 +246,12 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
         </div>
       ) : null}
 
-      <PlacementPanel
+      <PublishPanel
         providerId={id}
         cardId={cardId}
-        canPublish={eligibility?.eligible ?? false}
+        publication={cardPublication}
+        canPublish={canPublish}
         publishBlockedReason={eligibility?.message ?? null}
-        publishBlockedCode={eligibility?.code ?? null}
-        placement={livePlacement}
         packages={packages}
         priceTerms={cardPriceTerms}
       />
@@ -255,12 +270,11 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             <h2 className="pdash-section-title">İnceleme sürüyor</h2>
           </header>
           <p className="pdash-form-hint">
-            Bu sürüm yönetimde ve sonuçlanana kadar düzenlenemez. Bir düzeltme yapmanız
-            gerekiyorsa incelemeyi geri çekebilirsiniz: sürüm yeniden taslak olur, onayladığınız
-            hizmet bedeli sorumluluk metni sıfırlanır ve tekrar göndermek için yeniden onay
-            vermeniz gerekir.
+            Kartınız yönetimde ve sonuçlanana kadar düzenlenemez. Bir düzeltme yapmanız
+            gerekiyorsa incelemeyi geri çekebilirsiniz: metniniz yeniden taslağa döner ve tekrar
+            göndermek için şartları yeniden onaylamanız gerekir.
             {card.liveVersion
-              ? ' Onaylı sürümünüz bundan etkilenmez; yayına hazır kalmaya devam eder.'
+              ? ' Müşteriye gösterilen metin bundan etkilenmez.'
               : ''}
           </p>
 
@@ -283,20 +297,20 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
 
       {card.liveVersion ? (
         <VersionSummary
-          heading="Onaylı sürüm (yayına hazır)"
+          heading="Müşteriye gösterilen metin"
           version={card.liveVersion}
-          note="Müşteriye gösterilecek metin budur. Yeni bir sürüm onaylanana kadar değişmez."
+          note="Yeni bir metin onaylanana kadar bu metin değişmez."
         />
       ) : null}
 
       {draft && draft.id !== card.liveVersion?.id ? (
         <VersionSummary
-          heading={underReview ? 'İncelemedeki sürüm' : 'Taslak sürüm'}
+          heading={underReview ? 'İncelemedeki metniniz' : 'Kaydettiğiniz metin'}
           version={draft}
           note={
             underReview
-              ? 'Bu sürüm yönetimde. Sonuçlanana kadar düzenlenemez.'
-              : 'Bu sürüm henüz kimseye gösterilmiyor. İncelemeye göndermeden yayına hazır sayılmaz.'
+              ? 'Bu metin yönetimde. Sonuçlanana kadar düzenlenemez.'
+              : 'Bu metin henüz kimseye gösterilmiyor. İncelemeye göndermeden yayına alınamaz.'
           }
         />
       ) : null}
@@ -312,7 +326,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             </header>
             <p className="pdash-form-hint">
               Başlık, özet, kapsam, fiyat, görsel, yanıt taahhüdü veya bölge eklemek yönetim
-              onayı gerektirir; kaydettiğinizde yeni bir taslak sürüm oluşur. Yalnızca bölge
+              onayı gerektirir; kaydettiğinizde metniniz yeniden taslağa döner. Yalnızca bölge
               çıkarmak onaysız uygulanır.
             </p>
 
@@ -409,9 +423,9 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             <h2 className="pdash-section-title">Kartı arşivle</h2>
           </header>
           <p className="pdash-form-hint">
-            Arşivlenen kart yayından kalkar ve yeni talep almaz. Kartın geçmişi ve sürümleri
-            silinmez; istediğinizde geri getirebilirsiniz.
-            {livePlacement
+            Arşivlenen kart yayından kalkar ve yeni talep almaz. Kartın geçmişi silinmez;
+            istediğinizde geri getirebilirsiniz.
+            {onAir
               ? ' Satın aldığınız vitrin süresi arşivdeyken de işlemeye devam eder — arşivde geçen günler süreye eklenmez.'
               : ''}
           </p>
@@ -428,11 +442,17 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
 }
 
 /**
- * One version, read-only.
+ * One version of the card's text, read-only.
  *
  * Everything an operator will judge is shown here, including the areas: a
  * provider should be able to see the claim they made without opening the form
  * that would change it.
+ *
+ * The version *number* is gone, and so is the review-status badge beside it. A
+ * card carries at most two texts at a time — the one customers see and the one
+ * the provider is proposing — and the headings say which is which. "Sürüm 4" is
+ * a fact about the audit trail, which is an operator's concern; a provider
+ * reading it can only wonder what happened to the other three.
  */
 function VersionSummary({
   heading,
@@ -446,12 +466,7 @@ function VersionSummary({
   return (
     <section className="pdash-detail-card">
       <header className="pdash-section-head">
-        <h2 className="pdash-section-title">
-          {heading} · sürüm {version.versionNumber}
-        </h2>
-        <span className={showcaseReviewBadgeClass(version.reviewStatus)}>
-          {SHOWCASE_VERSION_REVIEW_LABELS[version.reviewStatus]}
-        </span>
+        <h2 className="pdash-section-title">{heading}</h2>
       </header>
       <p className="muted" style={{ fontSize: 13 }}>
         {note}
@@ -516,14 +531,6 @@ function VersionSummary({
                 <li key={area.areaKey}>{area.label}</li>
               ))}
             </ul>
-          </dd>
-        </div>
-        <div>
-          <dt>Sorumluluk metni onayı</dt>
-          <dd>
-            {version.priceTermsAcceptedAt
-              ? `${version.priceTermsVersion} · ${formatDateTime(version.priceTermsAcceptedAt)}`
-              : 'Henüz onaylanmadı'}
           </dd>
         </div>
       </dl>

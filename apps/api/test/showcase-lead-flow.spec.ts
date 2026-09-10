@@ -273,6 +273,75 @@ describe('opening a lead', () => {
     expect(await ctx.prisma.showcaseLead.count()).toBe(0);
   });
 
+  /*
+   * The gate that replaced the feed's location requirement.
+   *
+   * A visitor now meets every live card on the home page without naming a
+   * place, so the coverage line on a card is an advertisement rather than a
+   * filter. These two cases are what stops that being a hole: the address on
+   * the request — not the one the card was browsed from — decides, and it is
+   * decided on the server.
+   */
+  it('opens a lead when the address the customer typed is inside the run’s shelf', async () => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, {
+      city: 'İstanbul',
+      district: 'Kadıköy',
+    });
+
+    expect(response.status).toBe(201);
+  });
+
+  it('refuses a lead for an address the card does not serve, and opens nothing', async () => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, {
+      city: 'İstanbul',
+      district: 'Beşiktaş',
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('SHOWCASE_LEAD_AREA_NOT_SERVED');
+    // Nothing at all is written: no lead, and no service request behind it —
+    // a refusal that left a marketplace request lying around would be the
+    // customer's work quietly reaching businesses they never chose.
+    expect(await ctx.prisma.showcaseLead.count()).toBe(0);
+    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+  });
+
+  it('reads the card’s coverage from the shelf, so a wider card still takes the lead', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', {
+      kind: ServiceCategoryKind.LEAF,
+    });
+    const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const owner = await createDiscoverableProvider(ctx.prisma, {
+      userId: ownerUser.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+    const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: owner.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+    await createLiveShowcasePlacement(ctx, {
+      providerId: owner.id,
+      cardId: card.id,
+      versionId: version.id,
+      packageId: (await createShowcasePackage(ctx.prisma)).id,
+    });
+
+    // "İstanbul geneli" covers every district in it — the same containment rule
+    // the shelf itself is keyed on, rather than a second implementation of it.
+    const response = await openLead(card.id, category.slug, {
+      city: 'İstanbul',
+      district: 'Beşiktaş',
+    });
+
+    expect(response.status).toBe(201);
+  });
+
   it('refuses a provider trying to write to a card', async () => {
     const { card, category, rivalCookie } = await published();
     const payload = showcaseLeadPayload(category.slug);

@@ -95,11 +95,65 @@ function feed(query: string) {
 }
 
 describe('matching a visitor to a shelf', () => {
-  it('refuses without a location rather than listing the country', async () => {
+  it('publishes every live card when the visitor has named no place', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', {
+      kind: ServiceCategoryKind.LEAF,
+    });
+    const kadikoy = await publisher({
+      categoryId: category.id,
+      cards: 1,
+      label: 'Kadıköy',
+      areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
+    });
+
     const response = await request(ctx.server).get('/showcase/feed');
 
-    // A national list would show people businesses that cannot reach them, and
-    // would spend a provider's placement on visitors they did not pay for.
+    /*
+     * The reversal at the heart of this revision.
+     *
+     * The home page is the shelf, and a card a business paid to publish has to
+     * be on it before the visitor has told anybody where they live. What keeps
+     * the promise honest is the coverage printed on the card and the server
+     * check on the lead — not an empty page.
+     */
+    expect(response.status).toBe(200);
+    expect(response.body.location).toBeNull();
+    const ids = response.body.cards.map((card: { cardId: string }) => card.cardId);
+    expect(ids).toContain(kadikoy.cardIds[0]);
+  });
+
+  it('states the card’s whole coverage, worded, on every card', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', {
+      kind: ServiceCategoryKind.LEAF,
+    });
+    await publisher({
+      categoryId: category.id,
+      cards: 1,
+      label: 'İl geneli',
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+
+    const response = await request(ctx.server).get('/showcase/feed');
+
+    expect(response.status).toBe(200);
+    // The single most load-bearing line on a card a visitor met without
+    // choosing a place: what it is actually good for.
+    expect(response.body.cards[0].areas).toEqual([
+      {
+        scope: 'CITY',
+        city: 'İstanbul',
+        district: null,
+        neighborhood: null,
+        label: 'İstanbul geneli',
+      },
+    ]);
+  });
+
+  it('refuses a province that names no real place, even though none is required', async () => {
+    const response = await feed('city=Atlantis');
+
+    // Absent and wrong are different: one is the home page, the other is a bad
+    // query string that would otherwise read as "nobody advertises there".
     expect(response.status).toBe(400);
   });
 
