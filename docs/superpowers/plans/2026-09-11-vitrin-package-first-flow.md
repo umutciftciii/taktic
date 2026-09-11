@@ -76,7 +76,7 @@
 **Interfaces:**
 - Produces: Prisma modelleri `ShowcaseEntitlement`, `ShowcaseEntitlementReviewPause`, `ShowcasePackageTermsAcceptance`; enum'lar `ShowcaseEntitlementStatus`, `ShowcaseEntitlementPauseEnd`; kolonlar `ShowcasePackage.activationWindowDays`, `PackagePurchase.showcasePackageTermsAcceptanceId`.
 
-- [ ] **Step 1: Şemaya enum'ları ve kolonları ekle**
+- [x] **Step 1: Şemaya enum'ları ve kolonları ekle**
 
 `prisma/schema.prisma` içinde `enum ShowcaseLeadCloseReason { … }` bloğundan hemen sonra ekle:
 
@@ -144,7 +144,7 @@ ve index: `@@index([showcasePackageTermsAcceptanceId])`.
 
 Back-relation'lar: `model ProviderProfile` içine `showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]` ve `showcaseEntitlements ShowcaseEntitlement[]`; `model User` içine `showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]`; `model ShowcaseCard` içine `entitlements ShowcaseEntitlement[]`; `model ShowcasePlacement` içine `entitlement ShowcaseEntitlement?`; `model ShowcaseCardVersion` içine `entitlementPauses ShowcaseEntitlementReviewPause[]`.
 
-- [ ] **Step 2: Yeni modelleri ekle**
+- [x] **Step 2: Yeni modelleri ekle**
 
 `model ShowcaseCardPriceTermsAcceptance` bloğundan hemen sonra:
 
@@ -264,7 +264,7 @@ model ShowcaseEntitlementReviewPause {
 }
 ```
 
-- [ ] **Step 3: Migration SQL'ini yaz**
+- [x] **Step 3: Migration SQL'ini yaz**
 
 `prisma/migrations/20260911120000_add_showcase_entitlements/migration.sql`:
 
@@ -470,12 +470,12 @@ ALTER TABLE "ShowcaseEntitlementReviewPause" ADD CONSTRAINT "ShowcaseEntitlement
   FOREIGN KEY ("cardVersionId") REFERENCES "ShowcaseCardVersion"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ```
 
-- [ ] **Step 4: Prisma client'ı üret ve şemayı doğrula**
+- [x] **Step 4: Prisma client'ı üret ve şemayı doğrula**
 
 Run: `pnpm db:generate && pnpm exec prisma validate`
 Expected: `Generated Prisma Client` ve `The schema … is valid`. Hata olursa ilişki adlarını (`ShowcasePackageTermsAcceptedBy`) ve back-relation eksiklerini düzelt.
 
-- [ ] **Step 5: Migration'ın test DB'de uygulandığını kanıtlayan ilk spec'i yaz**
+- [x] **Step 5: Migration'ın test DB'de uygulandığını kanıtlayan ilk spec'i yaz**
 
 `apps/api/test/showcase-entitlement-lifecycle.spec.ts`:
 
@@ -518,12 +518,12 @@ describe('schema', () => {
 });
 ```
 
-- [ ] **Step 6: Spec'i çalıştır**
+- [x] **Step 6: Spec'i çalıştır**
 
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm --filter @taktic/api test -- showcase-entitlement-lifecycle`
 Expected: PASS (test DB provisioning `migrate deploy` ile yeni migration'ı uygular).
 
-- [ ] **Step 7: Migration dry-run'ı izole kopya DB'de yap ve kanıtı sakla**
+- [x] **Step 7: Migration dry-run'ı izole kopya DB'de yap ve kanıtı sakla**
 
 Scratchpad'e `dryrun.sh` yaz ve çalıştır (aktif DB yalnız `pg_dump` ile **okunur**):
 
@@ -541,7 +541,7 @@ echo "== after"; docker exec taktic-postgres psql -U taktic_user -d $DB -Atc "$S
 
 Expected: `before` ve `after` satır sayıları ve iki md5 birebir aynı; migrate çıktısında yalnız `20260911120000_add_showcase_entitlements` uygulanır; paket satırı `activationWindowDays=90`; entitlement sayısı 0. Çıktıyı `docs/superpowers/plans/2026-09-11-vitrin-migration-dryrun.txt` olarak kaydet (teslim raporu kanıtı).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add prisma/schema.prisma prisma/migrations/20260911120000_add_showcase_entitlements apps/api/test/showcase-entitlement-lifecycle.spec.ts docs/superpowers/plans/2026-09-11-vitrin-migration-dryrun.txt
@@ -569,7 +569,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `ShowcasePlacementService.createForEntitlement(tx, input: { entitlement: EntitlementSnapshot; cardId; providerId; categoryId; kind; versionId; startAt }): Promise<{ placementId }>`.
   - `ShowcaseEntitlementService` metodları: `grantForPurchase(tx, purchase, paidAt)`, `reserveForCard(tx, input)`, `releaseForCard(tx, cardId, now)`, `pauseForReview(tx, cardId, cardVersionId, now)`, `resumeAfterReview(tx, cardId, endReason, now)`, `consumeForCard(tx, input)`, `findReservedForCard(db, cardId, now)`, `listForProvider(providerId, now)`, `expireStale(now, limit)`; predicate'ler `usableEntitlementWhere(now)`, `reservedEntitlementWhere(cardId, now)`.
 
-- [ ] **Step 1: Hata kodlarını ekle**
+- [x] **Step 1: Hata kodlarını ekle**
 
 `showcase.errors.ts` sonuna:
 
@@ -636,7 +636,7 @@ export function showcaseRevisionNeedsPublication() {
 }
 ```
 
-- [ ] **Step 2: Preflight yardımcılarını ayrı dosyaya taşı**
+- [x] **Step 2: Preflight yardımcılarını ayrı dosyaya taşı**
 
 `apps/api/src/modules/showcase/showcase-publish-preflight.ts`:
 
@@ -697,7 +697,7 @@ export async function assertVersionAreasCovered(
 }
 ```
 
-- [ ] **Step 3: `createForEntitlement`'ı placement servisine ekle**
+- [x] **Step 3: `createForEntitlement`'ı placement servisine ekle**
 
 `showcase-placement.service.ts` içinde `createForPurchase`'ın hemen altına:
 
@@ -783,7 +783,7 @@ export type EntitlementSnapshot = {
 };
 ```
 
-- [ ] **Step 4: Failing test — grant, reserve, race, release, pause, consume**
+- [x] **Step 4: Failing test — grant, reserve, race, release, pause, consume**
 
 `showcase-entitlement-lifecycle.spec.ts` içine (`schema` describe'ının altına) ekle. Yardımcılar dosya üstünde:
 
@@ -991,12 +991,12 @@ describe('review pause, release and consumption', () => {
 });
 ```
 
-- [ ] **Step 5: Testi çalıştır — başarısız olmalı**
+- [x] **Step 5: Testi çalıştır — başarısız olmalı**
 
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm --filter @taktic/api test -- showcase-entitlement-lifecycle`
 Expected: FAIL — `Cannot find module '../src/modules/showcase/showcase-entitlement.service'`.
 
-- [ ] **Step 6: Servisi yaz**
+- [x] **Step 6: Servisi yaz**
 
 `apps/api/src/modules/showcase/showcase-entitlement.service.ts`:
 
@@ -1409,12 +1409,12 @@ export class ShowcaseEntitlementService {
 
 `showcase-lifecycle.module.ts` içindeki `providers` ve `exports` dizilerine `ShowcaseEntitlementService` ekle (bu modül `ShowcasePlacementService`'i barındırır; `PaymentsModule` onu import eder).
 
-- [ ] **Step 7: Testi çalıştır — geçmeli**
+- [x] **Step 7: Testi çalıştır — geçmeli**
 
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm --filter @taktic/api test -- showcase-entitlement-lifecycle`
 Expected: PASS (7 test). `totalPausedSeconds` eşitliğinde ms tam saniye olmalı — test tarihleri tam saniye.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/api/src/modules/showcase apps/api/test/showcase-entitlement-lifecycle.spec.ts
@@ -1445,7 +1445,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `GET /providers/:providerId/showcase/entitlements` → `ShowcaseEntitlementService.listForProvider` cevabı.
   - Harness: `createShowcaseEntitlement(ctx, { providerId, userId, packageId, paidAt? })` → `{ purchase, entitlement }`.
 
-- [ ] **Step 1: Failing test — paket satın alma**
+- [x] **Step 1: Failing test — paket satın alma**
 
 `apps/api/test/showcase-package-checkout.spec.ts`:
 
@@ -1610,12 +1610,12 @@ describe('the removed card-bound routes', () => {
 });
 ```
 
-- [ ] **Step 2: Testleri çalıştır — başarısız olmalı**
+- [x] **Step 2: Testleri çalıştır — başarısız olmalı**
 
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm --filter @taktic/api test -- showcase-package-checkout showcase-legacy-routes`
 Expected: FAIL — `packages/checkout` 404, legacy rotalar 200/201/409.
 
-- [ ] **Step 3: DTO ve servis**
+- [x] **Step 3: DTO ve servis**
 
 `dto/showcase-package-checkout.dto.ts`:
 
@@ -1779,7 +1779,7 @@ export class ShowcasePackageCheckoutService {
 
 `showcasePurchaseInclude`'dan `showcaseCard` çıkar (artık kartsız). `buildReturnUrl` aynı kalır: `/providers/${providerId}/vitrin/odeme/${purchaseId}?checkout=return`.
 
-- [ ] **Step 4: Controller'ları ve modülü güncelle**
+- [x] **Step 4: Controller'ları ve modülü güncelle**
 
 `provider-showcase-placements.controller.ts`:
 - `CreateShowcaseCheckoutDto`/`ShowcaseCheckoutService` import ve alanlarını `CreateShowcasePackageCheckoutDto`/`ShowcasePackageCheckoutService` ile değiştir; `ShowcaseEntitlementService` inject et.
@@ -1843,7 +1843,7 @@ export class ShowcasePackageCheckoutService {
 
 Sil: `showcase-checkout.service.ts`, `dto/showcase-checkout.dto.ts`.
 
-- [ ] **Step 5: Settlement dalları**
+- [x] **Step 5: Settlement dalları**
 
 `payments-webhook.service.ts` içindeki `if (purchase.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) { … }` bloğunu şu şekle getir (`ShowcaseEntitlementService` inject: `@Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService`):
 
@@ -1899,7 +1899,7 @@ Sil: `showcase-checkout.service.ts`, `dto/showcase-checkout.dto.ts`.
 
 `package-purchases.service.ts` mock settlement: aynı dallanma (`this.entitlements` inject; `ShowcaseLifecycleModule` bu modülde import edilmiş olmalı — `placements` zaten inject edildiğine göre öyledir). Tx sonrası bildirim bloğunda `if (placement) sendShowcasePlacementActivated` aynen; placement yoksa hiçbir şey gönderme.
 
-- [ ] **Step 6: Harness ve eski spec'leri taşı**
+- [x] **Step 6: Harness ve eski spec'leri taşı**
 
 `harness.ts` sonuna:
 
@@ -1952,12 +1952,12 @@ export async function createShowcaseEntitlement(
 
 `showcase-placement-checkout.spec.ts` silinir (`git rm`).
 
-- [ ] **Step 7: Testleri çalıştır — geçmeli**
+- [x] **Step 7: Testleri çalıştır — geçmeli**
 
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm --filter @taktic/api test -- showcase-package-checkout showcase-legacy-routes showcase-placement-settlement showcase-price-terms-acceptance showcase-package-catalog lemon-squeezy-webhook offer-package-settlement`
 Expected: PASS. `pnpm --filter @taktic/api typecheck` temiz.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A apps/api
@@ -1990,7 +1990,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - Admin `GET /admin/showcase/versions/:id` cevabına `entitlement: { packageName, durationDays, expiresAt, pausedForReview, valid } | null` eklenir.
   - Admin `POST /admin/showcase/versions/:id/approve` → ilk onayda `409 SHOWCASE_ENTITLEMENT_MISSING` / `SHOWCASE_CATEGORY_NOT_OFFERED` / `SHOWCASE_AREA_NOT_COVERED` mümkündür.
 
-- [ ] **Step 1: Failing test — uçtan uca hak akışı**
+- [x] **Step 1: Failing test — uçtan uca hak akışı**
 
 `apps/api/test/showcase-entitlement-review-flow.spec.ts`:
 
@@ -2240,12 +2240,12 @@ describe('an already-approved card', () => {
 });
 ```
 
-- [ ] **Step 2: Testi çalıştır — başarısız olmalı**
+- [x] **Step 2: Testi çalıştır — başarısız olmalı**
 
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm --filter @taktic/api test -- showcase-entitlement-review-flow`
 Expected: FAIL — kart hak olmadan oluşur (201), submit `{}` 400 döner.
 
-- [ ] **Step 3: DTO'lar**
+- [x] **Step 3: DTO'lar**
 
 `create-showcase-card.dto.ts` içindeki `CreateShowcaseCardDto`'ya:
 
@@ -2283,7 +2283,7 @@ export class UseShowcaseEntitlementDto {
 }
 ```
 
-- [ ] **Step 4: Kart servisi**
+- [x] **Step 4: Kart servisi**
 
 `provider-showcase-cards.service.ts`: constructor'a `@Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService` ekle; import'lar: `ShowcaseEntitlementService`, `assertCategoryStillOpen`, `assertVersionAreasCovered`, `showcaseEntitlementRequired`, `showcaseRevisionNeedsPublication`, `runSerializable`.
 
@@ -2522,7 +2522,7 @@ Controller (`provider-showcase-cards.controller.ts`), `:cardId/withdraw-submissi
   }
 ```
 
-- [ ] **Step 5: Admin onayı ve reddi**
+- [x] **Step 5: Admin onayı ve reddi**
 
 `admin-showcase.service.ts` — constructor'a `ShowcaseEntitlementService` inject; `approveVersion` içinde `version` select'ine `card: { select: { id, providerId, categoryId, kind, liveVersionId, category: { select: { id, kind, status } } } }` ekle ve `showcaseCardReview.create`'ten **önce**, versiyon `updateMany`'den sonra:
 
@@ -2596,7 +2596,7 @@ Bu kontrolleri **`updateMany`'den önce** koy (hiçbir yazım olmasın). Sonra k
     };
 ```
 
-- [ ] **Step 6: Mevcut spec'leri yeni akışa taşı**
+- [x] **Step 6: Mevcut spec'leri yeni akışa taşı**
 
 Her spec'te kart oluşturmadan önce `createShowcaseEntitlement(ctx, { providerId, userId, packageId })` çağrısı ve `createShowcasePackage` gerekir; `submit` çağrılarındaki `{ priceTermsAccepted: true, priceTermsVersion: 'v1' }` gövdeleri `{}` olur. Dosya dosya:
 - `showcase-card-authoring.spec.ts`: `scenario()` içine paket + hak; "submit requires acceptance" testi → "submit requires a reserved right" (hak `EXPIRED` yapılır, `SHOWCASE_ENTITLEMENT_REQUIRED` beklenir).
@@ -2605,12 +2605,12 @@ Her spec'te kart oluşturmadan önce `createShowcaseEntitlement(ctx, { providerI
 - `showcase-placement-version-pin.spec.ts`, `showcase-area-narrowing.spec.ts`, `showcase-placement-lifecycle.spec.ts`, `showcase-lead-flow.spec.ts`, `showcase-lead-sla-fallback.spec.ts`, `showcase-access.spec.ts`: `createApprovedShowcaseCard` + `createLiveShowcasePlacement` legacy kurgusu **kalır** (canlı kart senaryoları); yalnız `submit` gövdeleri `{}` ve yeni kart açan testlere hak eklenir.
 - `showcase-eligible-categories.spec.ts`: değişmez.
 
-- [ ] **Step 7: Testleri çalıştır**
+- [x] **Step 7: Testleri çalıştır**
 
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm --filter @taktic/api test -- showcase`
 Expected: tüm `showcase-*` spec'leri PASS. Ardından `pnpm --filter @taktic/api typecheck`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A apps/api
@@ -2650,7 +2650,7 @@ type ShowcasePublicationList = {
 ```
   - `ShowcasePackage` DTO/cevabına `activationWindowDays: number` (create: opsiyonel, default 90; update: opsiyonel; 1..365).
 
-- [ ] **Step 1: Failing test — durumlar**
+- [x] **Step 1: Failing test — durumlar**
 
 `showcase-publication-state.spec.ts`'i baştan yaz (mevcut `scenario` yardımcılarını koru; `TERMS_REQUIRED`/`READY_TO_PUBLISH` testlerini sil):
 
@@ -2718,12 +2718,12 @@ describe('the state one card is in', () => {
 
 `publication(providerId, cookie)` yardımcısı: `GET /providers/:id/showcase/publication` → `body`.
 
-- [ ] **Step 2: Testi çalıştır — başarısız olmalı**
+- [x] **Step 2: Testi çalıştır — başarısız olmalı**
 
 Run: `… pnpm --filter @taktic/api test -- showcase-publication-state`
 Expected: FAIL (`needsPackage`/`entitlement` alanları yok, arşiv kartı listede).
 
-- [ ] **Step 3: `ShowcasePublicationService`'i yeniden yaz**
+- [x] **Step 3: `ShowcasePublicationService`'i yeniden yaz**
 
 Tip tanımlarını yukarıdaki arayüze göre değiştir (`TERMS_REQUIRED`, `READY_TO_PUBLISH`, `AWAITING_PAYMENT`, `checkoutUrl`, `purchaseId` silinir). `listForProvider`:
 
@@ -2813,7 +2813,7 @@ Tip tanımlarını yukarıdaki arayüze göre değiştir (`TERMS_REQUIRED`, `REA
 
 (`ShowcaseEntitlementService` inject edilir; `IN_REVIEW` yalnız canlı sürümü olmayan kart için; canlı kartın revizyonu `hasPendingRevision` bayrağıyla `LIVE`/`EXPIRED` kalır. `EXPIRED` durumu için `needsPackage: true`; `hasRunBefore` false ise sağlayıcı ekranı "Pakete hazır" rozeti gösterir — bkz. web Task 8.)
 
-- [ ] **Step 4: Süpürme ve paket DTO'su**
+- [x] **Step 4: Süpürme ve paket DTO'su**
 
 `showcase-placement-expiry.service.ts`: `ShowcaseEntitlementService` inject; `execute` sonunda `const entitlementsExpired = await this.entitlements.expireStale(now, limit);` ve sonuç tipine `entitlementsExpired: number` ekle (scheduler log satırına da).
 
@@ -2831,12 +2831,12 @@ Tip tanımlarını yukarıdaki arayüze göre değiştir (`TERMS_REQUIRED`, `REA
 
 `showcase-package-catalog.spec.ts`'e bir test: create body'siz → 90; `{ activationWindowDays: 45 }` ile update → 45; `0` → 400.
 
-- [ ] **Step 5: Testleri çalıştır — geçmeli**
+- [x] **Step 5: Testleri çalıştır — geçmeli**
 
 Run: `… pnpm --filter @taktic/api test -- showcase scheduler-settings` ve `pnpm --filter @taktic/api typecheck && pnpm --filter @taktic/api lint`
 Expected: PASS, temiz.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A apps/api
@@ -2872,7 +2872,7 @@ export type ShowcasePackageTerms = { version: string; text: string; accepted: bo
   - Server actions: `startShowcasePackageCheckoutAction(formData)` (`providerId, showcasePackageId, priceTermsVersion?, priceTermsAccepted?, returnCard?`), `createShowcaseCardAction`, `updateShowcaseCardAction`, `submitShowcaseCardAction` (gövde `{}`), `withdrawShowcaseSubmissionAction`, `useShowcaseEntitlementAction` (`providerId, cardId`), `archiveShowcaseCardAction`, `unarchiveShowcaseCardAction`.
   - `showcaseStage(entry, ctx)` → `{ label, badge: 'live'|'progress'|'attention'|'muted', detail, action, secondary }`.
 
-- [ ] **Step 1: Failing test — kaldırılan yolların referansı yok**
+- [x] **Step 1: Failing test — kaldırılan yolların referansı yok**
 
 `apps/web/test/showcase-legacy-routes.spec.ts`:
 
@@ -2915,11 +2915,11 @@ describe('the removed card-bound vitrin routes', () => {
 
 (`FORBIDDEN` sabitini sil; sadece `includes` ve regex kullan.) Run: `pnpm --filter @taktic/web test -- showcase-legacy-routes` → FAIL: `actions.ts`, `[cardId]/page.tsx` listelenir.
 
-- [ ] **Step 2: Tipler**
+- [x] **Step 2: Tipler**
 
 `apps/web/lib/api.ts` — `ShowcasePublicationState`, `ShowcaseCardPublication`, `ShowcasePublicationList` tanımlarını yukarıdaki arayüzle değiştir; `ShowcaseCardPriceTerms` tipini sil; `ShowcasePackageTerms` ve `ShowcaseEntitlementSummary` ekle; `ShowcasePackage`'a `activationWindowDays: number`; `PackagePurchase`'a `kind: 'OFFER_PACKAGE' | 'SHOWCASE_PACKAGE'` ve `packageId: string | null`. `SHOWCASE_CARD_KIND_LABELS` kalır (`SERVICE: 'Hizmet vitrini'`, `PROMOTION: 'Genel tanıtım'`).
 
-- [ ] **Step 3: Rotalar**
+- [x] **Step 3: Rotalar**
 
 `lib/panel-routes.ts` `PANEL_ROUTES`'a (`'/providers/:id/vitrin/yeni'` satırından sonra):
 
@@ -2931,7 +2931,7 @@ describe('the removed card-bound vitrin routes', () => {
 
 `test/panel-routes.spec.ts` dizini yürüdüğü için sayfalar oluşturulunca (Task 8–9) bu liste olmadan FAIL eder; şimdi eklemek testi sayfalar gelene kadar FAIL bırakır — bu yüzden bu satırları **Task 9'da sayfalarla birlikte** ekle. Bu adımda yalnız not.
 
-- [ ] **Step 4: Eylemler**
+- [x] **Step 4: Eylemler**
 
 `actions.ts`: `startShowcaseCheckoutAction`'ı sil, `submitShowcaseCardAction` gövdesini `JSON.stringify({})` yap; ekle:
 
@@ -3007,7 +3007,7 @@ export async function useShowcaseEntitlementAction(formData: FormData) {
 
 Checkout sayfası (`checkout/page.tsx`) `searchParams.card` değerini `<input type="hidden" name="returnCard">` olarak forma taşır.
 
-- [ ] **Step 5: Hata mesajları ve durum çözümü**
+- [x] **Step 5: Hata mesajları ve durum çözümü**
 
 `showcase-errors.ts`: `SHOWCASE_PRICE_TERMS_REQUIRED`, `SHOWCASE_CARD_NOT_PUBLISHABLE`, `SHOWCASE_PACKAGE_KIND_MISMATCH` satırlarını kaldır (kod tarafından üretilmiyor); ekle:
 
@@ -3077,7 +3077,7 @@ export function showcaseStage(
 
 `publish-panel.tsx` dosyasını sil. `[cardId]/page.tsx` ve `page.tsx` bu adımda derlenmez; Task 8–9'da yeniden yazılacak — typecheck'i **Task 9 sonunda** çalıştır. Bu görevde yalnız `showcase-legacy-routes` ve `panel-routes` (rota ekleme öncesi) testleri koşulur.
 
-- [ ] **Step 6: Testi çalıştır**
+- [x] **Step 6: Testi çalıştır**
 
 Run: `pnpm --filter @taktic/web test -- showcase-legacy-routes`
 Expected: `[cardId]/page.tsx` hâlâ `price-terms` çağırdığı için FAIL — Task 9'da geçer. Bu görevde commit atma; Task 7 ile birlikte commit'lenir.
@@ -3105,7 +3105,7 @@ export function faceFromVersion(card: Pick<ShowcaseCard, 'kind' | 'category'>, v
 ```
 - CSS sınıfları: `.vitrin-face`, `.vitrin-face-media`, `.vitrin-face-media-empty`, `.vitrin-face-body`, `.vitrin-face-kicker`, `.vitrin-face-title`, `.vitrin-face-provider`, `.vitrin-face-summary`, `.vitrin-face-price`, `.vitrin-face-area`, `.vitrin-face-badge`, `.vitrin-grid`, `.vitrin-hub-head`, `.vitrin-counter`, `.vitrin-section-title`, `.vitrin-card-foot`, `.vitrin-badge(-live|-progress|-attention|-muted)`, `.vitrin-pkg-grid`, `.vitrin-pkg`, `.vitrin-consent`, `.vitrin-form`, `.vitrin-form-group`, `.vitrin-form-group-head`, `.vitrin-choice`, `.vitrin-status`, `.vitrin-menu`, `.vitrin-dialog`, `.vitrin-return`, `.vitrin-empty`, `.vitrin-summary`, `.vitrin-public`.
 
-- [ ] **Step 1: Bileşen**
+- [x] **Step 1: Bileşen**
 
 `apps/web/app/showcase-card-face.tsx`:
 
@@ -3232,7 +3232,7 @@ export function faceFromVersion(
 
 (`categoryImageSrc(imageUrl, slug)` `category-art.ts`'te var; `ShowcaseCard.category` tipinde `slug` yoksa `lib/api.ts`'e ekle — API `showcaseCardInclude` category select'i `slug` içeriyor.)
 
-- [ ] **Step 2: CSS**
+- [x] **Step 2: CSS**
 
 `globals.css` içinde `.showcase-shelf-card`, `.showcase-shelf-provider`, `.showcase-shelf-summary`, `.showcase-shelf-price`, `.showcase-shelf-sla`, `.showcase-shelf-area`, `.showcase-area-badge*`, `.showcase-stage-*` kurallarını sil; `.showcase-consent`, `.showcase-list`, `.showcase-shelf-picker`, `.showcase-shelf-grid`, `.showcase-shelf-more`, `.showcase-inline*`, `.showcase-public*`, `.showcase-coverage-note` kalır. Dosya sonuna ekle:
 
@@ -3689,12 +3689,12 @@ export function faceFromVersion(
 }
 ```
 
-- [ ] **Step 3: Typecheck (yalnız bileşen)**
+- [x] **Step 3: Typecheck (yalnız bileşen)**
 
 Run: `pnpm --filter @taktic/web exec tsc --noEmit -p tsconfig.json 2>&1 | grep -v "vitrin/\[cardId\]/page.tsx\|vitrin/page.tsx" | head`
 Expected: `showcase-card-face.tsx` hatasız (kalan hatalar Task 8–9'da kapanacak sayfalardan).
 
-- [ ] **Step 4: Commit (Task 6 ile birlikte)**
+- [x] **Step 4: Commit (Task 6 ile birlikte)**
 
 ```bash
 git add -A apps/web
@@ -3717,7 +3717,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `ShowcaseCardFace`, `faceFromVersion`, `showcaseStage`, actions (Task 6–7); API `GET publication`, `GET packages`, `GET packages/terms`, `GET package-purchases/:id`.
 
-- [ ] **Step 1: Merkez sayfası**
+- [x] **Step 1: Merkez sayfası**
 
 `apps/web/app/providers/[id]/vitrin/page.tsx` — baştan:
 
@@ -3874,7 +3874,7 @@ export function StageAction({ stage, providerId, cardId }: { stage: ReturnType<t
 
 (`StageAction` bir server component'tir; `page.tsx` içinden export etmek Next'te izinli değildir — bunu `apps/web/app/providers/[id]/vitrin/stage-action.tsx` olarak ayrı dosyaya koy ve iki sayfadan import et. `CardGrid` inner function yerine `stateByCard`, `id`, `hasAvailableRight` parametre alan üst düzey fonksiyon yap.)
 
-- [ ] **Step 2: Paket seçimi (client) ve sayfa**
+- [x] **Step 2: Paket seçimi (client) ve sayfa**
 
 `paketler/package-picker.tsx`:
 
@@ -4000,7 +4000,7 @@ export default async function ShowcasePackagesPage({ params, searchParams }: Pro
 }
 ```
 
-- [ ] **Step 3: Ödeme dönüş ekranı**
+- [x] **Step 3: Ödeme dönüş ekranı**
 
 `odeme/[purchaseId]/page.tsx`:
 
@@ -4081,12 +4081,12 @@ export default async function ShowcasePaymentReturnPage({ params, searchParams }
 
 `package-purchases/[purchaseId]/checkout/page.tsx`: `searchParams`'tan `card`'ı oku ve mock formun içine `<input type="hidden" name="returnCard" value={card ?? ''} />` ekle (Task 6'daki action bunu okur).
 
-- [ ] **Step 4: Rotaları kaydet ve testleri çalıştır**
+- [x] **Step 4: Rotaları kaydet ve testleri çalıştır**
 
 `lib/panel-routes.ts`'e üç rotayı ekle (Task 6 Step 3). Run: `pnpm --filter @taktic/web test -- panel-routes`
 Expected: `duzenle` sayfası henüz yoksa FAIL — Task 9'da geçer; şimdilik `paketler` ve `odeme` satırlarını ekle, `duzenle`'yi Task 9'da.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A apps/web
@@ -4106,7 +4106,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `apps/web/app/providers/[id]/vitrin/[cardId]/edit-card-form.tsx` (yalnız yeni alanlar)
 - Modify: `apps/web/lib/panel-routes.ts` (`'/providers/:id/vitrin/:cardId/duzenle'`)
 
-- [ ] **Step 1: Form alanlarını dört gruba böl**
+- [x] **Step 1: Form alanlarını dört gruba böl**
 
 `showcase-card-fields.tsx`: `pdash-form-section` bloklarını `vitrin-form-group` + `vitrin-form-group-head` ile yeniden düzenle; gruplar: **Temel bilgiler** (kart türü radio'ları `vitrin-choice-row`/`vitrin-choice`, `categorySlot`, başlık, özet, görsel), **Hizmet ve fiyat** (dahil/hariç, SERVICE'te fiyat), **Yanıt taahhüdü** (iki saat alanı). Bölgeler grubu formu çağıran sayfada (`ServiceAreaFields`) aynı `vitrin-form-group` sarmalayıcısıyla. Kopya: grup açıklamaları birer cümle; "Kapsam" başlığı "Hizmet ve fiyat" olur.
 
@@ -4124,7 +4124,7 @@ Birden çok hak varsa `<div className="vitrin-choice-row">` içinde `<label clas
 
 `NewShowcaseCardForm` kategori slot'u: `vitrin-form-group` yerine `pdash-form-row` içinde select (grup "Temel bilgiler"in parçası).
 
-- [ ] **Step 2: Sil/arşiv menüsü (client)**
+- [x] **Step 2: Sil/arşiv menüsü (client)**
 
 `card-menu.tsx`:
 
@@ -4176,7 +4176,7 @@ export function CardMenu({ providerId, cardId, published }: { providerId: string
 
 (`method="dialog"` server action ile çakışırsa kaldır; `formAction` server action'dır ve `<dialog>` içinde normal çalışır.)
 
-- [ ] **Step 3: Kart ekranı**
+- [x] **Step 3: Kart ekranı**
 
 `[cardId]/page.tsx` — baştan; veri: `provider`, `card`, `creditBalance`, `publication` (`price-terms`, `eligibility`, `packages`, `provinces` **çekilmez**):
 
@@ -4256,18 +4256,18 @@ function statusHeading(state: ShowcasePublicationState | undefined, entry: Showc
 
 `published` bildirimi: `?published=1` → "Kartınız vitrinde yayına girdi."
 
-- [ ] **Step 4: Düzenleme görünümü**
+- [x] **Step 4: Düzenleme görünümü**
 
 `[cardId]/duzenle/page.tsx`: `card`, `provider`, `provinces`, `publication` çek; `underReview` (draft PENDING) veya `ARCHIVED/SUSPENDED` ise `redirect(\`/providers/${id}/vitrin/${cardId}\`)`. Başlık `Kartı düzenle`; canlı sürüm varsa tek cümle notice: "Değişiklikler yeniden incelemeye girer; yayındaki metin onaya kadar aynı kalır." Form: `updateShowcaseCardAction`, `vitrin-form`, `EditShowcaseCardForm` (kind sabit, kategori slot'u salt okunur) + bölgeler grubu (`ServiceAreaFields`) + foot: `Vazgeç` (kart ekranına) / `Kaydet`. `updateShowcaseCardAction` başarıda `${target}?saved=1` (kart ekranı) — mevcut.
 
-- [ ] **Step 5: Rota, typecheck, testler**
+- [x] **Step 5: Rota, typecheck, testler**
 
 `panel-routes.ts`'e `'/providers/:id/vitrin/:cardId/duzenle'` ekle (statik `paketler`, `odeme/:purchaseId` satırlarının `:cardId` satırından **önce** olduğundan emin ol — listede sıra okunabilirlik içindir ama `yeni` gibi statik segmentler `:cardId`'den önce yazılır).
 
 Run: `pnpm --filter @taktic/web typecheck && pnpm --filter @taktic/web lint && pnpm --filter @taktic/web test`
 Expected: PASS — `panel-routes` ve `showcase-legacy-routes` dahil.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A apps/web
@@ -4284,7 +4284,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `apps/web/app/showcase-shelf.tsx`, `apps/web/app/vitrin/page.tsx`, `apps/web/app/vitrin/[cardId]/page.tsx`
 - Modify: `apps/web/app/categories/[slug]/showcase-matches.tsx` (yalnız `ShowcaseShelfCard` importu kullanıyorsa)
 
-- [ ] **Step 1: Raf**
+- [x] **Step 1: Raf**
 
 `showcase-shelf.tsx` `ShowcaseShelfCard`:
 
@@ -4304,7 +4304,7 @@ export function ShowcaseShelfCard({ card }: { card: ShowcaseFeedCard }) {
 
 Grid: `showcase-shelf-grid` → `vitrin-grid`. `areaSentence` export'u kalır (public sayfa kullanır). Kalan raf başlığı/metni aynen.
 
-- [ ] **Step 2: Kart detayı**
+- [x] **Step 2: Kart detayı**
 
 `vitrin/[cardId]/page.tsx`: `lp-container showcase-public` içini iki kolona ayır:
 
@@ -4326,14 +4326,14 @@ Grid: `showcase-shelf-grid` → `vitrin-grid`. `areaSentence` export'u kalır (p
 
 Header'daki `showcase-area-badge` paragrafı ve ayrı fiyat paragrafı kaldırılır (yüz bunları taşır; `data-testid="showcase-card-area"` ve `showcase-card-price` yüz içinde). `h1` başlık kalır (erişilebilirlik); yüzdeki `h3` başlık tekrar eder — yüzü `compact` değil tam çiz, `h1` ise `lp-section-head` içinde kalır.
 
-- [ ] **Step 3: Görsel doğrulama**
+- [x] **Step 3: Görsel doğrulama**
 
 Dev sunucusunu `.claude/launch.json` ile aç (`web` girdisi yoksa oluştur: `pnpm --filter @taktic/web dev`, port 3000; API için `taktic-api` container'ı **ana checkout**'u çalıştırır — worktree API'sini görmek için `pnpm --filter @taktic/api dev`'i 3001'de ayrıca çalıştırma; bunun yerine E2E'ye güven). Playwright ile ekran görüntüleri Task 12'de alınır.
 
 Run: `pnpm --filter @taktic/web typecheck && pnpm --filter @taktic/web lint && pnpm --filter @taktic/web test`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A apps/web
@@ -4352,11 +4352,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `apps/admin/app/showcase/reviews/[versionId]/page.tsx`, `reviews/[versionId]/actions.ts`
 - Modify: `apps/admin/app/showcase/price-terms/page.tsx`
 
-- [ ] **Step 1: Menü**
+- [x] **Step 1: Menü**
 
 `lib/nav.ts`: Operasyon altında `Kart incelemeleri`, `Yayındaki kartlar`, `Vitrin talepleri`; Katalog altında `'/showcase/packages'` etiketi `Paketler`. (`/credit-packages` `Kredi Paketleri` kalır.)
 
-- [ ] **Step 2: Tipler ve paket formu**
+- [x] **Step 2: Tipler ve paket formu**
 
 `lib/api.ts`: `ShowcasePackage`'a `activationWindowDays: number`; `ShowcaseVersionDetail`'a `entitlement: { packageName: string; durationDays: number; expiresAt: string; pausedForReview: boolean; valid: boolean } | null`; şart kabulü listesi tipine `scope: 'CARD' | 'PACKAGE'` ve `cardId: string | null`.
 
@@ -4372,7 +4372,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 `packages/actions.ts`: gövdeye `activationWindowDays: Number(readString(formData, 'activationWindowDays'))`. Liste tablosuna `Geçerlilik` kolonu (`{pkg.activationWindowDays} gün`).
 
-- [ ] **Step 3: İnceleme detayı**
+- [x] **Step 3: İnceleme detayı**
 
 `reviews/[versionId]/page.tsx`: "İşletme" `SectionCard`'ının altına, yalnız `card.liveVersion === null` (ilk yayın) iken:
 
@@ -4397,7 +4397,7 @@ Onay butonunun `disabled`'ı: `!isPending || (card.liveVersion === null && !vers
 
 `price-terms/page.tsx`: tabloya `Kapsam` kolonu (`Paket` / `Kart`), kart kolonu boşsa `—`.
 
-- [ ] **Step 4: Doğrula ve commit**
+- [x] **Step 4: Doğrula ve commit**
 
 Run: `pnpm --filter @taktic/admin typecheck && pnpm --filter @taktic/admin lint && pnpm --filter @taktic/admin test`
 Expected: PASS.
@@ -4420,7 +4420,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: fixtures `createProvider({ categoryId, location, credits })`, `createAdmin()`, `createCustomer()`, `createCategory(depth, { namePrefix })`, `uniqueLocation()`, `prisma()`; `Actor.open(browser, 'web'|'admin', primaryRuntime)`, `loginToWeb`, `loginToAdmin`, `gotoWeb`, `gotoAdmin`, `assertNoErrorScreen`. Mock ödeme formu etiketleri: `Kart Üzerindeki İsim`, `Kart Numarası`, `Ay`, `Yıl`, `CVV`; buton `Ödemeyi Tamamla` (dosyadaki gerçek metni kullan). Test kart numarası `4111 1111 1111 1111`; `…0000` ile biten reddedilir.
 
-- [ ] **Step 1: Yeni akış spec'i**
+- [x] **Step 1: Yeni akış spec'i**
 
 `e2e/tests/showcase-package-first-flow.spec.ts` (paylaşılan yardımcılar `showcase-cards.spec.ts`'ten kopyalanır: `fillCardContent`, `addArea`, `expectNoHorizontalOverflow`, `seedShowcasePackage`):
 
@@ -4525,23 +4525,23 @@ test.describe('vitrin: paket-önce akış', () => {
 
 Yorum içindeki üç test gövdesi tam yazılır (yorum bırakılmaz): her biri ilk testteki adımların alt kümesidir; assert'ler yorumda listelenen ifadelerdir.
 
-- [ ] **Step 2: Viewport ve ekran görüntüsü spec'i**
+- [x] **Step 2: Viewport ve ekran görüntüsü spec'i**
 
 `e2e/tests/showcase-screens-viewport.spec.ts`: `[320, 768, 1024, 1440]` genişliklerinde şu ekranlar için `expectNoHorizontalOverflow` + `page.screenshot({ path: \`test-results/showcase-screens/${name}-${width}.png\`, fullPage: true })`: `/vitrin` (hak var, 2 kart: biri LIVE biri DRAFT), `/vitrin/paketler`, `/vitrin/yeni`, `/vitrin/:cardId` (DRAFT), `/vitrin/:cardId/duzenle`, `/vitrin/odeme/:purchaseId` (PAID), public `/` rafı, public `/vitrin/:cardId`, admin `/showcase/reviews/:versionId`. Kurulum DB seed'leriyle (Task 12 Step 1'deki yardımcılar + `showcaseEntitlement.create` doğrudan yazım: `status: 'AVAILABLE'`, `grantedAt: now`, `expiresAt: now+90g`, snapshot alanları).
 
-- [ ] **Step 3: Mevcut spec'leri taşı**
+- [x] **Step 3: Mevcut spec'leri taşı**
 
 `showcase-cards.spec.ts`: her testte kart açmadan önce `seedEntitlement(owner.id)` (paket seed + `packagePurchase` PAID + `showcaseEntitlement` AVAILABLE); `'Yeni vitrin kartı'` → `showcase-create-card` testid; `'Taslağı kaydet'` → `'Kartı oluştur'`; `acceptPriceTerms` çağrıları ve `'Onaya gönder'` → `'İncelemeye gönder'`; "Şart onayı bekliyor"/"Şartları onayla"/publish panel/`Ödemeye geç` bölümleri **silinir** (onay sonrası doğrudan `data-state="LIVE"` beklenir); geri çekme testi `'İncelemeyi geri çek'` aynı; genel tanıtım testi aynı; daraltma testi canlı kart ister → onaydan sonra zaten canlı. Dar ekran testleri yeni sayfa yollarını da ekler (`paketler`, `duzenle`).
 
 `showcase-placement-lead.spec.ts`: `seedLivePlacement` legacy şekil **kalır**; "hizmet veren yayındaki süresini … görür" testinde `'Vitrin yayını'` başlığı → `'Kartınız yayında'`, `showcase-live-until` → `getByText('Yayın bitişi')`, arşiv cümlesi → ⋯ menüsü açılıp diyalogdaki `'arşivdeyken de işlemeye devam eder'`. Diğer testler (feed, lead, area-not-served, admin suspend) selector'ları `showcase-card-face` yüzüne göre güncellenir (`showcase-card-area`, `showcase-card-price` testid'leri korunur).
 
-- [ ] **Step 4: Çalıştır**
+- [x] **Step 4: Çalıştır**
 
 Portları temizle: `for p in 3200 3201 3202 $(seq 3210 3242); do lsof -ti tcp:$p | xargs -r kill -9; done`
 Run: `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm e2e -- showcase` sonra `… pnpm e2e:webkit -- showcase`
 Expected: tüm showcase spec'leri iki tarayıcıda PASS; `e2e/test-results/showcase-screens/*.png` üretilir. PNG'leri `docs/superpowers/plans/2026-09-11-vitrin-screens/` altına kopyala (teslim kanıtı; yalnız 320 ve 1440 genişlikler, 9 ekran → 18 dosya).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A e2e docs/superpowers/plans/2026-09-11-vitrin-screens
@@ -4557,17 +4557,17 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-09-11-vitrin-package-first-flow.md` (checkbox'lar), Create: `docs/superpowers/plans/2026-09-11-vitrin-teslim-raporu.md`
 
-- [ ] **Step 1: Kök komutlar**
+- [x] **Step 1: Kök komutlar**
 
 Run (kökten, sırayla): `pnpm typecheck`, `pnpm lint`, `DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public' pnpm test`, `pnpm build`
 Expected: dördü de temiz. Hata varsa ilgili task'a dön.
 
-- [ ] **Step 2: Tam E2E (Chromium + WebKit)**
+- [x] **Step 2: Tam E2E (Chromium + WebKit)**
 
 Run: `DATABASE_URL='…' pnpm e2e` ve `DATABASE_URL='…' pnpm e2e:webkit` (önce portları temizle).
 Expected: tüm spec'ler PASS.
 
-- [ ] **Step 3: Teslim raporu**
+- [x] **Step 3: Teslim raporu**
 
 `docs/superpowers/plans/2026-09-11-vitrin-teslim-raporu.md` — brief'in istediği beş başlık:
 1. **Hakkın geçerlilik süresi nasıl belirlendi?** `ShowcasePackage.activationWindowDays` DEFAULT 90; gerekçe (spec §2.1); inceleme süresinin sayılmaması (§2.5) ve denetim tablosu.
@@ -4577,7 +4577,7 @@ Expected: tüm spec'ler PASS.
 5. **Migration dry-run ve veri bütünlüğü kanıtı:** aynı dosya + `showcase-entitlement-lifecycle` şema testi.
 Ayrıca ekran görüntüsü dizini ve E2E/`pnpm test` özetleri.
 
-- [ ] **Step 4: PR**
+- [x] **Step 4: PR**
 
 ```bash
 git push -u origin claude/vitrin-package-flow-redesign-27b4ed
