@@ -54,6 +54,8 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  /* Fills the step the sheet already referenced; it used to resolve to nothing. */
+  --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
 
@@ -5613,6 +5615,7 @@ body.has-drawer-open {
    ══════════════════════════════════════════════════════════════════════ */
 
 .vitrin-face {
+  position: relative;
   display: flex;
   flex-direction: column;
   border: 2px solid var(--color-text);

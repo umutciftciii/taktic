@@ -5,10 +5,10 @@ import { formatDate, type ShowcaseCardPublication } from '../../../../lib/api';
  * one thing to do about it.
  *
  * The API resolves the state (see `ShowcasePublicationService`); this turns it
- * into the strings a person acts on. Six human labels cover ten machine states
- * on purpose — a provider has a card that is being worked on, being read,
- * waiting for a package, on the air, refused, or finished, and does not need a
- * vocabulary finer than that.
+ * into the strings a person acts on. Eight human labels cover ten machine
+ * states on purpose — a provider has a card that is being worked on, being
+ * read, waiting for a package, on the air, refused, lapsed, stopped or
+ * archived, and does not need a vocabulary finer than that.
  *
  * Every action here is a verb the provider can actually perform. A state with
  * nothing to do about it — theirs to wait on, or an operator's to lift — returns

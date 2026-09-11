@@ -25,11 +25,18 @@ import { readServiceAreas } from '../../../../lib/service-area-payload';
  * Opens a card against a bought right.
  *
  * `entitlementId` travels only when the screen let the provider pick one; left
- * out, the API binds the oldest usable right itself. A refusal lands on the
- * list rather than back on the form: the reasons a card cannot be created —
- * no right, the wrong kind of right — are answered by buying a package, and
- * the list is where that button is.
+ * out, the API binds the oldest usable right itself. A refusal about the right
+ * — none on hand, the wrong kind — lands on the list, because buying a package
+ * is the answer and the list is where that button is. Every other refusal is
+ * about the content, and goes back to the form that can show it.
  */
+/** The refusals a package purchase answers; the list screen renders these. */
+const ENTITLEMENT_REFUSALS = new Set([
+  'SHOWCASE_ENTITLEMENT_REQUIRED',
+  'SHOWCASE_ENTITLEMENT_UNAVAILABLE',
+  'SHOWCASE_ENTITLEMENT_KIND_MISMATCH',
+]);
+
 export async function createShowcaseCardAction(formData: FormData) {
   const providerId = readString(formData, 'providerId');
   const base = `/providers/${providerId}/vitrin`;
@@ -47,7 +54,8 @@ export async function createShowcaseCardAction(formData: FormData) {
       }),
     });
   } catch (error) {
-    redirect(`${base}?error=${errorCode(error)}`);
+    const code = errorCode(error);
+    redirect(ENTITLEMENT_REFUSALS.has(code) ? `${base}?error=${code}` : `${base}/yeni?error=${code}`);
   }
 
   revalidatePath(base);

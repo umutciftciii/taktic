@@ -56,11 +56,12 @@ export function ShowcaseCardFace({
   const areas = card.areaLabels.length > 0 ? card.areaLabels.join(' · ') : 'Bölge belirtilmedi';
 
   return (
-    <article className={['vitrin-face', compact ? 'vitrin-face-compact' : '', className ?? ''].join(' ').trim()} data-testid={testId}>
+    <article className={['vitrin-face', compact && 'vitrin-face-compact', className].filter(Boolean).join(' ')} data-testid={testId}>
       <div className={art ? 'vitrin-face-media' : 'vitrin-face-media vitrin-face-media-empty'} aria-hidden="true">
         {art ? <img src={art} alt="" loading="lazy" /> : null}
-        {badge ? <span className="vitrin-face-badge">{badge}</span> : null}
       </div>
+      {/* Beside the media rather than inside it: the picture is decoration, the state is not. */}
+      {badge ? <span className="vitrin-face-badge">{badge}</span> : null}
       <div className="vitrin-face-body">
         <p className="vitrin-face-kicker">
           <span>{card.categoryName}</span>
