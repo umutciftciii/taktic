@@ -48,7 +48,11 @@ import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 export type ShowcasePublicationState =
   /** Never submitted. */
   | 'DRAFT'
-  /** With an operator right now. */
+  /**
+   * With an operator right now, and never having gone live yet. A card that
+   * is already on the air and has a fresh draft with an operator stays
+   * `LIVE`/`EXPIRED` with `hasPendingRevision: true` instead — see that flag.
+   */
   | 'IN_REVIEW'
   /** An operator said no, and the provider has the note. */
   | 'REJECTED'
@@ -56,7 +60,12 @@ export type ShowcasePublicationState =
   | 'NEEDS_PACKAGE'
   /** A run was bought before and has ended; the card needs a fresh right. */
   | 'EXPIRED'
-  /** Paid, waiting for the payment provider's confirmation to land. */
+  /**
+   * The instant between an approval spending the right and the placement row
+   * landing ACTIVE, both inside the same transaction — there is no payment
+   * provider any more to wait on, so in practice this is not an observable
+   * waiting room, only a state the type has to admit exists.
+   */
   | 'ACTIVATING'
   /** On the air. */
   | 'LIVE'

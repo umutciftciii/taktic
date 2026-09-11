@@ -266,6 +266,23 @@ describe('activation window', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('refuses a window beyond a year', async () => {
+    const cookie = await admin();
+
+    const response = await request(ctx.server)
+      .post('/admin/showcase/packages')
+      .set('Cookie', cookie)
+      .send({
+        name: 'Sınır dışı pencere',
+        slug: `vitrin-${uniqueSuffix()}`,
+        priceAmount: 49_900,
+        durationDays: 30,
+        activationWindowDays: 366,
+      });
+
+    expect(response.status).toBe(400);
+  });
 });
 
 describe('editing a package', () => {

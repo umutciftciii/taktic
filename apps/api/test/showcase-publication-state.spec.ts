@@ -2,6 +2,7 @@ import { ServiceCategoryKind, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  createApprovedShowcaseCard,
   createCategory,
   createDiscoverableProvider,
   createShowcaseEntitlement,
@@ -11,6 +12,7 @@ import {
   loginAs,
   resetDatabase,
   showcaseCardPayload,
+  showcaseUpdatePayload,
   type TestContext,
 } from './harness';
 
@@ -176,6 +178,63 @@ describe('the state one card is in', () => {
     expect(list.cards[0]).toMatchObject({ state: 'EXPIRED', hasRunBefore: true, needsPackage: true });
   });
 
+  it('stays LIVE with a pending revision flagged, then EXPIRED with the flag and the package need both true', async () => {
+    const s = await scenario();
+    const created = await request(ctx.server)
+      .post(`/providers/${s.profile.id}/showcase/cards`)
+      .set('Cookie', s.cookie)
+      .send(showcaseCardPayload(s.category.id));
+    const cardId = created.body.id as string;
+    const submitted = await request(ctx.server)
+      .post(`/providers/${s.profile.id}/showcase/cards/${cardId}/submit`)
+      .set('Cookie', s.cookie)
+      .send({});
+    await request(ctx.server)
+      .post(`/admin/showcase/versions/${submitted.body.draftVersion.id}/approve`)
+      .set('Cookie', s.adminCookie)
+      .send({});
+
+    // A revision needs no right of its own — it is text on a card already on
+    // the air, not a new publication.
+    await request(ctx.server)
+      .patch(`/providers/${s.profile.id}/showcase/cards/${cardId}`)
+      .set('Cookie', s.cookie)
+      .send(showcaseUpdatePayload(s.category.id, { title: 'Klima bakımı, aynı gün' }));
+    await request(ctx.server)
+      .post(`/providers/${s.profile.id}/showcase/cards/${cardId}/submit`)
+      .set('Cookie', s.cookie)
+      .send({});
+
+    let list = await publication(s.profile.id, s.cookie);
+    expect(list.cards[0]).toMatchObject({ state: 'LIVE', hasPendingRevision: true });
+
+    await ctx.prisma.showcasePlacement.updateMany({
+      where: { cardId },
+      data: { status: 'EXPIRED' },
+    });
+    list = await publication(s.profile.id, s.cookie);
+    expect(list.cards[0]).toMatchObject({
+      state: 'EXPIRED',
+      hasPendingRevision: true,
+      needsPackage: true,
+    });
+  });
+
+  it('reads a run bought before rights existed as expired needing a package', async () => {
+    const s = await scenario();
+    const { card } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: s.profile.id,
+      categoryId: s.category.id,
+    });
+
+    const list = await publication(s.profile.id, s.cookie);
+    expect(list.cards.find((entry: { cardId: string }) => entry.cardId === card.id)).toMatchObject({
+      state: 'EXPIRED',
+      hasRunBefore: false,
+      needsPackage: true,
+    });
+  });
+
   it('carries nothing a provider cannot act on', async () => {
     const s = await scenario();
     const created = await request(ctx.server)
@@ -190,15 +249,48 @@ describe('the state one card is in', () => {
       .post(`/admin/showcase/versions/${submitted.body.draftVersion.id}/approve`)
       .set('Cookie', s.adminCookie)
       .send({});
+    // A second, unspent right so `availableEntitlements` is exercised too —
+    // the first was already consumed by the approval above.
+    await createShowcaseEntitlement(ctx, {
+      providerId: s.profile.id,
+      userId: s.user.id,
+      packageId: s.pkg.id,
+    });
 
     const list = await publication(s.profile.id, s.cookie);
     const entry = list.cards[0];
 
-    expect(JSON.stringify(entry)).not.toContain('placementId');
-    expect(JSON.stringify(entry)).not.toContain('purchaseId');
-    expect(JSON.stringify(entry)).not.toContain('versionId');
-    expect(JSON.stringify(entry)).not.toContain('checkoutUrl');
-    expect(entry.entitlement === null || !('id' in entry.entitlement)).toBe(true);
+    // An exact key set, not a substring search: a raw id sitting under a
+    // different key name (`liveVersionId`, `entitlementId`, a nested `{ id }`)
+    // would slip straight through a `not.toContain('placementId')` check.
+    expect(Object.keys(entry).sort()).toEqual(
+      [
+        'areaLabels',
+        'cardId',
+        'endAt',
+        'entitlement',
+        'hasPendingRevision',
+        'hasRunBefore',
+        'leadCount',
+        'needsPackage',
+        'packageName',
+        'state',
+      ].sort(),
+    );
+    if (entry.entitlement !== null) {
+      expect(Object.keys(entry.entitlement).sort()).toEqual(
+        ['durationDays', 'expiresAt', 'packageName', 'pausedForReview'].sort(),
+      );
+    }
+    expect(Object.keys(list).sort()).toEqual(
+      ['availableEntitlements', 'cards', 'hasPublicationHistory'].sort(),
+    );
+    expect(list.availableEntitlements).toHaveLength(1);
+    for (const available of list.availableEntitlements) {
+      expect(Object.keys(available).sort()).toEqual(
+        ['allowedCardKind', 'durationDays', 'expiresAt', 'id', 'packageName'].sort(),
+      );
+    }
   });
 
   it('refuses another business’s panel', async () => {
