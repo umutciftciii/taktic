@@ -55,6 +55,9 @@ const PANEL_ROUTES = [
   // new-card form and `/vitrin/:cardId` is an existing card. Both draw the
   // provider panel, so the order matters here only for readability.
   '/providers/:id/vitrin/yeni',
+  // The shop and the screen after paying. Both static, both ahead of `:cardId`.
+  '/providers/:id/vitrin/paketler',
+  '/providers/:id/vitrin/odeme/:purchaseId',
   '/providers/:id/vitrin/:cardId',
   // Same precedence rule one line up: `talepler` is the lead inbox and comes
   // before `:cardId` would ever be consulted for it.
