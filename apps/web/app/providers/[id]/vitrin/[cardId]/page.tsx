@@ -15,7 +15,11 @@ import {
 import { ShowcaseCardFace, faceFromVersion } from '../../../../showcase-card-face';
 import { ProviderShell } from '../../../provider-shell';
 import { readCreditBalance } from '../../../provider-data';
-import { unarchiveShowcaseCardAction, withdrawShowcaseSubmissionAction } from '../actions';
+import {
+  submitShowcaseCardAction,
+  unarchiveShowcaseCardAction,
+  withdrawShowcaseSubmissionAction,
+} from '../actions';
 import { CardMenu } from '../card-menu';
 import { SHOWCASE_ERROR_MESSAGES } from '../showcase-errors';
 import { showcaseStage } from '../showcase-stage';
@@ -76,9 +80,19 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
   const stage = showcaseStage(entry, { providerId: id, cardId, hasAvailableRight });
   const shown = card.liveVersion ?? card.draftVersion;
   const rejection = lastRejection(card);
-  const published = entry ? PUBLISHED_STATES.has(entry.state) : false;
+  const onAir = entry ? PUBLISHED_STATES.has(entry.state) : false;
+  // The API's own rule for retiring a card: one that has ever been approved
+  // is archived and keeps its paid days; one that never was is deleted and
+  // gives its right back. Read off the card, not the publication entry — a
+  // failed fetch or a lapsed run must not relabel the dangerous action.
+  const everLive = card.liveVersion !== null;
   const retired = card.status === 'SUSPENDED' || card.status === 'ARCHIVED';
-  const canEdit = entry ? !['IN_REVIEW', 'ARCHIVED', 'SUSPENDED'].includes(entry.state) : !retired;
+  // A revision of a live card lives on the draft pointer while the publication
+  // state stays LIVE, so the pair of pointers — not the state — says whether
+  // there is a draft to send or a submission to take back.
+  const pendingRevision = card.draftVersion?.reviewStatus === 'PENDING';
+  const unsentRevision = everLive && card.draftVersion?.reviewStatus === 'DRAFT';
+  const canEdit = !retired && !pendingRevision;
   const cardHref = `/providers/${id}/vitrin/${cardId}`;
 
   return (
@@ -113,8 +127,8 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
       ) : null}
       {query.saved ? (
         <div className="pdash-notice" role="status">
-          {card.liveVersion
-            ? 'Değişiklikleriniz kaydedildi. İncelemeye gönderdiğinizde yayındaki metin onaya kadar aynı kalır.'
+          {everLive
+            ? 'Değişiklikleriniz kaydedildi. İncelemeye gönderene kadar yayındaki metin aynı kalır.'
             : 'Değişiklikleriniz kaydedildi.'}
         </div>
       ) : null}
@@ -144,7 +158,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             The bind endpoint answers 201 whether the card went live or only
             took the right; which one happened is read off the fresh state.
           */}
-          {published ? 'Kartınız vitrinde yayına girdi.' : 'Vitrin hakkınız bu karta bağlandı.'}
+          {onAir ? 'Kartınız vitrinde yayına girdi.' : 'Vitrin hakkınız bu karta bağlandı.'}
         </div>
       ) : null}
 
@@ -189,7 +203,12 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
               </div>
             </div>
           ) : null}
-          {entry?.hasPendingRevision ? (
+          {unsentRevision ? (
+            <p className="muted" style={{ marginTop: 12 }}>
+              Yayındaki metin gösteriliyor; kaydettiğiniz değişiklik incelemeye gönderilince burada görünecek.
+            </p>
+          ) : null}
+          {pendingRevision && everLive ? (
             <p className="muted" style={{ marginTop: 12 }}>
               Yaptığınız değişiklik incelemede. Yayındaki metin şimdilik aynı kalıyor.
             </p>
@@ -199,7 +218,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
         <aside className="vitrin-status" data-testid="showcase-status-panel" aria-labelledby="vitrin-durum">
           <div className="vitrin-status-head">
             <h2 id="vitrin-durum">{statusHeading(entry?.state, entry)}</h2>
-            {!retired ? <CardMenu providerId={id} cardId={cardId} published={published} /> : null}
+            {!retired ? <CardMenu providerId={id} cardId={cardId} published={everLive} /> : null}
           </div>
           {entry?.state === 'LIVE' && entry.endAt ? (
             <p data-testid="showcase-live-until">
@@ -215,7 +234,23 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             </p>
           ) : null}
           <StageAction stage={stage} providerId={id} cardId={cardId} />
-          {entry?.state === 'IN_REVIEW' ? (
+          {unsentRevision ? (
+            <>
+              <p>Kaydettiğiniz değişiklik henüz incelemeye gönderilmedi.</p>
+              <form action={submitShowcaseCardAction}>
+                <input type="hidden" name="providerId" value={id} />
+                <input type="hidden" name="cardId" value={cardId} />
+                <button
+                  className="pdash-btn pdash-btn-secondary"
+                  type="submit"
+                  data-testid="showcase-submit-revision"
+                >
+                  İncelemeye gönder
+                </button>
+              </form>
+            </>
+          ) : null}
+          {pendingRevision ? (
             <form action={withdrawShowcaseSubmissionAction}>
               <input type="hidden" name="providerId" value={id} />
               <input type="hidden" name="cardId" value={cardId} />

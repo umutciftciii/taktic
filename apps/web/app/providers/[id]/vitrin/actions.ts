@@ -73,7 +73,8 @@ export async function updateShowcaseCardAction(formData: FormData) {
       body: JSON.stringify(contentPayload(formData)),
     });
   } catch (error) {
-    redirect(`${target}?error=${errorCode(error)}`);
+    // Back to the form that can show it, not to the summary screen.
+    redirect(`${target}/duzenle?error=${errorCode(error)}`);
   }
 
   revalidatePath(target);

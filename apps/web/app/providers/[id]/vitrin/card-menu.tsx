@@ -24,20 +24,23 @@ export function CardMenu({
   published: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const menu = useRef<HTMLDetailsElement>(null);
   const label = published ? 'Kartı arşivle' : 'Kartı sil ve yayın hakkını serbest bırak';
 
   return (
     <>
-      <details className="vitrin-menu">
+      <details className="vitrin-menu" ref={menu}>
         <summary className="pdash-btn pdash-btn-ghost pdash-btn-sm" aria-label="Diğer işlemler">
           ⋯
         </summary>
-        <div className="vitrin-menu-list" role="menu">
+        <div className="vitrin-menu-list">
           <button
             type="button"
-            role="menuitem"
             className="vitrin-menu-danger"
-            onClick={() => dialog.current?.showModal()}
+            onClick={() => {
+              if (menu.current) menu.current.open = false;
+              dialog.current?.showModal();
+            }}
             data-testid="showcase-card-danger"
           >
             {label}

@@ -106,7 +106,7 @@ export default async function EditShowcaseCardPage({ params, searchParams }: Edi
 
         <section className="vitrin-form-group" aria-labelledby="vitrin-grup-bolge">
           <div className="vitrin-form-group-head">
-            <h2 id="vitrin-grup-bolge">Bölgeler</h2>
+            <h2 id="vitrin-grup-bolge">Hizmet bölgeleri</h2>
             <p>Kart yalnızca işletme profilinizdeki hizmet bölgelerinin içinde kalan yerleri hedefleyebilir.</p>
           </div>
           <ServiceAreaFields
