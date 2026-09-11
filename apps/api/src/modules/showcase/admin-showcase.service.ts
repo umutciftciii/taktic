@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  ProviderStatus,
   ShowcaseCardStatus,
   ShowcaseEntitlementStatus,
   ShowcasePlacementSuspendReason,
@@ -19,6 +20,7 @@ import {
   showcaseCardNotFound,
   showcaseCardNotSuspended,
   showcaseEntitlementMissing,
+  showcaseProviderNotApproved,
   showcaseVersionNotFound,
   showcaseVersionNotPending,
 } from './showcase.errors';
@@ -267,6 +269,16 @@ export class AdminShowcaseService {
         const reserved = await this.entitlements.findReservedForCard(tx, version.cardId, now);
         if (!reserved) {
           throw showcaseEntitlementMissing();
+        }
+        // The same gate `use-entitlement` applies before it publishes: a
+        // business that is no longer approved cannot be put on the home page,
+        // and the right must not be spent on a run that could not be shown.
+        const provider = await tx.providerProfile.findUniqueOrThrow({
+          where: { id: version.card.providerId },
+          select: { status: true },
+        });
+        if (provider.status !== ProviderStatus.APPROVED) {
+          throw showcaseProviderNotApproved();
         }
         assertCategoryStillOpen(version.card.category, version.card.kind);
         await assertVersionAreasCovered(tx, version.card.providerId, versionId);

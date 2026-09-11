@@ -102,8 +102,8 @@ export async function rejectShowcaseVersionAction(formData: FormData) {
  *
  * The message is whatever the API put in the body's `message` field — already
  * Turkish and already written for an operator, for every code this endpoint
- * can return: `SHOWCASE_ENTITLEMENT_MISSING`, `SHOWCASE_CATEGORY_NOT_OFFERED`
- * and `SHOWCASE_AREA_NOT_COVERED` included. There is deliberately no
+ * can return: `SHOWCASE_ENTITLEMENT_MISSING`, `SHOWCASE_PROVIDER_NOT_APPROVED`,
+ * `SHOWCASE_CATEGORY_NOT_OFFERED` and `SHOWCASE_AREA_NOT_COVERED` included. There is deliberately no
  * code-to-message map here to keep in sync with the API's own wording.
  */
 async function run(call: () => Promise<unknown>): Promise<string | null> {

@@ -727,84 +727,113 @@ export class ProviderShowcaseCardsService {
    * air. A right must not be spent on a run that could not be shown.
    */
   async useEntitlement(providerId: string, cardId: string, dto: UseShowcaseEntitlementDto) {
-    const card = await this.loadOwnedCard(providerId, cardId);
-    if (
-      card.status === ShowcaseCardStatus.ARCHIVED ||
-      card.status === ShowcaseCardStatus.SUSPENDED
-    ) {
-      throw showcaseCardLocked();
-    }
+    // Ownership and existence only: the card's state is read again under the
+    // transaction, because this decision — reserve or publish — must be made
+    // against the row as it is at commit time, not as it was a round trip ago.
+    await this.loadOwnedCard(providerId, cardId);
     const now = new Date();
     let activatedPlacementId: string | null = null;
 
-    await runSerializable(
-      this.prisma,
-      async (tx) => {
-        const existing = await this.entitlements.findReservedForCard(tx, card.id, now);
-        if (existing) {
-          throw showcaseEntitlementUnavailable();
-        }
-
-        // A right that lapsed *in place* — still RESERVED on this card, its
-        // window closed while the card sat unsubmitted — is invisible to the
-        // validity read above but still holds the card's one reservation
-        // slot. It is retired here so the right the provider just bought can
-        // take its place rather than collide with it.
-        await this.entitlements.expireLapsedReservationForCard(tx, card.id, now);
-
-        const publishNow =
-          card.status === ShowcaseCardStatus.APPROVED && card.liveVersionId !== null;
-        if (publishNow) {
-          const live = await tx.showcasePlacement.findFirst({
-            where: { cardId: card.id, status: { in: ['PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED'] } },
-            select: { id: true },
+    try {
+      await runSerializable(
+        this.prisma,
+        async (tx) => {
+          const card = await tx.showcaseCard.findUniqueOrThrow({
+            where: { id: cardId },
+            select: {
+              id: true,
+              status: true,
+              kind: true,
+              categoryId: true,
+              liveVersionId: true,
+              category: { select: { id: true, kind: true, status: true } },
+              draftVersion: { select: { id: true, reviewStatus: true } },
+            },
           });
-          if (live) {
-            throw showcaseCardAlreadyPlaced();
+          if (
+            card.status === ShowcaseCardStatus.ARCHIVED ||
+            card.status === ShowcaseCardStatus.SUSPENDED
+          ) {
+            throw showcaseCardLocked();
           }
-          const provider = await tx.providerProfile.findUniqueOrThrow({
-            where: { id: providerId },
-            select: { status: true },
-          });
-          if (provider.status !== ProviderStatus.APPROVED) {
-            throw showcaseProviderNotApproved();
+
+          const existing = await this.entitlements.findReservedForCard(tx, card.id, now);
+          if (existing) {
+            throw showcaseEntitlementUnavailable();
           }
-          assertCategoryStillOpen(card.category, card.kind);
-          await assertVersionAreasCovered(tx, providerId, card.liveVersionId!);
-        }
 
-        await this.entitlements.reserveForCard(tx, {
-          providerId,
-          cardId: card.id,
-          kind: card.kind,
-          entitlementId: dto.entitlementId ?? null,
-          now,
-        });
+          // A right that lapsed *in place* — still RESERVED on this card, its
+          // window closed while the card sat unsubmitted — is invisible to the
+          // validity read above but still holds the card's one reservation
+          // slot. It is retired here so the right the provider just bought can
+          // take its place rather than collide with it.
+          await this.entitlements.expireLapsedReservationForCard(tx, card.id, now);
 
-        // A first version already waiting on an operator gets the same clock
-        // stop a submission gives: the time from here to the ruling is the
-        // operator's, whichever order the right and the submission arrived in.
-        if (
-          !card.liveVersionId &&
-          card.draftVersion?.reviewStatus === ShowcaseVersionReview.PENDING
-        ) {
-          await this.entitlements.pauseForReview(tx, card.id, card.draftVersion.id, now);
-        }
+          const publishNow =
+            card.status === ShowcaseCardStatus.APPROVED && card.liveVersionId !== null;
+          if (publishNow) {
+            const live = await tx.showcasePlacement.findFirst({
+              where: { cardId: card.id, status: { in: ['PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED'] } },
+              select: { id: true },
+            });
+            if (live) {
+              throw showcaseCardAlreadyPlaced();
+            }
+            const provider = await tx.providerProfile.findUniqueOrThrow({
+              where: { id: providerId },
+              select: { status: true },
+            });
+            if (provider.status !== ProviderStatus.APPROVED) {
+              throw showcaseProviderNotApproved();
+            }
+            assertCategoryStillOpen(card.category, card.kind);
+            await assertVersionAreasCovered(tx, providerId, card.liveVersionId!);
+          }
 
-        if (publishNow) {
-          const { placementId } = await this.entitlements.consumeForCard(tx, {
-            cardId: card.id,
-            versionId: card.liveVersionId!,
+          await this.entitlements.reserveForCard(tx, {
             providerId,
-            categoryId: card.categoryId,
+            cardId: card.id,
             kind: card.kind,
+            entitlementId: dto.entitlementId ?? null,
             now,
           });
-          activatedPlacementId = placementId;
-        }
-      },
-      { label: 'showcase.useEntitlement' },
-    );
+
+          // A first version already waiting on an operator gets the same clock
+          // stop a submission gives: the time from here to the ruling is the
+          // operator's, whichever order the right and the submission arrived in.
+          if (
+            !card.liveVersionId &&
+            card.draftVersion?.reviewStatus === ShowcaseVersionReview.PENDING
+          ) {
+            await this.entitlements.pauseForReview(tx, card.id, card.draftVersion.id, now);
+          }
+
+          if (publishNow) {
+            const { placementId } = await this.entitlements.consumeForCard(tx, {
+              cardId: card.id,
+              versionId: card.liveVersionId!,
+              providerId,
+              categoryId: card.categoryId,
+              kind: card.kind,
+              now,
+            });
+            activatedPlacementId = placementId;
+          }
+        },
+        { label: 'showcase.useEntitlement' },
+      );
+    } catch (error) {
+      // Two binds racing on one card: the partial unique index on RESERVED
+      // rows lets exactly one through, and the loser's constraint violation is
+      // the same fact as "this card already holds a right" — a 409, not a 500.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw showcaseEntitlementUnavailable();
+      }
+      throw error;
+    }
 
     // After the commit, and only for a run this call actually started: a mail
     // about a placement that was rolled back would announce nothing.
@@ -846,15 +875,24 @@ export class ProviderShowcaseCardsService {
     const consumed = await tx.showcaseEntitlement.findFirst({
       where: { cardId, status: ShowcaseEntitlementStatus.CONSUMED },
       orderBy: [{ consumedAt: 'desc' }],
-      select: { priceTermsVersionSnapshot: true, consumedAt: true },
+      select: {
+        priceTermsVersionSnapshot: true,
+        consumedAt: true,
+        purchase: { select: { showcasePackageTermsAcceptance: { select: { acceptedAt: true } } } },
+      },
     });
     if (consumed) {
-      if (!consumed.consumedAt) {
+      // "When the terms were accepted" — the same moment a first submission
+      // records. The consumed timestamp stands in only for a right whose
+      // purchase carries no acceptance row (a legacy grant).
+      const acceptedAt =
+        consumed.purchase.showcasePackageTermsAcceptance?.acceptedAt ?? consumed.consumedAt;
+      if (!acceptedAt) {
         // The status CHECK makes this unrepresentable; a row that reaches
         // here is a data fault, and a fabricated timestamp would hide it.
         throw new Error(`CONSUMED vitrin hakkı consumedAt taşımıyor (cardId=${cardId})`);
       }
-      return { version: consumed.priceTermsVersionSnapshot, acceptedAt: consumed.consumedAt };
+      return { version: consumed.priceTermsVersionSnapshot, acceptedAt };
     }
     const placement = await tx.showcasePlacement.findFirst({
       where: { cardId },

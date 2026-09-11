@@ -282,7 +282,10 @@ describe('one right, one card', () => {
 
     const old = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({ where: { id: rightId } });
     expect(old.status).toBe('EXPIRED');
-    expect(old.cardId).toBeNull();
+    // The lapsed right keeps the card it sat on as a record, as the sweeper
+    // leaves it; only RESERVED rows hold the card's single slot.
+    expect(old.cardId).toBe(cardId);
+    expect(old.reservedAt).not.toBeNull();
     const bound = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({ where: { id: fresh.id } });
     expect(bound.status).toBe('RESERVED');
     expect(bound.cardId).toBe(cardId);
@@ -290,6 +293,33 @@ describe('one right, one card', () => {
     const submitted = await submit(profile.id, cardId, cookie);
     expect(submitted.status).toBe(200);
     expect(submitted.body.draftVersion.reviewStatus).toBe('PENDING');
+  });
+
+  it('refuses the first approval when the business is no longer approved, and spends nothing', async () => {
+    const { profile, cookie, adminCookie, category, rightId } = await scenario();
+    const created = await createCard(profile.id, cookie, category.id);
+    const cardId = created.body.id as string;
+    const submitted = await submit(profile.id, cardId, cookie);
+    const versionId = submitted.body.draftVersion.id as string;
+
+    await ctx.prisma.providerProfile.update({
+      where: { id: profile.id },
+      data: { status: 'SUSPENDED' },
+    });
+
+    const refused = await approve(versionId, adminCookie);
+    expect(refused.status).toBe(409);
+    expect(refused.body.code).toBe('SHOWCASE_PROVIDER_NOT_APPROVED');
+
+    const version = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({ where: { id: versionId } });
+    expect(version.reviewStatus).toBe('PENDING');
+    const right = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({ where: { id: rightId } });
+    expect(right.status).toBe('RESERVED');
+    expect(right.reviewPausedAt).not.toBeNull();
+    expect(await ctx.prisma.showcaseCardReview.count()).toBe(0);
+    expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
+    const card = await ctx.prisma.showcaseCard.findUniqueOrThrow({ where: { id: cardId } });
+    expect(card.liveVersionId).toBeNull();
   });
 
   it('deleting the card before approval releases the right, even from inside review', async () => {
@@ -397,6 +427,41 @@ describe('an already-approved card', () => {
     expect(
       await ctx.prisma.showcaseEntitlement.count({ where: { status: 'CONSUMED', cardId: card.id } }),
     ).toBe(2);
+  });
+
+  it('two binds racing on one approved card: one publishes, the other is refused, nothing doubles', async () => {
+    const { profile, cookie, category } = await scenario({ rights: 2 });
+    const { card } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: profile.id,
+      categoryId: category.id,
+    });
+    const rights = await ctx.prisma.showcaseEntitlement.findMany({
+      where: { providerId: profile.id, status: 'AVAILABLE' },
+      orderBy: [{ id: 'asc' }],
+      select: { id: true },
+    });
+    expect(rights).toHaveLength(2);
+
+    // Each call names its own right, so both reservations succeed on their
+    // own rows and the card's one-RESERVED-per-card index is what decides.
+    const [first, second] = await Promise.all([
+      useEntitlement(profile.id, card.id, cookie, { entitlementId: rights[0]!.id }),
+      useEntitlement(profile.id, card.id, cookie, { entitlementId: rights[1]!.id }),
+    ]);
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    const loser = first.status === 409 ? first : second;
+    // The loser is told the card already holds a right or a run — never a 500.
+    expect(['SHOWCASE_ENTITLEMENT_UNAVAILABLE', 'SHOWCASE_CARD_ALREADY_PLACED']).toContain(
+      loser.body.code,
+    );
+
+    expect(await ctx.prisma.showcasePlacement.count({ where: { cardId: card.id } })).toBe(1);
+    expect(
+      await ctx.prisma.showcaseEntitlement.count({ where: { cardId: card.id, status: 'CONSUMED' } }),
+    ).toBe(1);
+    expect(await ctx.prisma.showcaseEntitlement.count({ where: { status: 'RESERVED' } })).toBe(0);
+    expect(await ctx.prisma.showcaseEntitlement.count({ where: { status: 'AVAILABLE' } })).toBe(1);
   });
 
   it('attaching a right to a first version already in the queue pauses it, and the approval then spends it', async () => {

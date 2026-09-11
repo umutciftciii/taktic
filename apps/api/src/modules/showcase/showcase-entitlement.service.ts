@@ -229,7 +229,11 @@ export class ShowcaseEntitlementService {
         reviewPausedAt: null,
         expiresAt: { lte: now },
       },
-      data: { status: ShowcaseEntitlementStatus.EXPIRED, cardId: null, reservedAt: null },
+      // Only the status moves. An expired right keeps the card it sat on and
+      // the moment it was reserved as a record — the same shape the sweeper
+      // leaves, and the reservation slot is freed all the same, because the
+      // one-per-card index covers RESERVED rows only.
+      data: { status: ShowcaseEntitlementStatus.EXPIRED },
     });
     return moved.count === 1;
   }
