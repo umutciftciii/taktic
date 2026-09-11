@@ -97,22 +97,20 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       ).toHaveValue('1.250,75');
 
       // ── A whole number is lira, not kuruş ──────────────────────────────
+      // From the bare listing URL, so the `?saved=1` the action redirects to
+      // is a new URL this time and the wait for it is a real wait — the
+      // previous save left the page on `?saved=1` already.
+      await admin.gotoAdmin('/showcase/packages');
       const editAgain = admin.page.locator('form').filter({
         has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`),
       });
       await editAgain.getByTestId('showcase-package-price').fill('10');
       await editAgain.getByRole('button', { name: 'Kaydet' }).click();
-      // The URL already carries `saved=1` from the previous save, so it cannot
-      // tell this round trip apart from the last one; the write can.
-      await expect
-        .poll(
-          async () =>
-            (await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } })).priceAmount,
-          { timeout: 15_000 },
-        )
-        .toBe(1000);
       await expect(admin.page).toHaveURL(/saved=1/);
-      await admin.gotoAdmin('/showcase/packages');
+      await assertNoErrorScreen(admin.page);
+      expect(
+        (await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } })).priceAmount,
+      ).toBe(1000);
       await expect(
         admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-price-cell'),
       ).toHaveText('₺10,00');
