@@ -96,10 +96,15 @@ px'te başlık sol kenarı eyebrow ve grid sol kenarıyla ≤1px, `text-align` o
 - `Sıra` → "Gelişmiş ayarlar" `<details>` altında "Listeleme sırası"; açıklama:
   yalnız paket listesindeki görünüm sırası, kartların vitrindeki sırasını etkilemez,
   hiçbir paket öncelik/sıralama avantajı vermez. Açıklama alanına da vaat uyarısı.
-- Eski vaat: additive data migration
-  `20260912090000_showcase_package_description_no_priority_promise` — açıklamasında
-  "öncelik" geçen paketler `"<durationDays> gün boyunca vitrin sayfalarında yayınlanın ve
-  kartınızdan doğrudan talep alın."` olarak yeniden yazılır; diğer satırlar dokunulmaz.
+- Eski vaat: **DML** migration `20260912090000_showcase_package_description_no_priority_promise`
+  (şema değişikliği değil, ürün talebiyle yetkilendirilmiş dar kapsamlı veri düzeltmesi):
+  tek `UPDATE "ShowcasePackage" SET "description"`, WHERE `slug = 'vitrin-mini-30'` **ve**
+  açıklama eski metinle birebir eşit (`"30 gün boyunca vitrinde yer al" + CRLF +
+  "Taleplerde öncelik hizmeti"`, 2026-09-11 yedeğindeki orijinal). Operatörün düzenlediği
+  açıklama, başka vitrin paketi ve teklif/kredi paketleri dokunulmaz; zaten düzeltilmiş
+  satırda 0 etki. Kanıt: `apps/api/test/showcase-package-description-migration.spec.ts`
+  (migration dosyasının kendisi seeded satırlara karşı çalıştırılır: 1 satır değişir,
+  tekrar 0) ve izole dry-run (`…-migration-dryrun.txt`).
 - Kanıt: `e2e/tests/showcase-package-price.spec.ts` (10,50 → DB 1050 → liste ₺10,50 →
   form 10,50; 1.250,75 → 125075; 10 → 1000; `10,505` tarayıcı pattern'ında, `0` server
   action'da reddedilir).
@@ -156,7 +161,8 @@ değiştirilmedi; e2e runtime'ındaki değerler yalnız o suite'e ait placeholde
 - `pnpm typecheck` ✔ (5/5), `pnpm lint` ✔, `pnpm build` ✔.
 - `pnpm test` — bkz. §7.
 - E2E (Chromium/WebKit) — bkz. §7.
-- Migration dry-run (izole DB, aktif URL kullanılmadı):
+- Migration dry-run (izole DB, aktif URL kullanılmadı; 14 tabloda önce/sonra satır sayısı ve
+  md5 parmak izi, beklenen tek fark `vitrin-mini-30.description` eski→yeni):
   `docs/superpowers/plans/2026-09-12-vitrin-notify-migration-dryrun.txt`.
 
 ## 6. Ortam değişkenleri (deploy notu; değer bu PR'da yok)

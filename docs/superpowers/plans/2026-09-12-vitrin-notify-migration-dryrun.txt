@@ -1,25 +1,50 @@
-VIT-NOTIFY-UX-003 — migration dry-run (2026-09-12)
+VIT-NOTIFY-UX-003 — migration dry-run (2026-09-12, daraltılmış DML ile yeniden)
 
-İzole veritabanı: taktic_vitnotify003_dryrun (aktif `taktic` DB'nin pg_dump kopyası;
-aktif DATABASE_URL hiçbir adımda shadow/hedef olarak kullanılmadı; dry-run DB işin
-sonunda DROP edildi).
+İzole veritabanı: taktic_vitnotify003_dryrun2 (aktif `taktic` DB'nin pg_dump kopyası;
+aktif DATABASE_URL hiçbir adımda shadow/hedef olarak kullanılmadı; iş sonunda DROP edildi).
 
 Uygulanan migration'lar (yalnız bu ikisi bekliyordu):
-  20260912090000_showcase_package_description_no_priority_promise  (UPDATE, additive)
-  20260912090100_add_phone_verification_test_bypass_flag           (ADD COLUMN DEFAULT false)
+  20260912090000_showcase_package_description_no_priority_promise  → DML: tek UPDATE
+  20260912090100_add_phone_verification_test_bypass_flag           → DDL: ADD COLUMN DEFAULT false
 
-Dry-run DB'ye, migration'ın etkisini görmek için sentetik bir paket satırı eklendi
-(slug vitrin-dryrun-eski, durationDays 15, açıklama "… Taleplerde öncelikli hizmeti.").
+DML'in niteliği (açıkça): bu bir şema değişikliği değil, ürün talebiyle yetkilendirilmiş
+dar kapsamlı VERİ düzeltmesidir.
+  UPDATE "ShowcasePackage" SET "description" = <yeni metin>
+  WHERE "slug" = 'vitrin-mini-30' AND "description" = <eski metin, birebir>
+Eski metin, 2026-09-11 21:04 yedeğindeki (staging kökenli) satırdan alındı:
+  '30 gün boyunca vitrinde yer al' + CRLF + 'Taleplerde öncelik hizmeti'
+  (updatedAt = createdAt = 2026-09-10 15:19 → operatör dokunmamış).
 
-Satır sayıları  ShowcasePackage|PhoneVerification|NotificationLog|ShowcasePlacement|ShowcaseEntitlement|ShowcaseCard
-  öncesi : 2|3|39|2|2|2   (sentetik satır dahil)
-  sonrası: 2|3|39|2|2|2
+Dry-run DB'ye, davranışı görmek için staging benzeri durum kuruldu:
+  - vitrin-mini-30.description eski metne geri alındı (aktif yerel DB'de zaten düzeltilmişti),
+  - aynı eski metinle başka slug (vitrin-dryrun-baska),
+  - doğru kelimeyi içeren ama düzenlenmiş açıklama (vitrin-dryrun-duzenli),
+  - OfferCreditPackage starter-20 açıklamasına aynı kelime.
 
-İçerik md5 (id|normalizedPhone|consumedAt — PhoneVerification): a5d194b8af4e43aae01e50a93fb06cb4 → aynı
-İçerik md5 (id|template|status — NotificationLog):              e0670a5b31b41cb17113b3b53677b765 → aynı
+Parmak izi (tablo|satır|md5(id|…)) — 14 tablo, önce → sonra:
+  NotificationLog      39  e0670a5b… → aynı
+  Offer                 6  f6479e2b… → aynı
+  OfferCreditPackage    3  8c7eb76d… → aynı   (starter-20 açıklaması DOKUNULMADI)
+  PackagePurchase       9  ff010731… → aynı
+  PhoneVerification     3  e516bd15… → aynı   (verifiedByTestBypass: 0/3 true)
+  ProviderProfile       2  f5da1357… → aynı
+  ServiceCategory      49  a4129e93… → aynı
+  ServiceRequest       10  42889b84… → aynı
+  ShowcaseCard          2  6ebf9336… → aynı
+  ShowcaseCardVersion   2  3724edaf… → aynı
+  ShowcaseEntitlement   2  6a2de684… → aynı
+  ShowcasePackage       3  27116386… → 627a9b4e…   ← beklenen tek veri farkı
+  ShowcasePlacement     2  b38f0a5c… → aynı
+  User                  9  db0a96fa… → aynı
+  _prisma_migrations   56 → 58
 
-ShowcasePackage sonrası:
-  vitrin-dryrun-eski | 15 | 15 gün boyunca vitrin sayfalarında yayınlanın ve kartınızdan doğrudan talep alın.
-  vitrin-mini-30     | 30 | 30 gün boyunca vitrin sayfalarında yayınlanın ve kartınızdan doğrudan talep alın.  (değişmedi; zaten doğruydu)
+Beklenen tek veri farkı:
+  vitrin-mini-30.description
+    eski: "30 gün boyunca vitrinde yer al⏎Taleplerde öncelik hizmeti"
+    yeni: "30 gün boyunca vitrin sayfalarında yayınlanın ve kartınızdan doğrudan talep alın."
+  vitrin-dryrun-baska   → değişmedi (başka slug)
+  vitrin-dryrun-duzenli → değişmedi (metin birebir değil)
+  offer starter-20      → değişmedi (başka tablo)
 
-PhoneVerification.verifiedByTestBypass: 0 / 3 satır true (mevcut her satır gerçek doğrulama olarak okunur).
+Yerel aktif DB'de satır zaten düzeltilmiş metni taşıyor → migration 0 satır etkiler.
+Staging'de satır 2026-09-10'dan beri düzenlenmediyse tam 1 satır; düzenlendiyse 0 satır.
