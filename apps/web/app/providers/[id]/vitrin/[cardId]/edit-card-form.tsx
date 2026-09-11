@@ -34,17 +34,14 @@ export function EditShowcaseCardForm({
       <ShowcaseCardFields
         kind={card.kind}
         categorySlot={
-          <section className="pdash-form-section">
-            <h2>Hizmet kategorisi</h2>
-            <label className="pdash-form-row">
-              <span>Kategori</span>
-              <input value={card.category.name} readOnly disabled />
-            </label>
+          <label className="pdash-form-row">
+            <span>Kategori</span>
+            <input value={card.category.name} readOnly disabled />
             <span className="muted" style={{ fontSize: 12 }}>
               Kategori kart oluşturulduktan sonra değiştirilemez. Farklı bir kategori için yeni
               kart açın.
             </span>
-          </section>
+          </label>
         }
         defaultTitle={version.title}
         defaultSummary={version.summary}

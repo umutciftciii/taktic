@@ -12,7 +12,7 @@ type ShowcaseCardFieldsProps = {
   kind: ShowcaseCardKind;
   onKindChange?: (kind: ShowcaseCardKind) => void;
   /**
-   * The category control, rendered immediately under the kind.
+   * The category control, rendered inside the first group right under the kind.
    *
    * A slot rather than a prop pair, because the two forms need genuinely
    * different controls there: the create form picks from a list that depends on
@@ -36,7 +36,10 @@ type ShowcaseCardFieldsProps = {
 };
 
 /**
- * The content half of a vitrin card form.
+ * The content half of a vitrin card form, in three groups: the basics, the
+ * service and its price, and the response promise. The fourth group — where
+ * the card is offered — is drawn by the page, with the same area picker the
+ * profile form uses.
  *
  * Two decisions worth stating.
  *
@@ -83,15 +86,14 @@ export function ShowcaseCardFields({
 
   return (
     <>
-      <section className="pdash-form-section">
-        <h2>Kart türü</h2>
-        <p className="pdash-form-hint">
-          Hizmet vitrini belirli bir hizmeti sabit fiyatla anlatır. Genel tanıtım işletmenizi
-          tanıtır; müşteri hizmeti talep açarken seçer ve kart sabit fiyat iddiası taşımaz.
-        </p>
-        <div className="provider-apply-categories">
+      <section className="vitrin-form-group" aria-labelledby="vitrin-grup-temel">
+        <div className="vitrin-form-group-head">
+          <h2 id="vitrin-grup-temel">Temel bilgiler</h2>
+          <p>Müşterinin kartta ilk gördüğü şeyler: tür, kategori, başlık ve özet.</p>
+        </div>
+        <div className="vitrin-choice-row" role="radiogroup" aria-label="Kart türü">
           {(['SERVICE', 'PROMOTION'] as const).map((option) => (
-            <label className="check-chip" key={option}>
+            <label className="vitrin-choice" key={option}>
               <input
                 type="radio"
                 name="kind"
@@ -104,17 +106,14 @@ export function ShowcaseCardFields({
             </label>
           ))}
         </div>
-        {!onKindChange ? (
-          <span className="muted" style={{ fontSize: 12 }}>
-            Kart türü oluşturulduktan sonra değiştirilemez. Farklı bir tür için yeni kart açın.
-          </span>
-        ) : null}
-      </section>
+        <p className="pdash-form-hint" style={{ margin: 0 }}>
+          {onKindChange
+            ? 'Hizmet vitrini belirli bir hizmeti sabit fiyatla anlatır; genel tanıtım işletmenizi tanıtır ve fiyat iddiası taşımaz.'
+            : 'Kart türü oluşturulduktan sonra değiştirilemez. Farklı bir tür için yeni kart açın.'}
+        </p>
 
-      {categorySlot}
+        {categorySlot}
 
-      <section className="pdash-form-section">
-        <h2>Kart içeriği</h2>
         <label className="pdash-form-row">
           <span>Başlık *</span>
           <input name="title" required maxLength={120} defaultValue={defaultTitle} />
@@ -138,12 +137,15 @@ export function ShowcaseCardFields({
         </label>
       </section>
 
-      <section className="pdash-form-section">
-        <h2>Kapsam</h2>
-        <p className="pdash-form-hint">
-          Her satır bir madde. İkisi de zorunludur: kapsamı yazılmamış bir fiyat, müşterinin
-          neye evet dediğini bilmediği bir fiyattır.
-        </p>
+      <section className="vitrin-form-group" aria-labelledby="vitrin-grup-hizmet">
+        <div className="vitrin-form-group-head">
+          <h2 id="vitrin-grup-hizmet">Hizmet ve fiyat</h2>
+          <p>
+            {kind === 'SERVICE'
+              ? 'Neyin dahil, neyin hariç olduğu ve müşterinize verdiğiniz sabit bedel.'
+              : 'Neyin dahil, neyin hariç olduğu; genel tanıtım kartı fiyat taşımaz.'}
+          </p>
+        </div>
         <label className="pdash-form-row">
           <span>Dahil olanlar * (her satır bir madde)</span>
           <textarea
@@ -162,15 +164,7 @@ export function ShowcaseCardFields({
             defaultValue={defaultScopeExcluded.join('\n')}
           />
         </label>
-      </section>
-
-      {kind === 'SERVICE' ? (
-        <section className="pdash-form-section">
-          <h2>Hizmet bedeli</h2>
-          <p className="pdash-form-hint">
-            Bu bedel sizin müşterinize verdiğiniz fiyattır. TakTick bu bedeli tahsil etmez ve
-            taraflar arasındaki ödemeye müdahil olmaz.
-          </p>
+        {kind === 'SERVICE' ? (
           <label className="pdash-form-row" htmlFor={priceId}>
             <span>Sabit hizmet bedeli (₺) *</span>
             <input
@@ -183,16 +177,18 @@ export function ShowcaseCardFields({
               onChange={(event) => setPrice(formatLiraDraft(event.target.value))}
               onBlur={(event) => setPrice(completeLiraAmount(event.target.value))}
             />
+            <span className="muted" style={{ fontSize: 12 }}>
+              TakTick bu bedeli tahsil etmez; ödeme sizinle müşteriniz arasındadır.
+            </span>
           </label>
-        </section>
-      ) : null}
+        ) : null}
+      </section>
 
-      <section className="pdash-form-section">
-        <h2>Yanıt taahhüdü</h2>
-        <p className="pdash-form-hint">
-          Vitrin talebi geldiğinde en geç ne kadar sürede gerçek bir yanıt vereceğinizi
-          taahhüt edersiniz. Bu taahhüt kartın onaylanan metninin parçasıdır.
-        </p>
+      <section className="vitrin-form-group" aria-labelledby="vitrin-grup-yanit">
+        <div className="vitrin-form-group-head">
+          <h2 id="vitrin-grup-yanit">Yanıt taahhüdü</h2>
+          <p>Vitrin talebi geldiğinde en geç ne kadar sürede gerçek bir yanıt vereceğiniz.</p>
+        </div>
         <div className="pdash-form-grid">
           <label className="pdash-form-row">
             <span>Acil talep (saat) *</span>

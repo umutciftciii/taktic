@@ -47,48 +47,39 @@ export function NewShowcaseCardForm({
       kind={kind}
       onKindChange={changeKind}
       categorySlot={
-        <section className="pdash-form-section">
-          <h2>Hizmet kategorisi</h2>
-          <p className="pdash-form-hint">
-            {kind === 'PROMOTION'
-              ? 'Genel tanıtım kartını tek bir hizmete ya da altında hizmet verdiğiniz bir gruba bağlayabilirsiniz.'
-              : 'Hizmet vitrini kartı tek bir hizmete bağlanır.'}{' '}
-            Kategori kart oluşturulduktan sonra değiştirilemez; farklı bir kategori için yeni
-            kart açın.
-          </p>
-          <label className="pdash-form-row">
-            <span>Kategori *</span>
-            <select
-              name="categoryId"
-              required
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-              data-testid="showcase-category-select"
-            >
-              <option value="" disabled>
-                Seçiniz
+        <label className="pdash-form-row">
+          <span>Kategori *</span>
+          <select
+            name="categoryId"
+            required
+            value={categoryId}
+            onChange={(event) => setCategoryId(event.target.value)}
+            data-testid="showcase-category-select"
+          >
+            <option value="" disabled>
+              Seçiniz
+            </option>
+            {options.map((category) => (
+              <option key={category.id} value={category.id}>
+                {/*
+                  Indented with a fixed-width space rather than nested
+                  <optgroup>: a group here is a selectable option for a general
+                  card, and an optgroup label is not selectable.
+                */}
+                {'  '.repeat(category.depth)}
+                {category.name}
+                {category.kind === 'GROUP' ? ' (grup)' : ''}
               </option>
-              {options.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {/*
-                    Indented with a fixed-width space rather than nested
-                    <optgroup>: a group here is a selectable option for a general
-                    card, and an optgroup label is not selectable.
-                  */}
-                  {'  '.repeat(category.depth)}
-                  {category.name}
-                  {category.kind === 'GROUP' ? ' (grup)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          {options.length === 0 ? (
-            <span className="muted" style={{ fontSize: 12 }}>
-              Bu kart türü için uygun kategoriniz yok. İşletme profilinizde talep alabilen bir
-              hizmet seçtiğinizde burada görünür.
-            </span>
-          ) : null}
-        </section>
+            ))}
+          </select>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {options.length === 0
+              ? 'Bu kart türü için uygun kategoriniz yok. İşletme profilinizde talep alabilen bir hizmet seçtiğinizde burada görünür.'
+              : kind === 'PROMOTION'
+                ? 'Tek bir hizmete ya da altında hizmet verdiğiniz bir gruba bağlanır; sonradan değiştirilemez.'
+                : 'Tek bir hizmete bağlanır; sonradan değiştirilemez.'}
+          </span>
+        </label>
       }
     />
   );

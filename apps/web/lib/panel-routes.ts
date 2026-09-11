@@ -59,6 +59,9 @@ const PANEL_ROUTES = [
   '/providers/:id/vitrin/paketler',
   '/providers/:id/vitrin/odeme/:purchaseId',
   '/providers/:id/vitrin/:cardId',
+  // The card's edit screen: a separate route, so the summary screen never
+  // carries an open form.
+  '/providers/:id/vitrin/:cardId/duzenle',
   // Same precedence rule one line up: `talepler` is the lead inbox and comes
   // before `:cardId` would ever be consulted for it.
   '/providers/:id/vitrin/talepler',
