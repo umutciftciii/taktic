@@ -221,18 +221,19 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  * that summary takes — the whole subject of that spec — is a decision the engine
  * makes rather than the stylesheet. Its keyboard half is engine business too.
  *
- * And a sixth, for the first reason rather than the second:
+ * And the vitrin, for the first reason rather than the second:
  *
- *   showcase-placement-lead  the two new public vitrin layouts
+ *   showcase-*  the public shelf and card, the provider's hub, shop, forms
+ *               and card screen, and the operator's review — every vitrin spec
  *
- * The vitrin shelf is a `grid-template-columns: repeat(auto-fill, minmax(min(…)))`
- * of cards and the card's own page is a form inside another auto-fit grid —
- * both of them the exact construction where a track minimum quietly makes a
- * document wider than a phone, and both of them pages a visitor meets before
- * they have any relationship with this platform. They are also the first public
- * pages this product has added since the landing page. A Chromium-only pass
- * would be answering a different question about them than the one an iPhone
- * asks.
+ * The vitrin shelf and the provider's hub are one `.vitrin-grid` of card faces
+ * and the card's own page is a form inside another grid — the exact
+ * construction where a track minimum quietly makes a document wider than a
+ * phone — and the card screen carries a native `<details>` menu and a
+ * `<dialog>`, two overlays whose sizing is the engine's. These are pages a
+ * visitor meets before they have any relationship with this platform and pages
+ * a provider pays to reach. A Chromium-only pass would be answering a different
+ * question about them than the one an iPhone asks.
  *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
@@ -248,7 +249,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|showcase-placement-lead)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

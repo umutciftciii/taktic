@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
   createDiscoverableProvider,
+  createShowcaseEntitlement,
+  createShowcasePackage,
   createTestApp,
   createUser,
   loginAs,
@@ -67,12 +69,22 @@ async function providerFixture(options: {
   });
   const cookie = await loginAs(ctx.prisma, user.id);
 
-  return { category, user, provider, cookie };
+  // A card is opened on a purchased right; every case here that reaches the
+  // create endpoint needs one on the shelf. Cases that are refused before the
+  // transaction never touch it.
+  const pkg = await createShowcasePackage(ctx.prisma);
+  const { entitlement } = await createShowcaseEntitlement(ctx, {
+    providerId: provider.id,
+    userId: user.id,
+    packageId: pkg.id,
+  });
+
+  return { category, user, provider, cookie, pkg, entitlement };
 }
 
 describe('vitrin kartı oluşturma', () => {
   it('bir SERVICE kartını taslak sürümüyle birlikte açar', async () => {
-    const { category, provider, cookie } = await providerFixture();
+    const { category, provider, cookie, entitlement } = await providerFixture();
 
     const response = await request(ctx.server)
       .post(`/providers/${provider.id}/showcase/cards`)
@@ -90,6 +102,13 @@ describe('vitrin kartı oluşturma', () => {
     expect(response.body.draftVersion.priceTermsVersion).toBeNull();
     expect(response.body.draftVersion.priceTermsAcceptedAt).toBeNull();
     expect(response.body.draftVersion.submittedAt).toBeNull();
+
+    // The right the card was opened on is bound to it in the same transaction.
+    const right = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({
+      where: { id: entitlement.id },
+    });
+    expect(right.status).toBe('RESERVED');
+    expect(right.cardId).toBe(response.body.id);
   });
 
   it('SERVICE kartını fiyatsız kabul etmez', async () => {
@@ -234,6 +253,8 @@ describe('vitrin kartı kategorisi', () => {
       areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
     });
     const cookie = await loginAs(ctx.prisma, user.id);
+    const pkg = await createShowcasePackage(ctx.prisma);
+    await createShowcaseEntitlement(ctx, { providerId: provider.id, userId: user.id, packageId: pkg.id });
 
     await request(ctx.server)
       .post(`/providers/${provider.id}/showcase/cards`)

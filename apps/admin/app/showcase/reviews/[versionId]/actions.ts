@@ -25,6 +25,21 @@ export async function approveShowcaseVersionAction(formData: FormData) {
     redirect('/showcase/reviews');
   }
 
+  // Whether this is the card's first publication has to be read before the
+  // approve call, not after: approving is exactly what sets `card.liveVersion`,
+  // so the same read afterwards would always say "revision".
+  let isFirstPublication = false;
+  try {
+    const before = await apiFetch<{ card: { liveVersion: unknown } }>(
+      `/admin/showcase/versions/${encodeURIComponent(versionId)}`,
+    );
+    isFirstPublication = before.card.liveVersion === null;
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    // Falls through with isFirstPublication left false; the approve call below
+    // fails the same way and its own error is what reaches the operator.
+  }
+
   const failure = await run(() =>
     apiFetch<unknown>(
       `/admin/showcase/versions/${encodeURIComponent(versionId)}/approve`,
@@ -39,7 +54,11 @@ export async function approveShowcaseVersionAction(formData: FormData) {
     redirect(withParams(`/showcase/reviews/${versionId}`, { error: failure }));
   }
 
-  redirect(withParams(`/showcase/reviews/${versionId}`, { approved: '1' }));
+  redirect(
+    withParams(`/showcase/reviews/${versionId}`, {
+      approved: isFirstPublication ? 'first' : 'revision',
+    }),
+  );
 }
 
 export async function rejectShowcaseVersionAction(formData: FormData) {
@@ -78,7 +97,15 @@ export async function rejectShowcaseVersionAction(formData: FormData) {
   redirect(withParams(`/showcase/reviews/${versionId}`, { rejected: '1' }));
 }
 
-/** Runs a call and returns the operator-facing message, or null on success. */
+/**
+ * Runs a call and returns the operator-facing message, or null on success.
+ *
+ * The message is whatever the API put in the body's `message` field — already
+ * Turkish and already written for an operator, for every code this endpoint
+ * can return: `SHOWCASE_ENTITLEMENT_MISSING`, `SHOWCASE_PROVIDER_NOT_APPROVED`,
+ * `SHOWCASE_CATEGORY_NOT_OFFERED` and `SHOWCASE_AREA_NOT_COVERED` included. There is deliberately no
+ * code-to-message map here to keep in sync with the API's own wording.
+ */
 async function run(call: () => Promise<unknown>): Promise<string | null> {
   try {
     await call();

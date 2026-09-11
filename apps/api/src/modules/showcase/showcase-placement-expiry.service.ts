@@ -1,12 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ShowcasePlacementStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { DEFAULT_SHOWCASE_SCAN_LIMIT } from './showcase.constants';
 
 export type ShowcasePlacementExpiryResult = {
   expired: number;
   skipped: number;
   shelvesClosed: number;
+  entitlementsExpired: number;
 };
 
 /**
@@ -38,12 +40,23 @@ export type ShowcasePlacementExpiryResult = {
  * time ends. Leaving it SUSPENDED for ever would hold the card's live slot
  * open indefinitely and stop the provider from buying another one — a
  * suspension that outlived the run it suspended.
+ *
+ * ## Why this job also sweeps stale rights
+ *
+ * `execute()` finishes by calling `ShowcaseEntitlementService.expireStale`
+ * with the same clock and scan limit. Two independent sweepers on the same
+ * cron would either double the operator's job list for no reason or drift out
+ * of sync with each other; one call here keeps both counts in one log line
+ * and one operations-settings toggle.
  */
 @Injectable()
 export class ShowcasePlacementExpiryService {
   private readonly logger = new Logger(ShowcasePlacementExpiryService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService,
+  ) {}
 
   async execute(options: { limit?: number } = {}): Promise<ShowcasePlacementExpiryResult> {
     const limit = options.limit ?? DEFAULT_SHOWCASE_SCAN_LIMIT;
@@ -130,6 +143,8 @@ export class ShowcasePlacementExpiryService {
       this.logger.log(`vitrin placements expired=${expired} shelvesClosed=${shelvesClosed}`);
     }
 
-    return { expired, skipped, shelvesClosed };
+    const entitlementsExpired = await this.entitlements.expireStale(now, limit);
+
+    return { expired, skipped, shelvesClosed, entitlementsExpired };
   }
 }

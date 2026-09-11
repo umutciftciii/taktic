@@ -103,7 +103,7 @@ export default async function ShowcaseDirectoryPage({ searchParams }: ShowcaseDi
               : 'Şu anda vitrinde yayında olan bir hizmet yok.'}
           </p>
         ) : (
-          <div className="showcase-shelf-grid" data-testid="showcase-directory">
+          <div className="vitrin-grid" data-testid="showcase-directory">
             {feed.cards.map((card) => (
               <ShowcaseShelfCard card={card} key={card.cardId} />
             ))}

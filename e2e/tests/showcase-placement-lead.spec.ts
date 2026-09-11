@@ -30,8 +30,9 @@ import { primaryRuntime } from '../src/runtime';
  * 4. **Only one business sees it.** Two providers match the request equally
  *    well; the second one's panel is checked, and it has to be empty.
  * 5. **The screens say what the clock does before it does it.** The archive
- *    form states that the paid days keep running, and the publish panel states
- *    what was bought — a provider should not learn either afterwards.
+ *    dialog states that the paid days keep running, and the card's status panel
+ *    states what was bought and until when — a provider should not learn either
+ *    afterwards.
  *
  * The 320px checks are on the two pages a visitor actually meets — the shelf and
  * the card — because those are the ones with a card grid and a form on them,
@@ -326,10 +327,12 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
       const shelf = visitor.page.getByTestId('showcase-shelf');
       await expect(shelf).toBeVisible();
-      const shelfCard = shelf.locator('article', {
+      const shelfCard = shelf.getByTestId('showcase-shelf-card').filter({
         hasText: 'E2E Vitrin Klima Bakımı',
       });
       await expect(shelfCard).toBeVisible();
+      // One face, drawn by the same component the provider's own screens use.
+      await expect(shelfCard.getByTestId('showcase-card-face')).toBeVisible();
 
       // The single most load-bearing line on a card met without a filter.
       await expect(shelfCard.getByTestId('showcase-card-area')).toContainText(
@@ -337,7 +340,8 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       );
       // The provider's own price to their own customer. What TakTick charged
       // for the listing never appears on this page at all.
-      await expect(shelfCard.getByText('₺1.500,00')).toBeVisible();
+      await expect(shelfCard.getByTestId('showcase-card-price')).toContainText('₺1.500,00');
+      await expect(shelfCard.getByText('₺499,00')).toHaveCount(0);
 
       for (const width of NARROW_WIDTHS) {
         await visitor.page.setViewportSize({ width, height: 900 });
@@ -350,8 +354,14 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await assertNoErrorScreen(visitor.page);
 
       await expect(
-        visitor.page.getByRole('heading', { name: 'E2E Vitrin Klima Bakımı' }),
+        visitor.page.getByRole('heading', { name: 'E2E Vitrin Klima Bakımı', level: 1 }),
       ).toBeVisible();
+      // The same face again, with the area and the price where the shelf had them.
+      const publicFace = visitor.page.getByTestId('showcase-card-face');
+      await expect(publicFace.getByTestId('showcase-card-area')).toContainText(
+        `${location.district}, ${location.city}`,
+      );
+      await expect(publicFace.getByTestId('showcase-card-price')).toContainText('₺1.500,00');
 
       /*
        * The scope, stated as a limit, with both ways out of it. A visitor who
@@ -650,14 +660,18 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       // What was bought, in the provider's own words — and nothing about a
       // placement, a version number or a raw status.
       await expect(
-        provider.page.getByRole('heading', { name: 'Vitrin yayını' }),
+        provider.page.getByRole('heading', { name: 'Kartınız yayında' }),
       ).toBeVisible();
-      await expect(provider.page.getByTestId('showcase-live-until')).toContainText('Yayında');
-      await expect(provider.page.getByText('E2E Vitrin 30 Gün')).toBeVisible();
+      const until = provider.page.getByText('Yayın bitişi', { exact: false });
+      await expect(until).toBeVisible();
+      await expect(until).toContainText('E2E Vitrin 30 Gün');
       await expect(
-        provider.page.getByText(`${location.district}, ${location.city}`).first(),
-      ).toBeVisible();
+        provider.page.getByTestId('showcase-card-face').getByTestId('showcase-card-area'),
+      ).toContainText(`${location.district}, ${location.city}`);
       await expect(provider.page.getByText('sürüm', { exact: false })).toHaveCount(0);
+      await expect(provider.page.getByText('ACTIVE', { exact: true })).toHaveCount(0);
+      // One next step, and it is the public page — not a payment, not a package.
+      await expect(provider.page.getByTestId('showcase-stage-action')).toHaveText('Yayını görüntüle');
 
       // A business that *has* published gets the lead inbox in its navigation.
       await expect(provider.page.getByTestId('pdash-nav-showcase-leads')).toBeVisible();
@@ -668,11 +682,20 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
        * Archiving takes the card off the air and the paid days go on being
        * spent. That is deliberate — a run that could be frozen and resumed at
        * will would be a voucher rather than a dated placement — but it is only
-       * fair if it is said first.
+       * fair if it is said first: the ⋯ menu names the action as archiving,
+       * and the dialog says what the clock does before anything is confirmed.
        */
+      await provider.page.getByLabel('Diğer işlemler').click();
+      const danger = provider.page.getByTestId('showcase-card-danger');
+      await expect(danger).toHaveText('Kartı arşivle');
+      await danger.click();
+      const dialog = provider.page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
       await expect(
-        provider.page.getByText('arşivdeyken de işlemeye devam eder', { exact: false }),
+        dialog.getByText('arşivdeyken de işlemeye devam eder', { exact: false }),
       ).toBeVisible();
+      await dialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(dialog).toBeHidden();
 
       for (const width of NARROW_WIDTHS) {
         await provider.page.setViewportSize({ width, height: 900 });
@@ -754,13 +777,20 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await provider.gotoWeb(`/providers/${owner.id}/vitrin`);
       await assertNoErrorScreen(provider.page);
 
-      await expect(
-        provider.page.getByText('Geçici olarak yayında değil'),
-      ).toBeVisible();
-      await expect(
-        provider.page.getByText('durduğu süre yayın sürenize eklenir', { exact: false }),
-      ).toBeVisible();
+      const hubCard = provider.page.getByTestId('showcase-card').first();
+      await expect(hubCard).toHaveAttribute('data-state', 'PAUSED');
+      await expect(hubCard).toContainText('Kartınız geçici olarak görünmüyor');
+      await expect(hubCard).toContainText('kaldığı yerden devam eder');
+      // Nothing to press: lifting a hold is the operator's, not theirs.
+      await expect(hubCard.getByTestId('showcase-stage-action')).toHaveCount(0);
       await expect(provider.page.getByText('SUSPENDED', { exact: false })).toHaveCount(0);
+      await expect(provider.page.getByText('PAUSED', { exact: false })).toHaveCount(0);
+
+      await provider.gotoWeb(`/providers/${owner.id}/vitrin/${card.id}`);
+      await assertNoErrorScreen(provider.page);
+      await expect(
+        provider.page.getByRole('heading', { name: 'Kartınız geçici olarak görünmüyor' }),
+      ).toBeVisible();
     } finally {
       await admin.close();
       await visitor.close();

@@ -1,10 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   Prisma,
+  ProviderStatus,
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ShowcaseCardKind,
   ShowcaseCardStatus,
+  ShowcaseEntitlementStatus,
   ShowcasePlacementSuspendReason,
   ShowcaseVersionChangeTrigger,
   ShowcaseVersionReview,
@@ -18,12 +20,14 @@ import {
 } from '../../common/showcase-area-key';
 import { PrismaService } from '../../prisma/prisma.service';
 import { resolveArea } from '../locations/turkey-locations';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import {
   CreateShowcaseCardDto,
   ShowcaseCardContentDto,
   UpdateShowcaseCardDto,
 } from './dto/create-showcase-card.dto';
 import { SubmitShowcaseCardDto } from './dto/submit-showcase-card.dto';
+import { UseShowcaseEntitlementDto } from './dto/use-showcase-entitlement.dto';
 import {
   canReceiveRequests,
   isActiveFor,
@@ -35,13 +39,17 @@ import {
   showcaseAreaNotCovered,
   showcaseAreaOverlap,
   showcaseAreaUnknown,
+  showcaseCardAlreadyPlaced,
   showcaseCardLocked,
   showcaseCardNotFound,
   showcaseCategoryNotOffered,
   showcaseContentInvalid,
+  showcaseEntitlementRequired,
+  showcaseEntitlementUnavailable,
   showcaseNothingToSubmit,
   showcaseNothingToWithdraw,
-  showcasePriceTermsRequired,
+  showcaseProviderNotApproved,
+  showcaseRevisionNeedsPublication,
   showcaseVersionUnderReview,
 } from './showcase.errors';
 import { showcaseCardInclude, toShowcaseCard } from './showcase.projection';
@@ -52,7 +60,9 @@ import {
   SHOWCASE_SLA_URGENT_DEFAULT_HOURS,
 } from './showcase.constants';
 import { classifyShowcaseEdit, type ShowcaseVersionShape } from './showcase-version.rules';
+import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { ShowcasePlacementService } from './showcase-placement.service';
+import { assertCategoryStillOpen, assertVersionAreasCovered } from './showcase-publish-preflight';
 
 /**
  * A provider's own vitrin cards: creating them, editing them, and handing one to
@@ -76,12 +86,20 @@ import { ShowcasePlacementService } from './showcase-placement.service';
  *   `ShowcaseCardAutoPublishAudit` instead. A system-authored row in the review
  *   table would make "who approved this" unanswerable for every row in it.
  *
- * ## What this phase deliberately does not do
+ * ## The right behind every card
  *
- * An approved card is a reviewed text and nothing more. There is no package, no
- * placement, no customer surface and no lead: nothing in the product renders one
- * of these to a visitor, and no endpoint here publishes anything beyond setting
- * the pointer that a later phase will read.
+ * A card is opened *on* a purchased publication right, in the transaction that
+ * creates it, and that right follows the card through review: paused while an
+ * operator reads it, handed back when the operator refuses or the provider
+ * withdraws, released when the card is discarded, and spent — by the operator's
+ * first approval — on the placement that puts the card on the air. So "a card
+ * with no right" and "a right with no card" are both unrepresentable here, and
+ * an approved card is on the air the moment it is approved, never "approved but
+ * waiting for a purchase".
+ *
+ * A card that already serves a live version needs no right to revise its
+ * text: the run is already paid for, and a revision is a change to what the
+ * run shows, not a second run.
  */
 @Injectable()
 export class ProviderShowcaseCardsService {
@@ -89,6 +107,9 @@ export class ProviderShowcaseCardsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ShowcasePlacementService)
     private readonly placements: ShowcasePlacementService,
+    @Inject(ShowcaseEntitlementService)
+    private readonly entitlements: ShowcaseEntitlementService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
   ) {}
 
   /** The terms the submit endpoint requires acceptance of, for the form to show. */
@@ -200,36 +221,55 @@ export class ProviderShowcaseCardsService {
    * `ServiceRequest.matchedOfferId` already forms with `Offer.requestId`. Both
    * pointers are nullable, so there is an order that works; all three statements
    * are in one transaction, so no reader sees a card with no draft.
+   *
+   * Serializable, because the fourth statement binds a right, and two cards
+   * opened at once on a provider's last right have to produce exactly one card.
    */
   async createCard(providerId: string, dto: CreateShowcaseCardDto) {
     await this.assertCategoryIsOffered(providerId, dto.categoryId, dto.kind);
     const content = await this.normalizeContent(providerId, dto, dto.kind);
+    const now = new Date();
 
-    const cardId = await this.prisma.$transaction(async (tx) => {
-      const card = await tx.showcaseCard.create({
-        data: {
+    const cardId = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const card = await tx.showcaseCard.create({
+          data: {
+            providerId,
+            kind: dto.kind,
+            categoryId: dto.categoryId,
+            status: ShowcaseCardStatus.DRAFT,
+          },
+          select: { id: true },
+        });
+
+        const version = await this.writeVersion(tx, {
+          cardId: card.id,
+          versionNumber: 1,
+          content,
+          reviewStatus: ShowcaseVersionReview.DRAFT,
+        });
+
+        await tx.showcaseCard.update({
+          where: { id: card.id },
+          data: { draftVersionId: version.id },
+        });
+
+        // The right is bound in the same transaction that creates the card, so
+        // a card without a right and a right without its card are both
+        // unrepresentable. Refused here, nothing above is committed.
+        await this.entitlements.reserveForCard(tx, {
           providerId,
+          cardId: card.id,
           kind: dto.kind,
-          categoryId: dto.categoryId,
-          status: ShowcaseCardStatus.DRAFT,
-        },
-        select: { id: true },
-      });
+          entitlementId: dto.entitlementId ?? null,
+          now,
+        });
 
-      const version = await this.writeVersion(tx, {
-        cardId: card.id,
-        versionNumber: 1,
-        content,
-        reviewStatus: ShowcaseVersionReview.DRAFT,
-      });
-
-      await tx.showcaseCard.update({
-        where: { id: card.id },
-        data: { draftVersionId: version.id },
-      });
-
-      return card.id;
-    });
+        return card.id;
+      },
+      { label: 'showcase.createCard' },
+    );
 
     return this.getCard(providerId, cardId);
   }
@@ -311,19 +351,28 @@ export class ProviderShowcaseCardsService {
   }
 
   /**
-   * Hands the open draft to an operator, with the provider's acceptance of the
-   * price-responsibility text attached.
+   * Hands the open draft to an operator.
    *
-   * The acceptance and the transition are one statement. The database refuses a
-   * non-DRAFT version carrying no acceptance, so "submitted without accepting"
-   * is not a case the reviewer has to think about — it cannot be stored.
+   * The version's price-terms columns are written in the same statement as the
+   * transition, from the terms the provider already accepted — at the moment
+   * they bought the package, not at the moment they press the button. The
+   * database refuses a non-DRAFT version carrying no acceptance, so "submitted
+   * without accepting" is not a case the reviewer has to think about — it
+   * cannot be stored.
    *
    * The card's own status moves to PENDING_REVIEW only when there is nothing
    * live to protect. A card that already serves an approved version stays
    * APPROVED throughout: what is under review is the replacement, and the card
-   * is not off the air while somebody reads it.
+   * is not off the air while somebody reads it. For a card with nothing live,
+   * the reserved right's clock stops here and starts again when the operator
+   * rules — review time is the operator's, and must never cost the provider
+   * their right.
+   *
+   * `dto` is accepted and unread: the body is empty by design, and the route
+   * keeps a typed body so the old acceptance fields are refused rather than
+   * silently ignored.
    */
-  async submitCard(providerId: string, cardId: string, dto: SubmitShowcaseCardDto) {
+  async submitCard(providerId: string, cardId: string, _dto: SubmitShowcaseCardDto) {
     const card = await this.loadOwnedCard(providerId, cardId);
     assertCardIsEditable(card);
 
@@ -341,10 +390,6 @@ export class ProviderShowcaseCardsService {
     // asked to approve a claim nobody backs any more.
     await this.assertCategoryIsOffered(providerId, card.categoryId, card.kind);
 
-    if (!dto.priceTermsAccepted || dto.priceTermsVersion !== SHOWCASE_PRICE_TERMS_VERSION) {
-      throw showcasePriceTermsRequired();
-    }
-
     // The areas are re-checked against the provider's coverage at submit time as
     // well as at write time. A provider may have removed a service area from
     // their profile since the draft was written, and an operator must not be
@@ -361,30 +406,54 @@ export class ProviderShowcaseCardsService {
     const now = new Date();
     const draftId = card.draftVersion.id;
 
-    await this.prisma.$transaction(async (tx) => {
-      // Conditional, so two submits of one draft cannot both land: the second
-      // matches nothing and is reported as the conflict it is.
-      const moved = await tx.showcaseCardVersion.updateMany({
-        where: { id: draftId, reviewStatus: ShowcaseVersionReview.DRAFT },
-        data: {
-          reviewStatus: ShowcaseVersionReview.PENDING,
-          submittedAt: now,
-          priceTermsVersion: SHOWCASE_PRICE_TERMS_VERSION,
-          priceTermsAcceptedAt: now,
-        },
-      });
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        /*
+         * Where the terms snapshot comes from, and the two paths that exist:
+         *
+         *  - A card with no live version is going up for the first time. It
+         *    may only be submitted on a valid reserved right, and the version
+         *    records the terms that right was sold under.
+         *  - A card with a live version is revising text that is already on
+         *    the air. No right is needed; the terms are those of the consumed
+         *    right behind its run — or, for a run bought before rights
+         *    existed, the placement's own snapshot.
+         *
+         * There is deliberately no third source. The provider's package-level
+         * acceptance or the card's old card-level one would let a card go into
+         * review with no right behind it.
+         */
+        const terms = card.liveVersionId
+          ? await this.revisionTerms(tx, card.id)
+          : await this.firstPublicationTerms(tx, card.id, now);
 
-      if (moved.count !== 1) {
-        throw showcaseVersionUnderReview();
-      }
-
-      if (!card.liveVersionId) {
-        await tx.showcaseCard.update({
-          where: { id: card.id },
-          data: { status: ShowcaseCardStatus.PENDING_REVIEW },
+        // Conditional, so two submits of one draft cannot both land: the second
+        // matches nothing and is reported as the conflict it is.
+        const moved = await tx.showcaseCardVersion.updateMany({
+          where: { id: draftId, reviewStatus: ShowcaseVersionReview.DRAFT },
+          data: {
+            reviewStatus: ShowcaseVersionReview.PENDING,
+            submittedAt: now,
+            priceTermsVersion: terms.version,
+            priceTermsAcceptedAt: terms.acceptedAt,
+          },
         });
-      }
-    });
+
+        if (moved.count !== 1) {
+          throw showcaseVersionUnderReview();
+        }
+
+        if (!card.liveVersionId) {
+          await tx.showcaseCard.update({
+            where: { id: card.id },
+            data: { status: ShowcaseCardStatus.PENDING_REVIEW },
+          });
+          await this.entitlements.pauseForReview(tx, card.id, draftId, now);
+        }
+      },
+      { label: 'showcase.submitCard' },
+    );
 
     return this.getCard(providerId, cardId);
   }
@@ -421,12 +490,17 @@ export class ProviderShowcaseCardsService {
    *
    * ## What the provider gets back
    *
-   * The same version, in DRAFT, with its price-terms acceptance cleared. That
-   * clearing is deliberate rather than tidy-mindedness: the acceptance is an
-   * acceptance *of a submission*, and the text may have changed by the time they
-   * submit again. Re-submitting means accepting the current terms again, and a
-   * DRAFT carrying an acceptance nobody has re-given would be a record of a
-   * consent that no longer stands. A database CHECK insists on the same thing.
+   * The same version, in DRAFT, with its price-terms columns cleared. That
+   * clearing is deliberate rather than tidy-mindedness: the columns are a
+   * snapshot *of a submission*, written from the right the card sat on at that
+   * moment, and re-submitting writes them again from whatever right backs the
+   * card then. A DRAFT carrying a snapshot of a submission that was pulled
+   * would be a record of something that did not happen. A database CHECK
+   * insists on the same thing.
+   *
+   * A card with nothing live also gets its right's clock back: the pause that
+   * submission opened is closed as WITHDRAWN and the time under review is added
+   * to the right's window.
    */
   async withdrawSubmission(providerId: string, cardId: string) {
     const card = await this.loadOwnedCard(providerId, cardId);
@@ -487,6 +561,10 @@ export class ProviderShowcaseCardsService {
             submittedAtSnapshot: pending.submittedAt,
           },
         });
+
+        if (!card.liveVersionId) {
+          await this.entitlements.resumeAfterReview(tx, card.id, 'WITHDRAWN', new Date());
+        }
       },
       { label: 'showcase.withdrawSubmission' },
     );
@@ -514,6 +592,14 @@ export class ProviderShowcaseCardsService {
    * `CARD_ARCHIVED` is an observable condition rather than somebody's
    * judgement.
    *
+   * ## A card that never went live takes nothing with it
+   *
+   * "Kartı sil ve yayın hakkını serbest bırak": the right a draft sits on has
+   * not been spent, so archiving the draft hands it back — AVAILABLE again, to
+   * open another card on. A submission waiting in the operator's queue is
+   * withdrawn first, so the queue does not hold a version of an archived card,
+   * and the pause that submission opened is closed as RELEASED.
+   *
    * There is still no delete. The versions are the record of what was claimed
    * and what was approved.
    */
@@ -533,9 +619,44 @@ export class ProviderShowcaseCardsService {
     await runSerializable(
       this.prisma,
       async (tx) => {
+        const now = new Date();
+
+        if (!card.liveVersionId) {
+          if (
+            card.draftVersion?.reviewStatus === ShowcaseVersionReview.PENDING &&
+            card.draftVersion.submittedAt
+          ) {
+            // Conditional on PENDING, like `withdrawSubmission`: an operator
+            // ruling on this version in the same instant wins or loses cleanly.
+            const moved = await tx.showcaseCardVersion.updateMany({
+              where: { id: card.draftVersion.id, reviewStatus: ShowcaseVersionReview.PENDING },
+              data: {
+                reviewStatus: ShowcaseVersionReview.DRAFT,
+                submittedAt: null,
+                priceTermsVersion: null,
+                priceTermsAcceptedAt: null,
+              },
+            });
+            if (moved.count === 1) {
+              await tx.showcaseSubmissionWithdrawal.create({
+                data: {
+                  cardVersionId: card.draftVersion.id,
+                  cardId,
+                  providerId,
+                  submittedAtSnapshot: card.draftVersion.submittedAt,
+                },
+              });
+            }
+          }
+
+          // Closes an open review pause as RELEASED before the right goes back
+          // on the shelf, so the pause ledger and the right agree.
+          await this.entitlements.releaseForCard(tx, cardId, now);
+        }
+
         await tx.showcaseCard.update({
           where: { id: cardId },
-          data: { status: ShowcaseCardStatus.ARCHIVED, archivedAt: new Date() },
+          data: { status: ShowcaseCardStatus.ARCHIVED, archivedAt: now },
         });
 
         await this.placements.suspendLiveFor(
@@ -591,9 +712,198 @@ export class ProviderShowcaseCardsService {
     return this.getCard(providerId, cardId);
   }
 
+  /**
+   * Binds a usable right to a card that has none, and — when the card is
+   * already approved with a live version — spends it on the spot.
+   *
+   * This is the path for a card approved before rights existed, for a card
+   * whose run has ended ("Yeniden yayınla"), and for a card whose right was
+   * released and that the provider now wants back in the queue.
+   *
+   * When it publishes, it publishes under the same three checks the operator's
+   * first approval applies — the shelf is still open, the live version's areas
+   * are still inside the provider's coverage, the business is still approved —
+   * plus the one that only makes sense here: the card is not already on the
+   * air. A right must not be spent on a run that could not be shown.
+   */
+  async useEntitlement(providerId: string, cardId: string, dto: UseShowcaseEntitlementDto) {
+    // Ownership and existence only: the card's state is read again under the
+    // transaction, because this decision — reserve or publish — must be made
+    // against the row as it is at commit time, not as it was a round trip ago.
+    await this.loadOwnedCard(providerId, cardId);
+    const now = new Date();
+    let activatedPlacementId: string | null = null;
+
+    try {
+      await runSerializable(
+        this.prisma,
+        async (tx) => {
+          const card = await tx.showcaseCard.findUniqueOrThrow({
+            where: { id: cardId },
+            select: {
+              id: true,
+              status: true,
+              kind: true,
+              categoryId: true,
+              liveVersionId: true,
+              category: { select: { id: true, kind: true, status: true } },
+              draftVersion: { select: { id: true, reviewStatus: true } },
+            },
+          });
+          if (
+            card.status === ShowcaseCardStatus.ARCHIVED ||
+            card.status === ShowcaseCardStatus.SUSPENDED
+          ) {
+            throw showcaseCardLocked();
+          }
+
+          const existing = await this.entitlements.findReservedForCard(tx, card.id, now);
+          if (existing) {
+            throw showcaseEntitlementUnavailable();
+          }
+
+          // A right that lapsed *in place* — still RESERVED on this card, its
+          // window closed while the card sat unsubmitted — is invisible to the
+          // validity read above but still holds the card's one reservation
+          // slot. It is retired here so the right the provider just bought can
+          // take its place rather than collide with it.
+          await this.entitlements.expireLapsedReservationForCard(tx, card.id, now);
+
+          const publishNow =
+            card.status === ShowcaseCardStatus.APPROVED && card.liveVersionId !== null;
+          if (publishNow) {
+            const live = await tx.showcasePlacement.findFirst({
+              where: { cardId: card.id, status: { in: ['PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED'] } },
+              select: { id: true },
+            });
+            if (live) {
+              throw showcaseCardAlreadyPlaced();
+            }
+            const provider = await tx.providerProfile.findUniqueOrThrow({
+              where: { id: providerId },
+              select: { status: true },
+            });
+            if (provider.status !== ProviderStatus.APPROVED) {
+              throw showcaseProviderNotApproved();
+            }
+            assertCategoryStillOpen(card.category, card.kind);
+            await assertVersionAreasCovered(tx, providerId, card.liveVersionId!);
+          }
+
+          await this.entitlements.reserveForCard(tx, {
+            providerId,
+            cardId: card.id,
+            kind: card.kind,
+            entitlementId: dto.entitlementId ?? null,
+            now,
+          });
+
+          // A first version already waiting on an operator gets the same clock
+          // stop a submission gives: the time from here to the ruling is the
+          // operator's, whichever order the right and the submission arrived in.
+          if (
+            !card.liveVersionId &&
+            card.draftVersion?.reviewStatus === ShowcaseVersionReview.PENDING
+          ) {
+            await this.entitlements.pauseForReview(tx, card.id, card.draftVersion.id, now);
+          }
+
+          if (publishNow) {
+            const { placementId } = await this.entitlements.consumeForCard(tx, {
+              cardId: card.id,
+              versionId: card.liveVersionId!,
+              providerId,
+              categoryId: card.categoryId,
+              kind: card.kind,
+              now,
+            });
+            activatedPlacementId = placementId;
+          }
+        },
+        { label: 'showcase.useEntitlement' },
+      );
+    } catch (error) {
+      // Two binds racing on one card: the partial unique index on RESERVED
+      // rows lets exactly one through, and the loser's constraint violation is
+      // the same fact as "this card already holds a right" — a 409, not a 500.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw showcaseEntitlementUnavailable();
+      }
+      throw error;
+    }
+
+    // After the commit, and only for a run this call actually started: a mail
+    // about a placement that was rolled back would announce nothing.
+    if (activatedPlacementId) {
+      await this.mail.sendShowcasePlacementActivated(activatedPlacementId);
+    }
+
+    return this.getCard(providerId, cardId);
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Internals
   // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The terms a first submission records: those of the right the card sits on.
+   * No valid reserved right, no submission — the right may have expired while
+   * the provider sat on the draft, or been released.
+   */
+  private async firstPublicationTerms(tx: Prisma.TransactionClient, cardId: string, now: Date) {
+    const reserved = await this.entitlements.findReservedForCard(tx, cardId, now);
+    if (!reserved) {
+      throw showcaseEntitlementRequired();
+    }
+    return {
+      version: reserved.priceTermsVersionSnapshot,
+      acceptedAt: reserved.purchase.showcasePackageTermsAcceptance?.acceptedAt ?? reserved.grantedAt,
+    };
+  }
+
+  /**
+   * The terms a revision carries: those of the run already behind the card —
+   * the consumed right's, or for a run sold before rights existed, the
+   * placement's own snapshot. A card with a live version and neither is a
+   * legacy approval that never went on the air; it has to be published with a
+   * right before its text can be revised.
+   */
+  private async revisionTerms(tx: Prisma.TransactionClient, cardId: string) {
+    const consumed = await tx.showcaseEntitlement.findFirst({
+      where: { cardId, status: ShowcaseEntitlementStatus.CONSUMED },
+      orderBy: [{ consumedAt: 'desc' }],
+      select: {
+        priceTermsVersionSnapshot: true,
+        consumedAt: true,
+        purchase: { select: { showcasePackageTermsAcceptance: { select: { acceptedAt: true } } } },
+      },
+    });
+    if (consumed) {
+      // "When the terms were accepted" — the same moment a first submission
+      // records. The consumed timestamp stands in only for a right whose
+      // purchase carries no acceptance row (a legacy grant).
+      const acceptedAt =
+        consumed.purchase.showcasePackageTermsAcceptance?.acceptedAt ?? consumed.consumedAt;
+      if (!acceptedAt) {
+        // The status CHECK makes this unrepresentable; a row that reaches
+        // here is a data fault, and a fabricated timestamp would hide it.
+        throw new Error(`CONSUMED vitrin hakkı consumedAt taşımıyor (cardId=${cardId})`);
+      }
+      return { version: consumed.priceTermsVersionSnapshot, acceptedAt };
+    }
+    const placement = await tx.showcasePlacement.findFirst({
+      where: { cardId },
+      orderBy: [{ startAt: 'desc' }],
+      select: { priceTermsVersionSnapshot: true, startAt: true },
+    });
+    if (placement) {
+      return { version: placement.priceTermsVersionSnapshot, acceptedAt: placement.startAt };
+    }
+    throw showcaseRevisionNeedsPublication();
+  }
 
   /**
    * The card, or a 404 that says nothing about whether it exists.

@@ -128,6 +128,13 @@ export class CreateShowcaseCardDto extends ShowcaseCardContentDto {
   @IsString()
   @MinLength(1)
   categoryId!: string;
+
+  /** Which usable right to bind. Omitted, the earliest-expiring one of the right kind is used. */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  entitlementId?: string;
 }
 
 /** An edit to a card's content. The kind and the category are not editable. */

@@ -102,6 +102,7 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
               <thead>
                 <tr>
                   <th>İşletme</th>
+                  <th>Kapsam</th>
                   <th>Kart</th>
                   <th>Sürüm</th>
                   <th>Onaylayan</th>
@@ -117,13 +118,22 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
                         {row.provider.businessName}
                       </Link>
                     </td>
+                    <td>{row.scope === 'PACKAGE' ? 'Paket' : 'Kart'}</td>
                     <td>
-                      <Link href={`/showcase/cards?cardId=${row.card.id}`}>
-                        {row.card.id.slice(-6)}
-                      </Link>
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {row.card.kind} · {row.card.status}
-                      </div>
+                      {row.card ? (
+                        <>
+                          <Link href={`/showcase/cards?cardId=${row.card.id}`}>
+                            {row.card.id.slice(-6)}
+                          </Link>
+                          <div className="muted" style={{ fontSize: 12 }}>
+                            {row.card.kind} · {row.card.status}
+                          </div>
+                        </>
+                      ) : (
+                        // A package-first acceptance names no card: the
+                        // business agreed once, for every card it goes on to buy for.
+                        '—'
+                      )}
                     </td>
                     <td>{row.termsVersion}</td>
                     <td>

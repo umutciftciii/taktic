@@ -22,6 +22,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
+import { ShowcaseEntitlementService } from '../showcase/showcase-entitlement.service';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { LEMON_SQUEEZY_PROVIDER_KIND, readLemonSqueezyConfig } from './lemon-squeezy.config';
 import {
@@ -156,6 +157,7 @@ export class PaymentsWebhookService {
     @Inject(CreditsService) private readonly credits: CreditsService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
     @Inject(ShowcasePlacementService) private readonly placements: ShowcasePlacementService,
+    @Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService,
   ) {}
 
   async handleLemonSqueezyDelivery(
@@ -456,8 +458,9 @@ export class PaymentsWebhookService {
      * What a settlement grants depends on what was sold, and exactly one of
      * three things happens:
      *
-     *   SHOWCASE_PACKAGE — a placement is created and **no balance moves at
-     *     all**. `creditAmountSnapshot` is zero by construction and a CHECK
+     *   SHOWCASE_PACKAGE — a publication right is granted (or, for a legacy
+     *     card-bound purchase, a placement is created) and **no balance moves
+     *     at all**. `creditAmountSnapshot` is zero by construction and a CHECK
      *     constraint refuses a vitrin row that carries credit or names a ledger
      *     transaction, so a future edit that forgot this branch fails loudly
      *     rather than quietly handing out offer capacity.
@@ -471,45 +474,67 @@ export class PaymentsWebhookService {
      *
      * All three are written inside the same Serializable transaction as the
      * purchase update and the audit row, and each has a unique index behind it
-     * — `ShowcasePlacement.purchaseId` and
+     * — `ShowcaseEntitlement.purchaseId`, `ShowcasePlacement.purchaseId` and
      * `ProviderPackageEntitlement.purchaseId` — so a redelivered event that got
      * past the PROCESSED short-circuit still cannot produce a second one.
      */
     if (purchase.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
-      // Narrowed rather than asserted: the five columns are nullable on the
-      // model and NOT NULL in every case that can reach here, and the CHECK
+      // Narrowed rather than asserted: the columns are nullable on the model
+      // and NOT NULL in every case that can reach here, and the CHECK
       // constraint is what makes that true. A purchase that somehow reached
       // settlement without them is a data fault, not a payment to accept.
-      //
-      // The acceptance is one of the five. A vitrin run whose terms nobody
-      // agreed to must not go on the air, and a settlement is the last moment
-      // that refusal is still free.
-      if (
-        !purchase.showcasePackageId ||
-        !purchase.showcaseCardId ||
-        !purchase.showcaseCardVersionId ||
-        !purchase.showcasePriceTermsAcceptanceId ||
-        purchase.durationDaysSnapshot === null
-      ) {
+      if (!purchase.showcasePackageId || purchase.durationDaysSnapshot === null) {
         return { mismatch: 'UNKNOWN_REFERENCE', purchaseId: purchase.id };
       }
 
-      await this.placements.createForPurchase(
-        tx,
-        {
-          id: purchase.id,
-          providerId: purchase.providerId,
-          showcasePackageId: purchase.showcasePackageId,
-          showcaseCardId: purchase.showcaseCardId,
-          showcaseCardVersionId: purchase.showcaseCardVersionId,
-          durationDaysSnapshot: purchase.durationDaysSnapshot,
-          packageNameSnapshot: purchase.packageNameSnapshot,
-          priceAmountSnapshot: purchase.priceAmountSnapshot,
-          currencySnapshot: purchase.currencySnapshot,
-          showcasePriceTermsAcceptanceId: purchase.showcasePriceTermsAcceptanceId,
-        },
-        now,
-      );
+      if (purchase.showcaseCardId) {
+        // Legacy, card-bound purchase opened before the package-first flow:
+        // settles exactly as it always did, into a placement. The acceptance
+        // is one of the required columns — a vitrin run whose terms nobody
+        // agreed to must not go on the air, and a settlement is the last
+        // moment that refusal is still free.
+        if (!purchase.showcaseCardVersionId || !purchase.showcasePriceTermsAcceptanceId) {
+          return { mismatch: 'UNKNOWN_REFERENCE', purchaseId: purchase.id };
+        }
+
+        await this.placements.createForPurchase(
+          tx,
+          {
+            id: purchase.id,
+            providerId: purchase.providerId,
+            showcasePackageId: purchase.showcasePackageId,
+            showcaseCardId: purchase.showcaseCardId,
+            showcaseCardVersionId: purchase.showcaseCardVersionId,
+            durationDaysSnapshot: purchase.durationDaysSnapshot,
+            packageNameSnapshot: purchase.packageNameSnapshot,
+            priceAmountSnapshot: purchase.priceAmountSnapshot,
+            currencySnapshot: purchase.currencySnapshot,
+            showcasePriceTermsAcceptanceId: purchase.showcasePriceTermsAcceptanceId,
+          },
+          now,
+        );
+      } else {
+        // Package-first: the money buys a right, and the right is spent when
+        // the card is approved. No placement, no balance, no card yet.
+        if (!purchase.showcasePackageTermsAcceptanceId) {
+          return { mismatch: 'UNKNOWN_REFERENCE', purchaseId: purchase.id };
+        }
+
+        await this.entitlements.grantForPurchase(
+          tx,
+          {
+            id: purchase.id,
+            providerId: purchase.providerId,
+            showcasePackageId: purchase.showcasePackageId,
+            durationDaysSnapshot: purchase.durationDaysSnapshot,
+            packageNameSnapshot: purchase.packageNameSnapshot,
+            priceAmountSnapshot: purchase.priceAmountSnapshot,
+            currencySnapshot: purchase.currencySnapshot,
+            showcasePackageTermsAcceptanceId: purchase.showcasePackageTermsAcceptanceId,
+          },
+          now,
+        );
+      }
 
       await tx.packagePurchase.update({
         where: { id: purchase.id },
@@ -603,6 +628,19 @@ export class PaymentsWebhookService {
 
     if (placement) {
       await this.mail.sendShowcasePlacementActivated(placement.id);
+      return;
+    }
+
+    // A package-first vitrin purchase granted a right and put nothing on the
+    // air. There is no receipt template for a right — the return screen tells
+    // the provider — so nothing is sent, explicitly rather than by relying on
+    // `sendPackagePurchaseConfirmation` refusing the row.
+    const purchase = await this.prisma.packagePurchase.findUnique({
+      where: { id: purchaseId },
+      select: { kind: true },
+    });
+
+    if (purchase?.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
       return;
     }
 

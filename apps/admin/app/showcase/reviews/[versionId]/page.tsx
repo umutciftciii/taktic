@@ -95,9 +95,14 @@ export default async function ShowcaseReviewPage({
           {error}
         </div>
       ) : null}
-      {approved ? (
+      {approved === 'first' ? (
         <div className="notice notice-success" role="status">
-          Sürüm onaylandı ve kartın yayına hazır sürümü oldu.
+          Sürüm onaylandı; kart vitrinde yayına girdi.
+        </div>
+      ) : null}
+      {approved === 'revision' ? (
+        <div className="notice notice-success" role="status">
+          Sürüm onaylandı ve yayındaki metin güncellendi.
         </div>
       ) : null}
       {rejected ? (
@@ -148,6 +153,24 @@ export default async function ShowcaseReviewPage({
           ))}
         </ul>
       </SectionCard>
+
+      {card.liveVersion === null ? (
+        <SectionCard title="Yayın hakkı">
+          {version.entitlement ? (
+            <p data-testid="review-entitlement">
+              {version.entitlement.packageName} · {version.entitlement.durationDays} gün yayın ·{' '}
+              {version.entitlement.pausedForReview
+                ? 'inceleme süresince geçerliliği durduruldu'
+                : `${formatDateTime(version.entitlement.expiresAt)} tarihine kadar geçerli`}
+            </p>
+          ) : (
+            <div className="notice notice-error" role="alert" data-testid="review-entitlement-missing">
+              Bu kartın geçerli bir yayın hakkı yok. Sağlayıcı vitrin paketi almadan kart
+              onaylanıp yayına alınamaz.
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
 
       <div className="showcase-compare">
         <SectionCard
@@ -232,9 +255,16 @@ export default async function ShowcaseReviewPage({
         >
           <form action={approveShowcaseVersionAction} className="inline-actions">
             <input type="hidden" name="versionId" value={version.id} />
-            <button className="btn btn-primary btn-sm" type="submit">
+            <button
+              className="btn btn-primary btn-sm"
+              type="submit"
+              disabled={!isPending || (card.liveVersion === null && !version.entitlement?.valid)}
+            >
               Onayla
             </button>
+            {card.liveVersion === null && !version.entitlement?.valid ? (
+              <span className="cell-muted">Geçerli bir yayın hakkı yok.</span>
+            ) : null}
           </form>
 
           <form action={rejectShowcaseVersionAction} style={{ marginTop: 16 }}>

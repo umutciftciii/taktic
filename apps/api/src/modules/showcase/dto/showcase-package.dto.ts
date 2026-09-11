@@ -87,6 +87,19 @@ export class CreateShowcasePackageDto {
   @Min(0)
   @Max(10_000)
   sortOrder?: number;
+
+  /**
+   * How many days a right granted from this package stays spendable, counted
+   * from the moment the purchase settles. Defaults to 90 when omitted — the
+   * same figure `ShowcasePackage.activationWindowDays` defaults to at the
+   * database, so a package created without an opinion on this reads the same
+   * value whichever layer answers.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  activationWindowDays?: number;
 }
 
 /**
@@ -144,4 +157,10 @@ export class UpdateShowcasePackageDto {
   @Min(0)
   @Max(10_000)
   sortOrder?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  activationWindowDays?: number;
 }

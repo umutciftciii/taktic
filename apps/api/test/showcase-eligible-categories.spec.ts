@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
   createDiscoverableProvider,
+  createShowcaseEntitlement,
+  createShowcasePackage,
   createTestApp,
   createUser,
   loginAs,
@@ -61,6 +63,11 @@ async function providerBoundTo(categoryIds: string[]) {
       data: { providerId: provider.id, categoryId },
     });
   }
+
+  // The list is read without one, but the cases that go on to open a card
+  // need a right on the shelf; a refused create never touches it.
+  const pkg = await createShowcasePackage(ctx.prisma);
+  await createShowcaseEntitlement(ctx, { providerId: provider.id, userId: user.id, packageId: pkg.id });
 
   return { provider, cookie: await loginAs(ctx.prisma, user.id) };
 }

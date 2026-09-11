@@ -15,12 +15,12 @@ import { AdminShowcaseService } from './admin-showcase.service';
 import { ProviderShowcaseCardsController } from './provider-showcase-cards.controller';
 import { ProviderShowcaseCardsService } from './provider-showcase-cards.service';
 import { ProviderShowcasePlacementsController } from './provider-showcase-placements.controller';
-import { ShowcaseCheckoutService } from './showcase-checkout.service';
 import { ShowcaseFallbackController } from './showcase-fallback.controller';
 import { ShowcaseFeedService } from './showcase-feed.service';
 import { ShowcaseLeadAdminService } from './showcase-lead-admin.service';
 import { ShowcaseLeadService } from './showcase-lead.service';
 import { ShowcaseLeadSlaService } from './showcase-lead-sla.service';
+import { ShowcasePackageCheckoutService } from './showcase-package-checkout.service';
 import { ShowcasePackagesService } from './showcase-packages.service';
 import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 import { ShowcasePlacementExpiryService } from './showcase-placement-expiry.service';
@@ -63,9 +63,12 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
  * notifications (four messages), and operations settings (two operator-gated
  * jobs).
  *
- * What is still deliberately absent: **entitlements and credits.** A vitrin
- * package is never an offering right and a vitrin purchase never loads a
- * balance. The catalogue is separate (`ShowcasePackage`), a CHECK constraint
+ * What is still deliberately absent: **offering entitlements and credits.** A
+ * vitrin package is never an offering right and a vitrin purchase never loads a
+ * balance. (The vitrin *publication right* — `ShowcaseEntitlement`, what a
+ * package purchase grants and a card is opened on — is this context's own,
+ * lives in `ShowcaseLifecycleModule`, and has nothing to do with the credit
+ * economy despite sharing a word with it.) The catalogue is separate (`ShowcasePackage`), a CHECK constraint
  * refuses a vitrin purchase that carries credit, and this module has no way to
  * write a ledger row. The one place the two economies touch is a single branch
  * in the entitlement resolver — which lives on the resolver's side, reads one
@@ -121,7 +124,7 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
     ShowcasePriceTermsService,
     ShowcasePlacementReadService,
     ShowcasePublicationService,
-    ShowcaseCheckoutService,
+    ShowcasePackageCheckoutService,
     ShowcaseFeedService,
     ShowcaseLeadService,
     ShowcaseLeadAdminService,

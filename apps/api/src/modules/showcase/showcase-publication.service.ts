@@ -1,14 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  PackagePurchaseKind,
-  PackagePurchaseStatus,
-  ShowcaseCardStatus,
-  ShowcasePlacementStatus,
-  ShowcaseVersionReview,
-} from '@prisma/client';
+import { ShowcaseCardStatus, ShowcasePlacementStatus, ShowcaseVersionReview } from '@prisma/client';
 import { describeArea } from '../../common/provider-service-area-scope';
 import { PrismaService } from '../../prisma/prisma.service';
-import { resolveShowcasePriceTerms } from './showcase.constants';
+import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 
 /**
  * Where each of a business's cards stands, as **one** fact with **one** next
@@ -22,52 +16,56 @@ import { resolveShowcasePriceTerms } from './showcase.constants';
  * enum members, and an eligibility dry run whose refusal code decided which
  * form to render. Each read is correct; together they were a machine's model of
  * the feature rather than a person's, and they leaked straight through to the
- * provider: raw placement states, version numbers, a terms-acceptance ledger,
- * and an empty "Vitrin yayını" box on a card that had nothing to publish yet.
+ * provider: raw placement states, version numbers, an empty "Vitrin yayını"
+ * box on a card that had nothing to publish yet.
  *
- * Worse, the four could disagree. The card said APPROVED, the panel said
- * "yayına hazır", and the eligibility check said the price-responsibility text
- * needed re-accepting — because a card's *submission* records its acceptance on
- * the version while the *sale* reads a separate ledger, and a freshly approved
- * card has the first and not the second. The provider saw a notice about terms
- * being "updated" instead of the packages they were waiting for.
+ * ## Phase two: a right, not a checkout
  *
- * So the resolution happens here, once, on the server, and the screen renders
- * what it is told. There is exactly one state per card and exactly one thing to
- * do about it.
+ * The package-first flow replaced "money in flight" with "a right reserved or
+ * on the shelf" as the fact this resolves against. `TERMS_REQUIRED`,
+ * `READY_TO_PUBLISH` and `AWAITING_PAYMENT` are gone with the acceptance
+ * ledger and the pending-checkout read they were built on: a card either
+ * holds a valid right (reserved by it, or on the shelf waiting to be spent)
+ * or it needs one, and that is `NEEDS_PACKAGE` / `EXPIRED` with
+ * `needsPackage: true` rather than a state of its own.
  *
  * ## The order of the checks is the product
  *
  * It runs from the most operationally binding fact outwards: what an operator
- * did to the card, then what is on the air, then what money is in flight, then
- * what the review queue is holding, then what the provider has not done yet.
- * Reversing any two of them would tell somebody to buy a package for a card an
- * operator has just pulled.
+ * did to the card, then what is on the air, then what the review queue is
+ * holding, then what the provider has not done yet.
  *
  * ## What is deliberately not returned
  *
- * Placement ids, card version ids, purchase ids, raw enum members, the terms
- * ledger row. None of them is a thing a provider acts on, and every one of them
- * is a thing that ends up in a support conversation the moment it is on screen.
- * `endAt` travels because a provider genuinely needs to know when their run
- * ends; `checkoutUrl` travels because it is the action itself.
+ * Placement ids, card version ids, purchase ids, the right's own id, raw enum
+ * members. None of them is a thing a provider acts on, and every one of them
+ * is a thing that ends up in a support conversation the moment it is on
+ * screen. `endAt` travels because a provider genuinely needs to know when
+ * their run ends; the reserved right's package name, duration and pause flag
+ * travel because they are what the screen tells the provider they are
+ * holding.
  */
 export type ShowcasePublicationState =
   /** Never submitted. */
   | 'DRAFT'
-  /** With an operator right now. */
+  /**
+   * With an operator right now, and never having gone live yet. A card that
+   * is already on the air and has a fresh draft with an operator stays
+   * `LIVE`/`EXPIRED` with `hasPendingRevision: true` instead — see that flag.
+   */
   | 'IN_REVIEW'
   /** An operator said no, and the provider has the note. */
   | 'REJECTED'
-  /** Approved, but the sale terms in force have not been accepted for it. */
-  | 'TERMS_REQUIRED'
-  /** Approved and sellable: pick a package. */
-  | 'READY_TO_PUBLISH'
-  /** A run was bought before and has ended; the card can go up again. */
+  /** Nothing on the air and no valid right to publish with. */
+  | 'NEEDS_PACKAGE'
+  /** A run was bought before and has ended; the card needs a fresh right. */
   | 'EXPIRED'
-  /** A checkout is open and unpaid. */
-  | 'AWAITING_PAYMENT'
-  /** Paid, waiting for the payment provider's confirmation to land. */
+  /**
+   * The instant between an approval spending the right and the placement row
+   * landing ACTIVE, both inside the same transaction — there is no payment
+   * provider any more to wait on, so in practice this is not an observable
+   * waiting room, only a state the type has to admit exists.
+   */
   | 'ACTIVATING'
   /** On the air. */
   | 'LIVE'
@@ -83,18 +81,7 @@ export type ShowcaseCardPublication = {
   state: ShowcasePublicationState;
   /** When the current run ends. Only ever set while something is on the air. */
   endAt: string | null;
-  /**
-   * The hosted checkout to return to, when there is one and it is still usable.
-   *
-   * Null under the mock payment provider, which has no hosted page at all — the
-   * purchase's own screen carries the in-app form instead. That is why
-   * `purchaseId` travels beside it rather than this being the only way back to
-   * an unpaid purchase.
-   */
-  checkoutUrl: string | null;
-  /** The unpaid purchase, so the panel can send the provider back to it. */
-  purchaseId: string | null;
-  /** The package behind the current run or the open checkout, in the provider's words. */
+  /** The package behind the current run or the reserved right, in the provider's words. */
   packageName: string | null;
   /** Where the run is publishing, already worded. Empty when nothing is on the air. */
   areaLabels: string[];
@@ -106,35 +93,58 @@ export type ShowcaseCardPublication = {
    * a flag rather than as a twelfth state nobody could act on.
    */
   hasPendingRevision: boolean;
+  /** Whether a run has ever gone up for this card, live or past. */
+  hasRunBefore: boolean;
+  /** Whether the next action is buying a package. */
+  needsPackage: boolean;
+  /** The right reserved by this card, when it still holds a valid one. */
+  entitlement: {
+    packageName: string;
+    durationDays: number;
+    expiresAt: string;
+    pausedForReview: boolean;
+  } | null;
+};
+
+export type ShowcasePublicationList = {
+  cards: ShowcaseCardPublication[];
+  availableEntitlements: Array<{
+    id: string;
+    packageName: string;
+    durationDays: number;
+    allowedCardKind: 'SERVICE' | 'PROMOTION' | null;
+    expiresAt: string;
+  }>;
+  /**
+   * Whether this business has ever published. The panel's lead inbox is
+   * navigated to off this — a provider who has never bought a run has no
+   * direct leads and never will until they do, and an entry that is always
+   * empty teaches people to ignore the sidebar.
+   */
+  hasPublicationHistory: boolean;
 };
 
 @Injectable()
 export class ShowcasePublicationService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService,
+  ) {}
 
   /**
    * Every card this business owns, resolved.
    *
-   * Four queries rather than four per card: the panel lists all of them at
-   * once, and a per-card resolution would turn a page of ten cards into forty
-   * round trips.
+   * Three queries rather than one per card: the panel lists all of them at
+   * once, and a per-card resolution would turn a page of ten cards into
+   * dozens of round trips.
    */
-  async listForProvider(providerId: string): Promise<{
-    cards: ShowcaseCardPublication[];
-    /**
-     * Whether this business has ever published. The panel's lead inbox is
-     * navigated to off this — a provider who has never bought a run has no
-     * direct leads and never will until they do, and an entry that is always
-     * empty teaches people to ignore the sidebar.
-     */
-    hasPublicationHistory: boolean;
-  }> {
+  async listForProvider(providerId: string): Promise<ShowcasePublicationList> {
     const now = new Date();
-    const terms = resolveShowcasePriceTerms();
 
-    const [cards, placements, openCheckouts, acceptances] = await Promise.all([
+    const [cards, placements, rights] = await Promise.all([
       this.prisma.showcaseCard.findMany({
         where: { providerId },
+        orderBy: [{ createdAt: 'desc' }],
         select: {
           id: true,
           status: true,
@@ -158,128 +168,95 @@ export class ShowcasePublicationService {
           _count: { select: { leads: true } },
         },
       }),
-      /*
-       * Money in flight.
-       *
-       * Deliberately not narrowed to purchases that carry a hosted checkout
-       * URL: under the mock payment provider there is never one, and a filter
-       * on it made every mock purchase invisible — the card fell back to
-       * "yayına hazır" while an unpaid purchase for it existed, which is the
-       * kind of quiet disagreement this whole service exists to end.
-       */
-      this.prisma.packagePurchase.findMany({
-        where: {
-          providerId,
-          kind: PackagePurchaseKind.SHOWCASE_PACKAGE,
-          status: PackagePurchaseStatus.PENDING,
-          showcaseCardId: { not: null },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          showcaseCardId: true,
-          providerCheckoutUrl: true,
-          providerCheckoutExpiresAt: true,
-          packageNameSnapshot: true,
-        },
-      }),
-      this.prisma.showcaseCardPriceTermsAcceptance.findMany({
-        where: { providerId, termsVersion: terms.version },
-        select: { cardId: true },
-      }),
+      this.entitlements.listForProvider(providerId, now),
     ]);
 
-    const accepted = new Set(acceptances.map((row) => row.cardId));
-    const checkoutByCard = new Map(
-      openCheckouts
-        .filter((purchase) => purchase.showcaseCardId !== null)
-        .map((purchase) => [purchase.showcaseCardId!, purchase] as const),
-    );
+    const cardsOut: ShowcaseCardPublication[] = [];
 
-    return {
-      cards: cards.map((card) => {
-        // `orderBy startAt desc` above makes the first match the current run and
-        // any later match its history, which is what "expired before" needs.
-        const runs = placements.filter((placement) => placement.cardId === card.id);
-        const live =
-          runs.find((placement) => placement.status === ShowcasePlacementStatus.ACTIVE) ??
-          runs.find(
-            (placement) =>
-              placement.status === ShowcasePlacementStatus.PENDING_ACTIVATION ||
-              placement.status === ShowcasePlacementStatus.SUSPENDED,
-          ) ??
-          null;
-        const checkout = checkoutByCard.get(card.id) ?? null;
-        const hasPendingRevision =
-          card.draftVersion?.reviewStatus === ShowcaseVersionReview.PENDING &&
-          card.draftVersionId !== card.liveVersionId;
+    for (const card of cards) {
+      // `orderBy startAt desc` above makes the first match the current run and
+      // any later match its history.
+      const runs = placements.filter((placement) => placement.cardId === card.id);
+      const live =
+        runs.find((placement) => placement.status === ShowcasePlacementStatus.ACTIVE) ??
+        runs.find(
+          (placement) =>
+            placement.status === ShowcasePlacementStatus.PENDING_ACTIVATION ||
+            placement.status === ShowcasePlacementStatus.SUSPENDED,
+        ) ??
+        null;
+      const reserved = rights.reservedByCard[card.id] ?? null;
+      const validRight = reserved && reserved.valid ? reserved : null;
+      const inReview = card.draftVersion?.reviewStatus === ShowcaseVersionReview.PENDING;
+      const hasPendingRevision = inReview && card.draftVersionId !== card.liveVersionId && card.liveVersionId !== null;
 
-        const base = {
-          cardId: card.id,
-          endAt: live ? live.endAt.toISOString() : null,
-          checkoutUrl: null as string | null,
-          purchaseId: null as string | null,
-          packageName: live?.packageNameSnapshot ?? null,
-          areaLabels: (live?.shelves ?? []).map((shelf) => describeArea(shelf)),
-          leadCount: live?._count.leads ?? 0,
-          hasPendingRevision,
-        };
+      // A card that never went live and was discarded is gone from the
+      // provider's screen: "sil" is what the button said.
+      if (card.status === ShowcaseCardStatus.ARCHIVED && !card.liveVersionId) {
+        continue;
+      }
 
+      const base = {
+        cardId: card.id,
+        endAt: live ? live.endAt.toISOString() : null,
+        packageName: live?.packageNameSnapshot ?? validRight?.packageName ?? null,
+        areaLabels: (live?.shelves ?? []).map((shelf) => describeArea(shelf)),
+        leadCount: live?._count.leads ?? 0,
+        hasPendingRevision,
+        hasRunBefore: runs.length > 0,
+        needsPackage: false,
+        entitlement: validRight
+          ? {
+              packageName: validRight.packageName,
+              durationDays: validRight.durationDays,
+              expiresAt: validRight.expiresAt,
+              pausedForReview: validRight.pausedForReview,
+            }
+          : null,
+      };
+
+      const resolve = (): ShowcaseCardPublication => {
         if (card.status === ShowcaseCardStatus.ARCHIVED) {
-          return { ...base, state: 'ARCHIVED' as const };
+          return { ...base, state: 'ARCHIVED' };
         }
         if (card.status === ShowcaseCardStatus.SUSPENDED) {
-          return { ...base, state: 'SUSPENDED' as const };
+          return { ...base, state: 'SUSPENDED' };
         }
-
         if (live) {
           if (live.status === ShowcasePlacementStatus.ACTIVE) {
-            return { ...base, state: 'LIVE' as const };
+            return { ...base, state: 'LIVE' };
           }
           if (live.status === ShowcasePlacementStatus.PENDING_ACTIVATION) {
-            return { ...base, state: 'ACTIVATING' as const };
+            return { ...base, state: 'ACTIVATING' };
           }
-          return { ...base, state: 'PAUSED' as const };
+          return { ...base, state: 'PAUSED' };
         }
-
-        if (checkout) {
-          // An expired hosted session is not an action: sending somebody back
-          // to a dead link is worse than sending them to the purchase, where
-          // the checkout is opened again.
-          const usable =
-            checkout.providerCheckoutUrl !== null &&
-            (checkout.providerCheckoutExpiresAt === null ||
-              checkout.providerCheckoutExpiresAt > now);
-
-          return {
-            ...base,
-            state: 'AWAITING_PAYMENT' as const,
-            checkoutUrl: usable ? checkout.providerCheckoutUrl : null,
-            purchaseId: checkout.id,
-            packageName: checkout.packageNameSnapshot,
-          };
+        if (inReview && !card.liveVersionId) {
+          return { ...base, state: 'IN_REVIEW' };
         }
-
-        if (card.draftVersion?.reviewStatus === ShowcaseVersionReview.PENDING) {
-          return { ...base, state: 'IN_REVIEW' as const };
-        }
-
-        if (card.status === ShowcaseCardStatus.APPROVED && card.liveVersionId) {
-          if (!accepted.has(card.id)) {
-            return { ...base, state: 'TERMS_REQUIRED' as const };
-          }
-          // A card that has published before reads "yeniden yayınla" rather than
-          // "vitrine çıkar": the provider is renewing something they already
-          // know, not doing it for the first time.
-          return { ...base, state: runs.length > 0 ? ('EXPIRED' as const) : ('READY_TO_PUBLISH' as const) };
-        }
-
+        // REJECTED before the right check: a rejected card keeps its reason
+        // even when its right has lapsed; the flag says what to do about it.
         if (card.status === ShowcaseCardStatus.REJECTED) {
-          return { ...base, state: 'REJECTED' as const };
+          return { ...base, state: 'REJECTED', needsPackage: validRight === null };
         }
+        if (card.liveVersionId && card.status === ShowcaseCardStatus.APPROVED) {
+          // Approved text, nothing on the air: a run that ended, or an
+          // approval that predates rights. Either way the next step is a
+          // package.
+          return { ...base, state: 'EXPIRED', needsPackage: true };
+        }
+        if (!validRight) {
+          return { ...base, state: 'NEEDS_PACKAGE', needsPackage: true };
+        }
+        return { ...base, state: 'DRAFT' };
+      };
 
-        return { ...base, state: 'DRAFT' as const };
-      }),
+      cardsOut.push(resolve());
+    }
+
+    return {
+      cards: cardsOut,
+      availableEntitlements: rights.available,
       hasPublicationHistory: placements.length > 0,
     };
   }

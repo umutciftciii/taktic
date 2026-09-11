@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
   createDiscoverableProvider,
+  createShowcaseEntitlement,
+  createShowcasePackage,
   createTestApp,
   createUser,
   loginAs,
@@ -43,7 +45,11 @@ beforeEach(async () => {
   await resetDatabase(ctx.prisma);
 });
 
-async function fixture() {
+/**
+ * A provider with `rights` usable publication rights on the shelf — one by
+ * default, since a card is opened on one and most cases open one card.
+ */
+async function fixture(options: { rights?: number } = {}) {
   const category = await createCategory(ctx.prisma, 'Klima', {
     kind: ServiceCategoryKind.LEAF,
   });
@@ -54,6 +60,17 @@ async function fixture() {
     areas: [{ city: 'İstanbul', district: null }],
   });
   const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+  const pkg = await createShowcasePackage(ctx.prisma);
+  const rights = [];
+  for (let i = 0; i < (options.rights ?? 1); i += 1) {
+    rights.push(
+      await createShowcaseEntitlement(ctx, {
+        providerId: provider.id,
+        userId: providerUser.id,
+        packageId: pkg.id,
+      }),
+    );
+  }
 
   return {
     category,
@@ -61,6 +78,8 @@ async function fixture() {
     providerCookie: await loginAs(ctx.prisma, providerUser.id),
     admin,
     adminCookie: await loginAs(ctx.prisma, admin.id),
+    pkg,
+    rights,
   };
 }
 
@@ -118,7 +137,7 @@ describe('incelemeye gönderme', () => {
     expect(card.liveVersion).toBeNull();
   });
 
-  it('fiyat sorumluluk kabulü olmadan submit reddedilir', async () => {
+  it('geçerli rezerve hakkı olmayan kart incelemeye gönderilemez', async () => {
     const f = await fixture();
     const created = await request(ctx.server)
       .post(`/providers/${f.provider.id}/showcase/cards`)
@@ -126,28 +145,28 @@ describe('incelemeye gönderme', () => {
       .send(showcaseCardPayload(f.category.id))
       .expect(201);
 
-    // priceTermsAccepted: false — @Equals(true) bunu DTO seviyesinde keser.
-    await request(ctx.server)
-      .post(`/providers/${f.provider.id}/showcase/cards/${created.body.id}/submit`)
-      .set('Cookie', f.providerCookie)
-      .send({ priceTermsAccepted: false, priceTermsVersion: 'v1' })
-      .expect(400);
+    // Hak, kart taslakta beklerken süpürücü tarafından düşürülmüş gibi.
+    await ctx.prisma.showcaseEntitlement.updateMany({
+      where: { cardId: created.body.id },
+      data: { status: 'EXPIRED', cardId: null, reservedAt: null, reviewPausedAt: null },
+    });
 
-    // Alan tümden yoksa da aynı sonuç.
-    await request(ctx.server)
+    const response = await request(ctx.server)
       .post(`/providers/${f.provider.id}/showcase/cards/${created.body.id}/submit`)
       .set('Cookie', f.providerCookie)
-      .send({ priceTermsVersion: 'v1' })
-      .expect(400);
+      .send(SHOWCASE_SUBMIT_BODY)
+      .expect(409);
+    expect(response.body.code).toBe('SHOWCASE_ENTITLEMENT_REQUIRED');
 
     const untouched = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({
       where: { id: created.body.draftVersion.id },
     });
     expect(untouched.reviewStatus).toBe('DRAFT');
     expect(untouched.priceTermsVersion).toBeNull();
+    expect(untouched.submittedAt).toBeNull();
   });
 
-  it('tanınmayan sorumluluk metni sürümüyle submit reddedilir', async () => {
+  it('eski kabul alanlarını taşıyan submit gövdesi reddedilir', async () => {
     const f = await fixture();
     const created = await request(ctx.server)
       .post(`/providers/${f.provider.id}/showcase/cards`)
@@ -155,13 +174,18 @@ describe('incelemeye gönderme', () => {
       .send(showcaseCardPayload(f.category.id))
       .expect(201);
 
-    const response = await request(ctx.server)
+    // Kabul artık paket satın alımında verilir; gövdede gelen eski alanlar
+    // sessizce düşürülmez, whitelist 400 ile keser. Sürüm yerinden oynamaz.
+    await request(ctx.server)
       .post(`/providers/${f.provider.id}/showcase/cards/${created.body.id}/submit`)
       .set('Cookie', f.providerCookie)
-      .send({ priceTermsAccepted: true, priceTermsVersion: 'v0' })
+      .send({ priceTermsAccepted: true, priceTermsVersion: 'v1' })
       .expect(400);
 
-    expect(response.body.code).toBe('SHOWCASE_PRICE_TERMS_REQUIRED');
+    const untouched = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({
+      where: { id: created.body.draftVersion.id },
+    });
+    expect(untouched.reviewStatus).toBe('DRAFT');
   });
 
   it('incelemedeki sürüm düzenlenemez', async () => {
@@ -214,6 +238,14 @@ describe('ilk sürüm onayı ve reddi', () => {
     // Bir onay, sağlayıcının okuduğu satırda operatör notu taşımaz.
     expect(approved.body.review.note).toBeNull();
 
+    // İlk onay yayındır: hak tüketilir ve kartın yayını aynı işlemde doğar.
+    expect(await ctx.prisma.showcasePlacement.count({ where: { cardId: submitted.id } })).toBe(1);
+    expect(
+      await ctx.prisma.showcaseEntitlement.count({
+        where: { cardId: submitted.id, status: 'CONSUMED' },
+      }),
+    ).toBe(1);
+
     const card = await ctx.prisma.showcaseCard.findUniqueOrThrow({
       where: { id: submitted.id },
     });
@@ -241,6 +273,19 @@ describe('ilk sürüm onayı ve reddi', () => {
     expect(card.status).toBe('REJECTED');
     expect(card.liveVersionId).toBeNull();
     expect(card.draftVersionId).toBeNull();
+
+    // Taslak işaretçisi temizlendi; ama sahibinin okuyup düzelteceği metin
+    // projeksiyonda `rejectedVersion` olarak hâlâ duruyor.
+    const after = await request(ctx.server)
+      .get(`/providers/${f.provider.id}/showcase/cards/${submitted.id}`)
+      .set('Cookie', f.providerCookie)
+      .expect(200);
+    expect(after.body.draftVersion).toBeNull();
+    expect(after.body.liveVersion).toBeNull();
+    expect(after.body.rejectedVersion.id).toBe(submitted.draftVersion.id);
+    expect(after.body.rejectedVersion.review.note).toBe(
+      'Kapsam listesi hizmet bedelini karşılamıyor.',
+    );
   });
 
   it('gerekçesiz ret kabul edilmez', async () => {
@@ -380,6 +425,9 @@ describe('canlı kartın yeni sürümü', () => {
     expect(after.body.liveVersion.id).toBe(liveVersionId);
     expect(after.body.liveVersion.title).toBe(liveTitle);
     expect(after.body.draftVersion).toBeNull();
+    // Canlı metni olan kart için ret geçmiştir, sahibinin düzelteceği bir
+    // şey değil: `rejectedVersion` yalnız taslağı ve canlısı olmayan kartta dolar.
+    expect(after.body.rejectedVersion).toBeNull();
 
     // Reddedilen sürüm gerekçesiyle birlikte geçmişte duruyor.
     const rejectedVersion = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({
@@ -447,6 +495,8 @@ describe('canlı kartın yeni sürümü', () => {
     expect(edited.body.draftVersion.versionNumber).toBe(2);
     expect(edited.body.draftVersion.reviewStatus).toBe('DRAFT');
     expect(edited.body.status).toBe('DRAFT');
+    // Yeni taslak açılınca ret artık geçmiş: projeksiyon onu taşımıyor.
+    expect(edited.body.rejectedVersion).toBeNull();
 
     // Reddedilen sürüm reddedildiği hâliyle duruyor.
     const rejected = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({
@@ -535,7 +585,7 @@ describe('admin kararının bütünlüğü', () => {
   });
 
   it('inceleme kuyruğu yalnız bekleyen sürümleri, en eskisi başta listeler', async () => {
-    const f = await fixture();
+    const f = await fixture({ rights: 2 });
     const first = await createAndSubmit(f);
     const second = await createAndSubmit(f);
 

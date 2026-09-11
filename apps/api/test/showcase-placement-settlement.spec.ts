@@ -25,7 +25,8 @@ import {
 } from './harness';
 
 /**
- * A settled vitrin payment produces a run, and produces nothing else.
+ * A settled vitrin payment produces a publication right, and produces nothing
+ * else.
  *
  * The whole file runs against the real webhook endpoint with real signatures,
  * because the claim under test is about the only path in this application that
@@ -35,10 +36,16 @@ import {
  * ## The two settlement paths branch on one field
  *
  * `PackagePurchase.kind`. That is why every case below asserts the *absence* of
- * an offer-credit effect as well as the presence of the placement: a settlement
+ * an offer-credit effect as well as the presence of the right: a settlement
  * that forgot to branch would still produce a plausible-looking PAID purchase.
  * A CHECK constraint is the second line of defence, and it is proved in
  * `showcase-purchase-kind.spec.ts`.
+ *
+ * ## No placement, no card
+ *
+ * The sale is package-first. Money buys an AVAILABLE `ShowcaseEntitlement`; the
+ * card that spends it does not exist yet, so a settlement that produced a
+ * placement here would be publishing nothing.
  */
 const PLACEHOLDER_API_KEY = `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.${'placeholderNotARealCredential'}`;
 const WEBHOOK_SECRET = 'placeholder-webhook-secret-not-real';
@@ -102,7 +109,7 @@ function configureLemonSqueezy(variantMap: string) {
   process.env.WEB_ORIGIN = 'https://web.example.test';
 }
 
-/** A pending vitrin purchase, opened through the real checkout endpoint. */
+/** A pending vitrin purchase, opened through the real package-first checkout. */
 async function pendingShowcasePurchase() {
   const category = await createCategory(ctx.prisma, 'Klima', { kind: ServiceCategoryKind.LEAF });
   const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
@@ -111,26 +118,17 @@ async function pendingShowcasePurchase() {
     categoryId: category.id,
     areas: [{ city: 'İstanbul', district: null }],
   });
-  const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
-    providerId: provider.id,
-    categoryId: category.id,
-  });
   const pkg = await createShowcasePackage(ctx.prisma, { priceAmount: PRICE, durationDays: 30 });
-  // The sale's own precondition, asserted in
-  // `showcase-price-terms-acceptance.spec.ts` and satisfied here.
-  await acceptShowcasePriceTerms(ctx.prisma, {
-    providerId: provider.id,
-    cardId: card.id,
-    userId: ownerUser.id,
-  });
 
   configureLemonSqueezy(`${pkg.slug}:${VARIANT_ID}`);
   const cookie = await loginAs(ctx.prisma, ownerUser.id);
 
   const created = await request(ctx.server)
-    .post(`/providers/${provider.id}/showcase/placements/checkout`)
+    .post(`/providers/${provider.id}/showcase/packages/checkout`)
     .set('Cookie', cookie)
-    .send({ cardId: card.id, showcasePackageId: pkg.id })
+    // The sale's own precondition, asserted in
+    // `showcase-package-checkout.spec.ts` and satisfied here.
+    .send({ showcasePackageId: pkg.id, priceTermsAccepted: true, priceTermsVersion: 'v1' })
     .expect(201);
 
   const purchase = await ctx.prisma.packagePurchase.findUniqueOrThrow({
@@ -142,8 +140,6 @@ async function pendingShowcasePurchase() {
     provider,
     ownerUser,
     cookie,
-    card,
-    version,
     pkg,
     purchase,
     reference: purchase.paymentReference!,
@@ -206,8 +202,8 @@ function deliver(payload: unknown) {
 }
 
 describe('a settled vitrin payment', () => {
-  it('creates one live run, with its shelves, and moves no balance at all', async () => {
-    const { purchase, provider, card, version, reference } = await pendingShowcasePurchase();
+  it('grants one AVAILABLE right, no placement, no balance', async () => {
+    const { purchase, provider, pkg, reference } = await pendingShowcasePurchase();
 
     const response = await deliver(orderPayload({ reference }));
     expect(response.status).toBe(200);
@@ -223,44 +219,39 @@ describe('a settled vitrin payment', () => {
     expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);
 
-    const placement = await ctx.prisma.showcasePlacement.findUniqueOrThrow({
+    const right = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({
       where: { purchaseId: purchase.id },
-      include: { shelves: true },
     });
-    expect(placement.status).toBe('ACTIVE');
-    expect(placement.cardId).toBe(card.id);
-    expect(placement.pinnedVersionId).toBe(version.id);
-    // The run starts when the money settled, not at midnight and not on the
-    // next whole hour: rounding either way would be the platform quietly giving
-    // away or keeping back hours somebody bought.
-    expect(placement.startAt.getTime()).toBe(settled.paidAt!.getTime());
-    expect(placement.endAt.getTime() - placement.startAt.getTime()).toBe(
-      30 * 24 * 60 * 60 * 1000,
+    expect(right.status).toBe('AVAILABLE');
+    expect(right.providerId).toBe(provider.id);
+    expect(right.showcasePackageId).toBe(pkg.id);
+    expect(right.cardId).toBeNull();
+    expect(right.durationDaysSnapshot).toBe(30);
+    // The right is granted when the money settled — the activation window
+    // runs from that instant, not from midnight.
+    expect(right.grantedAt.getTime()).toBe(settled.paidAt!.getTime());
+    expect(right.expiresAt.getTime()).toBe(
+      settled.paidAt!.getTime() + pkg.activationWindowDays * 24 * 60 * 60 * 1000,
     );
-    expect(placement.shelves).toHaveLength(1);
-    expect(placement.shelves[0]?.active).toBe(true);
+    expect(right.priceTermsVersionSnapshot).toBe('v1');
+
+    // Nothing is on the air: there is no card to publish yet.
+    expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
+    expect(await ctx.prisma.showcasePlacementShelf.count()).toBe(0);
   });
 
-  it('tells the provider their card is on the air, not that credits arrived', async () => {
+  it('sends the provider no receipt at all', async () => {
     const { reference } = await pendingShowcasePurchase();
 
     await deliver(orderPayload({ reference }));
 
-    expect(
-      ctx.notifications.sent.filter(
-        (message) => message.template === 'showcase-placement-activated',
-      ),
-    ).toHaveLength(1);
-    // The credit receipt's heading would be a false statement about a purchase
-    // that loaded no balance.
-    expect(
-      ctx.notifications.sent.filter(
-        (message) => message.template === 'package-purchase-confirmation',
-      ),
-    ).toHaveLength(0);
+    // No card is on the air, so the placement notice would be false; the
+    // credit receipt's heading would be a false statement about a purchase
+    // that loaded no balance. The return screen tells the provider.
+    expect(ctx.notifications.sent).toHaveLength(0);
   });
 
-  it('produces one run when the same event is delivered twice', async () => {
+  it('grants one right when the same event is delivered twice', async () => {
     const { purchase, reference } = await pendingShowcasePurchase();
 
     const first = await deliver(orderPayload({ reference }));
@@ -269,8 +260,8 @@ describe('a settled vitrin payment', () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
 
-    expect(await ctx.prisma.showcasePlacement.count()).toBe(1);
-    expect(await ctx.prisma.showcasePlacementShelf.count()).toBe(1);
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(1);
+    expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
 
     const event = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow({
       where: { purchaseId: purchase.id },
@@ -278,27 +269,23 @@ describe('a settled vitrin payment', () => {
     expect(event.status).toBe(PaymentWebhookEventStatus.PROCESSED);
     expect(event.attemptCount).toBe(2);
 
-    // And still no receipt for a second settlement that did not happen.
-    expect(
-      ctx.notifications.sent.filter(
-        (message) => message.template === 'showcase-placement-activated',
-      ),
-    ).toHaveLength(1);
+    // And still nothing sent for a second settlement that did not happen.
+    expect(ctx.notifications.sent).toHaveLength(0);
   });
 
-  it('produces one run when two deliveries of the same event arrive together', async () => {
+  it('grants one right when two deliveries of the same event arrive together', async () => {
     const { reference } = await pendingShowcasePurchase();
 
     // The Serializable transaction, the PROCESSED short-circuit inside it and
-    // the unique index on `purchaseId` are what make this one run rather than
-    // two. All three survive concurrency; none of them relies on ordering.
+    // the unique index on `purchaseId` are what make this one right rather
+    // than two. All three survive concurrency; none of them relies on ordering.
     const [first, second] = await Promise.all([
       deliver(orderPayload({ reference })),
       deliver(orderPayload({ reference })),
     ]);
 
     expect([first.status, second.status].every((status) => status === 200)).toBe(true);
-    expect(await ctx.prisma.showcasePlacement.count()).toBe(1);
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(1);
     expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
   });
 
@@ -306,21 +293,12 @@ describe('a settled vitrin payment', () => {
     const first = await pendingShowcasePurchase();
     await deliver(orderPayload({ reference: first.reference, orderId: 'order-shared' }));
 
-    // A second vitrin purchase, on a second card, same Lemon order.
-    const second = await createApprovedShowcaseCard(ctx.prisma, {
-      providerId: first.provider.id,
-      categoryId: first.category.id,
-      title: 'İkinci kart',
-    });
-    await acceptShowcasePriceTerms(ctx.prisma, {
-      providerId: first.provider.id,
-      cardId: second.card.id,
-      userId: first.ownerUser.id,
-    });
+    // A second vitrin purchase of the same package — the first is PAID, so
+    // nothing pending is handed back — against the same Lemon order.
     const opened = await request(ctx.server)
-      .post(`/providers/${first.provider.id}/showcase/placements/checkout`)
+      .post(`/providers/${first.provider.id}/showcase/packages/checkout`)
       .set('Cookie', first.cookie)
-      .send({ cardId: second.card.id, showcasePackageId: first.pkg.id })
+      .send({ showcasePackageId: first.pkg.id })
       .expect(201);
     const secondPurchase = await ctx.prisma.packagePurchase.findUniqueOrThrow({
       where: { id: opened.body.purchase.id as string },
@@ -340,8 +318,8 @@ describe('a settled vitrin payment', () => {
     });
     expect(refused.status).toBe(PaymentWebhookEventStatus.MISMATCHED);
     expect(refused.detail).toBe('ORDER_ALREADY_SETTLED');
-    // One order, one run.
-    expect(await ctx.prisma.showcasePlacement.count()).toBe(1);
+    // One order, one right.
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(1);
   });
 
   /**
@@ -383,7 +361,7 @@ describe('a settled vitrin payment', () => {
       where: { purchaseId: vitrin.purchase.id },
     });
     expect(refused.detail).toBe('ORDER_ALREADY_SETTLED');
-    expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
   });
 
   it('reads the vitrin catalogue’s slug when checking the variant', async () => {
@@ -394,7 +372,7 @@ describe('a settled vitrin payment', () => {
     expect(response.status).toBe(200);
     const event = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow({});
     expect(event.detail).toBe('VARIANT_MISMATCH');
-    expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
   });
 
   it('refuses an amount that does not match the snapshot exactly', async () => {
@@ -405,7 +383,90 @@ describe('a settled vitrin payment', () => {
     expect(response.status).toBe(200);
     const event = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow({});
     expect(event.detail).toBe('AMOUNT_MISMATCH');
-    expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
+  });
+
+  /**
+   * A purchase opened by the card-bound checkout before the package-first flow
+   * shipped, still pending when the webhook arrives. The row names a card, a
+   * version and a card-scoped acceptance, and settling it must do what it
+   * always did — publish that card — not grant a right the provider never
+   * bought as one.
+   */
+  it('settles a legacy card-bound purchase into a placement, exactly as before', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', {
+      kind: ServiceCategoryKind.LEAF,
+    });
+    const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, {
+      userId: ownerUser.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+    const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: provider.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
+    });
+    const pkg = await createShowcasePackage(ctx.prisma, { priceAmount: PRICE, durationDays: 30 });
+    const acceptance = await acceptShowcasePriceTerms(ctx.prisma, {
+      providerId: provider.id,
+      cardId: card.id,
+      userId: ownerUser.id,
+    });
+    configureLemonSqueezy(`${pkg.slug}:${VARIANT_ID}`);
+
+    // The row the old checkout wrote, inserted directly: no route opens one
+    // any more.
+    const purchase = await ctx.prisma.packagePurchase.create({
+      data: {
+        providerId: provider.id,
+        kind: 'SHOWCASE_PACKAGE',
+        showcasePackageId: pkg.id,
+        showcaseCardId: card.id,
+        showcaseCardVersionId: version.id,
+        showcasePriceTermsAcceptanceId: acceptance.id,
+        durationDaysSnapshot: 30,
+        creditAmountSnapshot: 0,
+        priceAmountSnapshot: PRICE,
+        currencySnapshot: 'TRY',
+        packageNameSnapshot: pkg.name,
+        status: PackagePurchaseStatus.PENDING,
+        paymentProvider: 'lemon-squeezy-test',
+        paymentReference: 'legacy-card-bound-reference',
+        providerCheckoutId: 'checkout-legacy-1',
+        providerCheckoutUrl: HOSTED_URL,
+      },
+    });
+
+    const response = await deliver(orderPayload({ reference: 'legacy-card-bound-reference' }));
+    expect(response.status).toBe(200);
+
+    const settled = await ctx.prisma.packagePurchase.findUniqueOrThrow({
+      where: { id: purchase.id },
+    });
+    expect(settled.status).toBe(PackagePurchaseStatus.PAID);
+    expect(settled.providerOrderId).toBe('order-vitrin-1');
+
+    const placement = await ctx.prisma.showcasePlacement.findUniqueOrThrow({
+      where: { purchaseId: purchase.id },
+      include: { shelves: true },
+    });
+    expect(placement.status).toBe('ACTIVE');
+    expect(placement.cardId).toBe(card.id);
+    expect(placement.pinnedVersionId).toBe(version.id);
+    expect(placement.startAt.getTime()).toBe(settled.paidAt!.getTime());
+    expect(placement.shelves).toHaveLength(1);
+    expect(placement.shelves[0]?.active).toBe(true);
+
+    // The legacy sale grants no right and still moves no balance.
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
+    expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
+    expect(
+      ctx.notifications.sent.filter(
+        (message) => message.template === 'showcase-placement-activated',
+      ),
+    ).toHaveLength(1);
   });
 
   it('leaves an ordinary credit purchase settling exactly as it always has', async () => {
@@ -438,6 +499,7 @@ describe('a settled vitrin payment', () => {
 
     // The regression that matters most to everybody who is not using vitrin.
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(25);
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
     expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
     expect(
       ctx.notifications.sent.filter(

@@ -2335,6 +2335,8 @@ export type ShowcaseCard = {
   category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
+  /** The newest refused version, only while the card has neither a draft nor a live one. */
+  rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;
   suspendReason: string | null;
   archivedAt: string | null;
@@ -2383,6 +2385,19 @@ export type ShowcaseVersionDetail = ShowcaseCardVersion & {
     previousVersionId: string;
     removedAreaKeys: string[];
     createdAt: string;
+  } | null;
+  /**
+   * The reserved right this card would go live under — null when it holds
+   * none. Only meaningful for a first publication: a revision replaces an
+   * already-live card and consumes no right of its own, so a reviewer only
+   * needs this to judge whether approval is possible at all.
+   */
+  entitlement: {
+    packageName: string;
+    durationDays: number;
+    expiresAt: string;
+    pausedForReview: boolean;
+    valid: boolean;
   } | null;
 };
 
@@ -2485,6 +2500,13 @@ export type ShowcasePackage = {
   priceAmount: number;
   currency: string;
   durationDays: number;
+  /**
+   * How long a purchased-but-unused right stays reserved for one card, in
+   * days, counted from payment. Review time does not consume it — a version
+   * sitting in the queue does not burn the clock the way an operator's delay
+   * would.
+   */
+  activationWindowDays: number;
   allowedCardKind: ShowcaseCardKind | null;
   maxAreas: number | null;
   requiresAdminApproval: boolean;
@@ -2561,13 +2583,15 @@ export type ShowcasePlacement = {
  */
 export type ShowcasePriceTermsAcceptance = {
   id: string;
-  cardId: string;
+  /** Null for a package-first acceptance: it is scoped to the business, not a card. */
+  cardId: string | null;
   providerId: string;
   termsVersion: string;
   termsTextSnapshot: string;
   acceptedAt: string;
+  scope: 'CARD' | 'PACKAGE';
   provider: { id: string; businessName: string; status: string };
-  card: { id: string; kind: string; status: string; categoryId: string };
+  card: { id: string; kind: string; status: string; categoryId: string } | null;
   acceptedByUser: { id: string; name: string | null; email: string | null };
 };
 

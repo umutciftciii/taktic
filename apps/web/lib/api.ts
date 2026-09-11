@@ -813,7 +813,14 @@ export type PackagePurchase = {
   id: string;
   purchaseNumber: string | null;
   providerId: string;
-  packageId: string;
+  /**
+   * Which catalogue the row was sold from. A credit package loads credits on
+   * payment; a vitrin package grants a publication right instead, and the
+   * screens after payment go to different places for the two.
+   */
+  kind: 'OFFER_PACKAGE' | 'SHOWCASE_PACKAGE';
+  /** The credit package, or null for a vitrin package purchase. */
+  packageId: string | null;
   status: PackagePurchaseStatus;
   creditAmountSnapshot: number;
   priceAmountSnapshot: number;
@@ -1301,6 +1308,12 @@ export type ShowcaseCard = {
   category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
+  /**
+   * The most recent refused version, only while the card has neither a draft
+   * nor a live one: a rejection clears the draft pointer, and this is what the
+   * owner still has to read and fix.
+   */
+  rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;
   suspendReason: string | null;
   archivedAt: string | null;
@@ -1311,24 +1324,11 @@ export type ShowcaseCard = {
 export type ShowcasePriceTerms = { version: string; text: string };
 
 /**
- * The same terms, asked about one card: is there an acceptance on file for the
- * version in force?
- *
- * `accepted` answers what the buying screen needs rather than "has this card
- * ever accepted anything" — an acceptance of superseded terms reports `false`
- * with a null `acceptance`, because for the purpose of opening a checkout it is
- * not an acceptance at all.
+ * The sale terms as they stand for this business: the version in force, its
+ * text, and whether an acceptance of that version is already on file. The
+ * package screen shows the checkbox only when `accepted` is false.
  */
-export type ShowcaseCardPriceTerms = ShowcasePriceTerms & {
-  accepted: boolean;
-  acceptance: {
-    id: string;
-    cardId: string;
-    termsVersion: string;
-    termsText: string;
-    acceptedAt: string;
-  } | null;
-};
+export type ShowcasePackageTerms = { version: string; text: string; accepted: boolean; acceptedAt: string | null };
 
 /**
  * One category a card may point at, with the ancestry needed to render it.
@@ -1442,6 +1442,8 @@ export type ShowcasePackage = {
   priceAmount: number;
   currency: string;
   durationDays: number;
+  /** How many days a bought right stays usable before it lapses unused. */
+  activationWindowDays: number;
   allowedCardKind: ShowcaseCardKind | null;
   maxAreas: number | null;
   requiresAdminApproval: boolean;
@@ -1573,30 +1575,47 @@ export type ShowcasePublicationState =
   | 'DRAFT'
   | 'IN_REVIEW'
   | 'REJECTED'
-  | 'TERMS_REQUIRED'
-  | 'READY_TO_PUBLISH'
+  | 'NEEDS_PACKAGE'
   | 'EXPIRED'
-  | 'AWAITING_PAYMENT'
   | 'ACTIVATING'
   | 'LIVE'
   | 'PAUSED'
   | 'ARCHIVED'
   | 'SUSPENDED';
 
+/** A bought right that is not yet bound to a card. */
+export type ShowcaseEntitlementSummary = {
+  id: string;
+  packageName: string;
+  durationDays: number;
+  allowedCardKind: ShowcaseCardKind | null;
+  expiresAt: string;
+};
+
 export type ShowcaseCardPublication = {
   cardId: string;
   state: ShowcasePublicationState;
   endAt: string | null;
-  checkoutUrl: string | null;
-  purchaseId: string | null;
   packageName: string | null;
   areaLabels: string[];
   leadCount: number;
   hasPendingRevision: boolean;
+  /** Whether the card has ever been on the air — an expired first run reads differently from a lapsed right. */
+  hasRunBefore: boolean;
+  /** The card has no usable right and needs a package before it can go further. */
+  needsPackage: boolean;
+  /** The right bound to this card, when one is. */
+  entitlement: {
+    packageName: string;
+    durationDays: number;
+    expiresAt: string;
+    pausedForReview: boolean;
+  } | null;
 };
 
 export type ShowcasePublicationList = {
   cards: ShowcaseCardPublication[];
+  availableEntitlements: ShowcaseEntitlementSummary[];
   hasPublicationHistory: boolean;
 };
 

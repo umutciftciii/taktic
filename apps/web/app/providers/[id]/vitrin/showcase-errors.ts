@@ -12,8 +12,6 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
   SHOWCASE_VERSION_UNDER_REVIEW:
     'Bu kartın bir sürümü incelemede. İnceleme sonuçlanmadan yeni değişiklik kaydedilemez.',
   SHOWCASE_NOTHING_TO_SUBMIT: 'İncelemeye gönderilecek bir taslak sürüm yok.',
-  SHOWCASE_PRICE_TERMS_REQUIRED:
-    'Kartı incelemeye göndermek için hizmet bedeli sorumluluk metnini onaylamanız gerekir.',
   SHOWCASE_AREA_NOT_COVERED:
     'Seçtiğiniz bölgelerden biri işletme profilinizdeki hizmet bölgelerinin dışında. Önce profilinize ekleyin.',
   SHOWCASE_AREA_UNKNOWN: 'Seçilen il, ilçe ve mahalle birlikte geçerli bir bölge oluşturmuyor.',
@@ -28,12 +26,16 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
   SHOWCASE_CARD_LOCKED: 'Bu kart şu anda düzenlenemez.',
   SHOWCASE_SAVE_FAILED: 'Kaydedilemedi. Alanları kontrol edip tekrar deneyin.',
 
-  // Phase two: buying a run, and what can be in the way.
-  SHOWCASE_PACKAGE_NOT_FOUND: 'Seçtiğiniz vitrin paketi artık satışta değil.',
-  SHOWCASE_PACKAGE_KIND_MISMATCH:
-    'Bu paket bu kart tipi için satılmıyor. Kart tipine uygun bir paket seçin.',
-  SHOWCASE_CARD_NOT_PUBLISHABLE:
-    'Bu kart yayına alınamaz. Paket almak için kartın onaylanmış ve yayında bir sürümü olmalı.',
+  // Buying a right, binding it to a card, and what can be in the way.
+  SHOWCASE_ENTITLEMENT_REQUIRED: 'Kart oluşturmak için kullanılabilir bir vitrin hakkınız olmalı. Önce vitrin paketi alın.',
+  SHOWCASE_ENTITLEMENT_UNAVAILABLE: 'Bu vitrin hakkı artık kullanılabilir değil. Sayfayı yenileyip tekrar deneyin.',
+  SHOWCASE_ENTITLEMENT_KIND_MISMATCH: 'Seçtiğiniz vitrin hakkı bu kart türü için kullanılamaz.',
+  SHOWCASE_REVISION_NEEDS_PUBLICATION: 'Bu kartı düzenlemeden önce bir vitrin hakkıyla yayına almanız gerekir.',
+  SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED: 'Devam etmek için sorumluluk metnini kabul edin.',
+  // A package the catalogue lists but the payment provider cannot sell yet —
+  // a configuration gap, so the sentence names nothing the provider could fix.
+  PACKAGE_NOT_MAPPED: 'Bu paket şu an satın alınamıyor.',
+  SHOWCASE_PACKAGE_NOT_FOUND: 'Bu paket şu an satın alınamıyor.',
   SHOWCASE_CARD_ALREADY_PLACED:
     'Bu kartın yayında olan bir vitrin süresi zaten var. Süre bitince yenileyebilir ya da başka bir kartınız için paket alabilirsiniz.',
   SHOWCASE_PROVIDER_NOT_APPROVED:
@@ -41,26 +43,8 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
   SHOWCASE_CATEGORY_NOT_OFFERED_FOR_PLACEMENT:
     'Kartın kategorisi artık talep alamıyor, bu yüzden yayına alınamaz.',
   SHOWCASE_CARD_ALREADY_ARCHIVED: 'Bu kart zaten arşivlenmiş.',
-  // Not a fault and not a block on anything already running: the platform's
-  // price-responsibility text has moved on and the next purchase is sold under
-  // the new one. The sentence says so explicitly, because "onay gerekiyor" on a
-  // screen that also shows a live run reads like the run is at risk.
-  SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED:
-    'Hizmet bedeli sorumluluk metni güncellendi. Yeni paket almadan önce güncel metni onaylayın. Yayında olan vitrin süreniz bundan etkilenmez.',
   SHOWCASE_PRICE_TERMS_UNAVAILABLE:
     'Vitrin paketi satın alma şu anda geçici olarak kapalı. Lütfen daha sonra tekrar deneyin.',
   SHOWCASE_CHECKOUT_FAILED: 'Ödeme sayfası açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
   PROVIDER_UNAVAILABLE: 'Ödeme sayfası şu anda açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
-  /*
-   * The package exists in the catalogue but has no variant mapped at the
-   * payment provider yet.
-   *
-   * A configuration gap rather than anything the provider did, so the sentence
-   * says what they can do — come back — instead of naming the payment provider,
-   * the mapping, or the support queue. The machine-readable code is unchanged
-   * and still reaches the log, which is where the operator's half of this
-   * lives.
-   */
-  PACKAGE_NOT_MAPPED:
-    'Bu paket şu anda satın almaya açılmadı. Lütfen daha sonra tekrar deneyin.',
 };

@@ -23,6 +23,7 @@ import { resolvePaymentProviderKind } from '../payments/payment-provider.config'
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
+import { ShowcaseEntitlementService } from '../showcase/showcase-entitlement.service';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
@@ -42,6 +43,8 @@ export class PackagePurchasesService {
     @Inject(NumberingService) private readonly numbering: NumberingService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
     @Inject(ShowcasePlacementService) private readonly placements: ShowcasePlacementService,
+    @Inject(ShowcaseEntitlementService)
+    private readonly entitlements: ShowcaseEntitlementService,
   ) {}
 
   /**
@@ -199,11 +202,12 @@ export class PackagePurchasesService {
          * What a settled purchase produces depends on what was bought, and
          * exactly one of three things happens.
          *
-         * A vitrin package creates a placement and moves no balance at all —
-         * `creditAmountSnapshot` is zero by construction and a CHECK refuses a
-         * vitrin row that carries credit. A ONE_TIME_CREDITS package loads the
-         * ledger, exactly as it always has. A period package grants an
-         * entitlement and touches no balance either: writing a zero-credit
+         * A vitrin package grants a publication right (or, for a legacy
+         * card-bound purchase, creates a placement) and moves no balance at
+         * all — `creditAmountSnapshot` is zero by construction and a CHECK
+         * refuses a vitrin row that carries credit. A ONE_TIME_CREDITS package
+         * loads the ledger, exactly as it always has. A period package grants
+         * an entitlement and touches no balance either: writing a zero-credit
          * ledger row for it would put a transaction in the provider's history
          * that says nothing happened.
          *
@@ -216,32 +220,57 @@ export class PackagePurchasesService {
          * doing something the real one does not.
          */
         if (purchase.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
-          if (
-            !purchase.showcasePackageId ||
-            !purchase.showcaseCardId ||
-            !purchase.showcaseCardVersionId ||
-            !purchase.showcasePriceTermsAcceptanceId ||
-            purchase.durationDaysSnapshot === null
-          ) {
-            throw new ConflictException('This vitrin purchase is missing its placement details');
+          if (!purchase.showcasePackageId || purchase.durationDaysSnapshot === null) {
+            throw new ConflictException('This vitrin purchase is missing its package details');
           }
 
-          await this.placements.createForPurchase(
-            tx,
-            {
-              id: purchase.id,
-              providerId: purchase.providerId,
-              showcasePackageId: purchase.showcasePackageId,
-              showcaseCardId: purchase.showcaseCardId,
-              showcaseCardVersionId: purchase.showcaseCardVersionId,
-              durationDaysSnapshot: purchase.durationDaysSnapshot,
-              packageNameSnapshot: purchase.packageNameSnapshot,
-              priceAmountSnapshot: purchase.priceAmountSnapshot,
-              currencySnapshot: purchase.currencySnapshot,
-              showcasePriceTermsAcceptanceId: purchase.showcasePriceTermsAcceptanceId,
-            },
-            now,
-          );
+          if (purchase.showcaseCardId) {
+            // Legacy, card-bound purchase opened before the package-first
+            // flow: settles exactly as it always did, into a placement.
+            if (!purchase.showcaseCardVersionId || !purchase.showcasePriceTermsAcceptanceId) {
+              throw new ConflictException(
+                'This vitrin purchase is missing its placement details',
+              );
+            }
+
+            await this.placements.createForPurchase(
+              tx,
+              {
+                id: purchase.id,
+                providerId: purchase.providerId,
+                showcasePackageId: purchase.showcasePackageId,
+                showcaseCardId: purchase.showcaseCardId,
+                showcaseCardVersionId: purchase.showcaseCardVersionId,
+                durationDaysSnapshot: purchase.durationDaysSnapshot,
+                packageNameSnapshot: purchase.packageNameSnapshot,
+                priceAmountSnapshot: purchase.priceAmountSnapshot,
+                currencySnapshot: purchase.currencySnapshot,
+                showcasePriceTermsAcceptanceId: purchase.showcasePriceTermsAcceptanceId,
+              },
+              now,
+            );
+          } else {
+            // Package-first: the money buys a right, and the right is spent
+            // when the card is approved. No placement, no balance, no card yet.
+            if (!purchase.showcasePackageTermsAcceptanceId) {
+              throw new ConflictException('This vitrin purchase is missing its terms acceptance');
+            }
+
+            await this.entitlements.grantForPurchase(
+              tx,
+              {
+                id: purchase.id,
+                providerId: purchase.providerId,
+                showcasePackageId: purchase.showcasePackageId,
+                durationDaysSnapshot: purchase.durationDaysSnapshot,
+                packageNameSnapshot: purchase.packageNameSnapshot,
+                priceAmountSnapshot: purchase.priceAmountSnapshot,
+                currencySnapshot: purchase.currencySnapshot,
+                showcasePackageTermsAcceptanceId: purchase.showcasePackageTermsAcceptanceId,
+              },
+              now,
+            );
+          }
 
           return tx.packagePurchase.update({
             where: { id: purchase.id },
@@ -313,7 +342,9 @@ export class PackagePurchasesService {
     if (settled.status === PackagePurchaseStatus.PAID) {
       // The same two-receipts rule the webhook applies, for the same reason: a
       // vitrin purchase's notice is about the placement being on the air, not
-      // about a balance that never moved.
+      // about a balance that never moved. A package-first purchase produced no
+      // placement — it granted a right — and there is no receipt for that; the
+      // return screen tells the provider.
       if (settled.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
         const placement = await this.prisma.showcasePlacement.findUnique({
           where: { purchaseId: settled.id },

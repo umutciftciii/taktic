@@ -21,9 +21,26 @@ import { readServiceAreas } from '../../../../lib/service-area-payload';
  * carries codes.
  */
 
+/**
+ * Opens a card against a bought right.
+ *
+ * `entitlementId` travels only when the screen let the provider pick one; left
+ * out, the API binds the oldest usable right itself. A refusal about the right
+ * — none on hand, the wrong kind — lands on the list, because buying a package
+ * is the answer and the list is where that button is. Every other refusal is
+ * about the content, and goes back to the form that can show it.
+ */
+/** The refusals a package purchase answers; the list screen renders these. */
+const ENTITLEMENT_REFUSALS = new Set([
+  'SHOWCASE_ENTITLEMENT_REQUIRED',
+  'SHOWCASE_ENTITLEMENT_UNAVAILABLE',
+  'SHOWCASE_ENTITLEMENT_KIND_MISMATCH',
+]);
+
 export async function createShowcaseCardAction(formData: FormData) {
   const providerId = readString(formData, 'providerId');
   const base = `/providers/${providerId}/vitrin`;
+  const entitlementId = readOptionalString(formData, 'entitlementId');
 
   let card: ShowcaseCard;
   try {
@@ -32,11 +49,13 @@ export async function createShowcaseCardAction(formData: FormData) {
       body: JSON.stringify({
         kind: readString(formData, 'kind'),
         categoryId: readString(formData, 'categoryId'),
+        ...(entitlementId ? { entitlementId } : {}),
         ...contentPayload(formData),
       }),
     });
   } catch (error) {
-    redirect(`${base}/yeni?error=${errorCode(error)}`);
+    const code = errorCode(error);
+    redirect(ENTITLEMENT_REFUSALS.has(code) ? `${base}?error=${code}` : `${base}/yeni?error=${code}`);
   }
 
   revalidatePath(base);
@@ -54,7 +73,8 @@ export async function updateShowcaseCardAction(formData: FormData) {
       body: JSON.stringify(contentPayload(formData)),
     });
   } catch (error) {
-    redirect(`${target}?error=${errorCode(error)}`);
+    // Back to the form that can show it, not to the summary screen.
+    redirect(`${target}/duzenle?error=${errorCode(error)}`);
   }
 
   revalidatePath(target);
@@ -64,9 +84,9 @@ export async function updateShowcaseCardAction(formData: FormData) {
 /**
  * Hands the open draft to an operator.
  *
- * The acceptance travels as its own two fields rather than being assumed: the
- * API refuses a submission that does not carry them, and a form that sent them
- * unconditionally would be accepting on the provider's behalf.
+ * An empty body, and the API refuses any other: the sale terms were accepted
+ * when the package was bought, so there is nothing for this form to assert on
+ * the provider's behalf.
  */
 export async function submitShowcaseCardAction(formData: FormData) {
   const providerId = readString(formData, 'providerId');
@@ -76,13 +96,7 @@ export async function submitShowcaseCardAction(formData: FormData) {
   try {
     await apiFetch<ShowcaseCard>(
       `/providers/${providerId}/showcase/cards/${cardId}/submit`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          priceTermsAccepted: formData.get('priceTermsAccepted') === 'on',
-          priceTermsVersion: readString(formData, 'priceTermsVersion'),
-        }),
-      },
+      { method: 'POST', body: JSON.stringify({}) },
     );
   } catch (error) {
     redirect(`${target}?error=${errorCode(error)}`);
@@ -194,86 +208,32 @@ function errorCode(error: unknown): string {
   return 'SHOWCASE_SAVE_FAILED';
 }
 
-// ── Phase two: buying a run, and retiring a card ────────────────────────────
+// ── Buying a right, binding it, and retiring a card ──────────────────────
 
 /**
- * Opens a checkout for one card and one package.
- *
- * Nothing about price, duration or coverage is sent. All three are read
- * server-side from the package and the card's live version, so this form cannot
- * decide what a placement costs or how far it reaches — see
- * `CreateShowcaseCheckoutDto`.
- *
- * Where the provider goes next depends on the adapter: a hosted checkout has a
- * URL and the browser is sent to it; the mock adapter has none, and the
- * purchase's own screen renders the in-app form. The action does not decide
- * which — it follows whatever the API said.
+ * Buys a package. The acceptance travels only when the screen asked for it —
+ * the API already knows whether this business agreed to the version in force
+ * and refuses a purchase without it.
  */
-/**
- * Puts one card on the vitrin: accept the sale terms if they are still
- * outstanding, then open the checkout.
- *
- * ## Why the two are one submission
- *
- * They used to be two screens, and the seam between them was the worst defect
- * in this feature. A card's *submission* records its acceptance of the
- * price-responsibility text on the version; the *sale* reads a separate ledger.
- * A freshly approved card therefore had the first and not the second — so the
- * moment an operator approved a card, the buying panel replaced the package
- * table with a notice saying the terms had been "updated", for a provider who
- * had accepted them ten minutes earlier and had nothing to compare it against.
- * The packages, and the payment button with them, were simply not on screen.
- *
- * The acceptance is still a real, separate, recorded act — the API writes its
- * own row, keyed to the card and the version in force, naming the account that
- * agreed. What changed is that the provider performs it where it belongs: on
- * the line above the button it unblocks, having just read the package's price
- * and duration, in the order the flow actually runs. The checkbox is `required`,
- * so nothing is agreed to by pressing "pay".
- *
- * Accepting is idempotent — a unique index on (card, version) makes a second
- * row impossible — so a provider whose acceptance already stands sends no
- * checkbox and this step is skipped entirely.
- */
-export async function startShowcaseCheckoutAction(formData: FormData) {
+export async function startShowcasePackageCheckoutAction(formData: FormData) {
   const providerId = readString(formData, 'providerId');
-  const cardId = readString(formData, 'cardId');
-  const base = `/providers/${providerId}/vitrin/${cardId}`;
-  const priceTermsVersion = readString(formData, 'priceTermsVersion');
-
-  if (priceTermsVersion) {
-    try {
-      await apiFetch(
-        `/providers/${providerId}/showcase/cards/${cardId}/price-terms-acceptances`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            priceTermsAccepted: formData.get('priceTermsAccepted') === 'on',
-            priceTermsVersion,
-          }),
-        },
-      );
-    } catch (error) {
-      // Nothing is bought and no purchase row exists yet, so this is a clean
-      // stop: the provider lands back on the same panel with the reason.
-      redirect(`${base}?error=${errorCode(error)}`);
-    }
-  }
+  const returnCard = readOptionalString(formData, 'returnCard');
+  const base = `/providers/${providerId}/vitrin/paketler${returnCard ? `?card=${encodeURIComponent(returnCard)}` : ''}`;
+  const priceTermsVersion = readOptionalString(formData, 'priceTermsVersion');
 
   let outcome: ShowcaseCheckoutResult;
   try {
-    outcome = await apiFetch<ShowcaseCheckoutResult>(
-      `/providers/${providerId}/showcase/placements/checkout`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          cardId,
-          showcasePackageId: readString(formData, 'showcasePackageId'),
-        }),
-      },
-    );
+    outcome = await apiFetch<ShowcaseCheckoutResult>(`/providers/${providerId}/showcase/packages/checkout`, {
+      method: 'POST',
+      body: JSON.stringify({
+        showcasePackageId: readString(formData, 'showcasePackageId'),
+        ...(priceTermsVersion
+          ? { priceTermsVersion, priceTermsAccepted: formData.get('priceTermsAccepted') === 'on' }
+          : {}),
+      }),
+    });
   } catch (error) {
-    redirect(`${base}?error=${errorCode(error)}`);
+    redirect(`${base}${base.includes('?') ? '&' : '?'}error=${errorCode(error)}`);
   }
 
   revalidatePath(`/providers/${providerId}/vitrin`);
@@ -281,10 +241,26 @@ export async function startShowcaseCheckoutAction(formData: FormData) {
   if (outcome.checkout.url) {
     redirect(outcome.checkout.url);
   }
+  // No hosted page (mock provider): the in-app form, which returns to the vitrin payment screen.
+  redirect(`/providers/${providerId}/package-purchases/${outcome.purchase.id}/checkout?return=vitrin${returnCard ? `&card=${encodeURIComponent(returnCard)}` : ''}`);
+}
 
-  // No hosted page: the purchase's own screen carries the clearly-labelled mock
-  // form, exactly as it does for a credit package.
-  redirect(`/providers/${providerId}/package-purchases/${outcome.purchase.id}`);
+/** Binds a right to a card that has none; the API publishes at once if the card is already approved. */
+export async function useShowcaseEntitlementAction(formData: FormData) {
+  const providerId = readString(formData, 'providerId');
+  const cardId = readString(formData, 'cardId');
+  const target = `/providers/${providerId}/vitrin/${cardId}`;
+  try {
+    await apiFetch<ShowcaseCard>(`/providers/${providerId}/showcase/cards/${cardId}/use-entitlement`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  } catch (error) {
+    redirect(`${target}?error=${errorCode(error)}`);
+  }
+  revalidatePath(`/providers/${providerId}/vitrin`);
+  revalidatePath(target);
+  redirect(`${target}?published=1`);
 }
 
 /**
@@ -293,11 +269,17 @@ export async function startShowcaseCheckoutAction(formData: FormData) {
  * The paid clock keeps running while it is archived, and the screen says so
  * before this is submitted — a provider who expected the time to pause would be
  * a provider surprised by a bill they had already paid.
+ *
+ * A card that never went live is a different case: the API releases its right
+ * back to the pool, and the screen calls that "deleting" the card. The form
+ * says which it meant with `deleted=1`, and the provider lands on the list —
+ * there is nothing on the card's own screen left to look at.
  */
 export async function archiveShowcaseCardAction(formData: FormData) {
   const providerId = readString(formData, 'providerId');
   const cardId = readString(formData, 'cardId');
   const target = `/providers/${providerId}/vitrin/${cardId}`;
+  const deleted = formData.get('deleted') === '1';
 
   try {
     await apiFetch<ShowcaseCard>(
@@ -308,8 +290,9 @@ export async function archiveShowcaseCardAction(formData: FormData) {
     redirect(`${target}?error=${errorCode(error)}`);
   }
 
+  revalidatePath(`/providers/${providerId}/vitrin`);
   revalidatePath(target);
-  redirect(`${target}?archived=1`);
+  redirect(deleted ? `/providers/${providerId}/vitrin?deleted=1` : `${target}?archived=1`);
 }
 
 export async function unarchiveShowcaseCardAction(formData: FormData) {

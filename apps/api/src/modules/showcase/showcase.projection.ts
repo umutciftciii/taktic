@@ -39,6 +39,18 @@ export const showcaseCardInclude = {
   category: { select: { id: true, name: true, slug: true, kind: true, status: true } },
   liveVersion: { include: showcaseVersionInclude },
   draftVersion: { include: showcaseVersionInclude },
+  /*
+   * The most recent refused version. A rejection clears the draft pointer, so
+   * a card whose first version was refused points at nothing — and its owner
+   * would otherwise be shown a blank card with no note and no text to fix.
+   * The newest refusal is enough: it is the verdict still to be acted on.
+   */
+  versions: {
+    where: { reviewStatus: 'REJECTED' },
+    orderBy: [{ versionNumber: 'desc' }],
+    take: 1,
+    include: showcaseVersionInclude,
+  },
 } satisfies Prisma.ShowcaseCardInclude;
 
 type AreaRow = Prisma.ShowcaseCardVersionAreaGetPayload<{ select: typeof showcaseAreaSelect }>;
@@ -113,12 +125,32 @@ export function toShowcaseCard(card: CardRow) {
     category: card.category,
     liveVersion: card.liveVersion ? toShowcaseVersion(card.liveVersion) : null,
     draftVersion: card.draftVersion ? toShowcaseVersion(card.draftVersion) : null,
+    rejectedVersion: rejectedVersion(card),
     suspendedAt: card.suspendedAt,
     suspendReason: card.suspendReason,
     archivedAt: card.archivedAt,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
   };
+}
+
+/**
+ * The refused text a card with nothing else to show still carries.
+ *
+ * Only for a card with no draft and no live version: once either exists the
+ * refusal is history rather than the thing to act on. The rows may arrive as
+ * the one-row filtered include above or, from the operator's card screen, as
+ * the card's whole history newest first — so the status is checked here
+ * rather than assumed from the include.
+ */
+function rejectedVersion(card: CardRow) {
+  if (card.liveVersion || card.draftVersion) {
+    return null;
+  }
+  const refused = card.versions.find(
+    (version) => version.reviewStatus === 'REJECTED',
+  );
+  return refused ? toShowcaseVersion(refused) : null;
 }
 
 export type ShowcaseCardProjection = ReturnType<typeof toShowcaseCard>;

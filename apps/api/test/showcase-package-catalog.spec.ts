@@ -219,6 +219,72 @@ describe('who may read and write the catalogue', () => {
   });
 });
 
+describe('activation window', () => {
+  it('defaults to 90 days when a create body says nothing about it', async () => {
+    const cookie = await admin();
+
+    const response = await request(ctx.server)
+      .post('/admin/showcase/packages')
+      .set('Cookie', cookie)
+      .send({
+        name: 'Vitrin Varsayılan',
+        slug: `vitrin-${uniqueSuffix()}`,
+        priceAmount: 49_900,
+        durationDays: 30,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.activationWindowDays).toBe(90);
+  });
+
+  it('changes on an edit that names it', async () => {
+    const cookie = await admin();
+    const pkg = await createShowcasePackage(ctx.prisma);
+
+    const response = await request(ctx.server)
+      .patch(`/admin/showcase/packages/${pkg.id}`)
+      .set('Cookie', cookie)
+      .send({ activationWindowDays: 45 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.activationWindowDays).toBe(45);
+  });
+
+  it('refuses a window of zero days', async () => {
+    const cookie = await admin();
+
+    const response = await request(ctx.server)
+      .post('/admin/showcase/packages')
+      .set('Cookie', cookie)
+      .send({
+        name: 'Sınır dışı pencere',
+        slug: `vitrin-${uniqueSuffix()}`,
+        priceAmount: 49_900,
+        durationDays: 30,
+        activationWindowDays: 0,
+      });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('refuses a window beyond a year', async () => {
+    const cookie = await admin();
+
+    const response = await request(ctx.server)
+      .post('/admin/showcase/packages')
+      .set('Cookie', cookie)
+      .send({
+        name: 'Sınır dışı pencere',
+        slug: `vitrin-${uniqueSuffix()}`,
+        priceAmount: 49_900,
+        durationDays: 30,
+        activationWindowDays: 366,
+      });
+
+    expect(response.status).toBe(400);
+  });
+});
+
 describe('editing a package', () => {
   it('changes price and duration without touching the slug', async () => {
     const cookie = await admin();

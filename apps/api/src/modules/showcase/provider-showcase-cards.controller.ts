@@ -11,16 +11,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateShowcaseCardDto, UpdateShowcaseCardDto } from './dto/create-showcase-card.dto';
-import { AcceptShowcasePriceTermsDto } from './dto/showcase-price-terms.dto';
 import { SubmitShowcaseCardDto } from './dto/submit-showcase-card.dto';
-import { AuthUser } from '../auth/auth.types';
+import { UseShowcaseEntitlementDto } from './dto/use-showcase-entitlement.dto';
 import { ProviderShowcaseCardsService } from './provider-showcase-cards.service';
-import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 
 /**
  * A provider's own vitrin cards.
@@ -50,7 +48,6 @@ import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 export class ProviderShowcaseCardsController {
   constructor(
     @Inject(ProviderShowcaseCardsService) private readonly cards: ProviderShowcaseCardsService,
-    @Inject(ShowcasePriceTermsService) private readonly priceTerms: ShowcasePriceTermsService,
   ) {}
 
   /**
@@ -100,50 +97,6 @@ export class ProviderShowcaseCardsController {
   }
 
   /**
-   * What this card is being asked to agree to before its next placement is
-   * bought, and whether it already has.
-   *
-   * Card-scoped, unlike the `price-terms` route above it, and the two answer
-   * different questions on purpose. That one serves the sentence the *review*
-   * submission requires; this one also says whether this particular card has an
-   * acceptance for the version in force — which is what the buying screen needs
-   * in order to offer the acceptance rather than a button the checkout refuses.
-   */
-  @Get(':cardId/price-terms')
-  getCardPriceTerms(
-    @Param('providerId') providerId: string,
-    @Param('cardId') cardId: string,
-  ) {
-    return this.priceTerms.getForCard(providerId, cardId);
-  }
-
-  /**
-   * Accepts the price-responsibility text for this card.
-   *
-   * **200 on both the first call and every repeat, and never 201.** What this
-   * addresses is the card's acceptance of the terms in force, and after either
-   * call it exists; a status that differed between two identical requests would
-   * report to the caller a difference they cannot act on and do not have. The
-   * body is the acceptance itself either way — the same row, with the same
-   * `acceptedAt`, because a re-acceptance does not move the record of when
-   * consent was actually given.
-   *
-   * Nothing about the card changes here. No version is written, no review is
-   * opened, no placement is touched: that separation is the whole reason this
-   * route exists rather than a second submit.
-   */
-  @Post(':cardId/price-terms-acceptances')
-  @HttpCode(HttpStatus.OK)
-  acceptCardPriceTerms(
-    @Param('providerId') providerId: string,
-    @Param('cardId') cardId: string,
-    @CurrentUser() user: AuthUser,
-    @Body() dto: AcceptShowcasePriceTermsDto,
-  ) {
-    return this.priceTerms.acceptForCard(providerId, cardId, user, dto);
-  }
-
-  /**
    * An edit. What it produces — a rewritten draft, a new draft for review, or a
    * new live version — is the service's decision, not the caller's: a client
    * that could ask for "publish this without review" would be the whole of the
@@ -161,6 +114,10 @@ export class ProviderShowcaseCardsController {
   /**
    * 200 rather than 201: nothing the caller addressed is created — the same card
    * comes back with its draft now waiting for an operator.
+   *
+   * The body is empty. The provider accepted the price-responsibility text when
+   * they bought the package; the route keeps a typed body so the old acceptance
+   * fields are refused rather than silently dropped.
    */
   @Post(':cardId/submit')
   @HttpCode(HttpStatus.OK)
@@ -190,6 +147,22 @@ export class ProviderShowcaseCardsController {
     @Param('cardId') cardId: string,
   ) {
     return this.cards.withdrawSubmission(providerId, cardId);
+  }
+
+  /**
+   * Binds a right to a card that has none; publishes at once if the card is
+   * already approved.
+   *
+   * 201, unlike its siblings: when the card is approved this call births a
+   * placement — a new resource — and the same card comes back on the air.
+   */
+  @Post(':cardId/use-entitlement')
+  useEntitlement(
+    @Param('providerId') providerId: string,
+    @Param('cardId') cardId: string,
+    @Body() dto: UseShowcaseEntitlementDto,
+  ) {
+    return this.cards.useEntitlement(providerId, cardId, dto);
   }
 
   /**

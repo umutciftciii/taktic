@@ -123,7 +123,7 @@ export class ShowcaseSchedulerService implements OnModuleInit {
       const result = await this.expiry.execute({ limit: readShowcaseScanLimit() });
       const summary =
         `expired=${result.expired} skipped=${result.skipped} ` +
-        `shelvesClosed=${result.shelvesClosed}`;
+        `shelvesClosed=${result.shelvesClosed} entitlementsExpired=${result.entitlementsExpired}`;
       this.logger.log(`Vitrin placement expiry summary ${summary}`);
       this.runs.record('showcase-placement-expiry', {
         startedAt,

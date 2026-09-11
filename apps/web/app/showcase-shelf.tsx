@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { apiFetch, formatPrice, type ShowcaseFeed, type ShowcaseFeedCard } from '../lib/api';
+import { apiFetch, type ShowcaseFeed, type ShowcaseFeedCard } from '../lib/api';
+import { faceFromFeedCard, ShowcaseCardFace } from './showcase-card-face';
 
 /**
  * The vitrin shelf on the home page.
@@ -62,7 +63,7 @@ export async function ShowcaseShelf() {
           </p>
         ) : (
           <>
-            <div className="showcase-shelf-grid" data-testid="showcase-shelf">
+            <div className="vitrin-grid" data-testid="showcase-shelf">
               {feed.cards.map((card) => (
                 <ShowcaseShelfCard card={card} key={card.cardId} />
               ))}
@@ -86,46 +87,29 @@ export async function ShowcaseShelf() {
 /**
  * One card.
  *
- * The service area is a band of its own above the title rather than a muted
- * line under the call to action, and that placement is the whole point of this
- * revision: a visitor who never chose a location has to be able to tell, at a
- * glance and before reading anything else, whether this card is for them.
+ * The face carries the area band, the title, the price and the media — the
+ * exact same face a provider sees on their own screens. This wrapper adds
+ * only what is specific to the shelf: the response-time line and the primary
+ * call to action.
  */
 export function ShowcaseShelfCard({ card }: { card: ShowcaseFeedCard }) {
   return (
-    <article className="showcase-shelf-card">
-      <p className="showcase-area-badge" data-testid="showcase-card-area">
-        <span className="showcase-area-badge-label">Hizmet bölgesi</span>
-        <span className="showcase-area-badge-value">{areaSentence(card)}</span>
-      </p>
-
-      <span className="kicker">{card.category.name}</span>
-      <h3>
-        <Link href={`/vitrin/${card.cardId}`}>{card.title}</Link>
-      </h3>
-      <p className="showcase-shelf-provider">{card.provider.businessName}</p>
-      <p className="showcase-shelf-summary">{card.summary}</p>
-
-      {/*
-        Present only on a SERVICE card. The key is absent on a promotion card
-        rather than null, so this cannot render a price nobody claimed.
-      */}
-      {typeof card.listedServicePriceAmount === 'number' ? (
-        <p className="showcase-shelf-price">
-          {formatPrice(card.listedServicePriceAmount, card.listedServiceCurrency ?? 'TRY')}
-          <span className="muted"> · sabit hizmet bedeli</span>
+    <div data-testid="showcase-shelf-card">
+      <ShowcaseCardFace
+        card={faceFromFeedCard(card)}
+        href={`/vitrin/${card.cardId}`}
+        testId="showcase-card-face"
+      />
+      <div className="vitrin-card-foot">
+        <p className="muted">
+          Acil: {card.responseSlaUrgentHours} saat · Normal: {card.responseSlaNormalHours} saat
+          içinde dönüş
         </p>
-      ) : null}
-
-      <p className="muted showcase-shelf-sla">
-        Acil: {card.responseSlaUrgentHours} saat · Normal: {card.responseSlaNormalHours} saat
-        içinde dönüş
-      </p>
-
-      <Link className="btn btn-secondary" href={`/vitrin/${card.cardId}`}>
-        Bu hizmeti incele
-      </Link>
-    </article>
+        <Link className="pdash-btn pdash-btn-primary" href={`/vitrin/${card.cardId}`}>
+          Bu hizmeti incele
+        </Link>
+      </div>
+    </div>
   );
 }
 

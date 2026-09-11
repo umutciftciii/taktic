@@ -1,0 +1,35 @@
+DROP DATABASE
+NOTICE:  database "taktic_vitdesign002_dryrun" does not exist, skipping
+CREATE DATABASE
+ set_config 
+------------
+ 
+(1 row)
+
+== before
+1|1|6|0|1|11|10|6|9
+5c985341bdb46a5ec6a3fc4f61ae853c
+b74ad286f867515e9faa2c33143a3310
+warn The configuration property `package.json#prisma` is deprecated and will be removed in Prisma 7. Please migrate to a Prisma config file (e.g., `prisma.config.ts`).
+For more information, see: https://pris.ly/prisma-config
+
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "taktic_vitdesign002_dryrun", schema "public" at "localhost:5433"
+
+56 migrations found in prisma/migrations
+
+Applying migration `20260911120000_add_showcase_entitlements`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260911120000_add_showcase_entitlements/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+== after
+1|1|6|0|1|11|10|6|9
+5c985341bdb46a5ec6a3fc4f61ae853c
+b74ad286f867515e9faa2c33143a3310
+1 Aylık Vitrin Paketi|90
+0
