@@ -2561,13 +2561,15 @@ export type ShowcasePlacement = {
  */
 export type ShowcasePriceTermsAcceptance = {
   id: string;
-  cardId: string;
+  /** Null for a package-first acceptance: it is scoped to the business, not a card. */
+  cardId: string | null;
   providerId: string;
   termsVersion: string;
   termsTextSnapshot: string;
   acceptedAt: string;
+  scope: 'CARD' | 'PACKAGE';
   provider: { id: string; businessName: string; status: string };
-  card: { id: string; kind: string; status: string; categoryId: string };
+  card: { id: string; kind: string; status: string; categoryId: string } | null;
   acceptedByUser: { id: string; name: string | null; email: string | null };
 };
 

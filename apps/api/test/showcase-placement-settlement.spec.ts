@@ -10,6 +10,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
 import { LEMON_SQUEEZY_SIGNATURE_HEADER } from '../src/modules/payments/lemon-squeezy.webhook';
 import {
+  acceptShowcasePriceTerms,
+  createApprovedShowcaseCard,
   createCategory,
   createDiscoverableProvider,
   createOfferPackage,
@@ -382,6 +384,89 @@ describe('a settled vitrin payment', () => {
     const event = await ctx.prisma.paymentWebhookEvent.findFirstOrThrow({});
     expect(event.detail).toBe('AMOUNT_MISMATCH');
     expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
+  });
+
+  /**
+   * A purchase opened by the card-bound checkout before the package-first flow
+   * shipped, still pending when the webhook arrives. The row names a card, a
+   * version and a card-scoped acceptance, and settling it must do what it
+   * always did — publish that card — not grant a right the provider never
+   * bought as one.
+   */
+  it('settles a legacy card-bound purchase into a placement, exactly as before', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', {
+      kind: ServiceCategoryKind.LEAF,
+    });
+    const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, {
+      userId: ownerUser.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+    const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: provider.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
+    });
+    const pkg = await createShowcasePackage(ctx.prisma, { priceAmount: PRICE, durationDays: 30 });
+    const acceptance = await acceptShowcasePriceTerms(ctx.prisma, {
+      providerId: provider.id,
+      cardId: card.id,
+      userId: ownerUser.id,
+    });
+    configureLemonSqueezy(`${pkg.slug}:${VARIANT_ID}`);
+
+    // The row the old checkout wrote, inserted directly: no route opens one
+    // any more.
+    const purchase = await ctx.prisma.packagePurchase.create({
+      data: {
+        providerId: provider.id,
+        kind: 'SHOWCASE_PACKAGE',
+        showcasePackageId: pkg.id,
+        showcaseCardId: card.id,
+        showcaseCardVersionId: version.id,
+        showcasePriceTermsAcceptanceId: acceptance.id,
+        durationDaysSnapshot: 30,
+        creditAmountSnapshot: 0,
+        priceAmountSnapshot: PRICE,
+        currencySnapshot: 'TRY',
+        packageNameSnapshot: pkg.name,
+        status: PackagePurchaseStatus.PENDING,
+        paymentProvider: 'lemon-squeezy-test',
+        paymentReference: 'legacy-card-bound-reference',
+        providerCheckoutId: 'checkout-legacy-1',
+        providerCheckoutUrl: HOSTED_URL,
+      },
+    });
+
+    const response = await deliver(orderPayload({ reference: 'legacy-card-bound-reference' }));
+    expect(response.status).toBe(200);
+
+    const settled = await ctx.prisma.packagePurchase.findUniqueOrThrow({
+      where: { id: purchase.id },
+    });
+    expect(settled.status).toBe(PackagePurchaseStatus.PAID);
+    expect(settled.providerOrderId).toBe('order-vitrin-1');
+
+    const placement = await ctx.prisma.showcasePlacement.findUniqueOrThrow({
+      where: { purchaseId: purchase.id },
+      include: { shelves: true },
+    });
+    expect(placement.status).toBe('ACTIVE');
+    expect(placement.cardId).toBe(card.id);
+    expect(placement.pinnedVersionId).toBe(version.id);
+    expect(placement.startAt.getTime()).toBe(settled.paidAt!.getTime());
+    expect(placement.shelves).toHaveLength(1);
+    expect(placement.shelves[0]?.active).toBe(true);
+
+    // The legacy sale grants no right and still moves no balance.
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
+    expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
+    expect(
+      ctx.notifications.sent.filter(
+        (message) => message.template === 'showcase-placement-activated',
+      ),
+    ).toHaveLength(1);
   });
 
   it('leaves an ordinary credit purchase settling exactly as it always has', async () => {

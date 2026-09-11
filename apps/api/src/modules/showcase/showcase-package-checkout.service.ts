@@ -141,24 +141,33 @@ export class ShowcasePackageCheckoutService {
          * apart. A provider who already agreed to this version is not asked
          * again; a provider who has not must agree to *this* version.
          */
-        let acceptance = await tx.showcasePackageTermsAcceptance.findUnique({
+        const existing = await tx.showcasePackageTermsAcceptance.findUnique({
           where: { providerId_termsVersion: { providerId, termsVersion: terms.version } },
           select: { id: true },
         });
-        if (!acceptance) {
-          if (dto.priceTermsAccepted !== true || dto.priceTermsVersion !== terms.version) {
-            throw showcasePriceTermsReacceptRequired(terms.version);
-          }
-          acceptance = await tx.showcasePackageTermsAcceptance.create({
-            data: {
-              providerId,
-              termsVersion: terms.version,
-              termsTextSnapshot: terms.text,
-              acceptedByUserId: user.id,
-            },
-            select: { id: true },
-          });
+        if (
+          !existing &&
+          (dto.priceTermsAccepted !== true || dto.priceTermsVersion !== terms.version)
+        ) {
+          throw showcasePriceTermsReacceptRequired(terms.version);
         }
+        // An upsert rather than a create, because a first purchase is the one
+        // most likely to be double-clicked: two requests that both read no
+        // acceptance would both insert, and the unique index would turn the
+        // loser into a 500 that `runSerializable` does not retry. The upsert
+        // lets the loser adopt the winner's row — the same consent, recorded
+        // once — instead of failing on it.
+        const acceptance = await tx.showcasePackageTermsAcceptance.upsert({
+          where: { providerId_termsVersion: { providerId, termsVersion: terms.version } },
+          update: {},
+          create: {
+            providerId,
+            termsVersion: terms.version,
+            termsTextSnapshot: terms.text,
+            acceptedByUserId: user.id,
+          },
+          select: { id: true },
+        });
 
         const reusable = await this.findReusableCheckout(tx, providerId, pkg.id, kind);
         if (reusable) {
@@ -269,6 +278,15 @@ export class ShowcasePackageCheckoutService {
    * `showcaseCardId: null` keeps a legacy card-bound purchase — opened before
    * the package-first flow and still pending — from being handed back as if it
    * were a right: settling it would publish a card, not grant one.
+   *
+   * The two adapters differ on what "usable" means, and the clause below says
+   * so. A hosted provider's purchase is only continuable once its URL has
+   * landed on the row (`payments.service.ts` applies the same rule): a row
+   * whose session never opened, or the transient row between the insert
+   * committing and the URL being written, would otherwise be handed back as
+   * `{ url: null }` — a button that goes nowhere. The mock adapter has no
+   * hosted page at all, so its pending purchase is the one to continue and a
+   * null URL is its normal state.
    */
   private findReusableCheckout(
     db: Prisma.TransactionClient,
@@ -284,8 +302,7 @@ export class ShowcasePackageCheckoutService {
         showcaseCardId: null,
         status: PackagePurchaseStatus.PENDING,
         paymentProvider: kind,
-        // The mock adapter has no hosted URL; its pending purchase is still the
-        // one to continue.
+        ...(kind === 'mock' ? {} : { providerCheckoutUrl: { not: null } }),
         OR: [
           { providerCheckoutExpiresAt: null },
           { providerCheckoutExpiresAt: { gt: new Date() } },

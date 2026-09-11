@@ -2,6 +2,8 @@ import { ServiceCategoryKind, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  acceptShowcasePriceTerms,
+  createApprovedShowcaseCard,
   createCategory,
   createDiscoverableProvider,
   createShowcasePackage,
@@ -31,6 +33,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
+  ctx.notifications.clear();
 });
 
 async function scenario() {
@@ -210,5 +213,95 @@ describe('the package-first checkout', () => {
       .send({ ...MOCK_CARD, cardNumber: '4111111111110000' });
     expect(declined.body.status).toBe('FAILED');
     expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
+  });
+});
+
+describe('two first checkouts arriving together', () => {
+  /**
+   * The first purchase is the one most likely to be double-clicked, and it is
+   * the one that writes the acceptance. Both requests read no acceptance and
+   * both try to record one; the unique index on (provider, version) settles it
+   * and the loser adopts the winner's row rather than failing on it. Reuse then
+   * hands the same pending purchase back where the ordering allows it, so the
+   * outcome is two 201s, one acceptance, and no more than two purchases.
+   */
+  it('record one acceptance and both succeed', async () => {
+    const { profile, pkg, cookie } = await scenario();
+    const body = { showcasePackageId: pkg.id, priceTermsAccepted: true, priceTermsVersion: 'v1' };
+
+    const [first, second] = await Promise.all([
+      checkout(profile.id, cookie, body),
+      checkout(profile.id, cookie, body),
+    ]);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(
+      await ctx.prisma.showcasePackageTermsAcceptance.count({ where: { providerId: profile.id } }),
+    ).toBe(1);
+    expect(await ctx.prisma.packagePurchase.count()).toBeLessThanOrEqual(2);
+    expect(await ctx.prisma.packagePurchase.count({ where: { status: 'FAILED' } })).toBe(0);
+  });
+});
+
+describe('a legacy card-bound purchase on the mock path', () => {
+  /**
+   * Opened by the card-bound checkout before the package-first flow, still
+   * pending. The mock form settles it the way it always did — into a placement
+   * for the named card — and grants no right.
+   */
+  it('settles into a placement, exactly as before', async () => {
+    const { category, profile, user, cookie } = await scenario();
+    const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: profile.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: 'Kadıköy' }],
+    });
+    const pkg = await createShowcasePackage(ctx.prisma, { durationDays: 30 });
+    const acceptance = await acceptShowcasePriceTerms(ctx.prisma, {
+      providerId: profile.id,
+      cardId: card.id,
+      userId: user.id,
+    });
+    const purchase = await ctx.prisma.packagePurchase.create({
+      data: {
+        providerId: profile.id,
+        kind: 'SHOWCASE_PACKAGE',
+        showcasePackageId: pkg.id,
+        showcaseCardId: card.id,
+        showcaseCardVersionId: version.id,
+        showcasePriceTermsAcceptanceId: acceptance.id,
+        durationDaysSnapshot: 30,
+        creditAmountSnapshot: 0,
+        priceAmountSnapshot: pkg.priceAmount,
+        currencySnapshot: pkg.currency,
+        packageNameSnapshot: pkg.name,
+        status: 'PENDING',
+        paymentProvider: 'mock',
+      },
+    });
+
+    const paid = await request(ctx.server)
+      .post(`/providers/${profile.id}/package-purchases/${purchase.id}/mock-pay`)
+      .set('Cookie', cookie)
+      .send(MOCK_CARD);
+    expect(paid.status).toBe(201);
+    expect(paid.body.status).toBe('PAID');
+
+    const placement = await ctx.prisma.showcasePlacement.findUniqueOrThrow({
+      where: { purchaseId: purchase.id },
+      include: { shelves: true },
+    });
+    expect(placement.status).toBe('ACTIVE');
+    expect(placement.cardId).toBe(card.id);
+    expect(placement.pinnedVersionId).toBe(version.id);
+    expect(placement.shelves).toHaveLength(1);
+    expect(placement.shelves[0]?.active).toBe(true);
+    expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
+    expect(
+      ctx.notifications.sent.filter(
+        (message) => message.template === 'showcase-placement-activated',
+      ),
+    ).toHaveLength(1);
   });
 });

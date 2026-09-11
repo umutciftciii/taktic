@@ -118,12 +118,20 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
                       </Link>
                     </td>
                     <td>
-                      <Link href={`/showcase/cards?cardId=${row.card.id}`}>
-                        {row.card.id.slice(-6)}
-                      </Link>
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {row.card.kind} · {row.card.status}
-                      </div>
+                      {row.card ? (
+                        <>
+                          <Link href={`/showcase/cards?cardId=${row.card.id}`}>
+                            {row.card.id.slice(-6)}
+                          </Link>
+                          <div className="muted" style={{ fontSize: 12 }}>
+                            {row.card.kind} · {row.card.status}
+                          </div>
+                        </>
+                      ) : (
+                        // A package-first acceptance names no card: the
+                        // business agreed once, for every card it goes on to buy for.
+                        '—'
+                      )}
                     </td>
                     <td>{row.termsVersion}</td>
                     <td>
