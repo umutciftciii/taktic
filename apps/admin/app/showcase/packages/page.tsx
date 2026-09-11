@@ -104,6 +104,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                   <th>Kısa ad</th>
                   <th>Yayın bedeli</th>
                   <th>Süre</th>
+                  <th>Geçerlilik</th>
                   <th>Kart tipi</th>
                   <th>Bölge</th>
                   <th>Durum</th>
@@ -128,6 +129,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                     </td>
                     <td>{formatPrice(pkg.priceAmount, pkg.currency)}</td>
                     <td>{pkg.durationDays} gün</td>
+                    <td>{pkg.activationWindowDays} gün</td>
                     <td>
                       {pkg.allowedCardKind
                         ? SHOWCASE_CARD_KIND_LABELS[pkg.allowedCardKind]
@@ -182,6 +184,22 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
           <label>
             <span>Süre (gün) *</span>
             <input name="durationDays" type="number" min={1} max={365} required />
+          </label>
+          <label>
+            <span>Kullanılmamış hakkın geçerliliği (gün) *</span>
+            <input
+              name="activationWindowDays"
+              type="number"
+              min={1}
+              max={365}
+              step={1}
+              defaultValue={90}
+              required
+            />
+            <small>
+              Ödemeden itibaren kartın onaylanıp yayına girmesi için tanınan süre. İnceleme
+              süresi sayılmaz.
+            </small>
           </label>
           <label>
             <span>Kart tipi</span>
@@ -244,6 +262,22 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                 defaultValue={pkg.durationDays}
                 required
               />
+            </label>
+            <label>
+              <span>Kullanılmamış hakkın geçerliliği (gün) *</span>
+              <input
+                name="activationWindowDays"
+                type="number"
+                min={1}
+                max={365}
+                step={1}
+                defaultValue={pkg.activationWindowDays ?? 90}
+                required
+              />
+              <small>
+                Ödemeden itibaren kartın onaylanıp yayına girmesi için tanınan süre. İnceleme
+                süresi sayılmaz.
+              </small>
             </label>
             <label>
               <span>Kart tipi</span>

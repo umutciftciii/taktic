@@ -102,6 +102,7 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
               <thead>
                 <tr>
                   <th>İşletme</th>
+                  <th>Kapsam</th>
                   <th>Kart</th>
                   <th>Sürüm</th>
                   <th>Onaylayan</th>
@@ -117,6 +118,7 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
                         {row.provider.businessName}
                       </Link>
                     </td>
+                    <td>{row.scope === 'PACKAGE' ? 'Paket' : 'Kart'}</td>
                     <td>
                       {row.card ? (
                         <>

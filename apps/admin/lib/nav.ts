@@ -38,13 +38,13 @@ export const navGroups: NavGroup[] = [
        * package catalogue — both are things an operator goes looking for while
        * already inside vitrin, not places they navigate to cold.
        */
-      { href: '/showcase/reviews', label: 'Kart İncelemeleri' },
+      { href: '/showcase/reviews', label: 'Kart incelemeleri' },
       // The paid side of vitrin. Under Operasyon with the rest of it rather
       // than under Finans: a run is something an operator suspends, resumes and
       // investigates, and the money it represents is already visible on the
       // purchase it came from.
-      { href: '/showcase/placements', label: 'Yayındaki Kartlar' },
-      { href: '/showcase/leads', label: 'Vitrin Talepleri' },
+      { href: '/showcase/placements', label: 'Yayındaki kartlar' },
+      { href: '/showcase/leads', label: 'Vitrin talepleri' },
     ],
   },
   {
@@ -54,7 +54,7 @@ export const navGroups: NavGroup[] = [
       // The vitrin catalogue is a catalogue: an operator maintains it the way
       // they maintain credit packages, and it belongs beside them rather than
       // with the runs it produces.
-      { href: '/showcase/packages', label: 'Vitrin Paketleri' },
+      { href: '/showcase/packages', label: 'Paketler' },
       { href: '/credit-packages', label: 'Kredi Paketleri' },
     ],
   },

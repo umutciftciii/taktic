@@ -2384,6 +2384,19 @@ export type ShowcaseVersionDetail = ShowcaseCardVersion & {
     removedAreaKeys: string[];
     createdAt: string;
   } | null;
+  /**
+   * The reserved right this card would go live under — null when it holds
+   * none. Only meaningful for a first publication: a revision replaces an
+   * already-live card and consumes no right of its own, so a reviewer only
+   * needs this to judge whether approval is possible at all.
+   */
+  entitlement: {
+    packageName: string;
+    durationDays: number;
+    expiresAt: string;
+    pausedForReview: boolean;
+    valid: boolean;
+  } | null;
 };
 
 export type ShowcaseCardListEntry = ShowcaseCard & { provider: ShowcaseProviderSummary };
@@ -2485,6 +2498,13 @@ export type ShowcasePackage = {
   priceAmount: number;
   currency: string;
   durationDays: number;
+  /**
+   * How long a purchased-but-unused right stays reserved for one card, in
+   * days, counted from payment. Review time does not consume it — a version
+   * sitting in the queue does not burn the clock the way an operator's delay
+   * would.
+   */
+  activationWindowDays: number;
   allowedCardKind: ShowcaseCardKind | null;
   maxAreas: number | null;
   requiresAdminApproval: boolean;
