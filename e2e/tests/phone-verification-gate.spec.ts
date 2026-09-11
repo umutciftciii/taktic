@@ -90,7 +90,23 @@ test.describe('phone verification gate', () => {
       await customer.page.locator('input[name="code"]').fill(code);
       // Exact: "Doğrulama kodu gönder" also contains "Doğrula".
       await customer.page.getByRole('button', { name: 'Doğrula', exact: true }).click();
-      await expect(customer.page).toHaveURL(/verification=ok/);
+      // Both the send-code and the verify actions redirect to the same
+      // `?verification=ok` shape, so the URL from the send-code step above
+      // already satisfies this assertion before the verify round-trip lands —
+      // asserting on it here would pass instantly instead of waiting for the
+      // server action to finish. Poll the write the verify call performs
+      // instead: once it is set, the round trip genuinely completed.
+      await expect
+        .poll(
+          async () =>
+            (await prisma().serviceRequest.findUniqueOrThrow({ where: { id: requestId } }))
+              .phoneVerifiedAt,
+          {
+            message: 'phoneVerifiedAt should be set once the verify action completes',
+            timeout: 15_000,
+          },
+        )
+        .not.toBeNull();
       await assertNoErrorScreen(customer.page);
 
       // The verification card is gone once the number is proven.
