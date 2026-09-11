@@ -1,6 +1,12 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { loadUnreadMessageCount, type AuthUser, type ProviderStatus } from '../../lib/api';
+import {
+  apiFetch,
+  loadUnreadMessageCount,
+  type AuthUser,
+  type ProviderStatus,
+  type ShowcasePublicationList,
+} from '../../lib/api';
 import { statusLabel } from '../../lib/request-formatters';
 import {
   IconBell,
@@ -46,6 +52,16 @@ type ProviderShellProps = {
   creditBalance?: number | null;
   status?: ProviderStatus | null;
   counts?: Partial<Record<'requests' | 'offers' | 'showcaseLeads', number>>;
+  /**
+   * Whether this business has ever published a vitrin card.
+   *
+   * The lead inbox is navigated to off this. A provider who has never bought a
+   * placement has no direct leads and cannot have any until they do, so an
+   * entry that is permanently empty is an entry that teaches people the sidebar
+   * lies. Passed in by the vitrin screens, which already know; worked out here
+   * for every other screen, which does not.
+   */
+  hasShowcaseHistory?: boolean;
   children: ReactNode;
 };
 
@@ -65,6 +81,7 @@ export async function ProviderShell({
   creditBalance = null,
   status = null,
   counts = {},
+  hasShowcaseHistory,
   children,
 }: ProviderShellProps) {
   const display = displayName(user);
@@ -79,6 +96,15 @@ export async function ProviderShell({
   const showcaseLeadsHref = providerId ? `/providers/${providerId}/vitrin/talepler` : null;
   const profileHref = providerId ? `/providers/${providerId}` : null;
   const unread = await loadUnreadMessageCount();
+  /*
+   * Asked here rather than passed in by twelve screens, for the reason the
+   * unread badge already is: it describes the account, not the route, and a
+   * sidebar that only knew it where somebody remembered to pass it would hide
+   * the lead inbox from a provider standing on their own dashboard with a clock
+   * running. Skipped entirely when the caller already knows.
+   */
+  const showcaseLeadsVisible =
+    hasShowcaseHistory ?? (providerId ? await loadShowcaseHistory(providerId) : false);
 
   const navItems: ReadonlyArray<{
     key: ProviderShellActive;
@@ -170,52 +196,61 @@ export async function ProviderShell({
       ) : null}
 
       <nav className="pdash-nav" aria-label="Bölüm navigasyonu">
-        {navItems.map((item) => {
-          const isActive = item.key === active;
-          const { Icon } = item;
+        {navItems
+          /*
+           * The lead inbox is dropped from the list entirely rather than shown
+           * disabled. The "needs a profile" placeholder below is for sections a
+           * provider is *about* to be able to reach; this one is for a section
+           * that will not exist for them until they buy a placement, and a
+           * greyed row telling somebody so on every screen is noise.
+           */
+          .filter((item) => item.key !== 'showcase-leads' || showcaseLeadsVisible)
+          .map((item) => {
+            const isActive = item.key === active;
+            const { Icon } = item;
 
-          if (item.href) {
+            if (item.href) {
+              return (
+                <Link
+                  key={item.key}
+                  href={item.href}
+                  className={`pdash-nav-item${isActive ? ' is-active' : ''}`}
+                  aria-current={isActive ? 'page' : undefined}
+                  data-testid={`pdash-nav-${item.key}`}
+                >
+                  <span className="pdash-nav-icon">
+                    <Icon size={16} />
+                  </span>
+                  <span>{item.label}</span>
+                  {typeof item.count === 'number' ? (
+                    <span className="pdash-nav-count">{item.count}</span>
+                  ) : null}
+                </Link>
+              );
+            }
+
+            // A section that genuinely needs a provider profile, on an account
+            // that has not created one yet. It used to be labelled "Yakında",
+            // which was simply wrong — the feature has shipped, this account just
+            // cannot reach it yet — and told somebody waiting on their own profile
+            // to wait for the platform instead. The note now says which of the two
+            // it is, and says it in the row rather than only in a `title` a
+            // touchscreen never shows.
             return (
-              <Link
+              <span
                 key={item.key}
-                href={item.href}
-                className={`pdash-nav-item${isActive ? ' is-active' : ''}`}
-                aria-current={isActive ? 'page' : undefined}
+                className="pdash-nav-item is-disabled"
+                aria-disabled="true"
                 data-testid={`pdash-nav-${item.key}`}
               >
                 <span className="pdash-nav-icon">
                   <Icon size={16} />
                 </span>
                 <span>{item.label}</span>
-                {typeof item.count === 'number' ? (
-                  <span className="pdash-nav-count">{item.count}</span>
-                ) : null}
-              </Link>
-            );
-          }
-
-          // A section that genuinely needs a provider profile, on an account
-          // that has not created one yet. It used to be labelled "Yakında",
-          // which was simply wrong — the feature has shipped, this account just
-          // cannot reach it yet — and told somebody waiting on their own profile
-          // to wait for the platform instead. The note now says which of the two
-          // it is, and says it in the row rather than only in a `title` a
-          // touchscreen never shows.
-          return (
-            <span
-              key={item.key}
-              className="pdash-nav-item is-disabled"
-              aria-disabled="true"
-              data-testid={`pdash-nav-${item.key}`}
-            >
-              <span className="pdash-nav-icon">
-                <Icon size={16} />
+                <span className="pdash-nav-note">Profil gerekli</span>
               </span>
-              <span>{item.label}</span>
-              <span className="pdash-nav-note">Profil gerekli</span>
-            </span>
-          );
-        })}
+            );
+          })}
       </nav>
 
       {/*
@@ -297,7 +332,13 @@ type ProviderUserMenuProps = {
   profileHref: string | null;
 };
 
-function ProviderUserMenu({ user, display, initials, creditsHref, profileHref }: ProviderUserMenuProps) {
+function ProviderUserMenu({
+  user,
+  display,
+  initials,
+  creditsHref,
+  profileHref,
+}: ProviderUserMenuProps) {
   return (
     <details className="pdash-user">
       <summary className="pdash-user-summary" aria-label="Kullanıcı menüsü">
@@ -348,4 +389,22 @@ function getInitials(value: string): string {
   if (!cleaned) return 'H';
   const parts = cleaned.split(/\s+/).slice(0, 2);
   return parts.map((p) => p.charAt(0).toLocaleUpperCase('tr-TR')).join('') || 'H';
+}
+
+/**
+ * Whether this business has ever had a vitrin run.
+ *
+ * A failure is "no", not an error: the sidebar is chrome, and an unreachable
+ * API must not take a provider's whole panel down with it. The worst case is
+ * one hidden entry on a screen the provider can still reach by URL.
+ */
+async function loadShowcaseHistory(providerId: string): Promise<boolean> {
+  try {
+    const publication = await apiFetch<ShowcasePublicationList>(
+      `/providers/${providerId}/showcase/publication`,
+    );
+    return publication.hasPublicationHistory;
+  } catch {
+    return false;
+  }
 }

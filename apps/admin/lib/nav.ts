@@ -22,22 +22,29 @@ export const navGroups: NavGroup[] = [
       { href: '/offers', label: 'Teklifler' },
       { href: '/providers', label: 'Hizmet Verenler' },
       { href: '/support', label: 'Destek Talepleri' },
-      // Vitrin sits in Operasyon rather than Katalog: the queue is work waiting
-      // on an operator, like the request and provider queues beside it, not a
-      // catalogue somebody maintains.
-      { href: '/showcase/reviews', label: 'Vitrin İncelemeleri' },
-      { href: '/showcase/cards', label: 'Vitrin Kartları' },
+      /*
+       * Vitrin, as three entries rather than five.
+       *
+       * It used to carry "Vitrin İncelemeleri", "Vitrin Kartları", "Vitrin
+       * Yerleşimleri", "Vitrin Talepleri" and "Vitrin Metin Onayları" — five
+       * rows in one sidebar, three of them named after tables. An operator
+       * opening the panel had to know what a "yerleşim" was before they could
+       * decide which row held the thing they were looking for.
+       *
+       * The three that are left are the three jobs: read what is waiting to be
+       * approved, look at what is on the air, and answer what customers sent.
+       * "Vitrin Kartları" (every card, in every state) is reachable from the
+       * review queue, and "Vitrin Metin Onayları" (the consent ledger) from the
+       * package catalogue — both are things an operator goes looking for while
+       * already inside vitrin, not places they navigate to cold.
+       */
+      { href: '/showcase/reviews', label: 'Kart İncelemeleri' },
       // The paid side of vitrin. Under Operasyon with the rest of it rather
-      // than under Finans: a placement is something an operator suspends,
-      // resumes and investigates, and the money it represents is already
-      // visible on the purchase it came from.
-      { href: '/showcase/placements', label: 'Vitrin Yerleşimleri' },
+      // than under Finans: a run is something an operator suspends, resumes and
+      // investigates, and the money it represents is already visible on the
+      // purchase it came from.
+      { href: '/showcase/placements', label: 'Yayındaki Kartlar' },
       { href: '/showcase/leads', label: 'Vitrin Talepleri' },
-      // The consent ledger. Under Operasyon rather than Katalog because the
-      // question it answers is about a business — "did they agree to this, and
-      // when" — and it is asked while investigating one, not while maintaining
-      // the catalogue that produced the text.
-      { href: '/showcase/price-terms', label: 'Vitrin Metin Onayları' },
     ],
   },
   {

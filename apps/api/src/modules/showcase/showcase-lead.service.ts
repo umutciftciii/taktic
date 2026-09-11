@@ -15,11 +15,13 @@ import {
 } from '@prisma/client';
 import { ForbiddenException } from '@nestjs/common';
 import { runSerializable } from '../../common/serializable-transaction';
+import { showcaseCandidateAreaKeys } from '../../common/showcase-area-key';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
 import { normalizePhoneNumber } from '../phone-verification/phone.util';
+import { resolveArea } from '../locations/turkey-locations';
 import { ServiceRequestsService } from '../service-requests/service-requests.service';
 import {
   CreateShowcaseLeadDto,
@@ -32,8 +34,10 @@ import {
   SHOWCASE_LEAD_RATE_LIMIT_WINDOW_MINUTES,
 } from './showcase.constants';
 import {
+  showcaseAreaUnknown,
   showcaseCardNotFound,
   showcaseFallbackAlreadyDecided,
+  showcaseLeadAreaNotServed,
   showcaseFallbackNotAvailable,
   showcaseLeadNotFound,
   showcaseLeadPhoneVerificationRequired,
@@ -141,6 +145,25 @@ export class ShowcaseLeadService {
     if (!live) {
       throw showcaseCardNotFound();
     }
+
+    /*
+     * The address on the request, checked against the run's own shelf.
+     *
+     * **This is the one check that makes the home page safe to show without a
+     * location.** A visitor now reads every live card, so the "Hizmet bölgesi"
+     * line on a card is a statement, not a filter — and a statement on a client
+     * is not an access rule. Nothing stops somebody opening a Kadıköy card and
+     * typing an Erzurum address into the form, and the business on the other
+     * end would get a lead with a clock on it for work they never sold.
+     *
+     * The rule is exactly the shelf's own: the three keys a real address can
+     * match, compared against the placement's active shelf rows. Not
+     * `areaCovers` over the card version's areas — the *shelf* is what is on
+     * the air, it is what a narrowing edit and an operator's suspension both
+     * write to, and checking anything else would let a lead through for an area
+     * that has since come off.
+     */
+    await this.assertPlacementServesRequest(live.placementId, dto);
 
     const phone = normalizePhoneNumber(dto.customerPhone ?? '');
     await this.assertWithinRateLimits(phone, meta.ipAddress, now);
@@ -470,6 +493,46 @@ export class ShowcaseLeadService {
    * inside its own window. A card the visitor's browser is still rendering from
    * a cached page must not be able to take a lead.
    */
+  /**
+   * Whether this run is actually on the air for the address the customer typed.
+   *
+   * The city/district/neighbourhood triple is re-resolved against the shipped
+   * location list first, for the same reason every other public write does it:
+   * "KADIKÖY", "Kadıköy" and "kadikoy" have to fold to one place before they can
+   * be compared with a key, and a triple that names no real place is a bad
+   * request rather than a silent miss. `createServiceRequest` will refuse the
+   * same triple a moment later — this only has to get there first, so the
+   * customer is told the useful thing ("this card does not cover you, here is
+   * the ordinary route") rather than a generic location error.
+   */
+  private async assertPlacementServesRequest(
+    placementId: string,
+    dto: CreateShowcaseLeadDto,
+  ): Promise<void> {
+    const area = resolveArea({
+      city: dto.city?.trim() ?? '',
+      district: dto.district?.trim() || null,
+      neighborhood: dto.neighborhood?.trim() || null,
+    });
+
+    if (!area) {
+      throw showcaseAreaUnknown();
+    }
+
+    const served = await this.prisma.showcasePlacementShelf.findFirst({
+      where: {
+        placementId,
+        active: true,
+        areaKey: { in: showcaseCandidateAreaKeys(area) },
+      },
+      select: { id: true },
+    });
+
+    if (!served) {
+      throw showcaseLeadAreaNotServed();
+    }
+  }
+
   private async loadLivePlacement(cardId: string, now: Date) {
     const placement = await this.prisma.showcasePlacement.findFirst({
       where: {

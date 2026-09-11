@@ -17,17 +17,21 @@ import { primaryRuntime } from '../src/runtime';
  *
  * ## What these journeys prove that a unit test cannot
  *
- * 1. **The shelf really is a shelf.** The home page asks for a location before
- *    it shows anything, and what it shows is the card the API published — the
- *    server component, the query string and the feed query agreeing end to end.
- * 2. **The lead form is a real gate.** A visitor cannot write to a business
- *    without proving a telephone number, and the three-step form on the card's
- *    page is what that looks like in a browser.
- * 3. **Only one business sees it.** Two providers match the request equally
+ * 1. **The shelf is on the home page, unconditionally.** No province is chosen
+ *    and no query string is set, and the card a business paid to publish is
+ *    there — with its service area stated on the card itself, which is what
+ *    replaced the location gate that used to stand in front of it.
+ * 2. **Coverage is decided on the server, not on the screen.** A visitor can
+ *    reach any card, and a lead for an address the card does not serve is
+ *    refused with a route onward rather than opened.
+ * 3. **The lead form is a real gate.** A visitor cannot write to a business
+ *    without proving a telephone number, and the steps on the card's page are
+ *    what that looks like in a browser.
+ * 4. **Only one business sees it.** Two providers match the request equally
  *    well; the second one's panel is checked, and it has to be empty.
- * 4. **The screens say what the clock does before it does it.** The archive
- *    form states that the paid days keep running, and the placement panel
- *    states what was bought — a provider should not learn either afterwards.
+ * 5. **The screens say what the clock does before it does it.** The archive
+ *    form states that the paid days keep running, and the publish panel states
+ *    what was bought — a provider should not learn either afterwards.
  *
  * The 320px checks are on the two pages a visitor actually meets — the shelf and
  * the card — because those are the ones with a card grid and a form on them,
@@ -278,7 +282,7 @@ async function proveLeadPhone(phone: string) {
 }
 
 test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
-  test('ziyaretçi bölgesini seçer, karttan talep gönderir; talep yalnız kart sahibine gider', async ({
+  test('ziyaretçi konum seçmeden kartı görür, karttan talep gönderir; talep yalnız kart sahibine gider', async ({
     browser,
   }) => {
     const location = uniqueLocation();
@@ -310,24 +314,30 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
     const rivalActor = await Actor.open(browser, 'web', primaryRuntime);
 
     try {
-      // ── The shelf asks for a location before it shows anybody ─────────────
+      /*
+       * ── The shelf, with no location chosen anywhere ───────────────────────
+       *
+       * The bare home page. No query string, no province picker, no cookie —
+       * and the card is on it, because that is what the business bought. What
+       * keeps the promise honest is the line the next assertion checks.
+       */
       await visitor.gotoWeb('/');
-      await assertNoErrorScreen(visitor.page);
-      await expect(visitor.page.getByTestId('showcase-shelf-empty')).toBeVisible();
-
-      await visitor.gotoWeb(
-        `/?vitrinIl=${encodeURIComponent(location.city)}&vitrinIlce=${encodeURIComponent(
-          location.district,
-        )}`,
-      );
       await assertNoErrorScreen(visitor.page);
 
       const shelf = visitor.page.getByTestId('showcase-shelf');
       await expect(shelf).toBeVisible();
-      await expect(shelf.getByText('E2E Vitrin Klima Bakımı')).toBeVisible();
+      const shelfCard = shelf.locator('article', {
+        hasText: 'E2E Vitrin Klima Bakımı',
+      });
+      await expect(shelfCard).toBeVisible();
+
+      // The single most load-bearing line on a card met without a filter.
+      await expect(shelfCard.getByTestId('showcase-card-area')).toContainText(
+        `${location.district}, ${location.city}`,
+      );
       // The provider's own price to their own customer. What TakTick charged
       // for the listing never appears on this page at all.
-      await expect(shelf.getByText('₺1.500,00')).toBeVisible();
+      await expect(shelfCard.getByText('₺1.500,00')).toBeVisible();
 
       for (const width of NARROW_WIDTHS) {
         await visitor.page.setViewportSize({ width, height: 900 });
@@ -335,13 +345,29 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       }
       await visitor.page.setViewportSize({ width: 1280, height: 900 });
 
-      // ── The card's own page, and the gate in front of the form ────────────
-      await visitor.page.getByRole('link', { name: 'Kartı gör ve talep gönder' }).click();
+      // ── The card's own page: a decision first, then the gate ──────────────
+      await shelfCard.getByRole('link', { name: 'Bu hizmeti incele' }).click();
       await assertNoErrorScreen(visitor.page);
 
       await expect(
         visitor.page.getByRole('heading', { name: 'E2E Vitrin Klima Bakımı' }),
       ).toBeVisible();
+
+      /*
+       * The scope, stated as a limit, with both ways out of it. A visitor who
+       * arrived from an unfiltered shelf is owed the question "is this for me"
+       * before they are shown a form.
+       */
+      await expect(visitor.page.getByTestId('showcase-card-coverage-note')).toContainText(
+        `Bu hizmet yalnız ${location.district}, ${location.city} kapsamındaki işler için sunulur.`,
+      );
+      const decision = visitor.page.getByTestId('showcase-card-decision');
+      await expect(decision.getByRole('link', { name: 'Vazgeç' })).toBeVisible();
+      await expect(visitor.page.getByTestId('showcase-lead-form')).toHaveCount(0);
+
+      await decision.getByRole('link', { name: 'Devam et' }).click();
+      await assertNoErrorScreen(visitor.page);
+
       // The lead form is not reachable until a telephone number is proved.
       await expect(visitor.page.getByTestId('showcase-lead-form')).toHaveCount(0);
       await expect(visitor.page.getByLabel('Telefon *')).toBeVisible();
@@ -447,6 +473,150 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
     }
   });
 
+  test('kapsam dışı konum için doğrudan talep açılmaz, genel talep yolu gösterilir', async ({
+    browser,
+  }) => {
+    const covered = uniqueLocation();
+    const elsewhere = uniqueLocation();
+    const category = await createCategory(3, { namePrefix: 'E2E Vitrin Kapsam' });
+    const owner = await createProvider({ categoryId: category.id, location: covered, credits: 0 });
+
+    const { card, version } = await seedApprovedCard({
+      providerId: owner.id,
+      categoryId: category.id,
+      city: covered.city,
+      district: covered.district,
+      title: 'E2E Kapsam Disi Kart',
+    });
+    await seedLivePlacement({
+      providerId: owner.id,
+      cardId: card.id,
+      versionId: version.id,
+      categoryId: category.id,
+      city: covered.city,
+      district: covered.district,
+    });
+
+    const visitor = await Actor.open(browser, 'web', primaryRuntime);
+
+    try {
+      /*
+       * The visitor reaches the card perfectly legitimately — every live card
+       * is on the home page now — and then types an address the business does
+       * not serve. The screen cannot be what stops this: only the server knows
+       * what the run's shelf holds, and only the customer knows where the work
+       * is.
+       */
+      const customerPhone = `0555${String(Date.now()).slice(-7)}`;
+      await proveLeadPhone(customerPhone);
+
+      await visitor.gotoWeb(
+        `/vitrin/${card.id}?step=form&phone=${encodeURIComponent(customerPhone)}`,
+      );
+      await assertNoErrorScreen(visitor.page);
+
+      await visitor.page.getByTestId('showcase-urgency-normal').check();
+      await visitor.page.getByLabel('Ad soyad *').fill('E2E Kapsam Disi');
+      await visitor.page
+        .getByLabel('E-posta *')
+        .fill(`e2e-kapsam-${Date.now()}@example.test`);
+      await visitor.page.getByLabel('İl *').selectOption(elsewhere.city);
+      await visitor.page.getByLabel('İlçe *').fill(elsewhere.district);
+      await visitor.page
+        .getByLabel('Talebiniz *')
+        .fill('Kapsam dışı bir adres için talep gönderiyorum.');
+
+      await visitor.page.getByTestId('showcase-lead-submit').click();
+      await assertNoErrorScreen(visitor.page);
+
+      // The refusal, in the words the product promises — and a way onward
+      // rather than a dead end.
+      const refusal = visitor.page.getByTestId('showcase-lead-area-not-served');
+      await expect(refusal).toBeVisible();
+      await expect(refusal).toContainText(
+        'Bu vitrin hizmeti seçtiğiniz konumu kapsamıyor. Genel talep oluşturmaya devam edebilirsiniz.',
+      );
+      await expect(visitor.page.getByTestId('showcase-lead-sent')).toHaveCount(0);
+
+      // Nothing was opened.
+      expect(await prisma().showcaseLead.count({ where: { cardId: card.id } })).toBe(0);
+
+      await visitor.page.getByTestId('showcase-general-request-cta').click();
+      await assertNoErrorScreen(visitor.page);
+      await expect(visitor.page).toHaveURL(new RegExp(`/categories/${category.slug}`));
+
+      for (const width of NARROW_WIDTHS) {
+        await visitor.page.setViewportSize({ width, height: 900 });
+        await expectNoHorizontalOverflow(visitor.page, `kapsam dışı uyarısı @ ${width}px`);
+      }
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  test('talep formunda kategori ve konuma uyan vitrin kartları gösterilir', async ({
+    browser,
+  }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(3, { namePrefix: 'E2E Vitrin Form' });
+    const owner = await createProvider({ categoryId: category.id, location, credits: 0 });
+
+    const { card, version } = await seedApprovedCard({
+      providerId: owner.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+      title: 'E2E Form Ici Vitrin Karti',
+    });
+    await seedLivePlacement({
+      providerId: owner.id,
+      cardId: card.id,
+      versionId: version.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+    });
+
+    const visitor = await Actor.open(browser, 'web', primaryRuntime);
+
+    try {
+      await visitor.gotoWeb(`/categories/${category.slug}`);
+      await assertNoErrorScreen(visitor.page);
+
+      // Nothing is offered before the customer has said where the work is:
+      // without a place the block would be the home page shelf wedged into a
+      // form somebody is halfway through.
+      await expect(visitor.page.getByTestId('showcase-request-matches')).toHaveCount(0);
+
+      await visitor.page.getByLabel('Açıklama', { exact: false }).first().fill(
+        'Salon kliması bakım istiyorum, iki gündür soğutmuyor.',
+      );
+      await visitor.page.getByRole('tab', { name: 'Konum & zaman' }).click();
+      await visitor.page.getByTestId('request-city').selectOption(location.city);
+      await visitor.page.getByTestId('request-district').selectOption(location.district);
+
+      const matches = visitor.page.getByTestId('showcase-request-matches');
+      await expect(matches).toBeVisible();
+      await expect(matches.getByText('E2E Form Ici Vitrin Karti')).toBeVisible();
+      await expect(matches.getByText(`${location.district}, ${location.city}`)).toBeVisible();
+
+      for (const width of NARROW_WIDTHS) {
+        await visitor.page.setViewportSize({ width, height: 900 });
+        await expectNoHorizontalOverflow(visitor.page, `talep formu vitrin bloğu @ ${width}px`);
+      }
+      await visitor.page.setViewportSize({ width: 1280, height: 900 });
+
+      // Choosing one leaves the marketplace form for that card, carrying the
+      // place the customer already picked so it is not asked twice.
+      await matches.getByTestId('showcase-request-match-cta').first().click();
+      await assertNoErrorScreen(visitor.page);
+      await expect(visitor.page).toHaveURL(new RegExp(`/vitrin/${card.id}`));
+      await expect(visitor.page.getByTestId('showcase-card-decision')).toBeVisible();
+    } finally {
+      await visitor.close();
+    }
+  });
+
   test('hizmet veren yayındaki süresini ve arşivleme bedelini kartında görür', async ({
     browser,
   }) => {
@@ -477,12 +647,20 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await provider.gotoWeb(`/providers/${owner.id}/vitrin/${card.id}`);
       await assertNoErrorScreen(provider.page);
 
-      // What was bought, in the provider's own words.
+      // What was bought, in the provider's own words — and nothing about a
+      // placement, a version number or a raw status.
       await expect(
         provider.page.getByRole('heading', { name: 'Vitrin yayını' }),
       ).toBeVisible();
-      await expect(provider.page.getByText('Yayında', { exact: true }).first()).toBeVisible();
+      await expect(provider.page.getByTestId('showcase-live-until')).toContainText('Yayında');
       await expect(provider.page.getByText('E2E Vitrin 30 Gün')).toBeVisible();
+      await expect(
+        provider.page.getByText(`${location.district}, ${location.city}`).first(),
+      ).toBeVisible();
+      await expect(provider.page.getByText('sürüm', { exact: false })).toHaveCount(0);
+
+      // A business that *has* published gets the lead inbox in its navigation.
+      await expect(provider.page.getByTestId('pdash-nav-showcase-leads')).toBeVisible();
 
       /*
        * The sentence that has to be read before the button, not after.
@@ -529,6 +707,7 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
     const admin = await Actor.open(browser, 'admin', primaryRuntime);
     const visitor = await Actor.open(browser, 'web', primaryRuntime);
+    const provider = await Actor.open(browser, 'web', primaryRuntime);
 
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
@@ -554,18 +733,38 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       ).toBeVisible();
 
       // And the card is off the shelf immediately, not at the next sweep.
-      await visitor.gotoWeb(
-        `/?vitrinIl=${encodeURIComponent(location.city)}&vitrinIlce=${encodeURIComponent(
-          location.district,
-        )}`,
-      );
+      await visitor.gotoWeb('/');
       await assertNoErrorScreen(visitor.page);
       await expect(
         visitor.page.getByText('E2E Durdurulacak Kart', { exact: false }),
       ).toHaveCount(0);
+
+      /*
+       * ── And the provider's own screen says the same thing ─────────────────
+       *
+       * The two panels used to derive a card's state independently — the
+       * operator's from the placement row, the provider's from the card status
+       * plus a filtered placement list plus an eligibility dry run — and could
+       * disagree. Both now read the same resolution, and this is the assertion
+       * that keeps them there. Note what the provider is told and what they are
+       * not: no raw status, no placement id, and the sentence about the clock,
+       * because that is the part that costs them money.
+       */
+      await provider.loginToWeb(owner.email, owner.password);
+      await provider.gotoWeb(`/providers/${owner.id}/vitrin`);
+      await assertNoErrorScreen(provider.page);
+
+      await expect(
+        provider.page.getByText('Geçici olarak yayında değil'),
+      ).toBeVisible();
+      await expect(
+        provider.page.getByText('durduğu süre yayın sürenize eklenir', { exact: false }),
+      ).toBeVisible();
+      await expect(provider.page.getByText('SUSPENDED', { exact: false })).toHaveCount(0);
     } finally {
       await admin.close();
       await visitor.close();
+      await provider.close();
     }
   });
 });

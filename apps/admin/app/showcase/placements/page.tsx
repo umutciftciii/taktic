@@ -57,9 +57,9 @@ export default async function ShowcasePlacementsPage({ searchParams }: Placement
   return (
     <>
       <PageHeader
-        title="Vitrin Yerleşimleri"
+        title="Yayındaki Kartlar"
         subtitle="Satın alınmış vitrin süreleri, yayın durumları ve durdurma geçmişleri."
-        breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Vitrin Yerleşimleri' }]}
+        breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Yayındaki Kartlar' }]}
       />
 
       <SectionCard

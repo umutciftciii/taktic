@@ -210,44 +210,55 @@ function errorCode(error: unknown): string {
  * which — it follows whatever the API said.
  */
 /**
- * Accepts the current price-responsibility text for one card.
+ * Puts one card on the vitrin: accept the sale terms if they are still
+ * outstanding, then open the checkout.
  *
- * Its own action rather than a step folded into the checkout, and that is the
- * point of the whole feature: agreeing to the platform's terms is a legal act,
- * and one a provider can perform without buying anything, without touching what
- * their card says, and without sending it back to an operator. The API writes a
- * row in a table of its own and changes nothing else.
+ * ## Why the two are one submission
  *
- * Lands back on the card, where the buy button now works.
+ * They used to be two screens, and the seam between them was the worst defect
+ * in this feature. A card's *submission* records its acceptance of the
+ * price-responsibility text on the version; the *sale* reads a separate ledger.
+ * A freshly approved card therefore had the first and not the second — so the
+ * moment an operator approved a card, the buying panel replaced the package
+ * table with a notice saying the terms had been "updated", for a provider who
+ * had accepted them ten minutes earlier and had nothing to compare it against.
+ * The packages, and the payment button with them, were simply not on screen.
+ *
+ * The acceptance is still a real, separate, recorded act — the API writes its
+ * own row, keyed to the card and the version in force, naming the account that
+ * agreed. What changed is that the provider performs it where it belongs: on
+ * the line above the button it unblocks, having just read the package's price
+ * and duration, in the order the flow actually runs. The checkbox is `required`,
+ * so nothing is agreed to by pressing "pay".
+ *
+ * Accepting is idempotent — a unique index on (card, version) makes a second
+ * row impossible — so a provider whose acceptance already stands sends no
+ * checkbox and this step is skipped entirely.
  */
-export async function acceptShowcasePriceTermsAction(formData: FormData) {
-  const providerId = readString(formData, 'providerId');
-  const cardId = readString(formData, 'cardId');
-  const target = `/providers/${providerId}/vitrin/${cardId}`;
-
-  try {
-    await apiFetch(
-      `/providers/${providerId}/showcase/cards/${cardId}/price-terms-acceptances`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          priceTermsAccepted: formData.get('priceTermsAccepted') === 'on',
-          priceTermsVersion: readString(formData, 'priceTermsVersion'),
-        }),
-      },
-    );
-  } catch (error) {
-    redirect(`${target}?error=${errorCode(error)}`);
-  }
-
-  revalidatePath(target);
-  redirect(`${target}?priceTermsAccepted=1`);
-}
-
 export async function startShowcaseCheckoutAction(formData: FormData) {
   const providerId = readString(formData, 'providerId');
   const cardId = readString(formData, 'cardId');
   const base = `/providers/${providerId}/vitrin/${cardId}`;
+  const priceTermsVersion = readString(formData, 'priceTermsVersion');
+
+  if (priceTermsVersion) {
+    try {
+      await apiFetch(
+        `/providers/${providerId}/showcase/cards/${cardId}/price-terms-acceptances`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            priceTermsAccepted: formData.get('priceTermsAccepted') === 'on',
+            priceTermsVersion,
+          }),
+        },
+      );
+    } catch (error) {
+      // Nothing is bought and no purchase row exists yet, so this is a clean
+      // stop: the provider lands back on the same panel with the reason.
+      redirect(`${base}?error=${errorCode(error)}`);
+    }
+  }
 
   let outcome: ShowcaseCheckoutResult;
   try {

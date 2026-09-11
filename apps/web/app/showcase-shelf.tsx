@@ -1,21 +1,25 @@
 import Link from 'next/link';
-import { apiFetch, formatPrice, type ShowcaseFeed } from '../lib/api';
-import type { ProvinceWithDistricts } from '../lib/locations';
+import { apiFetch, formatPrice, type ShowcaseFeed, type ShowcaseFeedCard } from '../lib/api';
 
 /**
  * The vitrin shelf on the home page.
  *
- * ## Why it asks for a location instead of showing a national list
+ * ## Why it no longer asks where the visitor is
  *
- * A placement is bought for particular districts, and a business that cannot
- * reach the visitor is not an advertisement — it is noise for the visitor and a
- * waste of what the provider paid for. The API refuses a feed request with no
- * location for exactly that reason, so this block asks first and shows nothing
- * until it has an answer.
+ * It used to. A placement is bought for particular districts, and the earlier
+ * reasoning was that a business which cannot reach the visitor is noise — so
+ * the block asked for a province first and rendered nothing until it had one.
  *
- * The location lives in the URL rather than in a cookie or in component state,
- * which is what makes the whole block a server component: no client bundle, and
- * a shelf somebody can bookmark or send to a friend.
+ * That treated vitrin as a filtered directory, and it is not one. A business
+ * buys a package, its card goes on the home page, and **everybody** sees it.
+ * The honesty is not in hiding the card; it is in the card saying, unmissably,
+ * which area it is good for — and in the server refusing a direct lead for an
+ * address outside that area, which is where the promise is actually kept.
+ *
+ * The old shape cost the whole surface: every visitor who arrived without a
+ * query string saw an empty box, so what a provider had paid to publish was
+ * invisible to almost everyone. The province picker still exists, on the
+ * separate discovery page at `/vitrin`, where narrowing is the point.
  *
  * ## What the ordering means, and why nothing here decides it
  *
@@ -33,119 +37,46 @@ import type { ProvinceWithDistricts } from '../lib/locations';
  * price to their customer; TakTick does not collect it, and what the provider
  * paid for the placement never appears on this page at all.
  */
-export async function ShowcaseShelf({
-  city,
-  district,
-  provinces,
-}: {
-  city: string | null;
-  district: string | null;
-  provinces: ProvinceWithDistricts[];
-}) {
-  const feed = city ? await loadFeed(city, district) : null;
-  const selectedProvince = provinces.find((province) => province.name === city) ?? null;
+export async function ShowcaseShelf() {
+  const feed = await loadFeed();
 
   return (
     <section className="lp-section lp-section-white" id="vitrin">
       <div className="lp-container">
         <header className="lp-section-head">
           <span className="kicker">Vitrin</span>
-          <h2 className="lp-section-title">Bölgenizdeki hizmet verenler</h2>
+          <h2 className="lp-section-title">Öne çıkan hizmetler</h2>
           <p className="lp-section-sub">
-            Bu işletmeler hizmetlerini ve yanıt sürelerini önden açıkladı. Karttan doğrudan
-            talep gönderdiğinizde talebiniz yalnız o işletmeye iletilir.
+            Bu işletmeler hizmetlerini, hizmet bölgelerini ve yanıt sürelerini önden açıkladı.
+            Kartı inceleyip kendi konumunuz kapsam içindeyse doğrudan talep gönderebilirsiniz.
           </p>
         </header>
 
-        {/*
-          A plain GET form, so choosing a place is a navigation. No JavaScript,
-          the result is linkable, and the page stays a server component.
-        */}
-        <form className="showcase-shelf-picker" method="get" action="/#vitrin">
-          <label>
-            <span>İl</span>
-            <select name="vitrinIl" defaultValue={city ?? ''}>
-              <option value="">İl seçin</option>
-              {provinces.map((province) => (
-                <option key={province.code} value={province.name}>
-                  {province.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/*
-            The district list is only offered once a province is chosen, because
-            there is nothing to list before that. A visitor who names only a
-            province still gets a shelf — the API answers a province-wide
-            prefix scan — so this field is genuinely optional.
-          */}
-          {selectedProvince ? (
-            <label>
-              <span>İlçe</span>
-              <select name="vitrinIlce" defaultValue={district ?? ''}>
-                <option value="">Tüm ilçeler</option>
-                {selectedProvince.districts.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          <button className="btn btn-primary" type="submit">
-            Göster
-          </button>
-        </form>
-
-        {!city ? (
+        {!feed ? (
           <p className="muted" data-testid="showcase-shelf-empty">
-            Size hizmet verebilecek işletmeleri gösterebilmemiz için önce bölgenizi seçin.
-          </p>
-        ) : !feed ? (
-          <p className="muted" data-testid="showcase-shelf-empty">
-            Bu bölge için vitrin listesi şu anda yüklenemedi.
+            Vitrin listesi şu anda yüklenemedi.
           </p>
         ) : feed.cards.length === 0 ? (
           <p className="muted" data-testid="showcase-shelf-empty">
-            {feed.location.label} için şu anda vitrinde işletme yok.
+            Şu anda vitrinde yayında olan bir hizmet yok.
           </p>
         ) : (
-          <div className="showcase-shelf-grid" data-testid="showcase-shelf">
-            {feed.cards.map((card) => (
-              <article className="showcase-shelf-card" key={card.cardId}>
-                <span className="kicker">{card.category.name}</span>
-                <h3>
-                  <Link href={`/vitrin/${card.cardId}`}>{card.title}</Link>
-                </h3>
-                <p className="showcase-shelf-provider">{card.provider.businessName}</p>
-                <p className="showcase-shelf-summary">{card.summary}</p>
+          <>
+            <div className="showcase-shelf-grid" data-testid="showcase-shelf">
+              {feed.cards.map((card) => (
+                <ShowcaseShelfCard card={card} key={card.cardId} />
+              ))}
+            </div>
 
-                {/*
-                  Present only on a SERVICE card. The key is absent on a
-                  promotion card rather than null, so this cannot render a
-                  price nobody claimed.
-                */}
-                {typeof card.listedServicePriceAmount === 'number' ? (
-                  <p className="showcase-shelf-price">
-                    {formatPrice(card.listedServicePriceAmount, card.listedServiceCurrency ?? 'TRY')}
-                    <span className="muted"> · sabit hizmet bedeli</span>
-                  </p>
-                ) : null}
-
-                <p className="muted showcase-shelf-sla">
-                  Acil: {card.responseSlaUrgentHours} saat · Normal:{' '}
-                  {card.responseSlaNormalHours} saat içinde dönüş
-                </p>
-                <p className="muted showcase-shelf-area">{card.areaLabel}</p>
-
-                <Link className="btn btn-secondary" href={`/vitrin/${card.cardId}`}>
-                  Kartı gör ve talep gönder
-                </Link>
-              </article>
-            ))}
-          </div>
+            {/*
+              The narrowing surface, offered rather than imposed. A visitor who
+              wants to browse by province can; nobody has to in order to see
+              anything.
+            */}
+            <p className="showcase-shelf-more">
+              <Link href="/vitrin">Bölgeye göre tüm vitrin hizmetlerini görün</Link>
+            </p>
+          </>
         )}
       </div>
     </section>
@@ -153,20 +84,76 @@ export async function ShowcaseShelf({
 }
 
 /**
+ * One card.
+ *
+ * The service area is a band of its own above the title rather than a muted
+ * line under the call to action, and that placement is the whole point of this
+ * revision: a visitor who never chose a location has to be able to tell, at a
+ * glance and before reading anything else, whether this card is for them.
+ */
+export function ShowcaseShelfCard({ card }: { card: ShowcaseFeedCard }) {
+  return (
+    <article className="showcase-shelf-card">
+      <p className="showcase-area-badge" data-testid="showcase-card-area">
+        <span className="showcase-area-badge-label">Hizmet bölgesi</span>
+        <span className="showcase-area-badge-value">{areaSentence(card)}</span>
+      </p>
+
+      <span className="kicker">{card.category.name}</span>
+      <h3>
+        <Link href={`/vitrin/${card.cardId}`}>{card.title}</Link>
+      </h3>
+      <p className="showcase-shelf-provider">{card.provider.businessName}</p>
+      <p className="showcase-shelf-summary">{card.summary}</p>
+
+      {/*
+        Present only on a SERVICE card. The key is absent on a promotion card
+        rather than null, so this cannot render a price nobody claimed.
+      */}
+      {typeof card.listedServicePriceAmount === 'number' ? (
+        <p className="showcase-shelf-price">
+          {formatPrice(card.listedServicePriceAmount, card.listedServiceCurrency ?? 'TRY')}
+          <span className="muted"> · sabit hizmet bedeli</span>
+        </p>
+      ) : null}
+
+      <p className="muted showcase-shelf-sla">
+        Acil: {card.responseSlaUrgentHours} saat · Normal: {card.responseSlaNormalHours} saat
+        içinde dönüş
+      </p>
+
+      <Link className="btn btn-secondary" href={`/vitrin/${card.cardId}`}>
+        Bu hizmeti incele
+      </Link>
+    </article>
+  );
+}
+
+/**
+ * The coverage, as one sentence.
+ *
+ * Every label is already worded by the API — "İstanbul geneli", "Kadıköy,
+ * İstanbul", "Moda, Kadıköy, İstanbul" — because how a card states its promise
+ * is a product decision and two renderers of it would eventually disagree. All
+ * this does is join them.
+ */
+export function areaSentence(card: Pick<ShowcaseFeedCard, 'areas' | 'areaLabel'>): string {
+  if (card.areas.length === 0) {
+    return card.areaLabel;
+  }
+
+  return card.areas.map((area) => area.label).join(' · ');
+}
+
+/**
  * A shelf that cannot be loaded is an empty shelf, not a broken page.
  *
  * The home page has to render for a visitor whether or not this block can
- * answer, and a location the API refuses — a district that does not exist in
- * the shipped list — is a bad query string rather than an error worth showing.
+ * answer.
  */
-async function loadFeed(city: string, district: string | null): Promise<ShowcaseFeed | null> {
-  const params = new URLSearchParams({ city });
-  if (district) {
-    params.set('district', district);
-  }
-
+async function loadFeed(): Promise<ShowcaseFeed | null> {
   try {
-    return await apiFetch<ShowcaseFeed>(`/showcase/feed?${params.toString()}`);
+    return await apiFetch<ShowcaseFeed>('/showcase/feed');
   } catch {
     return null;
   }

@@ -9,7 +9,6 @@ import {
 } from '../lib/api';
 import { LandingHero } from './landing-hero';
 import { ShowcaseShelf } from './showcase-shelf';
-import type { ProvinceWithDistricts } from '../lib/locations';
 import { LandingFAQ } from './landing-faq';
 import { StartChoiceModal } from './start-choice-modal';
 import { CategoryVisual } from './category-visual';
@@ -27,11 +26,7 @@ import {
 } from './landing-icons';
 import type { IconComponent } from './landing-icons';
 
-type HomePageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-export default async function HomePage({ searchParams }: HomePageProps) {
+export default async function HomePage() {
   /*
    * Categories are the API's to answer. There is no stand-in list any more: a
    * fabricated grid would put category names on screen that nothing behind them
@@ -47,29 +42,6 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const user = await getCurrentUser();
   const isCustomer = user?.role === 'CUSTOMER';
   const isAuthenticated = !!user;
-
-  /*
-   * The vitrin shelf's location, carried in the query string.
-   *
-   * In the URL rather than in a cookie or in client state for three reasons:
-   * the block stays a server component with no bundle, the result is linkable,
-   * and a visitor who changes their mind changes it by navigating rather than
-   * by us remembering something about them.
-   *
-   * The province list is what the picker renders. A failure to load it leaves
-   * the picker empty rather than the page broken — the shelf is one section of
-   * a landing page, not the page.
-   */
-  const params = (await searchParams) ?? {};
-  const shelfCity = readParam(params.vitrinIl);
-  const shelfDistrict = readParam(params.vitrinIlce);
-
-  let provinces: ProvinceWithDistricts[] = [];
-  try {
-    provinces = await apiFetch<ProvinceWithDistricts[]>('/locations/provinces');
-  } catch {
-    provinces = [];
-  }
 
   // The refund window this page promises is the one a provider signing up today
   // would actually get, read from the platform rather than written into the
@@ -94,7 +66,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         for, and putting paid placements above the catalogue would be selling the
         top of the page rather than a placement.
       */}
-      <ShowcaseShelf city={shelfCity} district={shelfDistrict} provinces={provinces} />
+      <ShowcaseShelf />
       <HowItWorks />
       <ProviderValue refundWindowHours={refundWindowHours} />
       <Comparison />
@@ -598,18 +570,4 @@ function FinalCTA({
       </div>
     </section>
   );
-}
-
-/**
- * One query value, or nothing.
- *
- * Next hands repeated parameters back as an array. A shelf location is a single
- * place, so a repeated one is a malformed URL rather than two locations, and the
- * first is as good an answer as any — the API validates the name against the
- * shipped location list either way.
- */
-function readParam(value: string | string[] | undefined): string | null {
-  const raw = Array.isArray(value) ? value[0] : value;
-  const trimmed = raw?.trim() ?? '';
-  return trimmed.length > 0 ? trimmed : null;
 }

@@ -145,6 +145,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
           <RequestForm
             categorySlug={category.slug}
             entryCategorySlug={entryCategorySlug}
+            categoryId={category.id}
             routerSelections={routerSelections}
             questions={questions}
             disclosure={disclosure}

@@ -90,6 +90,30 @@ async function acceptPriceTerms(page: Page) {
   await page.getByText('TakTick bu hizmet bedelini tahsil etmez', { exact: false }).click();
 }
 
+/**
+ * One vitrin package on sale, so the buying step has something to buy.
+ *
+ * Written through Prisma rather than through the admin catalogue form: this
+ * suite's subject starts at the provider's keyboard, and driving the operator's
+ * package editor here would make a failure in that form read as a failure in
+ * this journey.
+ *
+ * The slug carries the reserved `vitrin-` prefix, which the API and two CHECK
+ * constraints insist on — it is what keeps a vitrin package from sharing a
+ * payment-variant namespace with an offer package.
+ */
+async function seedShowcasePackage() {
+  return prisma().showcasePackage.create({
+    data: {
+      name: 'E2E Vitrin Paketi',
+      slug: `vitrin-e2e-${Date.now()}-${Math.floor(Math.random() * 10_000)}`,
+      priceAmount: 49_900,
+      currency: 'TRY',
+      durationDays: 30,
+    },
+  });
+}
+
 /** Removes an added area chip by the sentence the product prints for it. */
 async function removeArea(page: Page, city: string, district: string) {
   await page
@@ -107,6 +131,7 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
       credits: 0,
     });
     const adminAccount = await createAdmin();
+    await seedShowcasePackage();
 
     const provider = await Actor.open(browser, 'web', primaryRuntime);
     const admin = await Actor.open(browser, 'admin', primaryRuntime);
@@ -137,7 +162,9 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
 
       // The card exists as a draft, and the screen is explicit that nothing is
       // published by saving one.
-      await expect(provider.page.getByText('Taslak. İncelemeye göndermediniz.')).toBeVisible();
+      await expect(
+        provider.page.getByText('Kartınız henüz kimseye gösterilmiyor.'),
+      ).toBeVisible();
       await expect(
         provider.page.getByRole('heading', { name: 'E2E Klima bakımı' }),
       ).toBeVisible();
@@ -203,12 +230,90 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
         admin.page.getByRole('link', { name: 'E2E Klima bakımı' }),
       ).toHaveCount(0);
 
-      // And the provider sees the approved version, with the wording that does
-      // not claim a customer can see it yet.
+      /*
+       * ── What the provider is told, and offered, the moment it is approved ──
+       *
+       * This is the seam the revision exists to fix. The card list used to say
+       * "Onaylı sürüm 1 yayına hazır" — a sentence about a version number — and
+       * the card screen, instead of the packages, showed a notice claiming the
+       * price-responsibility text had been *updated*. It had not: a card records
+       * its submission-time acceptance on the version while the sale reads a
+       * separate ledger, so every freshly approved card hit that refusal and no
+       * payment control was ever rendered.
+       */
       await provider.gotoWeb(`/providers/${providerAccount.id}/vitrin`);
+      await assertNoErrorScreen(provider.page);
+
+      const listRow = provider.page.getByTestId('showcase-card-list');
+      await expect(listRow.getByText('Şart onayı bekliyor')).toBeVisible();
+      // Never again the sentence that used to greet every freshly approved
+      // card: the platform's terms have not "changed", this card has simply
+      // not agreed to the sale terms yet, and that is a step rather than an
+      // interruption.
       await expect(
-        provider.page.getByText('Onaylı sürüm 1 yayına hazır.', { exact: false }),
-      ).toBeVisible();
+        provider.page.getByText('sorumluluk metni güncellendi', { exact: false }),
+      ).toHaveCount(0);
+
+      await listRow.getByRole('link', { name: 'Şartları onayla' }).first().click();
+      await assertNoErrorScreen(provider.page);
+
+      /*
+       * The package, its duration and its price, on the card's own screen.
+       *
+       * Scoped to one package row rather than to the panel: the suite shares a
+       * database, so another file's catalogue entry can be on sale at the same
+       * time and a panel-wide locator would be asserting on whichever the run
+       * happened to order first.
+       */
+      const publishPanel = provider.page.getByTestId('showcase-publish-panel');
+      await expect(publishPanel).toBeVisible();
+      const packageOption = publishPanel
+        .getByTestId('showcase-package-option')
+        .filter({ hasText: 'E2E Vitrin Paketi' })
+        .first();
+      await expect(packageOption).toBeVisible();
+      await expect(packageOption.getByText('30 gün', { exact: false })).toBeVisible();
+      await expect(packageOption.getByText('₺499,00')).toBeVisible();
+
+      /*
+       * The acceptance is still a real gate — it is simply asked where the flow
+       * reaches it, after the price and before the payment. The checkbox is
+       * `required`, so pressing the button without it does nothing at all.
+       */
+      const payButton = packageOption.getByRole('button', { name: 'Ödemeye geç' });
+      await payButton.click();
+      await expect(provider.page).toHaveURL(
+        new RegExp(`/providers/${providerAccount.id}/vitrin/`),
+      );
+      await expect(publishPanel).toBeVisible();
+
+      await packageOption
+        .getByText('TakTick bu hizmet bedelini tahsil etmez', { exact: false })
+        .click();
+      await payButton.click();
+      await assertNoErrorScreen(provider.page);
+
+      // The mock provider has no hosted page, so the purchase's own screen is
+      // where a checkout lands. Either way the provider has reached the payment.
+      await expect(provider.page).toHaveURL(/package-purchases/);
+
+      // And the card now reads as waiting for money rather than as a draft.
+      await provider.gotoWeb(`/providers/${providerAccount.id}/vitrin`);
+      await assertNoErrorScreen(provider.page);
+      await expect(provider.page.getByText('Ödeme bekliyor')).toBeVisible();
+
+      /*
+       * The technical placement screen is not in the provider's navigation, and
+       * the lead inbox is not offered to a business that has never published.
+       * Both used to be permanent rows: one named after a table, the other
+       * permanently empty.
+       */
+      await expect(
+        provider.page.getByTestId('pdash-nav-showcase-leads'),
+      ).toHaveCount(0);
+      await expect(
+        provider.page.getByRole('link', { name: 'Vitrin Yerleşimleri' }),
+      ).toHaveCount(0);
     } finally {
       await provider.close();
       await admin.close();
@@ -441,10 +546,23 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
       await provider.page.getByRole('button', { name: 'Kaydet' }).click();
       await assertNoErrorScreen(provider.page);
 
-      // Straight to a new live version — no draft, no queue entry.
+      /*
+       * Straight to a new live text — no draft, no queue entry.
+       *
+       * Asserted on the *area* rather than on a version number: the panel no
+       * longer prints "sürüm 2" at a provider, and the fact that matters is
+       * that the removed district is gone from what customers are shown while
+       * the card stayed approved.
+       */
       await expect(
-        provider.page.getByText('Onaylı sürüm 2 yayına hazır.', { exact: false }),
+        provider.page.getByRole('heading', { name: 'Müşteriye gösterilen metin' }),
       ).toBeVisible();
+      const liveText = provider.page
+        .locator('section', { has: provider.page.getByRole('heading', { name: 'Müşteriye gösterilen metin' }) })
+        .first();
+      await expect(
+        liveText.getByText(`${second.district}, ${second.city}`),
+      ).toHaveCount(0);
 
       // Nothing went to an operator: this card is not in the queue at all.
       await admin.gotoAdmin('/showcase/reviews');

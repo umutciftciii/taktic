@@ -51,6 +51,16 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
     'Vitrin paketi satın alma şu anda geçici olarak kapalı. Lütfen daha sonra tekrar deneyin.',
   SHOWCASE_CHECKOUT_FAILED: 'Ödeme sayfası açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
   PROVIDER_UNAVAILABLE: 'Ödeme sayfası şu anda açılamadı. Lütfen birkaç dakika içinde tekrar deneyin.',
+  /*
+   * The package exists in the catalogue but has no variant mapped at the
+   * payment provider yet.
+   *
+   * A configuration gap rather than anything the provider did, so the sentence
+   * says what they can do — come back — instead of naming the payment provider,
+   * the mapping, or the support queue. The machine-readable code is unchanged
+   * and still reaches the log, which is where the operator's half of this
+   * lives.
+   */
   PACKAGE_NOT_MAPPED:
-    'Bu paket ödeme sağlayıcısında tanımlı değil. Lütfen destek ile iletişime geçin.',
+    'Bu paket şu anda satın almaya açılmadı. Lütfen daha sonra tekrar deneyin.',
 };

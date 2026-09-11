@@ -6,8 +6,17 @@ import type { ProvinceWithDistricts } from '../../../lib/locations';
 type LocationFieldsProps = {
   /** Every province with its districts, rendered with the form. */
   provinces: ProvinceWithDistricts[];
-  /** Told when a value changed, so the form can refresh its own signals. */
-  onChange?: () => void;
+  /**
+   * Told when a value changed, and what the three fields now hold.
+   *
+   * The values travel because the form has a second reader of them: the vitrin
+   * block, which asks "who could take this exact job" and needs the category
+   * and the place to ask it. They are passed rather than re-read from the DOM
+   * because two of the three are React-controlled here, and a caller reading
+   * them out of the form during a change event would see the value that was
+   * just cleared.
+   */
+  onChange?: (value: { city: string; district: string; neighborhood: string }) => void;
   /**
    * Whether the neighbourhood has to be chosen.
    *
@@ -96,7 +105,7 @@ export function LocationFields({
    * still see the district that was just cleared.
    */
   useEffect(() => {
-    onChangeRef.current?.();
+    onChangeRef.current?.({ city, district, neighborhood });
   }, [city, district, neighborhood]);
 
   function handleCityChange(value: string) {

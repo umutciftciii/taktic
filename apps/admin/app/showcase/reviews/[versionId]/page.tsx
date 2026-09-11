@@ -75,7 +75,7 @@ export default async function ShowcaseReviewPage({
         subtitle={`${version.provider.businessName} · ${card.category.name} · sürüm ${version.versionNumber}`}
         breadcrumbs={[
           { label: 'Dashboard', href: '/' },
-          { label: 'Vitrin İncelemeleri', href: '/showcase/reviews' },
+          { label: 'Kart İncelemeleri', href: '/showcase/reviews' },
           { label: `Sürüm ${version.versionNumber}` },
         ]}
         actions={

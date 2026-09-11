@@ -265,7 +265,7 @@ export const SHOWCASE_PLACEMENT_NOT_FOUND_CODE = 'SHOWCASE_PLACEMENT_NOT_FOUND';
 export const SHOWCASE_PLACEMENT_NOT_SUSPENDABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_SUSPENDABLE';
 export const SHOWCASE_PLACEMENT_NOT_RESUMABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_RESUMABLE';
 export const SHOWCASE_PLACEMENT_NOT_CANCELLABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_CANCELLABLE';
-export const SHOWCASE_LOCATION_REQUIRED_CODE = 'SHOWCASE_LOCATION_REQUIRED';
+export const SHOWCASE_LEAD_AREA_NOT_SERVED_CODE = 'SHOWCASE_LEAD_AREA_NOT_SERVED';
 export const SHOWCASE_LEAD_NOT_FOUND_CODE = 'SHOWCASE_LEAD_NOT_FOUND';
 export const SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED_CODE =
   'SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED';
@@ -416,18 +416,33 @@ export function showcasePlacementNotCancellable() {
 }
 
 /**
- * The feed was asked for without a location.
+ * A direct lead was written for an address the card does not serve.
  *
- * A refusal rather than a nationwide list. Showing a visitor a business that
- * cannot reach them is the exact opposite of what a vitrin placement sells, and
- * a provider paying for İstanbul/Kadıköy would be paying to appear in Erzurum.
+ * **This is the server-side half of the whole vitrin promise, and the client
+ * cannot stand in for it.** A visitor may now read every live card from the
+ * home page without naming a place, so the card's own "Hizmet bölgesi" line is
+ * an *advertisement*, not a gate: it tells somebody what they are looking at.
+ * The gate is here. The address on the lead is the address the customer typed
+ * into the form, it is re-resolved against the shipped location list, and it is
+ * matched against the run's own shelf rows with the identical key rule the shelf
+ * was built with — `showcaseCandidateAreaKeys`.
+ *
+ * The refusal is not a dead end, and the sentence says so: the customer's work
+ * is real, it is simply not this business's, and the ordinary marketplace
+ * request is one click away. A refusal that only said "no" would push somebody
+ * with a genuine job off the platform to protect a rule they never saw.
+ *
+ * 409 rather than 400: nothing they sent is malformed. The card and the address
+ * are each perfectly valid and simply do not belong together.
  */
-export function showcaseLocationRequired() {
-  return new BadRequestException({
-    statusCode: HttpStatus.BAD_REQUEST,
-    error: 'Bad Request',
-    code: SHOWCASE_LOCATION_REQUIRED_CODE,
-    message: 'Vitrin listesi için en az il bilgisi gerekir.',
+export function showcaseLeadAreaNotServed() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_LEAD_AREA_NOT_SERVED_CODE,
+    message:
+      'Bu vitrin hizmeti seçtiğiniz konumu kapsamıyor. Genel talep oluşturmaya devam ' +
+      'edebilirsiniz.',
   });
 }
 

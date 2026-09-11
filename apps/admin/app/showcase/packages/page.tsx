@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import {
   apiFetch,
   formatDateTime,
@@ -52,8 +53,20 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
     <>
       <PageHeader
         title="Vitrin Paketleri"
-        subtitle="Hizmet verenlerin vitrin yerleşimi için satın aldığı süreli paketler."
+        subtitle="Hizmet verenlerin kartlarını yayına almak için satın aldığı süreli paketler."
         breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Vitrin Paketleri' }]}
+        /*
+          The consent ledger, reachable from the catalogue that produced the
+          text it records. It left the sidebar with "Vitrin Kartları": both are
+          things an operator looks up in the middle of an investigation, not
+          places they navigate to cold, and five vitrin rows in one sidebar made
+          the three that are actual jobs harder to find.
+        */
+        actions={
+          <Link className="btn btn-sm btn-secondary" href="/showcase/price-terms">
+            Metin onayları
+          </Link>
+        }
       />
 
       {error ? (
