@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { formatPrice, type ShowcasePackage, type ShowcasePackageTerms } from '../../../../../lib/api';
+import type { ShowcasePackage, ShowcasePackageTerms } from '../../../../../lib/api';
+// From the formatters module, not `lib/api`: this is a client component, and
+// `lib/api` reads `next/headers`, which a client bundle cannot carry.
+import { formatPrice } from '../../../../../lib/formatters';
 import { startShowcasePackageCheckoutAction } from '../actions';
 
 /**

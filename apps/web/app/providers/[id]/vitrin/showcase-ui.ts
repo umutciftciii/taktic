@@ -10,14 +10,23 @@ import type { ShowcaseCard } from '../../../../lib/api';
  * edit form needs answered.
  */
 
-/** The version the edit form should open on: the draft if there is one, else the live one. */
+/**
+ * The version the edit form should open on: the draft if there is one, else
+ * the live one, else the refused one — a provider fixing a rejected first
+ * version must not have to retype it.
+ */
 export function editableVersion(card: ShowcaseCard) {
-  return card.draftVersion ?? card.liveVersion;
+  return card.draftVersion ?? card.liveVersion ?? card.rejectedVersion;
+}
+
+/** The version a screen shows when it can show only one. */
+export function shownVersion(card: ShowcaseCard) {
+  return card.liveVersion ?? card.draftVersion ?? card.rejectedVersion;
 }
 
 /** The most recent rejection the provider still needs to read, or null. */
 export function lastRejection(card: ShowcaseCard) {
-  const candidates = [card.draftVersion, card.liveVersion];
+  const candidates = [card.draftVersion, card.liveVersion, card.rejectedVersion];
   for (const version of candidates) {
     if (version?.review?.decision === 'REJECTED') {
       return version.review;

@@ -96,7 +96,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
             description="Henüz bir vitrin paketi tanımlanmadı. Aşağıdaki formla ilkini oluşturabilirsiniz."
           />
         ) : (
-          <div className="table-scroll">
+          <div className="table-scroll showcase-table-scroll">
             <table className="data-table">
               <thead>
                 <tr>

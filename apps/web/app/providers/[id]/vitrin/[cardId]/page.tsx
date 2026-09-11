@@ -23,7 +23,7 @@ import {
 import { CardMenu } from '../card-menu';
 import { SHOWCASE_ERROR_MESSAGES } from '../showcase-errors';
 import { showcaseStage } from '../showcase-stage';
-import { lastRejection } from '../showcase-ui';
+import { lastRejection, shownVersion } from '../showcase-ui';
 import { StageAction } from '../stage-action';
 
 type ShowcaseCardPageProps = {
@@ -78,7 +78,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
   const entry = publication?.cards.find((e) => e.cardId === cardId);
   const hasAvailableRight = (publication?.availableEntitlements.length ?? 0) > 0;
   const stage = showcaseStage(entry, { providerId: id, cardId, hasAvailableRight });
-  const shown = card.liveVersion ?? card.draftVersion;
+  const shown = shownVersion(card);
   const rejection = lastRejection(card);
   const onAir = entry ? PUBLISHED_STATES.has(entry.state) : false;
   // The API's own rule for retiring a card: one that has ever been approved

@@ -1308,6 +1308,12 @@ export type ShowcaseCard = {
   category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
+  /**
+   * The most recent refused version, only while the card has neither a draft
+   * nor a live one: a rejection clears the draft pointer, and this is what the
+   * owner still has to read and fix.
+   */
+  rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;
   suspendReason: string | null;
   archivedAt: string | null;

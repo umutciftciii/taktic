@@ -14,6 +14,7 @@ import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
 import { SHOWCASE_ERROR_MESSAGES } from './showcase-errors';
 import { showcaseStage } from './showcase-stage';
+import { shownVersion } from './showcase-ui';
 import { StageAction } from './stage-action';
 
 type ShowcaseListPageProps = {
@@ -163,7 +164,7 @@ function CardGrid({
   return (
     <div className="vitrin-grid" data-testid="showcase-card-list">
       {cards.map((card) => {
-        const shown = card.liveVersion ?? card.draftVersion;
+        const shown = shownVersion(card);
         const entry = stateByCard.get(card.id);
         const stage = showcaseStage(entry, { providerId, cardId: card.id, hasAvailableRight });
         const cardHref = `/providers/${providerId}/vitrin/${card.id}`;
