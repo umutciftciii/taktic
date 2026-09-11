@@ -133,7 +133,12 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
 
         <div className="vitrin-public">
           <div className="showcase-public-body">
-            <ShowcaseCardFace card={faceFromFeedCard(card)} testId="showcase-card-face" eager />
+            <ShowcaseCardFace
+              card={{ ...faceFromFeedCard(card), providerName: null }}
+              testId="showcase-card-face"
+              eager
+              titleAs="h2"
+            />
 
             <p className="showcase-coverage-note" data-testid="showcase-card-coverage-note">
               Bu hizmet yalnız {coverage} kapsamındaki işler için sunulur.

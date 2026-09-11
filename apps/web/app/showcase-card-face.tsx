@@ -43,6 +43,7 @@ export function ShowcaseCardFace({
   className,
   testId,
   eager = false,
+  titleAs = 'h3',
 }: {
   card: ShowcaseFaceData;
   /** Wraps the title in a link when given. */
@@ -55,9 +56,18 @@ export function ShowcaseCardFace({
   /** The public card page's face is the largest image on the screen and above
    * the fold, so it should not lazy-load like a shelf/grid card does. */
   eager?: boolean;
+  /**
+   * The heading level of the card title. `h3` is correct wherever the face
+   * sits under a page/section `h2` (the home shelf, the provider hub, the
+   * provider's own card screen). The public card page's face sits directly
+   * under the page `h1` with no `h2` in between, so it passes `h2` here to
+   * keep the document outline in order.
+   */
+  titleAs?: 'h2' | 'h3';
 }) {
   const art = card.imageUrl ?? categoryImageSrc(null, card.categorySlug ?? null);
   const areas = card.areaLabels.length > 0 ? card.areaLabels.join(' · ') : 'Bölge belirtilmedi';
+  const Title = titleAs;
 
   return (
     <article className={['vitrin-face', compact && 'vitrin-face-compact', className].filter(Boolean).join(' ')} data-testid={testId}>
@@ -71,7 +81,7 @@ export function ShowcaseCardFace({
           <span>{card.categoryName}</span>
           <span className="vitrin-face-kind">{SHOWCASE_CARD_KIND_LABELS[card.kind]}</span>
         </p>
-        <h3 className="vitrin-face-title">{href ? <Link href={href}>{card.title}</Link> : card.title}</h3>
+        <Title className="vitrin-face-title">{href ? <Link href={href}>{card.title}</Link> : card.title}</Title>
         {card.providerName ? <p className="vitrin-face-provider">{card.providerName}</p> : null}
         {typeof card.listedServicePriceAmount === 'number' ? (
           <p className="vitrin-face-price" data-testid="showcase-card-price">

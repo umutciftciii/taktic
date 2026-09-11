@@ -5483,13 +5483,6 @@ body.has-drawer-open {
   }
 }
 
-.showcase-shelf-grid {
-  display: grid;
-  /* `min(260px, 100%)` rather than `260px` — see the block comment above. */
-  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
-  gap: var(--space-4);
-}
-
 /*
  * The one sentence that decides whether the visitor should go on. Stated as
  * body copy rather than as a muted note: it is the card's promise and its
@@ -5558,17 +5551,6 @@ body.has-drawer-open {
   gap: var(--space-4);
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.showcase-public-scopes {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-  gap: var(--space-5);
-}
-
-.showcase-public-scopes h2 {
-  font-size: 15px;
-  margin: 0 0 var(--space-2);
 }
 
 .showcase-public-cta {
