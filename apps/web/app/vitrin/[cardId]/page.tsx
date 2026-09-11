@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { apiFetch, formatPrice, type ShowcaseFeedCard } from '../../../lib/api';
+import { apiFetch, type ShowcaseFeedCard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { areaSentence } from '../../showcase-shelf';
+import { faceFromFeedCard, ShowcaseCardFace } from '../../showcase-card-face';
 import {
   confirmShowcaseLeadVerificationAction,
   createShowcaseLeadAction,
@@ -130,170 +131,161 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
           <p className="lp-section-sub">{card.provider.businessName}</p>
         </header>
 
-        <p className="showcase-area-badge showcase-area-badge-lg" data-testid="showcase-card-area">
-          <span className="showcase-area-badge-label">Hizmet bölgesi</span>
-          <span className="showcase-area-badge-value">{coverage}</span>
-        </p>
+        <div className="vitrin-public">
+          <div className="showcase-public-body">
+            <ShowcaseCardFace card={faceFromFeedCard(card)} testId="showcase-card-face" eager />
 
-        <section className="showcase-public-body">
-          <p className="showcase-coverage-note" data-testid="showcase-card-coverage-note">
-            Bu hizmet yalnız {coverage} kapsamındaki işler için sunulur.
-          </p>
-
-          <p>{card.summary}</p>
-
-          {typeof card.listedServicePriceAmount === 'number' ? (
-            <p className="showcase-shelf-price" data-testid="showcase-card-price">
-              {formatPrice(card.listedServicePriceAmount, card.listedServiceCurrency ?? 'TRY')}
-              <span className="muted"> · sabit hizmet bedeli</span>
+            <p className="showcase-coverage-note" data-testid="showcase-card-coverage-note">
+              Bu hizmet yalnız {coverage} kapsamındaki işler için sunulur.
             </p>
-          ) : null}
 
-          <div className="showcase-public-scopes">
-            <div>
-              <h2>Dahil olanlar</h2>
-              <ul className="showcase-list">
-                {card.scopeIncluded.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h2>Hariç olanlar</h2>
-              <ul className="showcase-list">
-                {card.scopeExcluded.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          <p className="muted">
-            Acil: {card.responseSlaUrgentHours} saat · Normal: {card.responseSlaNormalHours} saat
-            içinde dönüş taahhüdü.
-          </p>
-
-          <p className="muted">
-            Bu işletme, hizmet bedelini ve kapsamını kendisi belirler ve müşterisinden kendisi
-            tahsil eder. TakTick bu bedele taraf değildir.
-          </p>
-        </section>
-
-        {sent ? (
-          <div className="notice" role="status" data-testid="showcase-lead-sent">
-            Talebiniz {card.provider.businessName} işletmesine iletildi. Yanıt gelmezse size
-            e-posta ile yazacağız ve talebinizi diğer hizmet verenlere açmak isteyip
-            istemediğinizi soracağız.
-          </div>
-        ) : (
-          <section className="showcase-public-cta" data-testid="showcase-lead-cta">
-            {error === AREA_NOT_SERVED ? (
-              <AreaNotServed card={card} coverage={coverage} />
-            ) : (
-              <>
-                <h2>Bu işletmeye talep gönderin</h2>
-                <p className="muted">
-                  Talebiniz yalnız {card.provider.businessName} işletmesine iletilir. Başka hiçbir
-                  hizmet verene gönderilmez.
+            <div className="vitrin-summary-facts">
+              <div>
+                <h2>Dahil olanlar</h2>
+                <ul className="showcase-list">
+                  {card.scopeIncluded.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <h2>Hariç olanlar</h2>
+                <ul className="showcase-list">
+                  {card.scopeExcluded.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <h2>Yanıt taahhüdü</h2>
+                <p>
+                  Acil: {card.responseSlaUrgentHours} saat · Normal: {card.responseSlaNormalHours}{' '}
+                  saat içinde dönüş
                 </p>
+              </div>
+              <p className="muted">
+                Bu işletme, hizmet bedelini ve kapsamını kendisi belirler ve müşterisinden kendisi
+                tahsil eder. TakTick bu bedele taraf değildir.
+              </p>
+            </div>
+          </div>
 
-                {error ? (
-                  <div className="notice cdash-notice-error" role="alert">
-                    {LEAD_ERRORS[error] ?? LEAD_ERRORS.SHOWCASE_LEAD_FAILED}
-                  </div>
-                ) : null}
+          {sent ? (
+            <div className="notice" role="status" data-testid="showcase-lead-sent">
+              Talebiniz {card.provider.businessName} işletmesine iletildi. Yanıt gelmezse size
+              e-posta ile yazacağız ve talebinizi diğer hizmet verenlere açmak isteyip
+              istemediğinizi soracağız.
+            </div>
+          ) : (
+            <section className="showcase-public-cta" data-testid="showcase-lead-cta">
+              {error === AREA_NOT_SERVED ? (
+                <AreaNotServed card={card} coverage={coverage} />
+              ) : (
+                <>
+                  <h2>Bu işletmeye talep gönderin</h2>
+                  <p className="muted">
+                    Talebiniz yalnız {card.provider.businessName} işletmesine iletilir. Başka hiçbir
+                    hizmet verene gönderilmez.
+                  </p>
 
-                {step === 'form' ? (
-                  <LeadForm
-                    card={card}
-                    cardId={cardId}
-                    phone={phone}
-                    provinces={provinces}
-                    prefill={prefill}
-                  />
-                ) : step === 'code' ? (
-                  <form
-                    action={confirmShowcaseLeadVerificationAction}
-                    className="pdash-form"
-                  >
-                    <input type="hidden" name="cardId" value={cardId} />
-                    <input type="hidden" name="phone" value={phone} />
-                    <LocationCarry prefill={prefill} />
+                  {error ? (
+                    <div className="notice cdash-notice-error" role="alert">
+                      {LEAD_ERRORS[error] ?? LEAD_ERRORS.SHOWCASE_LEAD_FAILED}
+                    </div>
+                  ) : null}
 
-                    <p className="muted">
-                      {phone} numarasına bir doğrulama kodu gönderdik. Kodu girin.
-                    </p>
-                    <label className="pdash-form-row">
-                      <span>Doğrulama kodu *</span>
-                      <input
-                        name="code"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        minLength={6}
-                        maxLength={6}
-                        required
-                      />
-                    </label>
-                    <div className="pdash-form-foot">
-                      <Link
-                        className="pdash-btn pdash-btn-ghost"
-                        href={`/vitrin/${cardId}?step=phone${locationQuery(prefill)}`}
-                      >
-                        Numarayı değiştir
+                  {step === 'form' ? (
+                    <LeadForm
+                      card={card}
+                      cardId={cardId}
+                      phone={phone}
+                      provinces={provinces}
+                      prefill={prefill}
+                    />
+                  ) : step === 'code' ? (
+                    <form
+                      action={confirmShowcaseLeadVerificationAction}
+                      className="pdash-form"
+                    >
+                      <input type="hidden" name="cardId" value={cardId} />
+                      <input type="hidden" name="phone" value={phone} />
+                      <LocationCarry prefill={prefill} />
+
+                      <p className="muted">
+                        {phone} numarasına bir doğrulama kodu gönderdik. Kodu girin.
+                      </p>
+                      <label className="pdash-form-row">
+                        <span>Doğrulama kodu *</span>
+                        <input
+                          name="code"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          minLength={6}
+                          maxLength={6}
+                          required
+                        />
+                      </label>
+                      <div className="pdash-form-foot">
+                        <Link
+                          className="pdash-btn pdash-btn-ghost"
+                          href={`/vitrin/${cardId}?step=phone${locationQuery(prefill)}`}
+                        >
+                          Numarayı değiştir
+                        </Link>
+                        <button className="pdash-btn pdash-btn-primary" type="submit">
+                          Doğrula
+                        </button>
+                      </div>
+                    </form>
+                  ) : step === 'phone' ? (
+                    <form action={startShowcaseLeadVerificationAction} className="pdash-form">
+                      <input type="hidden" name="cardId" value={cardId} />
+                      <LocationCarry prefill={prefill} />
+                      <p className="muted">
+                        Talebinizin doğrudan bir işletmeye gitmesi için önce telefon numaranızı
+                        doğrulamamız gerekiyor.
+                      </p>
+                      <label className="pdash-form-row">
+                        <span>Telefon *</span>
+                        <input
+                          name="phone"
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel"
+                          placeholder="05xx xxx xx xx"
+                          defaultValue={phone}
+                          required
+                        />
+                      </label>
+                      <div className="pdash-form-foot">
+                        <button className="pdash-btn pdash-btn-primary" type="submit">
+                          Kod gönder
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    /*
+                     * The decision, and both ways out of it.
+                     *
+                     * "Vazgeç" goes back to the shelf rather than to the browser's
+                     * history, because somebody who arrived from a search result
+                     * has no history to go back to and would otherwise be stranded
+                     * on a card they have just declined.
+                     */
+                    <div className="pdash-form-foot" data-testid="showcase-card-decision">
+                      <Link className="pdash-btn pdash-btn-ghost" href="/vitrin">
+                        Vazgeç
                       </Link>
-                      <button className="pdash-btn pdash-btn-primary" type="submit">
-                        Doğrula
-                      </button>
+                      <Link className="pdash-btn pdash-btn-primary" href={nextStepHref}>
+                        Devam et
+                      </Link>
                     </div>
-                  </form>
-                ) : step === 'phone' ? (
-                  <form action={startShowcaseLeadVerificationAction} className="pdash-form">
-                    <input type="hidden" name="cardId" value={cardId} />
-                    <LocationCarry prefill={prefill} />
-                    <p className="muted">
-                      Talebinizin doğrudan bir işletmeye gitmesi için önce telefon numaranızı
-                      doğrulamamız gerekiyor.
-                    </p>
-                    <label className="pdash-form-row">
-                      <span>Telefon *</span>
-                      <input
-                        name="phone"
-                        type="tel"
-                        inputMode="tel"
-                        autoComplete="tel"
-                        placeholder="05xx xxx xx xx"
-                        defaultValue={phone}
-                        required
-                      />
-                    </label>
-                    <div className="pdash-form-foot">
-                      <button className="pdash-btn pdash-btn-primary" type="submit">
-                        Kod gönder
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  /*
-                   * The decision, and both ways out of it.
-                   *
-                   * "Vazgeç" goes back to the shelf rather than to the browser's
-                   * history, because somebody who arrived from a search result
-                   * has no history to go back to and would otherwise be stranded
-                   * on a card they have just declined.
-                   */
-                  <div className="pdash-form-foot" data-testid="showcase-card-decision">
-                    <Link className="pdash-btn pdash-btn-ghost" href="/vitrin">
-                      Vazgeç
-                    </Link>
-                    <Link className="pdash-btn pdash-btn-primary" href={nextStepHref}>
-                      Devam et
-                    </Link>
-                  </div>
-                )}
-              </>
-            )}
-          </section>
-        )}
+                  )}
+                </>
+              )}
+            </section>
+          )}
+        </div>
       </div>
     </main>
   );
