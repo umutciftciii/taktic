@@ -134,7 +134,13 @@ export class ShowcaseEntitlementService {
       where: {
         providerId: input.providerId,
         ...usableEntitlementWhere(input.now),
-        ...(input.entitlementId ? { id: input.entitlementId } : {}),
+        ...(input.entitlementId
+          ? { id: input.entitlementId }
+          : // Unnamed search: only a right that could actually cover this card
+            // kind is a candidate. A kind-restricted right the caller did not
+            // name is simply not in the running — it is not what makes a later,
+            // usable right unreachable.
+            { OR: [{ allowedCardKindSnapshot: null }, { allowedCardKindSnapshot: input.kind }] }),
       },
       orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
       select: { id: true, allowedCardKindSnapshot: true },

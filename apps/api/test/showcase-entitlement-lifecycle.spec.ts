@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ServiceCategoryKind, UserRole } from '@prisma/client';
 import { ShowcaseEntitlementService } from '../src/modules/showcase/showcase-entitlement.service';
-import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
 import {
   createCategory,
   createDiscoverableProvider,
@@ -149,9 +148,51 @@ describe('reserving', () => {
     ]);
 
     expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+    const rejected = outcomes.find(
+      (o): o is PromiseRejectedResult => o.status === 'rejected',
+    )!;
+    // The losing side either lost the conditional `updateMany` race (our own
+    // 409) or hit a Prisma serialization/unique error inside `$transaction`
+    // before it got that far — both are the expected shape of "somebody else
+    // got there first" under Serializable.
+    const code = (rejected.reason as { response?: { code?: string } })?.response?.code;
+    if (code !== undefined) {
+      expect(['SHOWCASE_ENTITLEMENT_UNAVAILABLE', 'SHOWCASE_ENTITLEMENT_REQUIRED']).toContain(code);
+    } else {
+      expect(rejected.reason).toBeInstanceOf(Error);
+    }
     const rights = await ctx.prisma.showcaseEntitlement.findMany();
     expect(rights).toHaveLength(1);
     expect(rights[0]!.status).toBe('RESERVED');
+  });
+
+  it('picks a usable right whose kind matches over an earlier-expiring one that does not, when no right is named', async () => {
+    const { user, profile, pkg, category, service } = await scenario();
+    const promoPkg = await createShowcasePackage(ctx.prisma, { allowedCardKind: 'PROMOTION' });
+    const promoPurchase = await paidPackagePurchase(profile.id, user.id, promoPkg.id);
+    await ctx.prisma.$transaction((tx) =>
+      service.grantForPurchase(tx, promoPurchase, new Date(Date.now() - 5 * DAY)));
+    const generalPurchase = await paidPackagePurchase(profile.id, user.id, pkg.id);
+    await ctx.prisma.$transaction((tx) => service.grantForPurchase(tx, generalPurchase, new Date()));
+
+    const promoRight = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({
+      where: { purchaseId: promoPurchase.id },
+    });
+    const generalRight = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({
+      where: { purchaseId: generalPurchase.id },
+    });
+    // The PROMOTION-only right expires first; the unrestricted one expires
+    // later. A SERVICE card with no named right must still reserve the one it
+    // can actually use, not refuse because the *earliest* one happens to be
+    // the wrong kind.
+    expect(promoRight.expiresAt.getTime()).toBeLessThan(generalRight.expiresAt.getTime());
+
+    const { card } = await draftCard(profile.id, category.id);
+    const reserved = await ctx.prisma.$transaction((tx) =>
+      service.reserveForCard(tx, { providerId: profile.id, cardId: card.id, kind: 'SERVICE', entitlementId: null, now: new Date() }));
+
+    expect(reserved.id).toBe(generalRight.id);
+    expect((await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({ where: { id: promoRight.id } })).status).toBe('AVAILABLE');
   });
 
   it('refuses a right whose kind does not match and an expired right', async () => {
