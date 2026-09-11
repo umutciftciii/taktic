@@ -139,6 +139,29 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'showcase-lead-received',
   'showcase-lead-breached-customer',
   'showcase-lead-breached-provider',
+  // Vitrin, phase three: the rest of a run's life, from the money to the end
+  // of the clock. Every one of them goes to the provider who owns the card or
+  // paid for the package, and nothing here is a customer message.
+  //
+  //  - the package was paid for            → what was bought, when the right lapses
+  //  - the payment did not complete        → no card detail, a way back to the shop
+  //  - approved and live in one transaction → one message, not two
+  //  - approved with nothing on the air    → the approval alone
+  //  - seven days, three days, and the end → three notices per run, each once
+  //
+  // "Approved and live" is deliberately one template rather than the approval
+  // and `showcase-placement-activated` sent back to back: the two facts are
+  // one transaction, and two messages about one event teach a provider to
+  // ignore the second. `showcase-placement-activated` stays for the run that
+  // goes up at a *different* moment from the approval — a right spent on a
+  // card that was already approved.
+  'showcase-package-payment-succeeded',
+  'showcase-package-payment-failed',
+  'showcase-card-approved-live',
+  'showcase-card-approved',
+  'showcase-placement-ending-7d',
+  'showcase-placement-ending-3d',
+  'showcase-placement-expired',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -222,6 +245,20 @@ export function transactionalSubject(
       return 'Yanıt süresi doldu — ne yapmak istersiniz?';
     case 'showcase-lead-breached-provider':
       return withSuffix('Vitrin talebine yanıt süresi doldu', text(data.requestNumber));
+    case 'showcase-package-payment-succeeded':
+      return withSuffix('Vitrin paketiniz hazır', text(data.packageName));
+    case 'showcase-package-payment-failed':
+      return 'Vitrin paketi ödemesi tamamlanmadı';
+    case 'showcase-card-approved-live':
+      return withSuffix('Kartınız onaylandı ve yayında', text(data.cardTitle));
+    case 'showcase-card-approved':
+      return withSuffix('Vitrin kartınız onaylandı', text(data.cardTitle));
+    case 'showcase-placement-ending-7d':
+      return withSuffix('Vitrin yayınınızın bitmesine 7 gün kaldı', text(data.cardTitle));
+    case 'showcase-placement-ending-3d':
+      return withSuffix('Vitrin yayınınız 3 gün içinde bitiyor', text(data.cardTitle));
+    case 'showcase-placement-expired':
+      return withSuffix('Vitrin yayınınız sona erdi', text(data.cardTitle));
     // The ticket's own subject is the suffix on all five, because it is the one
     // thing that tells two tickets apart in a mailbox — and it is truncated,
     // because a customer may type two hundred characters into it and a subject
@@ -348,6 +385,20 @@ export function buildDocument(
       return showcaseLeadBreachedCustomer(subject, fullName, data);
     case 'showcase-lead-breached-provider':
       return showcaseLeadBreachedProvider(subject, fullName, data);
+    case 'showcase-package-payment-succeeded':
+      return showcasePackagePaymentSucceeded(subject, fullName, data);
+    case 'showcase-package-payment-failed':
+      return showcasePackagePaymentFailed(subject, fullName, data);
+    case 'showcase-card-approved-live':
+      return showcaseCardApprovedLive(subject, fullName, data);
+    case 'showcase-card-approved':
+      return showcaseCardApproved(subject, fullName, data);
+    case 'showcase-placement-ending-7d':
+      return showcasePlacementEnding(subject, fullName, data, 7);
+    case 'showcase-placement-ending-3d':
+      return showcasePlacementEnding(subject, fullName, data, 3);
+    case 'showcase-placement-expired':
+      return showcasePlacementExpired(subject, fullName, data);
     case 'support-ticket-created':
       return supportTicketCreated(subject, fullName, data);
     case 'support-ticket-new-for-support':
@@ -1927,6 +1978,284 @@ function supportTicketProviderStatusChanged(
               'panelinizden yeni bir talep açabilirsiniz.'
           : 'Talebinizle ilgili her gelişmeyi bu talep üzerinden ileteceğiz.',
       ),
+    ]),
+  };
+}
+
+// ───────────────────────────── vitrin, phase three ───────────────────────────
+
+/**
+ * The package was paid for.
+ *
+ * What is stated is what the provider now holds: a right to publish one card
+ * for so many days, usable until a date. The only figure is the package's own
+ * price, taken from the purchase snapshot — never anything about what the
+ * provider charges their customers, which is a different number in a
+ * different place. Nothing from the payment provider travels either: no order
+ * id, no correlation token, no store, no mode.
+ *
+ * The call to action is the next thing to do rather than a receipt: the right
+ * is spent by a card, and the provider may not have one yet.
+ */
+function showcasePackagePaymentSucceeded(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  const packageName = text(data.packageName);
+  const durationDays = int(data.durationDays);
+  const expiresAt = formatDate(data.entitlementExpiresAt);
+
+  return {
+    subject,
+    preheader: expiresAt
+      ? `Yayın hakkınız ${expiresAt} tarihine kadar kullanılabilir.`
+      : 'Vitrin paketiniz için ödemeniz alındı.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: 'Vitrin paketiniz hazır',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        joinNonEmpty(
+          [
+            packageName ? `${packageName} paketi için ödemeniz alındı.` : 'Ödemeniz alındı.',
+            'Kartınız onaylandığında yayın süresi başlar; hakkınızı aşağıdaki tarihe kadar ' +
+              'kullanabilirsiniz.',
+          ],
+          ' ',
+        ) as string,
+      ),
+      spacer(4),
+      dataTable([
+        row('Paket', packageName),
+        row('Yayın süresi', durationDays ? `${durationDays} gün` : null),
+        row('Paket bedeli', formatMoneyMinorIn(int(data.priceAmountMinor), text(data.currency))),
+        row('Hakkın son kullanım tarihi', expiresAt),
+        row('Ödeme tarihi', formatDateTime(data.paidAt)),
+      ]),
+      spacer(24),
+      cta('Kartını oluştur', text(data.createCardUrl), 'primary'),
+      spacer(20),
+      note(
+        'Yayın süresi kartınız onaylanıp yayına girdiği anda başlar; onay için beklenen ' +
+          'süre haktan düşülmez.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * The payment did not complete.
+ *
+ * Deliberately thin. It says that nothing was charged and nothing was granted,
+ * and it says nothing about *why* — no card detail, no decline code, no
+ * provider message — because none of that is this platform's to relay and
+ * most of it is the buyer's bank's business. The one link goes back to the
+ * shop, where a fresh checkout can be opened.
+ */
+function showcasePackagePaymentFailed(
+  subject: string,
+  fullName: string,
+  data: Data,
+): EmailDocument {
+  const packageName = text(data.packageName);
+
+  return {
+    subject,
+    preheader: 'Ödeme tamamlanmadı; paket hesabınıza tanımlanmadı.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: 'Vitrin paketi ödemesi tamamlanmadı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        (packageName ? `${packageName} paketi için başlattığınız ödeme` : 'Başlattığınız ödeme') +
+          ' tamamlanamadı. Hesabınızdan bir tahsilat yapılmadı ve paket tanımlanmadı.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Paket', packageName),
+        row('Paket bedeli', formatMoneyMinorIn(int(data.priceAmountMinor), text(data.currency))),
+        row('İşlem tarihi', formatDateTime(data.attemptedAt)),
+      ]),
+      spacer(24),
+      cta('Paketlere dön', text(data.packagesUrl), 'primary'),
+      spacer(20),
+      note(
+        'Dilediğiniz zaman paketlerden yeni bir ödeme başlatabilirsiniz. Sorun sürerse ' +
+          'destek ekibimize yazabilirsiniz.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * Approved and on the air, as one message.
+ *
+ * The approval and the run are one transaction, so they are one message: a
+ * provider who is told "approved" and then, a second later, "live" learns to
+ * open only the first. The run's dates are here because they are the
+ * provider's own information and the one thing they need to plan a renewal.
+ *
+ * `revision` distinguishes a first publication from an approved edit to a card
+ * that was already live — the same facts, one sentence apart.
+ */
+function showcaseCardApprovedLive(subject: string, fullName: string, data: Data): EmailDocument {
+  const cardTitle = text(data.cardTitle);
+  const revision = text(data.revision) === 'true';
+
+  return {
+    subject,
+    preheader: cardTitle
+      ? `${cardTitle} kartınız onaylandı ve ana sayfada yayında.`
+      : 'Vitrin kartınız onaylandı ve ana sayfada yayında.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: revision ? 'Güncellemeniz onaylandı ve yayında' : 'Kartınız onaylandı ve yayında',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        revision
+          ? 'Kartınızda yaptığınız değişiklik incelendi ve onaylandı. Yayındaki kartınız artık ' +
+              'onaylanan metni gösteriyor; yayın süresi değişmedi.'
+          : 'Kartınız incelendi ve onaylandı. Aynı anda yayına alındı: seçtiğiniz bölgelerde ' +
+              'arayan müşterilere gösterilmeye başladı.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Kart', cardTitle),
+        row('Paket', text(data.packageName)),
+        row('Bölgeler', text(data.areaSummary)),
+        row('Başlangıç', formatDateTime(data.startAt)),
+        row('Bitiş', formatDateTime(data.endAt)),
+      ]),
+      spacer(24),
+      cta('Kartını görüntüle', text(data.cardUrl), 'primary'),
+      spacer(20),
+      note(
+        'Kartınızdan gelen talepler yalnız size iletilir ve bu talepler için teklif kredisi ' +
+          'harcanmaz.',
+      ),
+    ]),
+  };
+}
+
+/**
+ * Approved, with nothing on the air.
+ *
+ * Sent only when the approval did not publish anything — an edit approved on a
+ * card whose run has ended. It says the text is approved and stops there; what
+ * puts the card back on the air is a package, and the link goes to where one
+ * is bought.
+ */
+function showcaseCardApproved(subject: string, fullName: string, data: Data): EmailDocument {
+  const cardTitle = text(data.cardTitle);
+
+  return {
+    subject,
+    preheader: cardTitle
+      ? `${cardTitle} kartınız onaylandı; yayına almak için bir paket seçin.`
+      : 'Vitrin kartınız onaylandı; yayına almak için bir paket seçin.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: 'Vitrin kartınız onaylandı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Kartınız incelendi ve onaylandı. Şu anda yayında değil: yayına almak için vitrin ' +
+          'merkezinizden bir paket seçmeniz yeterli.',
+      ),
+      spacer(4),
+      dataTable([row('Kart', cardTitle), row('Onay tarihi', formatDateTime(data.approvedAt))]),
+      spacer(24),
+      cta('Vitrin merkezine git', text(data.showcaseUrl), 'primary'),
+      spacer(20),
+      note('Paket seçtiğiniz anda kartınız yayına girer; yeni bir inceleme gerekmez.'),
+    ]),
+  };
+}
+
+/**
+ * The run is ending — seven days out, then three.
+ *
+ * Two templates and one renderer, because the message is the same with a
+ * different number and a different length: the seven-day notice explains, the
+ * three-day one reminds. The end date is the *current* one, so a run whose
+ * clock was stopped by the platform and given back is told its real end.
+ */
+function showcasePlacementEnding(
+  subject: string,
+  fullName: string,
+  data: Data,
+  daysLeft: 7 | 3,
+): EmailDocument {
+  const cardTitle = text(data.cardTitle);
+  const endAt = formatDateTime(data.endAt);
+
+  return {
+    subject,
+    preheader: endAt
+      ? `Yayın ${endAt} tarihinde sona eriyor.`
+      : `Vitrin yayınınızın bitmesine ${daysLeft} gün kaldı.`,
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading:
+      daysLeft === 7 ? 'Vitrin yayınınızın bitmesine 7 gün kaldı' : 'Vitrin yayınınız 3 gün içinde bitiyor',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        daysLeft === 7
+          ? (cardTitle ? `${cardTitle} kartınızın` : 'Vitrin kartınızın') +
+              ' yayın süresi bir hafta içinde doluyor. Süre bittiğinde kart ana sayfadan ' +
+              'kalkar ve karttan yeni talep gelmez. Kesintisiz devam etmek için şimdiden yeni ' +
+              'bir paket seçebilirsiniz.'
+          : (cardTitle ? `${cardTitle} kartınızın` : 'Vitrin kartınızın') +
+              ' yayını 3 gün içinde bitiyor. Devam etmek için yeni bir paket seçin.',
+      ),
+      spacer(4),
+      dataTable([row('Kart', cardTitle), row('Bitiş', endAt)]),
+      spacer(24),
+      cta('Yeniden yayınla', text(data.packagesUrl), 'primary'),
+      cta('Vitrin merkezi', text(data.showcaseUrl), 'ghost'),
+      spacer(20),
+      note('Yeni paket, mevcut yayın bittikten sonra kartınız onaylı kaldığı sürece hemen kullanılabilir.'),
+    ]),
+  };
+}
+
+/** The run ended. The card is off the air; the way back is a package. */
+function showcasePlacementExpired(subject: string, fullName: string, data: Data): EmailDocument {
+  const cardTitle = text(data.cardTitle);
+
+  return {
+    subject,
+    preheader: cardTitle
+      ? `${cardTitle} kartınız artık yayında değil.`
+      : 'Vitrin kartınız artık yayında değil.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: 'Vitrin yayınınız sona erdi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        (cardTitle ? `${cardTitle} kartınızın` : 'Vitrin kartınızın') +
+          ' yayın süresi doldu. Kart artık ana sayfada ve vitrin sayfalarında gösterilmiyor; ' +
+          'kartınız ve daha önce gelen talepleriniz panelinizde duruyor.',
+      ),
+      spacer(4),
+      dataTable([row('Kart', cardTitle), row('Yayın bitişi', formatDateTime(data.endAt))]),
+      spacer(24),
+      cta('Yeniden yayınla', text(data.packagesUrl), 'primary'),
+      cta('Vitrin merkezi', text(data.showcaseUrl), 'ghost'),
+      spacer(20),
+      note('Yeni bir paket seçtiğinizde onaylı kartınız yeniden incelenmeden yayına girer.'),
     ]),
   };
 }

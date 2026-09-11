@@ -1497,6 +1497,26 @@ export function notificationTemplateLabel(template: string): string {
     'support-ticket-customer-reply': 'Destek: müşteri yanıtı',
     'support-ticket-admin-reply': 'Destek talebine yanıt',
     'support-ticket-status-changed': 'Destek talebi durumu',
+    'support-ticket-provider-created': 'Destek talebi alındı (hizmet veren)',
+    'support-ticket-provider-new-for-support': 'Destek: yeni talep (hizmet veren)',
+    'support-ticket-provider-reply': 'Destek: hizmet veren yanıtı',
+    'support-ticket-provider-admin-reply': 'Destek talebine yanıt (hizmet veren)',
+    'support-ticket-provider-status-changed': 'Destek talebi durumu (hizmet veren)',
+    'package-purchase-confirmation': 'Kredi paketi makbuzu',
+    'request-expired-customer': 'Talep süresi doldu (müşteri)',
+    'request-expired-provider': 'Talep süresi doldu (hizmet veren)',
+    // Vitrin: the run's life, from the money to the end of the clock.
+    'showcase-placement-activated': 'Vitrin: kart yayında',
+    'showcase-lead-received': 'Vitrin: yeni talep',
+    'showcase-lead-breached-customer': 'Vitrin: yanıt süresi doldu (müşteri)',
+    'showcase-lead-breached-provider': 'Vitrin: yanıt süresi doldu (hizmet veren)',
+    'showcase-package-payment-succeeded': 'Vitrin: paket ödemesi alındı',
+    'showcase-package-payment-failed': 'Vitrin: paket ödemesi tamamlanmadı',
+    'showcase-card-approved-live': 'Vitrin: kart onaylandı ve yayında',
+    'showcase-card-approved': 'Vitrin: kart onaylandı',
+    'showcase-placement-ending-7d': 'Vitrin: yayına 7 gün kaldı',
+    'showcase-placement-ending-3d': 'Vitrin: yayına 3 gün kaldı',
+    'showcase-placement-expired': 'Vitrin: yayın sona erdi',
   };
 
   return labels[template] ?? template;
@@ -1832,50 +1852,10 @@ export function formatPrice(amountMinor: number, currency: string = 'TRY') {
   }
 }
 
-// Parses a user-provided decimal string ("149.90", "149,90", "  1500 ", "0",
-// or numeric values) into a minor-unit integer. Returns null when the input is
-// empty / whitespace / non-finite so optional form fields can preserve "no value".
-// Negative inputs are also rejected (returned as null). Invalid inputs do not throw;
-// callers should rely on API-side validation (DTO @Min(100)) for final enforcement.
-export function parseDecimalToMinor(value: string | number | null | undefined): number | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  let raw: string;
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return null;
-    raw = String(value);
-  } else {
-    raw = value.trim();
-    if (!raw) return null;
-  }
-
-  const normalized = raw.replace(/\s/g, '').replace(',', '.');
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
-    return null;
-  }
-
-  const major = Number(normalized);
-  if (!Number.isFinite(major) || major < 0) {
-    return null;
-  }
-
-  return Math.round(major * 100);
-}
-
-// Renders a minor-unit integer as a "x.xx" string suitable for a controlled
-// decimal <input>. Null/undefined become an empty string so optional form fields
-// stay empty by default.
-export function formatMinorAsInput(amountMinor: number | null | undefined): string {
-  if (amountMinor === null || amountMinor === undefined) {
-    return '';
-  }
-  if (!Number.isFinite(amountMinor)) {
-    return '';
-  }
-  return (amountMinor / 100).toFixed(2);
-}
+// Form-side money parsing and formatting live in @taktic/shared (`money.ts`):
+// `parseTurkishLiraToMinor` and `formatMinorAsTurkishLiraInput`. One parser for
+// every admin form that takes a lira amount, and no floating point in any of
+// them.
 
 /**
  * Re-exported from @taktic/shared rather than reimplemented.

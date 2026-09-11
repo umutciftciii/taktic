@@ -353,10 +353,24 @@ export class PackagePurchasesService {
 
         if (placement) {
           await this.mail.sendShowcasePlacementActivated(placement.id);
+        } else {
+          // Package-first: the right's own notice. The method re-reads the
+          // committed rows and refuses anything but a PAID vitrin purchase
+          // with a right behind it.
+          await this.mail.sendShowcasePackagePaymentSucceeded(settled.id);
         }
       } else {
         await this.mail.sendPackagePurchaseConfirmation(settled.id);
       }
+    } else if (
+      settled.status === PackagePurchaseStatus.FAILED &&
+      settled.kind === PackagePurchaseKind.SHOWCASE_PACKAGE
+    ) {
+      // The declined card. A real payment failure, so the provider is told —
+      // without the card, the reason or anything else about the attempt. The
+      // method itself refuses a purchase that failed before any payment page
+      // opened, which is this deployment's problem rather than the buyer's.
+      await this.mail.sendShowcasePackagePaymentFailed(settled.id);
     }
 
     return settled;
@@ -442,7 +456,7 @@ export class PackagePurchasesService {
     }
 
     const now = new Date();
-    return this.prisma.packagePurchase.update({
+    const updated = await this.prisma.packagePurchase.update({
       where: { id },
       data: {
         status,
@@ -453,6 +467,19 @@ export class PackagePurchasesService {
       include: packagePurchaseInclude,
       omit: packagePurchaseOmit,
     });
+
+    // After the write, and only for a vitrin purchase an operator cancelled:
+    // the provider's checkout is not going to complete, and they are told so.
+    // An expiry is not a failure — the checkout simply lapsed — and gets no
+    // message. The admin note never travels; the method does not select it.
+    if (
+      updated.status === PackagePurchaseStatus.CANCELLED &&
+      updated.kind === PackagePurchaseKind.SHOWCASE_PACKAGE
+    ) {
+      await this.mail.sendShowcasePackagePaymentFailed(updated.id);
+    }
+
+    return updated;
   }
 
   private async ensureProviderExists(providerId: string) {

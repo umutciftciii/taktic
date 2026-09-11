@@ -955,6 +955,12 @@ model PhoneVerification {
   requestId       String?
   ipAddress       String?
   userAgent       String?
+  /// True when the row was consumed with the local/staging test code rather
+  /// than the code that was sent (see phone-verification-test-bypass.config.ts).
+  /// The audit distinction and nothing more: no code, no list, no reason.
+  /// Additive, defaulting to false, so every row written before it existed
+  /// reads as a real verification — which is what it was.
+  verifiedByTestBypass Boolean @default(false)
   createdAt       DateTime  @default(now())
 
   request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)

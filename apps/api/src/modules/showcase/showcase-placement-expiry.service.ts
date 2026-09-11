@@ -1,6 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ShowcasePlacementStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  ShowcaseLifecycleOutbox,
+  ShowcaseLifecycleOutboxResult,
+} from '../notifications/showcase-lifecycle-outbox.service';
 import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { DEFAULT_SHOWCASE_SCAN_LIMIT } from './showcase.constants';
 
@@ -9,6 +13,10 @@ export type ShowcasePlacementExpiryResult = {
   skipped: number;
   shelvesClosed: number;
   entitlementsExpired: number;
+  /** Reminder intents this tick wrote down, per threshold. */
+  remindersEnqueued: { first: number; second: number };
+  /** What the lifecycle outbox delivered at the end of the tick. */
+  notices: ShowcaseLifecycleOutboxResult;
 };
 
 /**
@@ -48,6 +56,22 @@ export type ShowcasePlacementExpiryResult = {
  * cron would either double the operator's job list for no reason or drift out
  * of sync with each other; one call here keeps both counts in one log line
  * and one operations-settings toggle.
+ *
+ * ## Why this job also owns the run's notices
+ *
+ * The seven-day and three-day reminders and the end-of-run notice are the
+ * same clock this job already reads, so they live under the same
+ * operations-settings toggle rather than a seventh one: an operator who has
+ * switched the run's clock off has switched off everything the clock says. A
+ * separate toggle would allow "remind about an end nobody will close" — a
+ * state with no honest sentence for the provider. The toggle's default is
+ * off, as every job's is, and the audit trail and the admin screen are
+ * unchanged.
+ *
+ * The end-of-run intent is written inside the expiring transaction; the
+ * reminders are enqueued by a scan; both are delivered by the outbox at the
+ * end of the tick. See `ShowcaseLifecycleOutbox` for why the message and the
+ * transition are kept apart.
  */
 @Injectable()
 export class ShowcasePlacementExpiryService {
@@ -56,6 +80,7 @@ export class ShowcasePlacementExpiryService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService,
+    @Inject(ShowcaseLifecycleOutbox) private readonly outbox: ShowcaseLifecycleOutbox,
   ) {}
 
   async execute(options: { limit?: number } = {}): Promise<ShowcasePlacementExpiryResult> {
@@ -128,6 +153,10 @@ export class ShowcasePlacementExpiryService {
           data: { active: false },
         });
 
+        // The notice is owed by this transition, so its intent commits with
+        // it — or not at all.
+        await this.outbox.enqueueExpired(tx, candidate.id);
+
         return { expired: true, shelves: shelves.count };
       });
 
@@ -145,6 +174,11 @@ export class ShowcasePlacementExpiryService {
 
     const entitlementsExpired = await this.entitlements.expireStale(now, limit);
 
-    return { expired, skipped, shelvesClosed, entitlementsExpired };
+    // After the transitions: a run this tick just expired is no longer ACTIVE
+    // and is not scanned for a reminder it would contradict.
+    const remindersEnqueued = await this.outbox.enqueueEndingReminders(now, { limit });
+    const notices = await this.outbox.deliverPending({ limit });
+
+    return { expired, skipped, shelvesClosed, entitlementsExpired, remindersEnqueued, notices };
   }
 }

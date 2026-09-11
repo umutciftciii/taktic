@@ -9,6 +9,7 @@ import { assertContactSharingConfig } from './modules/contact-sharing/contact-sh
 import { assertEmailBrandingConfig } from './modules/notifications/email-branding.config';
 import { assertEmailTransportConfig } from './modules/notifications/email-transport';
 import { assertPaymentProviderConfig } from './modules/payments/payment-provider.config';
+import { assertPhoneVerificationTestBypassConfig } from './modules/phone-verification/phone-verification-test-bypass.config';
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
@@ -60,6 +61,12 @@ async function bootstrap() {
   // stop the process here rather than surfacing as a purchase that loaded
   // credits nobody paid for.
   assertPaymentProviderConfig();
+
+  // The phone-verification test bypass, before a single code can be checked.
+  // A flag that says "test mode" on a deployment that is not local or staging
+  // stops the process here — with the variable's name and never its value —
+  // rather than being silently ignored where somebody might rely on it.
+  assertPhoneVerificationTestBypassConfig();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // Keeps the untouched request bytes on `req.rawBody`. The payment webhook

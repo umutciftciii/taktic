@@ -1,6 +1,6 @@
 'use server';
 
-import { safeRedirectPath } from '@taktic/shared';
+import { parseTurkishLiraToMinor, safeRedirectPath } from '@taktic/shared';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
@@ -8,7 +8,6 @@ import {
   OfferCreditPackage,
   OfferPackageType,
   apiFetch,
-  parseDecimalToMinor,
 } from '../../lib/api';
 
 const ALLOWED_CURRENCIES = ['TRY', 'USD', 'EUR'] as const;
@@ -199,9 +198,10 @@ export async function moveCreditPackageAction(formData: FormData) {
 
 function readDraft(formData: FormData): PackageDraft {
   const priceInput = readFormString(formData, 'priceAmount').trim();
-  // parseDecimalToMinor returns null for invalid/empty input; downstream
-  // validation surfaces a user-friendly error message in that case.
-  const priceAmountMinor = parseDecimalToMinor(priceInput) ?? 0;
+  // The form speaks lira with a comma for kuruş — the same shared parser the
+  // vitrin catalogue uses, and no floating point anywhere. It returns null for
+  // anything it refuses; validateDraft turns that into a sentence.
+  const priceAmountMinor = parseTurkishLiraToMinor(priceInput) ?? 0;
 
   return {
     name: readFormString(formData, 'name').trim(),
@@ -298,10 +298,10 @@ function validateDraft(draft: PackageDraft): string | null {
     }
   }
   // priceAmount is stored in minor units; 100 = 1,00 in the selected currency.
-  // Empty / non-numeric inputs are normalised to 0 in readDraft, which falls
+  // Anything the parser refused was normalised to 0 in readDraft and falls
   // into the same branch as values < 1,00.
   if (!Number.isInteger(draft.priceAmount) || draft.priceAmount < 100) {
-    return 'Fiyat en az 1,00 olmalıdır. Ondalıklı tutar girebilirsiniz (örn. 149,90).';
+    return 'Fiyat en az 1,00 olmalıdır. Kuruş için virgül kullanın: örn. 149,90 veya 1.250,75.';
   }
   if (!ALLOWED_CURRENCIES.includes(draft.currency)) {
     return 'Geçersiz para birimi.';

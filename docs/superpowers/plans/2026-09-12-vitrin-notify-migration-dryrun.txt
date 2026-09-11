@@ -1,0 +1,25 @@
+VIT-NOTIFY-UX-003 — migration dry-run (2026-09-12)
+
+İzole veritabanı: taktic_vitnotify003_dryrun (aktif `taktic` DB'nin pg_dump kopyası;
+aktif DATABASE_URL hiçbir adımda shadow/hedef olarak kullanılmadı; dry-run DB işin
+sonunda DROP edildi).
+
+Uygulanan migration'lar (yalnız bu ikisi bekliyordu):
+  20260912090000_showcase_package_description_no_priority_promise  (UPDATE, additive)
+  20260912090100_add_phone_verification_test_bypass_flag           (ADD COLUMN DEFAULT false)
+
+Dry-run DB'ye, migration'ın etkisini görmek için sentetik bir paket satırı eklendi
+(slug vitrin-dryrun-eski, durationDays 15, açıklama "… Taleplerde öncelikli hizmeti.").
+
+Satır sayıları  ShowcasePackage|PhoneVerification|NotificationLog|ShowcasePlacement|ShowcaseEntitlement|ShowcaseCard
+  öncesi : 2|3|39|2|2|2   (sentetik satır dahil)
+  sonrası: 2|3|39|2|2|2
+
+İçerik md5 (id|normalizedPhone|consumedAt — PhoneVerification): a5d194b8af4e43aae01e50a93fb06cb4 → aynı
+İçerik md5 (id|template|status — NotificationLog):              e0670a5b31b41cb17113b3b53677b765 → aynı
+
+ShowcasePackage sonrası:
+  vitrin-dryrun-eski | 15 | 15 gün boyunca vitrin sayfalarında yayınlanın ve kartınızdan doğrudan talep alın.
+  vitrin-mini-30     | 30 | 30 gün boyunca vitrin sayfalarında yayınlanın ve kartınızdan doğrudan talep alın.  (değişmedi; zaten doğruydu)
+
+PhoneVerification.verifiedByTestBypass: 0 / 3 satır true (mevcut her satır gerçek doğrulama olarak okunur).

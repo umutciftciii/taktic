@@ -4,6 +4,7 @@ import {
   NotificationStatus,
   OfferPackageType,
   OfferStatus,
+  PackagePurchaseKind,
   PackagePurchaseStatus,
   ProviderStatus,
   ServiceCategoryStatus,
@@ -11,6 +12,7 @@ import {
   ShowcaseLeadStatus,
   ShowcaseLeadUrgency,
   ShowcasePlacementStatus,
+  ShowcaseVersionReview,
   SupportTicketAuthorRole,
   SupportTicketRequesterRole,
 } from '@prisma/client';
@@ -32,7 +34,10 @@ import {
   providerProfileUrl,
   providerRequestUrl,
   providerRequestsUrl,
+  providerShowcaseCardUrl,
   providerShowcaseLeadUrl,
+  providerShowcaseNewCardUrl,
+  providerShowcasePackagesUrl,
   providerShowcaseUrl,
 } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -529,28 +534,134 @@ export class TransactionalMailService {
     await this.send(
       'showcase-placement-activated',
       provider.recipient,
-      {
-        fullName: provider.contactName ?? provider.businessName,
-        cardTitle: placement.pinnedVersion.title,
-        packageName: placement.packageNameSnapshot,
-        areaSummary: placement.shelves
-          .map((shelf) =>
-            describeArea({
-              city: shelf.city,
-              district: shelf.district,
-              neighborhood: shelf.neighborhood,
-            }),
-          )
-          .join(' · '),
-        startAt: placement.startAt.toISOString(),
-        endAt: placement.endAt.toISOString(),
-        placementUrl: providerShowcaseUrl(provider.id),
-        accountUrl: providerAccountUrl(),
-      },
+      showcasePlacementActivatedData(provider, placement),
       {
         providerId: provider.id,
         userId: provider.userId,
         dedupeKey: `showcase-placement-activated:${placement.id}`,
+      },
+    );
+  }
+
+  // ───────────────────────────── vitrin, phase three ──────────────────────────
+
+  /**
+   * The package was paid for — to the provider who bought it.
+   *
+   * Re-reads the committed purchase and the right it granted, and refuses
+   * anything that is not a PAID vitrin purchase with a right behind it: the
+   * legacy card-bound purchase, which settled straight into a placement, has
+   * its own notice and no right to describe.
+   *
+   * `dedupeKey` names the purchase. One purchase settles once, so a redelivered
+   * webhook — or the webhook and the mock form racing — produce one message.
+   */
+  async sendShowcasePackagePaymentSucceeded(purchaseId: string) {
+    const purchase = await loadSettledShowcasePurchase(this.prisma, purchaseId);
+    if (!purchase) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, purchase.providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    await this.send(
+      'showcase-package-payment-succeeded',
+      provider.recipient,
+      showcasePaymentSucceededData(provider, purchase),
+      {
+        providerId: provider.id,
+        userId: provider.userId,
+        dedupeKey: `showcase-package-payment-succeeded:${purchase.id}`,
+      },
+    );
+  }
+
+  /**
+   * The payment did not complete — to the provider who started it.
+   *
+   * Only a *payment* failure qualifies: a card the mock form declined, or a
+   * pending purchase an operator cancelled. A purchase that failed because the
+   * checkout could never be opened — `PACKAGE_NOT_MAPPED`, a provider that was
+   * down — is this deployment's configuration problem and is refused here:
+   * the provider never reached a payment page, and a message telling them
+   * their payment failed would be a lie about their card.
+   */
+  async sendShowcasePackagePaymentFailed(purchaseId: string) {
+    const purchase = await loadFailedShowcasePurchase(this.prisma, purchaseId);
+    if (!purchase) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, purchase.providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    await this.send(
+      'showcase-package-payment-failed',
+      provider.recipient,
+      showcasePaymentFailedData(provider, purchase),
+      {
+        providerId: provider.id,
+        userId: provider.userId,
+        dedupeKey: `showcase-package-payment-failed:${purchase.id}`,
+      },
+    );
+  }
+
+  /**
+   * A version was approved — one message, whichever of the two facts it
+   * produced.
+   *
+   * The approval is read back from the committed rows, and what the message
+   * says follows from what is on the air: a placement ACTIVE on this very
+   * version means "approved and live" as a single notice; nothing on the air
+   * means "approved", and the way back onto the air is a package. A placement
+   * that went up at a *different* moment from the approval is not this
+   * method's business — `sendShowcasePlacementActivated` covers it.
+   *
+   * `dedupeKey` names the version. A version is approved once, so the pair of
+   * keys — one per template — makes each approval exactly one message even if
+   * the operator's click is replayed.
+   */
+  async sendShowcaseCardApprovalOutcome(versionId: string) {
+    const version = await loadApprovedShowcaseVersion(this.prisma, versionId);
+    if (!version) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, version.card.providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    const live = await loadActivePlacementForVersion(this.prisma, versionId);
+
+    if (live) {
+      await this.send(
+        'showcase-card-approved-live',
+        provider.recipient,
+        showcaseCardApprovedLiveData(provider, version, live),
+        {
+          providerId: provider.id,
+          userId: provider.userId,
+          dedupeKey: `showcase-card-approved-live:${version.id}`,
+        },
+      );
+      return;
+    }
+
+    await this.send(
+      'showcase-card-approved',
+      provider.recipient,
+      showcaseCardApprovedData(provider, version),
+      {
+        providerId: provider.id,
+        userId: provider.userId,
+        dedupeKey: `showcase-card-approved:${version.id}`,
       },
     );
   }
@@ -1172,6 +1283,99 @@ export class TransactionalMailService {
               replyTo: supportReplyToEmail(),
               data: supportStatusChangeData(change),
             }
+          : null;
+      }
+
+      case 'showcase-placement-activated': {
+        const placement = await loadShowcasePlacement(this.prisma, source.ids[0]);
+        if (!placement || placement.status !== ShowcasePlacementStatus.ACTIVE) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, placement.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcasePlacementActivatedData(provider, placement) }
+          : null;
+      }
+
+      case 'showcase-package-payment-succeeded': {
+        const purchase = await loadSettledShowcasePurchase(this.prisma, source.ids[0]);
+        if (!purchase) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, purchase.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcasePaymentSucceededData(provider, purchase) }
+          : null;
+      }
+
+      case 'showcase-package-payment-failed': {
+        const purchase = await loadFailedShowcasePurchase(this.prisma, source.ids[0]);
+        if (!purchase) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, purchase.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcasePaymentFailedData(provider, purchase) }
+          : null;
+      }
+
+      case 'showcase-card-approved-live': {
+        const version = await loadApprovedShowcaseVersion(this.prisma, source.ids[0]);
+        if (!version) {
+          return null;
+        }
+        // The message says the card is on the air, so it may only be rebuilt
+        // while that is still true of this very version.
+        const live = await loadActivePlacementForVersion(this.prisma, version.id);
+        if (!live) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, version.card.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcaseCardApprovedLiveData(provider, version, live) }
+          : null;
+      }
+
+      case 'showcase-card-approved': {
+        const version = await loadApprovedShowcaseVersion(this.prisma, source.ids[0]);
+        if (!version) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, version.card.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcaseCardApprovedData(provider, version) }
+          : null;
+      }
+
+      case 'showcase-placement-ending-7d':
+      case 'showcase-placement-ending-3d': {
+        // Composed from the run's *current* clock, and only while the notice
+        // is still true: the run is on the air and ends within the window the
+        // template names. A run that was suspended, ended or extended past the
+        // window in between produces nothing rather than a stale sentence.
+        const placement = await loadShowcasePlacement(this.prisma, source.ids[0]);
+        const daysLeft = source.template === 'showcase-placement-ending-7d' ? 7 : 3;
+        if (
+          !placement ||
+          placement.status !== ShowcasePlacementStatus.ACTIVE ||
+          !endsWithin(placement.endAt, daysLeft, new Date())
+        ) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, placement.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcasePlacementEndingData(provider, placement) }
+          : null;
+      }
+
+      case 'showcase-placement-expired': {
+        const placement = await loadShowcasePlacement(this.prisma, source.ids[0]);
+        if (!placement || placement.status !== ShowcasePlacementStatus.EXPIRED) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, placement.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcasePlacementExpiredData(provider, placement) }
           : null;
       }
 
@@ -2244,6 +2448,19 @@ const RETRY_DEDUPE_PREFIXES = {
   'support-ticket-provider-reply': 'support-ticket-provider-reply',
   'support-ticket-provider-admin-reply': 'support-ticket-provider-admin-reply',
   'support-ticket-provider-status-changed': 'support-ticket-provider-status',
+  // The vitrin run's life. Every one of these is composed from a placement, a
+  // purchase or a card version — rows this product never deletes — and the
+  // three clock notices are not merely retryable but *delivered* through this
+  // table: the lifecycle outbox enqueues them inside the job's transaction and
+  // rebuilds them from exactly these prefixes when it sends.
+  'showcase-placement-activated': 'showcase-placement-activated',
+  'showcase-package-payment-succeeded': 'showcase-package-payment-succeeded',
+  'showcase-package-payment-failed': 'showcase-package-payment-failed',
+  'showcase-card-approved-live': 'showcase-card-approved-live',
+  'showcase-card-approved': 'showcase-card-approved',
+  'showcase-placement-ending-7d': 'showcase-placement-ending-7d',
+  'showcase-placement-ending-3d': 'showcase-placement-ending-3d',
+  'showcase-placement-expired': 'showcase-placement-expired',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -2290,6 +2507,14 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'support-ticket-provider-reply': 1,
   'support-ticket-provider-admin-reply': 1,
   'support-ticket-provider-status-changed': 1,
+  'showcase-placement-activated': 1,
+  'showcase-package-payment-succeeded': 1,
+  'showcase-package-payment-failed': 1,
+  'showcase-card-approved-live': 1,
+  'showcase-card-approved': 1,
+  'showcase-placement-ending-7d': 1,
+  'showcase-placement-ending-3d': 1,
+  'showcase-placement-expired': 1,
 };
 
 /**
@@ -2441,6 +2666,258 @@ function loadShowcasePlacement(prisma: PrismaService, placementId: string) {
       },
     },
   });
+}
+
+type ShowcasePlacementSource = NonNullable<Awaited<ReturnType<typeof loadShowcasePlacement>>>;
+type ShowcaseProviderSource = NonNullable<Awaited<ReturnType<typeof loadProvider>>>;
+
+/** The run's areas as one sentence, in the words the screens use. */
+function showcaseAreaSummary(placement: ShowcasePlacementSource): string {
+  return placement.shelves
+    .map((shelf) =>
+      describeArea({
+        city: shelf.city,
+        district: shelf.district,
+        neighborhood: shelf.neighborhood,
+      }),
+    )
+    .join(' · ');
+}
+
+function showcasePlacementActivatedData(
+  provider: ShowcaseProviderSource,
+  placement: ShowcasePlacementSource,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    cardTitle: placement.pinnedVersion.title,
+    packageName: placement.packageNameSnapshot,
+    areaSummary: showcaseAreaSummary(placement),
+    startAt: placement.startAt.toISOString(),
+    endAt: placement.endAt.toISOString(),
+    placementUrl: providerShowcaseUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/** Whether a run ends inside the next `days` — the window a reminder names. */
+export function endsWithin(endAt: Date, days: number, now: Date): boolean {
+  const remaining = endAt.getTime() - now.getTime();
+  return remaining > 0 && remaining <= days * 24 * 60 * 60 * 1000;
+}
+
+function showcasePlacementEndingData(
+  provider: ShowcaseProviderSource,
+  placement: ShowcasePlacementSource,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    cardTitle: placement.pinnedVersion.title,
+    endAt: placement.endAt.toISOString(),
+    packagesUrl: providerShowcasePackagesUrl(provider.id),
+    showcaseUrl: providerShowcaseUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+function showcasePlacementExpiredData(
+  provider: ShowcaseProviderSource,
+  placement: ShowcasePlacementSource,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    cardTitle: placement.pinnedVersion.title,
+    endAt: placement.endAt.toISOString(),
+    packagesUrl: providerShowcasePackagesUrl(provider.id),
+    showcaseUrl: providerShowcaseUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/**
+ * A PAID package-first vitrin purchase and the right it granted.
+ *
+ * The payment columns are not selected — no order id, no checkout id, no
+ * correlation token, no failure code, no admin note — so nothing on the
+ * payment side can reach a template by accident. A legacy card-bound purchase
+ * has no right and falls out; its notice is the placement's.
+ */
+async function loadSettledShowcasePurchase(prisma: PrismaService, purchaseId: string) {
+  const purchase = await prisma.packagePurchase.findUnique({
+    where: { id: purchaseId },
+    select: {
+      id: true,
+      kind: true,
+      providerId: true,
+      status: true,
+      packageNameSnapshot: true,
+      priceAmountSnapshot: true,
+      currencySnapshot: true,
+      durationDaysSnapshot: true,
+      paidAt: true,
+      showcaseEntitlement: { select: { expiresAt: true } },
+    },
+  });
+
+  if (
+    !purchase ||
+    purchase.kind !== PackagePurchaseKind.SHOWCASE_PACKAGE ||
+    purchase.status !== PackagePurchaseStatus.PAID ||
+    !purchase.showcaseEntitlement
+  ) {
+    return null;
+  }
+
+  return { ...purchase, entitlement: purchase.showcaseEntitlement };
+}
+
+type SettledShowcasePurchaseSource = NonNullable<
+  Awaited<ReturnType<typeof loadSettledShowcasePurchase>>
+>;
+
+function showcasePaymentSucceededData(
+  provider: ShowcaseProviderSource,
+  purchase: SettledShowcasePurchaseSource,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    packageName: purchase.packageNameSnapshot,
+    durationDays:
+      purchase.durationDaysSnapshot === null ? null : String(purchase.durationDaysSnapshot),
+    priceAmountMinor: String(purchase.priceAmountSnapshot),
+    currency: purchase.currencySnapshot,
+    entitlementExpiresAt: purchase.entitlement.expiresAt.toISOString(),
+    paidAt: purchase.paidAt?.toISOString() ?? null,
+    createCardUrl: providerShowcaseNewCardUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/**
+ * A vitrin purchase whose *payment* failed or was cancelled.
+ *
+ * `paymentFailureCode` is selected for one comparison and never returned: it is
+ * set only by the checkout-opening path, when no payment page ever opened, and
+ * a purchase carrying one is refused here. The mock decline and an operator's
+ * cancellation leave it null, and those are the two real failures.
+ */
+async function loadFailedShowcasePurchase(prisma: PrismaService, purchaseId: string) {
+  const purchase = await prisma.packagePurchase.findUnique({
+    where: { id: purchaseId },
+    select: {
+      id: true,
+      kind: true,
+      providerId: true,
+      status: true,
+      packageNameSnapshot: true,
+      priceAmountSnapshot: true,
+      currencySnapshot: true,
+      failedAt: true,
+      cancelledAt: true,
+      paymentFailureCode: true,
+    },
+  });
+
+  if (!purchase || purchase.kind !== PackagePurchaseKind.SHOWCASE_PACKAGE) {
+    return null;
+  }
+
+  const failed =
+    purchase.status === PackagePurchaseStatus.FAILED && purchase.paymentFailureCode === null;
+  const cancelled = purchase.status === PackagePurchaseStatus.CANCELLED;
+
+  if (!failed && !cancelled) {
+    return null;
+  }
+
+  const { paymentFailureCode: _code, ...rest } = purchase;
+  return { ...rest, attemptedAt: purchase.failedAt ?? purchase.cancelledAt ?? null };
+}
+
+type FailedShowcasePurchaseSource = NonNullable<
+  Awaited<ReturnType<typeof loadFailedShowcasePurchase>>
+>;
+
+function showcasePaymentFailedData(
+  provider: ShowcaseProviderSource,
+  purchase: FailedShowcasePurchaseSource,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    packageName: purchase.packageNameSnapshot,
+    priceAmountMinor: String(purchase.priceAmountSnapshot),
+    currency: purchase.currencySnapshot,
+    attemptedAt: purchase.attemptedAt?.toISOString() ?? null,
+    packagesUrl: providerShowcasePackagesUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/** An APPROVED version and the card it belongs to. Nothing else qualifies. */
+async function loadApprovedShowcaseVersion(prisma: PrismaService, versionId: string) {
+  const version = await prisma.showcaseCardVersion.findUnique({
+    where: { id: versionId },
+    select: {
+      id: true,
+      title: true,
+      reviewStatus: true,
+      publishedAt: true,
+      card: { select: { id: true, providerId: true } },
+    },
+  });
+
+  return version && version.reviewStatus === ShowcaseVersionReview.APPROVED ? version : null;
+}
+
+type ApprovedShowcaseVersionSource = NonNullable<
+  Awaited<ReturnType<typeof loadApprovedShowcaseVersion>>
+>;
+
+/** The run publishing this exact version right now, if there is one. */
+async function loadActivePlacementForVersion(prisma: PrismaService, versionId: string) {
+  const placement = await prisma.showcasePlacement.findFirst({
+    where: { pinnedVersionId: versionId, status: ShowcasePlacementStatus.ACTIVE },
+    orderBy: { startAt: 'desc' },
+    select: { id: true },
+  });
+
+  return placement ? loadShowcasePlacement(prisma, placement.id) : null;
+}
+
+function showcaseCardApprovedLiveData(
+  provider: ShowcaseProviderSource,
+  version: ApprovedShowcaseVersionSource,
+  placement: ShowcasePlacementSource,
+) {
+  // A run that started before this version was approved is one the approval
+  // re-pinned: the provider is reading about an edit, not a launch.
+  const revision =
+    version.publishedAt !== null && placement.startAt.getTime() < version.publishedAt.getTime();
+
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    cardTitle: version.title,
+    packageName: placement.packageNameSnapshot,
+    areaSummary: showcaseAreaSummary(placement),
+    startAt: placement.startAt.toISOString(),
+    endAt: placement.endAt.toISOString(),
+    revision: revision ? 'true' : 'false',
+    cardUrl: providerShowcaseCardUrl(provider.id, version.card.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+function showcaseCardApprovedData(
+  provider: ShowcaseProviderSource,
+  version: ApprovedShowcaseVersionSource,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    cardTitle: version.title,
+    approvedAt: version.publishedAt?.toISOString() ?? null,
+    showcaseUrl: providerShowcaseUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
 }
 
 /**

@@ -1,9 +1,9 @@
+import { formatMinorAsTurkishLiraInput } from '@taktic/shared';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
   apiFetch,
   formatDateTime,
-  formatMinorAsInput,
   formatPrice,
   AdminOfferPackage,
   PackagePurchase,
@@ -279,16 +279,15 @@ export default async function CreditPackageDetailPage({
                   <span>Fiyat *</span>
                   <input
                     name="priceAmount"
-                    type="number"
-                    step="0.01"
-                    min="1"
+                    type="text"
                     inputMode="decimal"
-                    placeholder="Örn. 149.90"
+                    pattern="([0-9]{1,3}(\\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
+                    placeholder="Örn. 149,90"
                     required
-                    defaultValue={formatMinorAsInput(creditPackage.priceAmount)}
+                    defaultValue={formatMinorAsTurkishLiraInput(creditPackage.priceAmount)}
                   />
                   <span className="help-text">
-                    Ondalıklı tutar girebilirsiniz. Örn: 149.90 {selectedCurrency} veya 1500. Mevcut
+                    Kuruş için virgül kullanın. Örn: 149,90 {selectedCurrency} veya 1.500. Mevcut
                     değer paketten okunarak basılır; değiştirip kaydedebilirsiniz.
                   </span>
                 </label>
@@ -476,7 +475,7 @@ export default async function CreditPackageDetailPage({
           <div className="helper-card">
             <h4>Hatırlatmalar</h4>
             <ul>
-              <li>Fiyat ondalıklı girilir (örn. 149.90); kaydederken sistem otomatik olarak normalize eder.</li>
+              <li>Fiyat lira olarak, kuruş için virgülle girilir (örn. 149,90); sistem kaydederken kuruşa çevirir.</li>
               <li>
                 Satın alma kayıtları paketin o anki adı, kredisi, fiyatı ve para biriminin
                 kopyasını tutar; sonraki değişiklikler eski kayıtları bozmaz.

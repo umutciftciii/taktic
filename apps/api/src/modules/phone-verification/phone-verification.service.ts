@@ -25,6 +25,7 @@ import {
   OTP_RATE_WINDOW_MINUTES,
   OTP_TTL_MINUTES,
 } from './phone-verification.constants';
+import { isPhoneVerificationTestBypassMatch } from './phone-verification-test-bypass.config';
 import { normalizePhoneNumber } from './phone.util';
 
 export type VerificationRequestMeta = {
@@ -149,9 +150,9 @@ export class PhoneVerificationService {
           return { ok: false as const };
         }
 
-        const matches = await bcrypt.compare(code, candidate.codeHash);
+        const accepted = await acceptedCode(code, candidate.codeHash, normalizedPhone, now);
 
-        if (!matches) {
+        if (!accepted) {
           const attemptCount = candidate.attemptCount + 1;
           // The increment is committed by this transaction and the caller
           // throws afterwards — throwing here would roll the counter back and
@@ -171,7 +172,7 @@ export class PhoneVerificationService {
 
         await tx.phoneVerification.update({
           where: { id: candidate.id },
-          data: { consumedAt: now },
+          data: { consumedAt: now, verifiedByTestBypass: accepted === 'test-bypass' },
         });
 
         // Guarded so the verification of one request can never stamp another,
@@ -333,9 +334,9 @@ export class PhoneVerificationService {
           return { ok: false as const };
         }
 
-        const matches = await bcrypt.compare(code, candidate.codeHash);
+        const accepted = await acceptedCode(code, candidate.codeHash, normalizedPhone, now);
 
-        if (!matches) {
+        if (!accepted) {
           const attemptCount = candidate.attemptCount + 1;
           // Committed by this transaction, and the caller throws afterwards.
           // Throwing here would roll the counter back and hand an attacker
@@ -355,7 +356,7 @@ export class PhoneVerificationService {
 
         await tx.phoneVerification.update({
           where: { id: candidate.id },
-          data: { consumedAt: now },
+          data: { consumedAt: now, verifiedByTestBypass: accepted === 'test-bypass' },
         });
 
         return { ok: true as const, verifiedAt: now };
@@ -461,6 +462,34 @@ function invalidCodeException() {
     code: 'PHONE_VERIFICATION_INVALID',
     message: 'Doğrulama kodu geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.',
   });
+}
+
+/**
+ * Which answer the code is, if it is one at all.
+ *
+ * The sent code is always checked first and always checked — the bcrypt
+ * comparison runs whether or not a test bypass could apply, so the timing of
+ * a refusal does not say whether this number is on a list. The test code is a
+ * second acceptable answer only while every clause of the bypass contract
+ * holds (see phone-verification-test-bypass.config.ts); for every other
+ * number, environment and moment it is simply a wrong code, and it costs an
+ * attempt like any other.
+ *
+ * Nothing about the flow is relaxed on the way here: the caller has already
+ * required a live, unexpired, unlocked row, which is the same row a real code
+ * would have needed.
+ */
+async function acceptedCode(
+  code: string,
+  codeHash: string,
+  normalizedPhone: string,
+  now: Date,
+): Promise<'sent-code' | 'test-bypass' | null> {
+  if (await bcrypt.compare(code, codeHash)) {
+    return 'sent-code';
+  }
+
+  return isPhoneVerificationTestBypassMatch(normalizedPhone, code, now) ? 'test-bypass' : null;
 }
 
 function generateCode(): string {

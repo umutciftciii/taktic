@@ -1,14 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import {
-  NotificationChannel,
-  NotificationStatus,
-  OfferStatus,
-  Prisma,
-  ServiceRequestStatus,
-} from '@prisma/client';
+import { OfferStatus, Prisma, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { maskEmail } from './mask';
 import { NotificationDispatcher } from './notification-dispatcher.service';
+import {
+  deliverPendingIntents,
+  INTENT_CLAIM_LEASE_MS,
+  IntentDeliveryResult,
+  intentRow,
+} from './notification-intents';
 import { recipientFor, TransactionalMailService } from './transactional-mail.service';
 
 /**
@@ -60,29 +59,16 @@ export const REQUEST_EXPIRED_TEMPLATES = [
  * A claim marks "somebody is sending this right now". If that process dies
  * between the claim and the transport's answer, the row would otherwise stay
  * PENDING for ever — the very durability hole this service exists to close,
- * moved one step later. Fifteen minutes is comfortably longer than any send
- * takes and short enough that a crashed pass recovers within a tick or two.
- *
- * Re-attempting a claim whose outcome is genuinely unknown is safe rather than
- * duplicative: the transport is offered the same idempotency key both times,
- * derived from the row id, so a first attempt that really did deliver is
- * de-duplicated by the provider instead of arriving twice.
+ * moved one step later. The lease itself is shared with every other intent
+ * outbox (see notification-intents.ts); this name is kept for the callers and
+ * tests that learned it here.
  */
-export const EXPIRY_OUTBOX_CLAIM_LEASE_MS = 15 * 60 * 1000;
+export const EXPIRY_OUTBOX_CLAIM_LEASE_MS = INTENT_CLAIM_LEASE_MS;
 
 /** Intents one sweep may deliver. Matches the job's own scan limit by default. */
 const DEFAULT_DELIVERY_LIMIT = 200;
 
-export type ExpiryOutboxDeliveryResult = {
-  /** Intents this sweep claimed. */
-  claimed: number;
-  /** Of those, the ones the transport accepted. */
-  sent: number;
-  /** Of those, the ones it refused. They are FAILED now and stay FAILED. */
-  failed: number;
-  /** Claimed rows whose source could no longer be composed. Also FAILED. */
-  unavailable: number;
-};
+export type ExpiryOutboxDeliveryResult = IntentDeliveryResult;
 
 @Injectable()
 export class RequestExpiryOutbox {
@@ -204,150 +190,15 @@ export class RequestExpiryOutbox {
    * failure than an undelivered notice.
    */
   async deliverPending(options: { limit?: number } = {}): Promise<ExpiryOutboxDeliveryResult> {
-    const limit = options.limit ?? DEFAULT_DELIVERY_LIMIT;
-    const result: ExpiryOutboxDeliveryResult = {
-      claimed: 0,
-      sent: 0,
-      failed: 0,
-      unavailable: 0,
-    };
-
-    const candidates = await this.prisma.notificationLog.findMany({
-      where: claimablePredicate(new Date()),
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      take: limit,
-      select: { id: true, template: true, dedupeKey: true, maskedRecipient: true },
-    });
-
-    for (const candidate of candidates) {
-      // Re-evaluated at claim time rather than reused from the scan: a row
-      // another runner took while this loop was working is no longer claimable,
-      // and PostgreSQL decides that after the row lock.
-      const claim = await this.prisma.notificationLog.updateMany({
-        where: { id: candidate.id, ...claimablePredicate(new Date()) },
-        data: { lastAttemptAt: new Date(), attemptCount: { increment: 1 } },
-      });
-
-      if (claim.count !== 1) {
-        continue;
-      }
-
-      result.claimed += 1;
-
-      const message = await this.mail.composeRetryMessage(candidate.template, candidate.dedupeKey);
-
-      // The rebuilt address has to be the recorded one. The raw address was
-      // never stored, but the mask is a strong enough statement: a message that
-      // would now go somewhere else is not this intent, and a source that is
-      // gone — a withdrawn offer, a provider with no address left — is exactly
-      // the case this must refuse rather than guess at.
-      if (!message || maskEmail(message.to) !== candidate.maskedRecipient) {
-        result.unavailable += 1;
-        await this.recordUnavailable(candidate.id, candidate.template, candidate.maskedRecipient);
-        continue;
-      }
-
-      const outcome = await this.dispatcher.resendExistingEmail(
-        candidate.id,
-        message,
-        candidate.maskedRecipient,
-      );
-
-      if (outcome.status === NotificationStatus.SENT) {
-        result.sent += 1;
-      } else {
-        result.failed += 1;
-      }
-    }
-
-    if (result.claimed > 0) {
-      this.logger.log(
-        `Request expiry outbox claimed=${result.claimed} sent=${result.sent} ` +
-          `failed=${result.failed} unavailable=${result.unavailable}`,
-      );
-    }
-
-    return result;
-  }
-
-  /**
-   * Settles a claimed row whose source can no longer be composed.
-   *
-   * FAILED rather than left PENDING, and that is load-bearing: a row this sweep
-   * can never compose would otherwise be re-claimed every time its lease
-   * expired, for ever. FAILED is also the truthful state — the message was
-   * owed and will not be sent — and it is the state an operator can see and act
-   * on. Nothing about the source is recorded; which row is gone is a fact about
-   * the domain, not about this message.
-   */
-  private async recordUnavailable(
-    id: string,
-    template: string,
-    maskedRecipient: string,
-  ): Promise<void> {
-    this.logger.warn(`[${template}] expiry notice unavailable for ${maskedRecipient}`);
-
-    await this.prisma.notificationLog.update({
-      where: { id },
-      data: {
-        status: NotificationStatus.FAILED,
-        failedAt: new Date(),
-        errorCode: 'SOURCE_UNAVAILABLE',
-      },
+    return deliverPendingIntents({
+      prisma: this.prisma,
+      dispatcher: this.dispatcher,
+      mail: this.mail,
+      logger: this.logger,
+      templates: REQUEST_EXPIRED_TEMPLATES,
+      limit: options.limit ?? DEFAULT_DELIVERY_LIMIT,
+      label: 'Request expiry',
     });
   }
 }
 
-/**
- * One un-attempted intent.
- *
- * `attemptCount: 0` is the only place in this system a notification row starts
- * at zero, and it says exactly what is true: the row exists because a message
- * is owed, not because one has been tried. Every other row is created by the
- * dispatcher at the moment it hands something to a transport, which is why the
- * column's default is 1.
- *
- * `lastAttemptAt: null` for the same reason, and it is what the sweep's
- * predicate reads as "never claimed".
- */
-function intentRow(input: {
-  template: (typeof REQUEST_EXPIRED_TEMPLATES)[number];
-  to: string;
-  dedupeKey: string;
-  requestId: string;
-  userId: string | null;
-  providerId: string | null;
-}): Prisma.NotificationLogCreateManyInput {
-  return {
-    channel: NotificationChannel.EMAIL,
-    template: input.template,
-    maskedRecipient: maskEmail(input.to),
-    status: NotificationStatus.PENDING,
-    requestId: input.requestId,
-    userId: input.userId,
-    providerId: input.providerId,
-    dedupeKey: input.dedupeKey,
-    attemptCount: 0,
-    lastAttemptAt: null,
-  };
-}
-
-/**
- * What the sweep may take: an expiry intent that is still owed and that nobody
- * is currently sending.
- *
- * PENDING only — a FAILED row is settled and is an operator's decision, never
- * this sweep's. Of the PENDING rows, one that has never been claimed, or one
- * whose claim is older than the lease and therefore belongs to a runner that is
- * not coming back.
- */
-function claimablePredicate(now: Date): Prisma.NotificationLogWhereInput {
-  return {
-    template: { in: [...REQUEST_EXPIRED_TEMPLATES] },
-    status: NotificationStatus.PENDING,
-    OR: [
-      { lastAttemptAt: null },
-      { lastAttemptAt: { lt: new Date(now.getTime() - EXPIRY_OUTBOX_CLAIM_LEASE_MS) } },
-    ],
-  };
-}

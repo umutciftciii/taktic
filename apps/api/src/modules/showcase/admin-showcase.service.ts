@@ -352,11 +352,12 @@ export class AdminShowcaseService {
       }
     }, { label: 'showcase.approveVersion' });
 
-    // After the commit: a mail about a run that was rolled back would announce
-    // nothing, and the settlement path sends the same message the same way.
-    if (activatedPlacementId) {
-      await this.mail.sendShowcasePlacementActivated(activatedPlacementId);
-    }
+    // After the commit: a mail about an approval that was rolled back would
+    // announce nothing. One call for both outcomes — the service reads back
+    // what is on the air and sends "approved and live" as a single message
+    // when the run was born here, or "approved" alone when nothing is.
+    void activatedPlacementId;
+    await this.mail.sendShowcaseCardApprovalOutcome(versionId);
 
     return this.getVersion(versionId);
   }
