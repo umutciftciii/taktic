@@ -240,15 +240,22 @@ describe('a settled vitrin payment', () => {
     expect(await ctx.prisma.showcasePlacementShelf.count()).toBe(0);
   });
 
-  it('sends the provider no receipt at all', async () => {
-    const { reference } = await pendingShowcasePurchase();
+  it('sends the provider one notice about the right, and no receipt for a balance', async () => {
+    const { purchase, reference } = await pendingShowcasePurchase();
 
     await deliver(orderPayload({ reference }));
 
     // No card is on the air, so the placement notice would be false; the
     // credit receipt's heading would be a false statement about a purchase
-    // that loaded no balance. The return screen tells the provider.
-    expect(ctx.notifications.sent).toHaveLength(0);
+    // that loaded no balance. What is sent is the right's own notice.
+    expect(ctx.notifications.sent.map((message) => message.template)).toEqual([
+      'showcase-package-payment-succeeded',
+    ]);
+    const log = await ctx.prisma.notificationLog.findMany({
+      where: { template: 'showcase-package-payment-succeeded' },
+    });
+    expect(log).toHaveLength(1);
+    expect(log[0]?.dedupeKey).toBe(`showcase-package-payment-succeeded:${purchase.id}`);
   });
 
   it('grants one right when the same event is delivered twice', async () => {
@@ -269,8 +276,8 @@ describe('a settled vitrin payment', () => {
     expect(event.status).toBe(PaymentWebhookEventStatus.PROCESSED);
     expect(event.attemptCount).toBe(2);
 
-    // And still nothing sent for a second settlement that did not happen.
-    expect(ctx.notifications.sent).toHaveLength(0);
+    // And exactly one notice: the redelivery settled nothing and sent nothing.
+    expect(ctx.notifications.ofTemplate('showcase-package-payment-succeeded')).toHaveLength(1);
   });
 
   it('grants one right when two deliveries of the same event arrive together', async () => {

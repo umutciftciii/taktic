@@ -1,8 +1,8 @@
+import { formatMinorAsTurkishLira, formatMinorAsTurkishLiraInput } from '@taktic/shared';
 import Link from 'next/link';
 import {
   apiFetch,
   formatDateTime,
-  formatPrice,
   requireAdmin,
   SHOWCASE_CARD_KIND_LABELS,
   type ShowcasePackage,
@@ -21,8 +21,69 @@ const ERRORS: Record<string, string> = {
     'Kısa ad "vitrin-" ile başlamak zorunda. Bu ön ek, ödeme sağlayıcısındaki ürün eşlemesinin teklif paketleriyle çakışmasını engeller.',
   SHOWCASE_PACKAGE_SLUG_TAKEN: 'Bu kısa ad başka bir vitrin paketinde kullanılıyor.',
   SHOWCASE_PACKAGE_NOT_FOUND: 'Vitrin paketi bulunamadı.',
+  SHOWCASE_PACKAGE_PRICE_INVALID:
+    'Yayın bedeli Türk lirası olarak girilmeli: örn. 10, 10,50 veya 1.250,75. Sıfır, eksi ve ikiden fazla ondalık kabul edilmez.',
   SHOWCASE_PACKAGE_SAVE_FAILED: 'Paket kaydedilemedi. Alanları kontrol edip tekrar deneyin.',
 };
+
+/**
+ * The price field, as the operator sees it: lira, with a comma for kuruş.
+ *
+ * Kuruş are the storage unit and never the form's language. The field is a
+ * text input rather than `type="number"` because a number input cannot hold
+ * `1.250,75` — it reads the dot as a decimal point and the comma as a typo —
+ * and `inputMode="decimal"` keeps the numeric keyboard on a phone. The server
+ * action parses it with the shared helper; the pattern here only spares the
+ * operator a round trip for the obvious cases.
+ */
+const PRICE_HELP = 'Türk lirası. Kuruş için virgül kullanın: 10, 10,50 veya 1.250,75.';
+const PRICE_PATTERN = '([0-9]{1,3}(\\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?';
+
+function PriceField({ defaultValue }: { defaultValue?: number }) {
+  return (
+    <label>
+      <span>Yayın bedeli (₺) *</span>
+      <input
+        name="priceAmount"
+        type="text"
+        inputMode="decimal"
+        required
+        pattern={PRICE_PATTERN}
+        placeholder="499,90"
+        defaultValue={defaultValue === undefined ? '' : formatMinorAsTurkishLiraInput(defaultValue)}
+        data-testid="showcase-package-price"
+      />
+      <small>{PRICE_HELP}</small>
+    </label>
+  );
+}
+
+/**
+ * The catalogue's own listing order, and nothing else.
+ *
+ * Under "Gelişmiş ayarlar" because it is not a fact about the package: it says
+ * where this package sits in the shop's list, and it says nothing about where
+ * any card sits on the home page. The vitrin shelf is ordered by the feed —
+ * one round of every provider's best card, then a round of second cards —
+ * and no package, price or setting moves a card up it. Stating that here is
+ * what keeps an operator from selling a boost that does not exist.
+ */
+function AdvancedSettings({ sortOrder }: { sortOrder: number }) {
+  return (
+    <details className="form-grid-wide">
+      <summary>Gelişmiş ayarlar</summary>
+      <label>
+        <span>Listeleme sırası</span>
+        <input name="sortOrder" type="number" min={0} defaultValue={sortOrder} />
+        <small>
+          Yalnız paket listesindeki görünüm sırası (küçük sayı önce). Kartların ana sayfa veya
+          vitrin sayfalarındaki sırasını etkilemez; hiçbir paket bir karta öncelik ya da
+          sıralama avantajı vermez.
+        </small>
+      </label>
+    </details>
+  );
+}
 
 /**
  * The vitrin catalogue.
@@ -127,7 +188,9 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                     <td>
                       <code>{pkg.slug}</code>
                     </td>
-                    <td>{formatPrice(pkg.priceAmount, pkg.currency)}</td>
+                    <td data-testid="showcase-package-price-cell">
+                      {formatMinorAsTurkishLira(pkg.priceAmount, pkg.currency)}
+                    </td>
                     <td>{pkg.durationDays} gün</td>
                     <td>{pkg.activationWindowDays} gün</td>
                     <td>
@@ -177,10 +240,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
               değiştirilemez.
             </small>
           </label>
-          <label>
-            <span>Yayın bedeli (kuruş) *</span>
-            <input name="priceAmount" type="number" min={1} required />
-          </label>
+          <PriceField />
           <label>
             <span>Süre (gün) *</span>
             <input name="durationDays" type="number" min={1} max={365} required />
@@ -215,12 +275,18 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
           </label>
           <label className="form-grid-wide">
             <span>Açıklama</span>
-            <textarea name="description" maxLength={600} />
+            <textarea
+              name="description"
+              maxLength={600}
+              placeholder="30 gün boyunca vitrin sayfalarında yayınlanın ve kartınızdan doğrudan talep alın."
+            />
+            <small>
+              Hizmet verenin gördüğü metin. Yalnız paketin sağladığını yazın: yayın süresi ve
+              karttan doğrudan talep. Taleplerde öncelik, sıralama veya öne çıkma vaadi vermeyin;
+              böyle bir mekanizma yoktur.
+            </small>
           </label>
-          <label>
-            <span>Sıra</span>
-            <input name="sortOrder" type="number" min={0} defaultValue={0} />
-          </label>
+          <AdvancedSettings sortOrder={0} />
 
           <div className="form-actions form-grid-wide">
             <button className="btn btn-primary" type="submit">
@@ -242,16 +308,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
               <span>Ad *</span>
               <input name="name" defaultValue={pkg.name} required minLength={3} maxLength={120} />
             </label>
-            <label>
-              <span>Yayın bedeli (kuruş) *</span>
-              <input
-                name="priceAmount"
-                type="number"
-                min={1}
-                defaultValue={pkg.priceAmount}
-                required
-              />
-            </label>
+            <PriceField defaultValue={pkg.priceAmount} />
             <label>
               <span>Süre (gün) *</span>
               <input
@@ -298,18 +355,19 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                 placeholder="Boş: tümü"
               />
             </label>
-            <label>
-              <span>Sıra</span>
-              <input name="sortOrder" type="number" min={0} defaultValue={pkg.sortOrder} />
-            </label>
             <label className="form-grid-wide">
               <span>Açıklama</span>
               <textarea name="description" maxLength={600} defaultValue={pkg.description ?? ''} />
+              <small>
+                Yalnız paketin sağladığını yazın: yayın süresi ve karttan doğrudan talep. Öncelik
+                veya sıralama vaadi vermeyin; böyle bir mekanizma yoktur.
+              </small>
             </label>
             <label className="checkbox-row form-grid-wide">
               <input type="checkbox" name="isActive" defaultChecked={pkg.isActive} />
               <span>Satışta</span>
             </label>
+            <AdvancedSettings sortOrder={pkg.sortOrder} />
 
             <div className="form-actions form-grid-wide">
               <button className="btn btn-primary" type="submit">

@@ -726,7 +726,12 @@ test.describe('vitrin ekranları dar ekranda', () => {
 
         // The consent sentence is two lines of terms rather than a chip's worth
         // of label, so it is the control most likely to widen this screen.
-        const { pkg } = await seedEntitlement(providerAccount.id, `E2E Dar Paket ${width}`);
+        // Unique per attempt: a retry of this case must not find two packages
+        // of one name on the shop and stop on a strict-mode violation.
+        const { pkg } = await seedEntitlement(
+          providerAccount.id,
+          `E2E Dar Paket ${width} ${Date.now().toString(36).slice(-4)}`,
+        );
         await provider.page.reload();
         await assertNoErrorScreen(provider.page);
         await provider.page.getByTestId('showcase-package-option').filter({ hasText: pkg.name }).click();
@@ -801,6 +806,13 @@ test.describe('vitrin ekranları dar ekranda', () => {
 
         await withdraw.click();
         await assertNoErrorScreen(provider.page);
+        // The withdrawal is a server action followed by a re-render: the menu
+        // below only exists on the withdrawn screen, and a click that lands on
+        // the one being replaced opens nothing. Wait for the screen first —
+        // the same wait the withdraw case above makes.
+        await expect(
+          provider.page.getByRole('heading', { name: 'Kartınızı incelemeye gönderin' }),
+        ).toBeVisible();
         await expectNoHorizontalOverflow(provider.page, `geri çekilmiş kart @${width}`);
 
         // The ⋯ menu and the dialog behind it, the two overlays on this screen.

@@ -99,6 +99,22 @@ export const E2E_LEMON_WEBHOOK_SECRET = 'e2e-placeholder-webhook-secret';
 export const E2E_DISCLOSURE_URL = 'https://example.test/taktic/contact-disclosure';
 export const E2E_DISCLOSURE_VERSION = 'e2e-v1';
 
+/**
+ * The phone-verification test bypass, on the phone-gate runtime only.
+ *
+ * Placeholders that mean nothing outside this suite: a number no fixture
+ * allocator can produce (the allocators live in blocks 000–999 under 0555 with
+ * a four-digit serial, and 998/0042 is reserved here), a code that is not a
+ * secret because it protects nothing but this suite's own runtime, and an
+ * expiry a day ahead of every run. The primary runtime gets none of these, so
+ * the same code and number are refused there — which is the assertion that
+ * the environment, not the request, is what opens the bypass.
+ */
+export const E2E_BYPASS_PHONE = '05559980042';
+export const E2E_BYPASS_PHONE_E164 = '+905559980042';
+export const E2E_BYPASS_CODE = '424242';
+export const E2E_BYPASS_EXPIRES_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
 function port(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;

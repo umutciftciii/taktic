@@ -8,6 +8,7 @@ import { EmailBrandingService } from './email-branding.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationPort } from './notification.port';
 import { RequestExpiryOutbox } from './request-expiry-outbox.service';
+import { ShowcaseLifecycleOutbox } from './showcase-lifecycle-outbox.service';
 import { isNotificationOutboxEnabled } from './notification-outbox';
 import { resolveEmailTransportKind } from './email-transport';
 import { ResendNotificationAdapter } from './resend-notification.adapter';
@@ -58,6 +59,9 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     // lifecycle module reaches it the way it reaches everything else in this
     // @Global module — without acquiring an edge to it.
     RequestExpiryOutbox,
+    // The vitrin run's clock notices, on the same arrangement and for the same
+    // reason.
+    ShowcaseLifecycleOutbox,
   ],
   exports: [
     NotificationPort,
@@ -66,6 +70,7 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     NotificationDispatcher,
     TransactionalMailService,
     RequestExpiryOutbox,
+    ShowcaseLifecycleOutbox,
   ],
 })
 export class NotificationsModule {}

@@ -1,5 +1,6 @@
 'use server';
 
+import { parseTurkishLiraToMinor } from '@taktic/shared';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch } from '../../../lib/api';
@@ -27,13 +28,20 @@ import { ApiError, apiFetch } from '../../../lib/api';
  * hold.
  */
 export async function createShowcasePackageAction(formData: FormData) {
+  // The form speaks lira; the API stores kuruş. The shared parser is the one
+  // place the two meet, and a value it refuses never reaches the API.
+  const priceAmount = parseTurkishLiraToMinor(readString(formData, 'priceAmount'));
+  if (priceAmount === null) {
+    redirect('/showcase/packages?error=SHOWCASE_PACKAGE_PRICE_INVALID');
+  }
+
   try {
     await apiFetch('/admin/showcase/packages', {
       method: 'POST',
       body: JSON.stringify({
         name: readString(formData, 'name'),
         slug: readString(formData, 'slug'),
-        priceAmount: readInt(formData, 'priceAmount'),
+        priceAmount,
         durationDays: readInt(formData, 'durationDays'),
         activationWindowDays: readInt(formData, 'activationWindowDays'),
         allowedCardKind: readOptional(formData, 'allowedCardKind'),
@@ -52,13 +60,17 @@ export async function createShowcasePackageAction(formData: FormData) {
 
 export async function updateShowcasePackageAction(formData: FormData) {
   const packageId = readString(formData, 'packageId');
+  const priceAmount = parseTurkishLiraToMinor(readString(formData, 'priceAmount'));
+  if (priceAmount === null) {
+    redirect('/showcase/packages?error=SHOWCASE_PACKAGE_PRICE_INVALID');
+  }
 
   try {
     await apiFetch(`/admin/showcase/packages/${packageId}`, {
       method: 'PATCH',
       body: JSON.stringify({
         name: readString(formData, 'name'),
-        priceAmount: readInt(formData, 'priceAmount'),
+        priceAmount,
         durationDays: readInt(formData, 'durationDays'),
         activationWindowDays: readInt(formData, 'activationWindowDays'),
         allowedCardKind: readOptional(formData, 'allowedCardKind'),

@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { describeDatabase, requireE2eDatabaseUrl } from './src/database-url';
 import {
+  E2E_BYPASS_CODE,
+  E2E_BYPASS_EXPIRES_AT,
+  E2E_BYPASS_PHONE_E164,
   E2E_LEMON_API_KEY,
   E2E_LEMON_PACKAGE_SLUG,
   E2E_LEMON_STORE_ID,
@@ -97,6 +100,20 @@ function apiServer(runtime: Runtime) {
       ...sharedEnv,
       API_PORT: String(runtime.ports.api),
       REQUIRE_PHONE_VERIFICATION: String(runtime.requirePhoneVerification),
+      // The phone-verification test bypass, and only on the runtime whose
+      // subject is phone verification. Every clause of its contract is set
+      // here — a declared local environment, the flag, one listed number, the
+      // code and a future expiry — and none of them on any other runtime, so
+      // the same number and code are refused everywhere else in the suite.
+      ...(runtime.requirePhoneVerification
+        ? {
+            APP_ENVIRONMENT: 'local',
+            PHONE_VERIFICATION_TEST_BYPASS_ENABLED: 'true',
+            PHONE_VERIFICATION_TEST_BYPASS_PHONES: E2E_BYPASS_PHONE_E164,
+            PHONE_VERIFICATION_TEST_BYPASS_CODE: E2E_BYPASS_CODE,
+            PHONE_VERIFICATION_TEST_BYPASS_EXPIRES_AT: E2E_BYPASS_EXPIRES_AT,
+          }
+        : {}),
       // Off for every runtime but the contact-sharing one. The API refuses to
       // boot with the flag on and no https URL and version, so a stack that
       // asks for the feature has to supply both here.

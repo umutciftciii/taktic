@@ -53,3 +53,13 @@ delete process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
 delete process.env.LEMON_SQUEEZY_VARIANT_MAP;
 delete process.env.LEMON_SQUEEZY_API_BASE_URL;
 delete process.env.LEMON_SQUEEZY_MODE;
+// The phone-verification test bypass is off unless a spec turns it on, and the
+// environment is undeclared unless a spec declares one: every clause of that
+// contract is exercised by phone-verification-test-bypass.spec.ts, and a value
+// exported in the developer's shell must not be able to satisfy one of them
+// from outside the suite.
+delete process.env.APP_ENVIRONMENT;
+delete process.env.PHONE_VERIFICATION_TEST_BYPASS_ENABLED;
+delete process.env.PHONE_VERIFICATION_TEST_BYPASS_PHONES;
+delete process.env.PHONE_VERIFICATION_TEST_BYPASS_CODE;
+delete process.env.PHONE_VERIFICATION_TEST_BYPASS_EXPIRES_AT;

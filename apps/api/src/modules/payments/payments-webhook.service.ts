@@ -632,15 +632,16 @@ export class PaymentsWebhookService {
     }
 
     // A package-first vitrin purchase granted a right and put nothing on the
-    // air. There is no receipt template for a right — the return screen tells
-    // the provider — so nothing is sent, explicitly rather than by relying on
-    // `sendPackagePurchaseConfirmation` refusing the row.
+    // air: its notice describes the right — what was bought and until when it
+    // can be spent. The method re-reads the purchase and refuses anything but
+    // a settled vitrin purchase with a right behind it.
     const purchase = await this.prisma.packagePurchase.findUnique({
       where: { id: purchaseId },
       select: { kind: true },
     });
 
     if (purchase?.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
+      await this.mail.sendShowcasePackagePaymentSucceeded(purchaseId);
       return;
     }
 

@@ -182,8 +182,11 @@ describe('the package-first checkout', () => {
     expect(rights[0]?.status).toBe('AVAILABLE');
     expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
     expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
-    // No receipt template exists for a right; the return screen tells the provider.
-    expect(ctx.notifications.sent).toHaveLength(0);
+    // One notice about the right — what was bought and until when it can be
+    // spent — and nothing about a placement or a balance.
+    expect(ctx.notifications.sent.map((message) => message.template)).toEqual([
+      'showcase-package-payment-succeeded',
+    ]);
 
     const again = await request(ctx.server)
       .post(`/providers/${profile.id}/package-purchases/${purchaseId}/mock-pay`)
@@ -213,6 +216,12 @@ describe('the package-first checkout', () => {
       .send({ ...MOCK_CARD, cardNumber: '4111111111110000' });
     expect(declined.body.status).toBe('FAILED');
     expect(await ctx.prisma.showcaseEntitlement.count()).toBe(0);
+    // The provider is told the payment did not complete — once, and without
+    // the card, the reason or anything else about the attempt.
+    const failures = ctx.notifications.ofTemplate('showcase-package-payment-failed');
+    expect(failures).toHaveLength(1);
+    expect(JSON.stringify(failures[0])).not.toContain('0000');
+    expect(JSON.stringify(failures[0])).not.toContain('declined');
   });
 });
 

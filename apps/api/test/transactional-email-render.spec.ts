@@ -361,6 +361,68 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     leadUrl: `${WEB}/providers/p1/vitrin/talepler/l1`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'showcase-package-payment-succeeded': {
+    fullName: 'Murat Şahin',
+    packageName: 'Vitrin Standart 30 Gün',
+    durationDays: '30',
+    priceAmountMinor: '49900',
+    currency: 'TRY',
+    entitlementExpiresAt: '2026-11-25T11:12:00.000Z',
+    paidAt: '2026-08-27T11:12:00.000Z',
+    createCardUrl: `${WEB}/providers/p1/vitrin/yeni`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-package-payment-failed': {
+    fullName: 'Murat Şahin',
+    packageName: 'Vitrin Standart 30 Gün',
+    priceAmountMinor: '49900',
+    currency: 'TRY',
+    attemptedAt: '2026-08-27T11:12:00.000Z',
+    packagesUrl: `${WEB}/providers/p1/vitrin/paketler`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-card-approved-live': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    packageName: 'Vitrin Standart 30 Gün',
+    areaSummary: 'Moda, Kadıköy, İstanbul · Kadıköy, İstanbul',
+    startAt: '2026-08-27T11:12:00.000Z',
+    endAt: '2026-09-26T11:12:00.000Z',
+    revision: 'false',
+    cardUrl: `${WEB}/providers/p1/vitrin/c1`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-card-approved': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    approvedAt: '2026-08-27T11:12:00.000Z',
+    showcaseUrl: `${WEB}/providers/p1/vitrin`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-placement-ending-7d': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    endAt: '2026-09-26T11:12:00.000Z',
+    packagesUrl: `${WEB}/providers/p1/vitrin/paketler`,
+    showcaseUrl: `${WEB}/providers/p1/vitrin`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-placement-ending-3d': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    endAt: '2026-09-26T11:12:00.000Z',
+    packagesUrl: `${WEB}/providers/p1/vitrin/paketler`,
+    showcaseUrl: `${WEB}/providers/p1/vitrin`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'showcase-placement-expired': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    endAt: '2026-09-26T11:12:00.000Z',
+    packagesUrl: `${WEB}/providers/p1/vitrin/paketler`,
+    showcaseUrl: `${WEB}/providers/p1/vitrin`,
+    accountUrl: `${WEB}/providers/me`,
+  },
 };
 
 /**
@@ -436,8 +498,8 @@ describe('transactional e-mail rendering', () => {
   it('covers every template the port accepts', () => {
     // The literal count is the point of this line: a template added without a
     // payload here would still render, silently, with every field missing.
-    // Twenty-eight before vitrin's four.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(32);
+    // Twenty-eight before vitrin's four, then the seven of the run's life.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(39);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -684,6 +746,93 @@ describe('transactional e-mail rendering', () => {
       'showcase-lead-received': 'Vitrin kartınızdan yeni talep — Acil',
       'showcase-lead-breached-customer': 'Yanıt süresi doldu — ne yapmak istersiniz?',
       'showcase-lead-breached-provider': 'Vitrin talebine yanıt süresi doldu — #T-90412',
+      'showcase-package-payment-succeeded': 'Vitrin paketiniz hazır — Vitrin Standart 30 Gün',
+      'showcase-package-payment-failed': 'Vitrin paketi ödemesi tamamlanmadı',
+      'showcase-card-approved-live': 'Kartınız onaylandı ve yayında — Kombi bakım paketi',
+      'showcase-card-approved': 'Vitrin kartınız onaylandı — Kombi bakım paketi',
+      'showcase-placement-ending-7d':
+        'Vitrin yayınınızın bitmesine 7 gün kaldı — Kombi bakım paketi',
+      'showcase-placement-ending-3d': 'Vitrin yayınınız 3 gün içinde bitiyor — Kombi bakım paketi',
+      'showcase-placement-expired': 'Vitrin yayınınız sona erdi — Kombi bakım paketi',
+    });
+  });
+
+  describe('the vitrin run, from the money to the end of the clock', () => {
+    it('states the package price and the right\'s last usable day, and nothing about a customer', () => {
+      const { html, text } = render(messageFor('showcase-package-payment-succeeded'));
+
+      expect(html).toContain('Vitrin paketiniz hazır');
+      expect(html).toContain('499 ₺');
+      expect(html).toContain('30 gün');
+      expect(html).toContain('25 Kasım 2026');
+      expect(html).toContain('Kartını oluştur');
+      expect(html).toContain(`${WEB}/providers/p1/vitrin/yeni`);
+      // The package's own price is the only figure: nothing here is what the
+      // provider charges anybody.
+      expect(text).not.toMatch(/hizmet bedeli/i);
+      expect(text).not.toMatch(/müşteri/i);
+    });
+
+    it('tells a failed payment without a card, a reason or a code', () => {
+      const { html, text } = render(messageFor('showcase-package-payment-failed'));
+
+      expect(html).toContain('Vitrin paketi ödemesi tamamlanmadı');
+      expect(html).toContain('tahsilat yapılmadı');
+      expect(html).toContain('Paketlere dön');
+      expect(html).toContain(`${WEB}/providers/p1/vitrin/paketler`);
+      expect(text).not.toMatch(/kart numar/i);
+      expect(text).not.toMatch(/PACKAGE_NOT_MAPPED|PROVIDER_UNAVAILABLE|declined/);
+    });
+
+    it('says approved and live as one message, with the run\'s dates', () => {
+      const { html } = render(messageFor('showcase-card-approved-live'));
+
+      expect(html).toContain('Kartınız onaylandı ve yayında');
+      expect(html).toContain('27 Ağustos 2026, 14:12');
+      expect(html).toContain('26 Eylül 2026, 14:12');
+      expect(html).toContain('Kartını görüntüle');
+      expect(html).toContain(`${WEB}/providers/p1/vitrin/c1`);
+    });
+
+    it('reads as an approved edit when the run predates the approval', () => {
+      const { html } = render(messageFor('showcase-card-approved-live', { revision: 'true' }));
+
+      expect(html).toContain('Güncellemeniz onaylandı ve yayında');
+      expect(html).toContain('yayın süresi değişmedi');
+    });
+
+    it('says approved alone, and points at the shop, when nothing is on the air', () => {
+      const { html, text } = render(messageFor('showcase-card-approved'));
+
+      expect(html).toContain('Vitrin kartınız onaylandı');
+      expect(html).toContain('Şu anda yayında değil');
+      expect(html).toContain('Vitrin merkezine git');
+      expect(text).not.toContain('Bitiş');
+    });
+
+    it('counts down at seven and at three, against the same end date', () => {
+      const seven = render(messageFor('showcase-placement-ending-7d'));
+      const three = render(messageFor('showcase-placement-ending-3d'));
+
+      expect(seven.html).toContain('bitmesine 7 gün kaldı');
+      expect(seven.html).toContain('26 Eylül 2026, 14:12');
+      expect(seven.html).toContain('Yeniden yayınla');
+      expect(seven.html).toContain(`${WEB}/providers/p1/vitrin/paketler`);
+
+      expect(three.html).toContain('3 gün içinde bitiyor');
+      expect(three.html).toContain('26 Eylül 2026, 14:12');
+      expect(three.html).toContain('Yeniden yayınla');
+      // The three-day notice is the shorter of the two.
+      expect(three.text.length).toBeLessThan(seven.text.length);
+    });
+
+    it('says the run ended and offers the way back', () => {
+      const { html } = render(messageFor('showcase-placement-expired'));
+
+      expect(html).toContain('Vitrin yayınınız sona erdi');
+      expect(html).toContain('artık ana sayfada ve vitrin sayfalarında gösterilmiyor');
+      expect(html).toContain('Yeniden yayınla');
+      expect(html).toContain(`${WEB}/providers/p1/vitrin/paketler`);
     });
   });
 

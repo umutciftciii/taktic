@@ -160,6 +160,23 @@ export function providerShowcaseLeadUrl(providerId: string, leadId: string): str
   );
 }
 
+/** One of the provider's own cards. `apps/web/app/providers/[id]/vitrin/[cardId]`. */
+export function providerShowcaseCardUrl(providerId: string, cardId: string): string {
+  return publicWebUrl(
+    `/providers/${encodeURIComponent(providerId)}/vitrin/${encodeURIComponent(cardId)}`,
+  );
+}
+
+/** The new-card form. `apps/web/app/providers/[id]/vitrin/yeni`. */
+export function providerShowcaseNewCardUrl(providerId: string): string {
+  return publicWebUrl(`/providers/${encodeURIComponent(providerId)}/vitrin/yeni`);
+}
+
+/** The vitrin shop. `apps/web/app/providers/[id]/vitrin/paketler`. */
+export function providerShowcasePackagesUrl(providerId: string): string {
+  return publicWebUrl(`/providers/${encodeURIComponent(providerId)}/vitrin/paketler`);
+}
+
 /**
  * Where the customer answers the fallback question.
  * `apps/web/app/requests/[id]/vitrin-karar`.

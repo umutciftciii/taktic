@@ -226,16 +226,15 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
                   <span>Fiyat *</span>
                   <input
                     name="priceAmount"
-                    type="number"
-                    step="0.01"
-                    min="1"
+                    type="text"
                     inputMode="decimal"
-                    placeholder="Örn. 149.90"
+                    pattern="([0-9]{1,3}(\\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
+                    placeholder="Örn. 149,90"
                     required
                     defaultValue={draft.priceAmount}
                   />
                   <span className="help-text">
-                    Ondalıklı tutar girebilirsiniz. Örn: 149.90 {selectedCurrency} veya 1500.
+                    Kuruş için virgül kullanın. Örn: 149,90 {selectedCurrency} veya 1.500.
                   </span>
                 </label>
                 <label className="field field-6">
@@ -278,7 +277,7 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
             <p>Paket oluştururken aklınızda bulundurun:</p>
             <ul>
               <li>Slug benzersizdir; aynı slug ile ikinci paket oluşturulamaz.</li>
-              <li>Fiyat alanına ondalıklı tutar girebilirsiniz; örn. 149.90 veya 1500.</li>
+              <li>Fiyat lira olarak, kuruş için virgülle girilir; örn. 149,90 veya 1.500.</li>
               <li>Sıralama değeri küçük olan üstte görünür; eşit değerlerde isme göre alfabetik sıralanır.</li>
               <li>Pasif paketler provider akışında listelenmez ancak silinmez.</li>
             </ul>

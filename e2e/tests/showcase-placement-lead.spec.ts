@@ -294,12 +294,15 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
     // in this test is to see nothing.
     const rival = await createProvider({ categoryId: category.id, location, credits: 20 });
 
+    // Unique per attempt: a retry after a browser crash must not meet the
+    // previous attempt's card on the shelf and stop on a strict-mode violation.
+    const cardTitle = `E2E Vitrin Klima Bakımı ${Date.now().toString(36).slice(-4)}`;
     const { card, version } = await seedApprovedCard({
       providerId: owner.id,
       categoryId: category.id,
       city: location.city,
       district: location.district,
-      title: 'E2E Vitrin Klima Bakımı',
+      title: cardTitle,
     });
     await seedLivePlacement({
       providerId: owner.id,
@@ -328,7 +331,7 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       const shelf = visitor.page.getByTestId('showcase-shelf');
       await expect(shelf).toBeVisible();
       const shelfCard = shelf.getByTestId('showcase-shelf-card').filter({
-        hasText: 'E2E Vitrin Klima Bakımı',
+        hasText: cardTitle,
       });
       await expect(shelfCard).toBeVisible();
       // One face, drawn by the same component the provider's own screens use.
@@ -354,7 +357,7 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await assertNoErrorScreen(visitor.page);
 
       await expect(
-        visitor.page.getByRole('heading', { name: 'E2E Vitrin Klima Bakımı', level: 1 }),
+        visitor.page.getByRole('heading', { name: cardTitle, level: 1 }),
       ).toBeVisible();
       // The same face again, with the area and the price where the shelf had them.
       const publicFace = visitor.page.getByTestId('showcase-card-face');
@@ -474,7 +477,7 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await rivalActor.gotoWeb(`/providers/${rival.id}/requests`);
       await assertNoErrorScreen(rivalActor.page);
       await expect(
-        rivalActor.page.getByText('E2E Vitrin Klima Bakımı', { exact: false }),
+        rivalActor.page.getByText(cardTitle, { exact: false }),
       ).toHaveCount(0);
     } finally {
       await visitor.close();
