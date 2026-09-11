@@ -13,12 +13,16 @@ import { mockPayPackagePurchaseAction } from './actions';
 
 type ProviderPackagePurchaseCheckoutPageProps = {
   params: Promise<{ id: string; purchaseId: string }>;
+  /** `card`: the vitrin card a package purchase should return to once paid. */
+  searchParams: Promise<{ card?: string }>;
 };
 
 export default async function ProviderPackagePurchaseCheckoutPage({
   params,
+  searchParams,
 }: ProviderPackagePurchaseCheckoutPageProps) {
   const { id, purchaseId } = await params;
+  const { card } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/package-purchases/${purchaseId}/checkout`);
@@ -73,6 +77,7 @@ export default async function ProviderPackagePurchaseCheckoutPage({
             <form action={mockPayPackagePurchaseAction} className="pdash-form">
               <input type="hidden" name="providerId" value={id} />
               <input type="hidden" name="purchaseId" value={purchase.id} />
+              <input type="hidden" name="returnCard" value={card ?? ''} />
               <label className="pdash-form-row">
                 <span>Kart Üzerindeki İsim</span>
                 <input name="cardholderName" required placeholder="Test Kullanıcısı" />

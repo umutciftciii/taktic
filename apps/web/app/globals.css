@@ -5488,95 +5488,6 @@ body.has-drawer-open {
   gap: var(--space-4);
 }
 
-.showcase-shelf-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-5);
-  border: 2px solid var(--color-text);
-  background: var(--color-bg);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.showcase-shelf-card h3 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.showcase-shelf-provider {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.showcase-shelf-summary {
-  margin: 0;
-  font-size: 14px;
-  color: var(--color-neutral-800);
-}
-
-.showcase-shelf-price {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-weight: var(--font-heading-weight);
-  font-size: 18px;
-}
-
-.showcase-shelf-sla,
-.showcase-shelf-area {
-  margin: 0;
-  font-size: 12px;
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   The service-area band.
-
-   The home page shelf shows every live card to visitors who never chose a
-   location, so "which area is this good for" stops being a filter the visitor
-   applied and becomes the single most important thing the card has to say. It
-   gets a band of its own at the top of the card — its own background, its own
-   label — rather than a muted line under the call to action, because a visitor
-   scanning a grid decides whether a card is theirs before they read the title.
-
-   `overflow-wrap: anywhere` and `min-width: 0` for the same reason every other
-   cell here has them: a run publishing in eight neighbourhoods produces a long
-   unbroken-looking string, and at 320px an unbreakable box is a page wider than
-   the phone.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-.showcase-area-badge {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border: 2px solid var(--color-text);
-  background: var(--color-neutral-100);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.showcase-area-badge-label {
-  font-family: var(--font-heading);
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.showcase-area-badge-value {
-  font-family: var(--font-heading);
-  font-weight: var(--font-heading-weight);
-  font-size: 15px;
-  line-height: 1.3;
-}
-
-.showcase-area-badge-lg .showcase-area-badge-value {
-  font-size: 18px;
-}
-
 /*
  * The one sentence that decides whether the visitor should go on. Stated as
  * body copy rather than as a muted note: it is the card's promise and its
@@ -5629,63 +5540,6 @@ body.has-drawer-open {
 .showcase-inline-card h4 {
   margin: 0;
   font-size: 16px;
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   The provider's vitrin card list: one state, one next action.
-
-   A row is a stack on a phone and a row from 640px, so the state and the thing
-   to do about it never sit side by side in a column narrower than either.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-.showcase-stage-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.showcase-stage-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-5);
-  border: 2px solid var(--color-text);
-  background: var(--color-bg);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.showcase-stage-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.showcase-stage-title {
-  margin: 0;
-  font-size: 18px;
-}
-
-.showcase-stage-state {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.showcase-stage-foot {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-@media (min-width: 640px) {
-  .showcase-stage-foot {
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-  }
 }
 
 /* The card's own page: one readable column, and the CTA below it. */
@@ -5746,4 +5600,455 @@ body.has-drawer-open {
   font-size: 13px;
   padding: 0;
   margin-bottom: var(--space-2);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Vitrin — VIT-DESIGN-002
+
+   One face for a card everywhere it appears, and one quiet surface for the
+   screens around it. The Modernist rules hold — radius 0, accent rare,
+   everything left-aligned — but the 2px black frame is spent once per card,
+   on the face itself, and nowhere else on these screens: forms sit on a
+   single surface with 1px inner rules, not a stack of framed boxes.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.vitrin-face {
+  display: flex;
+  flex-direction: column;
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vitrin-face-media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, var(--color-neutral-200), var(--color-neutral-300));
+  border-bottom: 2px solid var(--color-text);
+  overflow: hidden;
+}
+
+.vitrin-face-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* No picture and no category art: the surface itself, with one accent seam. */
+.vitrin-face-media-empty::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 6px;
+  background: var(--color-accent);
+}
+
+.vitrin-face-badge {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+}
+
+.vitrin-face-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.vitrin-face-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
+.vitrin-face-kind::before {
+  content: '·';
+  margin-right: var(--space-2);
+}
+
+.vitrin-face-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.vitrin-face-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.vitrin-face-title a:hover,
+.vitrin-face-title a:focus-visible {
+  color: var(--color-accent);
+}
+
+.vitrin-face-provider {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.vitrin-face-price {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 22px;
+}
+
+.vitrin-face-price span {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
+.vitrin-face-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-neutral-800);
+}
+
+.vitrin-face-area {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-text);
+  color: var(--color-bg);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.vitrin-face-area-label {
+  font-family: var(--font-heading);
+  font-weight: 600;
+}
+
+.vitrin-face-compact .vitrin-face-media { aspect-ratio: 21 / 9; }
+.vitrin-face-compact .vitrin-face-title { font-size: 17px; }
+
+/* Badges: four tones, no colour per state. */
+.vitrin-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--color-text);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.vitrin-badge-live { background: var(--color-text); color: var(--color-bg); }
+.vitrin-badge-progress { border-style: dashed; }
+.vitrin-badge-attention { border-color: var(--color-accent); color: var(--color-accent-700); background: var(--color-accent-100); }
+.vitrin-badge-muted { color: var(--color-neutral-700); border-color: var(--color-neutral-400); }
+
+/* The hub: heading, counter, one primary action. */
+.vitrin-hub-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-divider);
+  margin-bottom: var(--space-6);
+}
+
+.vitrin-counter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.vitrin-counter-text {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+@media (min-width: 768px) {
+  .vitrin-counter {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+.vitrin-section-title {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: 14px;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
+.vitrin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .vitrin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1200px) {
+  .vitrin-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.vitrin-card-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--color-divider);
+}
+
+.vitrin-card-foot form { display: contents; }
+
+.vitrin-card-foot .muted { margin: 0; font-size: 13px; }
+
+.vitrin-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-6);
+  background: var(--color-surface);
+  align-items: flex-start;
+}
+
+/* Packages: selectable cards, custom radio. */
+.vitrin-pkg-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+@media (min-width: 768px) {
+  .vitrin-pkg-grid { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
+}
+
+.vitrin-pkg {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  padding-left: calc(var(--space-4) + 28px);
+  border: 1px solid var(--color-neutral-400);
+  background: var(--color-bg);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.vitrin-pkg input {
+  appearance: none;
+  position: absolute;
+  top: var(--space-4);
+  left: var(--space-4);
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+  margin: 0;
+}
+
+.vitrin-pkg input:checked { background: var(--color-accent); box-shadow: inset 0 0 0 3px var(--color-bg); }
+.vitrin-pkg:has(input:checked) { border: 2px solid var(--color-text); padding: calc(var(--space-4) - 1px); padding-left: calc(var(--space-4) + 27px); }
+.vitrin-pkg:has(input:checked) input { top: calc(var(--space-4) - 1px); left: calc(var(--space-4) - 1px); }
+.vitrin-pkg:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.vitrin-pkg-name { margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 16px; }
+.vitrin-pkg-price { margin: 0; font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 22px; }
+.vitrin-pkg-meta { margin: 0; font-size: 13px; color: var(--color-neutral-700); }
+
+.vitrin-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vitrin-consent input {
+  appearance: none;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+}
+
+.vitrin-consent input:checked {
+  background: var(--color-accent);
+  box-shadow: inset 0 0 0 3px var(--color-bg);
+}
+
+.vitrin-consent:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.vitrin-cta-note { margin: 0; font-size: 13px; color: var(--color-neutral-700); }
+
+/* Forms: one surface, grouped by rule lines, never by frames. */
+.vitrin-form {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  padding: 0 var(--space-4);
+}
+
+@media (min-width: 768px) { .vitrin-form { padding: 0 var(--space-6); } }
+
+.vitrin-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6) 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.vitrin-form-group:last-of-type { border-bottom: 0; }
+
+.vitrin-form-group-head { display: flex; flex-direction: column; gap: 4px; }
+.vitrin-form-group-head h2 { margin: 0; font-size: 16px; }
+.vitrin-form-group-head p { margin: 0; font-size: 13px; color: var(--color-neutral-700); }
+
+.vitrin-form .pdash-form-row input,
+.vitrin-form .pdash-form-row textarea,
+.vitrin-form .pdash-form-row select { background: var(--color-bg); }
+
+.vitrin-choice-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.vitrin-choice {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-neutral-400);
+  background: var(--color-bg);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.vitrin-choice input { appearance: none; width: 14px; height: 14px; margin: 0; border: 2px solid var(--color-text); border-radius: 0; }
+.vitrin-choice input:checked { background: var(--color-accent); box-shadow: inset 0 0 0 2px var(--color-bg); }
+.vitrin-choice:has(input:checked) { border-color: var(--color-text); }
+.vitrin-choice:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.vitrin-choice:has(input:disabled) { cursor: default; color: var(--color-neutral-600); }
+
+.vitrin-form-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-6) 0;
+}
+
+@media (min-width: 640px) { .vitrin-form-foot { flex-direction: row; justify-content: flex-end; } }
+
+/* The card screen: summary on the left, status on the right from 1024px. */
+.vitrin-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 1024px) { .vitrin-summary { grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); } }
+
+.vitrin-summary-facts { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); background: var(--color-surface); }
+.vitrin-summary-facts h2 { margin: 0; font-size: 14px; }
+.vitrin-summary-facts p { margin: 0; font-size: 14px; }
+
+.vitrin-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+}
+
+.vitrin-status h2 { margin: 0; font-size: 18px; }
+.vitrin-status p { margin: 0; font-size: 14px; }
+.vitrin-status-note { padding: var(--space-3); background: var(--color-accent-100); border-left: 3px solid var(--color-accent); font-size: 14px; }
+
+.vitrin-status-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+
+/* The overflow menu: <details>, so it works with no script. */
+.vitrin-menu { position: relative; }
+.vitrin-menu > summary { list-style: none; cursor: pointer; }
+.vitrin-menu > summary::-webkit-details-marker { display: none; }
+.vitrin-menu-list {
+  position: absolute;
+  right: 0;
+  z-index: 5;
+  min-width: 260px;
+  margin-top: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--color-text);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-md);
+}
+.vitrin-menu-list button,
+.vitrin-menu-list a {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.vitrin-menu-list button:hover, .vitrin-menu-list a:hover { background: var(--color-surface); }
+.vitrin-menu-danger { color: var(--color-accent-700); }
+
+.vitrin-dialog {
+  max-width: min(480px, calc(100vw - 32px));
+  padding: var(--space-6);
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+}
+.vitrin-dialog::backdrop { background: color-mix(in srgb, #201e1d 55%, transparent); }
+.vitrin-dialog h2 { margin: 0 0 var(--space-3); font-size: 18px; }
+.vitrin-dialog p { font-size: 14px; }
+
+/* The return screen after payment: one statement, one action. */
+.vitrin-return {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+  border: 2px solid var(--color-text);
+  background: var(--color-bg);
+  align-items: flex-start;
+}
+.vitrin-return h1 { margin: 0; font-size: 28px; }
+.vitrin-return p { margin: 0; max-width: 56ch; }
+
+/* Public card page: the face beside the decision. */
+.vitrin-public { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+@media (min-width: 1024px) { .vitrin-public { grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .vitrin-face-title a, .vitrin-pkg, .vitrin-choice, .vitrin-menu-list button { transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease; }
 }
