@@ -373,6 +373,7 @@ model User {
   showcaseCardReviews           ShowcaseCardReview[]               @relation("ShowcaseCardReviewedBy")
   showcasePlacementSuspensions  ShowcasePlacementSuspension[]      @relation("ShowcasePlacementSuspendedBy")
   showcasePriceTermsAcceptances ShowcaseCardPriceTermsAcceptance[]
+  showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[] @relation("ShowcasePackageTermsAcceptedBy")
 
   @@index([role])
   @@index([isActive])
@@ -1136,6 +1137,8 @@ model ProviderProfile {
   showcasePlacements            ShowcasePlacement[]
   showcaseLeads                 ShowcaseLead[]
   showcasePriceTermsAcceptances ShowcaseCardPriceTermsAcceptance[]
+  showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]
+  showcaseEntitlements          ShowcaseEntitlement[]
   directShowcaseRequests        ServiceRequest[]                   @relation("ServiceRequestDirectShowcaseProvider")
 
   @@index([status])
@@ -1518,6 +1521,11 @@ model PackagePurchase {
   /// the acceptance row carries the text as well as the version — and the text
   /// is what a customer is eventually shown.
   showcasePriceTermsAcceptanceId String?
+  /// The provider-level acceptance a package-first vitrin purchase was opened
+  /// against. Exactly one of this and `showcasePriceTermsAcceptanceId` is set on
+  /// a SHOWCASE_PACKAGE row — the legacy card-bound shape or the package-first
+  /// one — and the CHECK `PackagePurchase_showcase_card_matches_kind` says so.
+  showcasePackageTermsAcceptanceId String?
   status                         PackagePurchaseStatus @default(PENDING)
   creditAmountSnapshot           Int
   priceAmountSnapshot            Int
@@ -1568,6 +1576,9 @@ model PackagePurchase {
   /// Restrict for the same reason as the three above: it is part of the record
   /// of what was sold and on what terms.
   showcasePriceTermsAcceptance ShowcaseCardPriceTermsAcceptance? @relation(fields: [showcasePriceTermsAcceptanceId], references: [id], onDelete: Restrict)
+  showcasePackageTermsAcceptance ShowcasePackageTermsAcceptance? @relation(fields: [showcasePackageTermsAcceptanceId], references: [id], onDelete: Restrict)
+  /// The publication right this purchase produced, when it was package-first.
+  showcaseEntitlement          ShowcaseEntitlement?
   /// The period this purchase paid for, when it paid for one. A ONE_TIME_CREDITS
   /// purchase has none.
   entitlement                  ProviderPackageEntitlement?       @relation("PackagePurchaseEntitlement")
@@ -1587,6 +1598,7 @@ model PackagePurchase {
   @@index([kind, status])
   @@index([showcaseCardId])
   @@index([showcasePriceTermsAcceptanceId])
+  @@index([showcasePackageTermsAcceptanceId])
 }
 
 /**
@@ -2423,6 +2435,7 @@ model ShowcaseCard {
   placements            ShowcasePlacement[]
   leads                 ShowcaseLead[]
   priceTermsAcceptances ShowcaseCardPriceTermsAcceptance[]
+  entitlements          ShowcaseEntitlement[]
 
   @@index([providerId, status])
   @@index([providerId, createdAt])
@@ -2513,6 +2526,7 @@ model ShowcaseCardVersion {
   versionChangesFrom ShowcasePlacementVersionChange[] @relation("ShowcasePlacementVersionFrom")
   versionChangesTo   ShowcasePlacementVersionChange[] @relation("ShowcasePlacementVersionTo")
   leads              ShowcaseLead[]
+  entitlementPauses  ShowcaseEntitlementReviewPause[]
 
   @@unique([cardId, versionNumber])
   @@index([cardId, createdAt])
@@ -2809,6 +2823,33 @@ enum ShowcaseLeadCloseReason {
   REQUEST_EXPIRED
 }
 
+/// Where a purchased vitrin publication right stands.
+///
+/// AVAILABLE — paid for, bound to no card yet. Usable while `expiresAt > now`.
+/// RESERVED  — bound to exactly one card that has not been published yet.
+///             Usable while `expiresAt > now` OR the card is under review
+///             (`reviewPausedAt IS NOT NULL`): review time is the operator's,
+///             and it must never cost the provider their right.
+/// CONSUMED  — the card was approved and its placement was born. Terminal.
+/// EXPIRED   — the activation window closed before the card went live.
+///             Written by the sweeper as a query optimisation; every reader
+///             checks the window itself, exactly as placements do.
+enum ShowcaseEntitlementStatus {
+  AVAILABLE
+  RESERVED
+  CONSUMED
+  EXPIRED
+}
+
+/// How one review pause on a right ended. Copied onto the pause row so the
+/// history of a right is readable without replaying the card's reviews.
+enum ShowcaseEntitlementPauseEnd {
+  REJECTED
+  WITHDRAWN
+  RELEASED
+  CONSUMED
+}
+
 /// What an operator sells: a run of vitrin visibility, for a fixed price and a
 /// fixed number of days.
 ///
@@ -2854,14 +2895,21 @@ model ShowcasePackage {
   /// high-priced package later is a controller change rather than a migration
   /// against a table that by then has live rows.
   requiresAdminApproval Boolean           @default(false)
+  /// How many days after payment an unused right stays claimable. The right is
+  /// consumed when the card is first approved; until then this is the clock —
+  /// paused while the card is under review, because that time is the
+  /// operator's, not the provider's. Snapshotted onto the entitlement as
+  /// `expiresAt`, so reshaping the package cannot shorten a right already sold.
+  activationWindowDays  Int               @default(90)
   description           String?
   isActive              Boolean           @default(true)
   sortOrder             Int               @default(0)
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
-  purchases  PackagePurchase[]
-  placements ShowcasePlacement[]
+  purchases    PackagePurchase[]
+  placements   ShowcasePlacement[]
+  entitlements ShowcaseEntitlement[]
 
   @@index([isActive, sortOrder])
 }
@@ -2958,6 +3006,7 @@ model ShowcasePlacement {
   suspensions    ShowcasePlacementSuspension[]
   versionChanges ShowcasePlacementVersionChange[]
   leads          ShowcaseLead[]
+  entitlement    ShowcaseEntitlement?
 
   // A PostgreSQL partial unique index — "ShowcasePlacement_one_live_per_card",
   // UNIQUE ("cardId") WHERE status IN ('PENDING_ACTIVATION','ACTIVE','SUSPENDED')
@@ -3058,6 +3107,120 @@ model ShowcaseCardPriceTermsAcceptance {
   @@unique([cardId, termsVersion])
   @@index([providerId, acceptedAt])
   @@index([termsVersion, acceptedAt])
+}
+
+/// One provider accepting one version of the price-responsibility text, for
+/// the package-first flow. Append-only, no `updatedAt`.
+///
+/// Provider-level rather than card-level, because in this flow there is no card
+/// yet when the money moves. `UNIQUE(providerId, termsVersion)` means a
+/// provider is asked once per version and never twice — and that a second
+/// concurrent acceptance cannot produce a second row. A bump of
+/// `SHOWCASE_PRICE_TERMS_VERSION` means no row names the new version, so the
+/// next purchase asks again.
+model ShowcasePackageTermsAcceptance {
+  id                String   @id @default(cuid())
+  providerId        String
+  termsVersion      String
+  termsTextSnapshot String
+  acceptedByUserId  String
+  acceptedAt        DateTime @default(now())
+
+  provider       ProviderProfile @relation(fields: [providerId], references: [id])
+  acceptedByUser User            @relation("ShowcasePackageTermsAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+  purchases      PackagePurchase[]
+
+  @@unique([providerId, termsVersion])
+  @@index([termsVersion, acceptedAt])
+}
+
+/// One paid, not-yet-used right to publish one vitrin card.
+///
+/// Sits between the payment and the placement: settlement grants it, creating a
+/// card reserves it, the operator's first approval consumes it and births the
+/// placement in the same transaction. A card cannot be "approved but
+/// unpublishable" because approval refuses without a valid reserved right.
+///
+/// What was sold is snapshotted here (package name, duration, price, terms) and
+/// copied onto the placement at consumption; the catalogue is never re-read.
+model ShowcaseEntitlement {
+  id                String                    @id @default(cuid())
+  providerId        String
+  /// One settled payment, one right. Unique: a redelivered settlement cannot
+  /// grant twice.
+  purchaseId        String                    @unique
+  showcasePackageId String
+
+  packageNameSnapshot       String
+  durationDaysSnapshot      Int
+  priceAmountSnapshot       Int
+  currencySnapshot          String            @default("TRY")
+  allowedCardKindSnapshot   ShowcaseCardKind?
+  maxAreasSnapshot          Int?
+  priceTermsVersionSnapshot String
+  priceTermsTextSnapshot    String
+
+  status    ShowcaseEntitlementStatus @default(AVAILABLE)
+  grantedAt DateTime
+  /// `grantedAt + activationWindowDays`, moved forward by exactly the time the
+  /// card spent under review (see ShowcaseEntitlementReviewPause).
+  expiresAt DateTime
+
+  cardId      String?
+  reservedAt  DateTime?
+  consumedAt  DateTime?
+  placementId String?   @unique
+  /// Non-NULL while the reserved card is with an operator: the clock is stopped.
+  reviewPausedAt     DateTime?
+  /// Sum of every closed review pause, in whole seconds. Seconds rather than
+  /// milliseconds because a 90-day window in milliseconds does not fit an Int.
+  totalPausedSeconds Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  provider  ProviderProfile    @relation(fields: [providerId], references: [id])
+  purchase  PackagePurchase    @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  package   ShowcasePackage    @relation(fields: [showcasePackageId], references: [id], onDelete: Restrict)
+  card      ShowcaseCard?      @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  placement ShowcasePlacement? @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  reviewPauses ShowcaseEntitlementReviewPause[]
+
+  // A partial unique index — "ShowcaseEntitlement_one_reserved_per_card",
+  // UNIQUE ("cardId") WHERE status = 'RESERVED' — is created by the migration:
+  // one card can hold one reserved right at a time.
+
+  @@index([providerId, status, expiresAt])
+  @@index([cardId])
+}
+
+/// One interval a reserved right spent with its card under review, and what
+/// happened to the right's clock because of it. Append-only, closed once.
+///
+/// The activation window is the provider's obligation to *submit*; the time an
+/// operator takes to decide is not billed to them. So the clock stops when the
+/// card enters review and `expiresAt` is pushed forward by the interval when it
+/// leaves. `expiresAtBefore/After` record the move, exactly as
+/// ShowcasePlacementSuspension records `endAtBefore/After`.
+model ShowcaseEntitlementReviewPause {
+  id             String                       @id @default(cuid())
+  entitlementId  String
+  cardVersionId  String
+  startedAt      DateTime                     @default(now())
+  endedAt        DateTime?
+  expiresAtBefore DateTime
+  expiresAtAfter  DateTime?
+  endReason      ShowcaseEntitlementPauseEnd?
+  createdAt      DateTime                     @default(now())
+
+  entitlement ShowcaseEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Restrict)
+  version     ShowcaseCardVersion @relation(fields: [cardVersionId], references: [id], onDelete: Restrict)
+
+  // A partial unique index — "ShowcaseEntitlementReviewPause_one_open",
+  // UNIQUE ("entitlementId") WHERE "endedAt" IS NULL — is created by the
+  // migration: one right is paused for one reason at a time.
+
+  @@index([entitlementId, startedAt])
 }
 
 model ShowcasePlacementShelf {
