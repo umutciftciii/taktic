@@ -273,6 +273,19 @@ describe('ilk sürüm onayı ve reddi', () => {
     expect(card.status).toBe('REJECTED');
     expect(card.liveVersionId).toBeNull();
     expect(card.draftVersionId).toBeNull();
+
+    // Taslak işaretçisi temizlendi; ama sahibinin okuyup düzelteceği metin
+    // projeksiyonda `rejectedVersion` olarak hâlâ duruyor.
+    const after = await request(ctx.server)
+      .get(`/providers/${f.provider.id}/showcase/cards/${submitted.id}`)
+      .set('Cookie', f.providerCookie)
+      .expect(200);
+    expect(after.body.draftVersion).toBeNull();
+    expect(after.body.liveVersion).toBeNull();
+    expect(after.body.rejectedVersion.id).toBe(submitted.draftVersion.id);
+    expect(after.body.rejectedVersion.review.note).toBe(
+      'Kapsam listesi hizmet bedelini karşılamıyor.',
+    );
   });
 
   it('gerekçesiz ret kabul edilmez', async () => {
@@ -412,6 +425,9 @@ describe('canlı kartın yeni sürümü', () => {
     expect(after.body.liveVersion.id).toBe(liveVersionId);
     expect(after.body.liveVersion.title).toBe(liveTitle);
     expect(after.body.draftVersion).toBeNull();
+    // Canlı metni olan kart için ret geçmiştir, sahibinin düzelteceği bir
+    // şey değil: `rejectedVersion` yalnız taslağı ve canlısı olmayan kartta dolar.
+    expect(after.body.rejectedVersion).toBeNull();
 
     // Reddedilen sürüm gerekçesiyle birlikte geçmişte duruyor.
     const rejectedVersion = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({
@@ -479,6 +495,8 @@ describe('canlı kartın yeni sürümü', () => {
     expect(edited.body.draftVersion.versionNumber).toBe(2);
     expect(edited.body.draftVersion.reviewStatus).toBe('DRAFT');
     expect(edited.body.status).toBe('DRAFT');
+    // Yeni taslak açılınca ret artık geçmiş: projeksiyon onu taşımıyor.
+    expect(edited.body.rejectedVersion).toBeNull();
 
     // Reddedilen sürüm reddedildiği hâliyle duruyor.
     const rejected = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({

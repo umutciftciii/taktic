@@ -2335,6 +2335,8 @@ export type ShowcaseCard = {
   category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
+  /** The newest refused version, only while the card has neither a draft nor a live one. */
+  rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;
   suspendReason: string | null;
   archivedAt: string | null;

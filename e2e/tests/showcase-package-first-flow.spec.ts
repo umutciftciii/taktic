@@ -717,10 +717,14 @@ test.describe('vitrin: paket-önce akış', () => {
       const right = await prisma().showcaseEntitlement.findUniqueOrThrow({ where: { id: entitlement.id } });
       expect(right.status).toBe('AVAILABLE');
       expect(right.cardId).toBeNull();
-      // The record stays: archived, never live, and the right's ledger says RELEASED.
+      // The record stays: archived, never live. The card was never submitted,
+      // so the right's clock never stopped and its pause ledger is empty.
       const card = await prisma().showcaseCard.findFirstOrThrow({ where: { providerId: owner.id } });
       expect(card.status).toBe('ARCHIVED');
       expect(card.liveVersionId).toBeNull();
+      expect(
+        await prisma().showcaseEntitlementReviewPause.count({ where: { entitlementId: entitlement.id } }),
+      ).toBe(0);
 
       // And a second card can be opened on the same right without buying again.
       await provider.page.getByTestId('showcase-create-card').click();
