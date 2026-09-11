@@ -115,6 +115,7 @@ export class ShowcasePackagesService {
           description: normalizeOptional(dto.description),
           isActive: dto.isActive ?? true,
           sortOrder: dto.sortOrder ?? 0,
+          activationWindowDays: dto.activationWindowDays ?? 90,
         },
         select: adminPackageSelect,
       });
@@ -157,6 +158,9 @@ export class ShowcasePackagesService {
           : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+        ...(dto.activationWindowDays !== undefined
+          ? { activationWindowDays: dto.activationWindowDays }
+          : {}),
       },
       select: adminPackageSelect,
     });
@@ -182,6 +186,7 @@ const providerPackageSelect = {
   requiresAdminApproval: true,
   description: true,
   sortOrder: true,
+  activationWindowDays: true,
 } satisfies Prisma.ShowcasePackageSelect;
 
 const adminPackageSelect = {

@@ -12,6 +12,7 @@ import {
   createCategory,
   createDiscoverableProvider,
   createLiveShowcasePlacement,
+  createShowcaseEntitlement,
   createShowcasePackage,
   createTestApp,
   createUser,
@@ -87,6 +88,7 @@ async function live(options: { durationDays?: number } = {}) {
   return {
     category,
     profile,
+    providerUserId: providerUser.id,
     card,
     version,
     pkg,
@@ -437,22 +439,34 @@ describe('the expiry sweeper', () => {
     expect(second.expired).toBe(0);
   });
 
-  // rewritten in Task 5: the card-bound checkout is gone, and a card's next
-  // run is a fresh right reserved by the card rather than a purchase naming it.
-  it.skip('frees the card for its next run once the old one has expired', async () => {
-    const { placement, card, profile, pkg, providerCookie } = await live();
+  // A card's next run is a fresh right reserved by the card, spent through
+  // `use-entitlement`, rather than a purchase naming the card directly.
+  it('frees the card for its next run once the old one has expired', async () => {
+    const { placement, card, profile, providerUserId, providerCookie } = await live();
     await ctx.prisma.showcasePlacement.update({
       where: { id: placement.id },
       data: { startAt: new Date(Date.now() - 40 * DAY), endAt: new Date(Date.now() - DAY) },
     });
     await expiry.execute();
 
+    const freshPkg = await createShowcasePackage(ctx.prisma, { durationDays: 30 });
+    await createShowcaseEntitlement(ctx, {
+      providerId: profile.id,
+      userId: providerUserId,
+      packageId: freshPkg.id,
+    });
+
     const response = await request(ctx.server)
-      .post(`/providers/${profile.id}/showcase/placements/checkout`)
+      .post(`/providers/${profile.id}/showcase/cards/${card.id}/use-entitlement`)
       .set('Cookie', providerCookie)
-      .send({ cardId: card.id, showcasePackageId: pkg.id });
+      .send({});
 
     expect(response.status).toBe(201);
+    const newPlacement = await ctx.prisma.showcasePlacement.findFirst({
+      where: { cardId: card.id, status: 'ACTIVE' },
+    });
+    expect(newPlacement).not.toBeNull();
+    expect(newPlacement!.id).not.toBe(placement.id);
   });
 });
 
