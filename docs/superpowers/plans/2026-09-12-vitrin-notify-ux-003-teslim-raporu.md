@@ -187,7 +187,11 @@ hiç bulunmaması beklenir (flag varsa boot durur).
   -placement-lead): 9/9 ✔.
 - Ekran kanıtı: `2026-09-12-vitrin-notify-screens/home-shelf-{320,768,1440}.png`
   (Chromium, section-only screenshot).
-- CI (PR #72, run 34650664154, commit `a19b567a`): `typecheck · lint · test · build` ✔,
+- CI (PR #72, son run 34654053607, commit `43d880f9`, daraltılmış DML dahil): üç iş ✔.
+  Önceki run (`93dc80ac`) WebKit'te bir tarayıcı çökmesi ("internal error") ve retry'da
+  spec fixture adı çakışması verdi; `showcase-placement-lead` kart adı deneme başına
+  tekilleştirildi (ürün kodu değişmedi).
+- Önceki CI (run 34650664154, commit `a19b567a`): `typecheck · lint · test · build` ✔,
   `e2e (chromium)` ✔, `e2e (webkit)` ✔. İlk koşuda WebKit'te `showcase-cards` 375px adımı
   (geri çekme re-render'ı beklenmeden ⋯ menüsü) ve yeni fiyat spec'inde aynı-URL redirect
   yarışı flake verdi; ikisi de spec tarafında sağlamlaştırıldı (ürün kodu değişmedi).
