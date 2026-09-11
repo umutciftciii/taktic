@@ -17,6 +17,7 @@ import { ProviderAccessGuard } from '../auth/provider-access.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateShowcaseCardDto, UpdateShowcaseCardDto } from './dto/create-showcase-card.dto';
 import { SubmitShowcaseCardDto } from './dto/submit-showcase-card.dto';
+import { UseShowcaseEntitlementDto } from './dto/use-showcase-entitlement.dto';
 import { ProviderShowcaseCardsService } from './provider-showcase-cards.service';
 
 /**
@@ -113,6 +114,10 @@ export class ProviderShowcaseCardsController {
   /**
    * 200 rather than 201: nothing the caller addressed is created — the same card
    * comes back with its draft now waiting for an operator.
+   *
+   * The body is empty. The provider accepted the price-responsibility text when
+   * they bought the package; the route keeps a typed body so the old acceptance
+   * fields are refused rather than silently dropped.
    */
   @Post(':cardId/submit')
   @HttpCode(HttpStatus.OK)
@@ -142,6 +147,22 @@ export class ProviderShowcaseCardsController {
     @Param('cardId') cardId: string,
   ) {
     return this.cards.withdrawSubmission(providerId, cardId);
+  }
+
+  /**
+   * Binds a right to a card that has none; publishes at once if the card is
+   * already approved.
+   *
+   * 201, unlike its siblings: when the card is approved this call births a
+   * placement — a new resource — and the same card comes back on the air.
+   */
+  @Post(':cardId/use-entitlement')
+  useEntitlement(
+    @Param('providerId') providerId: string,
+    @Param('cardId') cardId: string,
+    @Body() dto: UseShowcaseEntitlementDto,
+  ) {
+    return this.cards.useEntitlement(providerId, cardId, dto);
   }
 
   /**

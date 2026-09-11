@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ShowcaseCardStatus,
+  ShowcaseEntitlementStatus,
   ShowcasePlacementSuspendReason,
   ShowcaseVersionChangeTrigger,
   ShowcaseVersionReview,
@@ -8,12 +9,16 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { TransactionalMailService } from '../notifications/transactional-mail.service';
+import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { ShowcasePlacementService } from './showcase-placement.service';
+import { assertCategoryStillOpen, assertVersionAreasCovered } from './showcase-publish-preflight';
 import { ListShowcaseCardsDto, ListShowcaseVersionsDto } from './dto/review-showcase-version.dto';
 import {
   showcaseCardAlreadySuspended,
   showcaseCardNotFound,
   showcaseCardNotSuspended,
+  showcaseEntitlementMissing,
   showcaseVersionNotFound,
   showcaseVersionNotPending,
 } from './showcase.errors';
@@ -54,6 +59,9 @@ export class AdminShowcaseService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ShowcasePlacementService)
     private readonly placements: ShowcasePlacementService,
+    @Inject(ShowcaseEntitlementService)
+    private readonly entitlements: ShowcaseEntitlementService,
+    @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
   ) {}
 
   /**
@@ -128,11 +136,35 @@ export class AdminShowcaseService {
       throw showcaseVersionNotFound();
     }
 
+    // The right this card sits on, if it is waiting for its first approval.
+    // An operator deciding a first version needs to see that approving it will
+    // spend a right — and which package the run will be. A revision of a live
+    // card has no reserved right, and shows none.
+    const reserved = await this.prisma.showcaseEntitlement.findFirst({
+      where: { cardId: version.cardId, status: ShowcaseEntitlementStatus.RESERVED },
+      select: {
+        packageNameSnapshot: true,
+        durationDaysSnapshot: true,
+        expiresAt: true,
+        reviewPausedAt: true,
+      },
+    });
+    const now = new Date();
+
     return {
       ...toShowcaseVersion(version),
       card: toShowcaseCard(version.card),
       provider: version.card.provider,
       autoPublish: version.autoPublishAudit,
+      entitlement: reserved
+        ? {
+            packageName: reserved.packageNameSnapshot,
+            durationDays: reserved.durationDaysSnapshot,
+            expiresAt: reserved.expiresAt.toISOString(),
+            pausedForReview: reserved.reviewPausedAt !== null,
+            valid: reserved.reviewPausedAt !== null || reserved.expiresAt > now,
+          }
+        : null,
     };
   }
 
@@ -183,21 +215,66 @@ export class AdminShowcaseService {
    * The card is not "approved and still drafting" for any instant a reader could
    * observe, and the next edit starts from the version that is now live rather
    * than from the one that just stopped being a draft.
+   *
+   * ## The first approval is the publication
+   *
+   * A card with nothing live is going on the air here. The right it was opened
+   * on is spent in this transaction and the placement is born from it, so
+   * "approved" and "on the air" are one fact. Which means the three things that
+   * have to hold on the air — a valid right, an open shelf, covered areas — are
+   * checked here before anything is written; a refusal leaves the version
+   * PENDING and the queue as it was. "Approved but unpublishable" cannot be
+   * produced.
+   *
+   * A card with something live is revising it. No right is involved; the run
+   * already behind the card is re-pinned to the approved text.
    */
   async approveVersion(versionId: string, user: AuthUser) {
+    let activatedPlacementId: string | null = null;
+
     await runSerializable(this.prisma, async (tx) => {
       const version = await tx.showcaseCardVersion.findUnique({
         where: { id: versionId },
-        select: { id: true, cardId: true, reviewStatus: true },
+        select: {
+          id: true,
+          cardId: true,
+          reviewStatus: true,
+          card: {
+            select: {
+              id: true,
+              providerId: true,
+              categoryId: true,
+              kind: true,
+              liveVersionId: true,
+              category: { select: { id: true, kind: true, status: true } },
+            },
+          },
+        },
       });
 
       if (!version) {
         throw showcaseVersionNotFound();
       }
 
+      if (version.reviewStatus !== ShowcaseVersionReview.PENDING) {
+        throw showcaseVersionNotPending();
+      }
+
+      const firstPublication = version.card.liveVersionId === null;
+      const now = new Date();
+
+      if (firstPublication) {
+        const reserved = await this.entitlements.findReservedForCard(tx, version.cardId, now);
+        if (!reserved) {
+          throw showcaseEntitlementMissing();
+        }
+        assertCategoryStillOpen(version.card.category, version.card.kind);
+        await assertVersionAreasCovered(tx, version.card.providerId, versionId);
+      }
+
       const moved = await tx.showcaseCardVersion.updateMany({
         where: { id: versionId, reviewStatus: ShowcaseVersionReview.PENDING },
-        data: { reviewStatus: ShowcaseVersionReview.APPROVED, publishedAt: new Date() },
+        data: { reviewStatus: ShowcaseVersionReview.APPROVED, publishedAt: now },
       });
 
       if (moved.count !== 1) {
@@ -225,27 +302,49 @@ export class AdminShowcaseService {
         },
       });
 
-      /*
-       * Every paid run of this card moves to the text that was just approved,
-       * in this same transaction.
-       *
-       * The operator decided this version should be what the card says. A
-       * placement still publishing the previous one would mean the home page
-       * and the card's own page disagreeing about the same business — and the
-       * home page would be showing text nobody currently stands behind.
-       *
-       * The shelves are rebuilt from the new version's areas, so an approval
-       * that widened coverage widens the run's reach and one that narrowed it
-       * narrows it. `endAt` is untouched: re-pinning is a change to what is
-       * shown, never to what was bought.
-       */
-      await this.placements.repinToVersion(
-        tx,
-        version.cardId,
-        versionId,
-        ShowcaseVersionChangeTrigger.ADMIN_APPROVAL,
-      );
+      if (firstPublication) {
+        // The right is spent and the run is born, here, on the version that
+        // was just approved. `consumeForCard` re-reads the right under the
+        // transaction, so a right that vanished between the check above and
+        // this line still refuses rather than publishing on nothing.
+        const { placementId } = await this.entitlements.consumeForCard(tx, {
+          cardId: version.cardId,
+          versionId,
+          providerId: version.card.providerId,
+          categoryId: version.card.categoryId,
+          kind: version.card.kind,
+          now,
+        });
+        activatedPlacementId = placementId;
+      } else {
+        /*
+         * Every paid run of this card moves to the text that was just
+         * approved, in this same transaction.
+         *
+         * The operator decided this version should be what the card says. A
+         * placement still publishing the previous one would mean the home page
+         * and the card's own page disagreeing about the same business — and
+         * the home page would be showing text nobody currently stands behind.
+         *
+         * The shelves are rebuilt from the new version's areas, so an approval
+         * that widened coverage widens the run's reach and one that narrowed
+         * it narrows it. `endAt` is untouched: re-pinning is a change to what
+         * is shown, never to what was bought.
+         */
+        await this.placements.repinToVersion(
+          tx,
+          version.cardId,
+          versionId,
+          ShowcaseVersionChangeTrigger.ADMIN_APPROVAL,
+        );
+      }
     }, { label: 'showcase.approveVersion' });
+
+    // After the commit: a mail about a run that was rolled back would announce
+    // nothing, and the settlement path sends the same message the same way.
+    if (activatedPlacementId) {
+      await this.mail.sendShowcasePlacementActivated(activatedPlacementId);
+    }
 
     return this.getVersion(versionId);
   }
@@ -376,6 +475,11 @@ export class AdminShowcaseService {
    * status stays APPROVED — so refusing a provider's new text never takes their
    * working card off the air. Only a card that has never had a live version
    * becomes REJECTED, because for that one there is nothing else it could be.
+   *
+   * For that card the right it sits on gets its clock back: the pause opened
+   * at submission is closed as REJECTED and the time under review is added to
+   * the right's window. The right stays reserved on the card — the provider's
+   * next attempt is the next version, on the same right.
    */
   async rejectVersion(versionId: string, user: AuthUser, note: string) {
     await runSerializable(this.prisma, async (tx) => {
@@ -420,6 +524,10 @@ export class AdminShowcaseService {
           note: note.trim(),
         },
       });
+
+      if (!version.card.liveVersionId) {
+        await this.entitlements.resumeAfterReview(tx, version.cardId, 'REJECTED', new Date());
+      }
     }, { label: 'showcase.rejectVersion' });
 
     return this.getVersion(versionId);

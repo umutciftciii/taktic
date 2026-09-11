@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
   createDiscoverableProvider,
+  createShowcaseEntitlement,
+  createShowcasePackage,
   createTestApp,
   createUser,
   loginAs,
@@ -54,6 +56,13 @@ async function fixture() {
     areas: [{ city: 'İstanbul', district: null }],
   });
   const adminUser = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+  // One right on the shelf: every case here opens exactly one card on it.
+  const pkg = await createShowcasePackage(ctx.prisma);
+  const { entitlement } = await createShowcaseEntitlement(ctx, {
+    providerId: provider.id,
+    userId: providerUser.id,
+    packageId: pkg.id,
+  });
 
   return {
     category,
@@ -62,6 +71,7 @@ async function fixture() {
     providerCookie: await loginAs(ctx.prisma, providerUser.id),
     admin: adminUser,
     adminCookie: await loginAs(ctx.prisma, adminUser.id),
+    entitlement,
   };
 }
 
@@ -136,6 +146,20 @@ describe('incelemedeki sürümü geri çekme', () => {
     // Canlı sürümü olmayan kart taslağa döner.
     expect(withdrawn.body.status).toBe('DRAFT');
     expect(withdrawn.body.liveVersion).toBeNull();
+
+    // Hak kartta kalır, saati yeniden işler: inceleme duraklaması WITHDRAWN
+    // olarak kapanır.
+    const right = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({
+      where: { id: f.entitlement.id },
+    });
+    expect(right.status).toBe('RESERVED');
+    expect(right.cardId).toBe(card.id);
+    expect(right.reviewPausedAt).toBeNull();
+    expect(
+      await ctx.prisma.showcaseEntitlementReviewPause.count({
+        where: { entitlementId: right.id, endReason: 'WITHDRAWN' },
+      }),
+    ).toBe(1);
   });
 
   it('geri çekilen sürüm yeniden düzenlenebilir', async () => {
@@ -170,7 +194,7 @@ describe('incelemedeki sürümü geri çekme', () => {
     ).toBe(1);
   });
 
-  it('yeniden gönderim yeni bir kabul ister', async () => {
+  it('yeniden gönderim şart anlık görüntüsünü haktan yeniden yazar ve saati yeniden durdurur', async () => {
     const f = await fixture();
     const card = await createCard(f);
     await submit(f, card.id);
@@ -180,24 +204,32 @@ describe('incelemedeki sürümü geri çekme', () => {
       .send({})
       .expect(200);
 
-    // Kabul verilmeden gönderim reddedilir: eski kabul geri çekmeyle silindi.
-    await request(ctx.server)
-      .post(`/providers/${f.provider.id}/showcase/cards/${card.id}/submit`)
-      .set('Cookie', f.providerCookie)
-      .send({ priceTermsAccepted: false, priceTermsVersion: 'v1' })
-      .expect(400);
-
     const stored = await ctx.prisma.showcaseCardVersion.findFirstOrThrow({
       where: { cardId: card.id },
     });
     expect(stored.reviewStatus).toBe('DRAFT');
     expect(stored.priceTermsAcceptedAt).toBeNull();
 
-    // Yeniden kabulle geçer, ve kabul anı yeniden yazılır.
+    // Yeniden gönderim: şart sürümü haktan yazılır, ikinci bir duraklama açılır.
     const resubmitted = await submit(f, card.id);
     expect(resubmitted.draftVersion.reviewStatus).toBe('PENDING');
     expect(resubmitted.draftVersion.priceTermsVersion).toBe('v1');
     expect(resubmitted.draftVersion.priceTermsAcceptedAt).not.toBeNull();
+
+    const right = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({
+      where: { id: f.entitlement.id },
+    });
+    expect(right.reviewPausedAt).not.toBeNull();
+    expect(
+      await ctx.prisma.showcaseEntitlementReviewPause.count({
+        where: { entitlementId: right.id },
+      }),
+    ).toBe(2);
+    expect(
+      await ctx.prisma.showcaseEntitlementReviewPause.count({
+        where: { entitlementId: right.id, endedAt: null },
+      }),
+    ).toBe(1);
   });
 
   it('canlı sürümü olan kartta canlı içerik ve kart durumu korunur', async () => {

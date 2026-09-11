@@ -690,11 +690,13 @@ export function showcaseUpdatePayload(
   return content;
 }
 
-/** The acceptance body the submit endpoint requires. */
-export const SHOWCASE_SUBMIT_BODY = {
-  priceTermsAccepted: true,
-  priceTermsVersion: 'v1',
-} as const;
+/**
+ * The submit endpoint's body: empty. The provider accepted the
+ * price-responsibility text when they bought the package, and the route's
+ * whitelist refuses the old acceptance fields — a spec that needs to prove
+ * that sends them explicitly.
+ */
+export const SHOWCASE_SUBMIT_BODY = {} as const;
 
 export function providerPayload(categoryIds: string[] = []) {
   const suffix = uniqueSuffix();

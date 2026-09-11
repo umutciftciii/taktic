@@ -63,9 +63,12 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
  * notifications (four messages), and operations settings (two operator-gated
  * jobs).
  *
- * What is still deliberately absent: **entitlements and credits.** A vitrin
- * package is never an offering right and a vitrin purchase never loads a
- * balance. The catalogue is separate (`ShowcasePackage`), a CHECK constraint
+ * What is still deliberately absent: **offering entitlements and credits.** A
+ * vitrin package is never an offering right and a vitrin purchase never loads a
+ * balance. (The vitrin *publication right* — `ShowcaseEntitlement`, what a
+ * package purchase grants and a card is opened on — is this context's own,
+ * lives in `ShowcaseLifecycleModule`, and has nothing to do with the credit
+ * economy despite sharing a word with it.) The catalogue is separate (`ShowcasePackage`), a CHECK constraint
  * refuses a vitrin purchase that carries credit, and this module has no way to
  * write a ledger row. The one place the two economies touch is a single branch
  * in the entitlement resolver — which lives on the resolver's side, reads one

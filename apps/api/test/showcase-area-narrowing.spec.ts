@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
   createDiscoverableProvider,
+  createShowcaseEntitlement,
+  createShowcasePackage,
   createTestApp,
   createUser,
   loginAs,
@@ -60,6 +62,16 @@ async function approvedCardWithThreeAreas() {
   const adminUser = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
   const providerCookie = await loginAs(ctx.prisma, providerUser.id);
   const adminCookie = await loginAs(ctx.prisma, adminUser.id);
+
+  // The card is opened on a right and put on the air by its first approval,
+  // so the narrowing cases below act on a card with a real run behind it —
+  // which is the state the rule was written for.
+  const pkg = await createShowcasePackage(ctx.prisma);
+  await createShowcaseEntitlement(ctx, {
+    providerId: provider.id,
+    userId: providerUser.id,
+    packageId: pkg.id,
+  });
 
   const created = await request(ctx.server)
     .post(`/providers/${provider.id}/showcase/cards`)

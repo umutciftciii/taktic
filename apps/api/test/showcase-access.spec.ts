@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
   createDiscoverableProvider,
+  createShowcaseEntitlement,
+  createShowcasePackage,
   createTestApp,
   createUser,
   loginAs,
@@ -44,6 +46,10 @@ async function provider(categoryId: string) {
     categoryId,
     areas: [{ city: 'İstanbul', district: null }],
   });
+  // Each business holds one usable right, so a refusal below is never
+  // "no package" wearing an access code's clothes.
+  const pkg = await createShowcasePackage(ctx.prisma);
+  await createShowcaseEntitlement(ctx, { providerId: profile.id, userId: user.id, packageId: pkg.id });
 
   return { user, profile, cookie: await loginAs(ctx.prisma, user.id) };
 }
@@ -154,6 +160,18 @@ describe('sağlayıcı uçları — kimlik ve rol', () => {
       .set('Cookie', s.stranger.cookie)
       .send(SHOWCASE_SUBMIT_BODY)
       .expect(404);
+
+    // Yabancının kendi hakkı var; yine de başkasının kartına bağlayamaz.
+    await request(ctx.server)
+      .post(`/providers/${s.stranger.profile.id}/showcase/cards/${s.card.id}/use-entitlement`)
+      .set('Cookie', s.stranger.cookie)
+      .send({})
+      .expect(404);
+    expect(
+      await ctx.prisma.showcaseEntitlement.count({
+        where: { providerId: s.stranger.profile.id, status: 'AVAILABLE' },
+      }),
+    ).toBe(1);
 
     // Sahibin kartı hiç kıpırdamadı.
     const stored = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({
