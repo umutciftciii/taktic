@@ -27,6 +27,9 @@ const TRUNCATED_TABLES = [
   'ProviderPackageEntitlementScope',
   'ProviderPackageEntitlement',
   'OfferPackageScopeCategory',
+  // The vitrin catalogue is the one showcase table nothing above cascades
+  // into: every other showcase row hangs off a provider or a purchase.
+  'ShowcasePackage',
   'PackagePurchase',
   'Offer',
   'ServiceRequestAnswer',
