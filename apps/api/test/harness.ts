@@ -33,6 +33,7 @@ import {
   SHOWCASE_PRICE_TERMS_TEXT,
   SHOWCASE_PRICE_TERMS_VERSION,
 } from '../src/modules/showcase/showcase.constants';
+import { ShowcaseEntitlementService } from '../src/modules/showcase/showcase-entitlement.service';
 import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
 import { toShowcaseAreaRow } from '../src/common/showcase-area-key';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -1127,5 +1128,79 @@ export function showcaseLeadPayload(
     description: 'Vitrin kartından gönderilen test talebi.',
     answers: [],
     ...overrides,
+  };
+}
+
+/**
+ * A settled package-first purchase and the AVAILABLE right it granted.
+ *
+ * Goes through `ShowcaseEntitlementService.grantForPurchase` for the reason
+ * `createLiveShowcasePlacement` goes through the placement service: a right
+ * built by the code a real settlement runs, not a second definition of one.
+ * The acceptance is upserted because a business has one per version.
+ */
+export async function createShowcaseEntitlement(
+  ctx: TestContext,
+  options: { providerId: string; userId: string; packageId: string; paidAt?: Date },
+) {
+  const pkg = await ctx.prisma.showcasePackage.findUniqueOrThrow({
+    where: { id: options.packageId },
+  });
+  const paidAt = options.paidAt ?? new Date();
+  const acceptance = await ctx.prisma.showcasePackageTermsAcceptance.upsert({
+    where: {
+      providerId_termsVersion: {
+        providerId: options.providerId,
+        termsVersion: SHOWCASE_PRICE_TERMS_VERSION,
+      },
+    },
+    update: {},
+    create: {
+      providerId: options.providerId,
+      termsVersion: SHOWCASE_PRICE_TERMS_VERSION,
+      termsTextSnapshot: SHOWCASE_PRICE_TERMS_TEXT,
+      acceptedByUserId: options.userId,
+    },
+  });
+  const purchase = await ctx.prisma.packagePurchase.create({
+    data: {
+      providerId: options.providerId,
+      kind: 'SHOWCASE_PACKAGE',
+      showcasePackageId: pkg.id,
+      durationDaysSnapshot: pkg.durationDays,
+      creditAmountSnapshot: 0,
+      priceAmountSnapshot: pkg.priceAmount,
+      currencySnapshot: pkg.currency,
+      packageNameSnapshot: pkg.name,
+      showcasePackageTermsAcceptanceId: acceptance.id,
+      status: 'PAID',
+      paidAt,
+      paymentProvider: 'mock',
+    },
+  });
+
+  const entitlements = ctx.app.get(ShowcaseEntitlementService);
+  const { entitlementId } = await ctx.prisma.$transaction((tx) =>
+    entitlements.grantForPurchase(
+      tx,
+      {
+        id: purchase.id,
+        providerId: purchase.providerId,
+        showcasePackageId: pkg.id,
+        durationDaysSnapshot: pkg.durationDays,
+        packageNameSnapshot: purchase.packageNameSnapshot,
+        priceAmountSnapshot: purchase.priceAmountSnapshot,
+        currencySnapshot: purchase.currencySnapshot,
+        showcasePackageTermsAcceptanceId: acceptance.id,
+      },
+      paidAt,
+    ),
+  );
+
+  return {
+    purchase,
+    entitlement: await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({
+      where: { id: entitlementId },
+    }),
   };
 }

@@ -15,12 +15,12 @@ import { AdminShowcaseService } from './admin-showcase.service';
 import { ProviderShowcaseCardsController } from './provider-showcase-cards.controller';
 import { ProviderShowcaseCardsService } from './provider-showcase-cards.service';
 import { ProviderShowcasePlacementsController } from './provider-showcase-placements.controller';
-import { ShowcaseCheckoutService } from './showcase-checkout.service';
 import { ShowcaseFallbackController } from './showcase-fallback.controller';
 import { ShowcaseFeedService } from './showcase-feed.service';
 import { ShowcaseLeadAdminService } from './showcase-lead-admin.service';
 import { ShowcaseLeadService } from './showcase-lead.service';
 import { ShowcaseLeadSlaService } from './showcase-lead-sla.service';
+import { ShowcasePackageCheckoutService } from './showcase-package-checkout.service';
 import { ShowcasePackagesService } from './showcase-packages.service';
 import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 import { ShowcasePlacementExpiryService } from './showcase-placement-expiry.service';
@@ -121,7 +121,7 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
     ShowcasePriceTermsService,
     ShowcasePlacementReadService,
     ShowcasePublicationService,
-    ShowcaseCheckoutService,
+    ShowcasePackageCheckoutService,
     ShowcaseFeedService,
     ShowcaseLeadService,
     ShowcaseLeadAdminService,

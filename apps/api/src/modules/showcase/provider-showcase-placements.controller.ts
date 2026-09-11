@@ -16,9 +16,10 @@ import { AuthGuard } from '../auth/auth.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
 import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
-import { CreateShowcaseCheckoutDto } from './dto/showcase-checkout.dto';
-import { ShowcaseCheckoutService } from './showcase-checkout.service';
+import { CreateShowcasePackageCheckoutDto } from './dto/showcase-package-checkout.dto';
+import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { ShowcaseLeadService } from './showcase-lead.service';
+import { ShowcasePackageCheckoutService } from './showcase-package-checkout.service';
 import { ShowcasePackagesService } from './showcase-packages.service';
 import { ShowcasePlacementReadService } from './showcase-placement-read.service';
 import { ShowcasePublicationService } from './showcase-publication.service';
@@ -36,6 +37,11 @@ import { ShowcasePublicationService } from './showcase-publication.service';
  * the checkout: buying is an act of the account that owns the business, and the
  * service refuses any role but PROVIDER there — the same rule
  * `PaymentsService.createCheckoutSession` already applies to credit packages.
+ *
+ * The sale is package-first: `packages/checkout` buys a publication right and
+ * names no card. The card-bound routes (`placements/checkout`,
+ * `placements/eligibility`) are gone, and `showcase-legacy-routes.spec.ts`
+ * holds their 404.
  */
 @Controller('providers/:providerId/showcase')
 @UseGuards(AuthGuard, RolesGuard, ProviderAccessGuard)
@@ -43,7 +49,10 @@ import { ShowcasePublicationService } from './showcase-publication.service';
 export class ProviderShowcasePlacementsController {
   constructor(
     @Inject(ShowcasePackagesService) private readonly packages: ShowcasePackagesService,
-    @Inject(ShowcaseCheckoutService) private readonly checkout: ShowcaseCheckoutService,
+    @Inject(ShowcasePackageCheckoutService)
+    private readonly checkout: ShowcasePackageCheckoutService,
+    @Inject(ShowcaseEntitlementService)
+    private readonly entitlements: ShowcaseEntitlementService,
     @Inject(ShowcasePlacementReadService)
     private readonly placements: ShowcasePlacementReadService,
     @Inject(ShowcaseLeadService) private readonly leads: ShowcaseLeadService,
@@ -66,30 +75,51 @@ export class ProviderShowcasePlacementsController {
   }
 
   /**
+   * The price-responsibility text the package sale requires acceptance of, and
+   * whether this business has already agreed to the version in force.
+   *
+   * Declared above `packages` for the reason `price-terms` is declared before
+   * `:cardId` on the card controller: Nest matches in declaration order, and a
+   * literal segment declared after a broader route would be swallowed by it.
+   */
+  @Get('packages/terms')
+  getPackageTerms(@Param('providerId') providerId: string) {
+    return this.checkout.getTerms(providerId);
+  }
+
+  /**
+   * Opens a checkout for one package — the package-first sale.
+   *
+   * 201: a purchase row is genuinely created (or an open one for the same
+   * package is handed back, which is the same resource either way). What is
+   * bought is a publication right; the card that spends it comes later.
+   */
+  @Post('packages/checkout')
+  @HttpCode(HttpStatus.CREATED)
+  createPackageCheckout(
+    @Param('providerId') providerId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreateShowcasePackageCheckoutDto,
+  ) {
+    return this.checkout.createCheckout(providerId, user, dto);
+  }
+
+  /** The rights this business holds: available ones, and the one each card has reserved. */
+  @Get('entitlements')
+  listEntitlements(@Param('providerId') providerId: string) {
+    return this.entitlements.listForProvider(providerId, new Date());
+  }
+
+  /**
    * The catalogue, narrowed to what this card's kind can be sold.
    *
-   * Declared before `placements/:id` for the reason `price-terms` is declared
-   * before `:cardId` on the card controller: Nest matches in declaration order,
-   * and a literal segment after a parameter would be swallowed by it.
+   * Declared before `placements/:id` for the reason `packages/terms` is
+   * declared before it: Nest matches in declaration order, and a literal
+   * segment after a parameter would be swallowed by it.
    */
   @Get('packages')
   listPackages(@Query('cardKind') cardKind?: ShowcaseCardKind) {
     return this.packages.listForProvider(cardKind);
-  }
-
-  /**
-   * The dry run behind the buy button: can this card be published, and why not.
-   *
-   * Writes nothing and opens nothing. It runs the identical checks the checkout
-   * does, so a button that is enabled here cannot be refused there.
-   */
-  @Get('placements/eligibility')
-  checkEligibility(
-    @Param('providerId') providerId: string,
-    @Query('cardId') cardId: string,
-    @Query('showcasePackageId') showcasePackageId?: string,
-  ) {
-    return this.checkout.checkEligibility(providerId, cardId, showcasePackageId);
   }
 
   @Get('placements')
@@ -103,22 +133,6 @@ export class ProviderShowcasePlacementsController {
     @Param('placementId') placementId: string,
   ) {
     return this.placements.getForProvider(providerId, placementId);
-  }
-
-  /**
-   * Opens a checkout for one card and one package.
-   *
-   * 201: a purchase row is genuinely created (or an open one for the same card
-   * and package is handed back, which is the same resource either way).
-   */
-  @Post('placements/checkout')
-  @HttpCode(HttpStatus.CREATED)
-  createCheckout(
-    @Param('providerId') providerId: string,
-    @CurrentUser() user: AuthUser,
-    @Body() dto: CreateShowcaseCheckoutDto,
-  ) {
-    return this.checkout.createCheckout(providerId, user, dto);
   }
 
   /**

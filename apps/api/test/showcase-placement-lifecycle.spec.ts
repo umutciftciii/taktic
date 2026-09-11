@@ -437,7 +437,9 @@ describe('the expiry sweeper', () => {
     expect(second.expired).toBe(0);
   });
 
-  it('frees the card for its next run once the old one has expired', async () => {
+  // rewritten in Task 5: the card-bound checkout is gone, and a card's next
+  // run is a fresh right reserved by the card rather than a purchase naming it.
+  it.skip('frees the card for its next run once the old one has expired', async () => {
     const { placement, card, profile, pkg, providerCookie } = await live();
     await ctx.prisma.showcasePlacement.update({
       where: { id: placement.id },

@@ -273,10 +273,15 @@ export const SHOWCASE_LEAD_RATE_LIMITED_CODE = 'SHOWCASE_LEAD_RATE_LIMITED';
 export const SHOWCASE_FALLBACK_NOT_AVAILABLE_CODE = 'SHOWCASE_FALLBACK_NOT_AVAILABLE';
 export const SHOWCASE_FALLBACK_ALREADY_DECIDED_CODE = 'SHOWCASE_FALLBACK_ALREADY_DECIDED';
 
+/**
+ * 404 rather than 400: the package is the resource the sale addresses, and a
+ * retired one is, for a buyer, a package that no longer exists — the same
+ * answer the admin catalogue gives for an unknown id.
+ */
 export function showcasePackageNotFound() {
-  return new BadRequestException({
-    statusCode: HttpStatus.BAD_REQUEST,
-    error: 'Bad Request',
+  return new NotFoundException({
+    statusCode: HttpStatus.NOT_FOUND,
+    error: 'Not Found',
     code: SHOWCASE_PACKAGE_NOT_FOUND_CODE,
     message: 'Etkin bir vitrin paketi bulunamadı.',
   });
