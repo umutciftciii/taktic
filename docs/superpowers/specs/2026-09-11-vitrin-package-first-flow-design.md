@@ -90,20 +90,52 @@ Mevcut 2 FAILED satır legacy dalı, OFFER satırları ilk dalı sağlar.
 | `grantedAt`, `expiresAt` | `expiresAt = paidAt + activationWindowDays` |
 | `cardId?` (FK Restrict), `reservedAt?` | RESERVED/CONSUMED'da dolu |
 | `consumedAt?`, `placementId? UNIQUE` (FK Restrict) | CONSUMED'da dolu |
+| `reviewPausedAt?` | kart incelemedeyken dolu: **hak saati duruyor** (§2.5) |
+| `totalPausedMs INT DEFAULT 0` | inceleme duraklamalarının toplamı; `expiresAt` bu kadar ileri taşınmıştır |
 
 Index/constraint:
 - `UNIQUE (cardId) WHERE status = 'RESERVED'` — **bir kartta aynı anda tek rezerve hak.**
 - `(providerId, status, expiresAt)` index.
 - CHECK `ShowcaseEntitlement_status_shape`:
-  - AVAILABLE ⇒ cardId, reservedAt, consumedAt, placementId NULL
+  - AVAILABLE ⇒ cardId, reservedAt, consumedAt, placementId, reviewPausedAt NULL
   - RESERVED ⇒ cardId, reservedAt NOT NULL; consumedAt, placementId NULL
-  - CONSUMED ⇒ cardId, reservedAt, consumedAt, placementId NOT NULL
-  - EXPIRED ⇒ consumedAt, placementId NULL (cardId serbest: süresi dolan rezerve hak hangi karttaydı, kayıt kalır)
+  - CONSUMED ⇒ cardId, reservedAt, consumedAt, placementId NOT NULL; reviewPausedAt NULL
+  - EXPIRED ⇒ consumedAt, placementId, reviewPausedAt NULL (cardId serbest: süresi dolan rezerve hak hangi karttaydı, kayıt kalır)
 - CHECK `expiresAt > grantedAt`.
 
 Hiçbir okuyucu `status`'a tek başına güvenmez: kullanılabilirlik her zaman
-`status IN (AVAILABLE) AND expiresAt > now()` ile sorulur; rezervasyon geçerliliği
-`status = RESERVED AND expiresAt > now()`.
+`status = AVAILABLE AND expiresAt > now()` ile sorulur; rezervasyon geçerliliği
+`status = RESERVED AND (reviewPausedAt IS NOT NULL OR expiresAt > now())` —
+incelemede bekleyen hak hiçbir koşulda süresi dolmuş sayılmaz.
+
+### 2.5 `ShowcaseEntitlementReviewPause` (yeni tablo) — inceleme süresi hakkı tüketmez
+
+90 günlük geçerlilik, sağlayıcının kartı **incelemeye gönderme** yükümlülüğüdür;
+adminin karar süresi değildir. Bu yüzden RESERVED hak, kart `PENDING_REVIEW`'a
+geçtiği anda süre bakımından durur ve red/geri çekme sonrasında kalan süreyle
+yeniden işler. Durdurma **kalıcı ve denetlenebilir** kayda bağlıdır; runtime'da
+hesaplanmaz. Placement askılarının (`ShowcasePlacementSuspension`) disiplini
+birebir uygulanır:
+
+| kolon | not |
+|---|---|
+| `id`, `entitlementId` (FK Restrict), `cardVersionId` (FK Restrict) | hangi gönderim için durdu |
+| `startedAt`, `endedAt?` | açık satır = hak şu an duruyor |
+| `expiresAtBefore`, `expiresAtAfter?` | duraklama açılırken ve kapanırken `expiresAt` |
+| `endReason?` enum `ShowcaseEntitlementPauseEnd { REJECTED, WITHDRAWN, RELEASED, CONSUMED }` | nasıl bitti |
+
+- `UNIQUE (entitlementId) WHERE endedAt IS NULL` — bir hak aynı anda tek duraklama.
+- CHECK: `endedAt IS NULL` ⇔ `expiresAtAfter IS NULL` ⇔ `endReason IS NULL`.
+- **Açılış** (`submitCard`, canlı sürümü olmayan kart, aynı tx): satır yazılır,
+  `entitlement.reviewPausedAt = now`.
+- **Kapanış** (`rejectVersion`, `withdrawSubmission`, sil-ve-serbest-bırak, onayda
+  tüketim; hepsi aynı tx): `elapsed = now - startedAt`,
+  `entitlement.expiresAt += elapsed`, `totalPausedMs += elapsed`,
+  `reviewPausedAt = NULL`, satıra `endedAt/expiresAtAfter/endReason`.
+  Onayda hak CONSUMED olduğu için `expiresAt` artık okunmaz ama kayıt tutarlılık
+  için aynı kuralla kapatılır.
+- Süpürücü (`§3.6`) `reviewPausedAt IS NOT NULL` hakları atlar. Admin gecikmesi
+  nedeniyle hak EXPIRED olamaz.
 
 `ShowcasePlacement` şeması **değişmez**; haktan doğan placement aynı `purchaseId`'yi
 taşır (purchase → hak → placement zinciri her halkada unique).
@@ -147,17 +179,29 @@ taşır (purchase → hak → placement zinciri her halkada unique).
 - Hak yoksa `409 SHOWCASE_ENTITLEMENT_REQUIRED` (web zaten formu göstermez).
 
 ### 3.4 Kart durum geçişleri
-- **İncelemeye gönder**: checkbox yok. Sürümün `priceTermsVersion/priceTermsAcceptedAt`
-  değerleri sırasıyla şuradan alınır: kartın RESERVED hakkı → kartın son CONSUMED
-  hakkı → sağlayıcının güncel sürüm paket kabulü → kartın eski kart-bazlı kabulü.
-  Canlı sürümü olmayan kartta RESERVED+geçerli hak zorunlu (`SHOWCASE_ENTITLEMENT_REQUIRED`).
-  DTO'daki `priceTermsAccepted/priceTermsVersion` alanları kaldırılır.
-- **Red / geri çekme**: hak RESERVED kalır; kart düzenlenip yeniden gönderilir.
+- **İncelemeye gönder**: checkbox yok; DTO'daki `priceTermsAccepted/priceTermsVersion`
+  alanları kaldırılır. İki ayrı akış vardır ve **fallback zinciri yoktur**:
+  - *Canlı sürümü olmayan kart* (ilk yayın): yalnız geçerli RESERVED hakla
+    gönderilebilir (`409 SHOWCASE_ENTITLEMENT_REQUIRED`). Sürümün
+    `priceTermsVersion/priceTermsAcceptedAt` değerleri **sadece o hakkın**
+    `priceTermsVersionSnapshot` / kabul satırının `acceptedAt` değerinden yazılır.
+    Aynı tx'te inceleme duraklaması açılır (§2.5).
+  - *Canlı sürümü olan kartın revizyonu*: hak aranmaz; sürüm alanları kartın
+    **tüketilmiş** hakkının (en son CONSUMED) snapshot'ından, o yoksa (legacy yayın)
+    kartın son placement'ının `priceTermsVersionSnapshot`'ından yazılır. İkisi de
+    yoksa (canlı sürümü olup hiç yayını olmamış legacy kart) revizyon kabul
+    edilmez; sağlayıcı önce `use-entitlement` ile kartı yayınlar (§3.4 son madde).
+  Sağlayıcının güncel paket kabulü ve kartın eski kart-bazlı kabulü **hiçbir
+  zaman** kaynak değildir: yanlış satın almanın şartlarını yeni karta taşır ya da
+  rezervasyonsuz kartı incelemeye sokar.
+- **Red / geri çekme**: hak RESERVED kalır; inceleme duraklaması kapanır, hak kalan
+  süreyle işlemeye devam eder; kart düzenlenip yeniden gönderilir.
 - **Kartı sil ve yayın hakkını serbest bırak** (canlı sürümü olmayan kart —
   DRAFT/PENDING_REVIEW/REJECTED): kart `ARCHIVED`, RESERVED hak `AVAILABLE`'a
   döner (`cardId/reservedAt` NULL). Arayüzde tam bu adla, `⋯` menüsünde ve onay
   diyaloğunda sunulur; hak yanlışlıkla 90 gün kilitli kalmaz. Yayınlanmamış arşiv
-  kartları listeden gizlenir. Bekleyen inceleme varsa aynı tx'te geri çekilir.
+  kartları listeden gizlenir. Bekleyen inceleme varsa aynı tx'te geri çekilir ve
+  açık inceleme duraklaması `RELEASED` ile kapanır (kalan süre korunur).
 - **Aktif yayındaki kartı arşivle**: bugünkü davranış (placement CARD_ARCHIVED
   suspend, süre işler); hak zaten CONSUMED, dokunulmaz.
 - **`POST /cards/:id/use-entitlement`** `{ entitlementId? }`: rezerve hakkı olmayan
@@ -176,14 +220,16 @@ Serializable tx içinde, kartın **canlı sürümü yoksa** (ilk onay):
 3. Sürüm APPROVED, kart APPROVED/liveVersionId, review satırı, **placement**
    (`createForEntitlement`: startAt = now, endAt = now + durationDaysSnapshot,
    snapshot'lar haktan), hak CONSUMED (`updateMany WHERE status='RESERVED' AND
-   cardId = …`, count=1), shelf satırları, mail (tx sonrası).
+   cardId = …`, count=1), açık inceleme duraklaması `CONSUMED` ile kapanır, shelf
+   satırları, mail (tx sonrası). Placement süresi bu anda başlar.
 
 Canlı sürümü olan kartın revizyonu: bugünkü gibi yalnız repin; hak aranmaz.
 "Onaylandı ama yayınlanamıyor" hâli temsil edilemez: onay ve yayın tek tx.
 
 ### 3.6 Süre dolumu
 Mevcut `ShowcasePlacementExpiryService` süpürmesi ek olarak
-`status IN (AVAILABLE, RESERVED) AND expiresAt <= now` hakları EXPIRED yapar.
+`status IN (AVAILABLE, RESERVED) AND reviewPausedAt IS NULL AND expiresAt <= now`
+hakları EXPIRED yapar; incelemede duran hak asla süpürülmez.
 Okuyucular zaten `expiresAt`'e baktığından süpürücü kapalıyken de ek süre kazanılmaz.
 
 ### 3.7 Kaldırılan uçlar
@@ -196,11 +242,23 @@ sıfır referansı bir unit test ile kanıtlanır (`test/showcase-legacy-routes.
 
 ### 3.8 Sunucu-çözümlü kart durumu (`ShowcasePublicationService`)
 Öncelik sırası: `ARCHIVED` → `SUSPENDED` → `LIVE / ACTIVATING / PAUSED` →
-`IN_REVIEW` → geçerli rezerve hak yoksa `EXPIRED` (daha önce yayını olmuş) ya da
-`NEEDS_PACKAGE` (hiç olmamış) → `REJECTED` → `DRAFT`.
+`IN_REVIEW` → **`REJECTED`** → geçerli rezerve hak yoksa `EXPIRED` (daha önce
+yayını olmuş) ya da `NEEDS_PACKAGE` (hiç olmamış) → `DRAFT`.
+
+`REJECTED` hak gereksiniminden **önce** çözülür: reddedilmiş kart, hakkının süresi
+dolmuş olsa da reddedilme sebebini kaybetmez. Tek durum + tek CTA modeli korunur;
+hak durumu bayrakla taşınır:
+
+| kart | durum | ek açıklama | CTA |
+|---|---|---|---|
+| REJECTED, geçerli rezerve hak var | `Reddedildi` | inceleme notu | `Düzenle ve yeniden gönder` |
+| REJECTED, hak yok/süresi dolmuş (`needsPackage: true`) | `Reddedildi` | "Yayın hakkınızın süresi dolduğu için yeniden göndermek üzere paket almanız gerekiyor." | `Vitrin paketi al` |
+| DRAFT, hak yok | `Pakete hazır` (`NEEDS_PACKAGE`) | — | `Vitrin paketi al` / hak varsa `Vitrine çıkar` |
+
 `TERMS_REQUIRED`, `READY_TO_PUBLISH`, `AWAITING_PAYMENT` kalkar. Cevap:
 `{ cards: [...], availableEntitlements: [...], hasPublicationHistory }`; kart girdisi
-`entitlement: { packageName, durationDays, expiresAt } | null`, `hasRunBefore`.
+`entitlement: { packageName, durationDays, expiresAt, pausedForReview } | null`,
+`needsPackage`, `hasRunBefore`.
 
 ## 4. Ekranlar
 
@@ -253,7 +311,11 @@ dışında `ServiceRequest`/`ShowcaseLead` yazılmaz, genel talep CTA'sı). Yaln
   hak üretimi + aynı webhook/mock ikinci hak üretmez; paketsiz kart oluşturma 409;
   rezervasyon yarışı (`Promise.all` ile 2 kart, 1 hak → tam biri başarılı);
   red→düzelt→gönder→onay tek tüketim; silme hakkı serbest bırakır; süresi dolmuş
-  hakla onay 409 ve hiçbir yazım yok; çoklu paket/çoklu kart; süresi dolmuş kartın
+  hakla onay 409 ve hiçbir yazım yok; inceleme duraklaması (gönderimde açılır,
+  `expiresAt` geçmiş olsa bile incelemedeki hak onaylanabilir; redde kalan süre
+  `expiresAt`'e eklenir ve duraklama satırı kapanır; süpürücü duran hakkı atlar);
+  reddedilmiş + süresi dolmuş kart `REJECTED` + `needsPackage` döner; revizyon
+  gönderiminde şart alanları yalnız tüketilmiş hak/placement snapshot'ından yazılır; çoklu paket/çoklu kart; süresi dolmuş kartın
   `use-entitlement` ile yeniden yayını; legacy uçlar 404; publication durumları.
 - **Web unit**: `panel-routes.spec.ts` yeni rotalar; `showcase-legacy-routes.spec.ts`
   kaldırılan yolların sıfır referansı.
