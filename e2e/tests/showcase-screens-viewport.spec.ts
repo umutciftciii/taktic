@@ -50,14 +50,19 @@ function expectedColumns(width: number): number {
 }
 
 /**
- * WebKit's full-page screenshot rejects a document taller than 32767px. On
- * CI (never reproduced locally) WebKit at 320px sometimes reports the public
- * home page's scrollHeight as inflated far beyond its real rendered height —
- * a measurement quirk, not real overflow (expectNoHorizontalOverflow above
- * already passed). Guard the screenshot call and log what the page thought
- * its own height was, plus its five tallest elements, so a genuine layout
- * explosion is still caught while the quirk doesn't fail the run.
+ * WebKit's full-page screenshot rejects a *device-pixel* height over 32767.
+ * On CI, WebKit renders at devicePixelRatio 2 (unlike the local run, at 1),
+ * so a CSS-px page height that is well within reason still multiplies past
+ * the device-pixel ceiling — e.g. a ~16.5k CSS-px public-home page becomes
+ * >32767 device px at dpr 2. It's not a measurement quirk and not real
+ * overflow (expectNoHorizontalOverflow above already passed) — it's the
+ * screenshot API's own device-pixel limit interacting with a higher-dpr CI
+ * runner. Compute the device-pixel height and fall back to a viewport-only
+ * screenshot when it would exceed the limit, logging the five tallest
+ * elements so a genuine layout explosion is still visible in CI output.
  */
+const WEBKIT_MAX_SCREENSHOT_DEVICE_PX = 32_000;
+/** Layout-sanity ceilings, in CSS px — unrelated to the screenshot API. */
 const SAFE_SCREENSHOT_HEIGHT = 30_000;
 /** WebKit's own inflated measurement at 320px on CI; real value TBD. */
 const PUBLIC_HOME_MAX_HEIGHT = 200_000;
@@ -67,9 +72,10 @@ async function capture(page: Page, name: string, width: number) {
   await assertNoErrorScreen(page);
   await expectNoHorizontalOverflow(page, `${name} @${width}`);
 
-  const height = await page.evaluate(() =>
-    Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
-  );
+  const { height, dpr } = await page.evaluate(() => ({
+    height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
+    dpr: window.devicePixelRatio,
+  }));
 
   const maxAllowed = name === 'public-home' ? PUBLIC_HOME_MAX_HEIGHT : SAFE_SCREENSHOT_HEIGHT;
   expect(
@@ -77,7 +83,10 @@ async function capture(page: Page, name: string, width: number) {
     `${name} @${width}: measured page height ${height}px exceeds the ${maxAllowed}px ceiling`,
   ).toBeLessThan(maxAllowed);
 
-  if (height > SAFE_SCREENSHOT_HEIGHT) {
+  const devicePixelHeight = Math.ceil(height * dpr);
+  const fullPage = devicePixelHeight <= WEBKIT_MAX_SCREENSHOT_DEVICE_PX;
+
+  if (!fullPage) {
     const tallest = await page.evaluate(() => {
       return Array.from(document.querySelectorAll<HTMLElement>('*'))
         .map((element) => ({
@@ -93,7 +102,8 @@ async function capture(page: Page, name: string, width: number) {
         .slice(0, 5);
     });
     console.warn(
-      `${name} @${width}: measured height ${height}px exceeds ${SAFE_SCREENSHOT_HEIGHT}px, taking a viewport-only screenshot instead of full-page`,
+      `${name} @${width}: CSS height ${height}px × dpr ${dpr} = ${devicePixelHeight} device px exceeds ` +
+        `${WEBKIT_MAX_SCREENSHOT_DEVICE_PX}, taking a viewport-only screenshot instead of full-page`,
     );
     for (const element of tallest) {
       console.log(`${name} @${width}: tallest element — <${element.tag}${element.idOrClass}> height=${element.height}px`);
@@ -102,7 +112,7 @@ async function capture(page: Page, name: string, width: number) {
 
   await page.screenshot({
     path: resolve(SCREENSHOT_DIR, `${name}-${width}.png`),
-    fullPage: height <= SAFE_SCREENSHOT_HEIGHT,
+    fullPage,
   });
 }
 
