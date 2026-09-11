@@ -5719,6 +5719,9 @@ body.has-drawer-open {
 }
 
 .vitrin-face-compact .vitrin-face-media { aspect-ratio: 21 / 9; }
+/* A single face on a detail screen is wide; an empty 16:9 there is a wall of grey. */
+.vitrin-summary .vitrin-face-media,
+.vitrin-public .vitrin-face-media { aspect-ratio: 21 / 9; }
 .vitrin-face-compact .vitrin-face-title { font-size: 17px; }
 
 /* Badges: four tones, no colour per state. */
@@ -5986,6 +5989,7 @@ body.has-drawer-open {
   right: 0;
   z-index: 5;
   min-width: 260px;
+  max-width: calc(100vw - 32px);
   margin-top: var(--space-1);
   padding: var(--space-1);
   border: 1px solid var(--color-text);

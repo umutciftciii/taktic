@@ -5,10 +5,12 @@ import { formatDate, type ShowcaseCardPublication } from '../../../../lib/api';
  * one thing to do about it.
  *
  * The API resolves the state (see `ShowcasePublicationService`); this turns it
- * into the strings a person acts on. Eight human labels cover ten machine
- * states on purpose — a provider has a card that is being worked on, being
- * read, waiting for a package, on the air, refused, lapsed, stopped or
- * archived, and does not need a vocabulary finer than that.
+ * into the strings a person acts on. Eight human labels — Taslak, İncelemede,
+ * Reddedildi, Pakete hazır, Süresi doldu, Yayında, Arşivde, Yayında değil —
+ * cover the ten machine states of `ShowcasePublicationState` on purpose: a
+ * provider has a card that is being worked on, being read, waiting for a
+ * package, on the air, refused, lapsed, stopped or archived, and does not need
+ * a vocabulary finer than that.
  *
  * Every action here is a verb the provider can actually perform. A state with
  * nothing to do about it — theirs to wait on, or an operator's to lift — returns
@@ -16,7 +18,7 @@ import { formatDate, type ShowcaseCardPublication } from '../../../../lib/api';
  * pressed is a screen asking somebody to try.
  */
 export type ShowcaseStage = {
-  /** The badge text: one of the six human states. */
+  /** The badge text: one of the eight human labels. */
   label: string;
   badge: 'live' | 'progress' | 'attention' | 'muted';
   /** One sentence under the badge, when the state is not self-explanatory. */
@@ -44,9 +46,15 @@ export function showcaseStage(
     case 'IN_REVIEW':
       return { label: 'İncelemede', badge: 'progress', detail: 'Kartınız inceleniyor. Sonuçlanana kadar değiştirilemez.', action: null };
     case 'REJECTED':
-      return entry?.needsPackage
-        ? { label: 'Reddedildi', badge: 'attention', detail: 'Yayın hakkınızın süresi dolduğu için yeniden göndermek üzere paket almanız gerekiyor.', action: buy }
-        : { label: 'Reddedildi', badge: 'attention', detail: 'İnceleme notunu okuyup düzenledikten sonra yeniden gönderebilirsiniz.', action: { label: 'Düzenle ve yeniden gönder', href: `${cardHref}/duzenle`, kind: 'link' } };
+      if (!entry?.needsPackage) {
+        return { label: 'Reddedildi', badge: 'attention', detail: 'İnceleme notunu okuyup düzenledikten sonra yeniden gönderebilirsiniz.', action: { label: 'Düzenle ve yeniden gönder', href: `${cardHref}/duzenle`, kind: 'link' } };
+      }
+      // The right behind the refusal has lapsed. A provider who already holds
+      // another usable right binds it here and then edits; sending them to
+      // the shop instead would sell a package they do not need.
+      return ctx.hasAvailableRight
+        ? { label: 'Reddedildi', badge: 'attention', detail: 'Kullanılabilir vitrin hakkınızı bu karta bağlayıp düzenleyerek yeniden gönderebilirsiniz.', action: useRight }
+        : { label: 'Reddedildi', badge: 'attention', detail: 'Yayın hakkınızın süresi dolduğu için yeniden göndermek üzere paket almanız gerekiyor.', action: buy };
     case 'NEEDS_PACKAGE':
       return { label: 'Pakete hazır', badge: 'muted', detail: 'Bu kartı incelemeye göndermek için bir vitrin hakkı gerekiyor.', action: publishNow };
     case 'EXPIRED':

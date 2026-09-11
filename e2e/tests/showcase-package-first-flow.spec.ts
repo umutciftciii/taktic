@@ -657,6 +657,106 @@ test.describe('vitrin: paket-önce akış', () => {
     }
   });
 
+  test('reddedilen kartın hakkı dolunca eldeki hak karta bağlanır; mağazaya döngü yok', async ({ browser }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(3, { namePrefix: 'E2E Vitrin Red Hak' });
+    const owner = await createProvider({ categoryId: category.id, location, credits: 0 });
+    const adminAccount = await createAdmin();
+    const { entitlement } = await seedEntitlement(owner.id, 'E2E Red Hak Paketi');
+    const provider = await Actor.open(browser, 'web', primaryRuntime);
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+
+    try {
+      // ── A card on the bought right, sent in and refused ────────────────────
+      await provider.loginToWeb(owner.email, owner.password);
+      await provider.gotoWeb(`/providers/${owner.id}/vitrin`);
+      await assertNoErrorScreen(provider.page);
+      await provider.page.getByTestId('showcase-create-card').click();
+      await assertNoErrorScreen(provider.page);
+      await provider.page.getByLabel('Kategori *').selectOption({ label: category.name });
+      await fillCardContent(provider.page, {
+        title: 'E2E Hakkı Dolan Reddedilmiş Kart',
+        summary: 'Reddedildikten sonra hakkı dolan bir kart.',
+        included: 'Yerinde inceleme',
+        excluded: 'Malzeme bedeli',
+        price: '750',
+      });
+      await addArea(provider.page, location.city, location.district);
+      await provider.page.getByRole('button', { name: 'Kartı oluştur' }).click();
+      await assertNoErrorScreen(provider.page);
+      await provider.page.getByRole('button', { name: 'İncelemeye gönder' }).click();
+      await assertNoErrorScreen(provider.page);
+      await expect(provider.page.getByRole('heading', { name: 'Kartınız inceleniyor' })).toBeVisible();
+
+      const card = await prisma().showcaseCard.findFirstOrThrow({ where: { providerId: owner.id } });
+
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin('/showcase/reviews');
+      await admin.page.getByRole('link', { name: 'E2E Hakkı Dolan Reddedilmiş Kart' }).click();
+      await assertNoErrorScreen(admin.page);
+      await admin.page.getByLabel('Ret gerekçesi *').fill('Başlık çok genel, hizmeti adlandırın.');
+      await admin.page.getByRole('button', { name: 'Reddet' }).click();
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.getByText('Sürüm reddedildi', { exact: false })).toBeVisible();
+
+      // ── The right lapses in place while the provider sits on the refusal ───
+      // The clock is running again after the refusal (no pause), so the window
+      // is simply moved into the past; `expiresAt > grantedAt` stays true.
+      await prisma().showcaseEntitlement.update({
+        where: { id: entitlement.id },
+        data: {
+          reviewPausedAt: null,
+          grantedAt: new Date(Date.now() - 2 * DAY_MS),
+          expiresAt: new Date(Date.now() - DAY_MS),
+        },
+      });
+
+      await provider.gotoWeb(`/providers/${owner.id}/vitrin`);
+      await assertNoErrorScreen(provider.page);
+      const hubCard = provider.page.getByTestId('showcase-card').first();
+      await expect(hubCard).toHaveAttribute('data-state', 'REJECTED');
+      await expect(hubCard).toContainText('Reddedildi');
+      // No usable right anywhere: the only way on is the shop.
+      await expect(hubCard.getByTestId('showcase-stage-action')).toHaveText('Vitrin paketi al');
+
+      // ── A second right turns up; the card must use it, not sell another ────
+      const { entitlement: spare } = await seedEntitlement(owner.id, 'E2E Yedek Hak Paketi');
+      await provider.page.reload();
+      await assertNoErrorScreen(provider.page);
+      await expect(provider.page.getByTestId('showcase-entitlement-counter')).toContainText(
+        '1 kullanılabilir vitrin hakkınız var',
+      );
+      const bind = provider.page.getByTestId('showcase-card').first().getByTestId('showcase-stage-action');
+      await expect(bind).toHaveText('Vitrine çıkar');
+      await expect(bind).toHaveRole('button');
+      await bind.click();
+      await assertNoErrorScreen(provider.page);
+
+      // ── Bound, not published: the refused text still has to be fixed ───────
+      await expect(provider.page).toHaveURL(new RegExp(`/vitrin/${card.id}\\?published=1`));
+      await expect(provider.page.getByTestId('showcase-published-notice')).toHaveText(
+        'Vitrin hakkınız bu karta bağlandı.',
+      );
+      await expect(provider.page.getByRole('heading', { name: 'Kartınızda düzenleme gerekiyor' })).toBeVisible();
+      const fix = provider.page.getByTestId('showcase-stage-action');
+      await expect(fix).toHaveText('Düzenle ve yeniden gönder');
+      await expect(fix).toHaveAttribute('href', new RegExp(`/vitrin/${card.id}/duzenle$`));
+      // One door to the editor, not two.
+      await expect(provider.page.getByTestId('showcase-edit-link')).toHaveCount(0);
+
+      const lapsed = await prisma().showcaseEntitlement.findUniqueOrThrow({ where: { id: entitlement.id } });
+      expect(lapsed.status).toBe('EXPIRED');
+      expect(lapsed.cardId).toBe(card.id);
+      const bound = await prisma().showcaseEntitlement.findUniqueOrThrow({ where: { id: spare.id } });
+      expect(bound.status).toBe('RESERVED');
+      expect(bound.cardId).toBe(card.id);
+      expect(await prisma().showcasePlacement.count({ where: { cardId: card.id } })).toBe(0);
+    } finally {
+      await provider.close();
+      await admin.close();
+    }
+  });
+
   test('yayınlanmamış kartı silmek hakkı serbest bırakır', async ({ browser }) => {
     const location = uniqueLocation();
     const category = await createCategory(3, { namePrefix: 'E2E Vitrin Sil' });

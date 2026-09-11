@@ -25,6 +25,9 @@ type ShowcaseListPageProps = {
 /** The states under which a card counts as "on the air" for the hub's grouping. */
 const LIVE_STATES = new Set<ShowcaseCardPublication['state']>(['LIVE', 'ACTIVATING', 'PAUSED']);
 
+/** The states in which the card's text cannot be touched: with an operator, or retired. */
+const LOCKED_STATES = new Set<ShowcaseCardPublication['state']>(['IN_REVIEW', 'ARCHIVED', 'SUSPENDED']);
+
 /**
  * The provider's vitrin: a shop window, not a record list.
  *
@@ -168,6 +171,12 @@ function CardGrid({
         const entry = stateByCard.get(card.id);
         const stage = showcaseStage(entry, { providerId, cardId: card.id, hasAvailableRight });
         const cardHref = `/providers/${providerId}/vitrin/${card.id}`;
+        // No edit link on a card that cannot be edited, and none beside a
+        // primary action that already opens the editor.
+        const editHref = `${cardHref}/duzenle`;
+        const canEdit =
+          !LOCKED_STATES.has(entry?.state ?? 'DRAFT') &&
+          !(stage.action?.kind === 'link' && stage.action.href === editHref);
         return (
           <div key={card.id} data-testid="showcase-card" data-state={entry?.state ?? 'DRAFT'}>
             <ShowcaseCardFace
@@ -191,9 +200,11 @@ function CardGrid({
             <div className="vitrin-card-foot">
               {stage.detail ? <p className="muted">{stage.detail}</p> : null}
               <StageAction stage={stage} providerId={providerId} cardId={card.id} />
-              <Link className="pdash-btn pdash-btn-ghost pdash-btn-sm" href={`${cardHref}/duzenle`}>
-                Kartı düzenle
-              </Link>
+              {canEdit ? (
+                <Link className="pdash-btn pdash-btn-ghost pdash-btn-sm" href={editHref}>
+                  Kartı düzenle
+                </Link>
+              ) : null}
             </div>
           </div>
         );

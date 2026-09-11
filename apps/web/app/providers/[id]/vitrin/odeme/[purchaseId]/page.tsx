@@ -41,7 +41,7 @@ export default async function ShowcasePaymentReturnPage({ params, searchParams }
   }
 
   const cardQuery = card ? `card=${encodeURIComponent(card)}` : '';
-  const cardHref = card ? `/providers/${id}/vitrin/${card}` : null;
+  const cardHref = card ? `/providers/${id}/vitrin/${encodeURIComponent(card)}` : null;
   const createHref = `/providers/${id}/vitrin/yeni`;
   const packagesHref = `/providers/${id}/vitrin/paketler${cardQuery ? `?${cardQuery}` : ''}`;
   const continueHref =

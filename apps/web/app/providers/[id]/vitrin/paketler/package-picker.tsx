@@ -39,10 +39,12 @@ export function PackagePicker({
       {returnCard ? <input type="hidden" name="returnCard" value={returnCard} /> : null}
 
       <fieldset className="vitrin-form-group" style={{ border: 0, margin: 0, minWidth: 0 }}>
-        <legend className="vitrin-form-group-head">
+        {/* The group's name for assistive tech; the visible heading is plain flow content, because a <legend> cannot hold a <p>. */}
+        <legend className="visually-hidden">Paketinizi seçin</legend>
+        <div className="vitrin-form-group-head">
           <h2>Paketinizi seçin</h2>
           <p>Süre, kartınız onaylanıp yayına girdiği an başlar.</p>
-        </legend>
+        </div>
         <div className="vitrin-pkg-grid">
           {packages.map((pkg) => (
             <label className="vitrin-pkg" key={pkg.id} data-testid="showcase-package-option">

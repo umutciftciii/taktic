@@ -92,8 +92,13 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
   // there is a draft to send or a submission to take back.
   const pendingRevision = card.draftVersion?.reviewStatus === 'PENDING';
   const unsentRevision = everLive && card.draftVersion?.reviewStatus === 'DRAFT';
-  const canEdit = !retired && !pendingRevision;
   const cardHref = `/providers/${id}/vitrin/${cardId}`;
+  const editHref = `${cardHref}/duzenle`;
+  // No second door to the editor when the primary action already opens it.
+  const canEdit =
+    !retired &&
+    !pendingRevision &&
+    !(stage.action?.kind === 'link' && stage.action.href === editHref);
 
   return (
     <ProviderShell
@@ -269,7 +274,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             </form>
           ) : null}
           {canEdit ? (
-            <Link className="pdash-btn pdash-btn-ghost" href={`${cardHref}/duzenle`} data-testid="showcase-edit-link">
+            <Link className="pdash-btn pdash-btn-ghost" href={editHref} data-testid="showcase-edit-link">
               Kartı düzenle
             </Link>
           ) : null}
