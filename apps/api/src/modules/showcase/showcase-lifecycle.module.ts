@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { ShowcaseLeadLifecycleService } from './showcase-lead-lifecycle.service';
 import { ShowcasePlacementService } from './showcase-placement.service';
 
@@ -41,7 +42,7 @@ import { ShowcasePlacementService } from './showcase-placement.service';
  */
 @Module({
   imports: [PrismaModule],
-  providers: [ShowcasePlacementService, ShowcaseLeadLifecycleService],
-  exports: [ShowcasePlacementService, ShowcaseLeadLifecycleService],
+  providers: [ShowcasePlacementService, ShowcaseLeadLifecycleService, ShowcaseEntitlementService],
+  exports: [ShowcasePlacementService, ShowcaseLeadLifecycleService, ShowcaseEntitlementService],
 })
 export class ShowcaseLifecycleModule {}

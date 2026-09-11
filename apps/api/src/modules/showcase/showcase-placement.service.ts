@@ -205,6 +205,69 @@ export class ShowcasePlacementService {
     return { placementId: placement.id };
   }
 
+  /**
+   * Turns a reserved right into a live run, in the caller's transaction.
+   *
+   * The package-first twin of {@link createForPurchase}: snapshots come from
+   * the entitlement rather than from the purchase and the acceptance, and the
+   * run starts at the moment of approval rather than at the moment of payment
+   * — the provider paid for days on the air, and days spent writing the card
+   * and waiting for an operator are not on the air.
+   */
+  async createForEntitlement(
+    tx: Prisma.TransactionClient,
+    input: {
+      entitlement: EntitlementSnapshot;
+      providerId: string;
+      cardId: string;
+      categoryId: string;
+      kind: ShowcaseCardKind;
+      versionId: string;
+      startAt: Date;
+    },
+  ): Promise<{ placementId: string }> {
+    const endAt = showcasePlacementEndAt(input.startAt, input.entitlement.durationDaysSnapshot);
+
+    const placement = await tx.showcasePlacement.create({
+      data: {
+        purchaseId: input.entitlement.purchaseId,
+        providerId: input.providerId,
+        showcasePackageId: input.entitlement.showcasePackageId,
+        cardId: input.cardId,
+        pinnedVersionId: input.versionId,
+        categoryId: input.categoryId,
+        kindSnapshot: input.kind,
+        packageNameSnapshot: input.entitlement.packageNameSnapshot,
+        priceAmountSnapshot: input.entitlement.priceAmountSnapshot,
+        currencySnapshot: input.entitlement.currencySnapshot,
+        durationDaysSnapshot: input.entitlement.durationDaysSnapshot,
+        priceTermsVersionSnapshot: input.entitlement.priceTermsVersionSnapshot,
+        priceTermsTextSnapshot: input.entitlement.priceTermsTextSnapshot,
+        startAt: input.startAt,
+        endAt,
+        status: ShowcasePlacementStatus.PENDING_ACTIVATION,
+      },
+      select: { id: true },
+    });
+
+    await this.writeShelves(tx, {
+      placementId: placement.id,
+      providerId: input.providerId,
+      categoryId: input.categoryId,
+      versionId: input.versionId,
+      maxAreas: input.entitlement.maxAreasSnapshot,
+      endAt,
+      active: true,
+    });
+
+    await tx.showcasePlacement.update({
+      where: { id: placement.id },
+      data: { status: ShowcasePlacementStatus.ACTIVE },
+    });
+
+    return { placementId: placement.id };
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Off the air, and back
   // ──────────────────────────────────────────────────────────────────────────
@@ -697,3 +760,16 @@ export function packageAllowsCardKind(
 ): boolean {
   return allowedCardKind === null || allowedCardKind === cardKind;
 }
+
+/** What a placement needs from the right it is born from. */
+export type EntitlementSnapshot = {
+  purchaseId: string;
+  showcasePackageId: string;
+  packageNameSnapshot: string;
+  durationDaysSnapshot: number;
+  priceAmountSnapshot: number;
+  currencySnapshot: string;
+  maxAreasSnapshot: number | null;
+  priceTermsVersionSnapshot: string;
+  priceTermsTextSnapshot: string;
+};

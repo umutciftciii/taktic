@@ -9,8 +9,6 @@ import {
   PackagePurchaseStatus,
   Prisma,
   ProviderStatus,
-  ServiceCategoryKind,
-  ShowcaseCardKind,
   ShowcaseCardStatus,
   ShowcasePlacementStatus,
   UserRole,
@@ -20,11 +18,6 @@ import { areaCovers, describeArea } from '../../common/provider-service-area-sco
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
-import {
-  canReceiveRequests,
-  isActiveFor,
-  type CategoryTaxonomyFacts,
-} from '../categories/category-taxonomy';
 import { packagePurchaseOmit } from '../package-purchases/package-purchases.service';
 import {
   resolvePaymentProviderKind,
@@ -33,6 +26,7 @@ import {
 } from '../payments/payment-provider.config';
 import { CheckoutSessionError, PaymentProviderPort } from '../payments/payment-provider.port';
 import { CreateShowcaseCheckoutDto } from './dto/showcase-checkout.dto';
+import { assertCategoryStillOpen } from './showcase-publish-preflight';
 import { packageAllowsCardKind } from './showcase-placement.service';
 import { resolveShowcasePriceTerms } from './showcase.constants';
 import { findCurrentPriceTermsAcceptance } from './showcase-price-terms.service';
@@ -41,7 +35,6 @@ import {
   showcaseCardAlreadyPlaced,
   showcaseCardNotFound,
   showcaseCardNotPublishable,
-  showcaseCategoryNotOffered,
   showcasePackageKindMismatch,
   showcasePackageNotFound,
   showcasePriceTermsReacceptRequired,
@@ -487,38 +480,6 @@ export class ShowcaseCheckoutService {
       include: showcasePurchaseInclude,
       omit: packagePurchaseOmit,
     });
-  }
-}
-
-/**
- * The category rule, restated at purchase time.
- *
- * Identical in substance to `assertCategoryIsOffered`'s shape rules, and
- * deliberately not shared with it: that one also answers "does this business
- * offer this service", which is a question about bindings and is already
- * settled by the card existing. This one asks only whether the shelf is still
- * open, and merging the two would mean a change for one silently applying to
- * the other.
- */
-function assertCategoryStillOpen(
-  category: CategoryTaxonomyFacts,
-  cardKind: ShowcaseCardKind,
-) {
-  // A GROUP is only ever reachable from a PROMOTION card, and the question for
-  // a shelf is whether the shelf itself is open.
-  if (cardKind === ShowcaseCardKind.PROMOTION && category.kind === ServiceCategoryKind.GROUP) {
-    if (!isActiveFor(category.status)) {
-      throw showcaseCategoryNotOffered();
-    }
-    return;
-  }
-
-  // Everything else has to be a leaf that can still take a request. `isAdmin`
-  // is false even when a SUPER_ADMIN is looking: a placement is a claim made in
-  // public, judged by what a customer could reach, never by what an operator
-  // can preview.
-  if (!canReceiveRequests(category, false)) {
-    throw showcaseCategoryNotOffered();
   }
 }
 

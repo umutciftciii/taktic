@@ -619,3 +619,64 @@ export function showcaseCardAlreadyArchived() {
     message: 'Bu kart zaten arşivlenmiş.',
   });
 }
+
+export const SHOWCASE_ENTITLEMENT_REQUIRED_CODE = 'SHOWCASE_ENTITLEMENT_REQUIRED';
+export const SHOWCASE_ENTITLEMENT_UNAVAILABLE_CODE = 'SHOWCASE_ENTITLEMENT_UNAVAILABLE';
+export const SHOWCASE_ENTITLEMENT_MISSING_CODE = 'SHOWCASE_ENTITLEMENT_MISSING';
+export const SHOWCASE_ENTITLEMENT_KIND_MISMATCH_CODE = 'SHOWCASE_ENTITLEMENT_KIND_MISMATCH';
+export const SHOWCASE_REVISION_NEEDS_PUBLICATION_CODE = 'SHOWCASE_REVISION_NEEDS_PUBLICATION';
+
+/** The provider has no usable right: a card cannot be opened or submitted without one. */
+export function showcaseEntitlementRequired() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_ENTITLEMENT_REQUIRED_CODE,
+    message: 'Vitrin kartı oluşturmak için kullanılabilir bir vitrin hakkınız olmalı. Önce vitrin paketi alın.',
+  });
+}
+
+/** The named right was taken by another card (or expired) between the read and the write. */
+export function showcaseEntitlementUnavailable() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_ENTITLEMENT_UNAVAILABLE_CODE,
+    message: 'Bu vitrin hakkı artık kullanılabilir değil. Listeyi yenileyip tekrar deneyin.',
+  });
+}
+
+/** An operator tried to approve a first version whose card holds no valid reserved right. */
+export function showcaseEntitlementMissing() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_ENTITLEMENT_MISSING_CODE,
+    message:
+      'Bu kartın geçerli bir yayın hakkı yok. Sağlayıcı vitrin paketi almadan kart onaylanıp yayına alınamaz.',
+  });
+}
+
+/** The chosen right was sold for a different card kind. */
+export function showcaseEntitlementKindMismatch() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_ENTITLEMENT_KIND_MISMATCH_CODE,
+    message: 'Seçtiğiniz vitrin hakkı bu kart türü için kullanılamaz.',
+  });
+}
+
+/**
+ * A card with a live version but no run behind it (a legacy approval) tried to
+ * submit a revision. There is no terms snapshot to carry, so the card must be
+ * published with a right first.
+ */
+export function showcaseRevisionNeedsPublication() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_REVISION_NEEDS_PUBLICATION_CODE,
+    message: 'Bu kartı düzenlemeden önce bir vitrin hakkıyla yayına almanız gerekir.',
+  });
+}
