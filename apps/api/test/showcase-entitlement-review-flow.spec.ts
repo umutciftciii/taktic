@@ -185,7 +185,7 @@ describe('one right, one card', () => {
     expect(card.liveVersionId).toBe(secondVersionId);
   });
 
-  it('an approval with an expired right changes nothing; a paused right is never expired', async () => {
+  it('refuses to submit on a right that lapsed in the drawer; a paused right is never expired', async () => {
     const { profile, cookie, adminCookie, category, rightId } = await scenario();
     const created = await createCard(profile.id, cookie, category.id);
     const cardId = created.body.id as string;
@@ -260,6 +260,36 @@ describe('one right, one card', () => {
     expect(version.reviewStatus).toBe('PENDING');
     expect(await ctx.prisma.showcaseCardReview.count()).toBe(0);
     expect(await ctx.prisma.showcasePlacement.count()).toBe(0);
+  });
+
+  it('a right that lapsed in place makes way for a newly bought one', async () => {
+    const { profile, cookie, category, user, pkg, rightId } = await scenario();
+    const created = await createCard(profile.id, cookie, category.id);
+    const cardId = created.body.id as string;
+    // The provider sat on the draft past the window; the sweeper has not run.
+    await ctx.prisma.showcaseEntitlement.update({
+      where: { id: rightId },
+      data: { grantedAt: new Date(Date.now() - 2 * DAY), expiresAt: new Date(Date.now() - DAY) },
+    });
+    const { entitlement: fresh } = await createShowcaseEntitlement(ctx, {
+      providerId: profile.id,
+      userId: user.id,
+      packageId: pkg.id,
+    });
+
+    const attached = await useEntitlement(profile.id, cardId, cookie);
+    expect(attached.status).toBe(201);
+
+    const old = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({ where: { id: rightId } });
+    expect(old.status).toBe('EXPIRED');
+    expect(old.cardId).toBeNull();
+    const bound = await ctx.prisma.showcaseEntitlement.findUniqueOrThrow({ where: { id: fresh.id } });
+    expect(bound.status).toBe('RESERVED');
+    expect(bound.cardId).toBe(cardId);
+
+    const submitted = await submit(profile.id, cardId, cookie);
+    expect(submitted.status).toBe(200);
+    expect(submitted.body.draftVersion.reviewStatus).toBe('PENDING');
   });
 
   it('deleting the card before approval releases the right, even from inside review', async () => {

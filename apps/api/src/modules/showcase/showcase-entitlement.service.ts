@@ -198,6 +198,42 @@ export class ShowcaseEntitlementService {
     return moved.count === 1;
   }
 
+  /**
+   * A right still marked RESERVED on this card whose window closed while the
+   * card sat unsubmitted — the sweeper has not reached it yet — is moved to
+   * EXPIRED so a fresh right can take the card's single reservation slot.
+   * A paused right is never lapsed: review time is the operator's.
+   */
+  async expireLapsedReservationForCard(
+    tx: Prisma.TransactionClient,
+    cardId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const lapsed = await tx.showcaseEntitlement.findFirst({
+      where: {
+        cardId,
+        status: ShowcaseEntitlementStatus.RESERVED,
+        reviewPausedAt: null,
+        expiresAt: { lte: now },
+      },
+      select: { id: true },
+    });
+    if (!lapsed) {
+      return false;
+    }
+
+    const moved = await tx.showcaseEntitlement.updateMany({
+      where: {
+        id: lapsed.id,
+        status: ShowcaseEntitlementStatus.RESERVED,
+        reviewPausedAt: null,
+        expiresAt: { lte: now },
+      },
+      data: { status: ShowcaseEntitlementStatus.EXPIRED, cardId: null, reservedAt: null },
+    });
+    return moved.count === 1;
+  }
+
   /** The card entered review: stop the clock and write the audit row. */
   async pauseForReview(
     tx: Prisma.TransactionClient,

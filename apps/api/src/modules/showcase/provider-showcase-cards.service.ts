@@ -745,6 +745,13 @@ export class ProviderShowcaseCardsService {
           throw showcaseEntitlementUnavailable();
         }
 
+        // A right that lapsed *in place* — still RESERVED on this card, its
+        // window closed while the card sat unsubmitted — is invisible to the
+        // validity read above but still holds the card's one reservation
+        // slot. It is retired here so the right the provider just bought can
+        // take its place rather than collide with it.
+        await this.entitlements.expireLapsedReservationForCard(tx, card.id, now);
+
         const publishNow =
           card.status === ShowcaseCardStatus.APPROVED && card.liveVersionId !== null;
         if (publishNow) {
@@ -842,10 +849,12 @@ export class ProviderShowcaseCardsService {
       select: { priceTermsVersionSnapshot: true, consumedAt: true },
     });
     if (consumed) {
-      return {
-        version: consumed.priceTermsVersionSnapshot,
-        acceptedAt: consumed.consumedAt ?? new Date(),
-      };
+      if (!consumed.consumedAt) {
+        // The status CHECK makes this unrepresentable; a row that reaches
+        // here is a data fault, and a fabricated timestamp would hide it.
+        throw new Error(`CONSUMED vitrin hakkı consumedAt taşımıyor (cardId=${cardId})`);
+      }
+      return { version: consumed.priceTermsVersionSnapshot, acceptedAt: consumed.consumedAt };
     }
     const placement = await tx.showcasePlacement.findFirst({
       where: { cardId },
