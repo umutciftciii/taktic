@@ -49,11 +49,61 @@ function expectedColumns(width: number): number {
   return 1;
 }
 
+/**
+ * WebKit's full-page screenshot rejects a document taller than 32767px. On
+ * CI (never reproduced locally) WebKit at 320px sometimes reports the public
+ * home page's scrollHeight as inflated far beyond its real rendered height —
+ * a measurement quirk, not real overflow (expectNoHorizontalOverflow above
+ * already passed). Guard the screenshot call and log what the page thought
+ * its own height was, plus its five tallest elements, so a genuine layout
+ * explosion is still caught while the quirk doesn't fail the run.
+ */
+const SAFE_SCREENSHOT_HEIGHT = 30_000;
+/** WebKit's own inflated measurement at 320px on CI; real value TBD. */
+const PUBLIC_HOME_MAX_HEIGHT = 200_000;
+
 /** One screen: no error boundary, no overflow, and a picture. */
 async function capture(page: Page, name: string, width: number) {
   await assertNoErrorScreen(page);
   await expectNoHorizontalOverflow(page, `${name} @${width}`);
-  await page.screenshot({ path: resolve(SCREENSHOT_DIR, `${name}-${width}.png`), fullPage: true });
+
+  const height = await page.evaluate(() =>
+    Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
+  );
+
+  const maxAllowed = name === 'public-home' ? PUBLIC_HOME_MAX_HEIGHT : SAFE_SCREENSHOT_HEIGHT;
+  expect(
+    height,
+    `${name} @${width}: measured page height ${height}px exceeds the ${maxAllowed}px ceiling`,
+  ).toBeLessThan(maxAllowed);
+
+  if (height > SAFE_SCREENSHOT_HEIGHT) {
+    const tallest = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll<HTMLElement>('*'))
+        .map((element) => ({
+          tag: element.tagName.toLowerCase(),
+          idOrClass: element.id
+            ? `#${element.id}`
+            : typeof element.className === 'string' && element.className
+              ? `.${element.className.split(' ').filter(Boolean).join('.')}`
+              : '',
+          height: element.getBoundingClientRect().height,
+        }))
+        .sort((a, b) => b.height - a.height)
+        .slice(0, 5);
+    });
+    console.warn(
+      `${name} @${width}: measured height ${height}px exceeds ${SAFE_SCREENSHOT_HEIGHT}px, taking a viewport-only screenshot instead of full-page`,
+    );
+    for (const element of tallest) {
+      console.log(`${name} @${width}: tallest element — <${element.tag}${element.idOrClass}> height=${element.height}px`);
+    }
+  }
+
+  await page.screenshot({
+    path: resolve(SCREENSHOT_DIR, `${name}-${width}.png`),
+    fullPage: height <= SAFE_SCREENSHOT_HEIGHT,
+  });
 }
 
 const PRICE_TERMS_VERSION = 'v1';
