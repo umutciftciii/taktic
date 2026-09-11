@@ -205,18 +205,23 @@ taşır (purchase → hak → placement zinciri her halkada unique).
 - **Aktif yayındaki kartı arşivle**: bugünkü davranış (placement CARD_ARCHIVED
   suspend, süre işler); hak zaten CONSUMED, dokunulmaz.
 - **`POST /cards/:id/use-entitlement`** `{ entitlementId? }`: rezerve hakkı olmayan
-  karta hak bağlar. Kart APPROVED + canlı sürümlü + kategori açık + bölgeler kapsamda
-  ise **aynı tx'te** hak tüketilir ve placement doğar (legacy onaylı kart, süresi
-  dolmuş kart "Yeniden yayınla", serbest bırakılıp geri getirilen kart). Değilse
-  yalnız rezerve eder.
+  karta hak bağlar. Kart APPROVED + canlı sürümlü ise **aynı tx'te** hak tüketilir ve
+  placement doğar (legacy onaylı kart, süresi dolmuş kart "Yeniden yayınla", serbest
+  bırakılıp geri getirilen kart); kategori/kapsam/sağlayıcı kontrolü geçmezse
+  **reddeder** (onaylı karta rezerve etmek tüketilemez bir hak bırakırdı). Onaylı
+  olmayan kartta yalnız rezerve eder. Kart durumu ve kilit kontrolü (ARCHIVED/SUSPENDED
+  → `409 SHOWCASE_CARD_LOCKED`) tx içinde yeniden okunur; aynı karta yarışan iki
+  bağlama isteğinden kaybedeni `409 SHOWCASE_ENTITLEMENT_UNAVAILABLE` alır (tek
+  rezerve hak indeksi).
 
 ### 3.5 Admin onayı (`approveVersion`)
 Serializable tx içinde, kartın **canlı sürümü yoksa** (ilk onay):
 1. RESERVED + `expiresAt > now` hak → yoksa `409 SHOWCASE_ENTITLEMENT_MISSING`
    ("Bu kartın geçerli bir yayın hakkı yok; sağlayıcı paket almadan kart yayına
    alınamaz."), hiçbir yazım olmaz.
-2. Kategori hâlâ açık, sürümün bölgeleri sağlayıcının hizmet bölgeleri içinde →
-   değilse `409 SHOWCASE_CARD_NOT_PUBLISHABLE` ile anlaşılır mesaj.
+2. Sağlayıcı hâlâ APPROVED → değilse `409 SHOWCASE_PROVIDER_NOT_APPROVED`; kategori
+   hâlâ açık, sürümün bölgeleri sağlayıcının hizmet bölgeleri içinde → değilse
+   `409 SHOWCASE_CARD_NOT_PUBLISHABLE` ile anlaşılır mesaj. Hiçbir yazım olmaz.
 3. Sürüm APPROVED, kart APPROVED/liveVersionId, review satırı, **placement**
    (`createForEntitlement`: startAt = now, endAt = now + durationDaysSnapshot,
    snapshot'lar haktan), hak CONSUMED (`updateMany WHERE status='RESERVED' AND
@@ -252,7 +257,8 @@ hak durumu bayrakla taşınır:
 | kart | durum | ek açıklama | CTA |
 |---|---|---|---|
 | REJECTED, geçerli rezerve hak var | `Reddedildi` | inceleme notu | `Düzenle ve yeniden gönder` |
-| REJECTED, hak yok/süresi dolmuş (`needsPackage: true`) | `Reddedildi` | "Yayın hakkınızın süresi dolduğu için yeniden göndermek üzere paket almanız gerekiyor." | `Vitrin paketi al` |
+| REJECTED, hak yok/süresi dolmuş (`needsPackage: true`), kullanılabilir hak yok | `Reddedildi` | "Yayın hakkınızın süresi dolduğu için yeniden göndermek üzere paket almanız gerekiyor." | `Vitrin paketi al` |
+| REJECTED, hak yok ama kullanılabilir hak var | `Reddedildi` | "Kullanılabilir vitrin hakkınızı bu karta bağlayıp düzenleyerek yeniden gönderebilirsiniz." | `Vitrine çıkar` (hak bağlanır, kart "geçerli rezerve hak var" satırına düşer) |
 | DRAFT, hak yok | `Pakete hazır` (`NEEDS_PACKAGE`) | — | `Vitrin paketi al` / hak varsa `Vitrine çıkar` |
 
 `TERMS_REQUIRED`, `READY_TO_PUBLISH`, `AWAITING_PAYMENT` kalkar. Cevap:
