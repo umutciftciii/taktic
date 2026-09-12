@@ -1,29 +1,25 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH } from '@taktic/shared';
+import { useMemo, useRef, useState, type RefObject } from 'react';
 import type { ContactDisclosureConfig, Question, RouterSelection } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
+import {
+  ContactSection,
+  EMPTY_ALTERNATE_CONTACT,
+  accountContactIsComplete,
+  type AccountContact,
+} from '../../request-fields/contact-section';
+import { DescriptionField } from '../../request-fields/description-field';
+import { ContactDisclosureField } from '../../request-fields/disclosure-field';
+import { LocationFields } from '../../request-fields/location-fields';
+import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
+import { UrgencySelect } from '../../request-fields/timing-fields';
 import { BudgetFields } from './budget-fields';
-import { LocationFields } from './location-fields';
 import { ShowcaseMatches } from './showcase-matches';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
-/**
- * The signed-in customer's own contact details, as the API reports them.
- *
- * Every field is nullable because every column is: an account may exist with no
- * telephone number or no name. The form reads them to *show* what will be
- * shared and to say when something is missing — it never posts them. On the
- * default path the API derives all three from the account itself, so what is
- * rendered here is a mirror, not an input.
- */
-export type AccountContact = {
-  name: string | null;
-  phone: string | null;
-  email: string | null;
-};
+export type { AccountContact };
 
 type RequestFormProps = {
   /**
@@ -63,24 +59,11 @@ type RequestFormProps = {
   action: (formData: FormData) => void | Promise<void>;
 };
 
-/** An empty alternate contact — also what unticking the checkbox restores. */
-const EMPTY_ALTERNATE_CONTACT = { name: '', phone: '', email: '' };
-
 const STEPS = [
   { key: 'detail', label: 'İş detayı' },
   { key: 'place', label: 'Konum & zaman' },
   { key: 'contact', label: 'İletişim' },
 ] as const;
-
-/**
- * Where the description counter starts warning, in characters.
- *
- * Purely presentational — the rule itself is
- * SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH, which the API enforces. This only
- * decides when the customer is told they are running out of room, early enough
- * to be useful while there is still a paragraph left to write.
- */
-const DESCRIPTION_NEAR_LIMIT_AT = 4500;
 
 /**
  * The public request form, in the three steps the design defines.
@@ -150,57 +133,20 @@ export function RequestForm({
   const [place, setPlace] = useState({ city: '', district: '', neighborhood: '' });
 
   /*
-   * The description's length, mirrored into state purely so the counter can
-   * render it. The textarea itself stays uncontrolled — the server action reads
-   * the posted field, exactly as before — so this never becomes the value's
-   * source of truth. React's onChange is the `input` event, which is what makes
-   * typing, deleting and pasting all land here.
-   */
-  const [descriptionLength, setDescriptionLength] = useState(0);
-
-  /*
-   * Browsers restore a textarea's text when the customer comes back to this
-   * page — with the Back button, or from bfcache — but they do not re-run the
-   * change handler that fed the count. Reading the field once on mount is what
-   * stops the counter from claiming 0 under a description that is plainly
-   * there. It only ever reads; the field stays uncontrolled.
-   */
-  useEffect(() => {
-    const field = detailRef.current
-      ?.closest('form')
-      ?.elements.namedItem('description');
-    if (field instanceof HTMLTextAreaElement) {
-      setDescriptionLength(field.value.length);
-    }
-  }, []);
-
-  /*
    * Whether the customer asked to name somebody else, and what they typed.
-   *
-   * Controlled on purpose. The values have to be *erased* when the box is
-   * unticked — not merely hidden — and an uncontrolled input that React
-   * unmounts would leave the browser free to restore its text on the next tick
-   * of the box. Holding them here makes "cleared" a fact this component owns,
-   * and the fields are gone from the DOM as well, so nothing is posted.
+   * Controlled state, owned here and rendered by the shared ContactSection —
+   * see its notes on why the values are erased rather than hidden.
    */
   const [useAlternateContact, setUseAlternateContact] = useState(false);
   const [alternateContact, setAlternateContact] = useState(EMPTY_ALTERNATE_CONTACT);
 
-  /** True when the account carries all three details the API needs. */
-  const accountContactComplete = Boolean(
-    accountContact?.name?.trim() && accountContact?.phone?.trim() && accountContact?.email?.trim(),
-  );
+  const accountContactComplete = accountContactIsComplete(accountContact);
   /**
    * A signed-in customer whose account is missing one of the three. The default
    * path cannot work for them — the API refuses it — so the form says so and
    * withholds submit until they name a contact person instead.
    */
   const accountContactIncomplete = Boolean(accountContact) && !accountContactComplete;
-  const missingAccountContactLabels = [
-    accountContact?.name?.trim() ? null : 'ad soyad',
-    accountContact?.phone?.trim() ? null : 'telefon',
-    accountContact?.email?.trim() ? null : 'e-posta',
-  ].filter((label): label is string => label !== null);
   const submitBlocked = accountContactIncomplete && !useAlternateContact;
 
   const shown = useMemo(() => visibleQuestions(questions, answers), [questions, answers]);
@@ -250,19 +196,6 @@ export function RequestForm({
 
   const estimate = checklist.filter((item) => item.done).length * 25;
 
-  /*
-   * What the counter says beyond the bare numbers. Both states are spelled out
-   * in words rather than signalled by colour alone, so the warning survives
-   * greyscale, low vision and a screen reader.
-   */
-  const descriptionAtLimit = descriptionLength >= SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH;
-  const descriptionNearLimit = !descriptionAtLimit && descriptionLength > DESCRIPTION_NEAR_LIMIT_AT;
-  const descriptionStatus = descriptionAtLimit
-    ? 'Karakter sınırına ulaştınız'
-    : descriptionNearLimit
-      ? 'Sınıra yaklaşıyorsunuz'
-      : null;
-
   function refreshSignals() {
     const form = detailRef.current?.closest('form');
     if (!form) return;
@@ -277,29 +210,7 @@ export function RequestForm({
       return '';
     };
 
-    const nextAnswers: Record<string, string | string[]> = {};
-    for (const question of questions) {
-      if (question.systemField) {
-        continue;
-      }
-
-      const element = form.elements.namedItem(`answer_${question.key}`);
-
-      if (element instanceof HTMLSelectElement && element.multiple) {
-        nextAnswers[question.key] = Array.from(element.selectedOptions).map(
-          (option) => option.value,
-        );
-      } else if (element instanceof HTMLInputElement && element.type === 'checkbox') {
-        nextAnswers[question.key] = element.checked ? 'true' : 'false';
-      } else if (
-        element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement ||
-        element instanceof HTMLSelectElement
-      ) {
-        nextAnswers[question.key] = element.value;
-      }
-    }
-    setAnswers(nextAnswers);
+    setAnswers(readAnswers(form, questions));
 
     setSignals({
       detail: value('description').length >= 40,
@@ -367,13 +278,7 @@ export function RequestForm({
         Only the questions that are on screen. A hidden one carries no answer,
         and the API refuses one that arrives anyway.
       */}
-      <input
-        type="hidden"
-        name="questionMeta"
-        value={JSON.stringify(
-          answerableQuestions.map((question) => ({ key: question.key, type: question.type })),
-        )}
-      />
+      <input type="hidden" name="questionMeta" value={encodeQuestionMeta(answerableQuestions)} />
 
       <div className="req-body">
         <div className="req-main">
@@ -415,53 +320,7 @@ export function RequestForm({
 
             <section className="form-section">
               <h2>İş açıklaması</h2>
-              <label className="form-row">
-                <span>
-                  {descriptionQuestion?.label ?? 'Açıklama'}
-                  {descriptionQuestion?.isRequired ? ' *' : ''}
-                </span>
-                <textarea
-                  name="description"
-                  required={descriptionQuestion?.isRequired ?? false}
-                  data-testid="request-description"
-                  maxLength={SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
-                  aria-describedby="request-description-help request-description-counter"
-                  onChange={(event) => setDescriptionLength(event.target.value.length)}
-                  placeholder="Yapılacak işi kısaca anlatın: ne, nerede, hangi durumda."
-                />
-              </label>
-              {/*
-                * The help text and the counter share one row — guidance on the
-                * left, the count on the right — because they answer the same
-                * question about the field and reading them as two stacked lines
-                * made the count look like a stray label.
-                *
-                * Both sit outside the label on purpose. A count that changes on
-                * every keystroke inside it would keep rewriting the field's
-                * accessible name; as descriptions they are announced when the
-                * field is reached, and the status line — which only changes at
-                * the two thresholds, so it is not chatty — announces itself.
-                */}
-              <div className="description-meta">
-                <span className="help-text" id="request-description-help">
-                  {descriptionQuestion?.helpText ??
-                    'Detay yazdıkça talebin kalite skoru yükselir ve daha isabetli teklif alırsınız.'}
-                </span>
-                <p
-                  className="description-counter"
-                  id="request-description-counter"
-                  data-testid="request-description-counter"
-                  data-state={descriptionAtLimit ? 'limit' : descriptionNearLimit ? 'near' : 'ok'}
-                >
-                  <span className="description-counter-count">
-                    {descriptionLength} / {SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
-                    <span className="visually-hidden"> karakter kullanıldı</span>
-                  </span>
-                  <span className="description-counter-status" role="status">
-                    {descriptionStatus}
-                  </span>
-                </p>
-              </div>
+              <DescriptionField question={descriptionQuestion} />
             </section>
           </div>
 
@@ -510,15 +369,7 @@ export function RequestForm({
             <section className="form-section">
               <h2>Zaman ve bütçe</h2>
               <div className="form-grid">
-                <label className="form-row">
-                  <span>Aciliyet</span>
-                  <select name="urgency" defaultValue="">
-                    <option value="">Seçiniz</option>
-                    <option value="TODAY">Bugün</option>
-                    <option value="THIS_WEEK">Bu hafta</option>
-                    <option value="FLEXIBLE">Esnek</option>
-                  </select>
-                </label>
+                <UrgencySelect />
                 <label className="form-row">
                   <span>
                     {preferredDateQuestion?.label ?? 'Tercih edilen tarih'}
@@ -553,150 +404,13 @@ export function RequestForm({
             <section className="form-section">
               <h2>İletişim</h2>
 
-              {accountContact ? (
-                <>
-                  {/*
-                    What the account already knows, shown rather than asked for.
-                    Read-only in the strongest sense available: this is text, not
-                    a disabled control, so there is no field for anyone to edit
-                    and nothing named `customerName` is posted. The API derives
-                    all three from the session on its side.
-                  */}
-                  {accountContactComplete ? (
-                    <div className="verify-well" data-testid="account-contact-summary">
-                      <span className="cdash-summary-label">Hesap iletişim bilgileriniz</span>
-                      <dl className="account-contact-list">
-                        <div className="account-contact-row">
-                          <dt>Ad soyad</dt>
-                          <dd data-testid="account-contact-name">{accountContact.name}</dd>
-                        </div>
-                        <div className="account-contact-row">
-                          <dt>Telefon</dt>
-                          <dd data-testid="account-contact-phone">{accountContact.phone}</dd>
-                        </div>
-                        <div className="account-contact-row">
-                          <dt>E-posta</dt>
-                          <dd data-testid="account-contact-email">{accountContact.email}</dd>
-                        </div>
-                      </dl>
-                      <p className="help-text" style={{ margin: 0 }}>
-                        Teklifler bu iletişim bilgileriyle paylaşılacak.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="notice" data-testid="account-contact-incomplete">
-                      <span>
-                        Hesabınızda {missingAccountContactLabels.join(', ')} bilgisi eksik olduğu
-                        için talebiniz hesap bilgilerinizle oluşturulamıyor. Aşağıdan farklı bir
-                        iletişim kişisi tanımlayabilirsiniz.
-                      </span>
-                    </div>
-                  )}
-
-                  <label className="checkbox-row" htmlFor="use-alternate-contact">
-                    <input
-                      id="use-alternate-contact"
-                      name="useAlternateContact"
-                      type="checkbox"
-                      value="true"
-                      checked={useAlternateContact}
-                      data-testid="use-alternate-contact"
-                      onChange={(event) => {
-                        setUseAlternateContact(event.target.checked);
-                        // Unticking erases what was typed. The next tick starts
-                        // from empty fields, and nothing lingers to be posted.
-                        if (!event.target.checked) {
-                          setAlternateContact(EMPTY_ALTERNATE_CONTACT);
-                        }
-                      }}
-                    />
-                    <span>Farklı bir iletişim kişisi kullanacağım</span>
-                  </label>
-
-                  {useAlternateContact ? (
-                    <div className="alternate-contact-fields" data-testid="alternate-contact-fields">
-                      <p className="help-text">
-                        Bu bilgiler yalnızca bu talep için kullanılır; hesabınız değişmez.
-                      </p>
-                      <div className="form-grid">
-                        <label className="form-row">
-                          <span>Ad soyad *</span>
-                          <input
-                            name="customerName"
-                            required
-                            value={alternateContact.name}
-                            onChange={(event) =>
-                              setAlternateContact((current) => ({
-                                ...current,
-                                name: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="form-row">
-                          <span>Telefon *</span>
-                          <input
-                            name="customerPhone"
-                            required
-                            placeholder="05XX XXX XX XX"
-                            value={alternateContact.phone}
-                            onChange={(event) =>
-                              setAlternateContact((current) => ({
-                                ...current,
-                                phone: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                      </div>
-                      <label className="form-row">
-                        <span>E-posta *</span>
-                        <input
-                          name="customerEmail"
-                          type="email"
-                          required
-                          placeholder="ornek@eposta.com"
-                          value={alternateContact.email}
-                          onChange={(event) =>
-                            setAlternateContact((current) => ({
-                              ...current,
-                              email: event.target.value,
-                            }))
-                          }
-                        />
-                        <span className="help-text">
-                          Teklifler bu kişiyle paylaşılacak. Talep yine hesabınıza bağlı kalır.
-                        </span>
-                      </label>
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <div className="form-grid">
-                    <label className="form-row">
-                      <span>Ad soyad *</span>
-                      <input name="customerName" required />
-                    </label>
-                    <label className="form-row">
-                      <span>Telefon *</span>
-                      <input name="customerPhone" required placeholder="05XX XXX XX XX" />
-                    </label>
-                  </div>
-                  <label className="form-row">
-                    <span>E-posta *</span>
-                    <input
-                      name="customerEmail"
-                      type="email"
-                      required
-                      placeholder="ornek@eposta.com"
-                    />
-                    <span className="help-text">
-                      Tekliflerinizi takip edebilmeniz için e-posta adresiniz gereklidir.
-                    </span>
-                  </label>
-                </>
-              )}
+              <ContactSection
+                accountContact={accountContact}
+                useAlternateContact={useAlternateContact}
+                onUseAlternateContactChange={setUseAlternateContact}
+                alternateContact={alternateContact}
+                onAlternateContactChange={setAlternateContact}
+              />
 
               {/*
                 Telefon doğrulaması talep oluşturulduktan sonra, talebin kendi
@@ -715,38 +429,7 @@ export function RequestForm({
             {showDisclosure ? (
               <section className="form-section">
                 <h2>Bilgilendirme</h2>
-                {/*
-                  The checkbox states one thing only: that the linked text was read.
-                  It does not paraphrase, summarise or stand in for that text — the
-                  disclosure itself lives at CONTACT_DISCLOSURE_URL, and the feature
-                  cannot be switched on until it does.
-                */}
-                <input
-                  type="hidden"
-                  name="contactDisclosureVersion"
-                  value={disclosure.disclosureVersion ?? ''}
-                />
-                <label className="checkbox-row" htmlFor="contact-disclosure">
-                  <input
-                    id="contact-disclosure"
-                    name="contactDisclosureAccepted"
-                    type="checkbox"
-                    value="true"
-                    required
-                    data-testid="contact-disclosure-accept"
-                  />
-                  <span>
-                    <a
-                      href={disclosure.disclosureUrl ?? '#'}
-                      target="_blank"
-                      rel="noreferrer"
-                      data-testid="contact-disclosure-link"
-                    >
-                      İletişim bilgilerinin paylaşılmasına ilişkin bilgilendirme metnini
-                    </a>{' '}
-                    okudum.
-                  </span>
-                </label>
+                <ContactDisclosureField disclosure={disclosure} />
               </section>
             ) : null}
           </div>
@@ -862,62 +545,4 @@ export function RequestForm({
       </div>
     </form>
   );
-}
-
-function RequestField({ question }: { question: Question }) {
-  return (
-    <label className="form-row">
-      <span>
-        {question.label}
-        {question.isRequired ? ' *' : ''}
-      </span>
-      {renderInput(question)}
-      {question.helpText ? <span className="help-text">{question.helpText}</span> : null}
-    </label>
-  );
-}
-
-function renderInput(question: Question) {
-  const name = `answer_${question.key}`;
-
-  switch (question.type) {
-    case 'TEXT':
-      return <input name={name} required={question.isRequired} />;
-    case 'TEXTAREA':
-      return <textarea name={name} required={question.isRequired} />;
-    case 'SELECT':
-      return (
-        <select name={name} required={question.isRequired} defaultValue="">
-          <option value="">Seçiniz</option>
-          {(question.options ?? []).map((option) => (
-            <option key={option.key} value={option.key}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      );
-    case 'MULTI_SELECT':
-      return (
-        <select name={name} multiple required={question.isRequired}>
-          {(question.options ?? []).map((option) => (
-            <option key={option.key} value={option.key}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      );
-    case 'NUMBER':
-      return <input name={name} type="number" required={question.isRequired} />;
-    case 'BOOLEAN':
-      return (
-        <span className="checkbox-row">
-          <input name={name} type="checkbox" value="true" />
-          <span>Evet</span>
-        </span>
-      );
-    case 'DATE':
-      return <input name={name} type="date" required={question.isRequired} />;
-    case 'IMAGE':
-      return <input name={name} placeholder="Dosya yükleme sonraki fazda" required={question.isRequired} />;
-  }
 }

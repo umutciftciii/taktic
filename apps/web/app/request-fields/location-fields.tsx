@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ProvinceWithDistricts } from '../../../lib/locations';
+import type { ProvinceWithDistricts } from '../../lib/locations';
 
 type LocationFieldsProps = {
   /** Every province with its districts, rendered with the form. */
@@ -28,6 +28,16 @@ type LocationFieldsProps = {
   neighborhoodRequired?: boolean;
   /** Category-specific wording for the neighbourhood field, when there is any. */
   neighborhoodHelpText?: string | null;
+  /**
+   * Where the selects start.
+   *
+   * The vitrin card's form is reached from the marketplace form with the place
+   * the customer already chose there, and asking it a third time would be
+   * rude. A prefill is a convenience and nothing more: a value the lists do
+   * not contain simply leaves the select on its placeholder, and the API
+   * re-checks whatever is posted.
+   */
+  initialValue?: { city?: string; district?: string; neighborhood?: string };
 };
 
 type NeighborhoodState =
@@ -59,10 +69,11 @@ export function LocationFields({
   onChange,
   neighborhoodRequired = false,
   neighborhoodHelpText,
+  initialValue,
 }: LocationFieldsProps) {
-  const [city, setCity] = useState('');
-  const [district, setDistrict] = useState('');
-  const [neighborhood, setNeighborhood] = useState('');
+  const [city, setCity] = useState(initialValue?.city ?? '');
+  const [district, setDistrict] = useState(initialValue?.district ?? '');
+  const [neighborhood, setNeighborhood] = useState(initialValue?.neighborhood ?? '');
   const [neighborhoods, setNeighborhoods] = useState<NeighborhoodState>({ status: 'idle' });
 
   // Held in a ref so the notify effect depends on the values only, and a caller
