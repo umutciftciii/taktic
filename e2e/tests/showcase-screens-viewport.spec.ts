@@ -515,6 +515,19 @@ test.describe('vitrin ekranları: genişlikler ve ekran görüntüleri', () => {
         await expect(visitor.page.getByTestId('showcase-card-decision')).toBeVisible();
         await capture(visitor.page, 'public-card', width);
 
+        // ── The card's lead form, with the marketplace form's own parts on it ─
+        await visitor.gotoWeb(`/vitrin/${live.card.id}?step=form`);
+        const leadForm = visitor.page.getByTestId('showcase-lead-form');
+        await expect(leadForm).toBeVisible();
+        await visitor.page.getByTestId('request-city').selectOption(location.city);
+        await visitor.page.getByTestId('request-district').selectOption(location.district);
+        await visitor.page
+          .getByLabel('Açıklama *')
+          .fill('Dar ekranda satır kırılmasını zorlamak için bilinçli olarak uzun tutulmuş bir açıklama.');
+        await visitor.page.getByLabel('Ad soyad *').fill('E2E Dar Ekran Müşterisi');
+        await visitor.page.getByLabel('Telefon *').fill('05559991234');
+        await capture(visitor.page, 'public-card-form', width);
+
         // ── The operator's review screen, with the right shown ─────────────
         await provider.gotoWeb(`/providers/${owner.id}/vitrin/${draft.card.id}`);
         await provider.page.getByRole('button', { name: 'İncelemeye gönder' }).click();
