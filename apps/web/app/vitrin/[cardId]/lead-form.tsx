@@ -5,6 +5,7 @@ import { useMemo, useRef, useState, useTransition, type FormEvent } from 'react'
 import type { ContactDisclosureConfig, Question, ShowcaseFeedCard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { boundQuestion, visibleQuestions } from '../../../lib/request-flow';
+import { showcaseLeadRefusalText } from '../../../lib/showcase-lead-errors';
 import {
   ContactSection,
   EMPTY_ALTERNATE_CONTACT,
@@ -36,26 +37,10 @@ import {
  */
 const AREA_NOT_SERVED = 'SHOWCASE_LEAD_AREA_NOT_SERVED';
 const PHONE_PROOF_REQUIRED = 'SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED';
-const GENERIC = 'SHOWCASE_LEAD_FAILED';
 
-const LEAD_ERRORS: Record<string, string> = {
-  SHOWCASE_CARD_NOT_FOUND: 'Bu kart artık yayında değil.',
-  [PHONE_PROOF_REQUIRED]:
-    'Telefon doğrulamanız tamamlanmadı ya da süresi doldu. Kodu yeniden isteyin.',
-  SHOWCASE_LEAD_RATE_LIMITED: 'Çok fazla talep gönderildi. Lütfen bir süre sonra tekrar deneyin.',
-  PHONE_VERIFICATION_INVALID:
-    'Doğrulama kodu geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.',
-  PHONE_VERIFICATION_RATE_LIMITED:
-    'Bu numara için kısa sürede çok fazla kod istendi. Lütfen biraz sonra tekrar deneyin.',
-  SHOWCASE_AREA_UNKNOWN: 'Seçilen il, ilçe ve mahalle birlikte geçerli bir bölge oluşturmuyor.',
-  SHOWCASE_LEAD_FORBIDDEN:
-    'Hizmet veren hesabıyla vitrin talebi gönderilemez. Müşteri olarak devam etmek için oturumu kapatın.',
-  [GENERIC]: 'Talebiniz gönderilemedi. Bilgileri kontrol edip tekrar deneyin.',
-};
-
-/** The sentence for a refusal: the API's own when it gave one, else ours for the code. */
+/** The sentence for a refusal — see showcaseLeadRefusalText for the precedence. */
 function refusalText(failure: Extract<LeadActionResult, { ok: false }>): string {
-  return LEAD_ERRORS[failure.code] ?? failure.message ?? LEAD_ERRORS[GENERIC] ?? '';
+  return showcaseLeadRefusalText(failure);
 }
 
 type Verification =

@@ -607,6 +607,69 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
     }
   });
 
+  test('API’nin kendi reddi ekranda kendi cümlesiyle görünür; generic hataya yutulmaz', async ({
+    browser,
+  }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(3, { namePrefix: 'E2E Vitrin Ret' });
+    const owner = await createProvider({ categoryId: category.id, location, credits: 0 });
+    const { card, version } = await seedApprovedCard({
+      providerId: owner.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+      title: 'E2E Ret Kartı',
+    });
+    await seedLivePlacement({
+      providerId: owner.id,
+      cardId: card.id,
+      versionId: version.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+    });
+
+    /*
+     * The marketplace's own identity rule: a guest whose telephone number
+     * belongs to one customer account and whose e-mail belongs to another is
+     * refused with a sentence written for them, and no code. The vitrin form
+     * has to show that sentence — the code-less refusal used to be folded into
+     * "Talebiniz gönderilemedi" with nothing to say why.
+     */
+    const phoneOwner = await createCustomer('E2E Telefon Sahibi');
+    const emailOwner = await createCustomer('E2E E-posta Sahibi');
+
+    const visitor = await Actor.open(browser, 'web', primaryRuntime);
+
+    try {
+      await visitor.gotoWeb(`/vitrin/${card.id}?step=form`);
+      await assertNoErrorScreen(visitor.page);
+
+      await visitor.page.getByLabel('Açıklama *').fill('Kimlik çakışması denemesi.');
+      await chooseLeadLocation(visitor.page, location);
+      await visitor.page.getByTestId('showcase-urgency-normal').check();
+      await visitor.page.getByLabel('Ad soyad *').fill('E2E Çakışan Kişi');
+      await visitor.page.getByLabel('E-posta *').fill(emailOwner.email);
+      await proveLeadPhoneInForm(visitor.page, phoneOwner.phone);
+
+      const requestsBefore = await prisma().serviceRequest.count();
+      await visitor.page.getByTestId('showcase-lead-submit').click();
+
+      const refusal = visitor.page.getByTestId('showcase-lead-error');
+      await expect(refusal).toBeVisible();
+      await expect(refusal).toHaveText('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
+      await expect(visitor.page.getByTestId('showcase-lead-sent')).toHaveCount(0);
+
+      expect(await prisma().serviceRequest.count()).toBe(requestsBefore);
+      expect(await prisma().showcaseLead.count({ where: { cardId: card.id } })).toBe(0);
+      // Everything typed, and the proof, are still there to correct and resend.
+      await expect(visitor.page.getByLabel('Ad soyad *')).toHaveValue('E2E Çakışan Kişi');
+      await expect(visitor.page.getByTestId('showcase-lead-phone-verified')).toBeVisible();
+    } finally {
+      await visitor.close();
+    }
+  });
+
   test('talep formunda kategori ve konuma uyan vitrin kartları gösterilir', async ({
     browser,
   }) => {
