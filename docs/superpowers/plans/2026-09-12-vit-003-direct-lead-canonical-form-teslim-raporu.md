@@ -194,3 +194,20 @@ Sonuçlar: aşağıda "Doğrulama" bölümünde.
   (yatay taşma 0; 320'de tek kolon).
 - CI (PR #73, run 34688984278): `typecheck · lint · test · build` ✓, `e2e (chromium)` ✓ (12m40s),
   `e2e (webkit · sign-in and mobile shells)` ✓ (7m42s). PR merge edilmedi.
+
+## 7. Merge sonrası düzeltme — API'nin kodsuz reddi generic mesaja yutuluyordu
+
+Yerelde gerçek denemede (`05322222323` + başka bir müşteriye ait e-posta) ekran yine
+"Talebiniz gönderilemedi" gösterdi. Web logu gerçek nedeni yazmıştı:
+`API refused with 409 code=- message="Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor."`
+— marketplace'in mevcut kimlik kuralı (`resolveCustomerForCreate`), Türkçe cümle,
+`code` yok. Hata `refusalText` önceliğindeydi: kodsuz reddin fallback kodu
+`SHOWCASE_LEAD_FAILED` tabloda bulunduğu için API mesajının önüne geçiyordu.
+
+- `apps/web/lib/showcase-lead-errors.ts`: öncelik artık *özel kod → API mesajı → generic*;
+  generic kod hiçbir zaman mesajın önüne geçmez. 4 birim testi.
+- E2E (`showcase-placement-lead.spec.ts`): iki farklı müşteriye ait telefon + e-posta ile
+  gönderim → ekranda API'nin kendi cümlesi, `showcase-lead-sent` yok, `ServiceRequest`/
+  `ShowcaseLead` değişmez, form ve kanıt korunur.
+- Ekrandaki URL (`?step=form&phone=…&error=SHOWCASE_LEAD_FAILED&city=…`) merge öncesi
+  eski akıştan kalma bir adres; yeni form URL'ye hata yazmaz, sayfa yine de açılır.
