@@ -8,6 +8,7 @@ import {
   prisma,
   uniqueLocation,
 } from '../src/fixtures';
+import { waitForLatestSmsCode } from '../src/outbox';
 import { primaryRuntime } from '../src/runtime';
 
 /**
@@ -25,8 +26,13 @@ import { primaryRuntime } from '../src/runtime';
  *    reach any card, and a lead for an address the card does not serve is
  *    refused with a route onward rather than opened.
  * 3. **The lead form is a real gate.** A visitor cannot write to a business
- *    without proving a telephone number, and the steps on the card's page are
- *    what that looks like in a browser.
+ *    without proving a telephone number — the code is sent for real and read
+ *    back from the test outbox — and the proof happens inside the form,
+ *    without losing anything typed before it.
+ * 6. **The form is the marketplace form's own parts.** The location is the same
+ *    dependent selects, the timing the same select, and there is no text field
+ *    a district could be typed into — the old form's free text was refused by
+ *    the API's canonical location check and reported as a generic failure.
  * 4. **Only one business sees it.** Two providers match the request equally
  *    well; the second one's panel is checked, and it has to be empty.
  * 5. **The screens say what the clock does before it does it.** The archive
@@ -131,24 +137,6 @@ function areaKey(city: string, district: string): string {
   const fold = (value: string) =>
     value.normalize('NFC').trim().toLocaleLowerCase('tr-TR').replace(/ı/g, 'i');
   return `${fold(city)}|${fold(district)}|`;
-}
-
-/**
- * The canonical form the API stores a proved number in.
- *
- * Restated here rather than imported, for the reason `areaKey` is: this suite
- * talks to the application over HTTP and to the database through Prisma, and
- * importing an API module would make it depend on internals rather than on
- * behaviour. Only the one shape these tests generate — a Turkish national
- * number — is handled, and anything else fails loudly rather than being
- * guessed at.
- */
-function toE164(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('0')) {
-    return `+90${digits.slice(1)}`;
-  }
-  throw new Error(`e2e fixture produced a phone number it cannot canonicalise: ${phone}`);
 }
 
 /** A settled vitrin purchase and the live run it produced. */
@@ -267,19 +255,32 @@ async function seedLivePlacement(options: {
  * what the lead endpoint redeems — and it binds it, which is what makes the
  * proof single-use here too.
  */
-async function proveLeadPhone(phone: string) {
-  const normalized = toE164(phone);
-  const now = new Date();
+/**
+ * Proves a telephone number inside the lead form, as a visitor does.
+ *
+ * The code is sent to the number for real and read back from the API's test
+ * outbox — the suite cannot read an SMS, and the code is never on any screen.
+ * Everything the visitor typed before this stays on the page: the proof is a
+ * panel under the telephone field, not a separate screen.
+ */
+async function proveLeadPhoneInForm(page: Page, phone: string) {
+  await page.getByLabel('Telefon *').fill(phone);
+  await page.getByTestId('showcase-lead-phone-send').click();
+  await expect(page.getByTestId('showcase-lead-phone-code')).toBeVisible();
 
-  await prisma().phoneVerification.create({
-    data: {
-      normalizedPhone: normalized,
-      codeHash: 'e2e-consumed',
-      expiresAt: new Date(now.getTime() + 5 * 60 * 1000),
-      consumedAt: now,
-      requestId: null,
-    },
-  });
+  const code = await waitForLatestSmsCode(phone);
+  await page.getByTestId('showcase-lead-code').fill(code);
+  await page.getByTestId('showcase-lead-phone-verify').click();
+  await expect(page.getByTestId('showcase-lead-phone-verified')).toBeVisible();
+}
+
+/**
+ * The location, chosen from the same dependent selects the marketplace form
+ * renders. There is no text field to type a district into — that is the point.
+ */
+async function chooseLeadLocation(page: Page, location: { city: string; district: string }) {
+  await page.getByTestId('request-city').selectOption(location.city);
+  await page.getByTestId('request-district').selectOption(location.district);
 }
 
 test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
@@ -381,56 +382,91 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await decision.getByRole('link', { name: 'Devam et' }).click();
       await assertNoErrorScreen(visitor.page);
 
-      // The lead form is not reachable until a telephone number is proved.
-      await expect(visitor.page.getByTestId('showcase-lead-form')).toHaveCount(0);
-      await expect(visitor.page.getByLabel('Telefon *')).toBeVisible();
+      const form = visitor.page.getByTestId('showcase-lead-form');
+      await expect(form).toBeVisible();
 
       for (const width of NARROW_WIDTHS) {
         await visitor.page.setViewportSize({ width, height: 900 });
-        await expectNoHorizontalOverflow(visitor.page, `vitrin kartı @ ${width}px`);
+        await expectNoHorizontalOverflow(visitor.page, `vitrin kartı formu @ ${width}px`);
       }
       await visitor.page.setViewportSize({ width: 1280, height: 900 });
 
       /*
-       * The verification is completed out of band — the suite cannot read an
-       * SMS — and the form is then reached directly at the step it would have
-       * landed on. What is being tested here is that the *form* refuses to
-       * exist before that point, which the assertion above already made, and
-       * that the lead it produces reaches one business and no other.
+       * ── The form is the marketplace form's own parts ──────────────────────
+       *
+       * The location is three dependent selects — the same component, the
+       * same test ids, the same canonical list — and there is no text field a
+       * district could be typed into. Changing the province clears what hung
+       * off it, exactly as on the category page.
        */
-      const customerPhone = `0555${String(Date.now()).slice(-7)}`;
-      await proveLeadPhone(customerPhone);
+      await expect(form.locator('select[name="district"]')).toHaveCount(1);
+      await expect(form.locator('select[name="neighborhood"]')).toHaveCount(1);
+      await expect(form.locator('input[name="district"], input[name="neighborhood"]')).toHaveCount(0);
+      await expect(form.locator('input[name="urgency"]')).toHaveCount(0);
 
-      await visitor.gotoWeb(
-        `/vitrin/${card.id}?step=form&phone=${encodeURIComponent(customerPhone)}`,
-      );
-      await assertNoErrorScreen(visitor.page);
+      await chooseLeadLocation(visitor.page, location);
+      await expect(visitor.page.getByTestId('request-district')).toHaveValue(location.district);
+      await visitor.page.getByTestId('request-city').selectOption('Ankara');
+      await expect(visitor.page.getByTestId('request-district')).toHaveValue('');
+      await chooseLeadLocation(visitor.page, location);
 
-      const form = visitor.page.getByTestId('showcase-lead-form');
-      await expect(form).toBeVisible();
-
-      // The two options are rendered from this card's own approved promises.
+      // The two options are rendered from this card's own approved promises,
+      // beside — not instead of — the request's own timing select.
       await expect(
         visitor.page.getByText('Acil — 3 saat içinde dönüş', { exact: false }),
       ).toBeVisible();
       await expect(
         visitor.page.getByText('Normal — 24 saat içinde dönüş', { exact: false }),
       ).toBeVisible();
-
+      await visitor.page.getByTestId('showcase-lead-urgency').selectOption('THIS_WEEK');
       await visitor.page.getByTestId('showcase-urgency-urgent').check();
+
+      await visitor.page
+        .getByLabel('Açıklama *')
+        .fill('Salon kliması bakım istiyorum, iki gündür soğutmuyor.');
       await visitor.page.getByLabel('Ad soyad *').fill('E2E Vitrin Müşterisi');
       await visitor.page
         .getByLabel('E-posta *')
         .fill(`e2e-vitrin-${Date.now()}@example.test`);
-      await visitor.page.getByLabel('İl *').selectOption(location.city);
-      await visitor.page.getByLabel('İlçe *').fill(location.district);
-      await visitor.page
-        .getByLabel('Talebiniz *')
-        .fill('Salon kliması bakım istiyorum, iki gündür soğutmuyor.');
+
+      // Nothing can be sent before the number is proved.
+      await expect(visitor.page.getByTestId('showcase-lead-submit')).toBeDisabled();
+
+      const customerPhone = `0555${String(Date.now()).slice(-7)}`;
+      await proveLeadPhoneInForm(visitor.page, customerPhone);
+
+      // The proof did not cost the visitor anything they had typed.
+      await expect(visitor.page.getByLabel('Ad soyad *')).toHaveValue('E2E Vitrin Müşterisi');
+      await expect(visitor.page.getByLabel('Açıklama *')).toHaveValue(
+        'Salon kliması bakım istiyorum, iki gündür soğutmuyor.',
+      );
+      await expect(visitor.page.getByTestId('request-district')).toHaveValue(location.district);
+      await expect(visitor.page.getByTestId('showcase-lead-urgency')).toHaveValue('THIS_WEEK');
+      await expect(visitor.page.getByTestId('showcase-urgency-urgent')).toBeChecked();
+      await expect(visitor.page.getByLabel('Telefon *')).toHaveValue(customerPhone);
+
+      const requestsBefore = await prisma().serviceRequest.count();
+      const leadsBefore = await prisma().showcaseLead.count();
 
       await visitor.page.getByTestId('showcase-lead-submit').click();
       await assertNoErrorScreen(visitor.page);
       await expect(visitor.page.getByTestId('showcase-lead-sent')).toBeVisible();
+
+      // Exactly one request and one lead, carrying the canonical values the
+      // selects posted — and the promise the customer chose.
+      expect(await prisma().serviceRequest.count()).toBe(requestsBefore + 1);
+      expect(await prisma().showcaseLead.count()).toBe(leadsBefore + 1);
+      const lead = await prisma().showcaseLead.findFirstOrThrow({
+        where: { cardId: card.id },
+        include: { request: true },
+      });
+      expect(lead.urgencyBucket).toBe('URGENT');
+      expect(lead.slaHoursSnapshot).toBe(3);
+      expect(lead.request.city).toBe(location.city);
+      expect(lead.request.district).toBe(location.district);
+      expect(lead.request.urgency).toBe('THIS_WEEK');
+      expect(lead.request.phoneVerifiedAt).not.toBeNull();
+      expect(lead.request.directShowcaseProviderId).toBe(owner.id);
 
       // ── The card owner sees it; the rival does not ────────────────────────
       await providerActor.loginToWeb(owner.email, owner.password);
@@ -520,24 +556,23 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
        * what the run's shelf holds, and only the customer knows where the work
        * is.
        */
-      const customerPhone = `0555${String(Date.now()).slice(-7)}`;
-      await proveLeadPhone(customerPhone);
-
-      await visitor.gotoWeb(
-        `/vitrin/${card.id}?step=form&phone=${encodeURIComponent(customerPhone)}`,
-      );
+      await visitor.gotoWeb(`/vitrin/${card.id}?step=form`);
       await assertNoErrorScreen(visitor.page);
 
+      await visitor.page
+        .getByLabel('Açıklama *')
+        .fill('Kapsam dışı bir adres için talep gönderiyorum.');
+      await chooseLeadLocation(visitor.page, elsewhere);
       await visitor.page.getByTestId('showcase-urgency-normal').check();
       await visitor.page.getByLabel('Ad soyad *').fill('E2E Kapsam Disi');
       await visitor.page
         .getByLabel('E-posta *')
         .fill(`e2e-kapsam-${Date.now()}@example.test`);
-      await visitor.page.getByLabel('İl *').selectOption(elsewhere.city);
-      await visitor.page.getByLabel('İlçe *').fill(elsewhere.district);
-      await visitor.page
-        .getByLabel('Talebiniz *')
-        .fill('Kapsam dışı bir adres için talep gönderiyorum.');
+
+      const customerPhone = `0555${String(Date.now()).slice(-7)}`;
+      await proveLeadPhoneInForm(visitor.page, customerPhone);
+
+      const requestsBefore = await prisma().serviceRequest.count();
 
       await visitor.page.getByTestId('showcase-lead-submit').click();
       await assertNoErrorScreen(visitor.page);
@@ -551,8 +586,13 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       );
       await expect(visitor.page.getByTestId('showcase-lead-sent')).toHaveCount(0);
 
-      // Nothing was opened.
+      // Nothing was opened — no lead, and no request behind one either. What
+      // the visitor typed is still on the page, so a wrong district can simply
+      // be corrected.
       expect(await prisma().showcaseLead.count({ where: { cardId: card.id } })).toBe(0);
+      expect(await prisma().serviceRequest.count()).toBe(requestsBefore);
+      await expect(visitor.page.getByLabel('Ad soyad *')).toHaveValue('E2E Kapsam Disi');
+      await expect(visitor.page.getByTestId('showcase-lead-phone-verified')).toBeVisible();
 
       await visitor.page.getByTestId('showcase-general-request-cta').click();
       await assertNoErrorScreen(visitor.page);

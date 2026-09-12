@@ -5586,6 +5586,81 @@ body.has-drawer-open {
   margin-bottom: var(--space-2);
 }
 
+/*
+ * The lead form inside the card's CTA panel.
+ *
+ * The same parts as the marketplace form — `.form-grid`, `.form-row`, the
+ * description counter, the contact section — on the CTA's own surface. Sections
+ * are separated by a 1px rule rather than framed, keeping the one 2px frame on
+ * the panel itself. Every grid inside is `auto-fit, minmax(min(220px, 100%),
+ * 1fr)`, which is what lets the panel fall to a single column at 320px without
+ * a track ever being wider than the phone.
+ */
+.showcase-lead {
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.showcase-lead-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-divider);
+  min-width: 0;
+}
+
+.showcase-lead-section > h3 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.showcase-lead-section .pdash-form-hint {
+  margin: 0;
+}
+
+.showcase-lead-section .form-row,
+.showcase-lead-section .pdash-form-row {
+  min-width: 0;
+}
+
+.showcase-lead-proof {
+  margin-top: var(--space-2);
+}
+
+.showcase-lead-proof .verify-row .pdash-form-row {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.showcase-lead-proof input[name='code'] {
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+}
+
+.showcase-lead .pdash-form-foot .help-text {
+  flex-basis: 100%;
+}
+
+.showcase-lead-refusal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.showcase-lead-refusal h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.showcase-lead-refusal p {
+  margin: 0;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    Vitrin — VIT-DESIGN-002
 

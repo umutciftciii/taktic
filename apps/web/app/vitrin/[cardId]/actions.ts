@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch } from '../../../lib/api';
+import { buildServiceRequestPayload, readFormString } from '../../../lib/service-request-payload';
 
 /**
  * The three steps of writing to a business from its vitrin card.
@@ -24,50 +25,74 @@ import { ApiError, apiFetch } from '../../../lib/api';
  * The proof is single-use and short-lived. Nothing is stored here and no token
  * travels: the receipt is the consumed verification row itself, and the API
  * binds it to the request it creates.
+ *
+ * ## Why these return a result instead of redirecting
+ *
+ * The form is one screen that keeps everything the customer typed while the
+ * number is proved inside it. A redirect on every step would throw that away
+ * — the old flow carried the location in the query string and lost the rest —
+ * so each step answers the component that called it, and only the successful
+ * submission navigates.
  */
 
-export async function startShowcaseLeadVerificationAction(formData: FormData) {
-  const cardId = readString(formData, 'cardId');
-  const phone = readString(formData, 'phone');
-  const place = readLocation(formData);
+export type LeadActionResult =
+  | { ok: true }
+  | {
+      ok: false;
+      /** The API's own code when it gave one, or the generic one. */
+      code: string;
+      /**
+       * What the API said, for the refusals it words for the customer — a
+       * validation message, a conflict. Null when there was nothing safe to
+       * show, and the component falls back to its own sentence for the code.
+       */
+      message: string | null;
+    };
 
+/**
+ * The code every refusal without a more specific one is reported under. Not
+ * exported: a 'use server' module may only export async functions, so the
+ * component spells the same string in its own error table.
+ */
+const SHOWCASE_LEAD_FAILED = 'SHOWCASE_LEAD_FAILED';
+
+export async function startShowcaseLeadVerificationAction(
+  phone: string,
+): Promise<LeadActionResult> {
   try {
     await apiFetch('/showcase/lead-verification', {
       method: 'POST',
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({ phone: phone.trim() }),
     });
   } catch (error) {
-    redirect(`/vitrin/${cardId}?step=phone&error=${errorCode(error)}${place}`);
+    return describeFailure('lead-verification', error);
   }
 
-  // The number travels in the query string so the next step's form can prefill
-  // it. It is the visitor's own number, they just typed it, and it grants
-  // nothing — the code is what proves anything, and that is never in a URL.
-  redirect(`/vitrin/${cardId}?step=code&phone=${encodeURIComponent(phone)}${place}`);
+  return { ok: true };
 }
 
-export async function confirmShowcaseLeadVerificationAction(formData: FormData) {
-  const cardId = readString(formData, 'cardId');
-  const phone = readString(formData, 'phone');
-  const code = readString(formData, 'code');
-  const place = readLocation(formData);
-
+export async function confirmShowcaseLeadVerificationAction(
+  phone: string,
+  code: string,
+): Promise<LeadActionResult> {
   try {
     await apiFetch('/showcase/lead-verification/verify', {
       method: 'POST',
-      body: JSON.stringify({ phone, code }),
+      body: JSON.stringify({ phone: phone.trim(), code: code.trim() }),
     });
   } catch (error) {
-    redirect(
-      `/vitrin/${cardId}?step=code&phone=${encodeURIComponent(phone)}&error=${errorCode(error)}${place}`,
-    );
+    return describeFailure('lead-verification/verify', error);
   }
 
-  redirect(`/vitrin/${cardId}?step=form&phone=${encodeURIComponent(phone)}${place}`);
+  return { ok: true };
 }
 
 /**
  * Opens the lead.
+ *
+ * The body is the marketplace request body — built by the same function the
+ * category form posts through, so the location, timing, contact and answer
+ * fields cannot drift from what the API's DTO reads — plus `urgencyBucket`.
  *
  * `urgencyBucket` is the customer's own choice between the two options the card
  * showed, and it is **not** the same field as `urgency`. The first is how long
@@ -80,92 +105,73 @@ export async function confirmShowcaseLeadVerificationAction(formData: FormData) 
  * provider id. A body that could name any of the three would be a body deciding
  * whose run it attaches to and what deadline it sets.
  */
-export async function createShowcaseLeadAction(formData: FormData) {
-  const cardId = readString(formData, 'cardId');
-  const phone = readString(formData, 'phone');
+export async function createShowcaseLeadAction(formData: FormData): Promise<LeadActionResult> {
+  const cardId = readFormString(formData, 'cardId');
 
   try {
-    await apiFetch(`/showcase/cards/${cardId}/leads`, {
+    await apiFetch(`/showcase/cards/${encodeURIComponent(cardId)}/leads`, {
       method: 'POST',
       body: JSON.stringify({
-        categorySlug: readString(formData, 'categorySlug'),
-        urgencyBucket: readString(formData, 'urgencyBucket'),
-        customerName: readString(formData, 'customerName'),
-        customerPhone: phone,
-        customerEmail: readString(formData, 'customerEmail'),
-        city: readString(formData, 'city'),
-        district: readString(formData, 'district'),
-        neighborhood: readOptional(formData, 'neighborhood'),
-        description: readOptional(formData, 'description'),
-        // The job's own timing, independent of the answer-time choice above.
-        urgency: readOptional(formData, 'urgency'),
-        answers: [],
-        contactDisclosureAccepted: formData.get('contactDisclosureAccepted') === 'on',
+        ...buildServiceRequestPayload(formData),
+        urgencyBucket: readFormString(formData, 'urgencyBucket'),
       }),
     });
   } catch (error) {
-    /*
-     * The refusal travels as a code, and the address the customer typed travels
-     * with it.
-     *
-     * `SHOWCASE_LEAD_AREA_NOT_SERVED` is the one the card page turns into a
-     * route onward rather than a red box: the work is real, it is simply not
-     * this business's, and the ordinary marketplace request is one click away.
-     * Every other code re-renders the form with what they had entered, which is
-     * why the location is carried here as well.
-     */
-    redirect(
-      `/vitrin/${cardId}?step=form&phone=${encodeURIComponent(phone)}&error=${errorCode(error)}` +
-        readLocation(formData),
-    );
+    return describeFailure(`cards/${cardId}/leads`, error);
   }
 
-  redirect(`/vitrin/${cardId}?sent=1`);
+  redirect(`/vitrin/${encodeURIComponent(cardId)}?sent=1`);
 }
 
 /**
- * The location the customer chose, as a query-string fragment.
+ * Turns an API refusal into what the component shows and what the log keeps.
  *
- * Carried from step to step purely so nobody is asked the same question twice —
- * and, on a refusal, so the form comes back with what they typed rather than
- * blank. It is never authority: the API re-resolves it against the shipped
- * location list and re-checks it against the run's own shelf on every
- * submission, so a hand-edited URL buys no lead a real form could not open.
+ * The API answers two ways. Its own refusals carry a `code` and a sentence
+ * written for the customer (`SHOWCASE_LEAD_AREA_NOT_SERVED`, …). A body the DTO
+ * refuses carries no code, only class-validator's messages — and the old flow
+ * folded those into the generic code, which is how a free-text district became
+ * "Talebiniz gönderilemedi" with nothing in any log to say why. Now a 4xx
+ * message reaches the customer, and status, code and message reach the server
+ * log. Neither carries what the customer typed.
  */
-function readLocation(formData: FormData): string {
-  const params = new URLSearchParams();
-  for (const key of ['city', 'district', 'neighborhood'] as const) {
-    const value = readString(formData, key);
-    if (value) {
-      params.set(key, value);
-    }
+function describeFailure(step: string, error: unknown): LeadActionResult {
+  if (!(error instanceof ApiError)) {
+    console.error(`[vitrin lead] ${step}: unexpected failure`, error);
+    return { ok: false, code: SHOWCASE_LEAD_FAILED, message: null };
   }
 
-  const query = params.toString();
-  return query ? `&${query}` : '';
-}
+  let code: string | null = null;
+  let message: string | null = null;
 
-function readString(formData: FormData, key: string): string {
-  const value = formData.get(key);
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readOptional(formData: FormData, key: string): string | null {
-  const value = readString(formData, key);
-  return value.length > 0 ? value : null;
-}
-
-function errorCode(error: unknown): string {
-  if (error instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(error.body) as { code?: unknown };
-      if (typeof parsed.code === 'string') {
-        return encodeURIComponent(parsed.code);
-      }
-    } catch {
-      // Not JSON, or JSON with no code.
+  try {
+    const parsed = JSON.parse(error.body) as { code?: unknown; message?: unknown };
+    if (typeof parsed.code === 'string') {
+      code = parsed.code;
     }
+    // Nest's own exceptions carry a string; the ValidationPipe carries a list.
+    const raw = Array.isArray(parsed.message) ? parsed.message[0] : parsed.message;
+    if (typeof raw === 'string' && raw.trim()) {
+      message = raw.trim();
+    }
+  } catch {
+    // Not JSON, or JSON with neither.
   }
 
-  return 'SHOWCASE_LEAD_FAILED';
+  console.error(
+    `[vitrin lead] ${step}: API refused with ${error.status}` +
+      ` code=${code ?? '-'} message=${JSON.stringify(message ?? '-')}`,
+  );
+
+  // Only a refusal the API worded for the client is shown as-is; a 5xx body is
+  // not a sentence for a customer.
+  const userFacing = error.status >= 400 && error.status < 500;
+
+  // The one refusal that carries no code but has a fixed meaning here: a
+  // PROVIDER session cannot open a lead. Named so the form can say so in
+  // Turkish rather than relay the API's English sentence.
+  if (!code && error.status === 403) {
+    return { ok: false, code: 'SHOWCASE_LEAD_FORBIDDEN', message: null };
+  }
+
+  return { ok: false, code: code ?? SHOWCASE_LEAD_FAILED, message: userFacing ? message : null };
 }

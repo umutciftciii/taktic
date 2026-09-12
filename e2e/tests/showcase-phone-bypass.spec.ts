@@ -64,11 +64,13 @@ test.describe('vitrin: telefon doğrulama test modu', () => {
 
     try {
       // ── The runtime with the bypass ─────────────────────────────────────
-      await gated.gotoWeb(`/vitrin/${card.id}?step=phone`);
+      // The proof lives inside the lead form now, under the telephone field;
+      // the same screen, the same field, the same button as any visitor sees.
+      await gated.gotoWeb(`/vitrin/${card.id}?step=form`);
       await assertNoErrorScreen(gated.page);
       await gated.page.getByLabel('Telefon *').fill(E2E_BYPASS_PHONE);
       await gated.page.getByRole('button', { name: 'Kod gönder' }).click();
-      await expect(gated.page).toHaveURL(/step=code/);
+      await expect(gated.page.getByTestId('showcase-lead-phone-code')).toBeVisible();
       await assertNoErrorScreen(gated.page);
 
       // The ordinary flow ran: a real code was issued to the number, hashed,
@@ -83,7 +85,7 @@ test.describe('vitrin: telefon doğrulama test modu', () => {
 
       await gated.page.locator('input[name="code"]').fill(E2E_BYPASS_CODE);
       await gated.page.getByRole('button', { name: 'Doğrula', exact: true }).click();
-      await expect(gated.page).toHaveURL(/step=form/);
+      await expect(gated.page.getByTestId('showcase-lead-phone-verified')).toBeVisible();
       await assertNoErrorScreen(gated.page);
       await expect(gated.page.getByTestId('showcase-lead-form')).toBeVisible();
 
@@ -102,17 +104,20 @@ test.describe('vitrin: telefon doğrulama test modu', () => {
       expect(formScreen).not.toContain(E2E_BYPASS_CODE);
 
       // ── The same steps on the runtime without it ────────────────────────
-      await plain.gotoWeb(`/vitrin/${card.id}?step=phone`);
+      await plain.gotoWeb(`/vitrin/${card.id}?step=form`);
       await plain.page.getByLabel('Telefon *').fill(E2E_BYPASS_PHONE);
       await plain.page.getByRole('button', { name: 'Kod gönder' }).click();
-      await expect(plain.page).toHaveURL(/step=code/);
+      await expect(plain.page.getByTestId('showcase-lead-phone-code')).toBeVisible();
 
       await plain.page.locator('input[name="code"]').fill(E2E_BYPASS_CODE);
       await plain.page.getByRole('button', { name: 'Doğrula', exact: true }).click();
-      await expect(plain.page).toHaveURL(/step=code.*error=PHONE_VERIFICATION_INVALID/);
+      await expect(plain.page.getByTestId('showcase-lead-phone-error')).toContainText(
+        'Doğrulama kodu geçersiz',
+      );
       await assertNoErrorScreen(plain.page);
-      await expect(plain.page.locator('.cdash-notice-error')).toContainText('Doğrulama kodu geçersiz');
-      await expect(plain.page.getByTestId('showcase-lead-form')).toHaveCount(0);
+      // Not proved: the code field is still on screen, and nothing can be sent.
+      await expect(plain.page.getByTestId('showcase-lead-phone-verified')).toHaveCount(0);
+      await expect(plain.page.getByTestId('showcase-lead-submit')).toBeDisabled();
 
       // And the row it refused against is untouched: not consumed, one
       // attempt spent, no test flag.
