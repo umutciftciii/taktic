@@ -192,4 +192,5 @@ Sonuçlar: aşağıda "Doğrulama" bölümünde.
   gerçek başarılı direct lead senaryosu iki motorda da geçti.
 - Ekran görüntüleri: `e2e/test-results/showcase-screens/public-card-form-{320,768,1024,1440}.png`
   (yatay taşma 0; 320'de tek kolon).
-- CI: PR açıldıktan sonra eklenecek.
+- CI (PR #73, run 34688984278): `typecheck · lint · test · build` ✓, `e2e (chromium)` ✓ (12m40s),
+  `e2e (webkit · sign-in and mobile shells)` ✓ (7m42s). PR merge edilmedi.
