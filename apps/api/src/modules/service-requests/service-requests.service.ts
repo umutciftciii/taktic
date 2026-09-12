@@ -384,8 +384,13 @@ export class ServiceRequestsService {
    * An alternate contact belongs to the request alone: ownership is decided
    * separately by {@link resolveCustomerForCreate}, which still hands a
    * signed-in customer's request to that customer.
+   *
+   * Public because the vitrin lead path needs the same answer *before* it
+   * creates the request: the proof of the telephone number has to be looked up
+   * for the number the request will be stored with, and for a signed-in
+   * customer that is the account's, not whatever the body carried.
    */
-  private async resolveContactDetails(
+  async resolveContactDetails(
     dto: CreateServiceRequestDto,
     user: AuthUser | null,
   ): Promise<{ customerName: string; customerPhone: string; customerEmail: string }> {

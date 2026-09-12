@@ -356,6 +356,125 @@ describe('opening a lead', () => {
   });
 });
 
+describe('the body is the marketplace request body', () => {
+  /*
+   * The vitrin form posts through the same payload builder the marketplace
+   * form does, and the DTO extends the marketplace DTO. These pin the three
+   * facts the card page used to get wrong: a spelling the canonical list does
+   * not know is a refusal that writes nothing, the timing value is the
+   * marketplace select's own, and a signed-in customer's lead is proved against
+   * the account's number — the one the request is stored with.
+   */
+  it('refuses a district the canonical list does not know, and writes nothing', async () => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, {
+      district: 'Kadikoy',
+      urgencyBucket: 'URGENT',
+    });
+
+    expect(response.status).toBe(400);
+    // Class-validator's own message, in the API's words; no code accompanies it.
+    expect(response.body.message).toEqual([
+      'Seçilen il, ilçe ve mahalle birlikte geçerli bir adres oluşturmuyor.',
+    ]);
+    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+    expect(await ctx.prisma.showcaseLead.count()).toBe(0);
+    expect(await ctx.prisma.notificationLog.count()).toBe(0);
+    expect(ctx.notifications.sent).toHaveLength(0);
+  });
+
+  it('refuses a neighbourhood typed rather than chosen, and writes nothing', async () => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, {
+      neighborhood: 'Caferağa',
+    });
+
+    expect(response.status).toBe(400);
+    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+    expect(await ctx.prisma.showcaseLead.count()).toBe(0);
+  });
+
+  it('accepts the canonical neighbourhood the dependent select posts', async () => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, {
+      neighborhood: 'Caferağa Mah',
+    });
+
+    expect(response.status).toBe(201);
+    const stored = await ctx.prisma.serviceRequest.findFirstOrThrow();
+    expect(stored.neighborhood).toBe('Caferağa Mah');
+  });
+
+  it('refuses a body missing a required category answer, and writes nothing', async () => {
+    const { card, category } = await published();
+    await ctx.prisma.serviceRequestQuestion.create({
+      data: {
+        categoryId: category.id,
+        key: 'unit_count',
+        label: 'Kaç iç ünite?',
+        type: 'NUMBER',
+        isRequired: true,
+        sortOrder: 0,
+        isActive: true,
+      },
+    });
+
+    const response = await openLead(card.id, category.slug, { answers: [] });
+
+    expect(response.status).toBe(400);
+    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+    expect(await ctx.prisma.showcaseLead.count()).toBe(0);
+  });
+
+  it('stores the timing the marketplace select posts', async () => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, { urgency: 'THIS_WEEK' });
+
+    expect(response.status).toBe(201);
+    const stored = await ctx.prisma.serviceRequest.findFirstOrThrow();
+    expect(stored.urgency).toBe('THIS_WEEK');
+  });
+
+  it("proves a signed-in customer's lead against the account's own number", async () => {
+    const { card, category } = await published();
+    const customer = await createUser(ctx.prisma, {
+      role: UserRole.CUSTOMER,
+      phone: '05557778899',
+    });
+    const cookie = await loginAs(ctx.prisma, customer.id);
+    await proveShowcaseLeadPhone(ctx.prisma, '05557778899');
+
+    // The account path: no contact fields in the body, exactly as the shared
+    // payload builder posts for a signed-in customer.
+    const payload = showcaseLeadPayload(category.slug);
+    delete (payload as Record<string, unknown>).customerName;
+    delete (payload as Record<string, unknown>).customerPhone;
+    delete (payload as Record<string, unknown>).customerEmail;
+
+    const response = await request(ctx.server)
+      .post(`/showcase/cards/${card.id}/leads`)
+      .set('Cookie', cookie)
+      .send(payload);
+
+    expect(response.status).toBe(201);
+    const stored = await ctx.prisma.serviceRequest.findFirstOrThrow();
+    expect(stored.customerId).toBe(customer.id);
+    // The account's own number, in the form the request service stores it —
+    // the proof below is looked up under its E.164 spelling.
+    expect(stored.customerPhone).toBe('05557778899');
+    expect(stored.phoneVerifiedAt).not.toBeNull();
+
+    const proof = await ctx.prisma.phoneVerification.findFirstOrThrow({
+      where: { normalizedPhone: '+905557778899' },
+    });
+    expect(proof.requestId).toBe(stored.id);
+  });
+});
+
 describe('the telephone number has to be proved first', () => {
   /**
    * Mandatory here whatever `REQUIRE_PHONE_VERIFICATION` says — the one place

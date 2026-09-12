@@ -165,7 +165,15 @@ export class ShowcaseLeadService {
      */
     await this.assertPlacementServesRequest(live.placementId, dto);
 
-    const phone = normalizePhoneNumber(dto.customerPhone ?? '');
+    /*
+     * The number the proof is for: resolved by the same rule that decides the
+     * request's stored contact, so a signed-in customer's lead is proved
+     * against the account's number and a guest's against the one they typed.
+     * Reading `dto.customerPhone` directly would refuse every signed-in
+     * customer, whose body carries no contact fields at all.
+     */
+    const contact = await this.requests.resolveContactDetails(dto, user);
+    const phone = normalizePhoneNumber(contact.customerPhone);
     await this.assertWithinRateLimits(phone, meta.ipAddress, now);
 
     // A double-submitted form is one lead, not two. Deliberately an application
