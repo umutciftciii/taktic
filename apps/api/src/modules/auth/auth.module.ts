@@ -35,11 +35,15 @@ import { RolesGuard } from './roles.guard';
     // cannot reach (confirmed: the draft endpoint 429'd on unrelated earlier
     // test cases a reset never touched). Sharing one options object also means
     // the base `ThrottlerGuard.canActivate` would enforce *both* named
-    // entries on every guarded route unless told otherwise — a request to any
-    // AuthThrottlerGuard route would otherwise also spend the `request-drafts`
-    // budget, and vice versa. Rather than annotate every route (and every
-    // future one) with `@SkipThrottle`, each guard class scopes itself to its
-    // own name in `onModuleInit` — see AuthThrottlerGuard and
+    // entries on every guarded route unless told otherwise. Throttler storage
+    // keys are class + handler + throttler name + tracker, so this is not
+    // shared consumption across routes — it is every AuthThrottlerGuard route
+    // silently gaining a second, independent `request-drafts` counter (and
+    // every RequestDraftThrottlerGuard route gaining an independent `auth`
+    // one) on top of the one it already enforces, an extra unrelated cap
+    // nobody asked for. Rather than annotate every route (and every future
+    // one) with `@SkipThrottle`, each guard class scopes itself to its own
+    // name in `onModuleInit` — see AuthThrottlerGuard and
     // RequestDraftThrottlerGuard.
     ThrottlerModule.forRoot([
       { name: 'auth', ttl: AUTH_THROTTLE_TTL_MS, limit: AUTH_THROTTLE_LIMIT },

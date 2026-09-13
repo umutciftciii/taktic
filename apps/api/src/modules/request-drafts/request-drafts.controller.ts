@@ -23,11 +23,14 @@ export class RequestDraftsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   // Its own named bucket on AuthModule's shared forRoot — five drafts per
-  // client per ten minutes. RequestDraftThrottlerGuard's onModuleInit (see
-  // auth.throttler.ts) narrows it to only the `request-drafts` throttler, so
-  // this route never touches the credential endpoints' `auth` budget: a
-  // browser drafting several forms must never spend the budget it would need
-  // to sign in.
+  // client per ten minutes. Throttler storage keys are class + handler +
+  // throttler name + tracker, so without scoping, this route would not share
+  // a budget with the credential endpoints — it would instead pick up a
+  // second, independent `request-drafts` counter on top of whatever `auth`
+  // check a guard already applied, an unwanted extra cap nobody asked for.
+  // RequestDraftThrottlerGuard's onModuleInit (see auth.throttler.ts) keeps
+  // only the `request-drafts` throttler for this guard, so this route
+  // enforces exactly one counter and nothing about the `auth` one.
   @UseGuards(RequestDraftThrottlerGuard)
   async create(@Body() dto: CreateRequestDraftDto, @Req() req: IncomingRequest, @Res({ passthrough: true }) res: OutgoingResponse) {
     try {

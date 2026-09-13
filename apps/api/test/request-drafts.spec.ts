@@ -92,6 +92,7 @@ describe('POST /request-drafts', () => {
     const answers = Array.from({ length: 100 }, (_, index) => ({ questionKey: `q${index}`, value: 'x'.repeat(400) }));
     const response = await post({ ...marketplace, payload: { ...marketplace.payload, answers } });
     expect(response.status).toBe(400);
+    expect(response.body.code).toBe('DRAFT_TOO_LARGE');
   });
 
   it('sets expectedUserId from the identity check and never returns it', async () => {
@@ -198,6 +199,11 @@ describe('POST /request-drafts', () => {
       .post('/auth/login')
       .send({ email: user.email, password: 'WrongPassword!' });
     expect(loginAfterDraftBudget.status).toBe(401);
+    // Discriminates the actual defect: without guard-level scoping, login
+    // would also carry (and be checked against) the unrelated request-drafts
+    // counter.
+    expect(loginAfterDraftBudget.headers['x-ratelimit-limit-request-drafts']).toBeUndefined();
+    expect(loginAfterDraftBudget.headers['x-ratelimit-limit-auth']).toBeDefined();
 
     resetAuthThrottle(ctx.app);
 
@@ -213,6 +219,8 @@ describe('POST /request-drafts', () => {
       identity: { phone: '05559990000', email: 'after-login-budget@example.test' },
     });
     expect(draftAfterLoginBudget.status).toBe(201);
+    expect(draftAfterLoginBudget.headers['x-ratelimit-limit-auth']).toBeUndefined();
+    expect(draftAfterLoginBudget.headers['x-ratelimit-limit-request-drafts']).toBeDefined();
   });
 
   it('sweeps at most 200 expired rows, at most once an hour per process', async () => {
