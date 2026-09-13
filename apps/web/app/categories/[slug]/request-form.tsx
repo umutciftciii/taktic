@@ -1,9 +1,21 @@
 'use client';
 
-import { useMemo, useRef, useState, type RefObject } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+  type RefObject,
+} from 'react';
 import type { ContactDisclosureConfig, Question, RouterSelection } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
+import type { RequestDraftPayload } from '../../../lib/request-drafts';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
+import { requestRefusalText } from '../../../lib/request-refusal-text';
+import { switchAccountAction } from '../../login/actions';
 import {
   ContactSection,
   EMPTY_ALTERNATE_CONTACT,
@@ -12,9 +24,12 @@ import {
 } from '../../request-fields/contact-section';
 import { DescriptionField } from '../../request-fields/description-field';
 import { ContactDisclosureField } from '../../request-fields/disclosure-field';
+import { useIdentityCheck } from '../../request-fields/identity-check';
+import { IdentityNotice } from '../../request-fields/identity-notice';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
 import { UrgencySelect } from '../../request-fields/timing-fields';
+import { saveMarketplaceDraftAction, type SubmitRequestResult } from '../actions';
 import { BudgetFields } from './budget-fields';
 import { ShowcaseMatches } from './showcase-matches';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
@@ -55,18 +70,47 @@ type RequestFormProps = {
    * fields are asked for, exactly as they always were.
    */
   accountContact?: AccountContact | null;
-  /** The existing server action; this component only decides what is on screen. */
-  action: (formData: FormData) => void | Promise<void>;
+  /**
+   * The server action that posts the request. It answers rather than
+   * redirects, so a refusal can be shown inline with everything the customer
+   * typed still on screen; the component navigates on success.
+   */
+  action: (formData: FormData) => Promise<SubmitRequestResult>;
+  /**
+   * A draft the customer parked before leaving to sign in or activate an
+   * account, restored into the fields. Null when there is nothing to restore.
+   */
+  initialDraft?: RequestDraftPayload | null;
+  /**
+   * The parked draft belongs to a different account than the one signed in
+   * now. The form opens empty and says so; the draft is not shown.
+   */
+  wrongAccount?: boolean;
+  /**
+   * This screen's own path, query included — what sign-in and activation are
+   * told to come back to.
+   */
+  formPath: string;
 };
 
 const STEPS = [
+  { key: 'contact', label: 'İletişim' },
   { key: 'detail', label: 'İş detayı' },
   { key: 'place', label: 'Konum & zaman' },
-  { key: 'contact', label: 'İletişim' },
 ] as const;
+
+/** Which of the two ways off the contact step a saved draft was for. */
+type DraftIntent = 'login' | 'activate';
 
 /**
  * The public request form, in the three steps the design defines.
+ *
+ * Contact comes first. A visitor's telephone number and e-mail are checked
+ * against the customer records before anything else is asked, so that
+ * somebody who already has an account is sent to sign in *before* writing the
+ * request rather than after — and what they had typed is parked as a draft and
+ * restored when they come back. A signed-in customer has a resolved identity
+ * already and walks straight through.
  *
  * Every field stays mounted for the whole flow — only the active step is shown —
  * so the single POST the server action already expects is unchanged: one form,
@@ -88,15 +132,20 @@ export function RequestForm({
   provinces,
   accountContact = null,
   action,
+  initialDraft = null,
+  wrongAccount = false,
+  formPath,
 }: RequestFormProps) {
+  const router = useRouter();
   const [step, setStep] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
+  const contactRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const placeRef = useRef<HTMLDivElement>(null);
-  const contactRef = useRef<HTMLDivElement>(null);
   const stepRefs: ReadonlyArray<RefObject<HTMLDivElement | null>> = [
+    contactRef,
     detailRef,
     placeRef,
-    contactRef,
   ];
 
   /*
@@ -130,7 +179,11 @@ export function RequestForm({
    * read it out of the DOM during a change event without seeing a dependent
    * select React has not cleared yet.
    */
-  const [place, setPlace] = useState({ city: '', district: '', neighborhood: '' });
+  const [place, setPlace] = useState({
+    city: initialDraft?.city ?? '',
+    district: initialDraft?.district ?? '',
+    neighborhood: initialDraft?.neighborhood ?? '',
+  });
 
   /*
    * Whether the customer asked to name somebody else, and what they typed.
@@ -139,6 +192,48 @@ export function RequestForm({
    */
   const [useAlternateContact, setUseAlternateContact] = useState(false);
   const [alternateContact, setAlternateContact] = useState(EMPTY_ALTERNATE_CONTACT);
+
+  /*
+   * The visitor's own three fields, controlled, because the identity pre-check
+   * has to know what was typed without reading the DOM. Never part of a draft:
+   * the number and address are what the draft is bound to, not what it holds.
+   */
+  const [guestContact, setGuestContact] = useState(EMPTY_ALTERNATE_CONTACT);
+
+  /*
+   * The gate on the contact step. A visitor's number and e-mail are checked
+   * once all three fields are filled and left; only a `new-customer` answer
+   * opens the way forward. For a signed-in customer the check is disabled and
+   * the gate stands open — their identity is the session's, already resolved.
+   */
+  const identity = useIdentityCheck({ ...guestContact, enabled: accountContact === null });
+
+  /*
+   * The two ways off the contact step for somebody who already has an account,
+   * and what parking the draft for either of them said.
+   */
+  const [draftIntent, setDraftIntent] = useState<DraftIntent | null>(null);
+  const [draftExists, setDraftExists] = useState(false);
+  const [draftError, setDraftError] = useState<'DRAFT_BUSY' | 'DRAFT_FAILED' | null>(null);
+  const [activationSent, setActivationSent] = useState(false);
+  const [draftBusy, setDraftBusy] = useState(false);
+
+  /** The API's refusal of the last submission, shown inline until the next try. */
+  const [failure, setFailure] = useState<Extract<SubmitRequestResult, { ok: false }> | null>(null);
+  const [submitting, startSubmit] = useTransition();
+  /** "Hesap değiştir" — a server action that redirects, so it runs in a transition. */
+  const [, startSwitch] = useTransition();
+
+  /*
+   * A restored draft is already in the fields when the form first renders, but
+   * nothing has fired a change event: the estimate and the conditional
+   * questions are read from the DOM once, so they reflect what came back
+   * rather than an empty form. Reading only — see `refreshSignals`.
+   */
+  const restoredDraft = initialDraft !== null;
+  useEffect(() => {
+    if (restoredDraft) refreshSignals();
+  }, [restoredDraft]);
 
   const accountContactComplete = accountContactIsComplete(accountContact);
   /**
@@ -197,7 +292,7 @@ export function RequestForm({
   const estimate = checklist.filter((item) => item.done).length * 25;
 
   function refreshSignals() {
-    const form = detailRef.current?.closest('form');
+    const form = formRef.current;
     if (!form) return;
 
     const value = (name: string) => {
@@ -252,6 +347,19 @@ export function RequestForm({
           return;
         }
       }
+
+      /*
+       * Leaving the contact step needs the gate open, not merely valid fields.
+       * Nothing on this screen can open it but the check itself — so if it has
+       * not answered yet (autofill skips blur; the customer clicked straight
+       * through), the click runs it, and the notice under the e-mail field
+       * says what happened. A visitor who must sign in is stopped here, before
+       * writing the request.
+       */
+      if (step === 0 && !identity.gateOpen) {
+        identity.check();
+        return;
+      }
     }
 
     refreshSignals();
@@ -260,8 +368,164 @@ export function RequestForm({
 
   const isLast = step === STEPS.length - 1;
 
+  /**
+   * Posts the form and shows the answer here.
+   *
+   * `onSubmit` rather than `<form action>`: a refusal has to land beside what
+   * the customer typed, with every field still holding it. The server action
+   * answers with the id on success and the component navigates.
+   */
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    // The gate stands until the check said `new-customer`; a visitor cannot
+    // reach this step otherwise, but submit is where the rule finally holds.
+    if (!identity.gateOpen) return;
+    if (submitBlocked || submitting) return;
+
+    setFailure(null);
+    startSubmit(async () => {
+      const result = await action(new FormData(form));
+      if (result.ok) {
+        // The action already cleared the draft cookie; nothing else to undo.
+        router.push(`/requests/success?id=${encodeURIComponent(result.requestId)}`);
+        return;
+      }
+      setFailure(result);
+    });
+  }
+
+  /**
+   * Parks the form before the customer leaves it. Answers whether they may go;
+   * every refusal is shown in the identity notice and nothing navigates.
+   */
+  async function saveDraft(replace: boolean): Promise<boolean> {
+    const form = formRef.current;
+    if (!form) return false;
+    setDraftBusy(true);
+    try {
+      const result = await saveMarketplaceDraftAction(new FormData(form), replace);
+      if (result.ok) {
+        setDraftExists(false);
+        setDraftError(null);
+        return true;
+      }
+      if (result.code === 'DRAFT_EXISTS') {
+        setDraftExists(true);
+      } else if (result.code === 'DRAFT_NOT_CONTINUABLE') {
+        // The customer record changed under us; ask again and act on the new answer.
+        identity.check();
+      } else {
+        setDraftError(result.code);
+      }
+      return false;
+    } catch {
+      setDraftError('DRAFT_FAILED');
+      return false;
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  /** A full navigation on purpose: sign-in sets a cookie and this page re-reads the draft. */
+  function goToLogin() {
+    window.location.assign(`/login?redirectTo=${encodeURIComponent(formPath)}`);
+  }
+
+  /**
+   * Asks for the activation link. The proxy answers 202 whatever it found — a
+   * form that could tell "sent" from "no such account" would be an oracle for
+   * which numbers have an account — so "sent" is what the customer sees.
+   */
+  async function sendActivation() {
+    setDraftBusy(true);
+    try {
+      await fetch('/api/auth/request-identity-check/activate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          phone: guestContact.phone.trim(),
+          email: guestContact.email.trim(),
+          redirectTo: formPath,
+        }),
+      });
+      setActivationSent(true);
+    } catch {
+      setDraftError('DRAFT_FAILED');
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  /** Continues with whatever the draft was parked for. */
+  async function continueAfterDraft(intent: DraftIntent) {
+    if (intent === 'login') goToLogin();
+    else await sendActivation();
+  }
+
+  async function onLogin() {
+    setDraftIntent('login');
+    if (await saveDraft(false)) goToLogin();
+  }
+
+  async function onActivate() {
+    setDraftIntent('activate');
+    if (await saveDraft(false)) await sendActivation();
+  }
+
+  /** "Evet, geç": the earlier draft gives way to this one, then the same road. */
+  async function onReplaceDraft() {
+    const intent = draftIntent ?? 'login';
+    if (await saveDraft(true)) await continueAfterDraft(intent);
+  }
+
+  /** "Vazgeç": the earlier draft stays as it is; nothing here is saved or sent. */
+  function onKeepDraft() {
+    setDraftExists(false);
+    setDraftIntent(null);
+  }
+
+  /*
+   * "Hesap değiştir": ends the session and returns to sign-in, this form as
+   * the destination. A server action, so the sign-out is a POST. The parked
+   * draft is left alone — it is the other account's to continue.
+   */
+  function onChangeAccount() {
+    startSwitch(async () => {
+      await switchAccountAction(formPath);
+    });
+  }
+
+  const identityBusy = draftBusy || submitting;
+  const noticeProps = {
+    status: identity.status,
+    onRetry: () => {
+      setDraftError(null);
+      if (draftError && draftIntent) {
+        // The retry after a failed park repeats the same road.
+        if (draftIntent === 'login') void onLogin();
+        else void onActivate();
+        return;
+      }
+      identity.retry();
+    },
+    onLogin,
+    onActivate,
+    activationSent,
+    draftError,
+    draftExists,
+    onReplaceDraft: () => void onReplaceDraft(),
+    onKeepDraft,
+    onChangeAccount,
+    busy: identityBusy,
+  };
+
+  /** A saved draft's answer for one question, when there is one. */
+  const draftAnswer = (questionKey: string) =>
+    initialDraft?.answers?.find((answer) => answer.questionKey === questionKey)?.value;
+
   return (
-    <form action={action} className="form-card" onChange={refreshSignals}>
+    <form ref={formRef} onSubmit={handleSubmit} className="form-card" onChange={refreshSignals}>
       {/*
         The category the request is posted under is the *entry* one. For an
         ordinary service that is this leaf and nothing changed; for a routed
@@ -299,11 +563,71 @@ export function RequestForm({
             ))}
           </div>
 
+          {/*
+            The parked draft belongs to another account: said once, above the
+            steps, with the way to the right account. The form below is empty.
+          */}
+          {wrongAccount ? <IdentityNotice {...noticeProps} wrongAccount /> : null}
+
+          {/*
+            The API's refusal of the last submission — a conflict on the contact
+            fields, a validation message — inline and above the steps, with every
+            field still holding what was typed.
+          */}
+          {failure ? (
+            <div className="notice cdash-notice-error" role="alert" data-testid="request-submit-error">
+              {requestRefusalText(failure)}
+            </div>
+          ) : null}
+
+          <div
+            id="request-step-contact"
+            ref={contactRef}
+            className="step-panel"
+            hidden={step !== 0}
+          >
+            <section className="form-section">
+              <h2>İletişim</h2>
+
+              <ContactSection
+                accountContact={accountContact}
+                useAlternateContact={useAlternateContact}
+                onUseAlternateContactChange={setUseAlternateContact}
+                alternateContact={alternateContact}
+                onAlternateContactChange={setAlternateContact}
+                guestContact={guestContact}
+                onGuestContactChange={setGuestContact}
+                onContactBlur={identity.check}
+                identityNotice={<IdentityNotice {...noticeProps} wrongAccount={false} />}
+              />
+
+              {/*
+                Telefon doğrulaması talep oluşturulduktan sonra, talebin kendi
+                ekranında yapılır: kod bir talep kaydına gönderilir. Burada
+                yalnızca ne olacağı anlatılır — çalışmayan bir kutu konmaz.
+              */}
+              <div className="verify-well">
+                <span className="cdash-summary-label">Telefon doğrulama</span>
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  Talebinizi gönderdikten sonra talep ekranınızdan telefonunuza doğrulama kodu
+                  isteyebilirsiniz. Doğrulama, talebinizin doğru kişiye ulaştığını teyit eder.
+                </p>
+              </div>
+            </section>
+
+            {showDisclosure ? (
+              <section className="form-section">
+                <h2>Bilgilendirme</h2>
+                <ContactDisclosureField disclosure={disclosure} />
+              </section>
+            ) : null}
+          </div>
+
           <div
             id="request-step-detail"
             ref={detailRef}
             className="step-panel"
-            hidden={step !== 0}
+            hidden={step !== 1}
           >
             {answerableQuestions.length > 0 ? (
               <section className="form-section">
@@ -313,14 +637,21 @@ export function RequestForm({
                   yanıtlayın.
                 </p>
                 {answerableQuestions.map((question) => (
-                  <RequestField key={question.id} question={question} />
+                  <RequestField
+                    key={question.id}
+                    question={question}
+                    defaultValue={draftAnswer(question.key)}
+                  />
                 ))}
               </section>
             ) : null}
 
             <section className="form-section">
               <h2>İş açıklaması</h2>
-              <DescriptionField question={descriptionQuestion} />
+              <DescriptionField
+                question={descriptionQuestion}
+                defaultValue={initialDraft?.description}
+              />
             </section>
           </div>
 
@@ -328,12 +659,13 @@ export function RequestForm({
             id="request-step-place"
             ref={placeRef}
             className="step-panel"
-            hidden={step !== 1}
+            hidden={step !== 2}
           >
             <section className="form-section">
               <h2>Konum</h2>
               <LocationFields
                 provinces={provinces}
+                initialValue={initialDraft ?? undefined}
                 onChange={(value) => {
                   setPlace(value);
                   refreshSignals();
@@ -343,7 +675,11 @@ export function RequestForm({
               />
               <label className="form-row">
                 <span>Adres notu</span>
-                <textarea name="addressNote" placeholder="Ek bilgi / yol tarifi" />
+                <textarea
+                  name="addressNote"
+                  placeholder="Ek bilgi / yol tarifi"
+                  defaultValue={initialDraft?.addressNote}
+                />
               </label>
             </section>
 
@@ -369,7 +705,7 @@ export function RequestForm({
             <section className="form-section">
               <h2>Zaman ve bütçe</h2>
               <div className="form-grid">
-                <UrgencySelect />
+                <UrgencySelect defaultValue={initialDraft?.urgency} />
                 <label className="form-row">
                   <span>
                     {preferredDateQuestion?.label ?? 'Tercih edilen tarih'}
@@ -379,6 +715,7 @@ export function RequestForm({
                     name="preferredDate"
                     type="date"
                     required={preferredDateQuestion?.isRequired ?? false}
+                    defaultValue={initialDraft?.preferredDate}
                     data-testid="request-preferred-date"
                   />
                   {preferredDateQuestion?.helpText ? (
@@ -390,48 +727,11 @@ export function RequestForm({
                   required={budgetQuestion?.isRequired ?? false}
                   minHelpText={budgetQuestion?.helpText}
                   onChange={refreshSignals}
+                  defaultMin={initialDraft?.budgetMin}
+                  defaultMax={initialDraft?.budgetMax}
                 />
               </div>
             </section>
-          </div>
-
-          <div
-            id="request-step-contact"
-            ref={contactRef}
-            className="step-panel"
-            hidden={step !== 2}
-          >
-            <section className="form-section">
-              <h2>İletişim</h2>
-
-              <ContactSection
-                accountContact={accountContact}
-                useAlternateContact={useAlternateContact}
-                onUseAlternateContactChange={setUseAlternateContact}
-                alternateContact={alternateContact}
-                onAlternateContactChange={setAlternateContact}
-              />
-
-              {/*
-                Telefon doğrulaması talep oluşturulduktan sonra, talebin kendi
-                ekranında yapılır: kod bir talep kaydına gönderilir. Burada
-                yalnızca ne olacağı anlatılır — çalışmayan bir kutu konmaz.
-              */}
-              <div className="verify-well">
-                <span className="cdash-summary-label">Telefon doğrulama</span>
-                <p style={{ margin: 0, fontSize: 13 }}>
-                  Talebinizi gönderdikten sonra talep ekranınızdan telefonunuza doğrulama kodu
-                  isteyebilirsiniz. Doğrulama, talebinizin doğru kişiye ulaştığını teyit eder.
-                </p>
-              </div>
-            </section>
-
-            {showDisclosure ? (
-              <section className="form-section">
-                <h2>Bilgilendirme</h2>
-                <ContactDisclosureField disclosure={disclosure} />
-              </section>
-            ) : null}
           </div>
 
           <div className="step-foot">
@@ -479,22 +779,30 @@ export function RequestForm({
                 key="submit"
                 className="btn btn-primary"
                 type="submit"
-                disabled={submitBlocked}
+                disabled={submitBlocked || submitting}
+                aria-busy={submitting || undefined}
                 title={
                   submitBlocked
                     ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
                     : undefined
                 }
               >
-                Talebi Gönder
+                {submitting ? 'Gönderiliyor…' : 'Talebi Gönder'}
                 <IconArrowRight />
               </button>
             ) : (
+              /*
+                Off the contact step only through the gate — see `goTo`. Held
+                while the check is in flight so a second click cannot start a
+                second one; a click before any check runs the first.
+              */
               <button
                 key="next"
                 type="button"
                 className="btn btn-primary"
                 onClick={() => goTo(step + 1)}
+                disabled={step === 0 && identity.status === 'checking'}
+                aria-disabled={step === 0 && !identity.gateOpen ? true : undefined}
               >
                 Devam et
                 <IconArrowRight />

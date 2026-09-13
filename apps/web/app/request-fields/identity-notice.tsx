@@ -13,7 +13,12 @@ type Props = {
   onReplaceDraft: () => void;
   onKeepDraft: () => void;
   wrongAccount: boolean;
-  changeAccountHref: string;
+  /**
+   * "Hesap değiştir": ends the session and returns to sign-in with the form
+   * as the destination. A callback rather than a link because signing out is
+   * a POST — the form wires it to a server action.
+   */
+  onChangeAccount: () => void | Promise<void>;
   busy: boolean;
 };
 
@@ -22,7 +27,7 @@ export function IdentityNotice(p: Props) {
     return (
       <div className="notice cdash-notice-error identity-notice" role="alert" data-testid="identity-wrong-account">
         <span>Bu talebe devam etmek için iletişim bilgilerine bağlı hesabınızla giriş yapın.</span>
-        <a className="btn btn-secondary" href={p.changeAccountHref}>Hesap değiştir</a>
+        <button type="button" className="btn btn-secondary" onClick={() => void p.onChangeAccount()} disabled={p.busy} data-testid="identity-change-account-cta">Hesap değiştir</button>
       </div>
     );
   }

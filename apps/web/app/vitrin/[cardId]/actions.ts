@@ -1,7 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { ApiError, apiFetch } from '../../../lib/api';
+import { apiFetch } from '../../../lib/api';
+import { describeApiRefusal } from '../../../lib/api-refusal';
 import { buildServiceRequestPayload, readFormString } from '../../../lib/service-request-payload';
 
 /**
@@ -49,13 +50,6 @@ export type LeadActionResult =
       message: string | null;
     };
 
-/**
- * The code every refusal without a more specific one is reported under. Not
- * exported: a 'use server' module may only export async functions, so the
- * component spells the same string in its own error table.
- */
-const SHOWCASE_LEAD_FAILED = 'SHOWCASE_LEAD_FAILED';
-
 export async function startShowcaseLeadVerificationAction(
   phone: string,
 ): Promise<LeadActionResult> {
@@ -65,7 +59,7 @@ export async function startShowcaseLeadVerificationAction(
       body: JSON.stringify({ phone: phone.trim() }),
     });
   } catch (error) {
-    return describeFailure('lead-verification', error);
+    return describeApiRefusal('vitrin/lead-verification', error);
   }
 
   return { ok: true };
@@ -81,7 +75,7 @@ export async function confirmShowcaseLeadVerificationAction(
       body: JSON.stringify({ phone: phone.trim(), code: code.trim() }),
     });
   } catch (error) {
-    return describeFailure('lead-verification/verify', error);
+    return describeApiRefusal('vitrin/lead-verification/verify', error);
   }
 
   return { ok: true };
@@ -117,61 +111,8 @@ export async function createShowcaseLeadAction(formData: FormData): Promise<Lead
       }),
     });
   } catch (error) {
-    return describeFailure(`cards/${cardId}/leads`, error);
+    return describeApiRefusal(`vitrin/cards/${cardId}/leads`, error);
   }
 
   redirect(`/vitrin/${encodeURIComponent(cardId)}?sent=1`);
-}
-
-/**
- * Turns an API refusal into what the component shows and what the log keeps.
- *
- * The API answers two ways. Its own refusals carry a `code` and a sentence
- * written for the customer (`SHOWCASE_LEAD_AREA_NOT_SERVED`, …). A body the DTO
- * refuses carries no code, only class-validator's messages — and the old flow
- * folded those into the generic code, which is how a free-text district became
- * "Talebiniz gönderilemedi" with nothing in any log to say why. Now a 4xx
- * message reaches the customer, and status, code and message reach the server
- * log. Neither carries what the customer typed.
- */
-function describeFailure(step: string, error: unknown): LeadActionResult {
-  if (!(error instanceof ApiError)) {
-    console.error(`[vitrin lead] ${step}: unexpected failure`, error);
-    return { ok: false, code: SHOWCASE_LEAD_FAILED, message: null };
-  }
-
-  let code: string | null = null;
-  let message: string | null = null;
-
-  try {
-    const parsed = JSON.parse(error.body) as { code?: unknown; message?: unknown };
-    if (typeof parsed.code === 'string') {
-      code = parsed.code;
-    }
-    // Nest's own exceptions carry a string; the ValidationPipe carries a list.
-    const raw = Array.isArray(parsed.message) ? parsed.message[0] : parsed.message;
-    if (typeof raw === 'string' && raw.trim()) {
-      message = raw.trim();
-    }
-  } catch {
-    // Not JSON, or JSON with neither.
-  }
-
-  console.error(
-    `[vitrin lead] ${step}: API refused with ${error.status}` +
-      ` code=${code ?? '-'} message=${JSON.stringify(message ?? '-')}`,
-  );
-
-  // Only a refusal the API worded for the client is shown as-is; a 5xx body is
-  // not a sentence for a customer.
-  const userFacing = error.status >= 400 && error.status < 500;
-
-  // The one refusal that carries no code but has a fixed meaning here: a
-  // PROVIDER session cannot open a lead. Named so the form can say so in
-  // Turkish rather than relay the API's English sentence.
-  if (!code && error.status === 403) {
-    return { ok: false, code: 'SHOWCASE_LEAD_FORBIDDEN', message: null };
-  }
-
-  return { ok: false, code: code ?? SHOWCASE_LEAD_FAILED, message: userFacing ? message : null };
 }
