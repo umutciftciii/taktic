@@ -146,15 +146,17 @@ export class RequestDraftsService {
    * Bounded, throttled physical cleanup. Expired rows are already logically
    * dead; this only reclaims the storage.
    *
-   * The per-hour cooldown is set only when a sweep actually finds work. An
-   * empty sweep is as cheap as the cooldown check itself (one indexed query),
-   * so there is nothing to protect by locking the window on a no-op — and
-   * locking it anyway would let a create() on an already-clean table (the
-   * common case) spend the hour's one sweep for nothing.
+   * The cooldown is set synchronously, before the first `await` — single-
+   * flight: two overlapping callers (an opportunistic call from create() and
+   * a concurrent one from another request) must not both pass the check and
+   * both run the query, even though the very first ever call finds nothing to
+   * delete. Locking the window on an empty result is deliberate, not a
+   * missed optimisation.
    */
   async sweepExpired(): Promise<number> {
     const now = Date.now();
     if (now - this.lastSweepAt < REQUEST_DRAFT_SWEEP_INTERVAL_MS) return 0;
+    this.lastSweepAt = now;
     const victims = await this.prisma.requestDraft.findMany({
       where: { expiresAt: { lt: new Date(now) } },
       select: { id: true },
@@ -162,7 +164,6 @@ export class RequestDraftsService {
       take: REQUEST_DRAFT_SWEEP_BATCH,
     });
     if (victims.length === 0) return 0;
-    this.lastSweepAt = now;
     const result = await this.prisma.requestDraft.deleteMany({ where: { id: { in: victims.map((v) => v.id) } } });
     return result.count;
   }

@@ -1,5 +1,4 @@
 import { Body, Controller, HttpCode, HttpStatus, Inject, Logger, Post, UseGuards } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { AuthThrottlerGuard } from './auth.throttler';
 import { RequestIdentityActivateDto, RequestIdentityCheckDto } from './dto/request-identity.dto';
@@ -10,10 +9,6 @@ import { RequestIdentityService } from './request-identity.service';
  * account. Session-less and rate limited: the answer is one of five product
  * states and carries nothing about the account itself.
  */
-// See AuthController: opts this controller's AuthThrottlerGuard routes out of
-// the unrelated request-drafts budget registered alongside `auth` on
-// AuthModule's forRoot.
-@SkipThrottle({ 'request-drafts': true })
 @Controller('auth/request-identity-check')
 export class RequestIdentityController {
   private readonly logger = new Logger(RequestIdentityController.name);

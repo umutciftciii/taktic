@@ -1,12 +1,10 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpException, HttpStatus, Inject, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
-import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../auth/auth.decorators';
 import { OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { CreateRequestDraftDto, CurrentRequestDraftQueryDto } from './dto/create-request-draft.dto';
 import { getDraftTokenFromRequest } from './request-draft.cookie';
 import { RequestDraftThrottlerGuard } from './request-draft.throttler';
-import { REQUEST_DRAFT_THROTTLE_LIMIT, REQUEST_DRAFT_THROTTLE_TTL_MS } from './request-drafts.constants';
 import { RequestDraftsService } from './request-drafts.service';
 
 type IncomingRequest = { headers?: Record<string, string | string[] | undefined> };
@@ -24,13 +22,13 @@ export class RequestDraftsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  // Its own named bucket on AuthModule's shared forRoot — five drafts per
+  // client per ten minutes. RequestDraftThrottlerGuard's onModuleInit (see
+  // auth.throttler.ts) narrows it to only the `request-drafts` throttler, so
+  // this route never touches the credential endpoints' `auth` budget: a
+  // browser drafting several forms must never spend the budget it would need
+  // to sign in.
   @UseGuards(RequestDraftThrottlerGuard)
-  // Its own named bucket on AuthModule's shared forRoot (see the comment
-  // there) — five drafts per client per ten minutes — and explicitly not the
-  // credential endpoints' one: a browser drafting several forms must never
-  // spend the budget it would need to sign in.
-  @Throttle({ 'request-drafts': { limit: REQUEST_DRAFT_THROTTLE_LIMIT, ttl: REQUEST_DRAFT_THROTTLE_TTL_MS } })
-  @SkipThrottle({ auth: true })
   async create(@Body() dto: CreateRequestDraftDto, @Req() req: IncomingRequest, @Res({ passthrough: true }) res: OutgoingResponse) {
     try {
       return await this.drafts.create(

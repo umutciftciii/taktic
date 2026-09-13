@@ -1,4 +1,4 @@
-import { CustomerOrigin, UserRole } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestApp, createUser, loginAs, resetAuthThrottle, resetDatabase, type TestContext } from './harness';
@@ -86,7 +86,11 @@ describe('POST /request-drafts', () => {
   });
 
   it('refuses a payload over 32 KB', async () => {
-    const response = await post({ ...marketplace, payload: { ...marketplace.payload, description: 'x'.repeat(33 * 1024) } });
+    // Exceeds the 32 KB ceiling through `answers`, not through `description`'s
+    // own @MaxLength(20_000) — this must fail on the service's byte-size
+    // check, not incidentally pass DTO validation for the wrong reason.
+    const answers = Array.from({ length: 100 }, (_, index) => ({ questionKey: `q${index}`, value: 'x'.repeat(400) }));
+    const response = await post({ ...marketplace, payload: { ...marketplace.payload, answers } });
     expect(response.status).toBe(400);
   });
 
@@ -179,8 +183,47 @@ describe('POST /request-drafts', () => {
     }
   });
 
+  it('scopes AuthThrottlerGuard and RequestDraftThrottlerGuard to their own named budget', async () => {
+    // Exhausting the draft budget must not spend a caller's login budget: a
+    // browser drafting several forms can still sign in right after.
+    for (let index = 0; index < 5; index += 1) {
+      const response = await post({
+        ...marketplace,
+        identity: { phone: `0555500${String(index).padStart(4, '0')}`, email: `budget-${index}@example.test` },
+      });
+      expect(response.status).toBe(201);
+    }
+    const user = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, password: 'Password123!' });
+    const loginAfterDraftBudget = await request(ctx.server)
+      .post('/auth/login')
+      .send({ email: user.email, password: 'WrongPassword!' });
+    expect(loginAfterDraftBudget.status).toBe(401);
+
+    resetAuthThrottle(ctx.app);
+
+    // And the reverse: exhausting the login budget must not touch drafting.
+    for (let index = 0; index < 5; index += 1) {
+      const response = await request(ctx.server)
+        .post('/auth/login')
+        .send({ email: user.email, password: 'WrongPassword!' });
+      expect(response.status).toBe(401);
+    }
+    const draftAfterLoginBudget = await post({
+      ...marketplace,
+      identity: { phone: '05559990000', email: 'after-login-budget@example.test' },
+    });
+    expect(draftAfterLoginBudget.status).toBe(201);
+  });
+
   it('sweeps at most 200 expired rows, at most once an hour per process', async () => {
     const service = ctx.app.get(RequestDraftsService);
+    // This suite shares one app across every case, and any earlier successful
+    // create() has already kicked off its own opportunistic background sweep
+    // (see request-drafts.service.ts) — which sets the hourly cooldown even
+    // when it finds nothing expired to delete, by design (single-flight
+    // against concurrent callers). Reset it here so this test observes a
+    // clean cooldown rather than one a prior case already spent.
+    (service as unknown as { lastSweepAt: number }).lastSweepAt = 0;
     const past = new Date(Date.now() - 60_000);
     await ctx.prisma.requestDraft.createMany({
       data: Array.from({ length: 250 }, (_, index) => ({
