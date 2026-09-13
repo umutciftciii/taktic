@@ -13,7 +13,13 @@ import {
   type SeededCategory,
 } from '../src/fixtures';
 import { expectIdentityGateOpen, settleIdentityGate } from '../src/journeys';
-import { emailCountFor, smsEntriesFor, waitForLatestActivationUrl, waitForLatestSmsCode } from '../src/outbox';
+import {
+  emailCountFor,
+  emailEntriesFor,
+  smsEntriesFor,
+  waitForLatestActivationUrl,
+  waitForLatestSmsCode,
+} from '../src/outbox';
 import { primaryRuntime } from '../src/runtime';
 import { seedApprovedShowcaseCard, seedLiveShowcasePlacement, showcaseAreaKey } from '../src/showcase-fixtures';
 
@@ -583,13 +589,21 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
         await expect(wrongAccount).toContainText(
           'Bu talebe devam etmek için iletişim bilgilerine bağlı hesabınızla giriş yapın.',
         );
-        // The form is theirs and empty: nothing of the draft is shown to them.
+        // The form is theirs and empty: nothing of the draft is shown to them,
+        // and nothing can be sent from this session as it stands.
         if (kind === 'showcase') {
           await expect(visitor.page.getByLabel('Açıklama *')).toHaveValue('');
           await expect(visitor.page.getByTestId('request-district')).toHaveValue('');
           await expect(visitor.page.getByTestId('showcase-urgency-urgent')).not.toBeChecked();
+          await expect(visitor.page.getByTestId('showcase-lead-submit')).toBeDisabled();
         } else {
           await expect(visitor.page.getByTestId('account-contact-email')).toHaveText(other.email);
+          await expect(
+            visitor.page.locator('form.form-card textarea[name="description"]'),
+          ).toHaveValue('');
+          await expect(visitor.page.locator('form.form-card select[name="district"]')).toHaveValue('');
+          await expect(visitor.page.getByTestId('request-submit-error')).toHaveCount(0);
+          await expect(visitor.page).not.toHaveURL(/\/requests\/success/);
         }
         // And the row is exactly as it was: still the owner's, bound to nobody.
         const untouched = await prisma().requestDraft.findUniqueOrThrow({ where: { id: draft.id } });
@@ -664,7 +678,9 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
 
         const activationUrl = await waitForLatestActivationUrl(claimable.email);
         expect(emailCountFor(claimable.email, 'customer-activation')).toBe(mailsBefore + 1);
-        expect(emailCountFor(typedEmail, 'customer-activation')).toBe(0);
+        // The address typed into the form receives nothing at all — not the
+        // activation link, not any other message.
+        expect(emailEntriesFor(typedEmail)).toHaveLength(0);
         expect(new URL(activationUrl).searchParams.get('redirectTo')).toBe(back);
 
         // The link, as from an inbox: a password, then straight back to the form, signed in.

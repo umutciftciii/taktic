@@ -189,6 +189,18 @@ export function prisma(): PrismaClient {
  * Widened rather than worked around both times, which is what the allocator's
  * own refusal message asks for: four is still more parallelism than this suite
  * has ever been run with, and the ceiling per worker doubles again.
+ *
+ * What four costs, stated plainly. Blocks are indexed by TEST_WORKER_INDEX,
+ * and Playwright numbers every worker process it starts across one run — one
+ * per project, plus one for each retry restart — so a run now survives four
+ * worker processes before `has no location block`, where it survived eight:
+ * chromium (0), webkit (1) and two retry restarts. Enough for how this suite
+ * is run today (one project per invocation, `retries: 1` in CI), but the
+ * ceiling moved from "never" to "a bad day". The permanent fix is the other
+ * direction: fewer unique districts per test. A scenario that does not need
+ * a distinct card area — most of the marketplace identity-gate scenarios,
+ * whose district is only what the request is posted with — can share one
+ * location instead of allocating its own.
  */
 export const LOCATION_WORKER_BLOCKS = 4;
 
