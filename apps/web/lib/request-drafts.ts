@@ -3,7 +3,6 @@
 import { cookies } from 'next/headers';
 import { apiUrl } from '../app/api-base';
 import { appCookieOptions } from '../app/session-cookie';
-import { apiFetch } from './api';
 import { clientForwardingHeaders } from './forwarded-for';
 import { decodeRouterSelections } from './request-flow';
 import { readFormString, readOptionalFormString } from './service-request-payload';
@@ -85,16 +84,44 @@ export async function saveRequestDraftAction(input: {
   return { ok: true };
 }
 
-export async function discardRequestDraftAction(): Promise<void> {
+/**
+ * "Vazgeç" on a form that opened a draft. The API deletes the row only when
+ * it is the one this form showed — same key, and anonymous or the session's
+ * own (see `RequestDraftsService.discard`) — and answers `{ deleted }`. The
+ * cookie goes only on `deleted: true`: a cookie that still names a live row
+ * (somebody else's protected draft, another form's) is that row's only way
+ * back and is kept. A plain `fetch`, not `apiFetch`: the reply is read here
+ * and a transport failure is a `false`, never an error page.
+ */
+export async function discardRequestDraftAction(key: {
+  formType: DraftFormType;
+  categorySlug: string;
+  cardId?: string | null;
+}): Promise<{ deleted: boolean }> {
   const cookieStore = await cookies();
-  if (cookieStore.get(COOKIE_NAME)) {
-    try {
-      await apiFetch('/request-drafts/current', { method: 'DELETE' });
-    } catch {
-      /* best effort */
+  if (!cookieStore.get(COOKIE_NAME)) return { deleted: false };
+  const query = new URLSearchParams({
+    formType: key.formType,
+    categorySlug: key.categorySlug,
+    ...(key.cardId ? { cardId: key.cardId } : {}),
+  });
+  let deleted = false;
+  try {
+    const response = await fetch(`${apiUrl}/request-drafts/current?${query}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+      headers: { cookie: cookieStore.toString() },
+    });
+    if (response.ok) {
+      deleted = ((await response.json()) as { deleted?: boolean }).deleted === true;
+    } else {
+      console.error(`[request draft] discard refused with ${response.status}`);
     }
+  } catch (error) {
+    console.error('[request draft] discard failed', error);
   }
-  await clearRequestDraftCookie();
+  if (deleted) await clearRequestDraftCookie();
+  return { deleted };
 }
 
 export async function clearRequestDraftCookie(): Promise<void> {

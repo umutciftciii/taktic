@@ -71,9 +71,26 @@ export class RequestDraftsController {
     return result.kind === 'payload' ? { payload: result.payload } : { status: 'wrong-account' };
   }
 
+  /**
+   * "Vazgeç" on a form that opened a draft. Keyed and guarded exactly like
+   * GET: the row goes only when it is the one this form showed — same
+   * key, and anonymous or the session's own. A wrong account, another form's
+   * cookie or a bare token deletes nothing. Always 200 with `{ deleted }`, so
+   * the web knows whether the cookie it holds still names a live row.
+   */
   @Delete('current')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async discard(@Req() req: IncomingRequest) {
-    await this.drafts.discard(getDraftTokenFromRequest(req));
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(OptionalAuthGuard)
+  async discard(
+    @Query() query: CurrentRequestDraftQueryDto,
+    @CurrentUser() user: AuthUser | null,
+    @Req() req: IncomingRequest,
+  ): Promise<{ deleted: boolean }> {
+    const deleted = await this.drafts.discard(
+      getDraftTokenFromRequest(req),
+      { formType: query.formType, categorySlug: query.categorySlug, cardId: query.cardId ?? null },
+      user?.id ?? null,
+    );
+    return { deleted };
   }
 }

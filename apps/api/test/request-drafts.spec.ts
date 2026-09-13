@@ -337,15 +337,83 @@ describe('foreign keys', () => {
   });
 });
 
+/**
+ * "Vazgeç": keyed and guarded like GET. The row goes only when it is the one
+ * the form showed — same key, and anonymous or the session's own — and the
+ * answer says whether it went, so the web clears its cookie only for a row
+ * that is really gone.
+ */
 describe('DELETE /request-drafts/current', () => {
-  it('removes the draft the cookie names and nothing else', async () => {
+  function del(query: Record<string, string>, cookie?: string, session?: string) {
+    const cookies = [cookie ? `${COOKIE}=${cookie}` : null, session ?? null].filter(Boolean).join('; ');
+    const req = request(ctx.server).delete('/request-drafts/current').query(query);
+    return cookies ? req.set('Cookie', cookies) : req;
+  }
+
+  it('removes the anonymous draft the cookie names and nothing else', async () => {
     const mine = await post(marketplace);
     const other = await request(ctx.server).post('/request-drafts').send({ ...marketplace, identity: { phone: '05554440008', email: 'eight@example.test' } });
 
-    const response = await request(ctx.server).delete('/request-drafts/current').set('Cookie', `${COOKIE}=${mine.body.token}`);
-    expect(response.status).toBe(204);
+    const response = await del(mpQuery, mine.body.token);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ deleted: true });
     expect(await ctx.prisma.requestDraft.count()).toBe(1);
     expect((await get(mpQuery, other.body.token)).status).toBe(200);
+
+    // Gone is gone: the same call again deletes nothing and says so.
+    const again = await del(mpQuery, mine.body.token);
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual({ deleted: false });
+  });
+
+  it('requires the query and leaves the row alone without it', async () => {
+    const mine = await post(marketplace);
+    const response = await request(ctx.server).delete('/request-drafts/current').set('Cookie', `${COOKIE}=${mine.body.token}`);
+    expect(response.status).toBe(400);
+    expect(await ctx.prisma.requestDraft.count()).toBe(1);
+  });
+
+  it('leaves the row when the key is another form’s', async () => {
+    const mine = await post(marketplace);
+    const response = await del(scQuery, mine.body.token);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ deleted: false });
+    expect(await ctx.prisma.requestDraft.count()).toBe(1);
+    expect((await get(mpQuery, mine.body.token)).status).toBe(200);
+  });
+
+  it('leaves a protected draft when the wrong account, or nobody, asks', async () => {
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'draft@example.test' });
+    const stranger = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const created = await post(marketplace);
+    const before = await ctx.prisma.requestDraft.findFirstOrThrow();
+
+    const anonymous = await del(mpQuery, created.body.token);
+    expect(anonymous.status).toBe(200);
+    expect(anonymous.body).toEqual({ deleted: false });
+
+    const wrong = await del(mpQuery, created.body.token, await loginAs(ctx.prisma, stranger.id));
+    expect(wrong.status).toBe(200);
+    expect(wrong.body).toEqual({ deleted: false });
+
+    const after = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(after.id).toBe(before.id);
+    expect(after.expectedUserId).toBe(owner.id);
+    expect(after.consumedAt).toBeNull();
+
+    // The owner, on the same browser: theirs to discard.
+    const own = await del(mpQuery, created.body.token, await loginAs(ctx.prisma, owner.id));
+    expect(own.status).toBe(200);
+    expect(own.body).toEqual({ deleted: true });
+    expect(await ctx.prisma.requestDraft.count()).toBe(0);
+  });
+
+  it('deletes nothing without a cookie', async () => {
+    await post(marketplace);
+    const response = await del(mpQuery);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ deleted: false });
+    expect(await ctx.prisma.requestDraft.count()).toBe(1);
   });
 });
 

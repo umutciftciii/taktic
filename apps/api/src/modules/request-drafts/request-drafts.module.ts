@@ -15,8 +15,11 @@ import { RequestDraftsService } from './request-drafts.service';
  * `resetAuthThrottle` never touches (proven by the draft endpoint 429ing on
  * its 6th call across unrelated test cases that never reset between them).
  * The draft budget is instead a second named throttler on AuthModule's one
- * `forRoot` — see auth.module.ts and request-drafts.controller.ts's
- * `@Throttle`/`@SkipThrottle` pair.
+ * `forRoot` — see auth.module.ts. Which guard enforces which named throttler
+ * is decided in the guards themselves: `RequestDraftThrottlerGuard` (and its
+ * sibling `AuthThrottlerGuard`) filter `this.throttlers` down to their own
+ * name in `onModuleInit`, so each route carries exactly one counter — no
+ * `@Throttle`/`@SkipThrottle` decorators are involved.
  */
 @Module({
   imports: [PrismaModule, AuthModule],

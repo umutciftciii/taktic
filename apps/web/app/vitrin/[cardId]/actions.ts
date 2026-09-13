@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../../lib/api';
 import { describeApiRefusal } from '../../../lib/api-refusal';
+import { draftConsumedBySubmission, readDraftState } from '../../../lib/draft-state';
 import {
   clearRequestDraftCookie,
   draftPayloadFromForm,
@@ -120,10 +121,15 @@ export async function createShowcaseLeadAction(formData: FormData): Promise<Lead
     return describeApiRefusal(`vitrin/cards/${cardId}/leads`, error);
   }
 
-  // The API consumed the draft inside the lead's own transaction; only the
-  // browser's cookie is left to clear, and it goes before the redirect so the
-  // card page the customer lands on does not read a token for a row that is gone.
-  await clearRequestDraftCookie();
+  // The API consumed the draft inside the lead's own transaction — when the
+  // draft was this form's to consume — and the cookie goes before the redirect
+  // so the card page the customer lands on does not read a token for a row
+  // that is gone. A draft protected for another account (`wrong-account`), or
+  // one this form never opened, was left alone by the API and keeps its
+  // cookie for the account it belongs to; see lib/draft-state.ts.
+  if (draftConsumedBySubmission(readDraftState(formData))) {
+    await clearRequestDraftCookie();
+  }
   redirect(`/vitrin/${encodeURIComponent(cardId)}?sent=1`);
 }
 

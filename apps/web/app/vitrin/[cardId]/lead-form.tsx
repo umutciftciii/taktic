@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from 'react';
 import type { ContactDisclosureConfig, Question, ShowcaseFeedCard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { DRAFT_STATE_FIELD, draftStateFor } from '../../../lib/draft-state';
 import { discardRequestDraftAction, type RequestDraftPayload } from '../../../lib/request-drafts';
 import { boundQuestion, visibleQuestions } from '../../../lib/request-flow';
 import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../../../lib/request-refusal-text';
@@ -419,18 +420,23 @@ export function ShowcaseLeadForm({
   }
 
   /*
-   * "Vazgeç" under the form: the explicit way out. Whatever draft this card
-   * held is discarded on the server and the cookie dropped, then back to the
-   * card's own page. Distinct from the keep-draft "Vazgeç" above, which
-   * discards nothing.
+   * "Vazgeç" under the form: the explicit way out. The draft this form
+   * actually opened — and only that one — is discarded on the server and its
+   * cookie dropped, then back to the card's own page. A form that opened no
+   * draft (nothing parked, or a draft protected for another account) just
+   * leaves: the row the cookie names is not this form's to delete, and the
+   * API would refuse anyway. Distinct from the keep-draft "Vazgeç" above,
+   * which discards nothing.
    */
   function onDiscard() {
     startLeave(async () => {
-      try {
-        await discardRequestDraftAction();
-      } catch (error) {
-        // Best effort: the draft expires on its own; leaving is not withheld for it.
-        console.error('[vitrin lead] discard draft failed', error);
+      if (restoredDraft) {
+        try {
+          await discardRequestDraftAction({ formType: 'SHOWCASE_LEAD', categorySlug: card.category.slug, cardId });
+        } catch (error) {
+          // Best effort: the draft expires on its own; leaving is not withheld for it.
+          console.error('[vitrin lead] discard draft failed', error);
+        }
       }
       router.push(`/vitrin/${encodeURIComponent(cardId)}`);
     });
@@ -493,6 +499,8 @@ export function ShowcaseLeadForm({
       <input type="hidden" name="cardId" value={cardId} />
       <input type="hidden" name="categorySlug" value={card.category.slug} />
       <input type="hidden" name="questionMeta" value={encodeQuestionMeta(answerableQuestions)} />
+      {/* What the page found in the draft slot — decides whether a success clears the cookie. */}
+      <input type="hidden" name={DRAFT_STATE_FIELD} value={draftStateFor({ restored: restoredDraft, wrongAccount })} />
 
       {/*
         The parked draft belongs to another account: said once, above the

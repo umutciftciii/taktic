@@ -11,6 +11,7 @@ import {
   type RefObject,
 } from 'react';
 import type { ContactDisclosureConfig, Question, RouterSelection } from '../../../lib/api';
+import { DRAFT_STATE_FIELD, draftStateFor } from '../../../lib/draft-state';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import type { RequestDraftPayload } from '../../../lib/request-drafts';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
@@ -565,6 +566,12 @@ export function RequestForm({
         type="hidden"
         name="routerSelections"
         value={encodeRouterSelections(routerSelections)}
+      />
+      {/* What the page found in the draft slot — decides whether a success clears the cookie. */}
+      <input
+        type="hidden"
+        name={DRAFT_STATE_FIELD}
+        value={draftStateFor({ restored: restoredDraft, wrongAccount })}
       />
       {/*
         Only the questions that are on screen. A hidden one carries no answer,

@@ -49,8 +49,9 @@ function kindOf(row: Row | null): RowKind {
 /**
  * Classifies a telephone number + e-mail pair against the accounts that exist.
  *
- * Both rows are read in one transaction and judged together; there is no
- * "first match wins". `User.phone` is not canonicalised on every write path —
+ * Both rows are read together — one `Promise.all` on the one client the caller
+ * passed, be that a transaction or the plain service — and judged jointly;
+ * there is no "first match wins". `User.phone` is not canonicalised on every write path —
  * `resolveCustomerForCreate` only strips non-digits, and self-registration is
  * trim-only — so the phone lookup widens to every spelling the platform is
  * known to store (see `equivalentPhoneSpellings`) rather than the one

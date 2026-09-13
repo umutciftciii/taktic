@@ -123,9 +123,24 @@ export class RequestDraftsService {
     return { kind: 'payload', payload: row.payload as RequestDraftPayload };
   }
 
-  async discard(token: string | null): Promise<void> {
-    if (!token) return;
-    await this.prisma.requestDraft.deleteMany({ where: { tokenHash: hashDraftToken(token) } });
+  /**
+   * Deletes the draft the cookie names — but only the one the caller could
+   * have opened: same key as the form, and either anonymous or protected for
+   * the session's own account. Somebody else's protected draft, or a draft
+   * for another form, stays exactly as it is. Answers whether a row went.
+   */
+  async discard(token: string | null, key: DraftKey, sessionUserId: string | null): Promise<boolean> {
+    if (!token) return false;
+    const result = await this.prisma.requestDraft.deleteMany({
+      where: {
+        tokenHash: hashDraftToken(token),
+        formType: key.formType,
+        categorySlug: key.categorySlug,
+        cardId: key.cardId,
+        OR: [{ expectedUserId: null }, ...(sessionUserId ? [{ expectedUserId: sessionUserId }] : [])],
+      },
+    });
+    return result.count > 0;
   }
 
   /**

@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { apiFetch, RoutingResolution, ServiceRequest } from '../../lib/api';
 import { describeApiRefusal } from '../../lib/api-refusal';
+import { draftConsumedBySubmission, readDraftState } from '../../lib/draft-state';
 import {
   clearRequestDraftCookie,
   draftPayloadFromForm,
@@ -64,9 +65,14 @@ export async function submitServiceRequestAction(formData: FormData): Promise<Su
       method: 'POST',
       body: JSON.stringify(buildServiceRequestPayload(formData)),
     });
-    // The API consumed the draft inside the request's own transaction; only
-    // the browser's cookie is left to clear.
-    await clearRequestDraftCookie();
+    // The API consumed the draft inside the request's own transaction — when
+    // the draft was this form's to consume. A draft protected for another
+    // account (`wrong-account`), or one this form never opened, was left
+    // alone by the API, and its cookie is kept for the account it belongs to;
+    // see lib/draft-state.ts.
+    if (draftConsumedBySubmission(readDraftState(formData))) {
+      await clearRequestDraftCookie();
+    }
     return { ok: true, requestId: request.id };
   } catch (error) {
     return describeApiRefusal('service-requests', error);
