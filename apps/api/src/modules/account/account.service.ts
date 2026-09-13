@@ -9,7 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
-import { normalizePhoneNumber } from '../phone-verification/phone.util';
+import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
 import { resolveArea } from '../locations/turkey-locations';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateAccountProfileDto } from './dto/update-account-profile.dto';
@@ -304,24 +304,4 @@ function normalizeAccountCity(value: string | null | undefined): string | null |
   }
 
   return area.city;
-}
-
-/**
- * The ways one Turkish number may already be sitting in the database.
- *
- * Only spellings of the *same* number: the E.164 form, the national form with
- * its trunk zero, and the subscriber number on its own. Nothing here widens
- * what is accepted — the value being written is always the E.164 one.
- */
-function equivalentPhoneSpellings(e164: string): string[] {
-  const spellings = new Set<string>([e164]);
-
-  if (e164.startsWith('+90') && e164.length === 13) {
-    const subscriber = e164.slice(3);
-    spellings.add(`0${subscriber}`);
-    spellings.add(subscriber);
-    spellings.add(`90${subscriber}`);
-  }
-
-  return [...spellings];
 }

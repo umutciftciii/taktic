@@ -68,6 +68,16 @@ describe('POST /auth/request-identity-check', () => {
     expect((await check({ phone: '05551110002', email: 'ACTIVE@example.test ' })).body).toEqual({ status: 'login-required' });
   });
 
+  it('matches a stored phone regardless of which un-canonicalised spelling wrote it', async () => {
+    // resolveCustomerForCreate and self-registration never canonicalise —
+    // whatever the visitor typed is what lands in the row.
+    await activeCustomer('5551110012', 'bare@example.test');
+    await activeCustomer('905551110013', 'countrycode@example.test');
+
+    expect((await check({ phone: '05551110012', email: FRESH.email })).body).toEqual({ status: 'login-required' });
+    expect((await check({ phone: '+905551110013', email: FRESH.email })).body).toEqual({ status: 'login-required' });
+  });
+
   it('answers activation-required for a claimable, password-less account', async () => {
     await claimableCustomer('05551110004', 'claim@example.test');
 

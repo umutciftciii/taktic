@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { normalizePhoneNumber } from '../phone-verification/phone.util';
+import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
 
 export type RequestIdentityStatus =
   | 'new-customer'
@@ -50,9 +50,14 @@ function kindOf(row: Row | null): RowKind {
  * Classifies a telephone number + e-mail pair against the accounts that exist.
  *
  * Both rows are read in one transaction and judged together; there is no
- * "first match wins". The result set is exactly the one
- * resolveCustomerForCreate acts on at submit time — this only moves the answer
- * to the moment the two fields are typed.
+ * "first match wins". `User.phone` is not canonicalised on every write path —
+ * `resolveCustomerForCreate` only strips non-digits, and self-registration is
+ * trim-only — so the phone lookup widens to every spelling the platform is
+ * known to store (see `equivalentPhoneSpellings`) rather than the one
+ * `resolveCustomerForCreate` would produce for a fresh row. This is a
+ * superset of what that function acts on at submit time, not an exact mirror
+ * of it — the pre-check would rather over-match an existing account than tell
+ * its owner they are new.
  */
 @Injectable()
 export class RequestIdentityService {
@@ -60,7 +65,8 @@ export class RequestIdentityService {
 
   normalize(input: { phone: string; email: string }) {
     return {
-      // The same spelling the request service stores and matches on.
+      // Canonical E.164 — the base spelling equivalentPhoneSpellings expands
+      // to every other form a stored row might use.
       phone: normalizePhoneNumber(input.phone),
       email: input.email.trim().toLowerCase(),
     };
@@ -73,7 +79,7 @@ export class RequestIdentityService {
     const { phone, email } = this.normalize(input);
 
     const [byPhone, byEmail] = await Promise.all([
-      db.user.findFirst({ where: { phone: { in: [phone, denormalizedPhone(phone)] } }, select: rowSelect }),
+      db.user.findFirst({ where: { phone: { in: equivalentPhoneSpellings(phone) } }, select: rowSelect }),
       db.user.findUnique({ where: { email }, select: rowSelect }),
     ]);
 
@@ -105,14 +111,4 @@ export class RequestIdentityService {
   classifyNow(input: { phone: string; email: string }) {
     return this.classify(this.prisma, input);
   }
-}
-
-/**
- * User.phone is stored the way ServiceRequestsService.normalizePhone leaves it
- * (digits, national trunk zero kept: "05551234567") while
- * normalizePhoneNumber yields E.164 ("+905551234567"). Both spellings are
- * looked up so the pre-check sees the same account the request service will.
- */
-function denormalizedPhone(e164: string): string {
-  return e164.startsWith('+90') ? `0${e164.slice(3)}` : e164;
 }
