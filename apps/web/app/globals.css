@@ -5661,6 +5661,17 @@ body.has-drawer-open {
   margin: 0;
 }
 
+.identity-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.identity-notice > span {
+  flex: 1 1 240px;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    Vitrin — VIT-DESIGN-002
 

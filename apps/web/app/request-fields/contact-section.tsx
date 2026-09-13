@@ -75,6 +75,18 @@ type ContactSectionProps = {
   phoneLocked?: boolean;
   /** Wording under the e-mail field. */
   emailHelpText?: string;
+  /**
+   * Rendered directly under the guest e-mail field's label — the identity
+   * pre-check's notice slot. Signed-in customers already have a resolved
+   * identity, so this only ever shows up on the guest branch.
+   */
+  identityNotice?: ReactNode;
+  /**
+   * Fired on blur of the three guest fields only (not the signed-in
+   * customer's alternate-contact fields) — the identity pre-check runs once
+   * the visitor has finished typing rather than on every keystroke.
+   */
+  onContactBlur?: () => void;
 };
 
 /**
@@ -97,6 +109,8 @@ export function ContactSection({
   phoneAddon,
   phoneLocked = false,
   emailHelpText = 'Tekliflerinizi takip edebilmeniz için e-posta adresiniz gereklidir.',
+  identityNotice,
+  onContactBlur,
 }: ContactSectionProps) {
   if (!accountContact) {
     const controlled = guestContact !== undefined;
@@ -112,6 +126,7 @@ export function ContactSection({
               name="customerName"
               autoComplete="name"
               required
+              onBlur={onContactBlur}
               {...(controlled
                 ? { value: guestContact.name, onChange: (e) => update({ name: e.target.value }) }
                 : {})}
@@ -128,6 +143,7 @@ export function ContactSection({
               placeholder="05XX XXX XX XX"
               readOnly={phoneLocked}
               aria-readonly={phoneLocked || undefined}
+              onBlur={onContactBlur}
               {...(controlled
                 ? { value: guestContact.phone, onChange: (e) => update({ phone: e.target.value }) }
                 : {})}
@@ -143,12 +159,14 @@ export function ContactSection({
             autoComplete="email"
             required
             placeholder="ornek@eposta.com"
+            onBlur={onContactBlur}
             {...(controlled
               ? { value: guestContact.email, onChange: (e) => update({ email: e.target.value }) }
               : {})}
           />
           <span className="help-text">{emailHelpText}</span>
         </label>
+        {identityNotice}
       </>
     );
   }
@@ -215,6 +233,7 @@ export function ContactSection({
         />
         <span>Farklı bir iletişim kişisi kullanacağım</span>
       </label>
+      <span className="help-text">Talep yine hesabınıza bağlı kalır; yalnız bu talep için iletişim kişisi değişir.</span>
 
       {useAlternateContact ? (
         <div className="alternate-contact-fields" data-testid="alternate-contact-fields">
