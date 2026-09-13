@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SHOWCASE_LEAD_FAILED, showcaseLeadRefusalText } from '../lib/showcase-lead-errors';
+import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../lib/request-refusal-text';
 
 /**
  * The precedence the vitrin lead form applies to a refusal. The case that
@@ -7,34 +7,45 @@ import { SHOWCASE_LEAD_FAILED, showcaseLeadRefusalText } from '../lib/showcase-l
  * with no code, has to reach the screen — it used to be swallowed by the
  * generic sentence because the code-less fallback was itself in the table.
  */
-describe('showcaseLeadRefusalText', () => {
+describe('requestRefusalText', () => {
   it('uses the form’s own sentence for a specific code', () => {
     expect(
-      showcaseLeadRefusalText({ code: 'PHONE_VERIFICATION_INVALID', message: 'Invalid code' }),
+      requestRefusalText({ code: 'PHONE_VERIFICATION_INVALID', message: 'Invalid code' }),
     ).toBe('Doğrulama kodu geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.');
   });
 
   it('shows the API’s message when the refusal carried no code', () => {
     expect(
-      showcaseLeadRefusalText({
-        code: SHOWCASE_LEAD_FAILED,
+      requestRefusalText({
+        code: REQUEST_REFUSAL_GENERIC,
         message: 'Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.',
       }),
     ).toBe('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
   });
 
   it('shows the API’s message for a code the form has no sentence for', () => {
-    expect(showcaseLeadRefusalText({ code: 'SOMETHING_NEW', message: 'Yeni bir kural.' })).toBe(
+    expect(requestRefusalText({ code: 'SOMETHING_NEW', message: 'Yeni bir kural.' })).toBe(
       'Yeni bir kural.',
     );
   });
 
   it('falls back to the generic sentence only when there is nothing else', () => {
-    expect(showcaseLeadRefusalText({ code: SHOWCASE_LEAD_FAILED, message: null })).toBe(
+    expect(requestRefusalText({ code: REQUEST_REFUSAL_GENERIC, message: null })).toBe(
       'Talebiniz gönderilemedi. Bilgileri kontrol edip tekrar deneyin.',
     );
-    expect(showcaseLeadRefusalText({ code: 'SOMETHING_NEW', message: '  ' })).toBe(
+    expect(requestRefusalText({ code: 'SOMETHING_NEW', message: '  ' })).toBe(
       'Talebiniz gönderilemedi. Bilgileri kontrol edip tekrar deneyin.',
+    );
+  });
+
+  it('names the identity conflict in the product’s words', () => {
+    expect(
+      requestRefusalText({
+        code: 'CUSTOMER_IDENTITY_CONFLICT',
+        message: 'Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.',
+      }),
+    ).toBe(
+      'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
     );
   });
 });

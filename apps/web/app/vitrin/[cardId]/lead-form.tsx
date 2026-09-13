@@ -5,7 +5,7 @@ import { useMemo, useRef, useState, useTransition, type FormEvent } from 'react'
 import type { ContactDisclosureConfig, Question, ShowcaseFeedCard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { boundQuestion, visibleQuestions } from '../../../lib/request-flow';
-import { showcaseLeadRefusalText } from '../../../lib/showcase-lead-errors';
+import { requestRefusalText } from '../../../lib/request-refusal-text';
 import {
   ContactSection,
   EMPTY_ALTERNATE_CONTACT,
@@ -38,9 +38,9 @@ import {
 const AREA_NOT_SERVED = 'SHOWCASE_LEAD_AREA_NOT_SERVED';
 const PHONE_PROOF_REQUIRED = 'SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED';
 
-/** The sentence for a refusal — see showcaseLeadRefusalText for the precedence. */
+/** The sentence for a refusal — see requestRefusalText for the precedence. */
 function refusalText(failure: Extract<LeadActionResult, { ok: false }>): string {
-  return showcaseLeadRefusalText(failure);
+  return requestRefusalText(failure);
 }
 
 type Verification =
