@@ -254,6 +254,7 @@ const TRUNCATED_TABLES = [
   'CustomerNote',
   'CustomerActivationToken',
   'AdminInviteToken',
+  'RequestDraft',
   'Session',
   'SequenceCounter',
   'User',

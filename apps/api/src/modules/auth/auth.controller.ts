@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { EmailVerificationService } from '../email-verification/email-verification.service';
 import { AuthService } from './auth.service';
@@ -22,6 +23,11 @@ import { RegisterDto } from './dto/register.dto';
 /** Signals the client that this e-mail needs mailbox verification, not a password. */
 export const ACTIVATION_REQUIRED_CODE = 'ACTIVATION_REQUIRED';
 
+// AuthThrottlerGuard now runs against every named throttler registered on
+// AuthModule's forRoot (see the comment there) unless told otherwise, so this
+// class opts out of the request-drafts budget: signing in must never spend a
+// caller's draft allowance.
+@SkipThrottle({ 'request-drafts': true })
 @Controller('auth')
 export class AuthController {
   constructor(

@@ -22,6 +22,7 @@ import { OffersModule } from './modules/offers/offers.module';
 import { OperationsSettingsModule } from './modules/operations-settings/operations-settings.module';
 import { PhoneVerificationModule } from './modules/phone-verification/phone-verification.module';
 import { UnviewedOfferRefundModule } from './modules/unviewed-offer-refund/unviewed-offer-refund.module';
+import { RequestDraftsModule } from './modules/request-drafts/request-drafts.module';
 import { RequestLifecycleModule } from './modules/request-lifecycle/request-lifecycle.module';
 import { CreditsModule } from './modules/credits/credits.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -50,6 +51,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CategoriesModule,
     LocationsModule,
     QuestionsModule,
+    RequestDraftsModule,
     ServiceRequestsModule,
     ProviderClaimModule,
     ProvidersModule,

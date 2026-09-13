@@ -1,0 +1,201 @@
+import { CustomerOrigin, UserRole } from '@prisma/client';
+import request from 'supertest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createTestApp, createUser, loginAs, resetAuthThrottle, resetDatabase, type TestContext } from './harness';
+import { RequestDraftsService } from '../src/modules/request-drafts/request-drafts.service';
+
+/**
+ * The server-side draft: what a browser can make it do, and what it cannot.
+ *
+ * The browser only ever holds an opaque token in an HttpOnly cookie. Everything
+ * that decides who may open a draft — expectedUserId — is derived on the server
+ * from the same identity classification the form saw, and is never sent or
+ * returned.
+ */
+let ctx: TestContext;
+
+beforeAll(async () => {
+  ctx = await createTestApp();
+});
+
+afterAll(async () => {
+  await ctx.app.close();
+});
+
+beforeEach(async () => {
+  await resetDatabase(ctx.prisma);
+  // This suite shares one app (and so one throttle bucket) across every case;
+  // without this, the earlier cases would spend the draft-endpoint budget
+  // before the dedicated throttling test gets to it. See resetAuthThrottle.
+  resetAuthThrottle(ctx.app);
+});
+
+const COOKIE = 'taktic_request_draft';
+
+const marketplace = {
+  formType: 'MARKETPLACE',
+  categorySlug: 'klima-servisi',
+  payload: { city: 'İstanbul', district: 'Kadıköy', description: 'Klima bakımı', urgency: 'THIS_WEEK', answers: [] },
+  identity: { phone: '05554440001', email: 'draft@example.test' },
+};
+
+const showcase = {
+  formType: 'SHOWCASE_LEAD',
+  categorySlug: 'klima-servisi',
+  cardId: 'card-1',
+  payload: { city: 'İstanbul', district: 'Kadıköy', description: 'Vitrin', urgencyBucket: 'URGENT', answers: [] },
+  identity: { phone: '05554440001', email: 'draft@example.test' },
+};
+
+function post(body: Record<string, unknown>, cookie?: string, headers: Record<string, string> = {}) {
+  const req = request(ctx.server).post('/request-drafts').set(headers);
+  return cookie ? req.set('Cookie', `${COOKIE}=${cookie}`).send(body) : req.send(body);
+}
+
+function get(query: Record<string, string>, cookie?: string, session?: string) {
+  const cookies = [cookie ? `${COOKIE}=${cookie}` : null, session ?? null].filter(Boolean).join('; ');
+  const req = request(ctx.server).get('/request-drafts/current').query(query);
+  return cookies ? req.set('Cookie', cookies) : req;
+}
+
+const mpQuery = { formType: 'MARKETPLACE', categorySlug: 'klima-servisi' };
+const scQuery = { formType: 'SHOWCASE_LEAD', categorySlug: 'klima-servisi', cardId: 'card-1' };
+
+describe('POST /request-drafts', () => {
+  it('stores the payload under a hashed token and returns the raw token once', async () => {
+    const response = await post(marketplace);
+
+    expect(response.status).toBe(201);
+    expect(typeof response.body.token).toBe('string');
+    expect(response.body.token.length).toBeGreaterThan(30);
+    expect(response.headers['set-cookie']).toBeUndefined();
+
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.tokenHash).not.toBe(response.body.token);
+    expect(row.expectedUserId).toBeNull();
+    expect(row.userId).toBeNull();
+    expect(row.payload).toEqual(marketplace.payload);
+    expect(JSON.stringify(row.payload)).not.toContain('05554440001');
+    expect(JSON.stringify(row.payload)).not.toContain('draft@example.test');
+  });
+
+  it('refuses contact fields inside the payload', async () => {
+    const response = await post({ ...marketplace, payload: { ...marketplace.payload, customerPhone: '05554440001' } });
+    expect(response.status).toBe(400);
+    expect(await ctx.prisma.requestDraft.count()).toBe(0);
+  });
+
+  it('refuses a payload over 32 KB', async () => {
+    const response = await post({ ...marketplace, payload: { ...marketplace.payload, description: 'x'.repeat(33 * 1024) } });
+    expect(response.status).toBe(400);
+  });
+
+  it('sets expectedUserId from the identity check and never returns it', async () => {
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'draft@example.test' });
+
+    const response = await post(marketplace);
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual({ token: expect.any(String), expiresAt: expect.any(String) });
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.expectedUserId).toBe(owner.id);
+    expect(row.userId).toBeNull();
+  });
+
+  it('refuses to save a draft for a pair that cannot continue', async () => {
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'a@example.test' });
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440002', email: 'draft@example.test' });
+
+    const conflict = await post(marketplace);
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.code).toBe('DRAFT_NOT_CONTINUABLE');
+
+    await createUser(ctx.prisma, { role: UserRole.PROVIDER, phone: '05554440003', email: 'p@example.test' });
+    const unavailable = await post({ ...marketplace, identity: { phone: '05554440003', email: 'new@example.test' } });
+    expect(unavailable.status).toBe(409);
+    expect(await ctx.prisma.requestDraft.count()).toBe(0);
+  });
+
+  it('updates the same draft in place for the same form context', async () => {
+    const first = await post(marketplace);
+    const second = await post({ ...marketplace, payload: { ...marketplace.payload, description: 'Güncel' } }, first.body.token);
+
+    expect(second.status).toBe(201);
+    expect(second.body.token).toBe(first.body.token);
+    expect(await ctx.prisma.requestDraft.count()).toBe(1);
+    expect((await ctx.prisma.requestDraft.findFirstOrThrow()).payload).toMatchObject({ description: 'Güncel' });
+  });
+
+  it('keeps one active draft per browser: a different form needs an explicit replace', async () => {
+    const first = await post(marketplace);
+    const firstRow = await ctx.prisma.requestDraft.findFirstOrThrow();
+
+    const refused = await post(showcase, first.body.token);
+    expect(refused.status).toBe(409);
+    expect(refused.body.code).toBe('DRAFT_EXISTS');
+    expect(await ctx.prisma.requestDraft.count()).toBe(1);
+    expect((await ctx.prisma.requestDraft.findFirstOrThrow()).tokenHash).toBe(firstRow.tokenHash);
+    expect((await get(mpQuery, first.body.token)).status).toBe(200);
+
+    const replaced = await post({ ...showcase, replace: true }, first.body.token);
+    expect(replaced.status).toBe(201);
+    expect(replaced.body.token).not.toBe(first.body.token);
+    const rows = await ctx.prisma.requestDraft.findMany();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.formType).toBe('SHOWCASE_LEAD');
+    expect((await get(mpQuery, first.body.token)).status).toBe(204);
+    expect((await get(scQuery, replaced.body.token)).status).toBe(200);
+  });
+
+  it('is rate limited per client and a forged X-Forwarded-For does not help', async () => {
+    let last = 0;
+    for (let index = 0; index < 8; index += 1) {
+      // A fresh browser every time (no cookie) so each call would be a new row.
+      const response = await post(marketplace, undefined, { 'x-forwarded-for': `10.1.0.${index}` });
+      last = response.status;
+      if (last === 429) break;
+    }
+    expect(last).toBe(429);
+    expect(await ctx.prisma.requestDraft.count()).toBeLessThanOrEqual(5);
+  });
+
+  it('answers 503 with Retry-After at the global ceiling, and writes nothing', async () => {
+    const service = ctx.app.get(RequestDraftsService);
+    const original = service.maxActive;
+    service.maxActive = 1;
+    try {
+      const first = await request(ctx.server).post('/request-drafts').send(marketplace);
+      expect(first.status).toBe(201);
+      const second = await request(ctx.server).post('/request-drafts').send({ ...marketplace, identity: { phone: '05554440009', email: 'nine@example.test' } });
+      expect(second.status).toBe(503);
+      expect(second.body.code).toBe('DRAFT_STORAGE_BUSY');
+      expect(second.headers['retry-after']).toBe('60');
+      expect(await ctx.prisma.requestDraft.count()).toBe(1);
+      // Updating the existing row is not a new row and passes the ceiling.
+      const update = await post({ ...marketplace, payload: { ...marketplace.payload, description: 'Yine' } }, first.body.token);
+      expect(update.status).toBe(201);
+    } finally {
+      service.maxActive = original;
+    }
+  });
+
+  it('sweeps at most 200 expired rows, at most once an hour per process', async () => {
+    const service = ctx.app.get(RequestDraftsService);
+    const past = new Date(Date.now() - 60_000);
+    await ctx.prisma.requestDraft.createMany({
+      data: Array.from({ length: 250 }, (_, index) => ({
+        tokenHash: `expired-${index}`,
+        formType: 'MARKETPLACE' as const,
+        categorySlug: 'x',
+        payload: {},
+        expiresAt: past,
+      })),
+    });
+
+    expect(await service.sweepExpired()).toBe(200);
+    expect(await ctx.prisma.requestDraft.count()).toBe(50);
+    // Second call inside the hour is a no-op.
+    expect(await service.sweepExpired()).toBe(0);
+    expect(await ctx.prisma.requestDraft.count()).toBe(50);
+  });
+});

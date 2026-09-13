@@ -11,6 +11,10 @@ import { AUTH_THROTTLE_LIMIT, AUTH_THROTTLE_TTL_MS, AuthThrottlerGuard } from '.
 import { ProviderAccessGuard } from './provider-access.guard';
 import { RequestIdentityController } from './request-identity.controller';
 import { RequestIdentityService } from './request-identity.service';
+import {
+  REQUEST_DRAFT_THROTTLE_LIMIT,
+  REQUEST_DRAFT_THROTTLE_TTL_MS,
+} from '../request-drafts/request-drafts.constants';
 import { RolesGuard } from './roles.guard';
 
 @Module({
@@ -22,9 +26,21 @@ import { RolesGuard } from './roles.guard';
     // what keeps the two modules from depending on each other.
     EmailVerificationModule,
     // Registered here (not globally) so only the credential endpoints in
-    // AuthController are throttled — see AuthThrottlerGuard.
+    // AuthController and the request-drafts endpoint are throttled — see
+    // AuthThrottlerGuard.
+    //
+    // Both throttlers live in this one `forRoot` call on purpose: `forRoot`
+    // makes its module global, and `@nestjs/throttler` v6 does not merge two
+    // separate `forRoot` registrations — a second one (e.g. inside
+    // RequestDraftsModule) gives guards declared there their own
+    // options/storage that `resetAuthThrottle` cannot reach. Every route this
+    // pair of throttlers does not name explicitly is skipped for it via
+    // `@SkipThrottle` (see AuthController, RequestIdentityController and
+    // RequestDraftsController), so drafting never spends a caller's login
+    // budget and logging in never spends their draft budget.
     ThrottlerModule.forRoot([
       { name: 'auth', ttl: AUTH_THROTTLE_TTL_MS, limit: AUTH_THROTTLE_LIMIT },
+      { name: 'request-drafts', ttl: REQUEST_DRAFT_THROTTLE_TTL_MS, limit: REQUEST_DRAFT_THROTTLE_LIMIT },
     ]),
   ],
   controllers: [AuthController, EmailVerificationController, RequestIdentityController],
