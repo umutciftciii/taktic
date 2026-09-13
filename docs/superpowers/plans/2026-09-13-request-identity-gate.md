@@ -157,8 +157,18 @@ ALTER TABLE "RequestDraft" ADD CONSTRAINT "RequestDraft_userId_fkey" FOREIGN KEY
 
 - [ ] **Step 3: Şema ile SQL'in eşleştiğini doğrula**
 
-Run: `export DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public'; pnpm db:generate && npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$DATABASE_URL"`
-Expected: `No difference detected.` (fark çıkarsa SQL'i şemaya göre düzelt; şemayı SQL'e uydurma). Yerel DB'ye **uygulama**; test veritabanı harness tarafından migrate edilir.
+**UYARI:** `migrate diff --from-migrations` shadow veritabanını SIFIRLAR. Shadow olarak asla `taktic` (yerel canlı DB) ya da `taktic_e2e` verme. Yalnız bu iş için boş bir DB kullan:
+
+Run:
+```bash
+docker exec taktic-postgres psql -U taktic_user -d postgres -c 'CREATE DATABASE taktic_shadow_plan;' 2>/dev/null || true
+export DATABASE_URL='postgresql://taktic_user:taktic_password@localhost:5433/taktic?schema=public'
+pnpm db:generate
+npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma \
+  --shadow-database-url 'postgresql://taktic_user:taktic_password@localhost:5433/taktic_shadow_plan'
+docker exec taktic-postgres psql -U taktic_user -d postgres -c 'DROP DATABASE taktic_shadow_plan;'
+```
+Expected: `No difference detected.` (fark çıkarsa SQL'i şemaya göre düzelt; şemayı SQL'e uydurma). Yerel `taktic` DB'sine **hiçbir migration uygulama**; test veritabanı harness tarafından migrate edilir.
 
 - [ ] **Step 4: Commit**
 
