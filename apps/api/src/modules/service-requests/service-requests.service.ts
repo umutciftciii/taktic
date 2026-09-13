@@ -24,6 +24,7 @@ import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
+import { RequestDraftsService } from '../request-drafts/request-drafts.service';
 import {
   hasSystemFieldValue,
   SystemFieldRequestValues,
@@ -40,6 +41,12 @@ import { UpdateServiceRequestStatusDto } from './dto/update-service-request-stat
  * missing instead of showing a raw validation error.
  */
 export const ACCOUNT_CONTACT_INCOMPLETE_CODE = 'ACCOUNT_CONTACT_INCOMPLETE';
+
+/**
+ * Returned when a request creation is refused because the provided phone and
+ * email belong to two different customers.
+ */
+export const CUSTOMER_IDENTITY_CONFLICT_CODE = 'CUSTOMER_IDENTITY_CONFLICT';
 
 type QuestionOption = {
   key: string;
@@ -111,6 +118,14 @@ export type ServiceRequestCreationContext = {
    * request existed. See `PhoneVerificationService.sendStandaloneCode`.
    */
   phoneVerifiedAt?: Date;
+  /**
+   * The draft token the browser carried (see RequestDraftsService). Consumed
+   * inside the creation transaction so "the request exists" and "the draft is
+   * used up" are one fact; a draft protected for another account is skipped.
+   */
+  draftToken?: string | null;
+  /** The card id a vitrin draft was keyed on. Absent on the public form. */
+  draftCardId?: string | null;
   onCreated?: (
     tx: Prisma.TransactionClient,
     request: { id: string; customerId: string | null },
@@ -157,6 +172,7 @@ export class ServiceRequestsService {
     @Inject(CategoriesService) private readonly categories: CategoriesService,
     @Inject(ShowcaseLeadLifecycleService)
     private readonly showcaseLeads: ShowcaseLeadLifecycleService,
+    @Inject(RequestDraftsService) private readonly drafts: RequestDraftsService,
   ) {}
 
   /**
@@ -326,6 +342,21 @@ export class ServiceRequestsService {
           },
         },
       });
+
+      // The draft the browser carried, consumed in the same transaction that
+      // wrote the request: "the request exists" and "the draft is used up"
+      // become one fact, and a draft protected for another account is
+      // skipped rather than blocking this submission.
+      await this.drafts.consumeInTransaction(
+        tx,
+        context.draftToken ?? null,
+        {
+          formType: context.directShowcaseProviderId ? 'SHOWCASE_LEAD' : 'MARKETPLACE',
+          categorySlug,
+          cardId: context.draftCardId ?? null,
+        },
+        created.customerId,
+      );
 
       // The vitrin lead, its SLA and the verification it redeemed, all inside
       // the transaction that created the request. A request carrying a
@@ -899,7 +930,12 @@ async function resolveCustomerForCreate(
   ]);
 
   if (byPhone && byEmail && byPhone.id !== byEmail.id) {
-    throw new ConflictException('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
+    throw new ConflictException({
+      statusCode: HttpStatus.CONFLICT,
+      error: 'Conflict',
+      code: CUSTOMER_IDENTITY_CONFLICT_CODE,
+      message: 'Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.',
+    });
   }
 
   if (byPhone) {
@@ -926,9 +962,12 @@ async function resolveCustomerForCreate(
     return created.id;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      throw new ConflictException(
-        'Müşteri kaydı oluşturulamadı: telefon veya e-posta başka bir kayıtla çakışıyor.',
-      );
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: CUSTOMER_IDENTITY_CONFLICT_CODE,
+        message: 'Müşteri kaydı oluşturulamadı: telefon veya e-posta başka bir kayıtla çakışıyor.',
+      });
     }
     throw error;
   }

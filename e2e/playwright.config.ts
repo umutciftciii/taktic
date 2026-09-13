@@ -85,6 +85,34 @@ const sharedEnv = {
   AUTH_RATE_LIMIT_WINDOW_SECONDS: '60',
 };
 
+/**
+ * The trusted-proxy contract, switched on for the whole suite.
+ *
+ * The request-draft budget is five saves per client IP per ten minutes, and it
+ * is not a deployment value: unlike the credential throttle above it cannot be
+ * raised from the environment. Every browser in this suite reaches the web
+ * server from 127.0.0.1, and the web server reaches the API from 127.0.0.1, so
+ * without these two flags the entire run — every "Giriş yap" and every
+ * activation link the identity-gate spec clicks — shares a single bucket of
+ * five and fails from the sixth save onwards.
+ *
+ * Instead of raising a limit the product does not let anybody raise, the suite
+ * uses the production topology as it is: a trusted edge writes the client's
+ * address into X-Forwarded-For, the web server forwards the header it received
+ * verbatim (WEB_TRUST_PROXY), and the API's `trust proxy` hop count picks the
+ * rightmost address out of it (TRUST_PROXY=1 — one hop, the web server). Here
+ * the browser plays the edge: a test that needs its own draft budget opens its
+ * context with an `x-forwarded-for` header of its own, and the API keys the
+ * throttle on that address. A context that sends no header is still 127.0.0.1
+ * to the API, exactly as before, so no other spec changes behaviour — and the
+ * forwarding path itself (`forwardedForHeaders`, `clientForwardingHeaders`) is
+ * exercised by real requests rather than only by its unit test.
+ *
+ * Same value on every runtime, so the five stacks stay one configuration.
+ */
+const trustedProxyApiEnv = { TRUST_PROXY: '1' };
+const trustedProxyWebEnv = { WEB_TRUST_PROXY: 'true' };
+
 function apiServer(runtime: Runtime) {
   return {
     // The compiled entry point, so the suite exercises the same artefact CI
@@ -98,6 +126,7 @@ function apiServer(runtime: Runtime) {
     stderr: 'pipe' as const,
     env: {
       ...sharedEnv,
+      ...trustedProxyApiEnv,
       API_PORT: String(runtime.ports.api),
       REQUIRE_PHONE_VERIFICATION: String(runtime.requirePhoneVerification),
       // The phone-verification test bypass, and only on the runtime whose
@@ -198,6 +227,9 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
       // The web app reads the same flag to decide what its forms and its
       // confirmation screen say, so it has to agree with its own API.
       PROVIDER_CLAIM_ENABLED: String(runtime.providerClaim),
+      // Only the web app forwards a client address to the API — see
+      // trustedProxyWebEnv. The admin app has no such path.
+      ...(app === 'web' ? trustedProxyWebEnv : {}),
     },
   };
 }
@@ -243,6 +275,14 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *   showcase-*  the public shelf and card, the provider's hub, shop, forms
  *               and card screen, and the operator's review — every vitrin spec
  *
+ * And the identity gate, for the first reason again:
+ *
+ *   request-identity-gate  the pre-check on both request forms and the draft
+ *                          that carries a form across sign-in and activation —
+ *                          a flow that leaves the browser holding a draft
+ *                          cookie *and* a session cookie at once, and comes
+ *                          back through a full navigation to read both
+ *
  * The vitrin shelf and the provider's hub are one `.vitrin-grid` of card faces
  * and the card's own page is a form inside another grid — the exact
  * construction where a track minimum quietly makes a document wider than a
@@ -266,7 +306,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

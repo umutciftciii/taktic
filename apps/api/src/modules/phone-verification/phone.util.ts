@@ -56,3 +56,27 @@ function assertPlausible(e164: string): string {
 
   return e164;
 }
+
+/**
+ * The ways one Turkish number may already be sitting in the database.
+ *
+ * Only spellings of the *same* number: the E.164 form, the national form with
+ * its trunk zero, the subscriber number on its own, and the country code
+ * without a leading "+". Nothing here widens what is accepted — the value
+ * being written through a canonicalising path is always the E.164 one; this
+ * exists so a *lookup* also finds rows written before that path existed, or
+ * by a path that never canonicalises (customer-phone on a request, a
+ * self-registered account).
+ */
+export function equivalentPhoneSpellings(e164: string): string[] {
+  const spellings = new Set<string>([e164]);
+
+  if (e164.startsWith('+90') && e164.length === 13) {
+    const subscriber = e164.slice(3);
+    spellings.add(`0${subscriber}`);
+    spellings.add(subscriber);
+    spellings.add(`90${subscriber}`);
+  }
+
+  return [...spellings];
+}

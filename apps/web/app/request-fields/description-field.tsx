@@ -28,6 +28,8 @@ type DescriptionFieldProps = {
   helpText?: string;
   /** Told the new length on every input, for a parent that keeps a signal. */
   onLengthChange?: (length: number) => void;
+  /** A saved draft's description, when one is being restored. */
+  defaultValue?: string;
 };
 
 /**
@@ -48,8 +50,9 @@ export function DescriptionField({
   placeholder = 'Yapılacak işi kısaca anlatın: ne, nerede, hangi durumda.',
   helpText = 'Detay yazdıkça talebin kalite skoru yükselir ve daha isabetli teklif alırsınız.',
   onLengthChange,
+  defaultValue,
 }: DescriptionFieldProps) {
-  const [length, setLength] = useState(0);
+  const [length, setLength] = useState(defaultValue?.length ?? 0);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
 
   /*
@@ -88,6 +91,7 @@ export function DescriptionField({
           data-testid="request-description"
           maxLength={SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
           aria-describedby="request-description-help request-description-counter"
+          defaultValue={defaultValue}
           onChange={(event) => {
             setLength(event.target.value.length);
             onLengthChange?.(event.target.value.length);

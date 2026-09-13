@@ -7,6 +7,7 @@ import {
   getCurrentUser,
 } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { readCurrentDraft } from '../../../lib/request-drafts';
 import { decodeRouterSelections } from '../../../lib/request-flow';
 import { CategoryVisual } from '../../category-visual';
 import { submitServiceRequestAction } from '../actions';
@@ -27,7 +28,11 @@ type CategoryPageProps = {
 export default async function CategoryPage({ params, searchParams }: CategoryPageProps) {
   const { slug } = await params;
   const { entry, r } = await searchParams;
-  const [category, user, disclosure, provinces] = await Promise.all([
+  // A router that arrives without an entry is itself the entry: it is the first
+  // screen of its own flow. The same slug is what the form posts under and what
+  // a draft is keyed by — see the hidden `categorySlug` field in the form.
+  const entryCategorySlug = entry ?? slug;
+  const [category, user, disclosure, provinces, draft] = await Promise.all([
     // A slug the public may not reach — a draft, a closed category, a group, or
     // simply one that never existed — is a 404 page rather than an error
     // screen. The API already answers 404 for all four, and the reason it does
@@ -40,6 +45,12 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
     // submitted request. Rendered with the form (~14 KB) so the first two
     // selects need no round trip.
     apiFetch<ProvinceWithDistricts[]>('/locations/provinces'),
+    // A form parked here before the customer left to sign in or activate an
+    // account. `none` when there is nothing to restore; `wrong-account` when
+    // the draft belongs to a different account than the one now signed in.
+    // Keyed by the *entry* slug, because that is the slug the form posts and
+    // the draft was saved under — in a routed flow it is not this leaf.
+    readCurrentDraft({ formType: 'MARKETPLACE', categorySlug: entryCategorySlug }),
   ]);
   const questions = category.questions ?? [];
   const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
@@ -59,11 +70,16 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
       : null;
 
   const isRouter = category.kind === 'ROUTER';
-  // A router that arrives without an entry is itself the entry: it is the first
-  // screen of its own flow.
-  const entryCategorySlug = entry ?? slug;
   const routerSelections = decodeRouterSelections(r);
   const routerQuestion = questions.find((question) => question.isRouter);
+
+  /*
+   * This screen's own path, with the routed-flow query kept, for the form to
+   * hand to sign-in and activation as `redirectTo`: the customer comes back to
+   * exactly this form, and the draft saved before leaving is restored here.
+   */
+  const formQuery = new URLSearchParams({ ...(entry ? { entry } : {}), ...(r ? { r } : {}) }).toString();
+  const formPath = `/categories/${slug}${formQuery ? `?${formQuery}` : ''}`;
 
   return (
     <main className="req-page">
@@ -153,6 +169,9 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
             provinces={provinces}
             accountContact={accountContact}
             action={submitServiceRequestAction}
+            initialDraft={draft.kind === 'payload' ? draft.payload : null}
+            wrongAccount={draft.kind === 'wrong-account'}
+            formPath={formPath}
           />
         )}
       </div>

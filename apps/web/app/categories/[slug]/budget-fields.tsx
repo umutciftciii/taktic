@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import {
   completeLiraAmount,
   formatLiraDraft,
+  minorToLiraDraft,
   parseLiraToMinor,
 } from '../../../lib/lira-input';
 
@@ -16,6 +17,10 @@ type BudgetFieldsProps = {
   minHelpText?: string | null;
   /** Told when a value changed, so the form can refresh its own signals. */
   onChange?: () => void;
+  /** A saved draft's minimum budget, in kuruş, when one is being restored. */
+  defaultMin?: number | null;
+  /** A saved draft's maximum budget, in kuruş, when one is being restored. */
+  defaultMax?: number | null;
 };
 
 /**
@@ -50,9 +55,11 @@ export function BudgetFields({
   required,
   minHelpText,
   onChange,
+  defaultMin = null,
+  defaultMax = null,
 }: BudgetFieldsProps) {
-  const [min, setMin] = useState('');
-  const [max, setMax] = useState('');
+  const [min, setMin] = useState(() => minorToLiraDraft(defaultMin));
+  const [max, setMax] = useState(() => minorToLiraDraft(defaultMax));
   const minRef = useRef<HTMLInputElement>(null);
   const maxRef = useRef<HTMLInputElement>(null);
 

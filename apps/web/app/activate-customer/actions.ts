@@ -1,5 +1,6 @@
 'use server';
 
+import { safeRedirectPathOrNull } from '@taktic/shared';
 import { redirect } from 'next/navigation';
 import { persistSessionCookie } from '../session-cookie';
 
@@ -10,18 +11,23 @@ export async function submitCustomerActivationAction(formData: FormData) {
   const token = readFormString(formData, 'token').trim();
   const password = readFormString(formData, 'password');
   const passwordConfirm = readFormString(formData, 'passwordConfirm');
+  // Posted back by the page's own hidden field, which only ever holds what
+  // safeRedirectPathOrNull already approved on render — re-validated here
+  // because a form field is as untrusted as any other request input. See
+  // login/actions.ts for the same check on the sign-in form.
+  const redirectTo = safeRedirectPathOrNull(readFormString(formData, 'redirectTo'));
 
   if (!token) {
-    redirect('/activate-customer?error=invalid');
+    redirect(`/activate-customer?${buildErrorParams({ error: 'invalid', redirectTo }).toString()}`);
   }
 
   if (!password || password.length < 8) {
-    const params = new URLSearchParams({ token, error: 'password' });
+    const params = buildErrorParams({ token, error: 'password', redirectTo });
     redirect(`/activate-customer?${params.toString()}`);
   }
 
   if (password !== passwordConfirm) {
-    const params = new URLSearchParams({ token, error: 'mismatch' });
+    const params = buildErrorParams({ token, error: 'mismatch', redirectTo });
     redirect(`/activate-customer?${params.toString()}`);
   }
 
@@ -34,7 +40,7 @@ export async function submitCustomerActivationAction(formData: FormData) {
 
   if (!response.ok) {
     const message = await safeReadErrorMessage(response);
-    const params = new URLSearchParams({ token, error: 'submit' });
+    const params = buildErrorParams({ token, error: 'submit', redirectTo });
     if (message) {
       params.set('errorMessage', message);
     }
@@ -46,10 +52,25 @@ export async function submitCustomerActivationAction(formData: FormData) {
   // screen — that is the whole point of the claim flow.
   const session = await persistSessionCookie(response);
   if (session) {
-    redirect('/requests/my');
+    redirect(redirectTo ?? '/requests/my');
   }
 
   redirect('/activate-customer?success=1');
+}
+
+function buildErrorParams(fields: {
+  token?: string;
+  error: string;
+  redirectTo: string | null;
+}): URLSearchParams {
+  const params = new URLSearchParams({ error: fields.error });
+  if (fields.token) {
+    params.set('token', fields.token);
+  }
+  if (fields.redirectTo) {
+    params.set('redirectTo', fields.redirectTo);
+  }
+  return params;
 }
 
 async function safeReadErrorMessage(response: Response): Promise<string | null> {

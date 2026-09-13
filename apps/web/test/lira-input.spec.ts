@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   completeLiraAmount,
   formatLiraDraft,
+  minorToLiraDraft,
   parseLiraToMinor,
 } from '../lib/lira-input';
 
@@ -120,5 +121,17 @@ describe('parseLiraToMinor', () => {
   it('stays inside safe integers however many digits are pasted', () => {
     const parsed = parseLiraToMinor('9'.repeat(40));
     expect(Number.isSafeInteger(parsed!)).toBe(true);
+  });
+});
+
+describe('minorToLiraDraft', () => {
+  it('is empty for a budget the customer never entered', () => {
+    expect(minorToLiraDraft(null)).toBe('');
+    expect(minorToLiraDraft(undefined)).toBe('');
+  });
+
+  it('renders a saved minor-unit amount as the field would have grouped it', () => {
+    expect(minorToLiraDraft(150000)).toBe('1.500,00');
+    expect(minorToLiraDraft(99)).toBe('0,99');
   });
 });

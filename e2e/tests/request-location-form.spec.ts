@@ -8,7 +8,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
-import { fillContactStep } from '../src/journeys';
+import { fillRequestForm, openRequestFormContactStep } from '../src/journeys';
 
 /**
  * The request form's location step, driven the way a customer drives it.
@@ -30,11 +30,15 @@ test.describe('request form location', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await customer.gotoWeb(`/categories/${category.slug}`);
+      await openRequestFormContactStep(customer, category);
 
+      // A signed-in customer's contact step has nothing to type and no gate;
+      // the location lives on the third step.
       const form = customer.page.locator('form.form-card');
+      const nextStep = customer.page.getByRole('button', { name: 'Devam et' });
+      await nextStep.click();
       await form.locator('textarea[name="description"]').fill('Klima montajı gerekiyor.');
-      await customer.page.getByRole('button', { name: 'Devam et' }).click();
+      await nextStep.click();
 
       const city = form.getByTestId('request-city');
       const district = form.getByTestId('request-district');
@@ -83,23 +87,19 @@ test.describe('request form location', () => {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
 
       const values = requestFormValues(location, customerAccount.name);
-      await customer.gotoWeb(`/categories/${category.slug}`);
+      await openRequestFormContactStep(customer, category);
 
+      // Contact, details, then province and district from the journey; the
+      // form is left on its last step with the location chosen.
+      await fillRequestForm(customer, values);
       const form = customer.page.locator('form.form-card');
-      await form.locator('textarea[name="description"]').fill(values.description);
-      await customer.page.getByRole('button', { name: 'Devam et' }).click();
-
-      await form.getByTestId('request-city').selectOption(values.city);
-      await form.getByTestId('request-district').selectOption(values.district);
+      await expect(form.getByTestId('request-district')).toHaveValue(values.district);
 
       // The optional third field, picked from the list the district produced.
       const neighborhood = form.getByTestId('request-neighborhood');
       await expect(neighborhood).toBeEnabled();
       const chosenNeighborhood = (await neighborhood.locator('option').nth(1).getAttribute('value'))!;
       await neighborhood.selectOption(chosenNeighborhood);
-
-      await customer.page.getByRole('button', { name: 'Devam et' }).click();
-      await fillContactStep(customer, values);
 
       await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
       await expect(customer.page).toHaveURL(/\/requests\/success\?id=/);

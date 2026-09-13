@@ -8,7 +8,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
-import { fillContactStep } from '../src/journeys';
+import { fillRequestForm, openRequestFormContactStep } from '../src/journeys';
 
 /**
  * The two budget fields on the public request form, in Turkish lira.
@@ -24,11 +24,19 @@ import { fillContactStep } from '../src/journeys';
  * keeps whatever the browser did.
  */
 
-/** Walks the form to the step the budget fields live on. */
+/**
+ * Walks the form to the step the budget fields live on — the third. Every
+ * scenario here is a signed-in customer's, so the contact step has nothing to
+ * type and no identity gate: "Devam et" leaves it at once.
+ */
 async function openBudgetStep(customer: Actor) {
   const form = customer.page.locator('form.form-card');
+  const nextStep = customer.page.getByRole('button', { name: 'Devam et' });
+  await expect(customer.page.locator('#request-step-contact')).toBeVisible();
+  await nextStep.click();
   await form.locator('textarea[name="description"]').fill('Klima montajı gerekiyor.');
-  await customer.page.getByRole('button', { name: 'Devam et' }).click();
+  await nextStep.click();
+  await expect(form.getByTestId('request-budget-min')).toBeVisible();
   return form;
 }
 
@@ -160,19 +168,14 @@ test.describe('request form budget fields', () => {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
 
       const values = requestFormValues(location, customerAccount.name);
-      await customer.gotoWeb(`/categories/${category.slug}`);
+      await openRequestFormContactStep(customer, category);
 
+      // Contact, details and location from the journey; the budget fields are
+      // on the same last step as the location.
+      await fillRequestForm(customer, values);
       const form = customer.page.locator('form.form-card');
-      await form.locator('textarea[name="description"]').fill(values.description);
-      await customer.page.getByRole('button', { name: 'Devam et' }).click();
-
-      await form.getByTestId('request-city').selectOption(values.city);
-      await form.getByTestId('request-district').selectOption(values.district);
       await form.getByTestId('request-budget-min').fill('5000');
       await form.getByTestId('request-budget-max').fill('7500,5');
-
-      await customer.page.getByRole('button', { name: 'Devam et' }).click();
-      await fillContactStep(customer, values);
 
       await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
       await expect(customer.page).toHaveURL(/\/requests\/success\?id=/);

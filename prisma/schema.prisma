@@ -351,6 +351,8 @@ model User {
   customerNotes                 CustomerNote[]                     @relation("CustomerNoteCustomer")
   createdCustomerNotes          CustomerNote[]                     @relation("CustomerNoteCreatedBy")
   activationTokens              CustomerActivationToken[]          @relation("CustomerActivationTokenCustomer")
+  requestDraftsExpected         RequestDraft[]                     @relation("RequestDraftExpectedUser")
+  requestDrafts                 RequestDraft[]                     @relation("RequestDraftUser")
   createdActivationTokens       CustomerActivationToken[]          @relation("CustomerActivationTokenCreatedBy")
   adminInviteTokens             AdminInviteToken[]                 @relation("AdminInviteTokenUser")
   passwordResetTokens           PasswordResetToken[]
@@ -3411,4 +3413,41 @@ model ShowcaseLead {
   @@index([status, slaDueAt])
   @@index([placementId, createdAt])
   @@index([status, breachedAt])
+}
+
+/// Which request form a draft belongs to. The form page asks for its own kind
+/// only, so a marketplace draft can never prefill a vitrin lead or vice versa.
+enum RequestDraftFormType {
+  MARKETPLACE
+  SHOWCASE_LEAD
+}
+
+/// A request form saved server-side while its author goes away to sign in or
+/// to activate an account, and restored when they come back.
+///
+/// The browser holds only an opaque token (HttpOnly cookie); the row holds the
+/// token's hash. `payload` never carries contact fields. `expectedUserId` is
+/// the account the identity check found — set by the server, never by a
+/// client — and the only session allowed to open the draft; it cascades so a
+/// deleted account can never leave a protected draft behind as an anonymous
+/// one. `userId` is the account the draft actually ended up bound to.
+model RequestDraft {
+  id             String               @id @default(cuid())
+  tokenHash      String               @unique
+  formType       RequestDraftFormType
+  categorySlug   String
+  cardId         String?
+  payload        Json
+  expectedUserId String?
+  userId         String?
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime             @default(now())
+
+  expectedUser User? @relation("RequestDraftExpectedUser", fields: [expectedUserId], references: [id], onDelete: Cascade)
+  user         User? @relation("RequestDraftUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@index([expectedUserId])
+  @@index([userId])
 }

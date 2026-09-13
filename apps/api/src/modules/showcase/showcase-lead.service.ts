@@ -130,6 +130,7 @@ export class ShowcaseLeadService {
     dto: CreateShowcaseLeadDto,
     user: AuthUser | null,
     meta: LeadRequestMeta,
+    options: { draftToken?: string | null } = {},
   ) {
     if (user?.role === UserRole.PROVIDER) {
       throw new ForbiddenException('Providers cannot open vitrin leads');
@@ -202,6 +203,8 @@ export class ShowcaseLeadService {
         // redeemed inside the transaction. Set here as the value the request
         // row carries.
         phoneVerifiedAt: now,
+        draftToken: options.draftToken ?? null,
+        draftCardId: live.cardId,
         onCreated: async (tx, created) => {
           /*
            * The proof, redeemed inside the same transaction that creates the

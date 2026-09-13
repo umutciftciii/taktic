@@ -1,5 +1,5 @@
 /**
- * What the vitrin lead form says for a refusal.
+ * What a request form says for a refusal.
  *
  * Two sources, in this order:
  *
@@ -14,9 +14,9 @@
  * for the customer, which is exactly what happened when the code-less fallback
  * (`SHOWCASE_LEAD_FAILED`) was looked up in the table before the message.
  */
-export const SHOWCASE_LEAD_FAILED = 'SHOWCASE_LEAD_FAILED';
+export const REQUEST_REFUSAL_GENERIC = 'SHOWCASE_LEAD_FAILED';
 
-export const SHOWCASE_LEAD_ERRORS: Record<string, string> = {
+export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
   SHOWCASE_CARD_NOT_FOUND: 'Bu kart artık yayında değil.',
   SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED:
     'Telefon doğrulamanız tamamlanmadı ya da süresi doldu. Kodu yeniden isteyin.',
@@ -28,16 +28,20 @@ export const SHOWCASE_LEAD_ERRORS: Record<string, string> = {
   SHOWCASE_AREA_UNKNOWN: 'Seçilen il, ilçe ve mahalle birlikte geçerli bir bölge oluşturmuyor.',
   SHOWCASE_LEAD_FORBIDDEN:
     'Hizmet veren hesabıyla vitrin talebi gönderilemez. Müşteri olarak devam etmek için oturumu kapatın.',
+  REQUEST_FORBIDDEN:
+    'Hizmet veren hesabıyla talep oluşturulamaz. Müşteri olarak devam etmek için oturumu kapatın.',
+  CUSTOMER_IDENTITY_CONFLICT:
+    'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
 };
 
 const GENERIC_MESSAGE = 'Talebiniz gönderilemedi. Bilgileri kontrol edip tekrar deneyin.';
 
-export function showcaseLeadRefusalText(failure: {
+export function requestRefusalText(failure: {
   code: string;
   message: string | null;
 }): string {
-  if (failure.code !== SHOWCASE_LEAD_FAILED) {
-    const known = SHOWCASE_LEAD_ERRORS[failure.code];
+  if (failure.code !== REQUEST_REFUSAL_GENERIC) {
+    const known = REQUEST_REFUSAL_TEXTS[failure.code];
     if (known) {
       return known;
     }

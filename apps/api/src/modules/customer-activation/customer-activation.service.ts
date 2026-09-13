@@ -34,10 +34,65 @@ function generateRawToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
-function buildActivationUrl(rawToken: string): string {
+/** Whether a literal string is shaped like an in-application path. */
+function isSafeRedirectShape(value: string): boolean {
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return false;
+  return !/[\x00-\x20]/.test(value);
+}
+
+/**
+ * Decodes until the value stops changing, capped at three rounds — enough for
+ * single and double encoding, with the third round there only to prove a
+ * fixed point was reached rather than that the loop ran out of turns.
+ * Malformed percent-encoding is a rejection: `decodeURIComponent` throwing
+ * means the value cannot be a path this application produced.
+ */
+function fullyDecode(value: string): string | null {
+  let current = value;
+
+  for (let round = 0; round < 3; round += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      return null;
+    }
+
+    if (next === current) return current;
+    current = next;
+  }
+
+  return current;
+}
+
+/**
+ * Only a same-origin path may be carried on an activation link. Mirrors the
+ * shape-then-decode rule of `safeRedirectPathOrNull` in
+ * `packages/shared/src/safe-redirect.ts` — the API cannot import that package
+ * at runtime (boot failure), so it is repeated here: a candidate must look
+ * like an in-application path both as written and after being fully decoded,
+ * which is what catches `/%2f%2fevil.example` — safe-shaped as written, but
+ * `//evil.example` once decoded.
+ */
+function safeRedirectPath(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!isSafeRedirectShape(trimmed)) return null;
+  if (trimmed.length > 512) return null;
+
+  const decoded = fullyDecode(trimmed);
+  if (decoded === null || !isSafeRedirectShape(decoded)) return null;
+
+  return trimmed;
+}
+
+function buildActivationUrl(rawToken: string, redirectTo: string | null = null): string {
   const base = getWebAppBaseUrl();
   const url = new URL(CUSTOMER_ACTIVATION_PATH, `${base}/`);
   url.searchParams.set('token', rawToken);
+  if (redirectTo) {
+    url.searchParams.set('redirectTo', redirectTo);
+  }
   return url.toString();
 }
 
@@ -119,7 +174,10 @@ export class CustomerActivationService {
    * the service request the visitor just submitted. Returns null when the
    * account is not claimable (already has a password, self-registered, …).
    */
-  async issueForAutoCreatedCustomer(customerId: string) {
+  async issueForAutoCreatedCustomer(
+    customerId: string,
+    options: { redirectTo?: string | null } = {},
+  ) {
     const customer = await this.prisma.user.findUnique({
       where: { id: customerId },
       select: {
@@ -138,7 +196,13 @@ export class CustomerActivationService {
       return null;
     }
 
-    return this.issueAndNotify(customer.id, customer.email, customer.name, null);
+    return this.issueAndNotify(
+      customer.id,
+      customer.email,
+      customer.name,
+      null,
+      safeRedirectPath(options.redirectTo),
+    );
   }
 
   /**
@@ -182,8 +246,9 @@ export class CustomerActivationService {
     email: string,
     name: string | null,
     createdById: string | null,
+    redirectTo: string | null = null,
   ) {
-    const issued = await this.issueToken(customerId, createdById);
+    const issued = await this.issueToken(customerId, createdById, redirectTo);
 
     // Goes through the dispatcher so the send is audited, but the payload and
     // the transport are unchanged: the same NotificationPort adapter receives
@@ -210,7 +275,11 @@ export class CustomerActivationService {
    * Issues a fresh single-use token and invalidates every other outstanding one
    * for the same customer, so at most one activation link is ever live.
    */
-  private async issueToken(customerId: string, createdById: string | null) {
+  private async issueToken(
+    customerId: string,
+    createdById: string | null,
+    redirectTo: string | null = null,
+  ) {
     const rawToken = generateRawToken();
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(
@@ -239,7 +308,7 @@ export class CustomerActivationService {
       });
     });
 
-    return { activationUrl: buildActivationUrl(rawToken), expiresAt };
+    return { activationUrl: buildActivationUrl(rawToken, redirectTo), expiresAt };
   }
 
   async validateRawToken(rawToken: string) {

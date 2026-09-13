@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
+import { fillLeadContact, settleIdentityGate } from '../src/journeys';
 import { waitForLatestSmsCode } from '../src/outbox';
 import {
   E2E_BYPASS_CODE,
@@ -68,7 +69,15 @@ test.describe('vitrin: telefon doğrulama test modu', () => {
       // the same screen, the same field, the same button as any visitor sees.
       await gated.gotoWeb(`/vitrin/${card.id}?step=form`);
       await assertNoErrorScreen(gated.page);
+      // "Kod gönder" waits for the identity gate: name, e-mail and the number,
+      // and the check that leaving the number starts. Neutral values: the
+      // page's text is asserted below not to mention a test mode.
+      await fillLeadContact(gated.page, {
+        name: 'E2E Vitrin Ziyaretçisi',
+        email: `e2e-vitrin-kod-${Date.now()}@example.test`,
+      });
       await gated.page.getByLabel('Telefon *').fill(E2E_BYPASS_PHONE);
+      await settleIdentityGate(gated.page, gated.page.getByLabel('Telefon *'));
       await gated.page.getByRole('button', { name: 'Kod gönder' }).click();
       await expect(gated.page.getByTestId('showcase-lead-phone-code')).toBeVisible();
       await assertNoErrorScreen(gated.page);
@@ -105,7 +114,12 @@ test.describe('vitrin: telefon doğrulama test modu', () => {
 
       // ── The same steps on the runtime without it ────────────────────────
       await plain.gotoWeb(`/vitrin/${card.id}?step=form`);
+      await fillLeadContact(plain.page, {
+        name: 'E2E Vitrin Ziyaretçisi',
+        email: `e2e-vitrin-kod-plain-${Date.now()}@example.test`,
+      });
       await plain.page.getByLabel('Telefon *').fill(E2E_BYPASS_PHONE);
+      await settleIdentityGate(plain.page, plain.page.getByLabel('Telefon *'));
       await plain.page.getByRole('button', { name: 'Kod gönder' }).click();
       await expect(plain.page.getByTestId('showcase-lead-phone-code')).toBeVisible();
 

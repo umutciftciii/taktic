@@ -1,4 +1,4 @@
-import { formatDateTime } from '@taktic/shared';
+import { formatDateTime, safeRedirectPathOrNull } from '@taktic/shared';
 import Link from 'next/link';
 import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
 import { PasswordFields } from '../password-criteria';
@@ -12,6 +12,7 @@ type SearchParams = {
   success?: string;
   error?: string;
   errorMessage?: string;
+  redirectTo?: string;
 };
 
 type ActivateCustomerPageProps = {
@@ -81,7 +82,7 @@ async function safeReadMessage(response: Response): Promise<string | null> {
 const formatExpiry = formatDateTime;
 
 export default async function ActivateCustomerPage({ searchParams }: ActivateCustomerPageProps) {
-  const { token, success, error, errorMessage } = await searchParams;
+  const { token, success, error, errorMessage, redirectTo } = await searchParams;
 
   if (success === '1') {
     return (
@@ -172,6 +173,11 @@ export default async function ActivateCustomerPage({ searchParams }: ActivateCus
         ) : null}
 
         <input type="hidden" name="token" value={token} />
+        <input
+          type="hidden"
+          name="redirectTo"
+          value={safeRedirectPathOrNull(redirectTo ?? '') ?? ''}
+        />
 
         <div className="auth-screen-fields">
           <PasswordFields />

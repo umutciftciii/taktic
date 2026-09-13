@@ -3,6 +3,7 @@ import { CurrentUser } from '../auth/auth.decorators';
 import { OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
+import { getDraftTokenFromRequest } from '../request-drafts/request-draft.cookie';
 import { CreateShowcaseLeadDto, ShowcaseLeadVerificationConfirmDto, ShowcaseLeadVerificationStartDto } from './dto/showcase-lead.dto';
 import { ShowcaseFeedQueryDto } from './dto/showcase-feed.dto';
 import { ShowcaseFeedService } from './showcase-feed.service';
@@ -113,7 +114,9 @@ export class ShowcasePublicController {
     @CurrentUser() user: AuthUser | null,
     @Req() req: IncomingRequest,
   ) {
-    const outcome = await this.leads.createLead(cardId, dto, user ?? null, readMeta(req));
+    const outcome = await this.leads.createLead(cardId, dto, user ?? null, readMeta(req), {
+      draftToken: getDraftTokenFromRequest(req),
+    });
     return outcome.lead;
   }
 }
@@ -125,7 +128,7 @@ export class ShowcasePublicController {
  */
 type IncomingRequest = {
   ip?: unknown;
-  headers?: Record<string, unknown>;
+  headers?: Record<string, string | string[] | undefined>;
 };
 
 function readMeta(req: IncomingRequest) {

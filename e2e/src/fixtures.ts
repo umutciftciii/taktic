@@ -183,12 +183,26 @@ export function prisma(): PrismaClient {
  * if that ever stops being true.
  *
  * Was sixteen blocks of sixty until the offer-package suite arrived and the
- * single worker this config runs (`workers: 1`) went past sixty allocations.
- * Widened rather than worked around, which is what the allocator's own refusal
- * message asks for: eight is still more parallelism than this suite has ever
- * been run with, and the ceiling per worker doubles.
+ * single worker this config runs (`workers: 1`) went past sixty allocations,
+ * then eight blocks of a hundred and twenty-one until the identity-gate suite
+ * — two forms per scenario, each on its own district — went past that too.
+ * Widened rather than worked around both times, which is what the allocator's
+ * own refusal message asks for: four is still more parallelism than this suite
+ * has ever been run with, and the ceiling per worker doubles again.
+ *
+ * What four costs, stated plainly. Blocks are indexed by TEST_WORKER_INDEX,
+ * and Playwright numbers every worker process it starts across one run — one
+ * per project, plus one for each retry restart — so a run now survives four
+ * worker processes before `has no location block`, where it survived eight:
+ * chromium (0), webkit (1) and two retry restarts. Enough for how this suite
+ * is run today (one project per invocation, `retries: 1` in CI), but the
+ * ceiling moved from "never" to "a bad day". The permanent fix is the other
+ * direction: fewer unique districts per test. A scenario that does not need
+ * a distinct card area — most of the marketplace identity-gate scenarios,
+ * whose district is only what the request is posted with — can share one
+ * location instead of allocating its own.
  */
-export const LOCATION_WORKER_BLOCKS = 8;
+export const LOCATION_WORKER_BLOCKS = 4;
 
 /** Every (province, district) pair, in one deterministic order. */
 export function allDistrictPairs(): Location[] {
@@ -285,6 +299,37 @@ export async function createCustomer(name = 'E2E Müşteri'): Promise<SeededCust
     name: user.name ?? name,
     phone: user.phone ?? '',
   };
+}
+
+/**
+ * A customer account the request path created on its own and nobody has ever
+ * signed into: CUSTOMER, active, no password, `AUTO_CREATED_REQUEST`.
+ *
+ * Exactly the row `resolveCustomerForCreate` writes for a guest's first request,
+ * and the one shape the identity pre-check answers `activation-required` for —
+ * the customer is asked to set a password through the activation link rather
+ * than to sign in. No password is returned because none exists; the activation
+ * flow under test is what gives the account one.
+ */
+export async function createClaimableCustomer(
+  name = 'E2E Etkinleştirilecek Müşteri',
+): Promise<Omit<SeededCustomer, 'password'>> {
+  const suffix = uniqueSuffix();
+  const email = `e2e-claimable-${suffix}@example.test`;
+  const user = await prisma().user.create({
+    data: {
+      email,
+      phone: uniquePhone(),
+      name: `${name} ${suffix}`,
+      role: 'CUSTOMER',
+      isActive: true,
+      passwordHash: null,
+      customerOrigin: 'AUTO_CREATED_REQUEST',
+    },
+    select: { id: true, name: true, phone: true },
+  });
+
+  return { id: user.id, email, name: user.name ?? name, phone: user.phone ?? '' };
 }
 
 export async function createAdmin(): Promise<SeededCustomer> {

@@ -473,6 +473,23 @@ describe('the body is the marketplace request body', () => {
     });
     expect(proof.requestId).toBe(stored.id);
   });
+
+  it('refuses a phone and an e-mail that belong to two different customers, with a code', async () => {
+    const { card, category } = await published();
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05553330001', email: 'one@example.test' });
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05553330002', email: 'two@example.test' });
+
+    const response = await openLead(card.id, category.slug, {
+      customerPhone: '05553330001',
+      customerEmail: 'two@example.test',
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('CUSTOMER_IDENTITY_CONFLICT');
+    expect(response.body.message).toBe('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
+    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+    expect(await ctx.prisma.showcaseLead.count()).toBe(0);
+  });
 });
 
 describe('the telephone number has to be proved first', () => {
@@ -797,5 +814,36 @@ describe('the rate limits and the double-submitted form', () => {
     expect(second.body.id).toBe(first.body.id);
     expect(await ctx.prisma.showcaseLead.count()).toBe(1);
     expect(await ctx.prisma.serviceRequest.count()).toBe(1);
+  });
+});
+
+describe('the browser’s request draft', () => {
+  /**
+   * A vitrin draft is consumed inside the very same transaction that opens the
+   * lead, exactly as it is for the marketplace form — see
+   * `ServiceRequestsService.createServiceRequest`'s call to
+   * `RequestDraftsService.consumeInTransaction`. The lead path passes the
+   * draft's own card id (`draftCardId`), which is what lets the key match a
+   * vitrin draft rather than a marketplace one.
+   */
+  it('consumes the browser’s vitrin draft inside the lead transaction', async () => {
+    const { card, category } = await published();
+    const draft = await request(ctx.server).post('/request-drafts').send({
+      formType: 'SHOWCASE_LEAD', categorySlug: category.slug, cardId: card.id,
+      payload: { description: 'Vitrin taslağı', answers: [] },
+      identity: { phone: '05557770001', email: 'vitrin-draft@example.test' },
+    });
+    const payload = showcaseLeadPayload(category.slug, { customerPhone: '05557770001', customerEmail: 'vitrin-draft@example.test' });
+    await proveShowcaseLeadPhone(ctx.prisma, '05557770001');
+
+    const response = await request(ctx.server)
+      .post(`/showcase/cards/${card.id}/leads`)
+      .set('Cookie', `taktic_request_draft=${draft.body.token}`)
+      .send(payload);
+
+    expect(response.status).toBe(201);
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.consumedAt).not.toBeNull();
+    expect(await ctx.prisma.showcaseLead.count()).toBe(1);
   });
 });
