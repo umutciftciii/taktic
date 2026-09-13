@@ -278,9 +278,14 @@ ekranda kalır (client state) ve CTA tekrar denenebilir.
 
 - `taktic_request_draft` **web origin'inde** yazılır: server action API'den `{ token }`
   alır, `cookies().set(name, token, { httpOnly: true, sameSite: 'lax', path: '/',
-  maxAge: 86400, secure: NODE_ENV === 'production' || requestIsOverHttps() })`. API
-  `Set-Cookie` göndermez; kaybolacak başlık yoktur. Yerel HTTP'de çalışır; production'da
-  Secure zorunludur.
+  maxAge: 86400, ...(await appCookieOptions({ maxAge: 86400 })) })` — yani `secure` kararını
+  da (diğer tüm çerezlerle aynı) `appCookieOptions`/`requestIsOverHttps()` verir, doğrudan
+  `NODE_ENV` okunmaz (bkz. `session-cookie.spec.ts` mimari koruması: `secure:` anahtarı ve
+  `process.env.NODE_ENV` yalnızca `session-cookie.ts`'te bulunabilir — Next'in `NODE_ENV`'i
+  build-time sabitine katlamasından kaynaklanan geçmiş bir hatanın regresyon testi). API
+  `Set-Cookie` göndermez; kaybolacak başlık yoktur. Yerel HTTP'de çalışır; production edge'i
+  `x-forwarded-proto: https` gönderdiğinden `requestIsOverHttps()` orada `true` döner ve
+  Secure yine zorunlu olur.
 - API cookie'yi `apiFetch`'in forward ettiği `Cookie` başlığından okur (session ile aynı).
 - Form sayfaları (server component): cookie varsa `GET /request-drafts/current` →
   `200 payload` → `initialDraft`; `wrong-account` → notice + boş form (taslak yerinde);
