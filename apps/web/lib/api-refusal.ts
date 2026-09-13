@@ -31,8 +31,9 @@ export type ApiRefusal = {
  * reaches the customer; status, code and message reach the server log. Neither
  * carries what the customer typed.
  *
- * `step` names the call for the log only — `service-requests`,
- * `cards/<id>/leads` — so a refusal can be found without the body.
+ * `step` names the call — `service-requests`, `vitrin/cards/<id>/leads` — so
+ * a refusal can be found in the log without the body, and so the one
+ * code-less refusal below can be worded for the form it happened on.
  */
 export function describeApiRefusal(step: string, error: unknown): ApiRefusal {
   if (!(error instanceof ApiError)) {
@@ -68,9 +69,11 @@ export function describeApiRefusal(step: string, error: unknown): ApiRefusal {
 
   // The one refusal that carries no code but has a fixed meaning here: a
   // PROVIDER session may not open a customer request. Named so the form can
-  // say so in Turkish rather than relay the API's English sentence.
+  // say so in Turkish rather than relay the API's English sentence — and named
+  // per form, because the sentence names what could not be sent: a vitrin
+  // lead on the card's form, a request on the marketplace form.
   if (!code && error.status === 403) {
-    return { ok: false, code: 'SHOWCASE_LEAD_FORBIDDEN', message: null };
+    return { ok: false, code: step === 'service-requests' ? 'REQUEST_FORBIDDEN' : 'SHOWCASE_LEAD_FORBIDDEN', message: null };
   }
 
   return { ok: false, code: code ?? REQUEST_REFUSAL_GENERIC, message: userFacing ? message : null };

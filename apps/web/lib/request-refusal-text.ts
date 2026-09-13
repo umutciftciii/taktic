@@ -28,6 +28,8 @@ export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
   SHOWCASE_AREA_UNKNOWN: 'Seçilen il, ilçe ve mahalle birlikte geçerli bir bölge oluşturmuyor.',
   SHOWCASE_LEAD_FORBIDDEN:
     'Hizmet veren hesabıyla vitrin talebi gönderilemez. Müşteri olarak devam etmek için oturumu kapatın.',
+  REQUEST_FORBIDDEN:
+    'Hizmet veren hesabıyla talep oluşturulamaz. Müşteri olarak devam etmek için oturumu kapatın.',
   CUSTOMER_IDENTITY_CONFLICT:
     'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
 };

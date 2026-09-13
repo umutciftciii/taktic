@@ -15,20 +15,28 @@ export type IdentityAction =
   | { type: 'fields'; phone: string; email: string };
 
 /**
- * The pre-check's state machine, kept pure so the two rules that matter can be
- * tested without a browser: only the latest call's answer counts, and a
- * changed number or address throws the answer away.
+ * The pre-check's state machine, kept pure so the rules that matter can be
+ * tested without a browser:
+ *
+ * - only the latest call's answer counts (`seq`);
+ * - a changed number or address throws the answer away — and advances `seq`
+ *   too, so a call that was in flight for the *old* pair can never land on
+ *   the new one, whether or not the hook managed to abort it;
+ * - an answer lands only on a check that is still running: never on `idle`,
+ *   never on `error`.
  */
 export function identityReducer(state: IdentityState, action: IdentityAction): IdentityState {
   switch (action.type) {
     case 'start':
       return { status: 'checking', seq: state.seq + 1, phone: action.phone, email: action.email };
     case 'result':
-      return action.seq === state.seq ? { ...state, status: action.status } : state;
+      return action.seq === state.seq && state.status === 'checking' ? { ...state, status: action.status } : state;
     case 'failure':
-      return action.seq === state.seq ? { ...state, status: 'error' } : state;
+      return action.seq === state.seq && state.status === 'checking' ? { ...state, status: 'error' } : state;
     case 'fields':
-      return action.phone === state.phone && action.email === state.email ? state : { ...state, status: 'idle', phone: action.phone, email: action.email };
+      return action.phone === state.phone && action.email === state.email
+        ? state
+        : { status: 'idle', seq: state.seq + 1, phone: action.phone, email: action.email };
   }
 }
 
@@ -37,9 +45,29 @@ const API_STATUSES = new Set(['new-customer', 'login-required', 'activation-requ
 export function useIdentityCheck(input: { name: string; phone: string; email: string; enabled: boolean }) {
   const [state, dispatch] = useReducer(identityReducer, { status: 'idle', seq: 0, phone: '', email: '' });
   const controllerRef = useRef<AbortController | null>(null);
+  /*
+   * The number a `check()` call tags its fetch with, kept in lock-step with
+   * the reducer's `seq` by counting the same two events the reducer counts —
+   * a `start`, and a `fields` action that really changed the pair — against
+   * the same last-seen pair (`fieldsRef` mirrors the reducer's own
+   * `phone`/`email`). Counted here rather than read back from state: a
+   * dispatch queued from an effect may not have rendered yet when the blur
+   * that calls `check()` arrives, and a number read from state at that moment
+   * would be one behind, so the answer would never match and the check
+   * would hang in `checking`.
+   */
   const seqRef = useRef(0);
+  const fieldsRef = useRef({ phone: '', email: '' });
 
   useEffect(() => {
+    if (fieldsRef.current.phone !== input.phone || fieldsRef.current.email !== input.email) {
+      // A different pair: whatever is in flight was asked about the old one,
+      // and the reducer is about to advance `seq` for the same change.
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      fieldsRef.current = { phone: input.phone, email: input.email };
+      seqRef.current += 1;
+    }
     dispatch({ type: 'fields', phone: input.phone, email: input.email });
   }, [input.phone, input.email]);
 
@@ -52,6 +80,7 @@ export function useIdentityCheck(input: { name: string; phone: string; email: st
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
+    fieldsRef.current = { phone: input.phone, email: input.email };
     seqRef.current += 1;
     const seq = seqRef.current;
     dispatch({ type: 'start', phone: input.phone, email: input.email });
@@ -64,6 +93,8 @@ export function useIdentityCheck(input: { name: string; phone: string; email: st
         if (!response.ok) throw new Error(String(response.status));
         const body = (await response.json()) as { status?: string };
         if (!body.status || !API_STATUSES.has(body.status)) throw new Error('bad body');
+        // Aborted while the body was being read: the pair changed under it.
+        if (controller.signal.aborted) return;
         const status = body.status === 'new-customer'
           ? 'ok'
           : (body.status as 'login-required' | 'activation-required' | 'identity-conflict' | 'unavailable');

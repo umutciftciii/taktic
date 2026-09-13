@@ -38,6 +38,15 @@ describe('requestRefusalText', () => {
     );
   });
 
+  it('words the provider-session refusal for the form it happened on', () => {
+    expect(requestRefusalText({ code: 'REQUEST_FORBIDDEN', message: null })).toBe(
+      'Hizmet veren hesabıyla talep oluşturulamaz. Müşteri olarak devam etmek için oturumu kapatın.',
+    );
+    expect(requestRefusalText({ code: 'SHOWCASE_LEAD_FORBIDDEN', message: null })).toBe(
+      'Hizmet veren hesabıyla vitrin talebi gönderilemez. Müşteri olarak devam etmek için oturumu kapatın.',
+    );
+  });
+
   it('names the identity conflict in the product’s words', () => {
     expect(
       requestRefusalText({
