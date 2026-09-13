@@ -3,6 +3,12 @@
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../../lib/api';
 import { describeApiRefusal } from '../../../lib/api-refusal';
+import {
+  clearRequestDraftCookie,
+  draftPayloadFromForm,
+  saveRequestDraftAction,
+  type SaveDraftResult,
+} from '../../../lib/request-drafts';
 import { buildServiceRequestPayload, readFormString } from '../../../lib/service-request-payload';
 
 /**
@@ -114,5 +120,33 @@ export async function createShowcaseLeadAction(formData: FormData): Promise<Lead
     return describeApiRefusal(`vitrin/cards/${cardId}/leads`, error);
   }
 
+  // The API consumed the draft inside the lead's own transaction; only the
+  // browser's cookie is left to clear, and it goes before the redirect so the
+  // card page the customer lands on does not read a token for a row that is gone.
+  await clearRequestDraftCookie();
   redirect(`/vitrin/${encodeURIComponent(cardId)}?sent=1`);
+}
+
+/**
+ * Parks the vitrin form before the customer leaves it to sign in or to
+ * activate an account. Keyed by the card as well as the category, so a draft
+ * for one business is never restored into another's form. The contact fields
+ * are not part of the payload — they are the identity the draft is bound to,
+ * and the account the customer comes back with supplies them.
+ */
+export async function saveShowcaseDraftAction(
+  formData: FormData,
+  replace: boolean,
+): Promise<SaveDraftResult> {
+  return saveRequestDraftAction({
+    formType: 'SHOWCASE_LEAD',
+    categorySlug: readFormString(formData, 'categorySlug'),
+    cardId: readFormString(formData, 'cardId'),
+    payload: await draftPayloadFromForm(formData),
+    identity: {
+      phone: readFormString(formData, 'customerPhone'),
+      email: readFormString(formData, 'customerEmail'),
+    },
+    replace,
+  });
 }

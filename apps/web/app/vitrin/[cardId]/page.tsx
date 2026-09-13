@@ -8,6 +8,7 @@ import {
   type ShowcaseFeedCard,
 } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { readCurrentDraft } from '../../../lib/request-drafts';
 import { areaSentence } from '../../showcase-shelf';
 import { faceFromFeedCard, ShowcaseCardFace } from '../../showcase-card-face';
 import { ShowcaseLeadForm } from './lead-form';
@@ -83,7 +84,7 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
     notFound();
   }
 
-  const [provinces, category, disclosure, user] = await Promise.all([
+  const [provinces, category, disclosure, user, draft] = await Promise.all([
     // The canonical province/district list, from the same API that validates a
     // submitted request — the list the marketplace form is built from.
     apiFetch<ProvinceWithDistricts[]>('/locations/provinces').catch(
@@ -98,6 +99,11 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
     ),
     getContactDisclosure(),
     getCurrentUser(),
+    // A form parked here before the customer left to sign in or activate an
+    // account. `none` when there is nothing to restore; `wrong-account` when
+    // the draft belongs to a different account than the one now signed in.
+    // Keyed by the card too: a draft written for one business is not another's.
+    readCurrentDraft({ formType: 'SHOWCASE_LEAD', categorySlug: card.category.slug, cardId }),
   ]);
 
   const questions = category?.questions ?? [];
@@ -109,6 +115,14 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
 
   const coverage = areaSentence(card);
   const nextStepHref = `/vitrin/${cardId}?step=form${locationQuery(prefill)}`;
+  /*
+   * This screen's own path for the form to hand to sign-in and activation as
+   * `redirectTo`: the customer comes back to exactly this form, and the draft
+   * saved before leaving is restored here. The prefill is left out on purpose
+   * — the draft carries the location, and a telephone number has no place in
+   * a URL that travels through an e-mail.
+   */
+  const formPath = `/vitrin/${cardId}?step=form`;
 
   return (
     <main className="lp-section">
@@ -196,6 +210,9 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
                   showDisclosure={showDisclosure}
                   accountContact={accountContact}
                   prefill={prefill}
+                  initialDraft={draft.kind === 'payload' ? draft.payload : null}
+                  wrongAccount={draft.kind === 'wrong-account'}
+                  formPath={formPath}
                 />
               ) : (
                 /*

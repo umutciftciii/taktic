@@ -1,11 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useRef, useState, useTransition, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from 'react';
 import type { ContactDisclosureConfig, Question, ShowcaseFeedCard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
+import { discardRequestDraftAction, type RequestDraftPayload } from '../../../lib/request-drafts';
 import { boundQuestion, visibleQuestions } from '../../../lib/request-flow';
-import { requestRefusalText } from '../../../lib/request-refusal-text';
+import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../../../lib/request-refusal-text';
+import { switchAccountAction } from '../../login/actions';
 import {
   ContactSection,
   EMPTY_ALTERNATE_CONTACT,
@@ -15,12 +18,15 @@ import {
 } from '../../request-fields/contact-section';
 import { DescriptionField } from '../../request-fields/description-field';
 import { ContactDisclosureField } from '../../request-fields/disclosure-field';
+import { useIdentityCheck } from '../../request-fields/identity-check';
+import { IdentityNotice } from '../../request-fields/identity-notice';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
 import { UrgencySelect } from '../../request-fields/timing-fields';
 import {
   confirmShowcaseLeadVerificationAction,
   createShowcaseLeadAction,
+  saveShowcaseDraftAction,
   startShowcaseLeadVerificationAction,
   type LeadActionResult,
 } from './actions';
@@ -49,6 +55,9 @@ type Verification =
   | { status: 'code'; phone: string; error: string | null; verifying: boolean }
   | { status: 'verified'; phone: string };
 
+/** Which of the two ways off the contact section a saved draft was for. */
+type DraftIntent = 'login' | 'activate';
+
 type LeadFormProps = {
   card: ShowcaseFeedCard;
   cardId: string;
@@ -67,10 +76,38 @@ type LeadFormProps = {
    * server re-resolves and re-checks all of it.
    */
   prefill: { city: string; district: string; neighborhood: string; phone: string };
+  /**
+   * A draft the customer parked before leaving to sign in or activate an
+   * account, restored into the fields. Null when there is nothing to restore.
+   * When there is one it wins over `prefill`: the draft is what they actually
+   * filled in, the query string only where they came from.
+   */
+  initialDraft?: RequestDraftPayload | null;
+  /**
+   * The parked draft belongs to a different account than the one signed in
+   * now. The form opens empty and says so; the draft is not shown.
+   */
+  wrongAccount?: boolean;
+  /**
+   * This screen's own path, query included — what sign-in and activation are
+   * told to come back to.
+   */
+  formPath: string;
 };
 
 /**
  * The form that writes to the business behind a vitrin card.
+ *
+ * ## Contact first, and a gate before the SMS
+ *
+ * The contact section opens the form. A visitor's number and e-mail are
+ * checked against the customer records the moment all three fields are
+ * filled and left, and only a `new-customer` answer opens the gate: somebody
+ * who already has an account is sent to sign in (their form parked as a draft
+ * and restored when they come back) *before* a verification code is sent to
+ * their number and before they write the request. A registered person never
+ * receives the SMS. A signed-in customer has a resolved identity already and
+ * the gate stands open for them.
  *
  * ## One screen, the marketplace form's own parts
  *
@@ -110,9 +147,15 @@ export function ShowcaseLeadForm({
   showDisclosure,
   accountContact,
   prefill,
+  initialDraft = null,
+  wrongAccount = false,
+  formPath,
 }: LeadFormProps) {
+  const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [pending, startTransition] = useTransition();
+  /** "Hesap değiştir" and "Vazgeç" — server actions that navigate, so they run in their own transition. */
+  const [leaving, startLeave] = useTransition();
 
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [guestContact, setGuestContact] = useState<AlternateContact>({
@@ -123,6 +166,51 @@ export function ShowcaseLeadForm({
   const [alternateContact, setAlternateContact] = useState(EMPTY_ALTERNATE_CONTACT);
   const [verification, setVerification] = useState<Verification>({ status: 'idle' });
   const [failure, setFailure] = useState<Extract<LeadActionResult, { ok: false }> | null>(null);
+
+  /*
+   * The gate on the contact section. A visitor's number and e-mail are checked
+   * once all three fields are filled and left; only a `new-customer` answer
+   * opens the way to the code and to submit. For a signed-in customer the check
+   * is disabled and the gate stands open — their identity is the session's.
+   */
+  const identity = useIdentityCheck({ ...guestContact, enabled: accountContact === null });
+
+  /*
+   * The two ways off the contact section for somebody who already has an
+   * account, and what parking the draft for either of them said.
+   */
+  const [draftIntent, setDraftIntent] = useState<DraftIntent | null>(null);
+  const [draftExists, setDraftExists] = useState(false);
+  const [draftError, setDraftError] = useState<
+    'DRAFT_BUSY' | 'DRAFT_FAILED' | 'ACTIVATION_FAILED' | null
+  >(null);
+  const [activationSent, setActivationSent] = useState(false);
+  const [draftBusy, setDraftBusy] = useState(false);
+
+  /*
+   * A changed number or address is a different identity: whatever the last
+   * one was told — a draft conflict, a failed park, a link already sent — no
+   * longer describes this one. The check's own answer resets the same way
+   * inside the hook.
+   */
+  const { phone: guestPhone, email: guestEmail } = guestContact;
+  useEffect(() => {
+    setDraftError(null);
+    setDraftExists(false);
+    setActivationSent(false);
+    setDraftIntent(null);
+  }, [guestPhone, guestEmail]);
+
+  /*
+   * A restored draft is already in the fields when the form first renders, but
+   * nothing has fired a change event: the answers are read from the DOM once so
+   * a dependent question the draft answered is shown rather than hidden.
+   */
+  const restoredDraft = initialDraft !== null;
+  useEffect(() => {
+    const form = formRef.current;
+    if (restoredDraft && form) setAnswers(readAnswers(form, questions));
+  }, [restoredDraft, questions]);
 
   const shown = useMemo(() => visibleQuestions(questions, answers), [questions, answers]);
   const descriptionQuestion = boundQuestion(shown, 'DESCRIPTION');
@@ -146,12 +234,16 @@ export function ShowcaseLeadForm({
   const submitBlocked = accountContactIncomplete && !useAlternateContact;
   const verified = verification.status === 'verified';
   const phoneLocked = verification.status !== 'idle';
+  const gateOpen = identity.gateOpen;
 
   function resetVerification() {
     setVerification({ status: 'idle' });
   }
 
   function sendCode() {
+    // No code before the gate: a number that belongs to an account is sent to
+    // sign in, not an SMS. The button is disabled too; this is where the rule holds.
+    if (!gateOpen) return;
     const target = phone.trim();
     if (!target) {
       setVerification({ status: 'code', phone: '', error: 'Önce telefon numaranızı yazın.', verifying: false });
@@ -195,25 +287,197 @@ export function ShowcaseLeadForm({
     // does not reset the uncontrolled fields when the action answers with a
     // refusal — the description and the answers stay exactly as typed.
     event.preventDefault();
-    if (!verified || submitBlocked) return;
+    if (!gateOpen || !verified || submitBlocked) return;
 
     const data = new FormData(event.currentTarget);
     setFailure(null);
     startTransition(async () => {
-      const result = await createShowcaseLeadAction(data);
-      if (!result.ok) {
-        setFailure(result);
-        // A proof that lapsed while the form was being filled in has to be
-        // made again; leaving "verified" on screen would invite a second
-        // refusal for the same reason.
-        if (result.code === PHONE_PROOF_REQUIRED) {
-          resetVerification();
-        }
+      let result: LeadActionResult | undefined;
+      try {
+        result = await createShowcaseLeadAction(data);
+      } catch (error) {
+        // The action answers every refusal itself, so this is the transport: a
+        // dropped connection, a deploy mid-flight. Said inline like any other.
+        console.error('[vitrin lead] submit: transport failure', error);
+        result = { ok: false, code: REQUEST_REFUSAL_GENERIC, message: null };
+      }
+      // On success the action redirects and the router is already navigating;
+      // the promise resolves with nothing to show.
+      if (!result || result.ok) return;
+      setFailure(result);
+      // A proof that lapsed while the form was being filled in has to be
+      // made again; leaving "verified" on screen would invite a second
+      // refusal for the same reason.
+      if (result.code === PHONE_PROOF_REQUIRED) {
+        resetVerification();
       }
     });
   }
 
+  /**
+   * Parks the form before the customer leaves it. Answers whether they may go;
+   * every refusal is shown in the identity notice and nothing navigates.
+   */
+  async function saveDraft(replace: boolean): Promise<boolean> {
+    const form = formRef.current;
+    if (!form) return false;
+    setDraftBusy(true);
+    try {
+      const result = await saveShowcaseDraftAction(new FormData(form), replace);
+      if (result.ok) {
+        setDraftExists(false);
+        setDraftError(null);
+        return true;
+      }
+      if (result.code === 'DRAFT_EXISTS') {
+        setDraftExists(true);
+      } else if (result.code === 'DRAFT_NOT_CONTINUABLE') {
+        // The customer record changed under us; ask again and act on the new answer.
+        identity.check();
+      } else {
+        setDraftError(result.code);
+      }
+      return false;
+    } catch {
+      setDraftError('DRAFT_FAILED');
+      return false;
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  /** A full navigation on purpose: sign-in sets a cookie and this page re-reads the draft. */
+  function goToLogin() {
+    window.location.assign(`/login?redirectTo=${encodeURIComponent(formPath)}`);
+  }
+
+  /**
+   * Asks for the activation link. The proxy answers 202 whatever it found — a
+   * form that could tell "sent" from "no such account" would be an oracle for
+   * which numbers have an account — so a 202 is "sent". Anything else (a
+   * throttle, an unreachable API, a dropped connection) is a failure the
+   * customer is told about and may retry; it is never reported as sent.
+   */
+  async function sendActivation() {
+    setDraftBusy(true);
+    try {
+      const response = await fetch('/api/auth/request-identity-check/activate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          phone: guestContact.phone.trim(),
+          email: guestContact.email.trim(),
+          redirectTo: formPath,
+        }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      setActivationSent(true);
+    } catch {
+      setDraftError('ACTIVATION_FAILED');
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  /** Continues with whatever the draft was parked for. */
+  async function continueAfterDraft(intent: DraftIntent) {
+    if (intent === 'login') goToLogin();
+    else await sendActivation();
+  }
+
+  async function onLogin() {
+    setDraftIntent('login');
+    if (await saveDraft(false)) goToLogin();
+  }
+
+  async function onActivate() {
+    setDraftIntent('activate');
+    if (await saveDraft(false)) await sendActivation();
+  }
+
+  /** "Evet, geç": the earlier draft gives way to this one, then the same road. */
+  async function onReplaceDraft() {
+    const intent = draftIntent ?? 'login';
+    if (await saveDraft(true)) await continueAfterDraft(intent);
+  }
+
+  /** "Vazgeç" in the draft-exists notice: the earlier draft stays as it is; nothing here is saved or sent. */
+  function onKeepDraft() {
+    setDraftExists(false);
+    setDraftIntent(null);
+  }
+
+  /*
+   * "Hesap değiştir": ends the session and returns to sign-in, this form as
+   * the destination. A server action, so the sign-out is a POST. The parked
+   * draft is left alone — it is the other account's to continue.
+   */
+  function onChangeAccount() {
+    startLeave(async () => {
+      await switchAccountAction(formPath);
+    });
+  }
+
+  /*
+   * "Vazgeç" under the form: the explicit way out. Whatever draft this card
+   * held is discarded on the server and the cookie dropped, then back to the
+   * card's own page. Distinct from the keep-draft "Vazgeç" above, which
+   * discards nothing.
+   */
+  function onDiscard() {
+    startLeave(async () => {
+      try {
+        await discardRequestDraftAction();
+      } catch (error) {
+        // Best effort: the draft expires on its own; leaving is not withheld for it.
+        console.error('[vitrin lead] discard draft failed', error);
+      }
+      router.push(`/vitrin/${encodeURIComponent(cardId)}`);
+    });
+  }
+
+  const identityBusy = draftBusy || pending || leaving;
+  const noticeProps = {
+    status: identity.status,
+    onRetry: () => {
+      setDraftError(null);
+      if (draftError && draftIntent) {
+        // The retry after a failed park or a failed link repeats the same road.
+        if (draftIntent === 'login') void onLogin();
+        else void onActivate();
+        return;
+      }
+      identity.retry();
+    },
+    onLogin,
+    onActivate,
+    activationSent,
+    draftError,
+    draftExists,
+    onReplaceDraft: () => void onReplaceDraft(),
+    onKeepDraft,
+    onChangeAccount,
+    busy: identityBusy,
+  };
+
+  /** A saved draft's answer for one question, when there is one. */
+  const draftAnswer = (questionKey: string) =>
+    initialDraft?.answers?.find((answer) => answer.questionKey === questionKey)?.value;
+
   const areaNotServed = failure?.code === AREA_NOT_SERVED;
+
+  /*
+   * Why submit is withheld, in the order the rules apply: the gate first (no
+   * code and no request before the contact check), then the proof, then the
+   * one case the API would refuse anyway.
+   */
+  const submitHint = !gateOpen
+    ? 'Göndermeden önce iletişim bilgilerinizin kontrolü tamamlanmalı.'
+    : !verified
+      ? 'Göndermeden önce telefon numaranızı doğrulayın.'
+      : submitBlocked
+        ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
+        : null;
 
   return (
     <form
@@ -230,6 +494,12 @@ export function ShowcaseLeadForm({
       <input type="hidden" name="categorySlug" value={card.category.slug} />
       <input type="hidden" name="questionMeta" value={encodeQuestionMeta(answerableQuestions)} />
 
+      {/*
+        The parked draft belongs to another account: said once, above the
+        form, with the way to the right account. The form below is empty.
+      */}
+      {wrongAccount ? <IdentityNotice {...noticeProps} wrongAccount /> : null}
+
       {areaNotServed ? <AreaNotServed card={card} coverage={coverage} /> : null}
 
       {failure && !areaNotServed ? (
@@ -237,6 +507,38 @@ export function ShowcaseLeadForm({
           {refusalText(failure)}
         </div>
       ) : null}
+
+      <section className="showcase-lead-section">
+        <h3>İletişim</h3>
+        <ContactSection
+          accountContact={accountContact}
+          useAlternateContact={useAlternateContact}
+          onUseAlternateContactChange={(value) => {
+            setUseAlternateContact(value);
+            // A different person is a different number; the proof does not carry over.
+            resetVerification();
+          }}
+          alternateContact={alternateContact}
+          onAlternateContactChange={setAlternateContact}
+          guestContact={guestContact}
+          onGuestContactChange={setGuestContact}
+          onContactBlur={identity.check}
+          identityNotice={<IdentityNotice {...noticeProps} wrongAccount={false} />}
+          phoneLocked={phoneLocked}
+          emailHelpText="Yanıt gelmezse size bu adresten yazacağız."
+          phoneAddon={
+            <PhoneProof
+              phone={phone}
+              state={verification}
+              busy={pending}
+              gateOpen={gateOpen}
+              onSend={sendCode}
+              onConfirm={confirmCode}
+              onReset={resetVerification}
+            />
+          }
+        />
+      </section>
 
       <section className="showcase-lead-section">
         <h3>Talebiniz</h3>
@@ -247,13 +549,18 @@ export function ShowcaseLeadForm({
           </p>
         ) : null}
         {answerableQuestions.map((question) => (
-          <RequestField key={question.id} question={question} />
+          <RequestField
+            key={question.id}
+            question={question}
+            defaultValue={draftAnswer(question.key)}
+          />
         ))}
         <DescriptionField
           question={descriptionQuestion}
           required
           placeholder="Ne yapılmasını istiyorsunuz?"
           helpText="İşi kısaca anlatın: ne, nerede, hangi durumda. İşletme buna göre dönüş yapar."
+          defaultValue={initialDraft?.description}
         />
       </section>
 
@@ -265,7 +572,16 @@ export function ShowcaseLeadForm({
         </p>
         <LocationFields
           provinces={provinces}
-          initialValue={prefill}
+          /* The draft wins over the query string: it is what was actually filled in. */
+          initialValue={
+            initialDraft
+              ? {
+                  city: initialDraft.city,
+                  district: initialDraft.district,
+                  neighborhood: initialDraft.neighborhood,
+                }
+              : prefill
+          }
           neighborhoodRequired={addressQuestion?.isRequired ?? false}
           neighborhoodHelpText={addressQuestion?.helpText}
           onChange={() => {
@@ -282,6 +598,7 @@ export function ShowcaseLeadForm({
             label="İşi ne zaman yaptırmak istiyorsunuz?"
             helpText="İşin kendisi için istediğiniz zaman."
             testId="showcase-lead-urgency"
+            defaultValue={initialDraft?.urgency}
           />
         </div>
         <fieldset className="pdash-form-row">
@@ -290,7 +607,8 @@ export function ShowcaseLeadForm({
             Rendered from this card's own approved hours, never from a constant.
             Required with no default: a pre-ticked option would be the page
             choosing a deadline on the customer's behalf. The customer chooses
-            by seeing the promise the business made.
+            by seeing the promise the business made — and a restored draft
+            only repeats the choice they already made.
           */}
           <label className="showcase-consent">
             <input
@@ -298,6 +616,7 @@ export function ShowcaseLeadForm({
               name="urgencyBucket"
               value="URGENT"
               required
+              defaultChecked={initialDraft?.urgencyBucket === 'URGENT'}
               data-testid="showcase-urgency-urgent"
             />
             <span>Acil — {card.responseSlaUrgentHours} saat içinde dönüş</span>
@@ -308,6 +627,7 @@ export function ShowcaseLeadForm({
               name="urgencyBucket"
               value="NORMAL"
               required
+              defaultChecked={initialDraft?.urgencyBucket === 'NORMAL'}
               data-testid="showcase-urgency-normal"
             />
             <span>Normal — {card.responseSlaNormalHours} saat içinde dönüş</span>
@@ -316,35 +636,6 @@ export function ShowcaseLeadForm({
             Bu seçim işin zamanı değil, işletmenin size ilk dönüş süresidir.
           </span>
         </fieldset>
-      </section>
-
-      <section className="showcase-lead-section">
-        <h3>İletişim</h3>
-        <ContactSection
-          accountContact={accountContact}
-          useAlternateContact={useAlternateContact}
-          onUseAlternateContactChange={(value) => {
-            setUseAlternateContact(value);
-            // A different person is a different number; the proof does not carry over.
-            resetVerification();
-          }}
-          alternateContact={alternateContact}
-          onAlternateContactChange={setAlternateContact}
-          guestContact={guestContact}
-          onGuestContactChange={setGuestContact}
-          phoneLocked={phoneLocked}
-          emailHelpText="Yanıt gelmezse size bu adresten yazacağız."
-          phoneAddon={
-            <PhoneProof
-              phone={phone}
-              state={verification}
-              busy={pending}
-              onSend={sendCode}
-              onConfirm={confirmCode}
-              onReset={resetVerification}
-            />
-          }
-        />
       </section>
 
       <section className="showcase-lead-section">
@@ -362,27 +653,27 @@ export function ShowcaseLeadForm({
       </section>
 
       <div className="pdash-form-foot">
-        <Link className="pdash-btn pdash-btn-ghost" href={`/vitrin/${cardId}`}>
+        <button
+          type="button"
+          className="pdash-btn pdash-btn-ghost"
+          onClick={onDiscard}
+          disabled={leaving}
+          data-testid="showcase-lead-discard"
+        >
           Vazgeç
-        </Link>
+        </button>
         <button
           className="pdash-btn pdash-btn-primary"
           type="submit"
           data-testid="showcase-lead-submit"
-          disabled={!verified || submitBlocked || pending}
-          title={
-            !verified
-              ? 'Göndermeden önce telefon numaranızı doğrulayın.'
-              : submitBlocked
-                ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
-                : undefined
-          }
+          disabled={!gateOpen || !verified || submitBlocked || pending}
+          title={submitHint ?? undefined}
         >
-          {pending && verified ? 'Gönderiliyor…' : 'Talebi gönder'}
+          {pending && verified && gateOpen ? 'Gönderiliyor…' : 'Talebi gönder'}
         </button>
-        {!verified ? (
+        {submitHint && (!gateOpen || !verified) ? (
           <span className="help-text" data-testid="showcase-lead-submit-hint">
-            Göndermeden önce telefon numaranızı doğrulayın.
+            {submitHint}
           </span>
         ) : null}
       </div>
@@ -397,11 +688,15 @@ export function ShowcaseLeadForm({
  * `type="button"` — this sits inside the lead form, and none of these steps is
  * the submission. Enter inside the code field confirms the code rather than
  * posting the form for the same reason.
+ *
+ * "Kod gönder" waits for the identity gate: a number that already belongs to
+ * an account is sent to sign in, and never receives a code from here.
  */
 function PhoneProof({
   phone,
   state,
   busy,
+  gateOpen,
   onSend,
   onConfirm,
   onReset,
@@ -409,6 +704,7 @@ function PhoneProof({
   phone: string;
   state: Verification;
   busy: boolean;
+  gateOpen: boolean;
   onSend: () => void;
   onConfirm: (code: string) => void;
   onReset: () => void;
@@ -485,7 +781,7 @@ function PhoneProof({
           <button
             type="button"
             className="pdash-btn pdash-btn-ghost"
-            disabled={busy || sending}
+            disabled={busy || sending || !gateOpen}
             onClick={onSend}
           >
             Kodu yeniden gönder
@@ -509,8 +805,9 @@ function PhoneProof({
         <button
           type="button"
           className="pdash-btn pdash-btn-primary"
-          disabled={busy || !phone.trim()}
+          disabled={busy || !phone.trim() || !gateOpen}
           onClick={onSend}
+          title={!gateOpen ? 'Önce iletişim bilgilerinizin kontrolü tamamlanmalı.' : undefined}
           data-testid="showcase-lead-phone-send"
         >
           Kod gönder
