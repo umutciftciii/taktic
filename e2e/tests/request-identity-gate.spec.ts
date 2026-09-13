@@ -339,11 +339,21 @@ async function submitShowcaseLead(page: Page): Promise<void> {
 }
 
 /**
- * Walks the marketplace form from the contact step to the end and sends it.
- * The contact step has to be passable already — gate open, or a signed-in
- * customer. Returns the new request's id from the success page.
+ * The lira the marketplace body names as its minimum budget: as typed, as the
+ * field groups it while typing, and as it comes back from a draft — the draft
+ * holds kuruş, and a restored amount is written out with them.
  */
-async function finishMarketplaceForm(page: Page, location: Location): Promise<string> {
+const MARKETPLACE_BUDGET_TYPED = '1500';
+const MARKETPLACE_BUDGET_SHOWN = '1.500';
+const MARKETPLACE_BUDGET_RESTORED = '1.500,00';
+
+/**
+ * Walks the marketplace form from the contact step to its last step, filling
+ * everything but the contact: what a draft has to carry. The contact step has
+ * to be passable already — gate open, or a signed-in customer. Leaves the
+ * form on its last step, ready to send.
+ */
+async function fillMarketplaceBody(page: Page, location: Location): Promise<void> {
   const form = page.locator('form.form-card');
   const next = page.getByRole('button', { name: 'Devam et' });
 
@@ -354,13 +364,62 @@ async function finishMarketplaceForm(page: Page, location: Location): Promise<st
   await expect(page.locator('#request-step-place')).toBeVisible();
   await form.locator('select[name="city"]').selectOption(location.city);
   await form.locator('select[name="district"]').selectOption(location.district);
+  await form.getByTestId('request-urgency').selectOption('THIS_WEEK');
+  await form.getByTestId('request-budget-min').fill(MARKETPLACE_BUDGET_TYPED);
+  await expect(form.getByTestId('request-budget-min')).toHaveValue(MARKETPLACE_BUDGET_SHOWN);
+}
 
+/**
+ * The marketplace draft, field by field, exactly as it was typed — walked
+ * step by step with the form's own "Devam et", so every field is asserted
+ * while it is on screen. Leaves the form on its last step, ready to send.
+ */
+async function expectMarketplaceBodyRestored(page: Page, location: Location): Promise<void> {
+  const form = page.locator('form.form-card');
+  const next = page.getByRole('button', { name: 'Devam et' });
+
+  await next.click();
+  await expect(page.locator('#request-step-detail')).toBeVisible();
+  await expect(form.locator('textarea[name="description"]')).toHaveValue(MARKETPLACE_DESCRIPTION);
+  await next.click();
+  await expect(page.locator('#request-step-place')).toBeVisible();
+  await expect(form.getByTestId('request-city')).toHaveValue(location.city);
+  await expect(form.getByTestId('request-district')).toHaveValue(location.district);
+  await expect(form.getByTestId('request-urgency')).toHaveValue('THIS_WEEK');
+  await expect(form.getByTestId('request-budget-min')).toHaveValue(MARKETPLACE_BUDGET_RESTORED);
+}
+
+/** Sends the marketplace form from its last step. Returns the new request's id from the success page. */
+async function submitMarketplaceForm(page: Page): Promise<string> {
   await page.getByRole('button', { name: 'Talebi Gönder' }).click();
   await expect(page).toHaveURL(/\/requests\/success\?id=/);
   await assertNoErrorScreen(page);
   const id = new URL(page.url()).searchParams.get('id');
   expect(id, 'the success page must carry the new request id').toBeTruthy();
   return id as string;
+}
+
+/** Walks the marketplace form from the contact step to the end and sends it. */
+async function finishMarketplaceForm(page: Page, location: Location): Promise<string> {
+  await fillMarketplaceBody(page, location);
+  return submitMarketplaceForm(page);
+}
+
+/**
+ * Fills the marketplace form's body as a brand-new visitor, then comes back
+ * to the contact step — the way a person who typed the whole request before
+ * remembering they have an account arrives at the gate. The marketplace form
+ * cannot leave its first step until the gate opens, so the body has to be
+ * written behind a pair the check lets through; the pair that then gets
+ * typed over it is what the draft is bound to.
+ */
+async function writeMarketplaceBodyThenReturnToContact(page: Page, location: Location): Promise<void> {
+  const last = await typeContact(page, 'marketplace', freshContact('Önce Yazan'));
+  await settleIdentityGate(page, last);
+  await fillMarketplaceBody(page, location);
+  await page.getByRole('tab', { name: /İletişim/ }).click();
+  await expect(page.locator('#request-step-contact')).toBeVisible();
+  await expect(page.locator('#request-step-place')).toBeHidden();
 }
 
 /** The request the vitrin lead on this card created. */
@@ -495,10 +554,14 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
 
       try {
         await openForm(visitor, stage);
-        // The vitrin form takes the request before the contact; the
-        // marketplace form cannot leave its first step until the gate opens,
-        // so its draft carries nothing but the intent to sign in.
+        // Both drafts carry a whole request. The vitrin form takes the request
+        // before the contact; the marketplace form is written through with a
+        // new pair first and the registered pair typed over it on the way
+        // back — a plain leaf category, so the draft is keyed by the slug the
+        // page shows (a routed flow keys it by the entry slug instead; that
+        // path is not driven here).
         if (kind === 'showcase') await fillShowcaseBody(visitor.page, stage.location);
+        else await writeMarketplaceBodyThenReturnToContact(visitor.page, stage.location);
 
         await typeContactExpecting(
           visitor.page,
@@ -535,10 +598,15 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
         await expect(visitor.page.getByTestId('identity-login-required')).toHaveCount(0);
         await expect(visitor.page.getByTestId('identity-wrong-account')).toHaveCount(0);
 
+        // What was typed before leaving is back, field by field, and the
+        // request that goes out is the account's.
         if (kind === 'marketplace') {
-          const requestId = await finishMarketplaceForm(visitor.page, stage.location);
+          await expectMarketplaceBodyRestored(visitor.page, stage.location);
+          const requestId = await submitMarketplaceForm(visitor.page);
           const request = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: requestId } });
           expect(request.customerId).toBe(customer.id);
+          expect(request.description).toBe(MARKETPLACE_DESCRIPTION);
+          expect(request.district).toBe(stage.location.district);
         } else {
           await expectShowcaseBodyRestored(visitor.page, stage.location);
           await proveShowcasePhone(visitor.page, customer.phone);
@@ -570,6 +638,7 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
       try {
         await openForm(visitor, stage);
         if (kind === 'showcase') await fillShowcaseBody(visitor.page, stage.location);
+        else await writeMarketplaceBodyThenReturnToContact(visitor.page, stage.location);
         await typeContactExpecting(
           visitor.page,
           kind,
@@ -580,6 +649,8 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
         const draft = await prisma().requestDraft.findFirstOrThrow({
           where: { expectedUserId: owner.id, consumedAt: null },
         });
+        const cookieBefore = await draftCookie(visitor);
+        expect(cookieBefore).not.toBeNull();
         const before = await counts();
 
         // The wrong customer signs in and lands on the form.
@@ -612,6 +683,33 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
         expect(untouched.userId).toBeNull();
         expect(untouched.consumedAt).toBeNull();
 
+        /*
+         * The wrong account is still a customer with a form of their own, and
+         * may send a request from it. That request is theirs; it neither uses
+         * up the owner's draft nor takes the browser's way back to it — the
+         * token stays in the cookie jar, and the form, opened again, still
+         * says whose the draft is. (The vitrin form would need the wrong
+         * account's number proved first; the marketplace form is enough to
+         * hold the rule.)
+         */
+        let wrongAccountRequests = 0;
+        if (kind === 'marketplace') {
+          await fillMarketplaceBody(visitor.page, stage.location);
+          const theirs = await submitMarketplaceForm(visitor.page);
+          const theirRequest = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: theirs } });
+          expect(theirRequest.customerId).toBe(other.id);
+          wrongAccountRequests = 1;
+
+          const survived = await prisma().requestDraft.findUniqueOrThrow({ where: { id: draft.id } });
+          expect(survived.consumedAt).toBeNull();
+          expect(survived.userId).toBeNull();
+          expect(survived.expectedUserId).toBe(owner.id);
+          expect((await draftCookie(visitor))?.value).toBe(cookieBefore?.value);
+
+          await openForm(visitor, stage);
+          await expect(visitor.page.getByTestId('identity-wrong-account')).toBeVisible();
+        }
+
         // "Hesap değiştir": signed out, back to sign-in with the form as the destination.
         await visitor.page.getByTestId('identity-change-account-cta').click();
         await signInHere(visitor.page, back, owner.email, owner.password);
@@ -619,10 +717,13 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
         await expect(visitor.page.getByTestId('identity-wrong-account')).toHaveCount(0);
         await expect(visitor.page.getByTestId('account-contact-email')).toHaveText(owner.email);
 
+        // The owner's draft comes back whole, and the request that goes out is theirs.
         if (kind === 'marketplace') {
-          const requestId = await finishMarketplaceForm(visitor.page, stage.location);
+          await expectMarketplaceBodyRestored(visitor.page, stage.location);
+          const requestId = await submitMarketplaceForm(visitor.page);
           const request = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: requestId } });
           expect(request.customerId).toBe(owner.id);
+          expect(request.description).toBe(MARKETPLACE_DESCRIPTION);
         } else {
           await expectShowcaseBodyRestored(visitor.page, stage.location);
           await proveShowcasePhone(visitor.page, owner.phone);
@@ -631,13 +732,14 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
           expect(request.customerId).toBe(owner.id);
         }
 
-        // One request in all of this, and it is the owner's; the wrong
-        // account's visit created nothing.
+        // The owner's request, plus whatever the wrong account sent as
+        // itself; the wrong account's visit consumed nothing of the owner's.
         const after = await counts();
-        expect(after.requests).toBe(before.requests + 1);
+        expect(after.requests).toBe(before.requests + 1 + wrongAccountRequests);
         const consumed = await prisma().requestDraft.findUniqueOrThrow({ where: { id: draft.id } });
         expect(consumed.consumedAt).not.toBeNull();
         expect(consumed.userId).toBe(owner.id);
+        expect(await draftCookie(visitor)).toBeNull();
       } finally {
         await visitor.close();
       }

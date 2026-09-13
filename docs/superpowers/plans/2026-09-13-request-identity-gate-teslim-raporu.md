@@ -27,9 +27,10 @@ değişmeden çalışmaya devam eder.
   varsayılan — `AUTH_RATE_LIMIT_MAX`/`AUTH_RATE_LIMIT_WINDOW_SECONDS`). Oturumsuz.
 - Body: `{ phone: string; email: string }`, `forbidNonWhitelisted` — ikisi de zorunlu.
 - `ServiceRequestsService.resolveContactDetails` ile aynı normalizasyon
-  (`normalizePhone`, `trim().toLowerCase()`); iki `User.findUnique` (telefon/e-posta) tek
-  `$transaction` içinde birlikte okunur ve birlikte sınıflandırılır ("ilk bulunan kazanır"
-  yok).
+  (`normalizePhone`, `trim().toLowerCase()`); telefon (`findFirst`, eşdeğer yazımlar) ve
+  e-posta (`findUnique`) satırları **tek client üzerinde `Promise.all` ile birlikte okunur**
+  (ayrı bir transaction açılmaz; çağıran bir transaction client'ı verirse onun içinde) ve
+  birlikte sınıflandırılır ("ilk bulunan kazanır" yok).
 - Yanıt yalnız `{ status }` — isim, e-posta, telefon, rol, id, sahiplik hiçbir zaman dönmez.
 - Beş durum: `new-customer` (ikisi de yok) · `login-required` (aynı/tek eşleşme, aktif
   şifreli CUSTOMER) · `activation-required` (aynı/tek eşleşme, şifresiz
@@ -50,9 +51,15 @@ değişmeden çalışmaya devam eder.
   çağrılır; **alıcı her zaman `User.email`'den (veritabanından) okunur** — istemcinin
   gönderdiği `email` yalnızca sınıflandırma girdisidir, hiçbir kod yolunda mail alıcısına
   dönüşmez. Hesabın e-postası yoksa/claimable değilse: mail yok.
-- Her durumda `202 { status: 'accepted' }` — uç tek başına oracle değildir. Mail üretimi
+- Her durumda `202 { status: 'accepted' }` — `activate` ucu **ifşa etmez**. Mail üretimi
   best-effort `try/catch` içinde; hata olursa loglanır (sabit mesaj + stack, telefon/e-posta
   loglanmaz), yanıt yine 202.
+- **Oracle notu (dürüst sınır):** `check` ucu ise tasarımı gereği **sınırlı bir oracle'dır** —
+  taze bir e-posta + hedef telefon `login-required`/`activation-required` döndürür, yani
+  "bu numaranın müşteri hesabı var mı" sorusu yanıtlanabilir. Bu, formun giriş/etkinleştirme
+  yönlendirmesini yapabilmesi için kabul edilen bilinçli bir sızıntıdır; azaltımı
+  `AuthThrottlerGuard` bütçesi (IP başına 10/60 sn) ve yanıtın yalnız `{status}` olmasıdır
+  (isim/e-posta/rol/id yok). Yalnız `activate` "hesap var/yok" ayrımını gizler.
 - Aktivasyon linki: `buildActivationUrl(rawToken, redirectTo?)` → `/activate-customer?token=…&redirectTo=…`; taslak sırrı taşımaz.
 
 ### 2.3 Taslak — `RequestDraft` uçları
@@ -78,12 +85,26 @@ değişmeden çalışmaya devam eder.
   **veya** `= created.customerId` olan satıra `consumedAt=now, userId=created.customerId`
   yazılır; uyumsuz taslak dokunulmadan kalır ve talebi **hiçbir zaman** engellemez
   (`consumeInTransaction` sessizce çıkar, exception fırlatmaz).
-- **`DELETE /request-drafts/current`** — yalnız kullanıcı "Vazgeç" dediğinde; satır silinir,
-  web cookie'yi temizler.
+- **`DELETE /request-drafts/current?formType&categorySlug&cardId`** — yalnız kullanıcı
+  formdaki "Vazgeç"e bastığında. GET ile **aynı sorgu ve aynı `OptionalAuthGuard`**: satır
+  yalnız cookie hash'i **ve** anahtar uyuşuyorsa **ve** (`expectedUserId IS NULL` **veya**
+  `= session.userId`) ise silinir; aksi hâlde hiçbir şey silinmez. Yanıt her zaman
+  `200 { deleted: boolean }`. Web (`discardRequestDraftAction(key)`) ham `fetch` ile çağırır
+  ve cookie'yi **yalnız `deleted: true`** iken temizler; vitrin formu discard'ı yalnız
+  `initialDraft !== null` (bu tarayıcının gerçekten açtığı taslak) iken çağırır, aksi hâlde
+  yalnız kart sayfasına döner. (Final review F2.)
+- **Başarılı gönderim sonrası cookie** — formlar gizli `draftState` alanı gönderir
+  (`restored` | `wrong-account` | `none`, sayfa props'undan türetilir); submit action'ları
+  `clearRequestDraftCookie()`'yi **yalnız `restored`** iken çağırır. Yanlış hesapla oturum
+  açmış bir müşterinin kendi adına yaptığı gönderim, sahibin korumalı taslağını çerezsiz
+  (ulaşılamaz) bırakmaz; `none` durumunda da cookie başka bir formun/korumalı bir satırın
+  tek dönüş yolu olabileceğinden dokunulmaz. (Final review F3; `lib/draft-state.ts`.)
 - **Silinme yolları (kapalı liste):** TTL doldu (mantıksal; fiziksel `sweepExpired()` — en
   fazla 200 satır, process başına en fazla 60 dakikada bir, `POST` sonrası `setImmediate`
-  ile fırsatçı) · açık Vazgeç · başarılı talep (tüketim) · onaylı `replace` · beklenen
-  kullanıcı silindi (FK Cascade). Başka hiçbir yol taslağı silmez; `wrong-account` silmez.
+  ile fırsatçı) · açık Vazgeç (**yalnız açılmış taslağı ve yalnız sahibi/anonim iken siler**)
+  · başarılı talep (tüketim) · onaylı `replace` · beklenen kullanıcı silindi (FK Cascade).
+  Başka hiçbir yol taslağı silmez; `wrong-account` silmez, yanlış hesabın kendi gönderimi
+  de silmez/tüketmez.
 
 ### 2.4 `TRUST_PROXY` / `WEB_TRUST_PROXY` sözleşmesi
 
@@ -113,7 +134,8 @@ değişmeden çalışmaya devam eder.
    görür, satıra dokunulmaz — "Hesap değiştir" ile çıkış yapıp doğru hesapla tekrar
    girdiğinde aynı taslak eksiksiz açılır.
 4. **Tüketim** — talep/lead transaction'ı içinde, talep başarıyla yazıldıktan hemen sonra;
-   `consumedAt` + `userId` set edilir, cookie web tarafında temizlenir.
+   `consumedAt` + `userId` set edilir, cookie web tarafında **yalnız formun açtığı taslak
+   (`draftState=restored`) için** temizlenir — yanlış hesabın kendi gönderimi cookie'ye dokunmaz.
 5. **Silinme (kapalı liste)** — yukarıdaki §2.3'teki beş yol dışında hiçbir kod yolu taslağı
    silmez.
 6. **TTL** 24 saat (mantıksal — her okuma `expiresAt > now`); fiziksel temizlik
@@ -206,6 +228,12 @@ yolu korumalı bir taslağı anonime çevirmez), `userId` → `User(id)` **ON DE
   bütçesi (5/10 dk, IP başına, yükseltilemez) tüm suite'in tek bir loopback IP'sini
   paylaşmasını önlemek için; her test bağlamı kendi `x-forwarded-for` başlığıyla açılıyor
   (bkz. §9.3).
+- `.env.example` bu iki değişkeni başlangıçta listelemiyordu; final review sonrasında
+  "Request drafts and the client address behind them" bloğu olarak varsayılan değerleriyle
+  (`REQUEST_DRAFT_MAX_ACTIVE=10000`, `WEB_TRUST_PROXY=false`) eklendi. Kök `.env.example`
+  diğer isteğe bağlı bayrakları da (`REQUIRE_PHONE_VERIFICATION`, scheduler bayrakları vb.)
+  listelediğinden aynı yerde durmaları uygun görüldü; API'nin `TRUST_PROXY` hop sayısı
+  ayrıca listelenmiyor (bu işten önce de yoktu, `apps/api/src/main.ts` yorumunda anlatılır).
 
 ## 7. Spec'ten bilinçli sapmalar
 
@@ -314,7 +342,9 @@ Hepsi geçti; `pnpm build` (web + api + admin) hatasız tamamlandı.
    dönüldüğünü doğruluyor.
 5. **Misafirde gate atlanamaz.** Web birim: `identity-check.spec.ts` — `enabled` yalnız
    `accountContact===null` iken true, yarış/iptal testleri (geç gelen eski yanıt
-   uygulanmaz). E2E: senaryo 7 ("kontrol yanıtsız kalırsa gate kapalı kalır…" — route 500
+   uygulanmaz; final review F1 sonrası: telefon/e-posta değişince süren istek iptal edilir
+   **ve** reducer `seq`'i ilerletir, yanıt yalnız hâlâ `checking` olan kontrole düşer —
+   `start(A) → fields(B) → result(seq A)` gate'i açmaz). E2E: senaryo 7 ("kontrol yanıtsız kalırsa gate kapalı kalır…" — route 500
    stub'ı, "Devam et"/"Kod gönder" devre dışı kalıyor, "Tekrar dene" ile açılıyor) ve
    senaryo 11 ("misafire farklı iletişim kişisi seçeneği sunulmaz" — DOM'da
    `use-alternate-contact` yok). Ayrıca senaryo 9 ("gate açıldıktan sonra oluşan
@@ -346,3 +376,21 @@ Hepsi geçti; `pnpm build` (web + api + admin) hatasız tamamlandı.
 - Task 15: S12 marketplace varyantı yazılmadı (yalnız vitrin); e2e SMS bütçesi
   yaşlandırması kalıcı değil (bkz. §7c); `LOCATION_WORKER_BLOCKS=4`'ün kalıcılığı, suite
   büyüdükçe test başına konum tüketiminin azaltılmasına bağlı.
+
+## 11. Final review düzeltmeleri (dal geneli son review)
+
+Ayrıntı: `.superpowers/sdd/2026-09-13-request-identity-gate/final-fix-report.md`.
+
+- **F1** — `identity-check.ts`: değişen alanlarda süren istek iptal + reducer `seq` ilerletme +
+  yanıtın yalnız `checking` durumuna düşmesi (yeni reducer testleri).
+- **F2** — `DELETE /request-drafts/current` anahtar + sahip kontrolü, `200 {deleted}`; web
+  discard yalnız açılmış taslak için ve cookie yalnız `deleted:true`'da düşer (API testleri).
+- **F3** — gizli `draftState`; başarı sonrası cookie yalnız `restored` iken temizlenir
+  (`lib/draft-state.ts` + birim testi; E2E S3 marketplace yanlış-hesap gönderimi).
+- **F4** — E2E S2 marketplace varyantı artık gövdeyi (açıklama, il/ilçe, aciliyet, min bütçe)
+  taşıyıp geri getiriyor (düz leaf kategori; routed varyant sürülmedi); S3 marketplace'te
+  yanlış hesabın kendi gönderimi sonrası sahibin taslağının ve cookie'nin kaldığı, formun
+  yeniden `wrong-account` dediği ve "Hesap değiştir" sonrası taslağın eksiksiz döndüğü
+  doğrulanıyor.
+- Minor: kodsuz 403 adım-farkında (`REQUEST_FORBIDDEN`), yorum/doküman düzeltmeleri
+  (§2.1, §2.2 oracle notu, §2.3, §6), `.env.example`.
