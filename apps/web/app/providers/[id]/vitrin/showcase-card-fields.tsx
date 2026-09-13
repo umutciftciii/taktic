@@ -4,6 +4,7 @@ import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   completeLiraAmount,
   formatLiraDraft,
+  minorToLiraDraft,
 } from '../../../../lib/lira-input';
 import type { ShowcaseCardKind } from '../../../../lib/api';
 
@@ -218,10 +219,4 @@ export function ShowcaseCardFields({
       </section>
     </>
   );
-}
-
-/** Minor units back into the draft string the lira field holds. */
-function minorToLiraDraft(minor: number | null): string {
-  if (minor === null) return '';
-  return formatLiraDraft((minor / 100).toFixed(2).replace('.', ','));
 }

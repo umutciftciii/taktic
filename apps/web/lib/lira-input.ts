@@ -116,6 +116,23 @@ export function completeLiraAmount(raw: string): string {
 }
 
 /**
+ * Minor units (kuruş) back into the draft string a lira field holds.
+ *
+ * The inverse direction from {@link parseLiraToMinor}: turning a value the API
+ * already stored — a saved draft's budget, a card's price — back into what the
+ * field would show had the customer typed it. Routed through
+ * {@link formatLiraDraft} so a restored value is grouped exactly the way typing
+ * it would have produced, rather than duplicating that formatting here.
+ */
+export function minorToLiraDraft(minor: number | null | undefined): string {
+  if (minor === null || minor === undefined) {
+    return '';
+  }
+
+  return formatLiraDraft((minor / 100).toFixed(2).replace('.', ','));
+}
+
+/**
  * The amount in the minor unit the API stores — kuruş for TRY.
  *
  * `5.000,00` is 500000, not 5000: the digits before the comma are lira, and the

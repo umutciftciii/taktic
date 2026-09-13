@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import {
   completeLiraAmount,
   formatLiraDraft,
+  minorToLiraDraft,
   parseLiraToMinor,
 } from '../../../lib/lira-input';
 
@@ -257,10 +258,4 @@ function caretAfterSignificant(formatted: string, significant: number): number {
     }
   }
   return formatted.length;
-}
-
-/** Minor units (kuruş) back into the draft string the lira field holds. */
-function minorToLiraDraft(minor: number | null): string {
-  if (minor === null) return '';
-  return formatLiraDraft((minor / 100).toFixed(2).replace('.', ','));
 }
