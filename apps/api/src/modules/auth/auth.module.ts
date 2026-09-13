@@ -9,6 +9,8 @@ import { AuthService } from './auth.service';
 import { EmailVerificationController } from './email-verification.controller';
 import { AUTH_THROTTLE_LIMIT, AUTH_THROTTLE_TTL_MS, AuthThrottlerGuard } from './auth.throttler';
 import { ProviderAccessGuard } from './provider-access.guard';
+import { RequestIdentityController } from './request-identity.controller';
+import { RequestIdentityService } from './request-identity.service';
 import { RolesGuard } from './roles.guard';
 
 @Module({
@@ -25,7 +27,7 @@ import { RolesGuard } from './roles.guard';
       { name: 'auth', ttl: AUTH_THROTTLE_TTL_MS, limit: AUTH_THROTTLE_LIMIT },
     ]),
   ],
-  controllers: [AuthController, EmailVerificationController],
+  controllers: [AuthController, EmailVerificationController, RequestIdentityController],
   providers: [
     AuthService,
     AuthGuard,
@@ -33,7 +35,16 @@ import { RolesGuard } from './roles.guard';
     RolesGuard,
     ProviderAccessGuard,
     AuthThrottlerGuard,
+    RequestIdentityService,
   ],
-  exports: [AuthService, AuthGuard, OptionalAuthGuard, RolesGuard, ProviderAccessGuard],
+  exports: [
+    AuthService,
+    AuthGuard,
+    OptionalAuthGuard,
+    RolesGuard,
+    ProviderAccessGuard,
+    RequestIdentityService,
+    AuthThrottlerGuard,
+  ],
 })
 export class AuthModule {}
