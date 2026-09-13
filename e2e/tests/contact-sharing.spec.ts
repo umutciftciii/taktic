@@ -139,7 +139,7 @@ test.describe('contact sharing', () => {
 
       // ---- the form asks for the acknowledgement, and links the text -----
       // It lives on the contact step, next to the details it is about.
-      await openRequestFormContactStep(customer, category, values);
+      await openRequestFormContactStep(customer, category);
       await expect(customer.page.getByTestId('contact-disclosure-accept')).toBeVisible();
       await expect(customer.page.getByTestId('contact-disclosure-link')).toHaveAttribute(
         'href',
@@ -343,17 +343,20 @@ test.describe('contact sharing', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      const values = requestFormValues(location, customerAccount.name);
 
-      await openRequestFormContactStep(customer, category, values);
+      await openRequestFormContactStep(customer, category);
 
-      // Left unticked on purpose.
-      await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
+      // Left unticked on purpose. The box is on the first step, so the form
+      // does not even let the customer past it — "Devam et" is refused.
+      await customer.page.getByRole('button', { name: 'Devam et' }).click();
 
       // Refused in place by the form's own required checkbox, with it still on
       // screen — not a crash, and not a request that quietly went through. The
       // rule that actually protects the customer is at the accept (see the case
       // above); this one keeps the guided path honest about what is coming.
+      await expect(customer.page.locator('#request-step-contact')).toBeVisible();
+      await expect(customer.page.locator('#request-step-detail')).toBeHidden();
+      await expect(customer.page.getByRole('button', { name: 'Talebi Gönder' })).toHaveCount(0);
       await expect(customer.page).not.toHaveURL(/\/requests\/success/);
       await expect(customer.page.getByTestId('contact-disclosure-accept')).toBeVisible();
       await assertNoErrorScreen(customer.page);

@@ -12,7 +12,7 @@ import {
   requestFormValues,
   uniqueLocation,
 } from '../src/fixtures';
-import { fillRequestFormUpToContact } from '../src/journeys';
+import { completeContactStep, fillRequestForm } from '../src/journeys';
 import { primaryRuntime } from '../src/runtime';
 
 /**
@@ -145,26 +145,26 @@ test.describe('conditional questions', () => {
       const form = visitor.page.locator('form.form-card');
       const dependentField = form.locator('select[name="answer_yapilacak_isler"]');
 
-      // Nothing has been answered yet, so the dependent question is not there.
-      await expect(dependentField).toHaveCount(0);
+      // The category's questions are on the second step, after the contact.
+      await fillRequestForm(visitor, values, {
+        detailStep: async () => {
+          // Nothing has been answered yet, so the dependent question is not there.
+          await expect(dependentField).toHaveCount(0);
 
-      await form.locator('select[name="answer_tadilat_tipi"]').selectOption('fayans');
-      await expect(dependentField).toHaveCount(0);
+          await form.locator('select[name="answer_tadilat_tipi"]').selectOption('fayans');
+          await expect(dependentField).toHaveCount(0);
 
-      await form.locator('select[name="answer_tadilat_tipi"]').selectOption('komple');
-      await expect(dependentField).toBeVisible();
+          await form.locator('select[name="answer_tadilat_tipi"]').selectOption('komple');
+          await expect(dependentField).toBeVisible();
 
-      // Choosing the other branch again takes it away, rather than leaving a
-      // stale answer behind on a question nobody can see.
-      await form.locator('select[name="answer_tadilat_tipi"]').selectOption('fayans');
-      await expect(dependentField).toHaveCount(0);
+          // Choosing the other branch again takes it away, rather than leaving a
+          // stale answer behind on a question nobody can see.
+          await form.locator('select[name="answer_tadilat_tipi"]').selectOption('fayans');
+          await expect(dependentField).toHaveCount(0);
+        },
+      });
 
       // And the form still submits without it, because it does not apply.
-      await fillRequestFormUpToContact(visitor, values);
-      const disclosure = visitor.page.getByTestId('contact-disclosure-accept');
-      if ((await disclosure.count()) > 0) {
-        await disclosure.check();
-      }
       await visitor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
       await expect(visitor.page).toHaveURL(/\/requests\/success\?id=/);
       await assertNoErrorScreen(visitor.page);
@@ -220,28 +220,27 @@ test.describe('conditional questions', () => {
       const sourceField = form.locator('select[name="answer_yapilacak_isler"]');
       const dependentField = form.locator('select[name="answer_proje_detayi"]');
 
-      // One of the two expected answers is not both of them.
-      await sourceField.selectOption(['tesisat']);
-      await expect(dependentField).toHaveCount(0);
+      await fillRequestForm(visitor, values, {
+        detailStep: async () => {
+          // One of the two expected answers is not both of them.
+          await sourceField.selectOption(['tesisat']);
+          await expect(dependentField).toHaveCount(0);
 
-      // A different answer entirely is no closer.
-      await sourceField.selectOption(['kapi']);
-      await expect(dependentField).toHaveCount(0);
+          // A different answer entirely is no closer.
+          await sourceField.selectOption(['kapi']);
+          await expect(dependentField).toHaveCount(0);
 
-      // Both, and it appears.
-      await sourceField.selectOption(['tesisat', 'dolap']);
-      await expect(dependentField).toBeVisible();
+          // Both, and it appears.
+          await sourceField.selectOption(['tesisat', 'dolap']);
+          await expect(dependentField).toBeVisible();
 
-      // Extra choices do not take it away again.
-      await sourceField.selectOption(['tesisat', 'dolap', 'kapi']);
-      await expect(dependentField).toBeVisible();
+          // Extra choices do not take it away again.
+          await sourceField.selectOption(['tesisat', 'dolap', 'kapi']);
+          await expect(dependentField).toBeVisible();
 
-      await dependentField.selectOption('var');
-      await fillRequestFormUpToContact(visitor, values);
-      const disclosure = visitor.page.getByTestId('contact-disclosure-accept');
-      if ((await disclosure.count()) > 0) {
-        await disclosure.check();
-      }
+          await dependentField.selectOption('var');
+        },
+      });
       await visitor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
 
       // The API re-derives the same visibility from the stored rule, so the
@@ -319,11 +318,7 @@ test.describe('routed categories', () => {
       await expect(visitor.page).toHaveURL(new RegExp(`/categories/${dishwasher.slug}\\?`));
       await expect(visitor.page.getByRole('heading', { name: dishwasher.name })).toBeVisible();
 
-      await fillRequestFormUpToContact(visitor, values);
-      const disclosure = visitor.page.getByTestId('contact-disclosure-accept');
-      if ((await disclosure.count()) > 0) {
-        await disclosure.check();
-      }
+      await fillRequestForm(visitor, values);
       await visitor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
       await expect(visitor.page).toHaveURL(/\/requests\/success\?id=/);
 
@@ -573,8 +568,10 @@ test.describe('admin category management', () => {
         .toBe(1);
 
       // What the admin wired up is what the customer meets: one of the two
-      // answers is not enough, both are.
+      // answers is not enough, both are. The questions are on the second step,
+      // past the visitor's contact and its identity gate.
       await visitor.gotoWeb(`/categories/${category.slug}`);
+      await completeContactStep(visitor, requestFormValues(uniqueLocation(), 'E2E Koşul Müşterisi'));
       const form = visitor.page.locator('form.form-card');
       const dependentField = form.locator('select[name="answer_detay"]');
 

@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { Actor } from '../src/actors';
-import { createCategory, createCustomer } from '../src/fixtures';
+import { createCategory, createCustomer, type SeededCategory } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { openRequestFormContactStep } from '../src/journeys';
 
 /**
  * The character counter under the request form's description field.
@@ -18,6 +19,17 @@ import { primaryRuntime } from '../src/runtime';
 const LIMIT = 5000;
 const NEAR_LIMIT_AT = 4500;
 
+/**
+ * Opens the form on the step the description lives on — the second. Both
+ * scenarios are a signed-in customer's, so the contact step before it has
+ * nothing to type and no identity gate.
+ */
+async function openDescriptionStep(customer: Actor, category: SeededCategory) {
+  await openRequestFormContactStep(customer, category);
+  await customer.page.getByRole('button', { name: 'Devam et' }).click();
+  await expect(customer.page.locator('#request-step-detail')).toBeVisible();
+}
+
 test.describe('request description counter', () => {
   test('counts typing, deleting and pasting, and stops at the limit', async ({ browser }) => {
     const category = await createCategory(2);
@@ -26,7 +38,7 @@ test.describe('request description counter', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await customer.gotoWeb(`/categories/${category.slug}`);
+      await openDescriptionStep(customer, category);
 
       const form = customer.page.locator('form.form-card');
       const description = form.locator('textarea[name="description"]');
@@ -94,7 +106,7 @@ test.describe('request description counter', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await customer.gotoWeb(`/categories/${category.slug}`);
+      await openDescriptionStep(customer, category);
 
       const form = customer.page.locator('form.form-card');
       const description = form.locator('textarea[name="description"]');

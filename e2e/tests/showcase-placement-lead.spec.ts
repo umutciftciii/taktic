@@ -6,9 +6,11 @@ import {
   createCustomer,
   createProvider,
   prisma,
+  requestFormValues,
   uniqueLocation,
 } from '../src/fixtures';
 import { waitForLatestSmsCode } from '../src/outbox';
+import { completeContactStep, fillLeadContact, settleIdentityGate } from '../src/journeys';
 import { primaryRuntime } from '../src/runtime';
 
 /**
@@ -262,10 +264,20 @@ async function seedLivePlacement(options: {
  * outbox — the suite cannot read an SMS, and the code is never on any screen.
  * Everything the visitor typed before this stays on the page: the proof is a
  * panel under the telephone field, not a separate screen.
+ *
+ * "Kod gönder" waits for the identity gate: name and e-mail have to be on the
+ * page already (see `fillLeadContact`), and leaving the number is what starts
+ * the check that opens it.
  */
 async function proveLeadPhoneInForm(page: Page, phone: string) {
-  await page.getByLabel('Telefon *').fill(phone);
-  await page.getByTestId('showcase-lead-phone-send').click();
+  const phoneField = page.getByLabel('Telefon *');
+  const send = page.getByTestId('showcase-lead-phone-send');
+
+  await phoneField.fill(phone);
+  await expect(send).toBeDisabled();
+  await settleIdentityGate(page, phoneField);
+  await expect(send).toBeEnabled();
+  await send.click();
   await expect(page.getByTestId('showcase-lead-phone-code')).toBeVisible();
 
   const code = await waitForLatestSmsCode(phone);
@@ -424,10 +436,10 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await visitor.page
         .getByLabel('Açıklama *')
         .fill('Salon kliması bakım istiyorum, iki gündür soğutmuyor.');
-      await visitor.page.getByLabel('Ad soyad *').fill('E2E Vitrin Müşterisi');
-      await visitor.page
-        .getByLabel('E-posta *')
-        .fill(`e2e-vitrin-${Date.now()}@example.test`);
+      await fillLeadContact(visitor.page, {
+        name: 'E2E Vitrin Müşterisi',
+        email: `e2e-vitrin-${Date.now()}@example.test`,
+      });
 
       // Nothing can be sent before the number is proved.
       await expect(visitor.page.getByTestId('showcase-lead-submit')).toBeDisabled();
@@ -564,10 +576,10 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
         .fill('Kapsam dışı bir adres için talep gönderiyorum.');
       await chooseLeadLocation(visitor.page, elsewhere);
       await visitor.page.getByTestId('showcase-urgency-normal').check();
-      await visitor.page.getByLabel('Ad soyad *').fill('E2E Kapsam Disi');
-      await visitor.page
-        .getByLabel('E-posta *')
-        .fill(`e2e-kapsam-${Date.now()}@example.test`);
+      await fillLeadContact(visitor.page, {
+        name: 'E2E Kapsam Disi',
+        email: `e2e-kapsam-${Date.now()}@example.test`,
+      });
 
       const customerPhone = `0555${String(Date.now()).slice(-7)}`;
       await proveLeadPhoneInForm(visitor.page, customerPhone);
@@ -635,6 +647,12 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
      * refused with a sentence written for them, and no code. The vitrin form
      * has to show that sentence — the code-less refusal used to be folded into
      * "Talebiniz gönderilemedi" with nothing to say why.
+     *
+     * The pre-check on the contact section catches this pair before any code
+     * is sent (covered on its own by request-identity-gate), so the API's
+     * refusal is reached the one way it still can be: the two accounts take
+     * the number and the address *after* the gate opened and the number was
+     * proved, and the submission meets them.
      */
     const phoneOwner = await createCustomer('E2E Telefon Sahibi');
     const emailOwner = await createCustomer('E2E E-posta Sahibi');
@@ -645,19 +663,29 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await visitor.gotoWeb(`/vitrin/${card.id}?step=form`);
       await assertNoErrorScreen(visitor.page);
 
+      const customerPhone = `0555${String(Date.now()).slice(-7)}`;
+      const customerEmail = `e2e-cakisma-${Date.now()}@example.test`;
+
       await visitor.page.getByLabel('Açıklama *').fill('Kimlik çakışması denemesi.');
       await chooseLeadLocation(visitor.page, location);
       await visitor.page.getByTestId('showcase-urgency-normal').check();
-      await visitor.page.getByLabel('Ad soyad *').fill('E2E Çakışan Kişi');
-      await visitor.page.getByLabel('E-posta *').fill(emailOwner.email);
-      await proveLeadPhoneInForm(visitor.page, phoneOwner.phone);
+      await fillLeadContact(visitor.page, { name: 'E2E Çakışan Kişi', email: customerEmail });
+      await proveLeadPhoneInForm(visitor.page, customerPhone);
+
+      // Between the proof and the submission, the number and the address each
+      // become another customer's.
+      await prisma().user.update({ where: { id: phoneOwner.id }, data: { phone: customerPhone } });
+      await prisma().user.update({ where: { id: emailOwner.id }, data: { email: customerEmail } });
 
       const requestsBefore = await prisma().serviceRequest.count();
       await visitor.page.getByTestId('showcase-lead-submit').click();
 
       const refusal = visitor.page.getByTestId('showcase-lead-error');
       await expect(refusal).toBeVisible();
-      await expect(refusal).toHaveText('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
+      // The product's own sentence for the code, not the API's message.
+      await expect(refusal).toHaveText(
+        'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
+      );
       await expect(visitor.page.getByTestId('showcase-lead-sent')).toHaveCount(0);
 
       expect(await prisma().serviceRequest.count()).toBe(requestsBefore);
@@ -704,6 +732,9 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       // form somebody is halfway through.
       await expect(visitor.page.getByTestId('showcase-request-matches')).toHaveCount(0);
 
+      // The contact step comes first and a visitor leaves it through the
+      // identity gate; the place is two steps on.
+      await completeContactStep(visitor, requestFormValues(location, 'E2E Vitrin Form Müşterisi'));
       await visitor.page.getByLabel('Açıklama', { exact: false }).first().fill(
         'Salon kliması bakım istiyorum, iki gündür soğutmuyor.',
       );

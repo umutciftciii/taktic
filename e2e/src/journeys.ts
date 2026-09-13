@@ -1,4 +1,4 @@
-import { expect } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from './actors';
 import type { SeededCategory } from './fixtures';
 
@@ -39,19 +39,8 @@ export async function createRequest(
   category: SeededCategory,
   values: RequestFormValues,
 ): Promise<string> {
-  await actor.gotoWeb(`/categories/${category.slug}`);
-  await expect(actor.page.getByRole('heading', { name: category.name })).toBeVisible();
-
-  await fillRequestFormUpToContact(actor, values);
-
-  // Present only on a runtime with contact sharing on, where it is required:
-  // the form cannot be submitted until the customer confirms having read the
-  // linked disclosure. Ticking it here is what every other scenario means by
-  // "the customer filled the form in".
-  const disclosure = actor.page.getByTestId('contact-disclosure-accept');
-  if ((await disclosure.count()) > 0) {
-    await disclosure.check();
-  }
+  await openRequestFormContactStep(actor, category);
+  await fillRequestForm(actor, values);
 
   await actor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
 
@@ -65,37 +54,125 @@ export async function createRequest(
 }
 
 /**
- * Fills the public request form and stops on its last step, with the contact
- * fields entered and nothing submitted.
+ * The identity pre-check's refusals, by test id. Any one of these on screen
+ * means the gate is shut and "Devam et" / "Kod gönder" will not move — so a
+ * journey that meets one fails here, naming it, rather than on a click that
+ * quietly did nothing.
+ */
+const IDENTITY_REFUSALS = [
+  'identity-login-required',
+  'identity-activation-required',
+  'identity-conflict',
+  'identity-unavailable',
+  'identity-error',
+] as const;
+
+/**
+ * Asserts the contact step's identity gate stands open: no check in flight,
+ * and no refusal shown. Both request forms render the same notice slot, so
+ * one helper reads both.
+ */
+export async function expectIdentityGateOpen(page: Page): Promise<void> {
+  await expect(page.getByTestId('identity-checking')).toHaveCount(0);
+  for (const refusal of IDENTITY_REFUSALS) {
+    await expect(
+      page.getByTestId(refusal),
+      `the identity pre-check refused the contact details (${refusal}); this journey needs a brand-new phone and e-mail`,
+    ).toHaveCount(0);
+  }
+}
+
+/**
+ * Leaves the given guest contact field and waits for the identity pre-check
+ * that blur starts to answer, then asserts the gate opened.
+ *
+ * The check is a POST the browser makes on its own; waiting on that response
+ * rather than on the "checking" text is what makes this ordered: the text can
+ * appear and vanish between two polls, and a click that lands before the
+ * answer does not advance — the form runs the check again and stays put.
+ */
+export async function settleIdentityGate(page: Page, lastField: Locator): Promise<void> {
+  const answered = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      /\/api\/auth\/request-identity-check$/.test(new URL(response.url()).pathname),
+  );
+  await lastField.blur();
+  await answered;
+  await expectIdentityGateOpen(page);
+}
+
+/**
+ * Fills the public request form from its first step to its last, with nothing
+ * submitted: contact, then the job's details, then place and time.
  *
  * The form is one POST with the same field names as ever, presented in three
  * steps. Walking them with the page's own "Devam et" button is what a customer
  * does, and it is what keeps every field visible at the moment it is filled.
- * Callers that need to assert on the contact step — the disclosure checkbox
- * lives there — use this and then do their own thing.
+ * A visitor's way off the first step is the identity pre-check: their phone
+ * and e-mail have to come back as a new customer before "Devam et" moves.
+ *
+ * `detailStep` runs once the second step is on screen, before the description
+ * is typed — for the scenarios that interact with a category's own questions.
  */
-export async function fillRequestFormUpToContact(
+export async function fillRequestForm(
   actor: Actor,
   values: RequestFormValues,
+  options: { detailStep?: () => Promise<void> } = {},
 ): Promise<void> {
   const form = actor.page.locator('form.form-card');
   const nextStep = actor.page.getByRole('button', { name: 'Devam et' });
 
+  await completeContactStep(actor, values);
+
+  await options.detailStep?.();
   await form.locator('textarea[name="description"]').fill(values.description);
   await nextStep.click();
+  await expect(actor.page.locator('#request-step-place')).toBeVisible();
 
   // Province and district are dependent selects: the district list is empty
   // until a province is chosen, which is exactly the behaviour being relied on
   // here — selecting the district at all proves the cascade populated it.
   await form.locator('select[name="city"]').selectOption(values.city);
   await form.locator('select[name="district"]').selectOption(values.district);
-  await nextStep.click();
-
-  await fillContactStep(actor, values);
 }
 
 /**
- * Fills the contact step, whichever of its two shapes is on screen.
+ * Fills the contact step and leaves it through "Devam et".
+ *
+ * A visitor's details are checked on blur and the gate has to open first; a
+ * signed-in customer's step has no gate. The disclosure box — present only on
+ * a runtime with contact sharing on, and `required` there — lives on this step
+ * too, and native validation would refuse to leave without it. Ticking it here
+ * is what every other scenario means by "the customer filled the form in".
+ */
+export async function completeContactStep(actor: Actor, values: RequestFormValues): Promise<void> {
+  const page = actor.page;
+  const form = page.locator('form.form-card');
+
+  await expect(page.locator('#request-step-contact')).toBeVisible();
+  const guest = (await page.getByTestId('use-alternate-contact').count()) === 0;
+
+  await fillContactStep(actor, values);
+
+  // The gate before the box: clicking the box would blur the e-mail field and
+  // start the check on its own, leaving nothing for the settle step to wait on.
+  if (guest) {
+    await settleIdentityGate(page, form.locator('input[name="customerEmail"]'));
+  }
+
+  const disclosure = page.getByTestId('contact-disclosure-accept');
+  if ((await disclosure.count()) > 0) {
+    await disclosure.check();
+  }
+
+  await page.getByRole('button', { name: 'Devam et' }).click();
+  await expect(page.locator('#request-step-detail')).toBeVisible();
+}
+
+/**
+ * Fills the contact step's fields, whichever of its two shapes is on screen,
+ * and stops there — no blur, no gate, no "Devam et".
  *
  * A visitor is asked for the three details and types them. A signed-in customer
  * is not: their account's details are shown instead, and the fields only exist
@@ -119,15 +196,31 @@ export async function fillContactStep(actor: Actor, values: RequestFormValues): 
   await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
 }
 
-/** Opens the request form and steps straight to its contact step. */
+/**
+ * Opens the request form. The contact step is the first one now, so opening
+ * the form is arriving on it — the heading check is what proves the page is
+ * the category's form and not a router or an error screen.
+ */
 export async function openRequestFormContactStep(
   actor: Actor,
   category: SeededCategory,
-  values: RequestFormValues,
 ): Promise<void> {
   await actor.gotoWeb(`/categories/${category.slug}`);
   await expect(actor.page.getByRole('heading', { name: category.name })).toBeVisible();
-  await fillRequestFormUpToContact(actor, values);
+  await expect(actor.page.locator('#request-step-contact')).toBeVisible();
+}
+
+/**
+ * Fills the vitrin lead form's name and e-mail. The number is typed and proved
+ * separately — the proof binds to the exact number — and it is the last of the
+ * three to be left, so that blur is the one that starts the identity check.
+ */
+export async function fillLeadContact(
+  page: Page,
+  contact: { name: string; email: string },
+): Promise<void> {
+  await page.getByLabel('Ad soyad *').fill(contact.name);
+  await page.getByLabel('E-posta *').fill(contact.email);
 }
 
 /**

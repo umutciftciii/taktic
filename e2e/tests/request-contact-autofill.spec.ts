@@ -8,6 +8,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { openRequestFormContactStep, settleIdentityGate } from '../src/journeys';
 
 /**
  * The contact step, in the two shapes it now has.
@@ -24,27 +25,34 @@ import { primaryRuntime } from '../src/runtime';
  * `apps/api/test/request-contact-autofill.spec.ts`.
  */
 
-/** Walks the first two steps, stopping on the contact step. */
-async function goToContactStep(customer: Actor, slug: string, city: string, district: string) {
-  await customer.gotoWeb(`/categories/${slug}`);
-
+/**
+ * Walks the two steps after the contact — the job's details and its place —
+ * with the contact step's own controls left as the caller set them.
+ */
+async function walkToLastStep(customer: Actor, city: string, district: string) {
   const form = customer.page.locator('form.form-card');
   const nextStep = customer.page.getByRole('button', { name: 'Devam et' });
 
+  await nextStep.click();
+  await expect(customer.page.locator('#request-step-detail')).toBeVisible();
   await form.locator('textarea[name="description"]').fill('Salon klimasının montajı gerekiyor.');
   await nextStep.click();
+  await expect(customer.page.locator('#request-step-place')).toBeVisible();
   await form.locator('select[name="city"]').selectOption(city);
   await form.locator('select[name="district"]').selectOption(district);
-  await nextStep.click();
 }
 
-/** Ticks the disclosure when the runtime has contact sharing on, then submits. */
-async function submitRequest(customer: Actor): Promise<string> {
+/**
+ * From the contact step: ticks the disclosure when the runtime has contact
+ * sharing on, walks the remaining two steps and submits.
+ */
+async function submitRequest(customer: Actor, city: string, district: string): Promise<string> {
   const disclosure = customer.page.getByTestId('contact-disclosure-accept');
   if ((await disclosure.count()) > 0) {
     await disclosure.check();
   }
 
+  await walkToLastStep(customer, city, district);
   await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
   await expect(customer.page).toHaveURL(/\/requests\/success\?id=/);
   await assertNoErrorScreen(customer.page);
@@ -63,7 +71,7 @@ test.describe('request contact autofill', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await goToContactStep(customer, category.slug, location.city, location.district);
+      await openRequestFormContactStep(customer, category);
 
       // The three details, as text. Not a disabled input: there is no field to
       // edit, so there is nothing named customerName for anyone to post.
@@ -87,7 +95,7 @@ test.describe('request contact autofill', () => {
       // an account, and telling them otherwise would be wrong.
       await expect(customer.page.getByText('İletişim bilgisi verildi')).toBeVisible();
 
-      const requestId = await submitRequest(customer);
+      const requestId = await submitRequest(customer, location.city, location.district);
 
       const stored = await prisma().serviceRequest.findUniqueOrThrow({
         where: { id: requestId },
@@ -120,7 +128,7 @@ test.describe('request contact autofill', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await goToContactStep(customer, category.slug, location.city, location.district);
+      await openRequestFormContactStep(customer, category);
 
       const toggle = customer.page.getByTestId('use-alternate-contact');
       const form = customer.page.locator('form.form-card');
@@ -154,7 +162,7 @@ test.describe('request contact autofill', () => {
       await phone.fill(values.customerPhone);
       await email.fill(values.customerEmail);
 
-      const requestId = await submitRequest(customer);
+      const requestId = await submitRequest(customer, location.city, location.district);
 
       const stored = await prisma().serviceRequest.findUniqueOrThrow({
         where: { id: requestId },
@@ -184,7 +192,7 @@ test.describe('request contact autofill', () => {
     const visitor = await Actor.open(browser, 'visitor', primaryRuntime);
 
     try {
-      await goToContactStep(visitor, category.slug, location.city, location.district);
+      await openRequestFormContactStep(visitor, category);
 
       // Nothing to autofill from, so nothing is offered: no summary, no
       // checkbox, and the three fields exactly where they always were.
@@ -196,7 +204,11 @@ test.describe('request contact autofill', () => {
       await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
       await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
 
-      const requestId = await submitRequest(visitor);
+      // A visitor's way off this step is the identity pre-check: a brand-new
+      // number and address come back as a new customer and the gate opens.
+      await settleIdentityGate(visitor.page, form.locator('input[name="customerEmail"]'));
+
+      const requestId = await submitRequest(visitor, location.city, location.district);
 
       const stored = await prisma().serviceRequest.findUniqueOrThrow({
         where: { id: requestId },
@@ -227,15 +239,23 @@ test.describe('request contact autofill', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await goToContactStep(customer, category.slug, location.city, location.district);
+      await openRequestFormContactStep(customer, category);
 
       await expect(customer.page.getByTestId('account-contact-incomplete')).toContainText(
         'telefon',
       );
       await expect(customer.page.getByTestId('account-contact-summary')).toHaveCount(0);
       // Submitting on the account's own details is withheld rather than left to
-      // fail on the server.
+      // fail on the server: the steps can be walked, but the last one's button
+      // stays disabled until somebody else is named.
+      await walkToLastStep(customer, location.city, location.district);
       await expect(customer.page.getByRole('button', { name: 'Talebi Gönder' })).toBeDisabled();
+
+      // Back to the contact step, to name that somebody.
+      const back = customer.page.getByRole('button', { name: 'Geri' });
+      await back.click();
+      await back.click();
+      await expect(customer.page.locator('#request-step-contact')).toBeVisible();
 
       await customer.page.getByTestId('use-alternate-contact').check();
       const form = customer.page.locator('form.form-card');
@@ -243,7 +263,7 @@ test.describe('request contact autofill', () => {
       await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
       await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
 
-      const requestId = await submitRequest(customer);
+      const requestId = await submitRequest(customer, location.city, location.district);
 
       const stored = await prisma().serviceRequest.findUniqueOrThrow({
         where: { id: requestId },
@@ -269,7 +289,7 @@ test.describe('request contact autofill', () => {
 
     try {
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await goToContactStep(customer, category.slug, location.city, location.district);
+      await openRequestFormContactStep(customer, category);
 
       const overflow = async () =>
         customer.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
