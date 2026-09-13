@@ -394,3 +394,10 @@ Ayrıntı: `.superpowers/sdd/2026-09-13-request-identity-gate/final-fix-report.m
   doğrulanıyor.
 - Minor: kodsuz 403 adım-farkında (`REQUEST_FORBIDDEN`), yorum/doküman düzeltmeleri
   (§2.1, §2.2 oracle notu, §2.3, §6), `.env.example`.
+
+## 12. Son doğrulama (final review fix dalgası sonrası, HEAD `0813887c` üzerinde)
+
+- `pnpm typecheck` ✓ · `pnpm lint` ✓ · `pnpm test` ✓ (API 97 dosya / 2099, web 16 / 106, shared 4 / 97, admin 2 / 39) · `pnpm build` ✓
+- `pnpm --filter @taktic/e2e e2e` (tam Chromium): **227/227** (7.2 dk)
+- `pnpm --filter @taktic/e2e e2e:webkit` (tam WebKit projesi): **74/74** (5.2 dk)
+- Dal geneli son inceleme: F1 (kimlik yanıtı yarışı), F2 (Vazgeç/DELETE kapsamı), F3 (yanlış hesap çerezi), F4 (marketplace taslak geri gelişi E2E) kapatıldı; ikinci incelemede yeni bulgu yok.
