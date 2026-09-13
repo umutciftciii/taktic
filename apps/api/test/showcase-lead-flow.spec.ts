@@ -473,6 +473,23 @@ describe('the body is the marketplace request body', () => {
     });
     expect(proof.requestId).toBe(stored.id);
   });
+
+  it('refuses a phone and an e-mail that belong to two different customers, with a code', async () => {
+    const { card, category } = await published();
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05553330001', email: 'one@example.test' });
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05553330002', email: 'two@example.test' });
+
+    const response = await openLead(card.id, category.slug, {
+      customerPhone: '05553330001',
+      customerEmail: 'two@example.test',
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('CUSTOMER_IDENTITY_CONFLICT');
+    expect(response.body.message).toBe('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
+    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+    expect(await ctx.prisma.showcaseLead.count()).toBe(0);
+  });
 });
 
 describe('the telephone number has to be proved first', () => {

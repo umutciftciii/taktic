@@ -41,6 +41,12 @@ import { UpdateServiceRequestStatusDto } from './dto/update-service-request-stat
  */
 export const ACCOUNT_CONTACT_INCOMPLETE_CODE = 'ACCOUNT_CONTACT_INCOMPLETE';
 
+/**
+ * Returned when a request creation is refused because the provided phone and
+ * email belong to two different customers.
+ */
+export const CUSTOMER_IDENTITY_CONFLICT_CODE = 'CUSTOMER_IDENTITY_CONFLICT';
+
 type QuestionOption = {
   key: string;
   label: string;
@@ -899,7 +905,12 @@ async function resolveCustomerForCreate(
   ]);
 
   if (byPhone && byEmail && byPhone.id !== byEmail.id) {
-    throw new ConflictException('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
+    throw new ConflictException({
+      statusCode: HttpStatus.CONFLICT,
+      error: 'Conflict',
+      code: CUSTOMER_IDENTITY_CONFLICT_CODE,
+      message: 'Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.',
+    });
   }
 
   if (byPhone) {
@@ -926,9 +937,12 @@ async function resolveCustomerForCreate(
     return created.id;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      throw new ConflictException(
-        'Müşteri kaydı oluşturulamadı: telefon veya e-posta başka bir kayıtla çakışıyor.',
-      );
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: CUSTOMER_IDENTITY_CONFLICT_CODE,
+        message: 'Müşteri kaydı oluşturulamadı: telefon veya e-posta başka bir kayıtla çakışıyor.',
+      });
     }
     throw error;
   }
