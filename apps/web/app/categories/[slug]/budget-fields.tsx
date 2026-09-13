@@ -16,6 +16,10 @@ type BudgetFieldsProps = {
   minHelpText?: string | null;
   /** Told when a value changed, so the form can refresh its own signals. */
   onChange?: () => void;
+  /** A saved draft's minimum budget, in kuruş, when one is being restored. */
+  defaultMin?: number | null;
+  /** A saved draft's maximum budget, in kuruş, when one is being restored. */
+  defaultMax?: number | null;
 };
 
 /**
@@ -50,9 +54,11 @@ export function BudgetFields({
   required,
   minHelpText,
   onChange,
+  defaultMin = null,
+  defaultMax = null,
 }: BudgetFieldsProps) {
-  const [min, setMin] = useState('');
-  const [max, setMax] = useState('');
+  const [min, setMin] = useState(() => minorToLiraDraft(defaultMin));
+  const [max, setMax] = useState(() => minorToLiraDraft(defaultMax));
   const minRef = useRef<HTMLInputElement>(null);
   const maxRef = useRef<HTMLInputElement>(null);
 
@@ -251,4 +257,10 @@ function caretAfterSignificant(formatted: string, significant: number): number {
     }
   }
   return formatted.length;
+}
+
+/** Minor units (kuruş) back into the draft string the lira field holds. */
+function minorToLiraDraft(minor: number | null): string {
+  if (minor === null) return '';
+  return formatLiraDraft((minor / 100).toFixed(2).replace('.', ','));
 }

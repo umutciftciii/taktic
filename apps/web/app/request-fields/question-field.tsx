@@ -12,30 +12,43 @@ import type { Question } from '../../lib/api';
  * keys and types that were rendered, and the server action reads the answers
  * back through the same convention.
  */
-export function RequestField({ question }: { question: Question }) {
+export function RequestField({
+  question,
+  defaultValue,
+}: {
+  question: Question;
+  /** A saved draft's answer for this question, when one is being restored. */
+  defaultValue?: unknown;
+}) {
   return (
     <label className="form-row">
       <span>
         {question.label}
         {question.isRequired ? ' *' : ''}
       </span>
-      {renderInput(question)}
+      {renderInput(question, defaultValue)}
       {question.helpText ? <span className="help-text">{question.helpText}</span> : null}
     </label>
   );
 }
 
-function renderInput(question: Question) {
+/** Whether a draft value can fill a text/select control's `defaultValue`. */
+function isTextualDefault(value: unknown): value is string | number {
+  return typeof value === 'string' || typeof value === 'number';
+}
+
+function renderInput(question: Question, defaultValue?: unknown) {
   const name = `answer_${question.key}`;
+  const textDefault = isTextualDefault(defaultValue) ? String(defaultValue) : undefined;
 
   switch (question.type) {
     case 'TEXT':
-      return <input name={name} required={question.isRequired} />;
+      return <input name={name} required={question.isRequired} defaultValue={textDefault} />;
     case 'TEXTAREA':
-      return <textarea name={name} required={question.isRequired} />;
+      return <textarea name={name} required={question.isRequired} defaultValue={textDefault} />;
     case 'SELECT':
       return (
-        <select name={name} required={question.isRequired} defaultValue="">
+        <select name={name} required={question.isRequired} defaultValue={textDefault ?? ''}>
           <option value="">Seçiniz</option>
           {(question.options ?? []).map((option) => (
             <option key={option.key} value={option.key}>
@@ -46,7 +59,12 @@ function renderInput(question: Question) {
       );
     case 'MULTI_SELECT':
       return (
-        <select name={name} multiple required={question.isRequired}>
+        <select
+          name={name}
+          multiple
+          required={question.isRequired}
+          defaultValue={Array.isArray(defaultValue) ? (defaultValue as string[]) : undefined}
+        >
           {(question.options ?? []).map((option) => (
             <option key={option.key} value={option.key}>
               {option.label}
@@ -55,18 +73,30 @@ function renderInput(question: Question) {
         </select>
       );
     case 'NUMBER':
-      return <input name={name} type="number" required={question.isRequired} />;
+      return <input name={name} type="number" required={question.isRequired} defaultValue={textDefault} />;
     case 'BOOLEAN':
       return (
         <span className="checkbox-row">
-          <input name={name} type="checkbox" value="true" />
+          <input
+            name={name}
+            type="checkbox"
+            value="true"
+            defaultChecked={defaultValue === true || defaultValue === 'true'}
+          />
           <span>Evet</span>
         </span>
       );
     case 'DATE':
-      return <input name={name} type="date" required={question.isRequired} />;
+      return <input name={name} type="date" required={question.isRequired} defaultValue={textDefault} />;
     case 'IMAGE':
-      return <input name={name} placeholder="Dosya yükleme sonraki fazda" required={question.isRequired} />;
+      return (
+        <input
+          name={name}
+          placeholder="Dosya yükleme sonraki fazda"
+          required={question.isRequired}
+          defaultValue={textDefault}
+        />
+      );
   }
 }
 

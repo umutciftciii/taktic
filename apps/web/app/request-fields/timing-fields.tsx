@@ -21,6 +21,8 @@ type UrgencySelectProps = {
   required?: boolean;
   helpText?: string | null;
   testId?: string;
+  /** A saved draft's urgency, when one is being restored. */
+  defaultValue?: string;
 };
 
 export function UrgencySelect({
@@ -28,6 +30,7 @@ export function UrgencySelect({
   required = false,
   helpText,
   testId = 'request-urgency',
+  defaultValue,
 }: UrgencySelectProps) {
   return (
     <label className="form-row">
@@ -35,7 +38,7 @@ export function UrgencySelect({
         {label}
         {required ? ' *' : ''}
       </span>
-      <select name="urgency" defaultValue="" required={required} data-testid={testId}>
+      <select name="urgency" defaultValue={defaultValue ?? ''} required={required} data-testid={testId}>
         <option value="">Seçiniz</option>
         {URGENCY_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
