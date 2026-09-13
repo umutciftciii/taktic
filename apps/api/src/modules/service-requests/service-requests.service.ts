@@ -24,6 +24,7 @@ import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
+import { RequestDraftsService } from '../request-drafts/request-drafts.service';
 import {
   hasSystemFieldValue,
   SystemFieldRequestValues,
@@ -117,6 +118,14 @@ export type ServiceRequestCreationContext = {
    * request existed. See `PhoneVerificationService.sendStandaloneCode`.
    */
   phoneVerifiedAt?: Date;
+  /**
+   * The draft token the browser carried (see RequestDraftsService). Consumed
+   * inside the creation transaction so "the request exists" and "the draft is
+   * used up" are one fact; a draft protected for another account is skipped.
+   */
+  draftToken?: string | null;
+  /** The card id a vitrin draft was keyed on. Absent on the public form. */
+  draftCardId?: string | null;
   onCreated?: (
     tx: Prisma.TransactionClient,
     request: { id: string; customerId: string | null },
@@ -163,6 +172,7 @@ export class ServiceRequestsService {
     @Inject(CategoriesService) private readonly categories: CategoriesService,
     @Inject(ShowcaseLeadLifecycleService)
     private readonly showcaseLeads: ShowcaseLeadLifecycleService,
+    @Inject(RequestDraftsService) private readonly drafts: RequestDraftsService,
   ) {}
 
   /**
@@ -332,6 +342,21 @@ export class ServiceRequestsService {
           },
         },
       });
+
+      // The draft the browser carried, consumed in the same transaction that
+      // wrote the request: "the request exists" and "the draft is used up"
+      // become one fact, and a draft protected for another account is
+      // skipped rather than blocking this submission.
+      await this.drafts.consumeInTransaction(
+        tx,
+        context.draftToken ?? null,
+        {
+          formType: context.directShowcaseProviderId ? 'SHOWCASE_LEAD' : 'MARKETPLACE',
+          categorySlug,
+          cardId: context.draftCardId ?? null,
+        },
+        created.customerId,
+      );
 
       // The vitrin lead, its SLA and the verification it redeemed, all inside
       // the transaction that created the request. A request carrying a

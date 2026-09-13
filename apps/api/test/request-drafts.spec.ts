@@ -1,7 +1,7 @@
 import { UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTestApp, createUser, loginAs, resetAuthThrottle, resetDatabase, type TestContext } from './harness';
+import { createCategory, createTestApp, createUser, loginAs, resetAuthThrottle, resetDatabase, type TestContext } from './harness';
 import { RequestDraftsService } from '../src/modules/request-drafts/request-drafts.service';
 
 /**
@@ -346,5 +346,78 @@ describe('DELETE /request-drafts/current', () => {
     expect(response.status).toBe(204);
     expect(await ctx.prisma.requestDraft.count()).toBe(1);
     expect((await get(mpQuery, other.body.token)).status).toBe(200);
+  });
+});
+
+/**
+ * What actually submitting the request the draft was standing in for does to
+ * the draft row itself. Consuming it is folded into the request's own
+ * creation transaction (see `ServiceRequestsService.createServiceRequest` and
+ * `RequestDraftsService.consumeInTransaction`), and never blocks the request:
+ * a draft protected for another account is simply left alone.
+ */
+describe('consumption', () => {
+  const guestBody = {
+    categorySlug: '', // set per test
+    customerName: 'Taslak Sahibi',
+    customerPhone: '05554440001',
+    customerEmail: 'draft@example.test',
+    city: 'İstanbul',
+    district: 'Kadıköy',
+    description: 'Klima bakımı',
+    answers: [],
+  };
+
+  async function leafCategory() {
+    return createCategory(ctx.prisma, 'Klima Servisi', { offerCreditCost: 2 });
+  }
+
+  it('marks the anonymous draft consumed and bound to the customer the request created', async () => {
+    const category = await leafCategory();
+    const created = await post({ ...marketplace, categorySlug: category.slug });
+
+    const response = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', `${COOKIE}=${created.body.token}`)
+      .send({ ...guestBody, categorySlug: category.slug });
+
+    expect(response.status).toBe(201);
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.consumedAt).not.toBeNull();
+    expect(row.userId).toBe(response.body.customerId);
+    expect((await get({ formType: 'MARKETPLACE', categorySlug: category.slug }, created.body.token)).status).toBe(204);
+  });
+
+  it('leaves a draft protected for another account untouched and still creates the request', async () => {
+    const category = await leafCategory();
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'draft@example.test' });
+    const created = await post({ ...marketplace, categorySlug: category.slug });
+
+    // Somebody else submits from the same browser with their own contact.
+    const response = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', `${COOKIE}=${created.body.token}`)
+      .send({ ...guestBody, categorySlug: category.slug, customerPhone: '05554440077', customerEmail: 'other@example.test' });
+
+    expect(response.status).toBe(201);
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.consumedAt).toBeNull();
+    expect(row.expectedUserId).toBe(owner.id);
+  });
+
+  it('consumes a protected draft when its expected customer submits', async () => {
+    const category = await leafCategory();
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'draft@example.test' });
+    const created = await post({ ...marketplace, categorySlug: category.slug });
+
+    const response = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', [`${COOKIE}=${created.body.token}`, await loginAs(ctx.prisma, owner.id)].join('; '))
+      .send({ categorySlug: category.slug, city: 'İstanbul', district: 'Kadıköy', description: 'Klima', answers: [] });
+
+    expect(response.status).toBe(201);
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.consumedAt).not.toBeNull();
+    expect(row.userId).toBe(owner.id);
   });
 });

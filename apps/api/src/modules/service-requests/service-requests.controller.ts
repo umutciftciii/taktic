@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
 import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto';
+import { getDraftTokenFromRequest } from '../request-drafts/request-draft.cookie';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { ServiceRequestsService } from './service-requests.service';
@@ -19,8 +20,14 @@ export class ServiceRequestsController {
 
   @Post()
   @UseGuards(OptionalAuthGuard)
-  createServiceRequest(@Body() dto: CreateServiceRequestDto, @CurrentUser() user: AuthUser | null) {
-    return this.serviceRequestsService.createServiceRequest(dto, user);
+  createServiceRequest(
+    @Body() dto: CreateServiceRequestDto,
+    @CurrentUser() user: AuthUser | null,
+    @Req() req: { headers?: Record<string, string | string[] | undefined> },
+  ) {
+    return this.serviceRequestsService.createServiceRequest(dto, user, {
+      draftToken: getDraftTokenFromRequest(req),
+    });
   }
 
   @Get()

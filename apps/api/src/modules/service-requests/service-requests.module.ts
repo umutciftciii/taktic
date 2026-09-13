@@ -5,6 +5,7 @@ import { CategoriesModule } from '../categories/categories.module';
 import { CustomerActivationModule } from '../customer-activation/customer-activation.module';
 import { NumberingModule } from '../numbering/numbering.module';
 import { OffersModule } from '../offers/offers.module';
+import { RequestDraftsModule } from '../request-drafts/request-drafts.module';
 import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
 import { ServiceRequestsController } from './service-requests.controller';
 import { ServiceRequestsService } from './service-requests.service';
@@ -22,6 +23,10 @@ import { ServiceRequestsService } from './service-requests.service';
     // one creates leads through *this* service, and importing it here would
     // make the pair mutually dependent.
     ShowcaseLifecycleModule,
+    // Consuming the browser's draft inside the creation transaction.
+    // RequestDraftsModule only imports AuthModule + PrismaModule, so this
+    // creates no cycle.
+    RequestDraftsModule,
   ],
   controllers: [ServiceRequestsController],
   providers: [ServiceRequestsService],

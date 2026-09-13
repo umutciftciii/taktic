@@ -816,3 +816,34 @@ describe('the rate limits and the double-submitted form', () => {
     expect(await ctx.prisma.serviceRequest.count()).toBe(1);
   });
 });
+
+describe('the browser’s request draft', () => {
+  /**
+   * A vitrin draft is consumed inside the very same transaction that opens the
+   * lead, exactly as it is for the marketplace form — see
+   * `ServiceRequestsService.createServiceRequest`'s call to
+   * `RequestDraftsService.consumeInTransaction`. The lead path passes the
+   * draft's own card id (`draftCardId`), which is what lets the key match a
+   * vitrin draft rather than a marketplace one.
+   */
+  it('consumes the browser’s vitrin draft inside the lead transaction', async () => {
+    const { card, category } = await published();
+    const draft = await request(ctx.server).post('/request-drafts').send({
+      formType: 'SHOWCASE_LEAD', categorySlug: category.slug, cardId: card.id,
+      payload: { description: 'Vitrin taslağı', answers: [] },
+      identity: { phone: '05557770001', email: 'vitrin-draft@example.test' },
+    });
+    const payload = showcaseLeadPayload(category.slug, { customerPhone: '05557770001', customerEmail: 'vitrin-draft@example.test' });
+    await proveShowcaseLeadPhone(ctx.prisma, '05557770001');
+
+    const response = await request(ctx.server)
+      .post(`/showcase/cards/${card.id}/leads`)
+      .set('Cookie', `taktic_request_draft=${draft.body.token}`)
+      .send(payload);
+
+    expect(response.status).toBe(201);
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.consumedAt).not.toBeNull();
+    expect(await ctx.prisma.showcaseLead.count()).toBe(1);
+  });
+});
