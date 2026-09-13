@@ -128,3 +128,74 @@ describe('POST /auth/request-identity-check', () => {
     expect(last).toBe(429);
   });
 });
+
+describe('POST /auth/request-identity-check/activate', () => {
+  // The suite-level beforeEach only truncates the database; it never touches
+  // the recording transport (unlike customer-activation.spec.ts's own
+  // beforeEach), so a mail sent by one case would otherwise still be sitting
+  // in ctx.notifications.sent when the next case inspects it.
+  beforeEach(() => {
+    ctx.notifications.clear();
+  });
+
+  function activate(body: Record<string, unknown>) {
+    return request(ctx.server).post('/auth/request-identity-check/activate').send(body);
+  }
+
+  it('mails the activation link to the account’s own e-mail, never to the address in the form', async () => {
+    // The attacker knows the victim's number and supplies their own mailbox.
+    await claimableCustomer('05552220001', 'victim@example.test');
+
+    const response = await activate({ phone: '05552220001', email: 'attacker@example.test' });
+
+    expect(response.status).toBe(202);
+    expect(response.body).toEqual({ status: 'accepted' });
+
+    const mails = ctx.notifications.sent.filter((m) => m.template === 'customer-activation');
+    expect(mails).toHaveLength(1);
+    expect(mails[0]?.to).toBe('victim@example.test');
+    expect(ctx.notifications.sent.some((m) => m.to === 'attacker@example.test')).toBe(false);
+
+    const token = await ctx.prisma.customerActivationToken.findFirstOrThrow({ where: { usedAt: null } });
+    const victim = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'victim@example.test' } });
+    expect(token.customerId).toBe(victim.id);
+  });
+
+  it('carries a validated redirectTo on the link and drops an invalid one', async () => {
+    await claimableCustomer('05552220002', 'back@example.test');
+
+    await activate({ phone: '05552220002', email: 'back@example.test', redirectTo: '/vitrin/abc?step=form' });
+    const good = ctx.notifications.lastOfTemplate('customer-activation');
+    expect(good?.actionUrl).toContain('redirectTo=%2Fvitrin%2Fabc%3Fstep%3Dform');
+
+    ctx.notifications.clear();
+    await ctx.prisma.customerActivationToken.deleteMany();
+    await activate({ phone: '05552220002', email: 'back@example.test', redirectTo: 'https://evil.example/x' });
+    const bad = ctx.notifications.lastOfTemplate('customer-activation');
+    expect(bad?.actionUrl).not.toContain('redirectTo');
+  });
+
+  it('answers 202 and sends nothing for every other state', async () => {
+    await activeCustomer('05552220003', 'active2@example.test');
+    await createUser(ctx.prisma, { role: UserRole.PROVIDER, phone: '05552220004', email: 'prov2@example.test' });
+    // A claimable account with no e-mail cannot be mailed.
+    await createUser(ctx.prisma, {
+      role: UserRole.CUSTOMER, phone: '05552220005', email: undefined, password: null,
+      customerOrigin: CustomerOrigin.AUTO_CREATED_REQUEST,
+    });
+    await ctx.prisma.user.update({ where: { phone: '05552220005' }, data: { email: null } });
+
+    for (const body of [
+      { phone: FRESH.phone, email: FRESH.email },                       // new-customer
+      { phone: '05552220003', email: 'active2@example.test' },          // login-required
+      { phone: '05552220004', email: FRESH.email },                     // unavailable
+      { phone: '05552220003', email: 'victim@example.test' },           // conflict (if victim exists) or login
+      { phone: '05552220005', email: FRESH.email },                     // claimable, no e-mail
+    ]) {
+      const response = await activate(body);
+      expect(response.status).toBe(202);
+      expect(response.body).toEqual({ status: 'accepted' });
+    }
+    expect(ctx.notifications.sent.filter((m) => m.template === 'customer-activation')).toHaveLength(0);
+  });
+});

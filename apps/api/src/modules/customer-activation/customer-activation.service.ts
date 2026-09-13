@@ -34,10 +34,26 @@ function generateRawToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
-function buildActivationUrl(rawToken: string): string {
+/**
+ * Only a same-origin path may be carried on an activation link. The web app's
+ * login form applies the same rule (safeRedirectPathOrNull in @taktic/shared);
+ * it is repeated here because the API cannot import that package at runtime.
+ */
+function safeRedirectPath(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.includes('\\')) return null;
+  if (/[\x00-\x20]/.test(trimmed)) return null;
+  return trimmed.length <= 512 ? trimmed : null;
+}
+
+function buildActivationUrl(rawToken: string, redirectTo: string | null = null): string {
   const base = getWebAppBaseUrl();
   const url = new URL(CUSTOMER_ACTIVATION_PATH, `${base}/`);
   url.searchParams.set('token', rawToken);
+  if (redirectTo) {
+    url.searchParams.set('redirectTo', redirectTo);
+  }
   return url.toString();
 }
 
@@ -119,7 +135,10 @@ export class CustomerActivationService {
    * the service request the visitor just submitted. Returns null when the
    * account is not claimable (already has a password, self-registered, …).
    */
-  async issueForAutoCreatedCustomer(customerId: string) {
+  async issueForAutoCreatedCustomer(
+    customerId: string,
+    options: { redirectTo?: string | null } = {},
+  ) {
     const customer = await this.prisma.user.findUnique({
       where: { id: customerId },
       select: {
@@ -138,7 +157,13 @@ export class CustomerActivationService {
       return null;
     }
 
-    return this.issueAndNotify(customer.id, customer.email, customer.name, null);
+    return this.issueAndNotify(
+      customer.id,
+      customer.email,
+      customer.name,
+      null,
+      safeRedirectPath(options.redirectTo),
+    );
   }
 
   /**
@@ -182,8 +207,9 @@ export class CustomerActivationService {
     email: string,
     name: string | null,
     createdById: string | null,
+    redirectTo: string | null = null,
   ) {
-    const issued = await this.issueToken(customerId, createdById);
+    const issued = await this.issueToken(customerId, createdById, redirectTo);
 
     // Goes through the dispatcher so the send is audited, but the payload and
     // the transport are unchanged: the same NotificationPort adapter receives
@@ -210,7 +236,11 @@ export class CustomerActivationService {
    * Issues a fresh single-use token and invalidates every other outstanding one
    * for the same customer, so at most one activation link is ever live.
    */
-  private async issueToken(customerId: string, createdById: string | null) {
+  private async issueToken(
+    customerId: string,
+    createdById: string | null,
+    redirectTo: string | null = null,
+  ) {
     const rawToken = generateRawToken();
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(
@@ -239,7 +269,7 @@ export class CustomerActivationService {
       });
     });
 
-    return { activationUrl: buildActivationUrl(rawToken), expiresAt };
+    return { activationUrl: buildActivationUrl(rawToken, redirectTo), expiresAt };
   }
 
   async validateRawToken(rawToken: string) {

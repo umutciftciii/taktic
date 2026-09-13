@@ -1,6 +1,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Inject, Post, UseGuards } from '@nestjs/common';
+import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { AuthThrottlerGuard } from './auth.throttler';
-import { RequestIdentityCheckDto } from './dto/request-identity.dto';
+import { RequestIdentityActivateDto, RequestIdentityCheckDto } from './dto/request-identity.dto';
 import { RequestIdentityService } from './request-identity.service';
 
 /**
@@ -10,7 +11,10 @@ import { RequestIdentityService } from './request-identity.service';
  */
 @Controller('auth/request-identity-check')
 export class RequestIdentityController {
-  constructor(@Inject(RequestIdentityService) private readonly identity: RequestIdentityService) {}
+  constructor(
+    @Inject(RequestIdentityService) private readonly identity: RequestIdentityService,
+    @Inject(CustomerActivationService) private readonly activation: CustomerActivationService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.OK)
@@ -18,5 +22,33 @@ export class RequestIdentityController {
   async check(@Body() dto: RequestIdentityCheckDto) {
     const { status } = await this.identity.classifyNow(dto);
     return { status };
+  }
+
+  /**
+   * Re-sends the claim link for a password-less account the pair points at.
+   *
+   * The recipient is the account's own stored e-mail — read inside
+   * issueForAutoCreatedCustomer, never taken from this body. Somebody who knows
+   * a victim's number and types their own address gets a 202 and nothing else;
+   * the mail, if any, goes to the victim. Every other state is the same 202
+   * with no mail, so the endpoint reveals nothing on its own.
+   */
+  @Post('activate')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(AuthThrottlerGuard)
+  async activate(@Body() dto: RequestIdentityActivateDto) {
+    const { status, matchedCustomerId } = await this.identity.classifyNow(dto);
+
+    if (status === 'activation-required' && matchedCustomerId) {
+      try {
+        await this.activation.issueForAutoCreatedCustomer(matchedCustomerId, {
+          redirectTo: dto.redirectTo ?? null,
+        });
+      } catch {
+        // Best effort by design: the answer must not change with the outcome.
+      }
+    }
+
+    return { status: 'accepted' as const };
   }
 }
