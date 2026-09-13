@@ -34,17 +34,56 @@ function generateRawToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
+/** Whether a literal string is shaped like an in-application path. */
+function isSafeRedirectShape(value: string): boolean {
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return false;
+  return !/[\x00-\x20]/.test(value);
+}
+
 /**
- * Only a same-origin path may be carried on an activation link. The web app's
- * login form applies the same rule (safeRedirectPathOrNull in @taktic/shared);
- * it is repeated here because the API cannot import that package at runtime.
+ * Decodes until the value stops changing, capped at three rounds — enough for
+ * single and double encoding, with the third round there only to prove a
+ * fixed point was reached rather than that the loop ran out of turns.
+ * Malformed percent-encoding is a rejection: `decodeURIComponent` throwing
+ * means the value cannot be a path this application produced.
+ */
+function fullyDecode(value: string): string | null {
+  let current = value;
+
+  for (let round = 0; round < 3; round += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      return null;
+    }
+
+    if (next === current) return current;
+    current = next;
+  }
+
+  return current;
+}
+
+/**
+ * Only a same-origin path may be carried on an activation link. Mirrors the
+ * shape-then-decode rule of `safeRedirectPathOrNull` in
+ * `packages/shared/src/safe-redirect.ts` — the API cannot import that package
+ * at runtime (boot failure), so it is repeated here: a candidate must look
+ * like an in-application path both as written and after being fully decoded,
+ * which is what catches `/%2f%2fevil.example` — safe-shaped as written, but
+ * `//evil.example` once decoded.
  */
 function safeRedirectPath(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.includes('\\')) return null;
-  if (/[\x00-\x20]/.test(trimmed)) return null;
-  return trimmed.length <= 512 ? trimmed : null;
+  if (!isSafeRedirectShape(trimmed)) return null;
+  if (trimmed.length > 512) return null;
+
+  const decoded = fullyDecode(trimmed);
+  if (decoded === null || !isSafeRedirectShape(decoded)) return null;
+
+  return trimmed;
 }
 
 function buildActivationUrl(rawToken: string, redirectTo: string | null = null): string {

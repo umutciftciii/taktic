@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Inject, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Inject, Logger, Post, UseGuards } from '@nestjs/common';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { AuthThrottlerGuard } from './auth.throttler';
 import { RequestIdentityActivateDto, RequestIdentityCheckDto } from './dto/request-identity.dto';
@@ -11,6 +11,8 @@ import { RequestIdentityService } from './request-identity.service';
  */
 @Controller('auth/request-identity-check')
 export class RequestIdentityController {
+  private readonly logger = new Logger(RequestIdentityController.name);
+
   constructor(
     @Inject(RequestIdentityService) private readonly identity: RequestIdentityService,
     @Inject(CustomerActivationService) private readonly activation: CustomerActivationService,
@@ -44,8 +46,14 @@ export class RequestIdentityController {
         await this.activation.issueForAutoCreatedCustomer(matchedCustomerId, {
           redirectTo: dto.redirectTo ?? null,
         });
-      } catch {
+      } catch (error) {
         // Best effort by design: the answer must not change with the outcome.
+        // Logged without the phone or e-mail from the body — matchedCustomerId
+        // is enough to find the account without echoing what the caller sent.
+        this.logger.error(
+          'request-identity activate: failed to issue activation link',
+          error instanceof Error ? error.stack : String(error),
+        );
       }
     }
 

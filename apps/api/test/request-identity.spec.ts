@@ -164,15 +164,33 @@ describe('POST /auth/request-identity-check/activate', () => {
   it('carries a validated redirectTo on the link and drops an invalid one', async () => {
     await claimableCustomer('05552220002', 'back@example.test');
 
-    await activate({ phone: '05552220002', email: 'back@example.test', redirectTo: '/vitrin/abc?step=form' });
-    const good = ctx.notifications.lastOfTemplate('customer-activation');
+    async function attempt(redirectTo: string) {
+      ctx.notifications.clear();
+      await ctx.prisma.customerActivationToken.deleteMany();
+      await activate({ phone: '05552220002', email: 'back@example.test', redirectTo });
+      return ctx.notifications.lastOfTemplate('customer-activation');
+    }
+
+    const good = await attempt('/vitrin/abc?step=form');
     expect(good?.actionUrl).toContain('redirectTo=%2Fvitrin%2Fabc%3Fstep%3Dform');
 
-    ctx.notifications.clear();
-    await ctx.prisma.customerActivationToken.deleteMany();
-    await activate({ phone: '05552220002', email: 'back@example.test', redirectTo: 'https://evil.example/x' });
-    const bad = ctx.notifications.lastOfTemplate('customer-activation');
+    const bad = await attempt('https://evil.example/x');
     expect(bad?.actionUrl).not.toContain('redirectTo');
+
+    // Percent-encoded protocol-relative: safe-shaped as written, but decodes
+    // to `//evil.example`.
+    const doubleEncoded = await attempt('/%2f%2fevil.example');
+    expect(doubleEncoded?.actionUrl).not.toContain('redirectTo');
+
+    // Percent-encoded NUL: safe-shaped as written, but decodes to a control
+    // character.
+    const encodedControl = await attempt('/ok%00');
+    expect(encodedControl?.actionUrl).not.toContain('redirectTo');
+
+    // An ordinary path plus query string with more than one parameter is
+    // still carried, encoded.
+    const multiParam = await attempt('/vitrin/abc?step=form&x=1');
+    expect(multiParam?.actionUrl).toContain('redirectTo=%2Fvitrin%2Fabc%3Fstep%3Dform%26x%3D1');
   });
 
   it('answers 202 and sends nothing for every other state', async () => {
