@@ -250,3 +250,101 @@ describe('POST /request-drafts', () => {
     expect(await ctx.prisma.requestDraft.count()).toBe(50);
   });
 });
+
+describe('GET /request-drafts/current', () => {
+  it('opens an anonymous draft for its cookie bearer and binds it to nobody, even with a session', async () => {
+    const someone = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const created = await post(marketplace);
+
+    const anon = await get(mpQuery, created.body.token);
+    expect(anon.status).toBe(200);
+    expect(anon.body).toEqual({ payload: marketplace.payload });
+
+    const withSession = await get(mpQuery, created.body.token, await loginAs(ctx.prisma, someone.id));
+    expect(withSession.status).toBe(200);
+    expect((await ctx.prisma.requestDraft.findFirstOrThrow()).userId).toBeNull();
+  });
+
+  it('keeps a protected draft closed without a session, and refuses the wrong account without deleting anything', async () => {
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'draft@example.test' });
+    const stranger = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const created = await post(marketplace);
+    const before = await ctx.prisma.requestDraft.findFirstOrThrow();
+
+    expect((await get(mpQuery, created.body.token)).status).toBe(204);
+
+    const wrong = await get(mpQuery, created.body.token, await loginAs(ctx.prisma, stranger.id));
+    expect(wrong.status).toBe(200);
+    expect(wrong.body).toEqual({ status: 'wrong-account' });
+
+    const after = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(after.id).toBe(before.id);
+    expect(after.tokenHash).toBe(before.tokenHash);
+    expect(after.expectedUserId).toBe(owner.id);
+    expect(after.userId).toBeNull();
+    expect(after.consumedAt).toBeNull();
+
+    // The right account, on the same browser, afterwards: the very same draft.
+    const right = await get(mpQuery, created.body.token, await loginAs(ctx.prisma, owner.id));
+    expect(right.status).toBe(200);
+    expect(right.body).toEqual({ payload: marketplace.payload });
+    expect((await ctx.prisma.requestDraft.findFirstOrThrow()).userId).toBe(owner.id);
+  });
+
+  it('answers 204 for another form context, an expired row, or a consumed row', async () => {
+    const created = await post(marketplace);
+    expect((await get(scQuery, created.body.token)).status).toBe(204);
+
+    await ctx.prisma.requestDraft.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
+    expect((await get(mpQuery, created.body.token)).status).toBe(204);
+
+    await ctx.prisma.requestDraft.updateMany({ data: { expiresAt: new Date(Date.now() + 60_000), consumedAt: new Date() } });
+    expect((await get(mpQuery, created.body.token)).status).toBe(204);
+  });
+
+  it('never leaks who is expected', async () => {
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'draft@example.test' });
+    const created = await post(marketplace);
+    const stranger = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const wrong = await get(mpQuery, created.body.token, await loginAs(ctx.prisma, stranger.id));
+    expect(JSON.stringify(wrong.body)).not.toMatch(/expectedUserId|userId|@example\.test/);
+  });
+});
+
+describe('foreign keys', () => {
+  it('deletes a protected draft with its expected user — it never becomes anonymous', async () => {
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05554440001', email: 'draft@example.test' });
+    const created = await post(marketplace);
+    expect((await ctx.prisma.requestDraft.findFirstOrThrow()).expectedUserId).toBe(owner.id);
+
+    await ctx.prisma.user.delete({ where: { id: owner.id } });
+
+    expect(await ctx.prisma.requestDraft.count()).toBe(0);
+    expect((await get(mpQuery, created.body.token)).status).toBe(204);
+  });
+
+  it('keeps the row and nulls userId when the bound user goes', async () => {
+    const created = await post(marketplace);
+    const someone = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    await ctx.prisma.requestDraft.updateMany({ data: { userId: someone.id } });
+
+    await ctx.prisma.user.delete({ where: { id: someone.id } });
+
+    const row = await ctx.prisma.requestDraft.findFirstOrThrow();
+    expect(row.userId).toBeNull();
+    expect(row.expectedUserId).toBeNull();
+    expect((await get(mpQuery, created.body.token)).status).toBe(200);
+  });
+});
+
+describe('DELETE /request-drafts/current', () => {
+  it('removes the draft the cookie names and nothing else', async () => {
+    const mine = await post(marketplace);
+    const other = await request(ctx.server).post('/request-drafts').send({ ...marketplace, identity: { phone: '05554440008', email: 'eight@example.test' } });
+
+    const response = await request(ctx.server).delete('/request-drafts/current').set('Cookie', `${COOKIE}=${mine.body.token}`);
+    expect(response.status).toBe(204);
+    expect(await ctx.prisma.requestDraft.count()).toBe(1);
+    expect((await get(mpQuery, other.body.token)).status).toBe(200);
+  });
+});
