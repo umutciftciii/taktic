@@ -8,7 +8,12 @@ type Props = {
   onLogin: () => void | Promise<void>;
   onActivate: () => void | Promise<void>;
   activationSent: boolean;
-  draftError: 'DRAFT_BUSY' | 'DRAFT_FAILED' | null;
+  /**
+   * What went wrong on the way off the contact step: parking the draft
+   * (`DRAFT_*`), or asking for the activation link. Each has its own sentence;
+   * "Tekrar dene" repeats the same road.
+   */
+  draftError: 'DRAFT_BUSY' | 'DRAFT_FAILED' | 'ACTIVATION_FAILED' | null;
   draftExists: boolean;
   onReplaceDraft: () => void;
   onKeepDraft: () => void;
@@ -44,8 +49,12 @@ export function IdentityNotice(p: Props) {
   }
   if (p.draftError) {
     return (
-      <div className="notice cdash-notice-error identity-notice" role="alert" data-testid="identity-draft-error">
-        <span>Taslak şu anda kaydedilemedi. Birkaç dakika sonra tekrar deneyin.</span>
+      <div className="notice cdash-notice-error identity-notice" role="alert" data-testid={p.draftError === 'ACTIVATION_FAILED' ? 'identity-error' : 'identity-draft-error'}>
+        <span>
+          {p.draftError === 'ACTIVATION_FAILED'
+            ? 'İletişim bilgileri doğrulanamadı, tekrar deneyin.'
+            : 'Taslak şu anda kaydedilemedi. Birkaç dakika sonra tekrar deneyin.'}
+        </span>
         <button type="button" className="btn btn-secondary" onClick={p.onRetry} disabled={p.busy}>Tekrar dene</button>
       </div>
     );

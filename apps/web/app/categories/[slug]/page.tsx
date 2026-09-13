@@ -28,6 +28,10 @@ type CategoryPageProps = {
 export default async function CategoryPage({ params, searchParams }: CategoryPageProps) {
   const { slug } = await params;
   const { entry, r } = await searchParams;
+  // A router that arrives without an entry is itself the entry: it is the first
+  // screen of its own flow. The same slug is what the form posts under and what
+  // a draft is keyed by — see the hidden `categorySlug` field in the form.
+  const entryCategorySlug = entry ?? slug;
   const [category, user, disclosure, provinces, draft] = await Promise.all([
     // A slug the public may not reach — a draft, a closed category, a group, or
     // simply one that never existed — is a 404 page rather than an error
@@ -44,7 +48,9 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
     // A form parked here before the customer left to sign in or activate an
     // account. `none` when there is nothing to restore; `wrong-account` when
     // the draft belongs to a different account than the one now signed in.
-    readCurrentDraft({ formType: 'MARKETPLACE', categorySlug: slug }),
+    // Keyed by the *entry* slug, because that is the slug the form posts and
+    // the draft was saved under — in a routed flow it is not this leaf.
+    readCurrentDraft({ formType: 'MARKETPLACE', categorySlug: entryCategorySlug }),
   ]);
   const questions = category.questions ?? [];
   const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
@@ -64,9 +70,6 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
       : null;
 
   const isRouter = category.kind === 'ROUTER';
-  // A router that arrives without an entry is itself the entry: it is the first
-  // screen of its own flow.
-  const entryCategorySlug = entry ?? slug;
   const routerSelections = decodeRouterSelections(r);
   const routerQuestion = questions.find((question) => question.isRouter);
 

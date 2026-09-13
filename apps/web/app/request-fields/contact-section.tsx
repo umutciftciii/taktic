@@ -140,6 +140,10 @@ export function ContactSection({
               inputMode="tel"
               autoComplete="tel"
               required
+              // The identity pre-check will not ask about a number shorter than
+              // this; saying so here lets the browser explain it on "Devam et"
+              // instead of the step silently refusing to move.
+              minLength={7}
               placeholder="05XX XXX XX XX"
               readOnly={phoneLocked}
               aria-readonly={phoneLocked || undefined}

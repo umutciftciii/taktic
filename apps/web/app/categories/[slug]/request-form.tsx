@@ -14,7 +14,7 @@ import type { ContactDisclosureConfig, Question, RouterSelection } from '../../.
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import type { RequestDraftPayload } from '../../../lib/request-drafts';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
-import { requestRefusalText } from '../../../lib/request-refusal-text';
+import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../../../lib/request-refusal-text';
 import { switchAccountAction } from '../../login/actions';
 import {
   ContactSection,
@@ -214,9 +214,25 @@ export function RequestForm({
    */
   const [draftIntent, setDraftIntent] = useState<DraftIntent | null>(null);
   const [draftExists, setDraftExists] = useState(false);
-  const [draftError, setDraftError] = useState<'DRAFT_BUSY' | 'DRAFT_FAILED' | null>(null);
+  const [draftError, setDraftError] = useState<
+    'DRAFT_BUSY' | 'DRAFT_FAILED' | 'ACTIVATION_FAILED' | null
+  >(null);
   const [activationSent, setActivationSent] = useState(false);
   const [draftBusy, setDraftBusy] = useState(false);
+
+  /*
+   * A changed number or address is a different identity: whatever the last
+   * one was told — a draft conflict, a failed park, a link already sent — no
+   * longer describes this one. The check's own answer resets the same way
+   * inside the hook.
+   */
+  const { phone: guestPhone, email: guestEmail } = guestContact;
+  useEffect(() => {
+    setDraftError(null);
+    setDraftExists(false);
+    setActivationSent(false);
+    setDraftIntent(null);
+  }, [guestPhone, guestEmail]);
 
   /** The API's refusal of the last submission, shown inline until the next try. */
   const [failure, setFailure] = useState<Extract<SubmitRequestResult, { ok: false }> | null>(null);
@@ -385,7 +401,16 @@ export function RequestForm({
 
     setFailure(null);
     startSubmit(async () => {
-      const result = await action(new FormData(form));
+      let result: SubmitRequestResult;
+      try {
+        result = await action(new FormData(form));
+      } catch (error) {
+        // The action itself never throws — it answers every refusal — so this
+        // is the transport: a dropped connection, a deploy mid-flight. Said
+        // inline like any other failure rather than handed to the error page.
+        console.error('[request] submit: transport failure', error);
+        result = { ok: false, code: REQUEST_REFUSAL_GENERIC, message: null };
+      }
       if (result.ok) {
         // The action already cleared the draft cookie; nothing else to undo.
         router.push(`/requests/success?id=${encodeURIComponent(result.requestId)}`);
@@ -435,12 +460,14 @@ export function RequestForm({
   /**
    * Asks for the activation link. The proxy answers 202 whatever it found — a
    * form that could tell "sent" from "no such account" would be an oracle for
-   * which numbers have an account — so "sent" is what the customer sees.
+   * which numbers have an account — so a 202 is "sent". Anything else (a
+   * throttle, an unreachable API, a dropped connection) is a failure the
+   * customer is told about and may retry; it is never reported as sent.
    */
   async function sendActivation() {
     setDraftBusy(true);
     try {
-      await fetch('/api/auth/request-identity-check/activate', {
+      const response = await fetch('/api/auth/request-identity-check/activate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -449,9 +476,10 @@ export function RequestForm({
           redirectTo: formPath,
         }),
       });
+      if (!response.ok) throw new Error(String(response.status));
       setActivationSent(true);
     } catch {
-      setDraftError('DRAFT_FAILED');
+      setDraftError('ACTIVATION_FAILED');
     } finally {
       setDraftBusy(false);
     }
@@ -502,7 +530,7 @@ export function RequestForm({
     onRetry: () => {
       setDraftError(null);
       if (draftError && draftIntent) {
-        // The retry after a failed park repeats the same road.
+        // The retry after a failed park or a failed link repeats the same road.
         if (draftIntent === 'login') void onLogin();
         else void onActivate();
         return;
