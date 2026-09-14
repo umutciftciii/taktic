@@ -510,6 +510,8 @@ export async function createApprovedRequest(
     customerEmail?: string | null;
     /** Defaults to a fresh, unique number — pass one to write several rows under the same phone. */
     customerPhone?: string;
+    /** Defaults to the column's own `@default(now())` — pass one to backdate the row out of a rolling-window count (e.g. the per-phone 24h budget) while it still counts as "open". */
+    submittedAt?: Date;
   },
 ) {
   const suffix = uniqueSuffix();
@@ -530,6 +532,7 @@ export async function createApprovedRequest(
       status: ServiceRequestStatus.APPROVED,
       approvedAt: options.approvedAt ?? null,
       qualityScore: 80,
+      ...(options.submittedAt !== undefined ? { submittedAt: options.submittedAt } : {}),
     },
   });
 }
