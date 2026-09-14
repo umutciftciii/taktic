@@ -11,22 +11,29 @@ import {
   formatDateTime,
   qualityLabel,
   qualityBreakdownLabel,
-  statusLabel,
   urgencyLabel,
   getRefundPolicy,
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
 import { readCreditBalance } from '../../../provider-data';
 import {
+  providerOfferStatusLabel,
   providerStatusBadgeClass,
   providerRefundBadgeClass,
   formatBudgetRange,
 } from '../../../provider-ui';
 import { createOfferAction } from './actions';
+import { ReportDialog } from './report-dialog';
 
 type ProviderRequestDetailPageProps = {
   params: Promise<{ id: string; requestId: string }>;
-  searchParams: Promise<{ offerError?: string; shownCost?: string; currentCost?: string }>;
+  searchParams: Promise<{
+    offerError?: string;
+    shownCost?: string;
+    currentCost?: string;
+    reported?: string;
+    reportError?: string;
+  }>;
 };
 
 export default async function ProviderRequestDetailPage({
@@ -34,7 +41,7 @@ export default async function ProviderRequestDetailPage({
   searchParams,
 }: ProviderRequestDetailPageProps) {
   const { id, requestId } = await params;
-  const { offerError, shownCost, currentCost } = await searchParams;
+  const { offerError, shownCost, currentCost, reported, reportError } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/requests/${requestId}`);
@@ -63,6 +70,7 @@ export default async function ProviderRequestDetailPage({
    * snapshot instead; see the offer detail screen.
    */
   const refundPolicy = await getRefundPolicy();
+  const justReported = reported === '1';
 
   return (
     <ProviderShell
@@ -88,7 +96,42 @@ export default async function ProviderRequestDetailPage({
             {request.urgency ? (
               <span className="tag tag-neutral">{urgencyLabel(request.urgency)}</span>
             ) : null}
+            {/*
+              The provider's own report, or the way to make one. Only this
+              provider's: the API scopes `myReport` to the caller, and nothing
+              here says whether anybody else reported the request.
+            */}
+            <span style={{ marginLeft: 'auto' }}>
+              {request.myReport ? (
+                <span
+                  className="tag tag-neutral"
+                  // One element carries the test id: the notice below takes it
+                  // over on the round-trip right after reporting.
+                  data-testid={justReported ? undefined : 'report-received'}
+                >
+                  Bildiriminiz alındı · {formatDateTime(request.myReport.createdAt)}
+                </span>
+              ) : (
+                <ReportDialog providerId={id} requestId={requestId} />
+              )}
+            </span>
           </div>
+
+          {justReported ? (
+            <div className="pdash-notice" role="status" data-testid="report-received">
+              Bildiriminiz alındı, ekibimiz inceleyecek.
+            </div>
+          ) : null}
+          {reportError === 'exists' ? (
+            <div className="pdash-notice pdash-notice-warn" role="alert">
+              Bu talebi zaten bildirdiniz.
+            </div>
+          ) : null}
+          {reportError === 'limit' ? (
+            <div className="pdash-notice pdash-notice-warn" role="alert">
+              Günlük bildirim sınırına ulaştınız.
+            </div>
+          ) : null}
 
           <h1 className="pdash-page-title">
             {request.category.name}
@@ -247,7 +290,7 @@ export default async function ProviderRequestDetailPage({
                   <dd>
                     <strong>{formatPrice(request.existingOffer.priceAmount)}</strong>{' '}
                     <span className={providerStatusBadgeClass(request.existingOffer.status)}>
-                      {statusLabel(request.existingOffer.status)}
+                      {providerOfferStatusLabel(request.existingOffer.status)}
                     </span>
                   </dd>
                   <dt>Gönderim</dt>
@@ -278,9 +321,15 @@ export default async function ProviderRequestDetailPage({
                   ) : null}
                 </dl>
 
-                <div className="pdash-notice">
-                  Bu talebe daha önce teklif gönderdiniz. Aynı talebe yeniden teklif verilemez.
-                </div>
+                {request.existingOffer.closureNotice ? (
+                  <div className="pdash-notice" data-testid="offer-closure-notice">
+                    {request.existingOffer.closureNotice}
+                  </div>
+                ) : (
+                  <div className="pdash-notice">
+                    Bu talebe daha önce teklif gönderdiniz. Aynı talebe yeniden teklif verilemez.
+                  </div>
+                )}
 
                 <div className="pdash-actions">
                   <Link

@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { apiFetch, RoutingResolution, ServiceRequest } from '../../lib/api';
-import { describeApiRefusal } from '../../lib/api-refusal';
+import { describeApiRefusal, type ApiRefusal } from '../../lib/api-refusal';
 import { draftConsumedBySubmission, readDraftState } from '../../lib/draft-state';
 import {
   clearRequestDraftCookie,
@@ -45,8 +45,17 @@ export async function resolveRouterStepAction(formData: FormData) {
 }
 
 export type SubmitRequestResult =
-  | { ok: true; requestId: string }
-  | { ok: false; code: string; message: string | null };
+  | {
+      ok: true;
+      requestId: string;
+      /**
+       * The request's status as the API created it: `APPROVED` when it was
+       * born live and is already in front of providers, `SUBMITTED` when an
+       * operator reads it first. The success page words itself on this.
+       */
+      status: string;
+    }
+  | ApiRefusal;
 
 /**
  * Posts the request and answers the form rather than redirecting.
@@ -73,7 +82,7 @@ export async function submitServiceRequestAction(formData: FormData): Promise<Su
     if (draftConsumedBySubmission(readDraftState(formData))) {
       await clearRequestDraftCookie();
     }
-    return { ok: true, requestId: request.id };
+    return { ok: true, requestId: request.id, status: request.status };
   } catch (error) {
     return describeApiRefusal('service-requests', error);
   }

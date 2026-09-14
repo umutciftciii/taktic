@@ -15,6 +15,11 @@ import { DRAFT_STATE_FIELD, draftStateFor } from '../../../lib/draft-state';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import type { RequestDraftPayload } from '../../../lib/request-drafts';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
+import {
+  CONTACT_DETAILS_ERROR,
+  contactDetailsTarget,
+  type ContactDetailsTarget,
+} from '../../../lib/contact-details-refusal';
 import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../../../lib/request-refusal-text';
 import { switchAccountAction } from '../../login/actions';
 import {
@@ -414,12 +419,31 @@ export function RequestForm({
       }
       if (result.ok) {
         // The action already cleared the draft cookie; nothing else to undo.
-        router.push(`/requests/success?id=${encodeURIComponent(result.requestId)}`);
+        // `published` reports what the API answered — a request born live is
+        // already in front of providers, and the success page says so.
+        const published = result.status === 'APPROVED' ? '&published=1' : '';
+        router.push(`/requests/success?id=${encodeURIComponent(result.requestId)}${published}`);
         return;
       }
       setFailure(result);
+      // A refusal about one field is shown under that field, which may sit on
+      // a step the customer has already left. Go back to it, so the sentence
+      // is on screen and not behind a hidden panel.
+      const target = contactDetailsTarget(result);
+      if (target) setStep(target.target === 'addressNote' ? 2 : 1);
     });
   }
+
+  /**
+   * The field the last refusal was about, when it was about one. Everything
+   * else — the banner above the steps, the other fields — reads `null`.
+   */
+  const refusedField: ContactDetailsTarget | null = failure ? contactDetailsTarget(failure) : null;
+  const fieldError = (target: ContactDetailsTarget['target'], questionKey?: string) => {
+    if (!refusedField || refusedField.target !== target) return null;
+    if (refusedField.target === 'answer' && refusedField.questionKey !== questionKey) return null;
+    return CONTACT_DETAILS_ERROR;
+  };
 
   /**
    * Parks the form before the customer leaves it. Answers whether they may go;
@@ -609,7 +633,7 @@ export function RequestForm({
             fields, a validation message — inline and above the steps, with every
             field still holding what was typed.
           */}
-          {failure ? (
+          {failure && !refusedField ? (
             <div className="notice cdash-notice-error" role="alert" data-testid="request-submit-error">
               {requestRefusalText(failure)}
             </div>
@@ -676,6 +700,7 @@ export function RequestForm({
                     key={question.id}
                     question={question}
                     defaultValue={draftAnswer(question.key)}
+                    error={fieldError('answer', question.key)}
                   />
                 ))}
               </section>
@@ -686,6 +711,7 @@ export function RequestForm({
               <DescriptionField
                 question={descriptionQuestion}
                 defaultValue={initialDraft?.description}
+                error={fieldError('description')}
               />
             </section>
           </div>
@@ -714,7 +740,13 @@ export function RequestForm({
                   name="addressNote"
                   placeholder="Ek bilgi / yol tarifi"
                   defaultValue={initialDraft?.addressNote}
+                  aria-invalid={fieldError('addressNote') ? true : undefined}
                 />
+                {fieldError('addressNote') ? (
+                  <span className="field-error" role="alert" data-testid="contact-details-error">
+                    {fieldError('addressNote')}
+                  </span>
+                ) : null}
               </label>
             </section>
 

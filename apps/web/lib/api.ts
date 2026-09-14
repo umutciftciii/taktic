@@ -1,5 +1,7 @@
 export * from './formatters';
+export * from './request-reports';
 import type { ServiceAreaScope } from '@taktic/shared';
+import type { ProviderRequestReport } from './request-reports';
 import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   unviewedOfferRefundNotice,
@@ -304,12 +306,19 @@ export type ProviderRequestAnswer = {
 export type ExistingOfferSummary = {
   id: string;
   status: OfferStatus;
+  /** Set exactly when `status` is CANCELLED: the platform took the request down. */
+  cancelledAt: string | null;
   priceAmount: number;
   creditCost: number;
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
   refundEligibility: RefundEligibility;
+  /**
+   * Server-worded Turkish for an offer the platform closed, null for every
+   * other status. Rendered as-is: the sentence is the API's, not the screen's.
+   */
+  closureNotice: string | null;
   submittedAt: string;
 };
 
@@ -352,6 +361,11 @@ export type ProviderRequestDetail = Omit<ProviderRequestListItem, 'answersCount'
   qualityScoreBreakdown: Record<string, RequestQualityBreakdownComponent> | null;
   existingOffer: ExistingOfferSummary | null;
   providerCreditBalance?: number;
+  /**
+   * This provider's own report on the request, or null. Never another
+   * provider's — the API scopes the lookup to the caller.
+   */
+  myReport: ProviderRequestReport | null;
   answers: ProviderRequestAnswer[];
 };
 
@@ -417,11 +431,15 @@ export type ProviderOffer = {
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
   refundEligibility: RefundEligibility;
+  /** See ExistingOfferSummary.closureNotice. */
+  closureNotice: string | null;
   submittedAt: string;
   viewedAt: string | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
   withdrawnAt: string | null;
+  /** Set exactly when `status` is CANCELLED: the platform took the request down. */
+  cancelledAt: string | null;
   request: {
     id: string;
     requestNumber: string | null;

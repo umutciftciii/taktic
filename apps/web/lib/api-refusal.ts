@@ -20,6 +20,15 @@ export type ApiRefusal = {
    * and the form falls back to its own sentence for the code.
    */
   message: string | null;
+  /**
+   * Which field the refusal is about, when the API named one — today only
+   * `CONTACT_DETAILS_IN_TEXT` does (`description`, `addressNote`,
+   * `answers.<questionKey>`). The form uses it to put the sentence under the
+   * field rather than above the steps.
+   */
+  field?: string;
+  /** What was found there: `phone`, `email` or `url`. Same source as `field`. */
+  kind?: string;
 };
 
 /**
@@ -43,11 +52,24 @@ export function describeApiRefusal(step: string, error: unknown): ApiRefusal {
 
   let code: string | null = null;
   let message: string | null = null;
+  let field: string | null = null;
+  let kind: string | null = null;
 
   try {
-    const parsed = JSON.parse(error.body) as { code?: unknown; message?: unknown };
+    const parsed = JSON.parse(error.body) as {
+      code?: unknown;
+      message?: unknown;
+      field?: unknown;
+      kind?: unknown;
+    };
     if (typeof parsed.code === 'string') {
       code = parsed.code;
+    }
+    if (typeof parsed.field === 'string') {
+      field = parsed.field;
+    }
+    if (typeof parsed.kind === 'string') {
+      kind = parsed.kind;
     }
     // Nest's own exceptions carry a string; the ValidationPipe carries a list.
     const raw = Array.isArray(parsed.message) ? parsed.message[0] : parsed.message;
@@ -76,5 +98,13 @@ export function describeApiRefusal(step: string, error: unknown): ApiRefusal {
     return { ok: false, code: step === 'service-requests' ? 'REQUEST_FORBIDDEN' : 'SHOWCASE_LEAD_FORBIDDEN', message: null };
   }
 
-  return { ok: false, code: code ?? REQUEST_REFUSAL_GENERIC, message: userFacing ? message : null };
+  return {
+    ok: false,
+    code: code ?? REQUEST_REFUSAL_GENERIC,
+    message: userFacing ? message : null,
+    // Only when the API named them, so the shape of every other refusal is
+    // unchanged.
+    ...(field && userFacing ? { field } : {}),
+    ...(kind && userFacing ? { kind } : {}),
+  };
 }
