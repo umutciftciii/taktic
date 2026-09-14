@@ -23,6 +23,10 @@ export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
   SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED:
     'Telefon doğrulamanız tamamlanmadı ya da süresi doldu. Kodu yeniden isteyin.',
   SHOWCASE_LEAD_RATE_LIMITED: 'Çok fazla talep gönderildi. Lütfen bir süre sonra tekrar deneyin.',
+  // The IP throttler on POST /service-requests: a code-less 429, named by
+  // `describeApiRefusal` so the customer never sees the throttler's English.
+  REQUEST_RATE_LIMITED:
+    'Kısa sürede çok fazla talep gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
   PHONE_VERIFICATION_INVALID:
     'Doğrulama kodu geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.',
   PHONE_VERIFICATION_RATE_LIMITED:

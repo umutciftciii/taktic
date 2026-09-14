@@ -98,6 +98,14 @@ export function describeApiRefusal(step: string, error: unknown): ApiRefusal {
     return { ok: false, code: step === 'service-requests' ? 'REQUEST_FORBIDDEN' : 'SHOWCASE_LEAD_FORBIDDEN', message: null };
   }
 
+  // The other code-less refusal with a fixed meaning: Nest's throttler answers
+  // a 429 with its own English sentence ("ThrottlerException: Too Many
+  // Requests") and no code. The form gets a code so it can say so in Turkish;
+  // the draft endpoint does the same (`request-drafts.ts`, DRAFT_BUSY).
+  if (!code && error.status === 429) {
+    return { ok: false, code: 'REQUEST_RATE_LIMITED', message: null };
+  }
+
   return {
     ok: false,
     code: code ?? REQUEST_REFUSAL_GENERIC,
