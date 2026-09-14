@@ -7,6 +7,10 @@ const POSITIVE: Array<[string, 'phone' | 'email' | 'url']> = [
   ['+90 (532) 123-45-67', 'phone'],
   ['5321234567 whatsapp', 'phone'],
   ['0212 555 44 33 sabit', 'phone'],
+  ['+90 (532) 123 45 67', 'phone'],
+  ['0532-123-45-67', 'phone'],
+  ['05321234567 whatsapp', 'phone'],
+  ['Daire 7 0532 123 45 67', 'phone'],
   ['mail: ali@example.com', 'email'],
   ['ali [at] example [dot] com', 'email'],
   ['ali (at) example.com', 'email'],
@@ -31,6 +35,11 @@ const NEGATIVE = [
   'Bütçem 50.000 - 60.000 TL arası',
   '500.000 - 600.000 TL',
   '90.000 - 100.000 TL',
+  '5.000.000 - 6.000.000 TL',
+  '₺5.000.000–₺6.000.000',
+  '50000-60000 lira',
+  'Bütçe 15000 TL, en fazla 20000',
+  '2 oda 1 salon 120 m2 2018 yapımı 3. kat',
 ];
 
 describe('api detectContactDetails', () => {

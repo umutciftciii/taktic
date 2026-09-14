@@ -540,9 +540,18 @@ Tek kural, iki okuyucu: `packages/shared/contact-patterns.json` (regex kaynaklar
 gerekçesiyle JSON okunur, TS paketi import edilmez).
 
 Tespit (Türkçe odaklı, yanlış pozitifi sınırlı):
-- **Telefon:** `[\s.\-()]` ayraçları atılmış rakam dizisi 10–13 haneli **ve** `0`, `90`,
-  `+90` ya da `5` ile başlıyorsa. "15000 TL", "12.03.2026", "34000" gibi değerler yakalanmaz;
-  "0532 123 45 67", "+90 (532) 123-45-67", "5321234567" yakalanır.
+- **Telefon:** metin sayı token'larına ayrılır; ayraçlar körlemesine atılıp bağımsız
+  sayılar birleştirilmez. Binlik gruplu tutar (`\d{1,3}(?:\.\d{3})+`: "50.000",
+  "5.000.000") ve para işaretine (`₺`, `TL`, `lira`; önce/sonra, en fazla bir boşluk) bitişik
+  token **tutar**dır, telefon adayına girmez — para işareti tek başına kural değil, token'ın
+  kendi biçimiyle birlikte bir sinyaldir. Kalan düz rakam token'ları telefon ayraçlarıyla
+  (`boşluk . - – — ( )`, isteğe bağlı baştaki `+`) birleşerek adayı oluşturur; **iki yanı da
+  ≥4 haneli** token'lar arasındaki tire aralık ayracıdır ve adayı böler ("50000-60000" iki
+  token; "0532-123-45-67" kısa gruplar olduğu için birleşir). Adayın (ya da ardışık bir
+  diliminin) birleşik rakamları 10–13 haneli **ve** `0`, `90` ya da `5` ile başlıyorsa
+  telefon; URL içindeki aday atlanır. "15000 TL", "12.03.2026", "34000",
+  "50.000 - 60.000 TL", "₺5.000.000–₺6.000.000", "50000-60000 lira" yakalanmaz;
+  "0532 123 45 67", "+90 (532) 123-45-67", "5321234567", "0532-123-45-67" yakalanır.
 - **E-posta:** `[^\s@]+@[^\s@]+\.[^\s@]{2,}` + `[at]`, `(at)`, ` at ` + `[dot]`/`(nokta)`
   varyantları.
 - **URL / mesajlaşma:** `https?://`, `www.`, `wa.me`, `t.me`, `\b[\w-]+\.(com|net|org|
