@@ -171,6 +171,9 @@ export type Location = {
   district: string;
 };
 
+/** The codes the request form's "Aciliyet" select posts. */
+export type UrgencyCode = 'TODAY' | 'THIS_WEEK' | 'FLEXIBLE';
+
 export function prisma(): PrismaClient {
   return e2ePrisma();
 }
@@ -626,7 +629,11 @@ export async function countRefundTransactions(providerId?: string): Promise<numb
 }
 
 /** The details a customer types into the request form. */
-export function requestFormValues(location: Location, customerName: string) {
+export function requestFormValues(
+  location: Location,
+  customerName: string,
+  options: { urgency?: UrgencyCode; description?: string } = {},
+) {
   const suffix = uniqueSuffix();
 
   return {
@@ -635,8 +642,57 @@ export function requestFormValues(location: Location, customerName: string) {
     customerEmail: `e2e-request-${suffix}@example.test`,
     city: location.city,
     district: location.district,
-    description: 'Salon klimasının montajı ve ilk bakımı gerekiyor.',
+    description: options.description ?? 'Salon klimasının montajı ve ilk bakımı gerekiyor.',
+    ...(options.urgency ? { urgency: options.urgency } : {}),
   };
+}
+
+/** The `OperationsSettings` row's fixed id — the API's `OPERATIONS_SETTINGS_ID`. */
+const OPERATIONS_SETTINGS_ID = 'singleton';
+
+/** The refund window the API creates the row with when nobody set one. */
+const DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS = 48;
+
+/**
+ * Sets the marketplace auto-publish switch directly.
+ *
+ * The switch is one column on the operations-settings singleton, read by the
+ * API on every request creation, and its default is OFF — which every spec
+ * that approves a request by hand depends on. The specs that turn it on do
+ * so through the admin screen (that is the feature); this exists so they can
+ * put it back in `afterEach` without a browser, and so a spec that failed
+ * halfway cannot leave the rest of the run on the wrong side of the rule.
+ *
+ * Written without an audit row: the audit trail is what the admin action
+ * writes, and a reset that pretended to be an operator's decision would put
+ * a false entry on the operations screen.
+ */
+export async function setAutoPublish(enabled: boolean): Promise<void> {
+  await prisma().operationsSettings.upsert({
+    where: { id: OPERATIONS_SETTINGS_ID },
+    create: {
+      id: OPERATIONS_SETTINGS_ID,
+      unviewedOfferRefundWindowHours: DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+      marketplaceAutoPublishEnabled: enabled,
+    },
+    update: { marketplaceAutoPublishEnabled: enabled },
+  });
+}
+
+/** Whether the switch is on right now, read the way the API reads it. */
+export async function isAutoPublishEnabled(): Promise<boolean> {
+  const row = await prisma().operationsSettings.findUnique({
+    where: { id: OPERATIONS_SETTINGS_ID },
+    select: { marketplaceAutoPublishEnabled: true },
+  });
+  return row?.marketplaceAutoPublishEnabled ?? false;
+}
+
+/** How many provider reports still await a decision — on one request, or at all. */
+export async function openReportCount(requestId?: string): Promise<number> {
+  return prisma().serviceRequestReport.count({
+    where: { resolvedAt: null, ...(requestId ? { requestId } : {}) },
+  });
 }
 
 

@@ -281,6 +281,16 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *   showcase-*  the public shelf and card, the provider's hub, shop, forms
  *               and card screen, and the operator's review — every vitrin spec
  *
+ * The report dialog and the request form's refusal, for the overlay reason:
+ *
+ *   request-auto-publish   the success page a live request lands on, and the
+ *                          operator's `role="switch"` behind it
+ *   request-report-flow    a native `<dialog>` the provider reports from, and
+ *                          the operator's `<details open>` removal form
+ *   request-contact-filter a refusal that sends the form back a step, with a
+ *                          `role="alert"` under the field — the construction
+ *                          where WebKit's route announcer once collided
+ *
  * And the identity gate, for the first reason again:
  *
  *   request-identity-gate  the pre-check on both request forms and the draft
@@ -312,7 +322,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

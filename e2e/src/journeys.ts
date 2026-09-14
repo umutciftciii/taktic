@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from './actors';
-import type { SeededCategory } from './fixtures';
+import type { SeededCategory, UrgencyCode } from './fixtures';
 
 /**
  * The steps every scenario shares, expressed once.
@@ -25,6 +25,13 @@ export type RequestFormValues = {
   city: string;
   district: string;
   description: string;
+  /**
+   * When the customer wants the work done, as the code the form's "Aciliyet"
+   * select posts. Optional because the select is: left out, the field stays on
+   * "Seçiniz" and the request carries no urgency, exactly as before this field
+   * existed.
+   */
+  urgency?: UrgencyCode;
 };
 
 /**
@@ -42,15 +49,50 @@ export async function createRequest(
   await openRequestFormContactStep(actor, category);
   await fillRequestForm(actor, values);
 
-  await actor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
-
-  await expect(actor.page).toHaveURL(/\/requests\/success\?id=/);
-  await assertNoErrorScreen(actor.page);
+  await submitRequestForm(actor);
 
   const requestId = new URL(actor.page.url()).searchParams.get('id');
   expect(requestId, 'the success page must carry the new request id').toBeTruthy();
 
   return requestId as string;
+}
+
+/**
+ * Sends a fully filled request form and waits for the success page.
+ *
+ * Split out of `createRequest` for the scenario that fills the form, is
+ * refused once, corrects the field in place and sends again: the second send
+ * starts from the form already on screen, not from the category page.
+ *
+ * The URL check stops at `?id=` on purpose: a request born live arrives with
+ * `&published=1` after the id, one that waits for an operator does not, and
+ * which of the two happened is the spec's claim to make (see
+ * {@link expectPublishedSuccess}), not this step's.
+ */
+export async function submitRequestForm(actor: Actor): Promise<void> {
+  await actor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
+
+  await expect(actor.page).toHaveURL(/\/requests\/success\?id=/);
+  await assertNoErrorScreen(actor.page);
+}
+
+/**
+ * The success page a request born live shows: the heading that promises
+ * providers rather than a review, and the flag the form set to get it.
+ */
+export async function expectPublishedSuccess(actor: Actor): Promise<void> {
+  await expect(actor.page).toHaveURL(/\/requests\/success\?id=[^&]+&published=1$/);
+  await expect(actor.page.getByTestId('request-success-title')).toHaveText(
+    'Talebiniz uygun hizmet verenlere iletildi',
+  );
+}
+
+/** The older success page: the request waits for an operator. */
+export async function expectReviewPendingSuccess(actor: Actor): Promise<void> {
+  await expect(actor.page).not.toHaveURL(/published=1/);
+  await expect(actor.page.getByTestId('request-success-title')).toHaveText(
+    'Talebiniz ön incelemeye gönderildi',
+  );
 }
 
 /**
@@ -135,6 +177,10 @@ export async function fillRequestForm(
   // here — selecting the district at all proves the cascade populated it.
   await form.locator('select[name="city"]').selectOption(values.city);
   await form.locator('select[name="district"]').selectOption(values.district);
+
+  if (values.urgency) {
+    await form.locator('select[name="urgency"]').selectOption(values.urgency);
+  }
 }
 
 /**
@@ -410,4 +456,130 @@ export async function matchingRequestIds(
   expect(ids, 'every rendered match must carry a request id').toHaveLength(expectedCount);
 
   return ids;
+}
+
+/**
+ * Turns the marketplace auto-publish switch on from the operations screen,
+ * the way an operator does. Idempotent: a switch already on is left alone.
+ *
+ * The switch is a `role="switch"` submit button whose action redirects back
+ * to the page, so the re-rendered button carrying `aria-checked="true"` is
+ * the proof that the setting was written and read back, not merely painted.
+ *
+ * The suite's default is OFF and every other spec relies on it (they approve
+ * requests by hand). A spec that calls this must put it back — see
+ * `setAutoPublish(false)` in fixtures — in an `afterEach`, so a failure
+ * halfway through cannot leave the next spec on the wrong side of the rule.
+ */
+export async function enableAutoPublish(admin: Actor): Promise<void> {
+  await admin.gotoAdmin('/operations-settings');
+  const toggle = admin.page.getByTestId('auto-publish-toggle');
+  await expect(toggle).toBeVisible();
+
+  if ((await toggle.getAttribute('aria-checked')) !== 'true') {
+    await toggle.click();
+    await expect(admin.page.getByTestId('auto-publish-toggle')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+  }
+  await assertNoErrorScreen(admin.page);
+}
+
+/** The reasons the provider's report dialog offers, as the API stores them. */
+export type RequestReportReason =
+  | 'SPAM'
+  | 'FAKE_OR_TEST'
+  | 'CONTAINS_CONTACT_INFO'
+  | 'WRONG_CATEGORY'
+  | 'INAPPROPRIATE_CONTENT'
+  | 'DUPLICATE'
+  | 'OTHER';
+
+/**
+ * Reports a request from the provider's own request screen, through the
+ * native dialog, and waits for the page's "received" notice.
+ *
+ * `report-received` is looked up by test id rather than by role: the notice
+ * is a `role="status"` region, and on WebKit the route announcer Next.js
+ * renders is a live region too — a role-based query matched both.
+ */
+export async function reportRequest(
+  provider: Actor,
+  providerId: string,
+  requestId: string,
+  reason: RequestReportReason,
+  note?: string,
+): Promise<void> {
+  await openRequestAsProvider(provider, providerId, requestId);
+  await provider.page.getByTestId('report-request-button').click();
+
+  const dialog = provider.page.locator('dialog.report-dialog');
+  await expect(dialog).toBeVisible();
+  await provider.page.getByTestId('report-reason').selectOption(reason);
+  if (note) {
+    await provider.page.getByTestId('report-note').fill(note);
+  }
+  await provider.page.getByTestId('report-submit').click();
+
+  // The action round-trips to the API and comes back with `?reported=1`;
+  // the notice is the page's report of that answer, and it is present
+  // exactly once — the badge that normally carries the id yields it here.
+  await expect(provider.page.getByTestId('report-received')).toHaveCount(1);
+  await expect(provider.page.getByTestId('report-received')).toBeVisible();
+  await assertNoErrorScreen(provider.page);
+}
+
+/**
+ * Decides on a request's open reports from the admin request screen.
+ *
+ * Either the request is fine (`DISMISSED`) or it comes down
+ * (`REQUEST_REMOVED`, with the reason the customer is told). The API does
+ * everything in one transaction; this only drives the operator's two forms.
+ *
+ * As with `approveRequest`, the in-place assertion is what orders the step:
+ * a server action is an in-flight POST, and navigating away cancels it. A
+ * dismissal is done when the decision block is gone (no open report is left
+ * to decide on); a removal when the status badge reads rejected.
+ */
+export async function resolveReports(
+  admin: Actor,
+  requestId: string,
+  resolution: 'DISMISSED' | 'REQUEST_REMOVED',
+  removalReason: RequestReportReason = 'SPAM',
+): Promise<void> {
+  await admin.gotoAdmin(`/requests/${requestId}`);
+  await expect(admin.page.getByTestId('report-decisions')).toBeVisible();
+
+  if (resolution === 'DISMISSED') {
+    await admin.page.getByTestId('report-dismiss').click();
+    await expect(admin.page.getByTestId('report-decisions')).toHaveCount(0);
+  } else {
+    await admin.page
+      .getByRole('group', { name: 'Talebi kaldır' })
+      .locator('select[name="removalReason"]')
+      .selectOption(removalReason);
+    await admin.page.getByTestId('report-remove').click();
+    await expect(admin.page.getByTestId('request-status')).toHaveText('Reddedildi');
+    await expect(admin.page.getByTestId('report-decisions')).toHaveCount(0);
+  }
+
+  await expect(admin.page.getByTestId('report-error')).toHaveCount(0);
+  await assertNoErrorScreen(admin.page);
+}
+
+/**
+ * Puts a removed request back from the admin request screen and confirms it
+ * went back to approved — in place first, then after a reload, for the same
+ * reason `approveRequest` does both.
+ */
+export async function reopenRequest(admin: Actor, requestId: string): Promise<void> {
+  await admin.gotoAdmin(`/requests/${requestId}`);
+  await admin.page.getByTestId('report-reopen').click();
+  await expect(admin.page.getByTestId('request-status')).toHaveText('Onaylandı');
+  await expect(admin.page.getByTestId('report-reopen')).toHaveCount(0);
+  await assertNoErrorScreen(admin.page);
+
+  await admin.gotoAdmin(`/requests/${requestId}`);
+  await expect(admin.page.getByTestId('request-status')).toHaveText('Onaylandı');
 }
