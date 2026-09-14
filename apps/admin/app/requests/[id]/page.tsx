@@ -119,6 +119,8 @@ export default async function RequestDetailPage({
   const headerTitle = categoryName ? `${categoryName} Talebi` : 'Talep Detayı';
   const qualityFillPercent = Math.min(100, Math.max(0, request.qualityScore));
   const openReports = reports.filter((report) => report.resolvedAt === null);
+  // Both the moderation "Reddet" and a report's "Talebi kaldır" arrive at
+  // the same API gate, so one flag governs both forms.
   const canRemove = REMOVABLE_STATUSES.has(request.status);
   // Derived, not stored: the request is down *because of a report* only when
   // it is REJECTED and some report's decision was the removal.
@@ -185,7 +187,14 @@ export default async function RequestDetailPage({
             <div className="status-action-error" role="alert" data-testid="status-error">
               <strong>Durum değiştirilmedi.</strong> Telefon doğrulaması zorunlu olduğu için
               doğrulanmamış bir talep onaylanamaz. Müşteri numarasını doğruladıktan sonra tekrar
-              deneyin; reddetme ve iptal her durumda mümkündür.
+              deneyin; açık (yayında, incelemede, yeni) bir talep reddedilebilir, iptal her
+              durumda mümkündür.
+            </div>
+          ) : null}
+          {statusError === 'notRemovable' ? (
+            <div className="status-action-error" role="alert" data-testid="status-error">
+              <strong>Durum değiştirilmedi.</strong> Bu talep mevcut durumundan reddedilemez;
+              eşleşmiş veya kapanmış talep için &apos;İptal et&apos; kullanın.
             </div>
           ) : null}
 
@@ -196,7 +205,9 @@ export default async function RequestDetailPage({
             ) : (
               <>
                 Doğrulanmadı. Telefon doğrulaması zorunlu hale getirildiğinde bu talep onaylanamaz
-                ve hizmet verenlere gösterilmez; reddetme ve iptal her durumda mümkündür.
+                ve hizmet verenlere gösterilmez. Reddetme yalnız açık (yayında, incelemede, yeni)
+                talep için mümkündür ve aktif teklifleri kapatıp kredileri iade eder; iptal her
+                durumda mümkündür.
               </>
             )}
           </p>
@@ -251,7 +262,8 @@ export default async function RequestDetailPage({
               ) : null}
             </summary>
             <p className="status-reject-note">
-              Reddetme, aktif teklifleri kapatır ve harcanan kredileri iade eder.
+              Reddetme yalnız açık (yayında, incelemede, yeni) talep için mümkündür; aktif
+              teklifleri kapatır ve harcanan kredileri iade eder.
             </p>
             <form action={updateRequestStatusAction} className="status-reject-form">
               <input type="hidden" name="id" value={request.id} />
@@ -263,7 +275,7 @@ export default async function RequestDetailPage({
                   required
                   defaultValue={request.rejectionReason ?? ''}
                   placeholder="Müşteriye gösterilecek gerekçe"
-                  disabled={request.status === 'REJECTED'}
+                  disabled={!canRemove}
                 />
               </label>
               <label className="status-reject-field">
@@ -272,16 +284,25 @@ export default async function RequestDetailPage({
                   name="moderationNote"
                   defaultValue={request.moderationNote ?? ''}
                   placeholder="Yalnızca admin görür"
-                  disabled={request.status === 'REJECTED'}
+                  disabled={!canRemove}
                 />
               </label>
               <button
                 className="btn btn-danger btn-sm"
                 type="submit"
-                disabled={request.status === 'REJECTED'}
+                disabled={!canRemove}
+                aria-disabled={!canRemove}
+                data-testid="status-reject"
               >
                 {request.status === 'REJECTED' ? 'Talep zaten reddedildi' : 'Talebi reddet'}
               </button>
+              {canRemove ? null : (
+                <p className="status-reject-note" role="note" data-testid="status-reject-hint">
+                  {request.status === 'REJECTED'
+                    ? 'Talep zaten reddedilmiş; yayında değil.'
+                    : "Eşleşmiş veya kapanmış talep için 'İptal et' kullanın."}
+                </p>
+              )}
             </form>
           </details>
         </div>
@@ -704,7 +725,8 @@ export default async function RequestDetailPage({
                   </fieldset>
                   {canRemove ? null : (
                     <p className="report-decision-hint" role="note">
-                      Eşleşmiş talep için &apos;İptal et&apos; kullanın.
+                      Bu talep mevcut durumundan kaldırılamaz; eşleşmiş talep için &apos;İptal
+                      et&apos; kullanın, kapanmış talep zaten yayında değil.
                     </p>
                   )}
                 </form>

@@ -18,13 +18,18 @@ export async function updateRequestStatusAction(formData: FormData) {
       }),
     });
   } catch (error) {
-    // Refusing to approve a request whose phone is not verified is a rule the
-    // moderator has to act on, not a crash. It lands back on the request with
-    // an explanation instead of the generic error boundary — the request was
-    // not modified. Only this one code is handled; anything else still
-    // surfaces as an error.
-    if (conflictCode(error) === 'PHONE_NOT_VERIFIED') {
+    // Refusing to approve a request whose phone is not verified, or to reject
+    // one that is already matched or closed, is a rule the moderator has to
+    // act on, not a crash. It lands back on the request with an explanation
+    // instead of the generic error boundary — the request was not modified.
+    // Only these two codes are handled; anything else still surfaces as an
+    // error.
+    const code = conflictCode(error);
+    if (code === 'PHONE_NOT_VERIFIED') {
       redirect(`/requests/${id}?statusError=phoneNotVerified`);
+    }
+    if (code === 'REQUEST_NOT_REMOVABLE') {
+      redirect(`/requests/${id}?statusError=notRemovable`);
     }
 
     throw error;

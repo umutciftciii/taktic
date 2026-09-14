@@ -966,7 +966,8 @@ export class ServiceRequestsService {
         statusCode: HttpStatus.CONFLICT,
         error: 'Conflict',
         code: 'REQUEST_NOT_REMOVABLE',
-        message: 'Bu talep bu durumdan kaldırılamaz; eşleşmiş talep için iptal kullanın.',
+        message:
+          'Bu talep mevcut durumundan kaldırılamaz; eşleşmiş talep için iptal kullanın, kapanmış talep zaten yayında değil.',
       });
     }
 
