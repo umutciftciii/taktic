@@ -4,6 +4,7 @@
   "phoneDigitsMin": 10,
   "phoneDigitsMax": 13,
   "phonePrefixes": ["0", "90", "5"],
+  "amountRange": "^\\d{1,3}(\\.\\d{3})+(\\s*-\\s*\\d{1,3}(\\.\\d{3})+)?$",
   "email": "[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}",
   "emailObfuscated": "[^\\s]+\\s*[\\[(]\\s*at\\s*[\\])]\\s*[^\\s]+(\\s*[\\[(]\\s*(dot|nokta)\\s*[\\])]\\s*[^\\s]+)?",
   "url": "(https?://\\S+|\\bwww\\.\\S+|\\bwa\\.me/\\S*|\\bt\\.me/\\S*|\\b[a-z0-9-]+\\.(com|net|org|tr|io|me|co)\\b(/\\S*)?)"

@@ -23,6 +23,7 @@ export type ContactDetection = { kind: ContactDetailKind; match: string };
 
 const phoneRun = new RegExp(patterns.phoneRun, 'g');
 const separators = new RegExp(patterns.phoneSeparators, 'g');
+const amountRange = new RegExp(patterns.amountRange);
 const email = new RegExp(patterns.email, 'i');
 const emailObfuscated = new RegExp(patterns.emailObfuscated, 'i');
 const url = new RegExp(patterns.url, 'i');
@@ -57,12 +58,17 @@ export function detectContactDetails(text: string): ContactDetection | null {
   }
 
   for (const candidate of text.matchAll(phoneRun)) {
-    const digits = candidate[0].replace(separators, '').replace(/^\+/, '');
+    const match = candidate[0].trim();
+    // "50.000 - 60.000 TL": a thousands-separated amount or range carries ten
+    // or more digits behind a 0/5/90 prefix and would otherwise read as a
+    // phone number. Budget text is the most common thing a customer writes.
+    if (amountRange.test(match)) continue;
+    const digits = match.replace(separators, '').replace(/^\+/, '');
     if (!/^\d+$/.test(digits)) continue;
     if (digits.length < patterns.phoneDigitsMin || digits.length > patterns.phoneDigitsMax) continue;
     if (!patterns.phonePrefixes.some((prefix) => digits.startsWith(prefix))) continue;
     if (urlMatch && isContainedIn(candidate, urlMatch)) continue;
-    return { kind: 'phone', match: candidate[0].trim() };
+    return { kind: 'phone', match };
   }
 
   if (urlMatch) return { kind: 'url', match: urlMatch[0] };

@@ -28,6 +28,9 @@ const NEGATIVE = [
   'Sabah 09:30 ile 12:00 arası',
   '@usta değil, sizinle konuşmak istiyorum',
   '2 oda 1 salon 85 m2 2018 yapımı',
+  'Bütçem 50.000 - 60.000 TL arası',
+  '500.000 - 600.000 TL',
+  '90.000 - 100.000 TL',
 ];
 
 describe('api detectContactDetails', () => {
