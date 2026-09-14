@@ -57,7 +57,7 @@ import {
   offerNotWithdrawableException,
   WITHDRAWABLE_OFFER_STATUSES,
 } from '../offers/offer-transitions';
-import { calculateRefundEligibility } from '../offers/refund-policy';
+import { REQUEST_REMOVED_REFUND_REASON, calculateRefundEligibility } from '../offers/refund-policy';
 import {
   isClaimableProviderStatus,
   isProviderClaimEnabled,
@@ -1088,6 +1088,7 @@ export class ProvidersService {
           select: {
             id: true,
             status: true,
+            cancelledAt: true,
             priceAmount: true,
             creditCost: true,
             creditSpentTransactionId: true,
@@ -2418,6 +2419,7 @@ function toProviderRequestDetail(
         select: {
           id: true;
           status: true;
+          cancelledAt: true;
           priceAmount: true;
           creditCost: true;
           creditSpentTransactionId: true;
@@ -2490,10 +2492,33 @@ function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
   return {
     ...visible,
     refundEligibility: calculateRefundEligibility(offer),
+    closureNotice: closureNoticeFor(offer),
   };
 }
 
+/**
+ * What a provider is told about an offer the platform closed, and nothing
+ * about why the request went.
+ *
+ * `CANCELLED` has one writer — `ServiceRequestsService.rejectRequestInTransaction`
+ * — so a cancelled offer always means "the request was taken off the market".
+ * Whether the credit came back is read from the refund reason the same
+ * cascade wrote, never inferred: a period-package or vitrin-lead offer closes
+ * with no ledger row and must not be told one exists.
+ */
+function closureNoticeFor(offer: {
+  status: OfferStatus;
+  creditRefundReason?: string | null;
+}): string | null {
+  if (offer.status !== OfferStatus.CANCELLED) return null;
+  return offer.creditRefundReason === REQUEST_REMOVED_REFUND_REASON
+    ? 'Talep yayından kaldırıldı. Harcanan teklif krediniz iade edildi.'
+    : 'Talep yayından kaldırıldı.';
+}
+
 type RefundPolicyOfferShape = {
+  status: OfferStatus;
+  cancelledAt?: Date | string | null;
   submittedAt: Date | string | null;
   viewedAt: Date | string | null;
   creditCost: number;

@@ -91,8 +91,14 @@ export class ServiceRequestsController {
   @Patch(':id/status')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  updateServiceRequestStatus(@Param('id') id: string, @Body() dto: UpdateServiceRequestStatusDto) {
-    return this.serviceRequestsService.updateServiceRequestStatus(id, dto);
+  updateServiceRequestStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceRequestStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    // The operator is the actor on any credit a refusal gives back — the
+    // ledger row names who removed the request, not "the system".
+    return this.serviceRequestsService.updateServiceRequestStatus(id, dto, user);
   }
 
   /**

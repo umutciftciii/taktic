@@ -13,6 +13,16 @@ export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
 export const UNVIEWED_OFFER_REFUND_REASON = 'UNVIEWED_OFFER_48H';
 
 /**
+ * The platform took the request off the market. Not {@link UNVIEWED_OFFER_REFUND_REASON}
+ * and not a manual code: the provider did nothing and the customer decided
+ * nothing — the credit comes back because the thing it bought was withdrawn.
+ *
+ * Written by exactly one place, `ServiceRequestsService.rejectRequestInTransaction`,
+ * and paid regardless of whether the customer had opened the offer.
+ */
+export const REQUEST_REMOVED_REFUND_REASON = 'REQUEST_REMOVED';
+
+/**
  * The window the platform uses when no operator has chosen one.
  *
  * Not "the" window any more — a super admin sets it from the operations
@@ -432,6 +442,7 @@ const REFUND_REASON_LABELS: Record<string, string> = {
   // label says what an operator has to know rather than paraphrasing a state.
   NO_REFUND_SCHEDULE: 'İade zamanı kayıtlı değil',
   [MANUAL_REFUND_REASON_PREFIX]: 'Yönetici kredi iadesi',
+  [REQUEST_REMOVED_REFUND_REASON]: 'Talep yayından kaldırıldı — kredi iadesi',
   WAITING_VIEW_WINDOW: 'Görüntülenme bekleniyor',
 };
 
@@ -447,4 +458,6 @@ const REFUND_DETAILS: Record<string, string> = {
     'Bu teklif için müşteri kararı kaydedildi; kredi iadesi yapılmaz.',
   NO_REFUND_SCHEDULE:
     'Bu teklif için iade zamanı kayıtlı değil; otomatik iade yapılmaz. Lütfen destek ile iletişime geçin.',
+  [REQUEST_REMOVED_REFUND_REASON]:
+    'Talep platform tarafından yayından kaldırıldı; harcanan teklif krediniz iade edildi.',
 };
