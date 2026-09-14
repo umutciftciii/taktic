@@ -8,6 +8,7 @@ import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto'
 import { getDraftTokenFromRequest } from '../request-drafts/request-draft.cookie';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { ServiceRequestThrottlerGuard } from './service-request.throttler';
 import { ServiceRequestsService } from './service-requests.service';
 import { OffersService } from '../offers/offers.service';
 
@@ -19,7 +20,7 @@ export class ServiceRequestsController {
   ) {}
 
   @Post()
-  @UseGuards(OptionalAuthGuard)
+  @UseGuards(ServiceRequestThrottlerGuard, OptionalAuthGuard)
   createServiceRequest(
     @Body() dto: CreateServiceRequestDto,
     @CurrentUser() user: AuthUser | null,
@@ -91,8 +92,14 @@ export class ServiceRequestsController {
   @Patch(':id/status')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  updateServiceRequestStatus(@Param('id') id: string, @Body() dto: UpdateServiceRequestStatusDto) {
-    return this.serviceRequestsService.updateServiceRequestStatus(id, dto);
+  updateServiceRequestStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceRequestStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    // The operator is the actor on any credit a refusal gives back — the
+    // ledger row names who removed the request, not "the system".
+    return this.serviceRequestsService.updateServiceRequestStatus(id, dto, user);
   }
 
   /**

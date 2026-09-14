@@ -1215,7 +1215,7 @@ export class ProviderShowcaseCardsService {
    * other categories; it is not somewhere a business can be listed, and a card
    * pointing at one would have no answer to "which service is this".
    *
-   * A DRAFT category is refused for the reason `fanOutApprovedRequest` already
+   * A DRAFT category is refused for the reason the approval fan-out already
    * refuses one: it is an operator's release preparation, and an unreleased
    * service's name must not leave the admin surface.
    *

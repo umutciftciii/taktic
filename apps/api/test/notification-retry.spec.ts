@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import { TransactionalMailService } from '../src/modules/notifications/transactional-mail.service';
 import {
   createApprovedRequest,
@@ -87,6 +88,17 @@ async function failedApplicationReceipt(overrides: { email?: string } = {}) {
 /** The configuration failures this feature was built to recover from. */
 async function markErrorCode(logId: string, errorCode: string) {
   await ctx.prisma.notificationLog.update({ where: { id: logId }, data: { errorCode } });
+}
+
+/**
+ * The approval fan-out as production runs it: the intents booked in a
+ * transaction, then delivered by the outbox sweep.
+ */
+async function fanOut(requestId: string) {
+  const outbox = ctx.app.get(RequestPublishOutbox);
+  const approvedAt = new Date();
+  await ctx.prisma.$transaction((tx) => outbox.enqueue(tx, requestId, approvedAt));
+  await outbox.deliverPending();
 }
 
 /**
@@ -447,7 +459,7 @@ describe('rebuilding from live data', () => {
     const serviceRequest = await createApprovedRequest(ctx.prisma, { categoryId: category.id });
     const provider = await createDiscoverableProvider(ctx.prisma, { categoryId: category.id });
 
-    await mail.fanOutApprovedRequest(serviceRequest.id, new Date());
+    await fanOut(serviceRequest.id);
     ctx.notifications.clear();
     const available = await failInvitation();
 
@@ -477,7 +489,7 @@ describe('rebuilding from live data', () => {
     });
     await createDiscoverableProvider(ctx.prisma, { categoryId: category.id });
 
-    await mail.fanOutApprovedRequest(serviceRequest.id, new Date());
+    await fanOut(serviceRequest.id);
     ctx.notifications.clear();
     const available = await failInvitation();
     const cookie = await adminCookie();

@@ -15,10 +15,13 @@ import type { Question } from '../../lib/api';
 export function RequestField({
   question,
   defaultValue,
+  error = null,
 }: {
   question: Question;
   /** A saved draft's answer for this question, when one is being restored. */
   defaultValue?: unknown;
+  /** The API's refusal of this answer — contact details in the text — shown under it. */
+  error?: string | null;
 }) {
   return (
     <label className="form-row">
@@ -26,8 +29,13 @@ export function RequestField({
         {question.label}
         {question.isRequired ? ' *' : ''}
       </span>
-      {renderInput(question, defaultValue)}
+      {renderInput(question, defaultValue, Boolean(error))}
       {question.helpText ? <span className="help-text">{question.helpText}</span> : null}
+      {error ? (
+        <span className="field-error" role="alert" data-testid="contact-details-error">
+          {error}
+        </span>
+      ) : null}
     </label>
   );
 }
@@ -37,15 +45,31 @@ function isTextualDefault(value: unknown): value is string | number {
   return typeof value === 'string' || typeof value === 'number';
 }
 
-function renderInput(question: Question, defaultValue?: unknown) {
+function renderInput(question: Question, defaultValue?: unknown, invalid = false) {
   const name = `answer_${question.key}`;
   const textDefault = isTextualDefault(defaultValue) ? String(defaultValue) : undefined;
+  // Only the two free-text kinds can carry contact details; the rest are never refused for it.
+  const ariaInvalid = invalid ? true : undefined;
 
   switch (question.type) {
     case 'TEXT':
-      return <input name={name} required={question.isRequired} defaultValue={textDefault} />;
+      return (
+        <input
+          name={name}
+          required={question.isRequired}
+          defaultValue={textDefault}
+          aria-invalid={ariaInvalid}
+        />
+      );
     case 'TEXTAREA':
-      return <textarea name={name} required={question.isRequired} defaultValue={textDefault} />;
+      return (
+        <textarea
+          name={name}
+          required={question.isRequired}
+          defaultValue={textDefault}
+          aria-invalid={ariaInvalid}
+        />
+      );
     case 'SELECT':
       return (
         <select name={name} required={question.isRequired} defaultValue={textDefault ?? ''}>

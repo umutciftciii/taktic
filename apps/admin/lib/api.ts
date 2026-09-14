@@ -1179,6 +1179,8 @@ export type AdminSummary = {
   packagePurchases: number;
   /** OPEN + IN_PROGRESS tickets — the support backlog, never RESOLVED or CLOSED. */
   openSupportTickets: number;
+  /** Requests with at least one undecided provider report — the report queue. */
+  openRequestReports: number;
 };
 
 export type FinanceSummaryRecentTransaction = {
@@ -1965,6 +1967,7 @@ export const OPERATIONS_SETTING_LABELS: Record<string, string> = {
   requestReminderSchedulerEnabled: 'Talep hatırlatma işi',
   showcaseLeadSlaSchedulerEnabled: 'Vitrin talebi yanıt süresi işi',
   showcasePlacementExpirySchedulerEnabled: 'Vitrin yerleşimi süre dolumu işi',
+  marketplaceAutoPublishEnabled: 'Pazar taleplerinin otomatik yayını',
 };
 
 /* ---- scheduled jobs ------------------------------------------------------ */
@@ -2071,6 +2074,128 @@ export const SCHEDULER_JOB_COPY: Record<
       'serbest bırakır. Yayın açısından gerekli değildir: ana sayfa süreyi kendisi kontrol ' +
       'eder, bu yüzden iş kapalıyken de süresi dolmuş bir kart gösterilmez.',
   },
+};
+
+/* ---- marketplace auto-publish ------------------------------------------- */
+
+/**
+ * The switch that decides whether a submitted marketplace request waits for a
+ * moderator or goes straight to the matching providers. Read and written on
+ * its own endpoint; the change list is the same audit shape the other
+ * operations settings use.
+ */
+export type MarketplacePublishSettings = {
+  enabled: boolean;
+  recentChanges: OperationsSettingsChange[];
+};
+
+/* ---- request reports ----------------------------------------------------- */
+
+/**
+ * A provider's reason for reporting a request. The same seven keys double as
+ * the operator's removal reasons, so a reporter's reason can be carried over
+ * one-to-one when the report is upheld.
+ */
+export const REPORT_REASON_KEYS = [
+  'SPAM',
+  'FAKE_OR_TEST',
+  'CONTAINS_CONTACT_INFO',
+  'WRONG_CATEGORY',
+  'INAPPROPRIATE_CONTENT',
+  'DUPLICATE',
+  'OTHER',
+] as const;
+
+export type ReportReason = (typeof REPORT_REASON_KEYS)[number];
+export type RemovalReason = ReportReason;
+
+export type RequestReportResolution = 'DISMISSED' | 'REQUEST_REMOVED';
+
+/**
+ * The operator's spelling of a reporter's reason. Mirrors the API's
+ * `REPORT_REASON_ADMIN_LABELS` (`request-report-copy.ts`), copied because the
+ * admin app cannot import the API. Shown to operators only.
+ */
+export const REPORT_REASON_ADMIN_LABELS: Record<ReportReason, string> = {
+  SPAM: 'Spam / anlamsız',
+  FAKE_OR_TEST: 'Sahte / deneme',
+  CONTAINS_CONTACT_INFO: 'İletişim bilgisi içeriyor',
+  WRONG_CATEGORY: 'Yanlış kategori',
+  INAPPROPRIATE_CONTENT: 'Uygunsuz içerik',
+  DUPLICATE: 'Mükerrer',
+  OTHER: 'Diğer',
+};
+
+/**
+ * What the customer is told when their request is removed — the exact sentence
+ * the API stores as the request's rejection reason and mails out. Mirrors the
+ * API's `REMOVAL_REASON_CUSTOMER_LABELS`; shown beside each removal option so
+ * the operator sees the words the customer will read before choosing them.
+ */
+export const REMOVAL_REASON_CUSTOMER_LABELS: Record<RemovalReason, string> = {
+  SPAM: 'Talep içeriği platform kurallarına uygun bulunmadı',
+  FAKE_OR_TEST: 'Talep gerçek bir hizmet ihtiyacı olarak değerlendirilemedi',
+  CONTAINS_CONTACT_INFO: 'Talep metninde iletişim bilgisi paylaşımı',
+  WRONG_CATEGORY: 'Talep seçilen hizmet kategorisine uygun değil',
+  INAPPROPRIATE_CONTENT: 'Talep içeriği uygunsuz bulundu',
+  DUPLICATE: 'Aynı hizmet için birden fazla talep açılmış',
+  OTHER: 'Talep platform kurallarına uygun bulunmadı',
+};
+
+export const REPORT_RESOLUTION_LABELS: Record<RequestReportResolution, string> = {
+  DISMISSED: 'Uygun bulundu',
+  REQUEST_REMOVED: 'Talep kaldırıldı',
+};
+
+export function reportReasonLabel(reason: string): string {
+  return (REPORT_REASON_ADMIN_LABELS as Record<string, string>)[reason] ?? reason;
+}
+
+export function reportResolutionLabel(resolution: string): string {
+  return (REPORT_RESOLUTION_LABELS as Record<string, string>)[resolution] ?? resolution;
+}
+
+/** One row of the operator's report queue: a request, with its reports folded in. */
+export type RequestReportQueueItem = {
+  request: {
+    id: string;
+    requestNumber: string | null;
+    status: ServiceRequestStatus;
+    categoryName: string;
+    city: string;
+    district: string;
+    submittedAt: string;
+    descriptionExcerpt: string;
+  };
+  reportCount: number;
+  reasons: ReportReason[];
+  reporters: Array<{ id: string; businessName: string }>;
+  firstReportedAt: string;
+  lastResolution: { resolution: RequestReportResolution; resolvedAt: string } | null;
+  /**
+   * Derived by the API, never stored: the last decision removed the request
+   * and an operator has since put it back.
+   */
+  reopened: boolean;
+};
+
+export type RequestReportQueue = {
+  items: RequestReportQueueItem[];
+  nextCursor: string | null;
+};
+
+/** One report of one request, as the detail page lists them. Operator-only. */
+export type RequestReport = {
+  id: string;
+  reason: ReportReason;
+  /** The reporter's free text. Never shown outside the admin panel. */
+  note: string | null;
+  createdAt: string;
+  reporter: { id: string; businessName: string };
+  resolvedAt: string | null;
+  resolution: RequestReportResolution | null;
+  resolutionNote: string | null;
+  resolvedBy: { id: string; name: string | null } | null;
 };
 
 /* ---- support tickets ----------------------------------------------------- */

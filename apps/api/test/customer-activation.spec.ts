@@ -7,6 +7,7 @@ import {
   createTestApp,
   createUser,
   loginAs,
+  resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -25,6 +26,9 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
   ctx.notifications.clear();
+  // This suite posts several guest requests per file, which would otherwise
+  // spend the shared IP throttle bucket before the later cases get to it.
+  resetAuthThrottle(ctx.app);
 });
 
 /**

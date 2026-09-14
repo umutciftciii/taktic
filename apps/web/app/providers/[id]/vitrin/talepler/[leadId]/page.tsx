@@ -15,11 +15,17 @@ import {
 import { ProviderShell } from '../../../../provider-shell';
 import { readCreditBalance } from '../../../../provider-data';
 import { leadDeadlineLabel, leadIsAnswerable, showcaseLeadBadgeClass } from '../../showcase-lead-ui';
+import { ReportDialog } from '../../../requests/[requestId]/report-dialog';
 import { createShowcaseLeadOfferAction } from './actions';
 
 type LeadPageProps = {
   params: Promise<{ id: string; leadId: string }>;
-  searchParams: Promise<{ error?: string; offered?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    offered?: string;
+    reported?: string;
+    reportError?: string;
+  }>;
 };
 
 /**
@@ -42,7 +48,7 @@ type LeadPageProps = {
  */
 export default async function ShowcaseLeadPage({ params, searchParams }: LeadPageProps) {
   const { id, leadId } = await params;
-  const { error, offered } = await searchParams;
+  const { error, offered, reported, reportError } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/vitrin/talepler/${leadId}`);
@@ -98,6 +104,21 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
           Teklifiniz iletildi. Bu talep için teklif kredisi harcanmadı.
         </div>
       ) : null}
+      {reported === '1' ? (
+        <div className="pdash-notice" role="status" data-testid="report-received">
+          Bildiriminiz alındı, ekibimiz inceleyecek.
+        </div>
+      ) : null}
+      {reportError === 'exists' ? (
+        <div className="pdash-notice pdash-notice-warn" role="alert">
+          Bu talebi zaten bildirdiniz.
+        </div>
+      ) : null}
+      {reportError === 'limit' ? (
+        <div className="pdash-notice pdash-notice-warn" role="alert">
+          Günlük bildirim sınırına ulaştınız.
+        </div>
+      ) : null}
 
       {lead.status === 'BREACHED' ? (
         <div className="pdash-notice pdash-notice-warn" role="status">
@@ -118,7 +139,22 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
       ) : null}
 
       <section className="pdash-detail-card">
-        <h2 className="pdash-section-title">Talep</h2>
+        <header className="pdash-section-head">
+          <h2 className="pdash-section-title">Talep</h2>
+          {/*
+            The same report the ordinary request screen offers, because a
+            direct lead reached this business without an operator reading it
+            first. The lead payload does not carry the provider's own earlier
+            report; a second attempt is answered by the API and shown above.
+          */}
+          {answerable ? (
+            <ReportDialog
+              providerId={id}
+              requestId={lead.request.id}
+              returnTo={`/providers/${id}/vitrin/talepler/${leadId}`}
+            />
+          ) : null}
+        </header>
         <dl className="pdash-info-grid">
           <div className="pdash-info-row">
             <dt>Aciliyet</dt>

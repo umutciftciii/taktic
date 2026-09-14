@@ -16,6 +16,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { maskPhone } from '../notifications/mask';
 import { NotificationDispatcher } from '../notifications/notification-dispatcher.service';
+import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
+import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
+import { ServiceRequestsService } from '../service-requests/service-requests.service';
 import {
   OTP_CODE_LENGTH,
   OTP_LOCK_MINUTES,
@@ -40,6 +43,10 @@ export class PhoneVerificationService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NotificationDispatcher) private readonly notifications: NotificationDispatcher,
+    @Inject(MarketplacePublishSettingsService)
+    private readonly publishSettings: MarketplacePublishSettingsService,
+    @Inject(ServiceRequestsService) private readonly requests: ServiceRequestsService,
+    @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
   ) {}
 
   async sendCode(requestId: string, user: AuthUser, meta: VerificationRequestMeta) {
@@ -186,13 +193,29 @@ export class PhoneVerificationService {
           return { ok: false as const };
         }
 
-        return { ok: true as const, verifiedAt: now };
+        // Verification was the last thing the request waited for: publish it
+        // here, in the same transaction, so "verified" and "live" are one
+        // commit. The switch is read outside the transaction — it is an
+        // operations decision that does not change inside one — and the
+        // publish itself is conditional on SUBMITTED and an open gate, so a
+        // request an operator already moved, or a vitrin lead, is left alone.
+        const published =
+          (await this.publishSettings.isAutoPublishEnabled()) &&
+          (await this.requests.publishRequestInTransaction(tx, requestId, now));
+
+        return { ok: true as const, verifiedAt: now, published };
       },
       { label: 'phoneVerification.verifyCode' },
     );
 
     if (!outcome.ok) {
       throw invalidCodeException();
+    }
+
+    if (outcome.published) {
+      // After the commit and never awaited: the intents are durable, and the
+      // customer's response does not wait on a mail provider.
+      this.publishOutbox.deliverSoon();
     }
 
     void meta;

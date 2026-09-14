@@ -5,8 +5,10 @@ import { CategoriesModule } from '../categories/categories.module';
 import { CustomerActivationModule } from '../customer-activation/customer-activation.module';
 import { NumberingModule } from '../numbering/numbering.module';
 import { OffersModule } from '../offers/offers.module';
+import { OperationsSettingsModule } from '../operations-settings/operations-settings.module';
 import { RequestDraftsModule } from '../request-drafts/request-drafts.module';
 import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
+import { ServiceRequestThrottlerGuard } from './service-request.throttler';
 import { ServiceRequestsController } from './service-requests.controller';
 import { ServiceRequestsService } from './service-requests.service';
 
@@ -27,9 +29,12 @@ import { ServiceRequestsService } from './service-requests.service';
     // RequestDraftsModule only imports AuthModule + PrismaModule, so this
     // creates no cycle.
     RequestDraftsModule,
+    // The marketplace auto-publish switch, read once per creation. That module
+    // imports no domain module, so this cannot cycle.
+    OperationsSettingsModule,
   ],
   controllers: [ServiceRequestsController],
-  providers: [ServiceRequestsService],
+  providers: [ServiceRequestsService, ServiceRequestThrottlerGuard],
   exports: [ServiceRequestsService],
 })
 export class ServiceRequestsModule {}

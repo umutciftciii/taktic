@@ -749,6 +749,34 @@ input[readonly] {
   color: var(--color-neutral-700);
 }
 
+/* A field the API refused, said under the field itself. Weight and the
+   accent rule carry it together, so it survives greyscale. */
+.field-error {
+  display: block;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent-900);
+  background: var(--color-accent-100);
+  border-left: 3px solid var(--color-accent);
+}
+
+/* A hint that appears while typing — quieter than an error, because the
+   server has not refused anything yet. */
+.field-hint {
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-neutral-900);
+}
+/* The live region stays mounted; it takes no room while it has nothing to say. */
+.field-hint:empty { display: none; }
+
+.form-row [aria-invalid='true'] {
+  border-color: var(--color-accent);
+}
+
 /* The request description's help text and character counter, on one row:
    guidance on the left, the count hard against the right edge of the field.
 
@@ -6097,15 +6125,23 @@ body.has-drawer-open {
 .vitrin-menu-list button:hover, .vitrin-menu-list a:hover { background: var(--color-surface); }
 .vitrin-menu-danger { color: var(--color-accent-700); }
 
-.vitrin-dialog {
+.vitrin-dialog,
+.report-dialog {
   max-width: min(480px, calc(100vw - 32px));
   padding: var(--space-6);
   border: 2px solid var(--color-text);
   background: var(--color-bg);
 }
-.vitrin-dialog::backdrop { background: color-mix(in srgb, #201e1d 55%, transparent); }
-.vitrin-dialog h2 { margin: 0 0 var(--space-3); font-size: 18px; }
-.vitrin-dialog p { font-size: 14px; }
+.vitrin-dialog::backdrop,
+.report-dialog::backdrop { background: color-mix(in srgb, #201e1d 55%, transparent); }
+.vitrin-dialog h2,
+.report-dialog h2 { margin: 0 0 var(--space-3); font-size: 18px; }
+.vitrin-dialog p,
+.report-dialog p { font-size: 14px; }
+/* "Talebi bildir": the same frame, its form laid out like the offer form beside it. */
+.report-dialog { width: 480px; }
+.report-dialog h2,
+.report-dialog p { margin: 0; }
 
 /* The return screen after payment: one statement, one action. */
 .vitrin-return {

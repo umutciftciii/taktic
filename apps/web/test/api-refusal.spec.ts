@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../lib/api';
 import { describeApiRefusal } from '../lib/api-refusal';
-import { REQUEST_REFUSAL_GENERIC } from '../lib/request-refusal-text';
+import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../lib/request-refusal-text';
 
 /**
  * How an API refusal becomes the code a form looks up. The case that earns a
@@ -23,6 +23,25 @@ describe('describeApiRefusal', () => {
       code: 'SHOWCASE_LEAD_FORBIDDEN',
       message: null,
     });
+  });
+
+  it('names the code-less 429 so the throttler’s English never reaches the form', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const throttled = new ApiError(
+      429,
+      JSON.stringify({ statusCode: 429, message: 'ThrottlerException: Too Many Requests' }),
+    );
+    const refusal = describeApiRefusal('service-requests', throttled);
+    expect(refusal).toEqual({ ok: false, code: 'REQUEST_RATE_LIMITED', message: null });
+    expect(requestRefusalText(refusal)).toBe(
+      'Kısa sürede çok fazla talep gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
+    );
+    // A 429 the API coded itself keeps its code.
+    const coded = new ApiError(
+      429,
+      JSON.stringify({ code: 'SHOWCASE_LEAD_RATE_LIMITED', message: 'Çok fazla.' }),
+    );
+    expect(describeApiRefusal('vitrin/cards/card-1/leads', coded).code).toBe('SHOWCASE_LEAD_RATE_LIMITED');
   });
 
   it('keeps the API’s own code and client-worded message', () => {

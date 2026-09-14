@@ -1,6 +1,9 @@
 import type { AdminSummary } from './api';
 import { OPEN_SUPPORT_TICKETS_HREF } from './support-ticket-filter';
 
+/** The report queue's open tab — the list whose length the card shows. */
+export const OPEN_REQUEST_REPORTS_HREF = '/requests/reports?state=open';
+
 /**
  * The dashboard's metric cards, decided in one place.
  *
@@ -97,6 +100,13 @@ const ADMIN_DASHBOARD_METRICS: readonly AdminMetricDefinition[] = [
     label: 'Açık destek talepleri',
     href: OPEN_SUPPORT_TICKETS_HREF,
     read: (s) => s.openSupportTickets,
+    actionTone: 'warning',
+  },
+  {
+    key: 'openRequestReports',
+    label: 'Açık talep bildirimi',
+    href: OPEN_REQUEST_REPORTS_HREF,
+    read: (s) => s.openRequestReports,
     actionTone: 'warning',
   },
 ];

@@ -508,6 +508,10 @@ export async function createApprovedRequest(
     neighborhood?: string | null;
     approvedAt?: Date | null;
     customerEmail?: string | null;
+    /** Defaults to a fresh, unique number — pass one to write several rows under the same phone. */
+    customerPhone?: string;
+    /** Defaults to the column's own `@default(now())` — pass one to backdate the row out of a rolling-window count (e.g. the per-phone 24h budget) while it still counts as "open". */
+    submittedAt?: Date;
   },
 ) {
   const suffix = uniqueSuffix();
@@ -517,7 +521,7 @@ export async function createApprovedRequest(
       customerId: options.customerId ?? null,
       requestNumber: `TR-TEST-${suffix}`,
       customerName: `Müşteri ${suffix}`,
-      customerPhone: `0555444${suffix.padStart(4, '0')}`,
+      customerPhone: options.customerPhone ?? `0555444${suffix.padStart(4, '0')}`,
       customerEmail:
         options.customerEmail === undefined
           ? `req-${suffix}@example.test`
@@ -528,6 +532,7 @@ export async function createApprovedRequest(
       status: ServiceRequestStatus.APPROVED,
       approvedAt: options.approvedAt ?? null,
       qualityScore: 80,
+      ...(options.submittedAt !== undefined ? { submittedAt: options.submittedAt } : {}),
     },
   });
 }

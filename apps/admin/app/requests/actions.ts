@@ -18,13 +18,18 @@ export async function updateRequestStatusAction(formData: FormData) {
       }),
     });
   } catch (error) {
-    // Refusing to approve a request whose phone is not verified is a rule the
-    // moderator has to act on, not a crash. It lands back on the request with
-    // an explanation instead of the generic error boundary — the request was
-    // not modified. Only this one code is handled; anything else still
-    // surfaces as an error.
-    if (conflictCode(error) === 'PHONE_NOT_VERIFIED') {
+    // Refusing to approve a request whose phone is not verified, or to reject
+    // one that is already matched or closed, is a rule the moderator has to
+    // act on, not a crash. It lands back on the request with an explanation
+    // instead of the generic error boundary — the request was not modified.
+    // Only these two codes are handled; anything else still surfaces as an
+    // error.
+    const code = conflictCode(error);
+    if (code === 'PHONE_NOT_VERIFIED') {
       redirect(`/requests/${id}?statusError=phoneNotVerified`);
+    }
+    if (code === 'REQUEST_NOT_REMOVABLE') {
+      redirect(`/requests/${id}?statusError=notRemovable`);
     }
 
     throw error;
@@ -70,6 +75,89 @@ export async function cancelRequestAction(formData: FormData) {
 
   revalidatePath('/requests');
   revalidatePath(`/requests/${id}`);
+}
+
+/**
+ * The one decision about a request's open reports: either the request is fine
+ * and the reports are dismissed, or the reports are upheld and the request is
+ * taken down. The API does the rest in one transaction — closing every open
+ * report, rejecting the request, refunding the credits — so this action only
+ * carries the decision and lands the operator back on the request with a
+ * reason when the API refuses it.
+ *
+ * `removalReason` travels only with a removal. It is the sentence the customer
+ * is told, so a dismissal has no business carrying one.
+ */
+export async function resolveReportsAction(formData: FormData) {
+  const id = readFormString(formData, 'id');
+  const resolution = readFormString(formData, 'resolution');
+  const removalReason =
+    resolution === 'REQUEST_REMOVED' ? readOptionalFormString(formData, 'removalReason') : null;
+
+  // The API refuses a removal without a reason with a 400, which would land
+  // on the generic error page. The browser's `required` normally catches this
+  // first; this is the guard for a submission that bypassed it.
+  if (resolution === 'REQUEST_REMOVED' && !removalReason) {
+    redirect(`/requests/${id}?reportError=reasonRequired`);
+  }
+
+  try {
+    await apiFetch<ServiceRequest>(`/service-requests/${id}/reports/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        resolution,
+        resolutionNote: readOptionalFormString(formData, 'resolutionNote'),
+        removalReason: removalReason ?? undefined,
+      }),
+    });
+  } catch (error) {
+    const code = conflictCode(error);
+    if (code === 'REQUEST_NOT_REMOVABLE') {
+      redirect(`/requests/${id}?reportError=notRemovable`);
+    }
+    if (code === 'NO_OPEN_REPORTS') {
+      redirect(`/requests/${id}?reportError=noOpen`);
+    }
+
+    throw error;
+  }
+
+  revalidatePath('/requests/reports');
+  revalidatePath(`/requests/${id}`);
+  revalidatePath('/requests');
+}
+
+/**
+ * Puts a request back after a report removed it. Only a REJECTED request with
+ * a removal behind it qualifies, and the same phone rule that guards approval
+ * guards this — the request goes back to APPROVED, so an unverified number is
+ * refused the same way and with the same message.
+ */
+export async function reopenRequestAction(formData: FormData) {
+  const id = readFormString(formData, 'id');
+
+  try {
+    await apiFetch<ServiceRequest>(`/service-requests/${id}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({
+        moderationNote: readOptionalFormString(formData, 'moderationNote'),
+      }),
+    });
+  } catch (error) {
+    const code = conflictCode(error);
+    if (code === 'PHONE_NOT_VERIFIED') {
+      redirect(`/requests/${id}?statusError=phoneNotVerified`);
+    }
+    if (code === 'REQUEST_NOT_REOPENABLE') {
+      redirect(`/requests/${id}?reportError=notReopenable`);
+    }
+
+    throw error;
+  }
+
+  revalidatePath('/requests/reports');
+  revalidatePath(`/requests/${id}`);
+  revalidatePath('/requests');
 }
 
 export async function recalculateRequestQualityAction(formData: FormData) {

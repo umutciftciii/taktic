@@ -18,6 +18,7 @@ import { SupportTicketsModule } from './modules/support-tickets/support-tickets.
 import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
 import { ProviderInvitesModule } from './modules/provider-invites/provider-invites.module';
 import { ProvidersModule } from './modules/providers/providers.module';
+import { RequestReportsModule } from './modules/request-reports/request-reports.module';
 import { OffersModule } from './modules/offers/offers.module';
 import { OperationsSettingsModule } from './modules/operations-settings/operations-settings.module';
 import { PhoneVerificationModule } from './modules/phone-verification/phone-verification.module';
@@ -52,6 +53,13 @@ import { PrismaModule } from './prisma/prisma.module';
     LocationsModule,
     QuestionsModule,
     RequestDraftsModule,
+    // Before ServiceRequestsModule, and not by accident: its admin controller
+    // serves `GET /service-requests/reports`, which ServiceRequestsController's
+    // `GET :id` would capture if its routes were registered first. Nest
+    // registers routes in module insertion order, which is this list's order
+    // (depth-first), and request-reports-admin.spec.ts asserts a 200 on that
+    // path so a reordering here fails loudly.
+    RequestReportsModule,
     ServiceRequestsModule,
     ProviderClaimModule,
     ProvidersModule,

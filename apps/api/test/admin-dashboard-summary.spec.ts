@@ -159,6 +159,7 @@ describe('who may read the summary', () => {
       refundableOffers: 0,
       packagePurchases: 0,
       openSupportTickets: 0,
+      openRequestReports: 0,
     });
   });
 

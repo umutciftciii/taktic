@@ -9,6 +9,7 @@ import {
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { NotificationMessage } from '../src/modules/notifications/notification.port';
+import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import { TransactionalMailService } from '../src/modules/notifications/transactional-mail.service';
 import {
   backdateOfferSubmission,
@@ -155,6 +156,9 @@ describe('request lifecycle notifications', () => {
       .set('Cookie', cookie)
       .send({ status: ServiceRequestStatus.APPROVED })
       .expect(200);
+    // The approval books the fan-out and fires delivery without waiting for
+    // it; the explicit sweep is what makes the assertions below deterministic.
+    await ctx.app.get(RequestPublishOutbox).deliverPending();
 
     const published = ctx.notifications.ofTemplate('request-published');
     expect(published).toHaveLength(1);
@@ -206,6 +210,7 @@ describe('request lifecycle notifications', () => {
 
     await approve();
     await approve();
+    await ctx.app.get(RequestPublishOutbox).deliverPending();
 
     expect(ctx.notifications.ofTemplate('request-published')).toHaveLength(1);
     expect(ctx.notifications.ofTemplate('request-available')).toHaveLength(1);

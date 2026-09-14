@@ -41,8 +41,10 @@ export function OffersView({ requestId, offers }: OffersViewProps) {
 
   // The cheapest offer, which is simply the first one after the server's sort.
   // With a single offer there is nothing to be cheapest *than*, so nothing is
-  // marked.
-  const lowestId = offers.length > 1 ? (offers[0]?.id ?? null) : null;
+  // marked — and a closed offer is never marked: it is not an amount the
+  // customer can take.
+  const openOffers = offers.filter((offer) => !offerIsClosed(offer));
+  const lowestId = openOffers.length > 1 ? (openOffers[0]?.id ?? null) : null;
 
   return (
     <>
@@ -99,9 +101,10 @@ function OfferRow({
 }) {
   const initials = getInitials(offer.provider.businessName);
   const offerReference = offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`;
+  const closed = offerIsClosed(offer);
 
   return (
-    <article className="cdash-offer">
+    <article className="cdash-offer" data-offer-status={offer.status}>
       <div className="cdash-offer-head">
         <div className="cdash-offer-provider">
           <span className="cdash-offer-avatar" aria-hidden="true">
@@ -138,15 +141,25 @@ function OfferRow({
       <div className="cdash-offer-side">
         <span className="cdash-offer-price-label">Teklif tutarı</span>
         <span className="cdash-offer-price">{formatPrice(offer.priceAmount, offer.currency)}</span>
-        <div className="cdash-offer-actions">
-          <Link
-            className="cdash-btn cdash-btn-primary cdash-btn-block"
-            href={`/requests/${requestId}/offers/${offer.id}`}
-          >
-            Teklifi İncele
-            <IconArrowRight size={12} />
-          </Link>
-        </div>
+        {/*
+          A closed offer is read, not acted on: the request it answered was
+          taken down, so there is nothing left to review or accept.
+        */}
+        {closed ? (
+          <p className="cdash-offer-sub" data-testid="offer-closed-note">
+            {CLOSED_OFFER_TEXT}
+          </p>
+        ) : (
+          <div className="cdash-offer-actions">
+            <Link
+              className="cdash-btn cdash-btn-primary cdash-btn-block"
+              href={`/requests/${requestId}/offers/${offer.id}`}
+            >
+              Teklifi İncele
+              <IconArrowRight size={12} />
+            </Link>
+          </div>
+        )}
       </div>
     </article>
   );
@@ -254,16 +267,20 @@ function CompareTable({
                       Kabul etme adımı teklif detayında kalır: geri alınamaz bir
                       karar, sonuçlarının yazılı olduğu ekranda onaylanır.
                     */}
-                    <Link
-                      className={
-                        offer.id === lowestId
-                          ? 'cdash-btn cdash-btn-primary cdash-btn-sm'
-                          : 'cdash-btn cdash-btn-secondary cdash-btn-sm'
-                      }
-                      href={`/requests/${requestId}/offers/${offer.id}`}
-                    >
-                      Teklifi İncele
-                    </Link>
+                    {offerIsClosed(offer) ? (
+                      <span className="cdash-offer-sub">{CLOSED_OFFER_TEXT}</span>
+                    ) : (
+                      <Link
+                        className={
+                          offer.id === lowestId
+                            ? 'cdash-btn cdash-btn-primary cdash-btn-sm'
+                            : 'cdash-btn cdash-btn-secondary cdash-btn-sm'
+                        }
+                        href={`/requests/${requestId}/offers/${offer.id}`}
+                      >
+                        Teklifi İncele
+                      </Link>
+                    )}
                   </td>
                 ))}
               </tr>
@@ -298,8 +315,18 @@ const OFFER_STATUS_LABELS: Record<OfferStatus, string> = {
   REJECTED: 'Reddedildi',
   WITHDRAWN: 'Geri çekildi',
   EXPIRED: 'Süresi doldu',
-  CANCELLED: 'İptal edildi',
+  CANCELLED: 'Kapatıldı',
 };
+
+/**
+ * Why a CANCELLED offer is on the list at all: the platform took the request
+ * down and closed every offer on it. Read-only — no detail link, no accept.
+ */
+const CLOSED_OFFER_TEXT = 'Talep kaldırıldığı için kapatıldı';
+
+function offerIsClosed(offer: RequestOfferPreview): boolean {
+  return offer.status === 'CANCELLED';
+}
 
 function offerStatusLabel(status: OfferStatus): string {
   return OFFER_STATUS_LABELS[status] ?? statusLabel(status);

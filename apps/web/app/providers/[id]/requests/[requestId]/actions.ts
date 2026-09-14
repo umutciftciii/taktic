@@ -70,6 +70,65 @@ export async function createOfferAction(formData: FormData) {
   revalidatePath(`/providers/${providerId}/offers`);
 }
 
+/**
+ * Reports the request to the operators and lands back on the screen it was
+ * opened from.
+ *
+ * Both refusals the API words for the provider — "already reported" (409) and
+ * "daily limit" (429) — come back as a query flag the page turns into a
+ * sentence, mirroring the `?offerError=` pattern above. Anything else is a
+ * real failure and reaches the error boundary.
+ *
+ * `returnTo` is where the dialog lives — the request detail by default, or a
+ * vitrin lead's own screen, which mounts the same dialog. Only a path inside
+ * this provider's own panel is honoured; anything else falls back to the
+ * request detail, so the field can never turn into an open redirect.
+ */
+export async function reportRequestAction(formData: FormData) {
+  const providerId = readFormString(formData, 'providerId');
+  const requestId = readFormString(formData, 'requestId');
+  const base = `/providers/${providerId}/requests/${requestId}`;
+  const returnTo = safeReturnPath(readOptionalFormString(formData, 'returnTo'), providerId) ?? base;
+
+  try {
+    await apiFetch(`${base}/reports`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reason: readFormString(formData, 'reason'),
+        note: readOptionalFormString(formData, 'note'),
+      }),
+    });
+  } catch (error) {
+    const code = asOfferConflict(error)?.code ?? apiErrorCode(error);
+    if (code === 'REPORT_ALREADY_EXISTS') redirect(`${returnTo}?reportError=exists`);
+    if (code === 'REPORT_RATE_LIMITED') redirect(`${returnTo}?reportError=limit`);
+    throw error;
+  }
+
+  revalidatePath(base);
+  if (returnTo !== base) revalidatePath(returnTo);
+  redirect(`${returnTo}?reported=1`);
+}
+
+/** A path in this provider's own panel, or null. Query and fragment are dropped. */
+function safeReturnPath(value: string | null, providerId: string): string | null {
+  if (!value) return null;
+  const prefix = `/providers/${providerId}/`;
+  if (!value.startsWith(prefix)) return null;
+  return value.split(/[?#]/)[0] ?? null;
+}
+
+/** The machine-readable `code` from any ApiError body, whatever the status. */
+function apiErrorCode(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null;
+  try {
+    const parsed = JSON.parse(error.body) as { code?: unknown };
+    return typeof parsed?.code === 'string' ? parsed.code : null;
+  } catch {
+    return null;
+  }
+}
+
 function asOfferConflict(error: unknown): OfferConflict | null {
   if (!(error instanceof ApiError) || error.status !== 409) {
     return null;

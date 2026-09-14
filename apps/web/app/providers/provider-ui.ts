@@ -6,10 +6,18 @@ import { statusLabel } from '../../lib/request-formatters';
  * A rejection is always phrased the same way, whether the customer rejected it
  * by hand or the platform closed it because another offer was accepted. The
  * provider is never told that a competitor won, nor how many rivals there were.
+ * A CANCELLED offer is one the platform closed with its request; the offer's
+ * own `closureNotice` says what that meant for the credit.
  */
 export function providerOfferStatusLabel(status: string): string {
   if (status === 'REJECTED') {
     return 'Teklifiniz kabul edilmedi';
+  }
+
+  // Closed by the platform because the request was taken down — never the
+  // provider's doing, so not "İptal", which reads as if they cancelled it.
+  if (status === 'CANCELLED') {
+    return 'Kapatıldı';
   }
 
   return statusLabel(status);

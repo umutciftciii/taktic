@@ -1,6 +1,7 @@
 import { CreditTransactionType, OfferStatus, ProviderStatus, ServiceRequestStatus, UserRole } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DISPLAY_TIME_ZONE } from '../src/modules/notifications/templates/format';
+import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import { TransactionalMailService } from '../src/modules/notifications/transactional-mail.service';
 import {
   createApprovedRequest,
@@ -111,7 +112,11 @@ describe('provider-targeted mail — which address it reaches', () => {
   it('sends request-available to the account address, never the form field', async () => {
     const { serviceRequest, account, formEmail, customer } = await scenario();
 
-    await mail.fanOutApprovedRequest(serviceRequest.id, new Date());
+    // The fan-out as production runs it: intents booked, then the sweep.
+    const outbox = ctx.app.get(RequestPublishOutbox);
+    const approvedAt = new Date();
+    await ctx.prisma.$transaction((tx) => outbox.enqueue(tx, serviceRequest.id, approvedAt));
+    await outbox.deliverPending();
 
     expect(recipientsOf('request-available')).toEqual([account.email]);
     expect(recipientsOf('request-available')).not.toContain(formEmail);

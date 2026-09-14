@@ -14,6 +14,8 @@
  * for the customer, which is exactly what happened when the code-less fallback
  * (`SHOWCASE_LEAD_FAILED`) was looked up in the table before the message.
  */
+import { CONTACT_DETAILS_ERROR, CONTACT_DETAILS_IN_TEXT } from './contact-details-refusal';
+
 export const REQUEST_REFUSAL_GENERIC = 'SHOWCASE_LEAD_FAILED';
 
 export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
@@ -21,6 +23,10 @@ export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
   SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED:
     'Telefon doğrulamanız tamamlanmadı ya da süresi doldu. Kodu yeniden isteyin.',
   SHOWCASE_LEAD_RATE_LIMITED: 'Çok fazla talep gönderildi. Lütfen bir süre sonra tekrar deneyin.',
+  // The IP throttler on POST /service-requests: a code-less 429, named by
+  // `describeApiRefusal` so the customer never sees the throttler's English.
+  REQUEST_RATE_LIMITED:
+    'Kısa sürede çok fazla talep gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.',
   PHONE_VERIFICATION_INVALID:
     'Doğrulama kodu geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.',
   PHONE_VERIFICATION_RATE_LIMITED:
@@ -32,6 +38,9 @@ export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
     'Hizmet veren hesabıyla talep oluşturulamaz. Müşteri olarak devam etmek için oturumu kapatın.',
   CUSTOMER_IDENTITY_CONFLICT:
     'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
+  // Normally shown under the field the API named; this is the banner's
+  // wording when the field is one the form cannot point at.
+  [CONTACT_DETAILS_IN_TEXT]: CONTACT_DETAILS_ERROR,
 };
 
 const GENERIC_MESSAGE = 'Talebiniz gönderilemedi. Bilgileri kontrol edip tekrar deneyin.';

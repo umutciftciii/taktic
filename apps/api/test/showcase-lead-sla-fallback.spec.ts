@@ -1,6 +1,7 @@
 import { ServiceCategoryKind, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import { ShowcaseLeadSlaService } from '../src/modules/showcase/showcase-lead-sla.service';
 import {
   createApprovedShowcaseCard,
@@ -255,6 +256,8 @@ describe('the customer decides', () => {
       .set('Cookie', adminCookie)
       .send({ status: 'APPROVED' });
     expect(approved.status).toBe(200);
+    // The approval books the fan-out; the sweep delivers it.
+    await ctx.app.get(RequestPublishOutbox).deliverPending();
 
     /*
      * No special case: by the time the gate is clear there is nothing special

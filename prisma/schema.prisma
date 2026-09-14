@@ -119,6 +119,27 @@ enum ServiceRequestStatus {
   EXPIRED
 }
 
+/// Why a provider brought a request in front of an operator.
+enum ServiceRequestReportReason {
+  SPAM
+  FAKE_OR_TEST
+  CONTAINS_CONTACT_INFO
+  WRONG_CATEGORY
+  INAPPROPRIATE_CONTENT
+  DUPLICATE
+  OTHER
+}
+
+/// The one decision an operator takes about a report.
+///
+/// DISMISSED       — the request stays live.
+/// REQUEST_REMOVED — the request was taken off the market (REJECTED), its
+///                   live offers closed and their credits returned.
+enum ServiceRequestReportResolution {
+  DISMISSED
+  REQUEST_REMOVED
+}
+
 enum NotificationChannel {
   EMAIL
   SMS
@@ -376,6 +397,7 @@ model User {
   showcasePlacementSuspensions  ShowcasePlacementSuspension[]      @relation("ShowcasePlacementSuspendedBy")
   showcasePriceTermsAcceptances ShowcaseCardPriceTermsAcceptance[]
   showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[] @relation("ShowcasePackageTermsAcceptedBy")
+  resolvedRequestReports        ServiceRequestReport[]             @relation("ServiceRequestReportResolvedBy")
 
   @@index([role])
   @@index([isActive])
@@ -478,6 +500,13 @@ model OperationsSettings {
   /// environment variable.
   showcaseLeadSlaSchedulerEnabled         Boolean  @default(false)
   showcasePlacementExpirySchedulerEnabled Boolean  @default(false)
+  /// Whether a marketplace request is published to matching providers the
+  /// moment it is created, without an operator approving it first.
+  ///
+  /// Same contract as the scheduler switches above: false by default, read
+  /// fail-closed on every request creation, switched on by a person on the
+  /// operations screen and never by a migration or an environment variable.
+  marketplaceAutoPublishEnabled           Boolean  @default(false)
   createdAt                               DateTime @default(now())
   updatedAt                               DateTime @updatedAt
   /// Who last saved this. Nullable and SetNull for the same reason
@@ -875,6 +904,7 @@ model ServiceRequest {
   showcaseLead           ShowcaseLead?          @relation("ServiceRequestShowcaseLead", fields: [showcaseLeadId], references: [id], onDelete: Restrict)
   showcaseLeadSource     ShowcaseLead?          @relation("ShowcaseLeadRequest")
   directShowcaseProvider ProviderProfile?       @relation("ServiceRequestDirectShowcaseProvider", fields: [directShowcaseProviderId], references: [id], onDelete: Restrict)
+  reports                ServiceRequestReport[]
 
   @@index([categoryId])
   @@index([entryCategoryId])
@@ -884,6 +914,7 @@ model ServiceRequest {
   @@index([submittedAt])
   @@index([status, submittedAt])
   @@index([phoneVerifiedAt])
+  @@index([customerPhone, submittedAt])
   /// Expiry scan: "APPROVED and approved before <cutoff>".
   @@index([status, approvedAt])
   /// Reminder scan: the same window, narrowed to rows that have not been
@@ -1148,6 +1179,7 @@ model ProviderProfile {
   showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]
   showcaseEntitlements          ShowcaseEntitlement[]
   directShowcaseRequests        ServiceRequest[]                   @relation("ServiceRequestDirectShowcaseProvider")
+  requestReports                ServiceRequestReport[]
 
   @@index([status])
   @@index([city])
@@ -1289,6 +1321,12 @@ model Offer {
   rejectedAt                  DateTime?
   rejectionReason             OfferRejectionReason?
   withdrawnAt                 DateTime?
+  /// When the platform closed this offer because its request was taken off the
+  /// market. Written together with `status: CANCELLED` by
+  /// ServiceRequestsService.rejectRequestInTransaction — the only writer of
+  /// CANCELLED in the product. NULL on every offer that was never closed that
+  /// way, which is every offer written before this column existed.
+  cancelledAt                 DateTime?
   createdAt                   DateTime                @default(now())
   updatedAt                   DateTime                @updatedAt
 
@@ -3413,6 +3451,45 @@ model ShowcaseLead {
   @@index([status, slaDueAt])
   @@index([placementId, createdAt])
   @@index([status, breachedAt])
+}
+
+/// A provider telling an operator that a live request needs a look.
+///
+/// Append-only by contract: a row is created once and resolved once
+/// (open → resolved); nothing updates or deletes it afterwards. A report never
+/// hides anything by itself — the request stays exactly as visible and
+/// offerable as it was until an operator decides.
+///
+/// A PostgreSQL CHECK ("ServiceRequestReport_resolution_pair",
+/// ("resolvedAt" IS NULL) = ("resolution" IS NULL)) and a partial index on the
+/// open queue ("ServiceRequestReport_open_idx", WHERE "resolvedAt" IS NULL)
+/// live in the migration's raw SQL; Prisma cannot express either.
+model ServiceRequestReport {
+  id                 String                          @id @default(cuid())
+  requestId          String
+  reporterProviderId String
+  reason             ServiceRequestReportReason
+  /// Optional free text, bounded by the DTO (500 UTF-16 code units). Read by
+  /// admin surfaces only; never rendered to a customer or another provider.
+  note               String?
+  createdAt          DateTime                        @default(now())
+  resolvedAt         DateTime?
+  resolvedByUserId   String?
+  resolution         ServiceRequestReportResolution?
+  /// The operator's note on the decision. Admin-only, like `note`.
+  resolutionNote     String?
+
+  request    ServiceRequest  @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  reporter   ProviderProfile @relation(fields: [reporterProviderId], references: [id], onDelete: Restrict)
+  resolvedBy User?           @relation("ServiceRequestReportResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  /// One report per provider per request — the database's answer to a
+  /// double-click and to a provider filing the same complaint twice.
+  @@unique([requestId, reporterProviderId])
+  @@index([requestId])
+  /// The per-provider daily budget count.
+  @@index([reporterProviderId, createdAt])
+  @@index([resolvedAt, createdAt])
 }
 
 /// Which request form a draft belongs to. The form page asks for its own kind

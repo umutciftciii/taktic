@@ -2,14 +2,16 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Inject,
   HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { detectContactDetails } from '../../common/contact-detection';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
-import { CustomerOrigin, NumberedEntityType, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -19,9 +21,13 @@ import {
 } from '../contact-sharing/contact-sharing.config';
 import { CategoriesService, RoutingResolution } from '../categories/categories.service';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
+import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
+import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
+import { refundOfferCreditInTransaction } from '../offers/offers.service';
+import { REQUEST_REMOVED_REFUND_REASON } from '../offers/refund-policy';
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import { RequestDraftsService } from '../request-drafts/request-drafts.service';
@@ -30,6 +36,10 @@ import {
   SystemFieldRequestValues,
   systemFieldLabel,
 } from '../questions/question-system-fields';
+import {
+  SERVICE_REQUEST_MAX_OPEN_PER_PHONE,
+  SERVICE_REQUEST_MAX_PER_PHONE_PER_DAY,
+} from './service-requests.constants';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
@@ -47,6 +57,34 @@ export const ACCOUNT_CONTACT_INCOMPLETE_CODE = 'ACCOUNT_CONTACT_INCOMPLETE';
  * email belong to two different customers.
  */
 export const CUSTOMER_IDENTITY_CONFLICT_CODE = 'CUSTOMER_IDENTITY_CONFLICT';
+
+/**
+ * Returned when a free-text field — the description, the address note, or a
+ * TEXT/TEXTAREA answer — carries something that looks like a phone number,
+ * e-mail address, or link. Requests now publish to providers without an
+ * operator reading them first, so this is the only gate left against a
+ * customer routing a provider off-platform before an offer is even made;
+ * contact details are shared automatically once an offer is accepted.
+ */
+export const CONTACT_DETAILS_IN_TEXT_CODE = 'CONTACT_DETAILS_IN_TEXT';
+
+/** Refuses `value` if it carries a phone number, e-mail address, or link. */
+function assertNoContactDetails(field: string, value: string | null) {
+  if (!value) return;
+
+  const found = detectContactDetails(value);
+  if (found) {
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      code: CONTACT_DETAILS_IN_TEXT_CODE,
+      field,
+      kind: found.kind,
+      message:
+        'İletişim bilgisi (telefon, e-posta, bağlantı) paylaşılamaz; bilgiler teklif kabul edildiğinde otomatik paylaşılır.',
+    });
+  }
+}
 
 type QuestionOption = {
   key: string;
@@ -151,6 +189,23 @@ const nonModerationStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.EXPIRED,
 ]);
 
+/**
+ * Whether a moderation save is the one that takes a marketplace request live:
+ * a move *into* APPROVED (not a re-save of it) on a request no single vitrin
+ * business holds.
+ */
+function isPublishingTransition(
+  from: ServiceRequestStatus,
+  to: ServiceRequestStatus,
+  directShowcaseProviderId: string | null,
+): boolean {
+  return (
+    to === ServiceRequestStatus.APPROVED &&
+    from !== ServiceRequestStatus.APPROVED &&
+    directShowcaseProviderId === null
+  );
+}
+
 /** A request in one of these states has finished; nothing may move it again. */
 const terminalStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.COMPLETED,
@@ -173,6 +228,9 @@ export class ServiceRequestsService {
     @Inject(ShowcaseLeadLifecycleService)
     private readonly showcaseLeads: ShowcaseLeadLifecycleService,
     @Inject(RequestDraftsService) private readonly drafts: RequestDraftsService,
+    @Inject(MarketplacePublishSettingsService)
+    private readonly publishSettings: MarketplacePublishSettingsService,
+    @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
   ) {}
 
   /**
@@ -271,6 +329,14 @@ export class ServiceRequestsService {
       description: normalizeNullableString(dto.description),
     };
 
+    // Refused before anything else touches these values: a request that
+    // publishes straight to providers must not carry a way to reach the
+    // customer off-platform in the two free-text fields it controls
+    // directly. The vitrin lead path goes through this same method, so it is
+    // covered without a second check.
+    assertNoContactDetails('description', requestData.description);
+    assertNoContactDetails('addressNote', requestData.addressNote);
+
     // Answers are validated after the request fields are normalised, because a
     // system-bound question is a rule *about* those fields: "this category
     // requires a neighbourhood", "this one requires a budget". The bound
@@ -288,9 +354,65 @@ export class ServiceRequestsService {
       answers,
     });
 
+    // Read once per creation, outside the transaction: the switch is an
+    // operations decision that changes rarely, and a request that raced a
+    // toggle lands on whichever side it read — both sides are valid states.
+    //
+    // Three things have to agree for a request to be born live. The switch is
+    // on; the request is a marketplace one (a vitrin lead is reserved for a
+    // single business and is published by its own flow, never here); and the
+    // number is either not gated or already proven. A gated, unproven request
+    // waits at SUBMITTED for `PhoneVerificationService.verifyCode`, which
+    // publishes it in the same transaction that stamps the proof — that is
+    // the one case whose receipt tells the customer to verify rather than to
+    // wait for an operator.
+    const autoPublish =
+      (await this.publishSettings.isAutoPublishEnabled()) && !context.directShowcaseProviderId;
+    const awaitsVerification =
+      autoPublish && isPhoneVerificationRequired() && !context.phoneVerifiedAt;
+    const publishAtCreate = autoPublish && !awaitsVerification;
+    const now = new Date();
+
     const request = await runSerializable(
       this.prisma,
       async (tx) => {
+      // Per-phone budget, ahead of everything else in the transaction: a
+      // customer (or an attacker cycling identities behind one number)
+      // should not be able to spend the rest of this work — routing,
+      // quality scoring, the customer row itself — only to be refused at the
+      // very end. Counted by phone rather than by account because a guest
+      // checkout has no account yet, and because the limit is about how many
+      // requests one real phone number is allowed to have in flight,
+      // regardless of which session created them.
+      const phoneWindowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const [recentByPhone, openByPhone] = await Promise.all([
+        tx.serviceRequest.count({
+          where: {
+            customerPhone: requestData.customerPhone,
+            submittedAt: { gte: phoneWindowStart },
+            status: { in: [ServiceRequestStatus.SUBMITTED, ServiceRequestStatus.APPROVED] },
+          },
+        }),
+        tx.serviceRequest.count({
+          where: { customerPhone: requestData.customerPhone, status: ServiceRequestStatus.APPROVED },
+        }),
+      ]);
+      if (
+        recentByPhone >= SERVICE_REQUEST_MAX_PER_PHONE_PER_DAY ||
+        openByPhone >= SERVICE_REQUEST_MAX_OPEN_PER_PHONE
+      ) {
+        throw new HttpException(
+          {
+            statusCode: 429,
+            error: 'Too Many Requests',
+            code: 'REQUEST_RATE_LIMITED',
+            message:
+              'Bu telefon numarasıyla kısa sürede çok fazla talep açıldı. Lütfen daha sonra tekrar deneyin.',
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
       const customerId = await resolveCustomerForCreate(tx, requestData, user);
       const requestNumber = await this.numbering.generateDisplayNumber(
         tx,
@@ -307,6 +429,12 @@ export class ServiceRequestsService {
             routing.entryCategory.id === category.id ? null : routing.entryCategory.id,
           customerId,
           requestNumber,
+          // Born live when the operations switch says so. One INSERT, one state:
+          // approvedAt is the same instant as submittedAt, and moderatedAt stays
+          // NULL because no person approved this — that pair is how a row says
+          // "auto-published" without a column for it.
+          submittedAt: now,
+          ...(publishAtCreate ? { status: ServiceRequestStatus.APPROVED, approvedAt: now } : {}),
           ...requestData,
           ...disclosure,
           // The visibility gate. NULL on every request from the public form,
@@ -366,6 +494,13 @@ export class ServiceRequestsService {
         await context.onCreated(tx, { id: created.id, customerId: created.customerId });
       }
 
+      // The fan-out this publication owes, written down in the same
+      // transaction: "the request is live" and "its notifications are owed"
+      // commit together or not at all. Nothing is sent here.
+      if (publishAtCreate) {
+        await this.publishOutbox.enqueue(tx, created.id, now);
+      }
+
       return created;
       },
       { label: 'serviceRequests.create' },
@@ -388,13 +523,55 @@ export class ServiceRequestsService {
       }
     }
 
-    // The receipt for the request the visitor just submitted. After the commit
-    // and best-effort, for the same reason the activation link above is: the
-    // request exists, and a mail problem must not surface as a failed
-    // submission.
-    await this.notify(() => this.mail.sendRequestReceived(request.id), request.id);
+    if (request.status === ServiceRequestStatus.APPROVED) {
+      // Live already: the customer is told "yayında", not "alındı". The
+      // intents are committed; delivery is fired and not awaited, so the
+      // response never waits on a mail provider.
+      this.publishOutbox.deliverSoon();
+    } else {
+      // The receipt for the request the visitor just submitted. After the
+      // commit and best-effort, for the same reason the activation link above
+      // is: the request exists, and a mail problem must not surface as a
+      // failed submission. `nextStep` tells the customer what the request is
+      // waiting for — their own verification, or an operator.
+      await this.notify(
+        () =>
+          this.mail.sendRequestReceived(request.id, {
+            nextStep: awaitsVerification ? 'verify' : 'review',
+          }),
+        request.id,
+      );
+    }
 
     return withQualityLabel(request);
+  }
+
+  /**
+   * Moves a waiting marketplace request to APPROVED and books its fan-out, in
+   * the caller's transaction. Conditional on SUBMITTED and on an open gate, so
+   * two callers cannot both publish and a vitrin lead cannot be published by
+   * anything but its own flow. Returns whether this call was the one.
+   */
+  async publishRequestInTransaction(
+    tx: Prisma.TransactionClient,
+    requestId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const moved = await tx.serviceRequest.updateMany({
+      where: {
+        id: requestId,
+        status: ServiceRequestStatus.SUBMITTED,
+        directShowcaseProviderId: null,
+      },
+      data: { status: ServiceRequestStatus.APPROVED, approvedAt: now },
+    });
+
+    if (moved.count !== 1) {
+      return false;
+    }
+
+    await this.publishOutbox.enqueue(tx, requestId, now);
+    return true;
   }
 
   /**
@@ -593,7 +770,11 @@ export class ServiceRequestsService {
     return withQualityLabel(request);
   }
 
-  async updateServiceRequestStatus(id: string, dto: UpdateServiceRequestStatusDto) {
+  async updateServiceRequestStatus(
+    id: string,
+    dto: UpdateServiceRequestStatusDto,
+    user?: AuthUser | null,
+  ) {
     const existing = await this.ensureRequestExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
@@ -628,88 +809,281 @@ export class ServiceRequestsService {
     const shouldModerate = moderatedStatuses.has(dto.status);
     const now = new Date();
 
-    const request = await runSerializable(
+    const { request, publishes } = await runSerializable(
       this.prisma,
       async (tx) => {
-        const updated = await tx.serviceRequest.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        moderationNote,
-        rejectionReason: dto.status === ServiceRequestStatus.REJECTED ? rejectionReason : null,
-        ...(shouldModerate ? { moderatedAt: now } : {}),
-        // Written in the same statement that sets APPROVED, so the status and
-        // the clock the expiry/reminder jobs run on can never disagree.
-        //
-        // Only ever set, never cleared: a re-approval refreshes the window (the
-        // request really is open again from now), and a later transition to
-        // MATCHED, COMPLETED, CANCELLED or REJECTED leaves the old value in
-        // place as audit — nothing reads it once the status is no longer
-        // APPROVED, and erasing it would destroy the record of when the request
-        // went live.
-        ...(dto.status === ServiceRequestStatus.APPROVED ? { approvedAt: now } : {}),
-        ...(dto.status === ServiceRequestStatus.CANCELLED ? { cancelledAt: now } : {}),
-      },
-      include: {
-        category: {
-          select: { id: true, name: true, slug: true },
-        },
-        answers: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
-    });
+        // The status as it is *now*, under the transaction, not as the
+        // pre-flight read above saw it. `existing` decides what the operator
+        // may ask for; this decides what the save actually changes. Between
+        // the two the customer's own verification can publish the request
+        // (`PhoneVerificationService.verifyCode`), and an approval that lands
+        // on an already-live row must not book its fan-out a second time.
+        const current = await tx.serviceRequest.findUniqueOrThrow({
+          where: { id },
+          select: { status: true, directShowcaseProviderId: true },
+        });
 
-        /*
-         * A refused request closes the vitrin lead it came from, in the same
-         * transaction.
-         *
-         * Otherwise an SLA clock would keep running against a business over
-         * something an operator has already refused, and the breach sweeper
-         * would eventually ask the customer whether to release a request that
-         * no longer exists to release.
-         *
-         * Returns quietly for a request with no lead, which is nearly all of
-         * them.
-         */
-        if (dto.status === ServiceRequestStatus.REJECTED && existing.showcaseLeadId) {
-          await this.showcaseLeads.closeForRequest(
-            tx,
-            id,
-            ShowcaseLeadCloseReason.MODERATION_REJECTED,
+        const include = {
+          category: {
+            select: { id: true, name: true, slug: true },
+          },
+          answers: {
+            orderBy: { createdAt: 'asc' },
+          },
+        } satisfies Prisma.ServiceRequestInclude;
+
+        let updated: Prisma.ServiceRequestGetPayload<{ include: typeof include }>;
+
+        if (dto.status === ServiceRequestStatus.REJECTED) {
+          /*
+           * A refusal is a removal from the market, and the removal is one
+           * cascade: the status, the vitrin lead, the live offers and every
+           * credit those offers spent all move here, in this transaction —
+           * see `rejectRequestInTransaction`. The moderation screen has no
+           * private way of writing REJECTED that skips any of it.
+           */
+          await this.rejectRequestInTransaction(tx, {
+            requestId: id,
+            rejectionReason: rejectionReason!,
+            moderationNote,
+            actorUserId: user?.id ?? null,
             now,
-          );
+          });
+          updated = await tx.serviceRequest.findUniqueOrThrow({ where: { id }, include });
+        } else {
+          updated = await tx.serviceRequest.update({
+            where: { id },
+            data: {
+              status: dto.status,
+              moderationNote,
+              rejectionReason: null,
+              ...(shouldModerate ? { moderatedAt: now } : {}),
+              // Written in the same statement that sets APPROVED, so the status and
+              // the clock the expiry/reminder jobs run on can never disagree.
+              //
+              // Only ever set, never cleared: a re-approval refreshes the window (the
+              // request really is open again from now), and a later transition to
+              // MATCHED, COMPLETED, CANCELLED or REJECTED leaves the old value in
+              // place as audit — nothing reads it once the status is no longer
+              // APPROVED, and erasing it would destroy the record of when the request
+              // went live.
+              ...(dto.status === ServiceRequestStatus.APPROVED ? { approvedAt: now } : {}),
+              ...(dto.status === ServiceRequestStatus.CANCELLED ? { cancelledAt: now } : {}),
+            },
+            include,
+          });
         }
 
-        return updated;
+        /*
+         * Only a real transition owes anybody a message. Re-saving an
+         * already-approved request from the moderation screen rewrites
+         * `approvedAt` and nothing else: the customer is not told twice that
+         * their request went live, and no provider is invited to it a second
+         * time. The dedupe key carries `approvedAt` as a second, database-level
+         * guard against the same thing.
+         *
+         * **A direct vitrin lead is never fanned out**, and the gate is the
+         * whole of the test. A request reserved for one business must not be
+         * mailed to every business that matches it — that is the entire
+         * promise a placement sells. Note what the condition reads: the
+         * *gate*, not "did this come from a card". A released lead has a
+         * cleared gate by the time it is approved, and it fans out exactly
+         * like any other request, which is correct: by then it is one.
+         *
+         * Written down here, inside the approval's own transaction, so the
+         * intents and the status commit as one fact; delivered after the
+         * commit, below.
+         */
+        const publishes = isPublishingTransition(
+          current.status,
+          dto.status,
+          updated.directShowcaseProviderId,
+        );
+        if (publishes) {
+          await this.publishOutbox.enqueue(tx, id, now);
+        }
+
+        return { request: updated, publishes };
       },
       { label: 'serviceRequests.updateStatus' },
     );
 
-    /*
-     * Only a real transition mails anybody. Re-saving an already-approved
-     * request from the moderation screen rewrites `approvedAt` and nothing
-     * else: the customer is not told twice that their request went live, and no
-     * provider is invited to it a second time. The dedupe key carries
-     * `approvedAt` as a second, database-level guard against the same thing.
-     *
-     * **A direct vitrin lead is never fanned out**, and the gate is the whole
-     * of the test. A request reserved for one business must not be mailed to
-     * every business that matches it — that is the entire promise a placement
-     * sells. Note what the condition reads: the *gate*, not "did this come from
-     * a card". A released lead has a cleared gate by the time it is approved,
-     * and it fans out exactly like any other request, which is correct: by then
-     * it is one.
-     */
-    if (
-      dto.status === ServiceRequestStatus.APPROVED &&
-      existing.status !== ServiceRequestStatus.APPROVED &&
-      request.directShowcaseProviderId === null
-    ) {
-      await this.notify(() => this.mail.fanOutApprovedRequest(request.id, now), request.id);
+    if (publishes) {
+      this.publishOutbox.deliverSoon();
     }
 
     return withQualityLabel(request);
+  }
+
+  /** Statuses a request may be taken off the market from. MATCHED is not one. */
+  static readonly REMOVABLE_STATUSES = [
+    ServiceRequestStatus.APPROVED,
+    ServiceRequestStatus.IN_REVIEW,
+    ServiceRequestStatus.SUBMITTED,
+  ] as const;
+
+  /**
+   * Takes a request off the market: REJECTED, its vitrin lead closed, its live
+   * offers CANCELLED and every one-time credit they spent returned — all in
+   * the caller's transaction, so none of it exists without the rest.
+   *
+   * The one writer of Offer.CANCELLED in the product. Both the moderation
+   * screen's "Reddet" and a report's "Talebi kaldır" arrive here.
+   *
+   * Idempotent by construction rather than by flag. The conditional status
+   * move is the gate: a request already REJECTED (or MATCHED, or anything else
+   * off the list) matches nothing and the whole call is a 409 before any
+   * offer is touched. Within one successful removal each credit comes back
+   * exactly once, because the candidate filter, the helper's own conditional
+   * update and the ledger's one-refund-per-offer index all say so — and a
+   * refund the helper refuses throws, which rolls the status, the lead and
+   * every other offer back with it. A MATCHED request is not removable: its
+   * accepted offer is a contract the customer already entered, and the
+   * lifecycle cancel endpoint is the door for that.
+   */
+  async rejectRequestInTransaction(
+    tx: Prisma.TransactionClient,
+    input: {
+      requestId: string;
+      rejectionReason: string;
+      moderationNote: string | null;
+      actorUserId: string | null;
+      now: Date;
+    },
+  ): Promise<{ cancelledOfferIds: string[]; refundedOfferIds: string[] }> {
+    const { requestId, now } = input;
+    const moved = await tx.serviceRequest.updateMany({
+      where: { id: requestId, status: { in: [...ServiceRequestsService.REMOVABLE_STATUSES] } },
+      data: {
+        status: ServiceRequestStatus.REJECTED,
+        rejectionReason: input.rejectionReason,
+        moderationNote: input.moderationNote,
+        moderatedAt: now,
+      },
+    });
+    if (moved.count !== 1) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'REQUEST_NOT_REMOVABLE',
+        message:
+          'Bu talep mevcut durumundan kaldırılamaz; eşleşmiş talep için iptal kullanın, kapanmış talep zaten yayında değil.',
+      });
+    }
+
+    // Otherwise an SLA clock would keep running against a business over a
+    // request that no longer exists to answer. Quiet for the many requests
+    // that have no lead.
+    await this.showcaseLeads.closeForRequest(
+      tx,
+      requestId,
+      ShowcaseLeadCloseReason.MODERATION_REJECTED,
+      now,
+    );
+
+    // Read before the update, inside the transaction: exactly the set this
+    // cascade closes and nothing else. A withdrawn, rejected or expired offer
+    // has already ended on its own terms and is left as it is.
+    const liveStatuses = [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED];
+    const live = await tx.offer.findMany({
+      where: { requestId, status: { in: liveStatuses } },
+      orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        providerId: true,
+        creditCost: true,
+        entitlementSource: true,
+        creditSpentTransactionId: true,
+        creditRefundedTransactionId: true,
+      },
+    });
+
+    const closed = await tx.offer.updateMany({
+      where: { id: { in: live.map((offer) => offer.id) }, status: { in: liveStatuses } },
+      data: { status: OfferStatus.CANCELLED, cancelledAt: now },
+    });
+    // Serializable isolation makes a mismatch impossible; the check is here so
+    // that "REJECTED with an offer still live" can never be committed even if
+    // that guarantee is ever weakened.
+    if (closed.count !== live.length) {
+      throw new ConflictException('An offer on this request changed while it was being removed');
+    }
+
+    const refundedOfferIds: string[] = [];
+    for (const offer of live) {
+      // Only a one-time credit has a ledger row to give back. A period package
+      // (quota / unlimited) and a vitrin lead spent none; they close and that
+      // is all. An offer already refunded — by the unviewed sweeper, or by an
+      // administrator's hand — keeps the refund it has.
+      const refundable =
+        offer.entitlementSource === OfferEntitlementSource.ONE_TIME_CREDIT &&
+        offer.creditSpentTransactionId !== null &&
+        offer.creditCost > 0 &&
+        offer.creditRefundedTransactionId === null;
+      if (!refundable) continue;
+
+      // In full, viewed or not: the policy's "did the customer look" question
+      // is about the customer's decision, and here nobody decided anything.
+      // Throws on any guard failure, which rolls the whole removal back.
+      await refundOfferCreditInTransaction(
+        tx,
+        { id: offer.id, providerId: offer.providerId, creditCost: offer.creditCost },
+        REQUEST_REMOVED_REFUND_REASON,
+        { enforceUnviewedPolicy: false, createdById: input.actorUserId },
+      );
+      refundedOfferIds.push(offer.id);
+    }
+
+    return { cancelledOfferIds: live.map((offer) => offer.id), refundedOfferIds };
+  }
+
+  /**
+   * Puts back a request a report took down.
+   *
+   * Only that request: `REJECTED`, and with at least one report decided as
+   * `REQUEST_REMOVED`. A request an operator refused by hand from the
+   * moderation screen is not reopened from here — the screen's own "Onayla"
+   * is the door for that, and a "reopen" that could re-approve any rejected
+   * request would be a second approval endpoint with a narrower name.
+   *
+   * The reopening itself is the ordinary approval, with everything it
+   * carries: the phone-verification gate, `approvedAt` refreshed (the fourteen
+   * days start again — "re-approval refreshes the window"), `rejectionReason`
+   * cleared, and the fan-out booked, deduped so a provider who was invited the
+   * first time is not invited twice. The offers the removal CANCELLED stay
+   * closed and the credits they gave back stay given: the reports are
+   * append-only and so is the ledger, and the queue derives "reopened" from
+   * the decision on the reports and the request's status, never from a flag.
+   */
+  async reopenAfterRemoval(id: string, moderationNote: string | null, user: AuthUser) {
+    const existing = await this.prisma.serviceRequest.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        reports: {
+          where: { resolution: ServiceRequestReportResolution.REQUEST_REMOVED },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!existing) {
+      throw new NotFoundException('Service request not found');
+    }
+    if (existing.status !== ServiceRequestStatus.REJECTED || existing.reports.length === 0) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'REQUEST_NOT_REOPENABLE',
+        message: 'Yalnızca bildirim sonucu kaldırılmış bir talep geri açılabilir.',
+      });
+    }
+
+    return this.updateServiceRequestStatus(
+      id,
+      { status: ServiceRequestStatus.APPROVED, moderationNote, rejectionReason: null },
+      user,
+    );
   }
 
   /**
@@ -1224,8 +1598,11 @@ function validateAnswers(
 function validateAnswerValue(question: ServiceRequestQuestion, value: unknown): Prisma.InputJsonValue {
   switch (question.type) {
     case ServiceRequestQuestionType.TEXT:
-    case ServiceRequestQuestionType.TEXTAREA:
-      return normalizeRequiredString(value, question.label);
+    case ServiceRequestQuestionType.TEXTAREA: {
+      const text = normalizeRequiredString(value, question.label);
+      assertNoContactDetails(`answers.${question.key}`, text);
+      return text;
+    }
     case ServiceRequestQuestionType.SELECT:
       return validateSelectValue(question, value);
     case ServiceRequestQuestionType.MULTI_SELECT:

@@ -72,8 +72,12 @@ export function offerNotWithdrawableException() {
  * - `WITHDRAWN` is the provider's own decision, taken through the provider
  *   endpoint. Forcing it here would both skip that endpoint's guards and file a
  *   withdrawal against a provider who never withdrew.
- * - `SUBMITTED`, `EXPIRED` and `CANCELLED` have no writer anywhere in the
- *   product. Moving an offer back to SUBMITTED would also strand a MATCHED
+ * - `CANCELLED` is written by exactly one place —
+ *   `ServiceRequestsService.rejectRequestInTransaction`, the cascade that takes
+ *   a request off the market, closes its live offers and returns their credits.
+ *   An admin writing it here would close an offer without the refund that
+ *   goes with it. `SUBMITTED` and `EXPIRED` still have no writer anywhere in
+ *   the product; moving an offer back to SUBMITTED would also strand a MATCHED
  *   request pointing at an offer that is no longer accepted.
  */
 export const ADMIN_OFFER_ACTIONS = {

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { MarketplacePublishSettingsController } from './marketplace-publish-settings.controller';
+import { MarketplacePublishSettingsService } from './marketplace-publish-settings.service';
 import { OperationsSettingsController } from './operations-settings.controller';
 import { OperationsSettingsService } from './operations-settings.service';
 import { RefundPolicyController } from './refund-policy.controller';
@@ -19,8 +21,23 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
  */
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [OperationsSettingsController, RefundPolicyController, SchedulerSettingsController],
-  providers: [OperationsSettingsService, SchedulerSettingsService, SchedulerRunRegistry],
-  exports: [OperationsSettingsService, SchedulerSettingsService, SchedulerRunRegistry],
+  controllers: [
+    OperationsSettingsController,
+    RefundPolicyController,
+    SchedulerSettingsController,
+    MarketplacePublishSettingsController,
+  ],
+  providers: [
+    OperationsSettingsService,
+    SchedulerSettingsService,
+    SchedulerRunRegistry,
+    MarketplacePublishSettingsService,
+  ],
+  exports: [
+    OperationsSettingsService,
+    SchedulerSettingsService,
+    SchedulerRunRegistry,
+    MarketplacePublishSettingsService,
+  ],
 })
 export class OperationsSettingsModule {}

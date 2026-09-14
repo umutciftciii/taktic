@@ -162,6 +162,15 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'showcase-placement-ending-7d',
   'showcase-placement-ending-3d',
   'showcase-placement-expired',
+  // A request report, in two messages that must stay two. The customer whose
+  // request was taken down is told a fixed reason and nothing else — not who
+  // reported, not how many did, not what the operator wrote. The support
+  // inbox is told that a report exists, which reason, and where to open it —
+  // never the reporter's free text, which stays in the panel like a ticket
+  // body does. A template that served both would be one edit away from
+  // mailing a reporter's words to the person they reported.
+  'request-removed',
+  'request-report-new-for-support',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -259,6 +268,10 @@ export function transactionalSubject(
       return withSuffix('Vitrin yayınınız 3 gün içinde bitiyor', text(data.cardTitle));
     case 'showcase-placement-expired':
       return withSuffix('Vitrin yayınınız sona erdi', text(data.cardTitle));
+    case 'request-removed':
+      return 'Talebiniz yayından kaldırıldı';
+    case 'request-report-new-for-support':
+      return withSuffix('Yeni talep bildirimi', text(data.requestNumber));
     // The ticket's own subject is the suffix on all five, because it is the one
     // thing that tells two tickets apart in a mailbox — and it is truncated,
     // because a customer may type two hundred characters into it and a subject
@@ -399,6 +412,10 @@ export function buildDocument(
       return showcasePlacementEnding(subject, fullName, data, 3);
     case 'showcase-placement-expired':
       return showcasePlacementExpired(subject, fullName, data);
+    case 'request-removed':
+      return requestRemoved(subject, fullName, data);
+    case 'request-report-new-for-support':
+      return requestReportNewForSupport(subject, fullName, data);
     case 'support-ticket-created':
       return supportTicketCreated(subject, fullName, data);
     case 'support-ticket-new-for-support':
@@ -598,17 +615,26 @@ function providerApplicationApproved(subject: string, fullName: string, data: Da
 // ───────────────────────────── 05 · request.created ──────────────────────────
 
 function requestReceived(subject: string, fullName: string, data: Data): EmailDocument {
+  // What the request is waiting for. Absent on every receipt sent before the
+  // field existed — and on a retry of one — which reads as the operator's
+  // review, exactly what those receipts said.
+  const awaitsVerification = data.nextStep === 'verify';
+
   return {
     subject,
-    preheader: 'Talebiniz onaylandığında uzmanlara iletilecek.',
+    preheader: awaitsVerification
+      ? 'Telefonunuzu doğrulayın, talebiniz uzmanlara iletilsin.'
+      : 'Talebiniz onaylandığında uzmanlara iletilecek.',
     audience: 'HİZMET ALAN',
     kicker: 'Talep alındı',
-    heading: 'Talebiniz inceleniyor',
+    heading: awaitsVerification ? 'Telefonunuzu doğrulayın' : 'Talebiniz inceleniyor',
     fullName,
     accountUrl: text(data.accountUrl),
     blocks: compact([
       paragraph(
-        'Talebinizi aldık. Yayına almadan önce kısa bir kontrolden geçiriyoruz.',
+        awaitsVerification
+          ? 'Telefon numaranızı doğruladığınızda talebiniz uygun hizmet verenlere anında iletilir.'
+          : 'Ekibimiz talebinizi inceledikten sonra uygun hizmet verenlere iletilir.',
       ),
       spacer(4),
       dataTable([
@@ -1518,6 +1544,106 @@ function showcaseLeadBreachedProvider(
         'Müşteri kararını verene kadar hâlâ teklif verebilirsiniz. Bu talep için teklif ' +
           'kredisi harcanmaz.',
       ),
+    ]),
+  };
+}
+
+// ────────────── 16b · request.removed → the customer who asked ───────────────
+
+/**
+ * A request a report took down, told to the customer who opened it.
+ *
+ * What it says is fixed: the reason is a label from a customer-facing
+ * dictionary chosen by the operator, and the sentence about the offers is a
+ * constant because it describes what the removal transaction really did —
+ * every live offer on the request is CANCELLED in the same commit, so none of
+ * them can be acted on. That sentence is true only on that path, which is why
+ * `sendRequestRemoved` is the template's one caller.
+ *
+ * What it must not say is the reason it is a separate template: no reporter,
+ * no report count, no operator's note, no reason *code*. The two links are the
+ * two things the customer can actually do next.
+ */
+function requestRemoved(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const categoryName = text(data.categoryName);
+
+  return {
+    subject,
+    preheader: 'Talebiniz platform kurallarına uygunluk incelemesi sonucunda yayından kaldırıldı.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Yayından kaldırıldı',
+    heading: 'Talebiniz yayından kaldırıldı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${removedRequestSubject(requestNumber, categoryName)} platform kurallarına uygunluk ` +
+          'incelemesi sonucunda yayından kaldırıldı.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', requestNumber),
+        row('Kategori', categoryName),
+        row('Gerekçe', text(data.reasonLabel)),
+      ]),
+      spacer(16),
+      paragraph(
+        'Talep artık hizmet verenlere gösterilmiyor. Mevcut teklifler artık işleme alınamaz.',
+      ),
+      spacer(8),
+      paragraph(
+        'Bilgileri düzelterek yeni bir talep açabilir ya da itiraz için destek ekibine ' +
+          'yazabilirsiniz.',
+      ),
+      spacer(24),
+      cta('Yeni talep oluştur', text(data.newRequestUrl), 'primary'),
+      spacer(12),
+      cta('Destek ekibine yaz', text(data.supportUrl), 'ghost'),
+    ]),
+  };
+}
+
+/** The opening subject, narrowed to whatever of the two facts is held. */
+function removedRequestSubject(requestNumber: string | null, categoryName: string | null): string {
+  return requestNumber && categoryName
+    ? `${categoryName} için açtığınız ${requestNumber} numaralı talep`
+    : requestNumber
+      ? `${requestNumber} numaralı talebiniz`
+      : categoryName
+        ? `${categoryName} için açtığınız talep`
+        : 'Talebiniz';
+}
+
+// ───────────────── 16c · request.reported → the support inbox ────────────────
+
+/**
+ * A provider reported a request; the support mailbox is told.
+ *
+ * Four fields and a link, on the NotificationLog principle the support-ticket
+ * notices follow: the reporter's free text is not in the message. It is read
+ * in the panel, where it sits next to the request it is about and behind the
+ * operator's own session, and nowhere else.
+ */
+function requestReportNewForSupport(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Bir hizmet veren bir talebi bildirdi.',
+    audience: 'DESTEK',
+    kicker: 'Yeni bildirim',
+    heading: 'Yeni talep bildirimi',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph('Bir hizmet veren, yayındaki bir talebi platform kurallarına aykırı olabileceği gerekçesiyle bildirdi.'),
+      spacer(4),
+      dataTable([
+        row('Talep', text(data.requestNumber)),
+        row('Kategori', text(data.categoryName)),
+        row('Bildirim nedeni', text(data.reasonLabel)),
+      ]),
+      spacer(24),
+      cta('Talebi panelde aç', text(data.adminRequestUrl), 'primary'),
     ]),
   };
 }

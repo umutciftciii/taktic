@@ -109,6 +109,16 @@ export default async function ProviderOfferDetailPage({
         </p>
       </header>
 
+      {/*
+        Only for an offer the platform closed. The sentence is the API's own —
+        it knows whether the credit came back; this screen does not decide that.
+      */}
+      {offer.closureNotice ? (
+        <div className="pdash-notice" role="status" data-testid="offer-closure-notice">
+          {offer.closureNotice}
+        </div>
+      ) : null}
+
       <div className="pdash-detail-grid">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           <section className="pdash-detail-card">
@@ -130,6 +140,12 @@ export default async function ProviderOfferDetailPage({
                 <dt>Gönderim</dt>
                 <dd>{formatDateTime(offer.submittedAt)}</dd>
               </div>
+              {offer.cancelledAt ? (
+                <div className="pdash-info-row">
+                  <dt>Kapatılma</dt>
+                  <dd>{formatDateTime(offer.cancelledAt)}</dd>
+                </div>
+              ) : null}
               <div className="pdash-info-row">
                 <dt>Talep kategorisi</dt>
                 <dd>{offer.request.category.name}</dd>

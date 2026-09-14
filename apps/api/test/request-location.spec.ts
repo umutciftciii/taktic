@@ -4,6 +4,7 @@ import {
   createApprovedRequest,
   createCategory,
   createTestApp,
+  resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -39,6 +40,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
+  // This suite posts to /service-requests multiple times per file; without
+  // this the shared IP throttle bucket runs out partway through it.
+  resetAuthThrottle(ctx.app);
 });
 
 /** A real neighbourhood of İstanbul / Kadıköy, read from the shipped dataset. */

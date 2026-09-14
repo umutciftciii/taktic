@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH } from '@taktic/shared';
+import { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH, detectContactDetails } from '@taktic/shared';
 import type { Question } from '../../lib/api';
+import { CONTACT_DETAILS_HINT } from '../../lib/contact-details-refusal';
 
 /**
  * Where the counter starts warning, in characters.
@@ -30,6 +31,11 @@ type DescriptionFieldProps = {
   onLengthChange?: (length: number) => void;
   /** A saved draft's description, when one is being restored. */
   defaultValue?: string;
+  /**
+   * The API's refusal of this field — contact details in the text — shown
+   * under it. Null until the server said so; the live hint below is not this.
+   */
+  error?: string | null;
 };
 
 /**
@@ -51,8 +57,16 @@ export function DescriptionField({
   helpText = 'Detay yazdıkça talebin kalite skoru yükselir ve daha isabetli teklif alırsınız.',
   onLengthChange,
   defaultValue,
+  error = null,
 }: DescriptionFieldProps) {
   const [length, setLength] = useState(defaultValue?.length ?? 0);
+  /*
+   * Whether the text currently looks like it carries a phone number, e-mail
+   * or link — the same detector the API runs, so the hint and the refusal
+   * agree. A hint only: it never blocks submit, because the server is the
+   * rule and the detector is an obstacle, not a guarantee.
+   */
+  const [contactHint, setContactHint] = useState(false);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
 
   /*
@@ -65,6 +79,7 @@ export function DescriptionField({
   useEffect(() => {
     if (fieldRef.current) {
       setLength(fieldRef.current.value.length);
+      setContactHint(detectContactDetails(fieldRef.current.value) !== null);
     }
   }, []);
 
@@ -91,14 +106,33 @@ export function DescriptionField({
           data-testid="request-description"
           maxLength={SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
           aria-describedby="request-description-help request-description-counter"
+          aria-invalid={error ? true : undefined}
           defaultValue={defaultValue}
           onChange={(event) => {
             setLength(event.target.value.length);
+            setContactHint(detectContactDetails(event.target.value) !== null);
             onLengthChange?.(event.target.value.length);
           }}
           placeholder={placeholder}
         />
       </label>
+      {error ? (
+        <p className="field-error" role="alert" data-testid="contact-details-error">
+          {error}
+        </p>
+      ) : null}
+      {/*
+        The live hint, while typing. A live region that is empty until there is
+        a detection — not a node in the field's `aria-describedby`, which would
+        be read on every focus whether hidden or not. Polite rather than an
+        alert: it appears mid-sentence and should not interrupt. It gives way to
+        the server's refusal above so the two never say the same thing twice.
+      */}
+      <p className="field-hint" role="status" data-testid="contact-details-hint">
+        {contactHint && !error
+          ? `${CONTACT_DETAILS_HINT}: telefon, e-posta ve bağlantılar teklif kabul edildiğinde otomatik paylaşılır.`
+          : null}
+      </p>
       {/*
         * The help text and the counter share one row — guidance on the left,
         * the count on the right — because they answer the same question about

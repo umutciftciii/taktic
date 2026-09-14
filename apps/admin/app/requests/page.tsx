@@ -203,7 +203,21 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
         </div>
         <div className="admin-toolbar-field">
           <label htmlFor="request-status">Durum</label>
-          <select id="request-status" name="status" defaultValue={status}>
+          {/*
+            With auto-publish on, a submitted request is approved the moment it
+            is submitted, so "Yeni Talep" stops being the moderation inbox. The
+            hint says what is left in it, before the operator filters on it.
+          */}
+          <p className="admin-hint" id="request-status-hint">
+            Otomatik yayın açıkken yeni talepler bu kuyruğa düşmez; burada yalnız eski talepler ve
+            doğrulama bekleyenler var.
+          </p>
+          <select
+            id="request-status"
+            name="status"
+            defaultValue={status}
+            aria-describedby="request-status-hint"
+          >
             {statusFilters.map((filter) => (
               <option key={filter.value} value={filter.value}>
                 {filter.label}
