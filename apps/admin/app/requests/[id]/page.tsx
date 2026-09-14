@@ -53,6 +53,7 @@ const REPORT_ERROR_MESSAGES: Record<string, string> = {
   notRemovable:
     'Talep kaldırılmadı. Talep eşleşmiş ya da zaten kapanmış durumda; eşleşmiş talep için "İptal et" kullanın.',
   noOpen: 'Karar kaydedilmedi. Bu talebin açık bildirimi kalmamış; sayfa yenilendi.',
+  reasonRequired: 'Talebi kaldırmak için gerekçe seçilmelidir.',
   notReopenable:
     'Talep geri açılmadı. Yalnız bir bildirim sonucu kaldırılmış ve hâlâ reddedilmiş durumdaki talep geri açılabilir.',
 };
@@ -89,14 +90,19 @@ export default async function RequestDetailPage({
   const request = await fetchOrNotFound(() =>
     apiFetch<ServiceRequest>(`/service-requests/${id}`),
   );
-  const [offers, reports] = await Promise.all([
+  const [offers, reportsResult] = await Promise.all([
     apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]),
     // Operator-only: a reporter's note is shown here and nowhere the customer
-    // or another provider can see.
-    apiFetch<RequestReport[]>(`/service-requests/${id}/reports`).catch(
-      () => [] as RequestReport[],
+    // or another provider can see. A failed load is kept apart from an empty
+    // list: "no reports" must not be said about a request whose reports could
+    // not be read, and no decision form may be offered on it.
+    apiFetch<RequestReport[]>(`/service-requests/${id}/reports`).then(
+      (reports) => ({ reports, failed: false as const }),
+      () => ({ reports: [] as RequestReport[], failed: true as const }),
     ),
   ]);
+  const reports = reportsResult.reports;
+  const reportsFailed = reportsResult.failed;
   // Audit only: this panel reports whether contact details were opened and
   // under which disclosure version. It renders no contact value — the operator
   // already has the customer and provider panels for that, and this feature
@@ -117,6 +123,7 @@ export default async function RequestDetailPage({
   // Derived, not stored: the request is down *because of a report* only when
   // it is REJECTED and some report's decision was the removal.
   const canReopen =
+    !reportsFailed &&
     request.status === 'REJECTED' &&
     reports.some((report) => report.resolution === 'REQUEST_REMOVED');
   const reportErrorMessage = reportError ? (REPORT_ERROR_MESSAGES[reportError] ?? null) : null;
@@ -572,7 +579,11 @@ export default async function RequestDetailPage({
             </div>
           ) : null}
 
-          {reports.length === 0 ? (
+          {reportsFailed ? (
+            <p className="status-action-error" role="alert" data-testid="report-load-error">
+              Bildirimler yüklenemedi. Sayfayı yenileyin.
+            </p>
+          ) : reports.length === 0 ? (
             <EmptyState
               title="Bildirim yok."
               description="Bu talep hakkında hizmet verenlerden bir bildirim gelmedi."
@@ -656,10 +667,10 @@ export default async function RequestDetailPage({
               <details className="status-reject-block report-remove-block" open>
                 <summary data-testid="report-remove-toggle">Talebi kaldır</summary>
                 <form action={resolveReportsAction} className="status-reject-form report-decision-form">
+                  <input type="hidden" name="id" value={request.id} />
+                  <input type="hidden" name="resolution" value="REQUEST_REMOVED" />
                   <fieldset className="report-remove-fieldset" disabled={!canRemove}>
                     <legend>Talebi kaldır</legend>
-                    <input type="hidden" name="id" value={request.id} />
-                    <input type="hidden" name="resolution" value="REQUEST_REMOVED" />
                     <label className="status-reject-field">
                       <span>Gerekçe (zorunlu; müşteriye gösterilecek metin yanında)</span>
                       <select name="removalReason" required defaultValue="">
@@ -687,7 +698,6 @@ export default async function RequestDetailPage({
                       disabled={!canRemove}
                       aria-disabled={!canRemove}
                       data-testid="report-remove"
-                      title={canRemove ? undefined : "Eşleşmiş talep için 'İptal et' kullanın."}
                     >
                       Talebi kaldır
                     </button>

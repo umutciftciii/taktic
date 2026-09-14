@@ -35,9 +35,6 @@ describe('the report queue row', () => {
 
   it('is the only row lit on the queue', () => {
     expect(activeHrefs('/requests/reports')).toEqual(['/requests/reports']);
-    expect(activeHrefs('/requests/reports?state=resolved'.split('?')[0]!)).toEqual([
-      '/requests/reports',
-    ]);
   });
 });
 

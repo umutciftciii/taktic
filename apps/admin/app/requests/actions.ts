@@ -86,6 +86,15 @@ export async function cancelRequestAction(formData: FormData) {
 export async function resolveReportsAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const resolution = readFormString(formData, 'resolution');
+  const removalReason =
+    resolution === 'REQUEST_REMOVED' ? readOptionalFormString(formData, 'removalReason') : null;
+
+  // The API refuses a removal without a reason with a 400, which would land
+  // on the generic error page. The browser's `required` normally catches this
+  // first; this is the guard for a submission that bypassed it.
+  if (resolution === 'REQUEST_REMOVED' && !removalReason) {
+    redirect(`/requests/${id}?reportError=reasonRequired`);
+  }
 
   try {
     await apiFetch<ServiceRequest>(`/service-requests/${id}/reports/resolve`, {
@@ -93,10 +102,7 @@ export async function resolveReportsAction(formData: FormData) {
       body: JSON.stringify({
         resolution,
         resolutionNote: readOptionalFormString(formData, 'resolutionNote'),
-        removalReason:
-          resolution === 'REQUEST_REMOVED'
-            ? readOptionalFormString(formData, 'removalReason')
-            : undefined,
+        removalReason: removalReason ?? undefined,
       }),
     });
   } catch (error) {
