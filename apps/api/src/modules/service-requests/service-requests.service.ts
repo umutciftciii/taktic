@@ -8,6 +8,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { detectContactDetails } from '../../common/contact-detection';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
@@ -51,6 +52,34 @@ export const ACCOUNT_CONTACT_INCOMPLETE_CODE = 'ACCOUNT_CONTACT_INCOMPLETE';
  * email belong to two different customers.
  */
 export const CUSTOMER_IDENTITY_CONFLICT_CODE = 'CUSTOMER_IDENTITY_CONFLICT';
+
+/**
+ * Returned when a free-text field — the description, the address note, or a
+ * TEXT/TEXTAREA answer — carries something that looks like a phone number,
+ * e-mail address, or link. Requests now publish to providers without an
+ * operator reading them first, so this is the only gate left against a
+ * customer routing a provider off-platform before an offer is even made;
+ * contact details are shared automatically once an offer is accepted.
+ */
+export const CONTACT_DETAILS_IN_TEXT_CODE = 'CONTACT_DETAILS_IN_TEXT';
+
+/** Refuses `value` if it carries a phone number, e-mail address, or link. */
+function assertNoContactDetails(field: string, value: string | null) {
+  if (!value) return;
+
+  const found = detectContactDetails(value);
+  if (found) {
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      code: CONTACT_DETAILS_IN_TEXT_CODE,
+      field,
+      kind: found.kind,
+      message:
+        'İletişim bilgisi (telefon, e-posta, bağlantı) paylaşılamaz; bilgiler teklif kabul edildiğinde otomatik paylaşılır.',
+    });
+  }
+}
 
 type QuestionOption = {
   key: string;
@@ -294,6 +323,14 @@ export class ServiceRequestsService {
       urgency: normalizeNullableString(dto.urgency),
       description: normalizeNullableString(dto.description),
     };
+
+    // Refused before anything else touches these values: a request that
+    // publishes straight to providers must not carry a way to reach the
+    // customer off-platform in the two free-text fields it controls
+    // directly. The vitrin lead path goes through this same method, so it is
+    // covered without a second check.
+    assertNoContactDetails('description', requestData.description);
+    assertNoContactDetails('addressNote', requestData.addressNote);
 
     // Answers are validated after the request fields are normalised, because a
     // system-bound question is a rule *about* those fields: "this category
@@ -1518,8 +1555,11 @@ function validateAnswers(
 function validateAnswerValue(question: ServiceRequestQuestion, value: unknown): Prisma.InputJsonValue {
   switch (question.type) {
     case ServiceRequestQuestionType.TEXT:
-    case ServiceRequestQuestionType.TEXTAREA:
-      return normalizeRequiredString(value, question.label);
+    case ServiceRequestQuestionType.TEXTAREA: {
+      const text = normalizeRequiredString(value, question.label);
+      assertNoContactDetails(`answers.${question.key}`, text);
+      return text;
+    }
     case ServiceRequestQuestionType.SELECT:
       return validateSelectValue(question, value);
     case ServiceRequestQuestionType.MULTI_SELECT:
