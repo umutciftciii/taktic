@@ -381,6 +381,81 @@ describe('removing a request closes offers and refunds credits', () => {
   });
 });
 
+describe('a removed request is closed on every door', () => {
+  /**
+   * Removal is not only a status flip: the request has to stop existing for
+   * the providers who could still see it, the closed offer has to refuse both
+   * sides, and no conversation can be opened on it. One case, every door.
+   */
+  it('provider view, new offer, customer accept, provider withdraw and messaging all refuse', async () => {
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const customerCookie = await loginAs(ctx.prisma, customer.id);
+    const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: COST });
+    const req = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      approvedAt: new Date(),
+      customerId: customer.id,
+    });
+    const { provider, offerId, cookie } = await providerWithOffer(category.id, req.id);
+
+    await rejectAsAdmin(req.id, 200);
+    const offer = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: offerId } });
+    expect(offer.status).toBe(OfferStatus.CANCELLED);
+
+    // The provider who offered no longer finds the request.
+    await request(ctx.server)
+      .get(`/providers/${provider.id}/requests/${req.id}`)
+      .set('Cookie', cookie)
+      .expect(404);
+
+    // A fresh matching provider cannot offer on it either.
+    const lateUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const late = await createDiscoverableProvider(ctx.prisma, {
+      categoryId: category.id,
+      userId: lateUser.id,
+    });
+    await grantCredits(ctx.prisma, late.id, STARTING_CREDITS);
+    const lateCookie = await loginAs(ctx.prisma, lateUser.id);
+    await request(ctx.server)
+      .post(`/providers/${late.id}/requests/${req.id}/offers`)
+      .set('Cookie', lateCookie)
+      .send(offerPayload({ expectedCreditCost: COST }))
+      .expect(404);
+    expect(await currentCreditBalance(ctx.prisma, late.id)).toBe(STARTING_CREDITS);
+
+    // The owning customer cannot accept the cancelled offer.
+    const accept = await request(ctx.server)
+      .post(`/service-requests/${req.id}/offers/${offerId}/action`)
+      .set('Cookie', customerCookie)
+      .send({ action: 'ACCEPT', contactDisclosureAccepted: true })
+      .expect(400);
+    expect(accept.body.message).toBe('This offer cannot be acted on');
+
+    // The provider cannot withdraw it either: it is already closed.
+    const withdraw = await request(ctx.server)
+      .post(`/providers/${provider.id}/offers/${offerId}/withdraw`)
+      .set('Cookie', cookie)
+      .expect(409);
+    expect(withdraw.body.code).toBe('OFFER_NOT_WITHDRAWABLE');
+
+    // No conversation can be opened on a request that was never matched.
+    await request(ctx.server)
+      .post('/messages/threads/resolve')
+      .set('Cookie', customerCookie)
+      .send({ requestId: req.id })
+      .expect(404);
+    await request(ctx.server)
+      .post('/messages/threads/resolve')
+      .set('Cookie', cookie)
+      .send({ requestId: req.id })
+      .expect(404);
+
+    const after = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: offerId } });
+    expect(after.status).toBe(OfferStatus.CANCELLED);
+    expect(await ctx.prisma.offer.count({ where: { requestId: req.id } })).toBe(1);
+  });
+});
+
 describe('removing a request through a report resolution', () => {
   it('viewed and unviewed offers: CANCELLED, one refund each, the sweeper pays nothing more', async () => {
     const { category, req } = await scenario();
