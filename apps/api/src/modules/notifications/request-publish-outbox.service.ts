@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
@@ -35,8 +35,18 @@ const DEFAULT_DELIVERY_LIMIT = 200;
 export type RequestPublishOutboxResult = IntentDeliveryResult;
 
 @Injectable()
-export class RequestPublishOutbox {
+export class RequestPublishOutbox implements OnModuleDestroy {
   private readonly logger = new Logger(RequestPublishOutbox.name);
+
+  /**
+   * The sweep currently running in this process, if any. Sweeps are
+   * serialised per process so that awaiting `deliverPending` means every
+   * intent enqueued before the call has been attempted — by the sweep that
+   * was already running or by the one this call starts after it. Across
+   * processes the row claim is the guard; this is only about the answer a
+   * caller in *this* process can rely on.
+   */
+  private inFlight: Promise<RequestPublishOutboxResult> | null = null;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -135,7 +145,14 @@ export class RequestPublishOutbox {
    * earlier one's. Never throws; see `deliverPendingIntents`.
    */
   async deliverPending(options: { limit?: number } = {}): Promise<RequestPublishOutboxResult> {
-    return deliverPendingIntents({
+    // Wait out whatever sweep is running, then run one of our own: a row the
+    // earlier sweep scanned before this caller's enqueue is picked up here.
+    while (this.inFlight) {
+      // Another sweep's failure is its own to report, not this caller's.
+      await this.inFlight.catch(() => undefined);
+    }
+
+    const sweep = deliverPendingIntents({
       prisma: this.prisma,
       dispatcher: this.dispatcher,
       mail: this.mail,
@@ -143,7 +160,27 @@ export class RequestPublishOutbox {
       templates: REQUEST_PUBLISH_TEMPLATES,
       limit: options.limit ?? DEFAULT_DELIVERY_LIMIT,
       label: 'Request publish',
+    }).finally(() => {
+      if (this.inFlight === sweep) {
+        this.inFlight = null;
+      }
     });
+    this.inFlight = sweep;
+
+    return sweep;
+  }
+
+  /**
+   * A sweep `deliverSoon` started is nobody's to await — except on the way
+   * down. Waiting here lets a send that is already talking to the transport
+   * finish before the database client goes; a sweep cut off mid-way is still
+   * safe (the claim is recorded, the lease expires, the next sweep retries),
+   * it is just a slower path than finishing.
+   */
+  async onModuleDestroy(): Promise<void> {
+    while (this.inFlight) {
+      await this.inFlight.catch(() => undefined);
+    }
   }
 
   /**

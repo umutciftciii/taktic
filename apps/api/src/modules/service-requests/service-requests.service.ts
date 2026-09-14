@@ -19,7 +19,9 @@ import {
 } from '../contact-sharing/contact-sharing.config';
 import { CategoriesService, RoutingResolution } from '../categories/categories.service';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
+import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
+import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
@@ -151,6 +153,23 @@ const nonModerationStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.EXPIRED,
 ]);
 
+/**
+ * Whether a moderation save is the one that takes a marketplace request live:
+ * a move *into* APPROVED (not a re-save of it) on a request no single vitrin
+ * business holds.
+ */
+function isPublishingTransition(
+  from: ServiceRequestStatus,
+  to: ServiceRequestStatus,
+  directShowcaseProviderId: string | null,
+): boolean {
+  return (
+    to === ServiceRequestStatus.APPROVED &&
+    from !== ServiceRequestStatus.APPROVED &&
+    directShowcaseProviderId === null
+  );
+}
+
 /** A request in one of these states has finished; nothing may move it again. */
 const terminalStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.COMPLETED,
@@ -173,6 +192,9 @@ export class ServiceRequestsService {
     @Inject(ShowcaseLeadLifecycleService)
     private readonly showcaseLeads: ShowcaseLeadLifecycleService,
     @Inject(RequestDraftsService) private readonly drafts: RequestDraftsService,
+    @Inject(MarketplacePublishSettingsService)
+    private readonly publishSettings: MarketplacePublishSettingsService,
+    @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
   ) {}
 
   /**
@@ -288,6 +310,25 @@ export class ServiceRequestsService {
       answers,
     });
 
+    // Read once per creation, outside the transaction: the switch is an
+    // operations decision that changes rarely, and a request that raced a
+    // toggle lands on whichever side it read — both sides are valid states.
+    //
+    // Three things have to agree for a request to be born live. The switch is
+    // on; the request is a marketplace one (a vitrin lead is reserved for a
+    // single business and is published by its own flow, never here); and the
+    // number is either not gated or already proven. A gated, unproven request
+    // waits at SUBMITTED for `PhoneVerificationService.verifyCode`, which
+    // publishes it in the same transaction that stamps the proof — that is
+    // the one case whose receipt tells the customer to verify rather than to
+    // wait for an operator.
+    const autoPublish =
+      (await this.publishSettings.isAutoPublishEnabled()) && !context.directShowcaseProviderId;
+    const awaitsVerification =
+      autoPublish && isPhoneVerificationRequired() && !context.phoneVerifiedAt;
+    const publishAtCreate = autoPublish && !awaitsVerification;
+    const now = new Date();
+
     const request = await runSerializable(
       this.prisma,
       async (tx) => {
@@ -307,6 +348,12 @@ export class ServiceRequestsService {
             routing.entryCategory.id === category.id ? null : routing.entryCategory.id,
           customerId,
           requestNumber,
+          // Born live when the operations switch says so. One INSERT, one state:
+          // approvedAt is the same instant as submittedAt, and moderatedAt stays
+          // NULL because no person approved this — that pair is how a row says
+          // "auto-published" without a column for it.
+          submittedAt: now,
+          ...(publishAtCreate ? { status: ServiceRequestStatus.APPROVED, approvedAt: now } : {}),
           ...requestData,
           ...disclosure,
           // The visibility gate. NULL on every request from the public form,
@@ -366,6 +413,13 @@ export class ServiceRequestsService {
         await context.onCreated(tx, { id: created.id, customerId: created.customerId });
       }
 
+      // The fan-out this publication owes, written down in the same
+      // transaction: "the request is live" and "its notifications are owed"
+      // commit together or not at all. Nothing is sent here.
+      if (publishAtCreate) {
+        await this.publishOutbox.enqueue(tx, created.id, now);
+      }
+
       return created;
       },
       { label: 'serviceRequests.create' },
@@ -388,13 +442,55 @@ export class ServiceRequestsService {
       }
     }
 
-    // The receipt for the request the visitor just submitted. After the commit
-    // and best-effort, for the same reason the activation link above is: the
-    // request exists, and a mail problem must not surface as a failed
-    // submission.
-    await this.notify(() => this.mail.sendRequestReceived(request.id), request.id);
+    if (request.status === ServiceRequestStatus.APPROVED) {
+      // Live already: the customer is told "yayında", not "alındı". The
+      // intents are committed; delivery is fired and not awaited, so the
+      // response never waits on a mail provider.
+      this.publishOutbox.deliverSoon();
+    } else {
+      // The receipt for the request the visitor just submitted. After the
+      // commit and best-effort, for the same reason the activation link above
+      // is: the request exists, and a mail problem must not surface as a
+      // failed submission. `nextStep` tells the customer what the request is
+      // waiting for — their own verification, or an operator.
+      await this.notify(
+        () =>
+          this.mail.sendRequestReceived(request.id, {
+            nextStep: awaitsVerification ? 'verify' : 'review',
+          }),
+        request.id,
+      );
+    }
 
     return withQualityLabel(request);
+  }
+
+  /**
+   * Moves a waiting marketplace request to APPROVED and books its fan-out, in
+   * the caller's transaction. Conditional on SUBMITTED and on an open gate, so
+   * two callers cannot both publish and a vitrin lead cannot be published by
+   * anything but its own flow. Returns whether this call was the one.
+   */
+  async publishRequestInTransaction(
+    tx: Prisma.TransactionClient,
+    requestId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const moved = await tx.serviceRequest.updateMany({
+      where: {
+        id: requestId,
+        status: ServiceRequestStatus.SUBMITTED,
+        directShowcaseProviderId: null,
+      },
+      data: { status: ServiceRequestStatus.APPROVED, approvedAt: now },
+    });
+
+    if (moved.count !== 1) {
+      return false;
+    }
+
+    await this.publishOutbox.enqueue(tx, requestId, now);
+    return true;
   }
 
   /**
@@ -681,32 +777,37 @@ export class ServiceRequestsService {
           );
         }
 
+        /*
+         * Only a real transition owes anybody a message. Re-saving an
+         * already-approved request from the moderation screen rewrites
+         * `approvedAt` and nothing else: the customer is not told twice that
+         * their request went live, and no provider is invited to it a second
+         * time. The dedupe key carries `approvedAt` as a second, database-level
+         * guard against the same thing.
+         *
+         * **A direct vitrin lead is never fanned out**, and the gate is the
+         * whole of the test. A request reserved for one business must not be
+         * mailed to every business that matches it — that is the entire
+         * promise a placement sells. Note what the condition reads: the
+         * *gate*, not "did this come from a card". A released lead has a
+         * cleared gate by the time it is approved, and it fans out exactly
+         * like any other request, which is correct: by then it is one.
+         *
+         * Written down here, inside the approval's own transaction, so the
+         * intents and the status commit as one fact; delivered after the
+         * commit, below.
+         */
+        if (isPublishingTransition(existing.status, dto.status, updated.directShowcaseProviderId)) {
+          await this.publishOutbox.enqueue(tx, id, now);
+        }
+
         return updated;
       },
       { label: 'serviceRequests.updateStatus' },
     );
 
-    /*
-     * Only a real transition mails anybody. Re-saving an already-approved
-     * request from the moderation screen rewrites `approvedAt` and nothing
-     * else: the customer is not told twice that their request went live, and no
-     * provider is invited to it a second time. The dedupe key carries
-     * `approvedAt` as a second, database-level guard against the same thing.
-     *
-     * **A direct vitrin lead is never fanned out**, and the gate is the whole
-     * of the test. A request reserved for one business must not be mailed to
-     * every business that matches it — that is the entire promise a placement
-     * sells. Note what the condition reads: the *gate*, not "did this come from
-     * a card". A released lead has a cleared gate by the time it is approved,
-     * and it fans out exactly like any other request, which is correct: by then
-     * it is one.
-     */
-    if (
-      dto.status === ServiceRequestStatus.APPROVED &&
-      existing.status !== ServiceRequestStatus.APPROVED &&
-      request.directShowcaseProviderId === null
-    ) {
-      await this.notify(() => this.mail.fanOutApprovedRequest(request.id, now), request.id);
+    if (isPublishingTransition(existing.status, dto.status, request.directShowcaseProviderId)) {
+      this.publishOutbox.deliverSoon();
     }
 
     return withQualityLabel(request);

@@ -204,7 +204,16 @@ export class TransactionalMailService {
 
   // ────────────────────────────── 05 · request.created ───────────────────────
 
-  async sendRequestReceived(requestId: string) {
+  /**
+   * `nextStep` is what the request is waiting for once the receipt is read:
+   * an operator's review (the default, and what every receipt said before
+   * auto-publish existed) or the customer's own telephone verification, after
+   * which the request goes live with nobody in between.
+   */
+  async sendRequestReceived(
+    requestId: string,
+    options: { nextStep: RequestReceivedNextStep } = { nextStep: 'review' },
+  ) {
     const request = await loadRequest(this.prisma, requestId);
     if (!request?.customerEmail) {
       return;
@@ -213,7 +222,7 @@ export class TransactionalMailService {
     await this.send(
       'request-received',
       request.customerEmail,
-      requestReceivedData(request),
+      { ...requestReceivedData(request), nextStep: options.nextStep },
       {
         requestId: request.id,
         userId: request.customerId,
@@ -223,77 +232,11 @@ export class TransactionalMailService {
   }
 
   // ───────────── 06 + 09 · request.approved → customer, then providers ───────
-
-  /**
-   * The approval fan-out, both halves.
-   *
-   * The audience is resolved first, because the customer's own message reports
-   * how many providers the request reached and that number has to be the real
-   * one — the same list the invitations then go to, matched by the same rules
-   * the discovery screen uses.
-   *
-   * The invitations are sent one at a time, outside any transaction, each with
-   * its own dedupe key. That is what makes the whole operation safe to re-run:
-   * a crash halfway through leaves the providers already mailed claimed, and a
-   * second run reaches only the rest. It is also why there is no batching — a
-   * thousand recipients is a thousand independent sends, not one long
-   * transaction holding locks while a mail provider answers.
-   */
-  async fanOutApprovedRequest(requestId: string, approvedAt: Date) {
-    const request = await loadRequest(this.prisma, requestId);
-    if (!request || request.status !== ServiceRequestStatus.APPROVED) {
-      return { reached: 0, notified: 0 };
-    }
-
-    const audience = await findMatchingProviders(this.prisma, request);
-
-    if (request.customerEmail) {
-      await this.send(
-        'request-published',
-        request.customerEmail,
-        requestPublishedData(request, audience.length),
-        {
-          requestId: request.id,
-          userId: request.customerId,
-          dedupeKey: `request-published:${request.id}:${approvedAt.toISOString()}`,
-        },
-      );
-    }
-
-    let notified = 0;
-
-    for (const provider of audience) {
-      if (!provider.recipient) {
-        continue;
-      }
-
-      const outcome = await this.send(
-        'request-available',
-        provider.recipient,
-        requestAvailableData(request, provider, await creditBalance(this.prisma, provider.id)),
-        {
-          requestId: request.id,
-          providerId: provider.id,
-          userId: provider.userId,
-          dedupeKey: `request-available:${request.id}:${provider.id}`,
-        },
-      );
-
-      if (outcome?.status === NotificationStatus.SENT) {
-        notified += 1;
-      }
-    }
-
-    // Counts only, and always — an operator reading this can tell a fan-out
-    // that reached nobody from one whose transport was down, without either
-    // being inferred from silence. Nothing is capped, so `reached` is the whole
-    // audience rather than a page of it.
-    this.logger.log(
-      `request-available fan-out for ${request.id}: reached=${audience.length} notified=${notified}`,
-    );
-
-    return { reached: audience.length, notified };
-  }
+  //
+  // The approval fan-out is no longer sent from here. It is booked as intents
+  // by `RequestPublishOutbox.enqueue` inside the transaction that publishes
+  // the request, and each intent is rebuilt by `composeRetryMessage` below
+  // (`request-published`, `request-available`) when the outbox delivers it.
 
   // ─────────────────────────────── 07 · offer.created ────────────────────────
 
@@ -671,7 +614,7 @@ export class TransactionalMailService {
    * A direct lead — to the one business it was addressed to, and to nobody
    * else.
    *
-   * This is the method `fanOutApprovedRequest` is deliberately **not** for. A
+   * This is the message the approval fan-out is deliberately **not** for. A
    * placement's whole promise is that the lead it produces is not shared out,
    * so there is no audience to resolve here and no loop: one recipient, decided
    * by the card's ownership.
@@ -1029,7 +972,11 @@ export class TransactionalMailService {
 
       case 'request-published': {
         const request = await loadRequest(this.prisma, source.ids[0]);
-        if (!request?.customerEmail || request.status !== ServiceRequestStatus.APPROVED) {
+        // Trimmed, as the outbox trimmed it when it masked the recipient: the
+        // delivery compares the rebuilt address's mask against the recorded
+        // one, and a stray space would make the intent "unavailable".
+        const customerEmail = request?.customerEmail?.trim();
+        if (!request || !customerEmail || request.status !== ServiceRequestStatus.APPROVED) {
           return null;
         }
 
@@ -1037,7 +984,7 @@ export class TransactionalMailService {
         // message has to be one this platform can stand behind at the moment
         // it is sent.
         const audience = await findMatchingProviders(this.prisma, request);
-        return { to: request.customerEmail, data: requestPublishedData(request, audience.length) };
+        return { to: customerEmail, data: requestPublishedData(request, audience.length) };
       }
 
       case 'request-available': {
@@ -2046,6 +1993,9 @@ function supportStatusChangeData(change: {
 
 
 type MailData = ComposedMail['data'];
+
+/** What a freshly received request waits for next; see `sendRequestReceived`. */
+export type RequestReceivedNextStep = 'review' | 'verify';
 
 type LoadedProvider = NonNullable<Awaited<ReturnType<typeof loadProvider>>>;
 type LoadedRequest = NonNullable<Awaited<ReturnType<typeof loadRequest>>>;

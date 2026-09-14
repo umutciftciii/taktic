@@ -6,7 +6,7 @@ import {
 } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { TransactionalMailService } from '../src/modules/notifications/transactional-mail.service';
+import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import {
   createApprovedRequest,
   createCategory,
@@ -629,13 +629,23 @@ describe('a draft binding is not supply', () => {
   it('keeps the provider out of the approval fan-out until the category is released', async () => {
     const adminCookie = await cookieFor(UserRole.SUPER_ADMIN);
     const { draft, serviceRequest } = await draftWithRequest();
-    const mail = ctx.app.get(TransactionalMailService);
+    const outbox = ctx.app.get(RequestPublishOutbox);
+    // The fan-out as production runs it: the audience is resolved when the
+    // intents are booked, and `reached` is that audience.
+    const fanOut = async () => {
+      const approvedAt = new Date();
+      const booked = await ctx.prisma.$transaction((tx) =>
+        outbox.enqueue(tx, serviceRequest.id, approvedAt),
+      );
+      await outbox.deliverPending();
+      return booked;
+    };
 
     // A draft category's requests are the operator's own smoke tests. Mailing
     // one out would hand a provider a request they cannot open — and put an
     // unreleased service's name in their inbox, which is the leak that survives
     // every screen-level check because it is not on a screen.
-    const before = await mail.fanOutApprovedRequest(serviceRequest.id, new Date());
+    const before = await fanOut();
     expect(before.reached).toBe(0);
     // Scoped to the provider half of the fan-out. The customer's own
     // "your request is live" message names the category and always has — they
@@ -649,7 +659,7 @@ describe('a draft binding is not supply', () => {
       .send({ status: ServiceCategoryStatus.ACTIVE })
       .expect(200);
 
-    const after = await mail.fanOutApprovedRequest(serviceRequest.id, new Date());
+    const after = await fanOut();
     expect(after.reached).toBe(1);
   });
 

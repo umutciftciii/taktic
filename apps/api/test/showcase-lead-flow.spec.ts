@@ -1,6 +1,7 @@
 import { OfferEntitlementSource, ServiceCategoryKind, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import {
   createApprovedShowcaseCard,
   createCategory,
@@ -658,7 +659,9 @@ describe('answering a direct lead', () => {
     expect(answered.status).toBe('ANSWERED');
     expect(answered.respondedOfferId).toBe(offer.id);
 
-    // And the approval fans out to nobody.
+    // And the approval fans out to nobody — checked after a sweep, so an
+    // intent that should not exist would have had its chance to be sent.
+    await ctx.app.get(RequestPublishOutbox).deliverPending();
     expect(
       ctx.notifications.sent.filter((message) => message.template === 'request-available'),
     ).toHaveLength(0);

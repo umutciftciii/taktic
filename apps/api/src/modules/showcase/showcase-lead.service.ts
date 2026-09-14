@@ -67,7 +67,8 @@ export type LeadRequestMeta = {
  * It is **not** a marketplace request with a preference attached. Four things
  * that happen to every ordinary approved request do not happen here:
  *
- * - no matching, and no fan-out — `fanOutApprovedRequest` is never called;
+ * - no matching, and no fan-out — `RequestPublishOutbox.enqueue` is never
+ *   reached, and refuses a gated request if it ever were;
  * - no other provider can see it, at any point, until the customer says so;
  * - no offer credit is charged to the card's owner, because they already paid
  *   for the placement it arrived through;
@@ -282,8 +283,9 @@ export class ShowcaseLeadService {
     /*
      * One message, to one business.
      *
-     * `fanOutApprovedRequest` is deliberately not called and never will be for
-     * a request whose gate is set: this lead is addressed to one card owner,
+     * The approval fan-out (`RequestPublishOutbox`) is deliberately not booked
+     * and never will be for a request whose gate is set: this lead is
+     * addressed to one card owner,
      * and the whole promise of a placement is that it is not shared out.
      *
      * After the commit and best-effort, exactly as every other notification in
@@ -358,9 +360,9 @@ export class ShowcaseLeadService {
    * in the **ordinary moderation queue**. That is the answer to the one real
    * cost of skipping moderation on the way in: unread text reached one business
    * that chose to advertise, and it does not reach the market until an operator
-   * has read it. When it is approved, `fanOutApprovedRequest` runs exactly as it
-   * does for any other request — there is no special case, because by then there
-   * is nothing special about the request.
+   * has read it. When it is approved, the publish outbox fans it out exactly as
+   * it does for any other request — there is no special case, because by then
+   * there is nothing special about the request.
    *
    * `KEEP_CLOSED` cancels the request through the existing cancellation path.
    * The gate stays set, which is deliberate: the record of who this was

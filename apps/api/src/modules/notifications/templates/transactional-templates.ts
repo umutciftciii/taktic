@@ -598,17 +598,26 @@ function providerApplicationApproved(subject: string, fullName: string, data: Da
 // ───────────────────────────── 05 · request.created ──────────────────────────
 
 function requestReceived(subject: string, fullName: string, data: Data): EmailDocument {
+  // What the request is waiting for. Absent on every receipt sent before the
+  // field existed — and on a retry of one — which reads as the operator's
+  // review, exactly what those receipts said.
+  const awaitsVerification = data.nextStep === 'verify';
+
   return {
     subject,
-    preheader: 'Talebiniz onaylandığında uzmanlara iletilecek.',
+    preheader: awaitsVerification
+      ? 'Telefonunuzu doğrulayın, talebiniz uzmanlara iletilsin.'
+      : 'Talebiniz onaylandığında uzmanlara iletilecek.',
     audience: 'HİZMET ALAN',
     kicker: 'Talep alındı',
-    heading: 'Talebiniz inceleniyor',
+    heading: awaitsVerification ? 'Telefonunuzu doğrulayın' : 'Talebiniz inceleniyor',
     fullName,
     accountUrl: text(data.accountUrl),
     blocks: compact([
       paragraph(
-        'Talebinizi aldık. Yayına almadan önce kısa bir kontrolden geçiriyoruz.',
+        awaitsVerification
+          ? 'Telefon numaranızı doğruladığınızda talebiniz uygun hizmet verenlere anında iletilir.'
+          : 'Ekibimiz talebinizi inceledikten sonra uygun hizmet verenlere iletilir.',
       ),
       spacer(4),
       dataTable([
