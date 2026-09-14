@@ -1105,6 +1105,14 @@ export class ProvidersService {
           },
           take: 1,
         },
+        // This provider's own report on the request, if any — never another
+        // provider's. A report never hides the request or changes its
+        // pricing; it only surfaces as `myReport` in the detail below.
+        reports: {
+          where: { reporterProviderId: providerId },
+          select: { reason: true, createdAt: true },
+          take: 1,
+        },
       },
     });
 
@@ -1736,8 +1744,12 @@ export class ProvidersService {
    *
    * Returns the request's gate so the offer path can hand it to the resolver
    * without reading the row twice.
+   *
+   * Also the report path's gate: `RequestReportsService.createForProvider`
+   * calls this directly so a report can never confirm the existence of a
+   * request the caller was not shown.
    */
-  private async ensureProviderCanSeeRequest(providerId: string, requestId: string) {
+  async ensureProviderCanSeeRequest(providerId: string, requestId: string) {
     const provider = await this.getApprovedProviderForDiscovery(providerId);
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
@@ -2436,6 +2448,11 @@ function toProviderRequestDetail(
         };
         take: 1;
       };
+      reports: {
+        where: { reporterProviderId: string };
+        select: { reason: true; createdAt: true };
+        take: 1;
+      };
     };
   }>,
   providerCreditBalance: number,
@@ -2462,6 +2479,7 @@ function toProviderRequestDetail(
     createdAt: request.createdAt,
     existingOffer: request.offers[0] ? withRefundEligibility(request.offers[0]) : null,
     providerCreditBalance,
+    myReport: request.reports[0] ?? null,
     answers: request.answers.map((answer) => ({
       id: answer.id,
       questionKey: answer.questionKey,
