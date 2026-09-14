@@ -205,6 +205,23 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     creditsUrl: `${WEB}/providers/p1/credits`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'request-removed': {
+    fullName: 'Deniz Yılmaz',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    reasonLabel: 'Talep metninde iletişim bilgisi paylaşımı',
+    supportUrl: `${WEB}/destek`,
+    newRequestUrl: `${WEB}/categories`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'request-report-new-for-support': {
+    fullName: 'Destek Ekibi',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    reasonLabel: 'İletişim bilgisi içeriyor',
+    adminRequestUrl: `${ADMIN}/requests/r1`,
+    accountUrl: null,
+  },
   'support-ticket-created': {
     fullName: 'Deniz Yılmaz',
     ticketReference: 'tkt_c1a2b3',
@@ -498,8 +515,9 @@ describe('transactional e-mail rendering', () => {
   it('covers every template the port accepts', () => {
     // The literal count is the point of this line: a template added without a
     // payload here would still render, silently, with every field missing.
-    // Twenty-eight before vitrin's four, then the seven of the run's life.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(39);
+    // Twenty-eight before vitrin's four, then the seven of the run's life,
+    // then the two of a request report.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(41);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -731,6 +749,8 @@ describe('transactional e-mail rendering', () => {
       'request-expired-customer': 'Talebinizin süresi doldu — #T-90412',
       'request-expired-provider': 'Teklif verdiğiniz talebin süresi doldu — #T-90412',
       'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
+      'request-removed': 'Talebiniz yayından kaldırıldı',
+      'request-report-new-for-support': 'Yeni talep bildirimi — #T-90412',
       'support-ticket-created': 'Destek talebiniz alındı — Faturam ulaşmadı',
       'support-ticket-new-for-support': 'Yeni destek talebi — Faturam ulaşmadı',
       'support-ticket-customer-reply': 'Destek talebine müşteri yanıtı — Faturam ulaşmadı',
@@ -754,6 +774,31 @@ describe('transactional e-mail rendering', () => {
         'Vitrin yayınınızın bitmesine 7 gün kaldı — Kombi bakım paketi',
       'showcase-placement-ending-3d': 'Vitrin yayınınız 3 gün içinde bitiyor — Kombi bakım paketi',
       'showcase-placement-expired': 'Vitrin yayınınız sona erdi — Kombi bakım paketi',
+    });
+  });
+
+  describe('a request report, to the customer and to the support inbox', () => {
+    it('tells the customer the fixed reason and that the offers are closed, and nothing about who reported', () => {
+      const { html, text } = render(messageFor('request-removed'));
+
+      expect(html).toContain('Talebiniz yayından kaldırıldı');
+      expect(html).toContain('Talep metninde iletişim bilgisi paylaşımı');
+      // The sentence is the cascade's real behaviour, carried as a constant.
+      expect(text).toContain('Mevcut teklifler artık işleme alınamaz.');
+      expect(html).toContain(`${WEB}/destek`);
+      expect(html).toContain(`${WEB}/categories`);
+      // Nothing says a report happened, let alone who filed it.
+      expect(text).not.toMatch(/bildiren|bildirdi|bildirim sonucu|işletme|rapor/i);
+    });
+
+    it('tells the support inbox the request, the category and the reason, and links the panel', () => {
+      const { html, text } = render(messageFor('request-report-new-for-support'));
+
+      expect(html).toContain('Yeni talep bildirimi');
+      expect(html).toContain('İletişim bilgisi içeriyor');
+      expect(html).toContain(`${ADMIN}/requests/r1`);
+      // No note field is read: the reporter's free text stays in the panel.
+      expect(text).not.toMatch(/Not:|Açıklama/);
     });
   });
 

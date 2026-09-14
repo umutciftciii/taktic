@@ -9,7 +9,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
-import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -955,6 +955,55 @@ export class ServiceRequestsService {
     }
 
     return { cancelledOfferIds: live.map((offer) => offer.id), refundedOfferIds };
+  }
+
+  /**
+   * Puts back a request a report took down.
+   *
+   * Only that request: `REJECTED`, and with at least one report decided as
+   * `REQUEST_REMOVED`. A request an operator refused by hand from the
+   * moderation screen is not reopened from here — the screen's own "Onayla"
+   * is the door for that, and a "reopen" that could re-approve any rejected
+   * request would be a second approval endpoint with a narrower name.
+   *
+   * The reopening itself is the ordinary approval, with everything it
+   * carries: the phone-verification gate, `approvedAt` refreshed (the fourteen
+   * days start again — "re-approval refreshes the window"), `rejectionReason`
+   * cleared, and the fan-out booked, deduped so a provider who was invited the
+   * first time is not invited twice. The offers the removal CANCELLED stay
+   * closed and the credits they gave back stay given: the reports are
+   * append-only and so is the ledger, and the queue derives "reopened" from
+   * the decision on the reports and the request's status, never from a flag.
+   */
+  async reopenAfterRemoval(id: string, moderationNote: string | null, user: AuthUser) {
+    const existing = await this.prisma.serviceRequest.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        reports: {
+          where: { resolution: ServiceRequestReportResolution.REQUEST_REMOVED },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!existing) {
+      throw new NotFoundException('Service request not found');
+    }
+    if (existing.status !== ServiceRequestStatus.REJECTED || existing.reports.length === 0) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'REQUEST_NOT_REOPENABLE',
+        message: 'Yalnızca bildirim sonucu kaldırılmış bir talep geri açılabilir.',
+      });
+    }
+
+    return this.updateServiceRequestStatus(
+      id,
+      { status: ServiceRequestStatus.APPROVED, moderationNote, rejectionReason: null },
+      user,
+    );
   }
 
   /**

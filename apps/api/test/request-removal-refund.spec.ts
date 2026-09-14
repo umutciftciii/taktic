@@ -82,6 +82,32 @@ async function rejectAsAdmin(requestId: string, expectedStatus: number) {
     .expect(expectedStatus);
 }
 
+/**
+ * The other door into the same cascade: a provider reports the request and an
+ * operator resolves the report with "Talebi kaldır". The money-side contract
+ * must be the same one `rejectAsAdmin` gets, because it is the same function.
+ */
+async function removeViaReport(requestId: string, categoryId: string, expectedStatus: number) {
+  const reporterUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+  const reporter = await createDiscoverableProvider(ctx.prisma, {
+    categoryId,
+    userId: reporterUser.id,
+  });
+  const reporterCookie = await loginAs(ctx.prisma, reporterUser.id);
+  await request(ctx.server)
+    .post(`/providers/${reporter.id}/requests/${requestId}/reports`)
+    .set('Cookie', reporterCookie)
+    .send({ reason: 'FAKE_OR_TEST' })
+    .expect(201);
+
+  const cookie = await adminCookie();
+  return request(ctx.server)
+    .post(`/service-requests/${requestId}/reports/resolve`)
+    .set('Cookie', cookie)
+    .send({ resolution: 'REQUEST_REMOVED', removalReason: 'FAKE_OR_TEST' })
+    .expect(expectedStatus);
+}
+
 function refundRows(providerId: string) {
   return ctx.prisma.providerCreditTransaction.findMany({
     where: { providerId, type: CreditTransactionType.OFFER_REFUND },
@@ -326,5 +352,131 @@ describe('removing a request closes offers and refunds credits', () => {
     // The operations code stays inside the admin surfaces.
     expect(offer.creditRefundReason).toBeUndefined();
     expect(offer.refundEligibility.policyStatus).toBe('REFUNDED');
+  });
+
+  it('a vitrin lead offer (no credit spent) closes with no ledger row', async () => {
+    const { category, req } = await scenario();
+    const { provider, offerId } = await providerWithOffer(category.id, req.id);
+    // Rewrite the spend as a direct vitrin lead's answer: nothing was paid.
+    await ctx.prisma.offer.update({
+      where: { id: offerId },
+      data: {
+        entitlementSource: OfferEntitlementSource.SHOWCASE_PLACEMENT,
+        creditCost: 0,
+        creditSpentTransactionId: null,
+      },
+    });
+    const before = await currentCreditBalance(ctx.prisma, provider.id);
+
+    await rejectAsAdmin(req.id, 200);
+
+    const offer = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: offerId } });
+    expect(offer.status).toBe(OfferStatus.CANCELLED);
+    expect(offer.cancelledAt).not.toBeNull();
+    expect(offer.creditRefundedTransactionId).toBeNull();
+    expect(offer.creditRefundedAt).toBeNull();
+    expect(offer.creditRefundReason).toBeNull();
+    expect(await refundRows(provider.id)).toHaveLength(0);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(before);
+  });
+});
+
+describe('removing a request through a report resolution', () => {
+  it('viewed and unviewed offers: CANCELLED, one refund each, the sweeper pays nothing more', async () => {
+    const { category, req } = await scenario();
+    const viewed = await providerWithOffer(category.id, req.id, { viewed: true });
+    const unviewed = await providerWithOffer(category.id, req.id);
+
+    const response = await removeViaReport(req.id, category.id, 201);
+    expect(response.body.status).toBe(ServiceRequestStatus.REJECTED);
+
+    for (const party of [viewed, unviewed]) {
+      const offer = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: party.offerId } });
+      expect(offer.status).toBe(OfferStatus.CANCELLED);
+      expect(offer.cancelledAt).not.toBeNull();
+      expect(offer.creditRefundReason).toBe('REQUEST_REMOVED');
+      expect(await refundRows(party.provider.id)).toHaveLength(1);
+      expect(await currentCreditBalance(ctx.prisma, party.provider.id)).toBe(STARTING_CREDITS);
+    }
+
+    // The reports closed in the same transaction as the removal.
+    const open = await ctx.prisma.serviceRequestReport.count({
+      where: { requestId: req.id, resolvedAt: null },
+    });
+    expect(open).toBe(0);
+
+    await ctx.prisma.offer.update({
+      where: { id: unviewed.offerId },
+      data: { unviewedRefundEligibleAt: new Date(Date.now() - 1000) },
+    });
+    const sweeper = ctx.app.get(UnviewedOfferRefundService);
+    const result = await sweeper.execute({ limit: 50 });
+    expect(result.refunded).toBe(0);
+    expect(await refundRows(unviewed.provider.id)).toHaveLength(1);
+
+    // A second decision has nothing left to decide on.
+    const cookie = await adminCookie();
+    const again = await request(ctx.server)
+      .post(`/service-requests/${req.id}/reports/resolve`)
+      .set('Cookie', cookie)
+      .send({ resolution: 'REQUEST_REMOVED', removalReason: 'FAKE_OR_TEST' })
+      .expect(409);
+    expect(again.body.code).toBe('NO_OPEN_REPORTS');
+    expect(await refundRows(viewed.provider.id)).toHaveLength(1);
+    expect(await refundRows(unviewed.provider.id)).toHaveLength(1);
+
+    // The provider is told in the panel, not by mail; the customer is told by mail.
+    expect(ctx.notifications.sent.some((m) => m.template === 'credit-refunded')).toBe(false);
+    expect(ctx.notifications.sent.some((m) => m.template === 'request-removed')).toBe(true);
+  });
+
+  it('a MATCHED request: 409 REQUEST_NOT_REMOVABLE, the reports stay open, nothing moves', async () => {
+    const { category, req } = await scenario();
+    const { provider, offerId } = await providerWithOffer(category.id, req.id);
+    await ctx.prisma.$transaction([
+      ctx.prisma.offer.update({
+        where: { id: offerId },
+        data: { status: OfferStatus.ACCEPTED, acceptedAt: new Date() },
+      }),
+      ctx.prisma.serviceRequest.update({
+        where: { id: req.id },
+        data: {
+          status: ServiceRequestStatus.MATCHED,
+          matchedOfferId: offerId,
+          matchedAt: new Date(),
+        },
+      }),
+    ]);
+
+    // The reporter must still be able to see a MATCHED request to file the
+    // report; it is written directly so this case is about the decision only.
+    const reporterUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const reporter = await createDiscoverableProvider(ctx.prisma, {
+      categoryId: category.id,
+      userId: reporterUser.id,
+    });
+    await ctx.prisma.serviceRequestReport.create({
+      data: { requestId: req.id, reporterProviderId: reporter.id, reason: 'FAKE_OR_TEST' },
+    });
+
+    const cookie = await adminCookie();
+    const response = await request(ctx.server)
+      .post(`/service-requests/${req.id}/reports/resolve`)
+      .set('Cookie', cookie)
+      .send({ resolution: 'REQUEST_REMOVED', removalReason: 'FAKE_OR_TEST' })
+      .expect(409);
+    expect(response.body.code).toBe('REQUEST_NOT_REMOVABLE');
+
+    // One transaction: the reports were not closed by a decision that failed.
+    const open = await ctx.prisma.serviceRequestReport.count({
+      where: { requestId: req.id, resolvedAt: null },
+    });
+    expect(open).toBe(1);
+    expect(await refundRows(provider.id)).toHaveLength(0);
+    const offer = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: offerId } });
+    expect(offer.status).toBe(OfferStatus.ACCEPTED);
+    const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: req.id } });
+    expect(row.status).toBe(ServiceRequestStatus.MATCHED);
+    expect(ctx.notifications.sent.some((m) => m.template === 'request-removed')).toBe(false);
   });
 });

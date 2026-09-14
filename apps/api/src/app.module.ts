@@ -53,11 +53,17 @@ import { PrismaModule } from './prisma/prisma.module';
     LocationsModule,
     QuestionsModule,
     RequestDraftsModule,
+    // Before ServiceRequestsModule, and not by accident: its admin controller
+    // serves `GET /service-requests/reports`, which ServiceRequestsController's
+    // `GET :id` would capture if its routes were registered first. Nest
+    // registers routes in module insertion order, which is this list's order
+    // (depth-first), and request-reports-admin.spec.ts asserts a 200 on that
+    // path so a reordering here fails loudly.
+    RequestReportsModule,
     ServiceRequestsModule,
     ProviderClaimModule,
     ProvidersModule,
     ProviderInvitesModule,
-    RequestReportsModule,
     OffersModule,
     PhoneVerificationModule,
     UnviewedOfferRefundModule,

@@ -17,6 +17,7 @@ export class DashboardService {
       refundableOffers,
       packagePurchases,
       openSupportTickets,
+      openRequestReports,
     ] = await Promise.all([
       this.prisma.serviceRequest.count(),
       this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.SUBMITTED } }),
@@ -52,6 +53,10 @@ export class DashboardService {
           status: { in: [SupportTicketStatus.OPEN, SupportTicketStatus.IN_PROGRESS] },
         },
       }),
+      // The report queue's backlog: reports nobody has decided on. Counted per
+      // report rather than per request, which is the figure the nav badge
+      // shows; the queue itself groups them.
+      this.prisma.serviceRequestReport.count({ where: { resolvedAt: null } }),
     ]);
 
     return {
@@ -64,6 +69,7 @@ export class DashboardService {
       refundableOffers,
       packagePurchases,
       openSupportTickets,
+      openRequestReports,
     };
   }
 }

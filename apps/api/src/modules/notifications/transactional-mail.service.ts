@@ -9,6 +9,7 @@ import {
   Prisma,
   ProviderStatus,
   ServiceCategoryStatus,
+  ServiceRequestReportReason,
   ServiceRequestStatus,
   ShowcaseLeadStatus,
   ShowcaseLeadUrgency,
@@ -23,12 +24,14 @@ import {
 } from '../../common/provider-request-matching';
 import { describeArea } from '../../common/provider-service-area-scope';
 import {
+  adminRequestUrl,
   adminSupportTicketUrl,
   customerAccountUrl,
   customerNewRequestUrl,
   customerRequestUrl,
   customerShowcaseDecisionUrl,
   customerSupportTicketUrl,
+  customerSupportUrl,
   providerAccountUrl,
   providerCreditsUrl,
   providerOfferUrl,
@@ -48,6 +51,12 @@ import {
   refundReasonLabel,
 } from '../offers/refund-policy';
 import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.constants';
+import {
+  REMOVAL_REASON_CUSTOMER_LABELS,
+  REPORT_REASON_ADMIN_LABELS,
+  RemovalReasonKey,
+  removalReasonFromRejectionReason,
+} from '../request-reports/request-report-copy';
 import {
   readSupportInboxEmail,
   supportReplyToEmail,
@@ -727,6 +736,70 @@ export class TransactionalMailService {
     }
   }
 
+  // ──────────────────────── 16b-16c · request reports ────────────────────────
+
+  /**
+   * A request a report took down, told to its customer.
+   *
+   * Called once, after `RequestReportsService.resolve` has committed the
+   * removal — and only from there. The template states that the offers on the
+   * request can no longer be acted on, which is true because that same commit
+   * CANCELLED them; a caller that had not run the cascade would be sending a
+   * sentence that is false. `resolvedAt` is in the key so a request removed,
+   * reopened and removed again is told each time.
+   *
+   * The reason reaches the customer as its fixed label and nothing more. The
+   * key deliberately does not carry it: a retry rebuilds it from the request's
+   * own `rejectionReason`, which the decision wrote from the same dictionary.
+   */
+  async sendRequestRemoved(requestId: string, resolvedAt: Date, reason: RemovalReasonKey) {
+    const request = await loadRequest(this.prisma, requestId);
+    if (!request?.customerEmail) {
+      return;
+    }
+
+    await this.send('request-removed', request.customerEmail, requestRemovedData(request, reason), {
+      requestId: request.id,
+      userId: request.customerId,
+      dedupeKey: `${RETRY_DEDUPE_PREFIXES['request-removed']}:${request.id}:${resolvedAt.toISOString()}`,
+    });
+  }
+
+  /**
+   * A provider reported a request; the support mailbox is told.
+   *
+   * Keyed on the report, so each provider's report is one notice. The message
+   * names the request, the category and the reason, and links the panel; the
+   * reporter's note is not in it — see `requestReportNewForSupport` in the
+   * templates. `providerId` on the log names the reporter for the audit
+   * screen, which is operator-only.
+   */
+  async sendRequestReportNewForSupport(reportId: string) {
+    const report = await this.prisma.serviceRequestReport.findUnique({
+      where: { id: reportId },
+      select: {
+        id: true,
+        reason: true,
+        reporterProviderId: true,
+        request: { select: { id: true, requestNumber: true, category: { select: { name: true } } } },
+      },
+    });
+    if (!report) {
+      return;
+    }
+
+    await this.send(
+      'request-report-new-for-support',
+      readSupportInboxEmail(),
+      requestReportNewForSupportData(report),
+      {
+        requestId: report.request.id,
+        providerId: report.reporterProviderId,
+        dedupeKey: `${RETRY_DEDUPE_PREFIXES['request-report-new-for-support']}:${report.id}`,
+      },
+    );
+  }
+
   // ───────────────────────── 17-21 · support tickets ─────────────────────────
 
   /**
@@ -1327,6 +1400,36 @@ export class TransactionalMailService {
           : null;
       }
 
+      case 'request-removed': {
+        const request = await loadRequest(this.prisma, source.ids[0]);
+        // Rebuilt only while the removal still stands: a request an operator
+        // has since reopened must not be told a second time that it was taken
+        // down. The reason comes back out of the rejectionReason the decision
+        // wrote, through the same dictionary, with OTHER as the floor.
+        if (!request?.customerEmail || request.status !== ServiceRequestStatus.REJECTED) {
+          return null;
+        }
+
+        return {
+          to: request.customerEmail,
+          data: requestRemovedData(request, removalReasonFromRejectionReason(request.rejectionReason)),
+        };
+      }
+
+      case 'request-report-new-for-support': {
+        const report = await this.prisma.serviceRequestReport.findUnique({
+          where: { id: source.ids[0] },
+          select: {
+            id: true,
+            reason: true,
+            request: { select: { id: true, requestNumber: true, category: { select: { name: true } } } },
+          },
+        });
+        return report
+          ? { to: readSupportInboxEmail(), data: requestReportNewForSupportData(report) }
+          : null;
+      }
+
       case 'credit-refunded': {
         const transaction = await loadRefundTransaction(this.prisma, source.ids[0]);
         if (!transaction) {
@@ -1582,6 +1685,8 @@ function loadRequest(prisma: PrismaService, requestId: string) {
         qualityScore: true,
         /** Written by the expiry job in the same update that sets EXPIRED. */
         expiredAt: true,
+        /** Written by a removal; a retry of the removal mail reads the reason back out of it. */
+        rejectionReason: true,
         category: { select: { name: true, offerCreditCost: true } },
       },
     });
@@ -2063,6 +2168,33 @@ function requestPublishedData(request: LoadedRequest, reachedProviderCount: numb
   };
 }
 
+function requestRemovedData(request: LoadedRequest, reason: RemovalReasonKey): MailData {
+  return {
+    fullName: request.customerName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    // The label, never the key: a customer reads a sentence, not a code.
+    reasonLabel: REMOVAL_REASON_CUSTOMER_LABELS[reason],
+    supportUrl: customerSupportUrl(),
+    newRequestUrl: customerNewRequestUrl(),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+function requestReportNewForSupportData(report: {
+  reason: ServiceRequestReportReason;
+  request: { id: string; requestNumber: string | null; category: { name: string } };
+}): MailData {
+  return {
+    fullName: SUPPORT_INBOX_SALUTATION,
+    requestNumber: report.request.requestNumber ?? report.request.id,
+    categoryName: report.request.category.name,
+    reasonLabel: REPORT_REASON_ADMIN_LABELS[report.reason],
+    adminRequestUrl: adminRequestUrl(report.request.id),
+    accountUrl: null,
+  };
+}
+
 function requestExpiredCustomerData(request: LoadedRequest): MailData {
   return {
     fullName: request.customerName,
@@ -2412,6 +2544,12 @@ const RETRY_DEDUPE_PREFIXES = {
   'showcase-placement-ending-7d': 'showcase-placement-ending-7d',
   'showcase-placement-ending-3d': 'showcase-placement-ending-3d',
   'showcase-placement-expired': 'showcase-placement-expired',
+  // The two halves of a request report. The customer's notice carries the
+  // request id and the decision's timestamp — the reason is *not* in the key,
+  // and is read back out of the request's own rejectionReason on a retry. The
+  // support notice is keyed on the report row, which is never deleted.
+  'request-removed': 'request-removed',
+  'request-report-new-for-support': 'request-report',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -2466,6 +2604,9 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'showcase-placement-ending-7d': 1,
   'showcase-placement-ending-3d': 1,
   'showcase-placement-expired': 1,
+  /** The request only; the ISO timestamp after it has colons of its own and is not an id. */
+  'request-removed': 1,
+  'request-report-new-for-support': 1,
 };
 
 /**

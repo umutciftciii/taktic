@@ -116,6 +116,16 @@ export function providerCreditsUrl(providerId: string): string {
   return publicWebUrl(`/providers/${encodeURIComponent(providerId)}/credits`);
 }
 
+/**
+ * Where a customer opens a support ticket. `apps/web/app/destek`.
+ *
+ * The removal notice points here for an objection rather than at any ticket:
+ * there is none yet, and whether to open one is the customer's decision.
+ */
+export function customerSupportUrl(): string {
+  return publicWebUrl('/destek');
+}
+
 /** The customer's own support ticket. `apps/web/app/destek/[ticketId]`. */
 export function customerSupportTicketUrl(ticketId: string): string {
   return publicWebUrl(`/destek/${encodeURIComponent(ticketId)}`);
@@ -124,15 +134,27 @@ export function customerSupportTicketUrl(ticketId: string): string {
 /**
  * One ticket in the operator queue. `apps/admin/app/support/[id]`.
  *
- * The only link in this file that is *not* on the web application, and it is
- * here rather than in a file of its own because the rule the module comment
- * states applies to it unchanged: the path is a literal this repository owns,
- * and a route that moves has to break the build rather than a link in an
- * operator's inbox. It is used by exactly the two support notifications that
- * go to the support mailbox — a customer is never sent here.
+ * One of the two links in this file that are *not* on the web application
+ * (the other is `adminRequestUrl` below), and it is here rather than in a file
+ * of its own because the rule the module comment states applies to it
+ * unchanged: the path is a literal this repository owns, and a route that
+ * moves has to break the build rather than a link in an operator's inbox. It
+ * is used by exactly the two support notifications that go to the support
+ * mailbox — a customer is never sent here.
  */
 export function adminSupportTicketUrl(ticketId: string): string {
   return `${getAdminAppBaseUrl()}/support/${encodeURIComponent(ticketId)}`;
+}
+
+/**
+ * One request in the operator panel. `apps/admin/app/requests/[id]`.
+ *
+ * The same rule as the ticket link above, for the same audience: it is used by
+ * the one notice a new request report sends to the support mailbox, and a
+ * customer or a provider is never sent here.
+ */
+export function adminRequestUrl(requestId: string): string {
+  return `${getAdminAppBaseUrl()}/requests/${encodeURIComponent(requestId)}`;
 }
 
 // ───────────────────────────── vitrin, phase two ─────────────────────────────
