@@ -8,6 +8,7 @@ import { OffersModule } from '../offers/offers.module';
 import { OperationsSettingsModule } from '../operations-settings/operations-settings.module';
 import { RequestDraftsModule } from '../request-drafts/request-drafts.module';
 import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
+import { ServiceRequestThrottlerGuard } from './service-request.throttler';
 import { ServiceRequestsController } from './service-requests.controller';
 import { ServiceRequestsService } from './service-requests.service';
 
@@ -33,7 +34,7 @@ import { ServiceRequestsService } from './service-requests.service';
     OperationsSettingsModule,
   ],
   controllers: [ServiceRequestsController],
-  providers: [ServiceRequestsService],
+  providers: [ServiceRequestsService, ServiceRequestThrottlerGuard],
   exports: [ServiceRequestsService],
 })
 export class ServiceRequestsModule {}

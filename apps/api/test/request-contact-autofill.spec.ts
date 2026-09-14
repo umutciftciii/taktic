@@ -6,6 +6,7 @@ import {
   createTestApp,
   createUser,
   loginAs,
+  resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -38,6 +39,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
+  // This suite posts to /service-requests multiple times per case; without
+  // this the shared IP throttle bucket runs out partway through the file.
+  resetAuthThrottle(ctx.app);
 });
 
 /** The contact triple a request was actually stored with, plus its owner. */

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Inject,
   HttpStatus,
   Injectable,
@@ -35,6 +36,10 @@ import {
   SystemFieldRequestValues,
   systemFieldLabel,
 } from '../questions/question-system-fields';
+import {
+  SERVICE_REQUEST_MAX_OPEN_PER_PHONE,
+  SERVICE_REQUEST_MAX_PER_PHONE_PER_DAY,
+} from './service-requests.constants';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 
@@ -371,6 +376,43 @@ export class ServiceRequestsService {
     const request = await runSerializable(
       this.prisma,
       async (tx) => {
+      // Per-phone budget, ahead of everything else in the transaction: a
+      // customer (or an attacker cycling identities behind one number)
+      // should not be able to spend the rest of this work — routing,
+      // quality scoring, the customer row itself — only to be refused at the
+      // very end. Counted by phone rather than by account because a guest
+      // checkout has no account yet, and because the limit is about how many
+      // requests one real phone number is allowed to have in flight,
+      // regardless of which session created them.
+      const phoneWindowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const [recentByPhone, openByPhone] = await Promise.all([
+        tx.serviceRequest.count({
+          where: {
+            customerPhone: requestData.customerPhone,
+            submittedAt: { gte: phoneWindowStart },
+            status: { in: [ServiceRequestStatus.SUBMITTED, ServiceRequestStatus.APPROVED] },
+          },
+        }),
+        tx.serviceRequest.count({
+          where: { customerPhone: requestData.customerPhone, status: ServiceRequestStatus.APPROVED },
+        }),
+      ]);
+      if (
+        recentByPhone >= SERVICE_REQUEST_MAX_PER_PHONE_PER_DAY ||
+        openByPhone >= SERVICE_REQUEST_MAX_OPEN_PER_PHONE
+      ) {
+        throw new HttpException(
+          {
+            statusCode: 429,
+            error: 'Too Many Requests',
+            code: 'REQUEST_RATE_LIMITED',
+            message:
+              'Bu telefon numarasıyla kısa sürede çok fazla talep açıldı. Lütfen daha sonra tekrar deneyin.',
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
       const customerId = await resolveCustomerForCreate(tx, requestData, user);
       const requestNumber = await this.numbering.generateDisplayNumber(
         tx,

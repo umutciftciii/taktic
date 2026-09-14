@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
   createTestApp,
+  resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -31,6 +32,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
+  // This suite posts to /service-requests several times per file; without
+  // this the shared IP throttle bucket runs out partway through it.
+  resetAuthThrottle(ctx.app);
 });
 
 describe('service request description limit', () => {

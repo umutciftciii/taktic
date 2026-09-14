@@ -17,6 +17,7 @@ import {
   createUser,
   loginAs,
   providerPayload,
+  resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -45,6 +46,10 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
+  // This suite posts to /service-requests dozens of times per file; without
+  // this the shared IP throttle bucket would run out partway through and the
+  // rest would 429 for a reason unrelated to what each case is testing.
+  resetAuthThrottle(ctx.app);
 });
 
 async function adminCookie() {

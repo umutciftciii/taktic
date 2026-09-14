@@ -9,6 +9,7 @@ import {
   grantCredits,
   loginAs,
   offerPayload,
+  resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -45,6 +46,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
+  // Each case creates an approved request via POST /service-requests; without
+  // this the shared IP throttle bucket runs out partway through the file.
+  resetAuthThrottle(ctx.app);
 });
 
 const CATEGORY_COST = 2;

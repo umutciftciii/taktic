@@ -8,6 +8,7 @@ import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto'
 import { getDraftTokenFromRequest } from '../request-drafts/request-draft.cookie';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { ServiceRequestThrottlerGuard } from './service-request.throttler';
 import { ServiceRequestsService } from './service-requests.service';
 import { OffersService } from '../offers/offers.service';
 
@@ -19,7 +20,7 @@ export class ServiceRequestsController {
   ) {}
 
   @Post()
-  @UseGuards(OptionalAuthGuard)
+  @UseGuards(ServiceRequestThrottlerGuard, OptionalAuthGuard)
   createServiceRequest(
     @Body() dto: CreateServiceRequestDto,
     @CurrentUser() user: AuthUser | null,

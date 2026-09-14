@@ -83,6 +83,12 @@ const sharedEnv = {
   // raising it here changes no rule these scenarios are about.
   AUTH_RATE_LIMIT_MAX: '1000',
   AUTH_RATE_LIMIT_WINDOW_SECONDS: '60',
+  // Same reasoning, for `POST /service-requests`: it keys on the client IP
+  // too, and every scenario submits from 127.0.0.1, so the shipped budget of
+  // 5 per 10 minutes would only be measuring how many requests the suite
+  // itself opened. Its own integration test
+  // (service-request-rate-limit.spec.ts) covers the shipped value.
+  SERVICE_REQUEST_RATE_LIMIT_MAX: '1000',
 };
 
 /**

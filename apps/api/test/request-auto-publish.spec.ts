@@ -10,6 +10,7 @@ import {
   createTestApp,
   createUser,
   loginAs,
+  resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
   type TestContext,
@@ -35,6 +36,9 @@ beforeEach(async () => {
   ctx.notifications.clear();
   await setAutoPublish(false);
   process.env.REQUIRE_PHONE_VERIFICATION = 'false';
+  // Several cases post to /service-requests; without this the shared IP
+  // throttle bucket runs out partway through the file.
+  resetAuthThrottle(ctx.app);
 });
 
 afterEach(() => {
