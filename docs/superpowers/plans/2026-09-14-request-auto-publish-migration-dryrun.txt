@@ -1,0 +1,74 @@
+Anında yayın + talep bildirimi — migration dry-run (2026-09-14)
+
+İzole veritabanı: taktic_autopublish_dryrun (aktif `taktic` DB'nin `pg_dump` kopyası,
+`docker exec taktic-postgres pg_dump … | psql …` ile; aktif DATABASE_URL hiçbir adımda
+shadow/hedef olarak kullanılmadı; iş sonunda DROP edildi). İkinci bir kopya
+(taktic_autopublish_dryrun2) yalnız aşağıdaki OperationsSettings satır kontrolü için
+açıldı ve o da DROP edildi.
+
+Uygulanan migration (yalnız bu bekliyordu; 59 → 60):
+  20260914120000_add_request_reports_and_auto_publish   → saf DDL
+
+DDL'in niteliği (açıkça): hiçbir satır yeniden yazılmaz, DML yok.
+  CREATE TYPE  ServiceRequestReportReason (SPAM, FAKE_OR_TEST, CONTAINS_CONTACT_INFO,
+               WRONG_CATEGORY, INAPPROPRIATE_CONTENT, DUPLICATE, OTHER)
+  CREATE TYPE  ServiceRequestReportResolution (DISMISSED, REQUEST_REMOVED)
+  ALTER TABLE  OperationsSettings ADD COLUMN marketplaceAutoPublishEnabled BOOLEAN NOT NULL DEFAULT false
+  ALTER TABLE  Offer ADD COLUMN cancelledAt TIMESTAMP(3) NULL
+  CREATE TABLE ServiceRequestReport (id, requestId, reporterProviderId, reason, note,
+               createdAt, resolvedAt, resolvedByUserId, resolution, resolutionNote;
+               CHECK (resolvedAt IS NULL) = (resolution IS NULL))
+  CREATE INDEX ServiceRequestReport_requestId_reporterProviderId_key (UNIQUE),
+               _requestId_idx, _reporterProviderId_createdAt_idx,
+               _resolvedAt_createdAt_idx, _open_idx (partial: resolvedAt IS NULL),
+               ServiceRequest_customerPhone_submittedAt_idx
+  FK           requestId → ServiceRequest RESTRICT, reporterProviderId → ProviderProfile
+               RESTRICT, resolvedByUserId → User SET NULL
+
+Komut:
+  DATABASE_URL='postgresql://…@localhost:5433/taktic_autopublish_dryrun?schema=public' \
+    pnpm exec prisma migrate deploy
+  → "Applying migration 20260914120000_add_request_reports_and_auto_publish …
+     All migrations have been successfully applied."
+
+Parmak izi (tablo | satır | md5(string_agg(id|… ORDER BY id))) — önce → sonra:
+  ServiceRequest             13  31758b1f…  → aynı   (id|status|approvedAt|moderatedAt)
+  Offer                       6  b72d32ea…  → aynı   (id|status|creditRefundedTransactionId)
+  ProviderCreditTransaction  11  8c999cc0…  → aynı   (id|type|amount)
+  ShowcaseLead                3  076b4910…  → aynı   (id|status)
+  NotificationLog            52  5fb48b15…  → aynı   (id|status)
+  OperationsSettings          0  d41d8cd9…  → aynı   (boş tablo; bkz. ikinci kopya)
+  _prisma_migrations         59 → 60
+
+ServiceRequest durum dağılımı (SELECT status, count(*) … GROUP BY 1) — önce → sonra:
+  APPROVED   3 → 3
+  COMPLETED  3 → 3
+  MATCHED    1 → 1
+  SUBMITTED  6 → 6
+
+Tüm tabloların satır sayısı (58 tablo, tek tek count(*)) — tek fark:
+  + ServiceRequestReport 0   (yeni tablo)
+  _prisma_migrations 59 → 60
+  Diğer 56 tablo satır sayısı birebir aynı.
+
+Sonrası doğrulamalar (dry-run DB):
+  OperationsSettings.marketplaceAutoPublishEnabled  → kolon: boolean NOT NULL DEFAULT false;
+                                                     true olan satır: 0
+  Offer.cancelledAt                                 → 6 teklifin 6'sında NULL
+  ServiceRequestReport                              → 0 satır
+  Enum etiketleri, 5 kısıt (pkey, CHECK, 3 FK) ve 7 indeks yukarıdaki listeyle birebir.
+
+İkinci kopya (taktic_autopublish_dryrun2): yerel DB'de OperationsSettings boş olduğundan
+"her satırda false" iddiası boş kümeyle geçmesin diye migration ÖNCESİ elle bir satır
+eklendi (id='singleton', unviewedOfferRefundWindowHours=48,
+requestExpirySchedulerEnabled=true). Migration sonrası:
+  singleton | marketplaceAutoPublishEnabled=f | requestExpirySchedulerEnabled=t | 48
+  → mevcut satır yeniden yazılmadı, yeni kolon varsayılan false ile doldu, diğer
+    anahtarlar korundu; parmak izleri yine önce = sonra (yalnız _prisma_migrations 59→60).
+
+Aktif `taktic` DB (kontrol): _prisma_migrations 59, Offer.cancelledAt kolonu yok,
+ServiceRequestReport tablosu yok → dokunulmadı. Her iki dry-run DB DROP edildi.
+
+Sonuç: migration saf DDL; veri parmak izleri ve talep durum dağılımı değişmez; anahtar
+varsayılan kapalı doğar (bekleyen SUBMITTED talepler admin listesinde kalır ve "Onayla"
+akışı aynen çalışır — E2E marketplace-journey bu yolu anahtar kapalıyken koşuyor).
