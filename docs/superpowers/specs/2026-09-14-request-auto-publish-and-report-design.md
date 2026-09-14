@@ -541,17 +541,27 @@ gerekçesiyle JSON okunur, TS paketi import edilmez).
 
 Tespit (Türkçe odaklı, yanlış pozitifi sınırlı):
 - **Telefon:** metin sayı token'larına ayrılır; ayraçlar körlemesine atılıp bağımsız
-  sayılar birleştirilmez. Binlik gruplu tutar (`\d{1,3}(?:\.\d{3})+`: "50.000",
-  "5.000.000") ve para işaretine (`₺`, `TL`, `lira`; önce/sonra, en fazla bir boşluk) bitişik
-  token **tutar**dır, telefon adayına girmez — para işareti tek başına kural değil, token'ın
-  kendi biçimiyle birlikte bir sinyaldir. Kalan düz rakam token'ları telefon ayraçlarıyla
-  (`boşluk . - – — ( )`, isteğe bağlı baştaki `+`) birleşerek adayı oluşturur; **iki yanı da
-  ≥4 haneli** token'lar arasındaki tire aralık ayracıdır ve adayı böler ("50000-60000" iki
-  token; "0532-123-45-67" kısa gruplar olduğu için birleşir). Adayın (ya da ardışık bir
-  diliminin) birleşik rakamları 10–13 haneli **ve** `0`, `90` ya da `5` ile başlıyorsa
-  telefon; URL içindeki aday atlanır. "15000 TL", "12.03.2026", "34000",
-  "50.000 - 60.000 TL", "₺5.000.000–₺6.000.000", "50000-60000 lira" yakalanmaz;
-  "0532 123 45 67", "+90 (532) 123-45-67", "5321234567", "0532-123-45-67" yakalanır.
+  sayılar birleştirilmez. Şu token'lar telefon adayına girmez ve adayı böler: binlik gruplu
+  tutar (`\d{1,3}(?:\.\d{3})+`: "50.000", "5.000.000"; başında `+` varsa ülke kodudur,
+  tutar değil), tarih (`\d{1,2}\.\d{1,2}\.\d{2,4}`: "15.09.2026"), para işaretine bitişik
+  token (önünde `₺`; arkasında `₺`/`TL`/`lira`, en fazla bir boşluk — "TL" geriye doğru
+  okunmaz, yoksa "50.000 TL 0532 …" numarayı gizlerdi) ve boşlukla gruplu sayı
+  (`\d{1,3}(?: \d{3})+`: "5 000 000") **yalnızca** bağlamıyla: bütün grubun yanında para
+  işareti ya da aralık tiresiyle bağlı komşusu tutar ("5 000 000 - 6 000 000 TL"). Para
+  işareti tek başına kural değil, token'ın kendi biçimiyle birlikte bir sinyaldir. Kalan
+  düz token'lar telefon ayraçlarıyla (`boşluk . - – — ( )`, isteğe bağlı baştaki `+`)
+  birleşerek adayı oluşturur; **iki yanı da ≥4 haneli** token'lar arasındaki tire aralık
+  ayracıdır ve adayı böler ("50000-60000" iki token; "0532-123-45-67" kısa gruplar olduğu
+  için birleşir). Adayın denenen dilimleri: kısa adayda (≤ 13+3 hane) bütünü ya da baştan
+  token düşürülmüş sonekleri ("Daire 7 0532 123 45 67" bulunur; "90 100 110 120 130"
+  listesinin ilk parçası telefon sayılmaz), uzun adayda (IBAN, liste, rakam spam'i) yalnız
+  baştan başlayan en fazla 13 token'lık dilimler. Dilimin birleşik rakamları 10–13 haneli
+  **ve** `0`, `90` ya da `5` ile başlıyorsa telefon; URL içindeki dilim atlanır.
+  "15000 TL", "12.03.2026", "34000", "50.000 - 60.000 TL", "₺5.000.000–₺6.000.000",
+  "50000-60000 lira", "5 000 000 - 6 000 000 TL", "15.09.2026 - 20.09.2026",
+  "IBAN TR33 0006 1005 1978 6457 8413 26" yakalanmaz; "0532 123 45 67",
+  "+90 (532) 123-45-67", "5321234567", "0532-123-45-67", "0532.123.45.67",
+  "+90.532.123.45.67", "05 32 12 34 567" yakalanır.
 - **E-posta:** `[^\s@]+@[^\s@]+\.[^\s@]{2,}` + `[at]`, `(at)`, ` at ` + `[dot]`/`(nokta)`
   varyantları.
 - **URL / mesajlaşma:** `https?://`, `www.`, `wa.me`, `t.me`, `\b[\w-]+\.(com|net|org|

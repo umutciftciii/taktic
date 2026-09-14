@@ -10,6 +10,11 @@ const POSITIVE: Array<[string, 'phone' | 'email' | 'url']> = [
   ['0532-123-45-67', 'phone'],
   ['05321234567 whatsapp', 'phone'],
   ['Daire 7 0532 123 45 67', 'phone'],
+  ['12.03.2026 tarihinde 0532 123 45 67', 'phone'],
+  ['05 32 12 34 567', 'phone'],
+  ['0532.123.45.67', 'phone'],
+  ['+90.532.123.45.67', 'phone'],
+  ['Bütçe 50.000 TL 0532 123 45 67', 'phone'],
   ['mail: ali@example.com', 'email'],
   ['ali [at] example [dot] com', 'email'],
   ['ali (at) example.com', 'email'],
@@ -39,7 +44,19 @@ const NEGATIVE = [
   '50000-60000 lira',
   'Bütçe 15000 TL, en fazla 20000',
   '2 oda 1 salon 120 m2 2018 yapımı 3. kat',
+  '15.09.2026 - 20.09.2026 arası müsaitim',
+  'Metrekare 90 100 110 120 130',
+  'IBAN TR33 0006 1005 1978 6457 8413 26',
+  '5 000 000 - 6 000 000 TL',
 ];
+
+/**
+ * 2500 single-digit tokens in one separator-joined run — the worst case for
+ * anything that enumerates slices of a run. Must stay far from the request
+ * path's budget: the check runs on every public POST and on every keystroke
+ * in the form.
+ */
+const DIGIT_SPAM = Array.from({ length: 2500 }, () => '1').join(' ');
 
 describe('detectContactDetails', () => {
   it.each(POSITIVE)('flags %s as %s', (text, kind) => {
@@ -48,5 +65,11 @@ describe('detectContactDetails', () => {
 
   it.each(NEGATIVE)('leaves %s alone', (text) => {
     expect(detectContactDetails(text)).toBeNull();
+  });
+
+  it('stays fast on a run of thousands of digit tokens', () => {
+    const startedAt = performance.now();
+    expect(detectContactDetails(DIGIT_SPAM)).toBeNull();
+    expect(performance.now() - startedAt).toBeLessThan(200);
   });
 });
