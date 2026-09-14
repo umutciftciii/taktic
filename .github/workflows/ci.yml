@@ -26,7 +26,18 @@ jobs:
           POSTGRES_PASSWORD: taktic_password
         ports:
           - 5432:5432
+        # The data directory lives on a tmpfs: every byte PostgreSQL writes in
+        # this job is thrown away with the runner, so a disk is only latency —
+        # and on a hosted runner that latency is what varies from one VM to the
+        # next (the same commit has taken 13 and 47 minutes). Memory does not
+        # vary. 2 GiB is an explicit ceiling, not a reservation: tmpfs takes
+        # only what is written, and the databases here are tens of megabytes;
+        # the ceiling leaves room for the WAL, which max_wal_size (1 GiB by
+        # default) lets grow before a checkpoint recycles it. The durability
+        # settings that pair with this are applied by the first step below —
+        # a service takes no command-line arguments.
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
           --health-cmd "pg_isready -U taktic_user -d taktic"
           --health-interval 10s
           --health-timeout 5s
@@ -40,6 +51,42 @@ jobs:
       AUTH_COOKIE_NAME: taktic_session
 
     steps:
+      # Durability off, because there is nothing to be durable for: the data
+      # directory is a tmpfs (see the service above) and vanishes with the
+      # runner. fsync, synchronous_commit and full_page_writes only decide when
+      # a write is forced to storage; constraints, transactions and isolation
+      # levels are not touched, so the suite proves exactly what it proved
+      # before. They are set here rather than on the server command line
+      # because a service container takes none: `options` are `docker create`
+      # flags. All three are reloadable, so a reload is enough and nothing
+      # restarts. The step then reads back the mount and the settings and
+      # fails unless both are what this job relies on — the log carries the
+      # evidence, and only that: docker exec speaks over the container's
+      # socket, so no password or connection string appears anywhere.
+      - name: Configure PostgreSQL for disposable CI storage
+        env:
+          PG: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$PG" psql -v ON_ERROR_STOP=1 -q -U taktic_user -d taktic \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
+          mount=$(docker exec "$PG" awk '$2 == "/var/lib/postgresql/data" { print $3, $4 }' /proc/mounts)
+          echo "data directory mount: ${mount:-<none>}"
+          case "$mount" in
+            tmpfs*) ;;
+            *) echo "::error::PostgreSQL data directory is not on a tmpfs"; exit 1 ;;
+          esac
+
+          settings=$(docker exec "$PG" psql -v ON_ERROR_STOP=1 -tA -U taktic_user -d taktic \
+            -c "SELECT name || '=' || setting FROM pg_settings WHERE name IN ('fsync', 'synchronous_commit', 'full_page_writes') ORDER BY name")
+          echo "$settings"
+          [ "$(printf '%s\n' "$settings" | tr '\n' ' ')" = "fsync=off full_page_writes=off synchronous_commit=off " ] \
+            || { echo "::error::PostgreSQL durability settings were not applied"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -86,7 +133,10 @@ jobs:
           POSTGRES_PASSWORD: taktic_password
         ports:
           - 5432:5432
+        # Same tmpfs and ceiling as `verify`, for the same reason; the first
+        # step below applies the matching durability settings.
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
           --health-cmd "pg_isready -U taktic_user -d taktic"
           --health-interval 10s
           --health-timeout 5s
@@ -102,6 +152,31 @@ jobs:
       AUTH_COOKIE_NAME: taktic_session
 
     steps:
+      # Identical to the step of the same name on `verify`; see the notes there.
+      - name: Configure PostgreSQL for disposable CI storage
+        env:
+          PG: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$PG" psql -v ON_ERROR_STOP=1 -q -U taktic_user -d taktic \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
+          mount=$(docker exec "$PG" awk '$2 == "/var/lib/postgresql/data" { print $3, $4 }' /proc/mounts)
+          echo "data directory mount: ${mount:-<none>}"
+          case "$mount" in
+            tmpfs*) ;;
+            *) echo "::error::PostgreSQL data directory is not on a tmpfs"; exit 1 ;;
+          esac
+
+          settings=$(docker exec "$PG" psql -v ON_ERROR_STOP=1 -tA -U taktic_user -d taktic \
+            -c "SELECT name || '=' || setting FROM pg_settings WHERE name IN ('fsync', 'synchronous_commit', 'full_page_writes') ORDER BY name")
+          echo "$settings"
+          [ "$(printf '%s\n' "$settings" | tr '\n' ' ')" = "fsync=off full_page_writes=off synchronous_commit=off " ] \
+            || { echo "::error::PostgreSQL durability settings were not applied"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -163,7 +238,10 @@ jobs:
           POSTGRES_PASSWORD: taktic_password
         ports:
           - 5432:5432
+        # Same tmpfs and ceiling as `verify`, for the same reason; the first
+        # step below applies the matching durability settings.
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
           --health-cmd "pg_isready -U taktic_user -d taktic"
           --health-interval 10s
           --health-timeout 5s
@@ -177,6 +255,31 @@ jobs:
       AUTH_COOKIE_NAME: taktic_session
 
     steps:
+      # Identical to the step of the same name on `verify`; see the notes there.
+      - name: Configure PostgreSQL for disposable CI storage
+        env:
+          PG: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$PG" psql -v ON_ERROR_STOP=1 -q -U taktic_user -d taktic \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
+          mount=$(docker exec "$PG" awk '$2 == "/var/lib/postgresql/data" { print $3, $4 }' /proc/mounts)
+          echo "data directory mount: ${mount:-<none>}"
+          case "$mount" in
+            tmpfs*) ;;
+            *) echo "::error::PostgreSQL data directory is not on a tmpfs"; exit 1 ;;
+          esac
+
+          settings=$(docker exec "$PG" psql -v ON_ERROR_STOP=1 -tA -U taktic_user -d taktic \
+            -c "SELECT name || '=' || setting FROM pg_settings WHERE name IN ('fsync', 'synchronous_commit', 'full_page_writes') ORDER BY name")
+          echo "$settings"
+          [ "$(printf '%s\n' "$settings" | tr '\n' ' ')" = "fsync=off full_page_writes=off synchronous_commit=off " ] \
+            || { echo "::error::PostgreSQL durability settings were not applied"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
