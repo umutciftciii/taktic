@@ -1574,7 +1574,7 @@ model PackagePurchase {
   updatedAt                      DateTime              @updatedAt
 
   provider                     ProviderProfile                   @relation(fields: [providerId], references: [id])
-  package                      OfferCreditPackage?               @relation(fields: [packageId], references: [id])
+  package                      OfferCreditPackage?               @relation(fields: [packageId], references: [id], onDelete: Restrict)
   /// Restrict on all three: a catalogue row, a card or a version that a
   /// settled payment points at is part of the record of what was sold, and a
   /// cascade here would erase the answer to "what did this provider pay for".
