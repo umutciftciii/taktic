@@ -541,7 +541,16 @@ gerekçesiyle JSON okunur, TS paketi import edilmez).
 
 Tespit (Türkçe odaklı, yanlış pozitifi sınırlı):
 - **Telefon:** metin sayı token'larına ayrılır; ayraçlar körlemesine atılıp bağımsız
-  sayılar birleştirilmez. Şu token'lar telefon adayına girmez ve adayı böler: binlik gruplu
+  sayılar birleştirilmez. İki geçiş: önce **katı şekil geçişi** — düz rakam token'ları
+  (gruplu tutar ve tarih hariç) telefon ayraçlarıyla birleşir (bu geçişte tire bölmez, para
+  işareti komşuluğu yok sayılır); dilimin grup şekli JSON `phoneShapes` listesindeyse
+  (`4-3-2-2`, `4-7`, `4-3-4`, `3-3-2-2`, `11`, `10`, `2-3-3-2-2`, `1-3-3-2-2`, `2-4-3-2-2` …)
+  **ve** rakamları katı Türk numarasıysa (`^(?:90(?:0)?[2-5]\d{9}|0[2-5]\d{9}|5\d{9})$`:
+  `0`/`90` + 2xx–5xx alan/mobil kodu + 9 hane, ya da çıplak 10 haneli 5xx) telefondur —
+  yanındaki `TL`/`₺`/`lira`/tarih ne olursa olsun ("0532 123 45 67 TL", "0212-5554433",
+  "0232 555 44 33" yakalanır; "50000-60000" `5-5` şeklinde olmadığı için, "3456789012" çıplak
+  2xx–4xx olduğu için girmez). Katı geçiş bulamazsa **bağlam geçişi**: şu token'lar telefon
+  adayına girmez ve adayı böler: binlik gruplu
   tutar (`\d{1,3}(?:\.\d{3})+`: "50.000", "5.000.000"; başında `+` varsa ülke kodudur,
   tutar değil), tarih (`\d{1,2}\.\d{1,2}\.\d{2,4}`: "15.09.2026"), para işaretine bitişik
   token (önünde `₺`; arkasında `₺`/`TL`/`lira`, en fazla bir boşluk — "TL" geriye doğru
@@ -562,7 +571,7 @@ Tespit (Türkçe odaklı, yanlış pozitifi sınırlı):
   "50000-60000 lira", "5 000 000 - 6 000 000 TL", "15.09.2026 - 20.09.2026",
   "IBAN TR33 0006 1005 1978 6457 8413 26" yakalanmaz; "0532 123 45 67",
   "+90 (532) 123-45-67", "5321234567", "0532-123-45-67", "0532.123.45.67",
-  "+90.532.123.45.67", "05 32 12 34 567" yakalanır.
+  "+90.532.123.45.67", "05 32 12 34 567", "0532 123 45 67 TL", "0212-5554433" yakalanır.
 - **E-posta:** `[^\s@]+@[^\s@]+\.[^\s@]{2,}` + `[at]`, `(at)`, ` at ` + `[dot]`/`(nokta)`
   varyantları.
 - **URL / mesajlaşma:** `https?://`, `www.`, `wa.me`, `t.me`, `\b[\w-]+\.(com|net|org|

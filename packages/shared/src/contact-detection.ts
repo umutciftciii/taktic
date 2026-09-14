@@ -37,6 +37,9 @@ const currencyAfter = new RegExp(`^\\s?${patterns.currencyAfter}`, 'i');
 const separatorGap = new RegExp(`^${patterns.phoneSeparators}+$`);
 const rangeDash = new RegExp(patterns.rangeDash);
 const rangeGap = new RegExp(`^\\s*${patterns.rangeDash}\\s*$`);
+const strictPhone = new RegExp(patterns.strictPhone);
+const phoneShapes = new Set(patterns.phoneShapes.map((shape) => shape.join(',')));
+const phoneShapeMaxTokens = Math.max(...patterns.phoneShapes.map((shape) => shape.length));
 const email = new RegExp(patterns.email, 'i');
 const emailObfuscated = new RegExp(patterns.emailObfuscated, 'i');
 const url = new RegExp(patterns.url, 'i');
@@ -55,7 +58,18 @@ const url = new RegExp(patterns.url, 'i');
  * - `date`: "15.09.2026", so a date range does not read as digits.
  */
 type NumberTokenKind = 'plain' | 'amount' | 'date';
-type NumberToken = { start: number; end: number; digits: string; kind: NumberTokenKind };
+type NumberToken = {
+  start: number;
+  end: number;
+  digits: string;
+  kind: NumberTokenKind;
+  /**
+   * Whether the token is a bare digit run by shape — not thousands-grouped,
+   * not a date — whatever context later makes of it. The strict pass reads
+   * this and ignores `kind`.
+   */
+  bare: boolean;
+};
 
 type Span = [start: number, end: number];
 
@@ -94,7 +108,8 @@ function tokenize(text: string): NumberToken[] {
     const grouped = match[1] !== undefined && text[span[0] - 1] !== '+';
     const kind: NumberTokenKind =
       match[2] !== undefined ? 'date' : grouped || isCurrencyAdjacent(text, span) ? 'amount' : 'plain';
-    tokens.push({ start: span[0], end: span[1], digits: match[0].replace(/\D/g, ''), kind });
+    const bare = match[1] === undefined && match[2] === undefined;
+    tokens.push({ start: span[0], end: span[1], digits: match[0].replace(/\D/g, ''), kind, bare });
   }
   markSpaceGroupedAmounts(text, tokens);
   return tokens;
@@ -225,6 +240,70 @@ function phoneSlices(run: NumberToken[]): NumberToken[][] {
   return slices;
 }
 
+/**
+ * The strict pass: a phone number written the way people write phone
+ * numbers is a phone number, whatever sits next to it. It runs before any
+ * amount, currency, range or date reasoning, on bare digit tokens joined by
+ * phone separators — dashes never split here, currency neighbours are
+ * ignored — and accepts a slice only when its group shape is on the
+ * `phoneShapes` allow-list ("0532 123 45 67" is 4-3-2-2, "0212-5554433" is
+ * 4-7) and its digits form a strict Turkish number: trunk 0 or country 90
+ * then a 2xx–5xx area or mobile code and nine more digits, or a bare ten
+ * digit 5xx mobile. Shape is what keeps money out: "50000-60000" is 5-5
+ * and no allow-listed shape, however its digits read. The allow-list also
+ * bounds the window, so a long run costs a handful of slices per token.
+ *
+ * Grouped amounts and dates are not bare tokens, so "50.000 - 60.000 TL"
+ * can never be read as 2-3-2-3 here. What this pass does not find falls
+ * through to the contextual pass in `detectContactDetails`.
+ */
+function findStrictPhone(text: string, tokens: NumberToken[], urlMatch: RegExpMatchArray | null): Span | null {
+  const runs: NumberToken[][] = [];
+  let run: NumberToken[] = [];
+  for (const token of tokens) {
+    if (!token.bare) {
+      if (run.length > 0) runs.push(run);
+      run = [];
+      continue;
+    }
+    const prev = run[run.length - 1];
+    if (prev && !separatorGap.test(text.slice(prev.end, token.start))) {
+      runs.push(run);
+      run = [];
+    }
+    run.push(token);
+  }
+  if (run.length > 0) runs.push(run);
+
+  for (const tokensOfRun of runs) {
+    for (let from = 0; from < tokensOfRun.length; from += 1) {
+      const toMax = Math.min(tokensOfRun.length, from + phoneShapeMaxTokens);
+      for (let to = toMax; to > from; to -= 1) {
+        const slice = tokensOfRun.slice(from, to);
+        if (!phoneShapes.has(slice.map((token) => token.digits.length).join(','))) continue;
+        if (!strictPhone.test(slice.map((token) => token.digits).join(''))) continue;
+        const span = phoneSpan(text, slice);
+        if (urlMatch && isContainedIn(span, urlMatch)) continue;
+        return span;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The text span a phone slice reports, a leading "+" included. It starts at
+ * the first digit, so "(0532) 123 45 67" reports "0532) 123 45 67" —
+ * informational only; the refusal carries the field and kind, not this.
+ */
+function phoneSpan(text: string, slice: NumberToken[]): Span {
+  const first = slice[0];
+  const last = slice[slice.length - 1];
+  if (!first || !last) return [0, 0];
+  const start = text[first.start - 1] === '+' ? first.start - 1 : first.start;
+  return [start, last.end];
+}
+
 function isPhoneDigits(digits: string): boolean {
   if (digits.length < patterns.phoneDigitsMin || digits.length > patterns.phoneDigitsMax) return false;
   return patterns.phonePrefixes.some((prefix) => digits.startsWith(prefix));
@@ -244,10 +323,13 @@ function isPhoneDigits(digits: string): boolean {
  *
  * Phone numbers are judged token by token rather than by stripping every
  * separator out of a loose digit run: that used to fuse "50.000 - 60.000 TL"
- * into one 0-prefixed ten-digit "number". Each digit run is a token; amounts
- * and dates never join a candidate; the rest join across phone separators,
- * except a dash between two long groups, which reads as a range. See
- * `phoneSlices` for which parts of a run are then tried.
+ * into one 0-prefixed ten-digit "number". Two passes over the same tokens:
+ * first the strict one (`findStrictPhone`) — well-formed numbers win over
+ * every exception, so "0532 123 45 67 TL" is still a phone number — then
+ * the contextual one, where amounts and dates never join a candidate, the
+ * rest join across phone separators except a dash between two long groups,
+ * which reads as a range, and `phoneSlices` decides which parts of a run
+ * are tried.
  */
 export function detectContactDetails(text: string): ContactDetection | null {
   const urlMatch = text.match(url);
@@ -257,20 +339,19 @@ export function detectContactDetails(text: string): ContactDetection | null {
     return { kind: 'email', match: emailMatch[0] };
   }
 
-  for (const run of phoneRuns(text, tokenize(text))) {
+  const tokens = tokenize(text);
+
+  const strict = findStrictPhone(text, tokens, urlMatch);
+  if (strict) return { kind: 'phone', match: text.slice(strict[0], strict[1]) };
+
+  for (const run of phoneRuns(text, tokens)) {
     for (const slice of phoneSlices(run)) {
-      const [first] = slice;
-      const last = slice[slice.length - 1];
-      if (!first || !last) continue;
+      if (slice.length === 0) continue;
       const digits = slice.map((token) => token.digits).join('');
       if (!isPhoneDigits(digits)) continue;
-      // The match starts at the first digit (a leading "+" included), so
-      // "(0532) 123 45 67" reports "0532) 123 45 67" — informational only,
-      // the refusal carries the field and kind, not this string.
-      const start = text[first.start - 1] === '+' ? first.start - 1 : first.start;
-      const end = last.end;
-      if (urlMatch && isContainedIn([start, end], urlMatch)) continue;
-      return { kind: 'phone', match: text.slice(start, end) };
+      const span = phoneSpan(text, slice);
+      if (urlMatch && isContainedIn(span, urlMatch)) continue;
+      return { kind: 'phone', match: text.slice(span[0], span[1]) };
     }
   }
 
