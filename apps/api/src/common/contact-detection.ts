@@ -41,6 +41,8 @@ const separatorGap = new RegExp(`^${patterns.phoneSeparators}+$`);
 const rangeDash = new RegExp(patterns.rangeDash);
 const rangeGap = new RegExp(`^\\s*${patterns.rangeDash}\\s*$`);
 const strictPhone = new RegExp(patterns.strictPhone);
+const strictPhoneDashedPair = new RegExp(patterns.strictPhoneDashedPair);
+const spacedRangeDash = new RegExp(`\\s${patterns.rangeDash}|${patterns.rangeDash}\\s`);
 const phoneShapes = new Set(patterns.phoneShapes.map((shape) => shape.join(',')));
 const phoneShapeMaxTokens = Math.max(...patterns.phoneShapes.map((shape) => shape.length));
 const email = new RegExp(patterns.email, 'i');
@@ -257,8 +259,15 @@ function phoneSlices(run: NumberToken[]): NumberToken[][] {
  * bounds the window, so a long run costs a handful of slices per token.
  *
  * Grouped amounts and dates are not bare tokens, so "50.000 - 60.000 TL"
- * can never be read as 2-3-2-3 here. What this pass does not find falls
- * through to the contextual pass in `detectContactDetails`.
+ * can never be read as 2-3-2-3 here. The one shape money can still take is
+ * two groups on a dash — "500 - 5000000 TL" is 3-7 like "212-5554433" —
+ * so a two-group slice joined by a dash is held to more: a spaced dash is
+ * a range, never a phone separator ("0212-5554433" stays, "0212 - 5554433"
+ * is left to the contextual pass), and an unspaced one must carry a trunk
+ * or country prefix (`strictPhoneDashedPair`), so "550-5500000 lira" is not
+ * read as a bare mobile while "532-1234567" still is, by the contextual
+ * pass. What this pass does not find falls through to that pass in
+ * `detectContactDetails`.
  */
 function findStrictPhone(text: string, tokens: NumberToken[], urlMatch: RegExpMatchArray | null): Span | null {
   const runs: NumberToken[][] = [];
@@ -284,7 +293,9 @@ function findStrictPhone(text: string, tokens: NumberToken[], urlMatch: RegExpMa
       for (let to = toMax; to > from; to -= 1) {
         const slice = tokensOfRun.slice(from, to);
         if (!phoneShapes.has(slice.map((token) => token.digits.length).join(','))) continue;
-        if (!strictPhone.test(slice.map((token) => token.digits).join(''))) continue;
+        const digits = slice.map((token) => token.digits).join('');
+        if (!strictPhone.test(digits)) continue;
+        if (slice.length === 2 && !isStrictDashedPair(text, slice, digits)) continue;
         const span = phoneSpan(text, slice);
         if (urlMatch && isContainedIn(span, urlMatch)) continue;
         return span;
@@ -292,6 +303,15 @@ function findStrictPhone(text: string, tokens: NumberToken[], urlMatch: RegExpMa
     }
   }
   return null;
+}
+
+/** The two-group dash rule described on `findStrictPhone`. */
+function isStrictDashedPair(text: string, [first, second]: NumberToken[], digits: string): boolean {
+  if (!first || !second) return false;
+  const gap = text.slice(first.end, second.start);
+  if (!rangeDash.test(gap)) return true;
+  if (spacedRangeDash.test(gap)) return false;
+  return strictPhoneDashedPair.test(digits);
 }
 
 /**

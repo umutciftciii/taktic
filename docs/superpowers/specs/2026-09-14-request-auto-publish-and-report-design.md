@@ -548,8 +548,11 @@ Tespit (Türkçe odaklı, yanlış pozitifi sınırlı):
   **ve** rakamları katı Türk numarasıysa (`^(?:90(?:0)?[2-5]\d{9}|0[2-5]\d{9}|5\d{9})$`:
   `0`/`90` + 2xx–5xx alan/mobil kodu + 9 hane, ya da çıplak 10 haneli 5xx) telefondur —
   yanındaki `TL`/`₺`/`lira`/tarih ne olursa olsun ("0532 123 45 67 TL", "0212-5554433",
-  "0232 555 44 33" yakalanır; "50000-60000" `5-5` şeklinde olmadığı için, "3456789012" çıplak
-  2xx–4xx olduğu için girmez). Katı geçiş bulamazsa **bağlam geçişi**: şu token'lar telefon
+  "0232 555 44 33", "+905321234567 TL" yakalanır; "50000-60000" `5-5` şeklinde olmadığı için,
+  "3456789012" çıplak 2xx–4xx olduğu için girmez). Tek istisna iki gruplu tireli dilim
+  (`3-7`, `4-7`, `5-7` …): boşluklu tire bu geçişte aralıktır ("500 - 5000000 TL" bağlam
+  geçişine kalır ve serbest), boşluksuz tire `0`/`90` öneki ister (`strictPhoneDashedPair`:
+  "0212-5554433" telefon, "550-5500000 lira" değil; "532-1234567" bağlam geçişinden gelir). Katı geçiş bulamazsa **bağlam geçişi**: şu token'lar telefon
   adayına girmez ve adayı böler: binlik gruplu
   tutar (`\d{1,3}(?:\.\d{3})+`: "50.000", "5.000.000"; başında `+` varsa ülke kodudur,
   tutar değil), tarih (`\d{1,2}\.\d{1,2}\.\d{2,4}`: "15.09.2026"), para işaretine bitişik

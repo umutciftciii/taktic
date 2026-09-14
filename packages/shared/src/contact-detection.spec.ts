@@ -23,6 +23,9 @@ const POSITIVE: Array<[string, 'phone' | 'email' | 'url']> = [
   ['0212 555 4433', 'phone'],
   ['0216-5554433', 'phone'],
   ['0232 555 44 33', 'phone'],
+  ['+905321234567 TL', 'phone'],
+  ['905321234567 lira', 'phone'],
+  ['+90532 123 45 67 TL', 'phone'],
   ['mail: ali@example.com', 'email'],
   ['ali [at] example [dot] com', 'email'],
   ['ali (at) example.com', 'email'],
@@ -59,6 +62,9 @@ const NEGATIVE = [
   '2020 2021 2022 2023',
   'Adet: 5 10 15 20 25',
   'TC 12345678901',
+  '500 - 5000000 TL',
+  '0500 - 5000000 TL',
+  '550-5500000 lira',
 ];
 
 /**
