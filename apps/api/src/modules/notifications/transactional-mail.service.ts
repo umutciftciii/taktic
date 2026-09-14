@@ -6,6 +6,7 @@ import {
   OfferStatus,
   PackagePurchaseKind,
   PackagePurchaseStatus,
+  Prisma,
   ProviderStatus,
   ServiceCategoryStatus,
   ServiceRequestStatus,
@@ -1463,8 +1464,8 @@ export class TransactionalMailService {
    * Nothing widens it — a provider who could not find this request on their own
    * screen does not receive a mail about it.
    */
-async function findMatchingProviders(
-  prisma: PrismaService,
+export async function findMatchingProviders(
+  prisma: Pick<Prisma.TransactionClient, 'serviceRequest' | 'providerProfile'>,
   request: {
     id: string;
     categoryId: string;

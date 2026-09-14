@@ -8,6 +8,7 @@ import { EmailBrandingService } from './email-branding.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationPort } from './notification.port';
 import { RequestExpiryOutbox } from './request-expiry-outbox.service';
+import { RequestPublishOutbox } from './request-publish-outbox.service';
 import { ShowcaseLifecycleOutbox } from './showcase-lifecycle-outbox.service';
 import { isNotificationOutboxEnabled } from './notification-outbox';
 import { resolveEmailTransportKind } from './email-transport';
@@ -62,6 +63,9 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     // The vitrin run's clock notices, on the same arrangement and for the same
     // reason.
     ShowcaseLifecycleOutbox,
+    // The approval fan-out as a durable intent: enqueued inside the publishing
+    // transaction by the requests module, swept by the request lifecycle tick.
+    RequestPublishOutbox,
   ],
   exports: [
     NotificationPort,
@@ -71,6 +75,7 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     TransactionalMailService,
     RequestExpiryOutbox,
     ShowcaseLifecycleOutbox,
+    RequestPublishOutbox,
   ],
 })
 export class NotificationsModule {}
