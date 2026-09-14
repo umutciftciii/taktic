@@ -110,12 +110,12 @@ export async function reportRequestAction(formData: FormData) {
   redirect(`${returnTo}?reported=1`);
 }
 
-/** A path in this provider's own panel, or null. Query strings are dropped. */
+/** A path in this provider's own panel, or null. Query and fragment are dropped. */
 function safeReturnPath(value: string | null, providerId: string): string | null {
   if (!value) return null;
   const prefix = `/providers/${providerId}/`;
   if (!value.startsWith(prefix)) return null;
-  return value.split('?')[0] ?? null;
+  return value.split(/[?#]/)[0] ?? null;
 }
 
 /** The machine-readable `code` from any ApiError body, whatever the status. */

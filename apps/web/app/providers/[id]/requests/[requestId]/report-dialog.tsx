@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
+import { useFormStatus } from 'react-dom';
 import {
   REQUEST_REPORT_NOTE_MAX_LENGTH,
   REQUEST_REPORT_REASONS,
@@ -90,12 +91,26 @@ export function ReportDialog({ providerId, requestId, returnTo }: ReportDialogPr
             >
               Vazgeç
             </button>
-            <button type="submit" className="pdash-btn pdash-btn-primary" data-testid="report-submit">
-              Bildir
-            </button>
+            <SubmitButton />
           </div>
         </form>
       </dialog>
     </>
+  );
+}
+
+/** Held while the action runs, so a double click cannot post two reports. */
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      className="pdash-btn pdash-btn-primary"
+      disabled={pending}
+      aria-busy={pending || undefined}
+      data-testid="report-submit"
+    >
+      {pending ? 'Gönderiliyor…' : 'Bildir'}
+    </button>
   );
 }

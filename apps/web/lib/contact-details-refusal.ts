@@ -25,12 +25,16 @@ export type ContactDetailsTarget =
  * Reads the API's `field` into a place on the form, or null for a refusal that
  * is not about contact details, or names a field this form does not have.
  * The latter falls back to the banner above the steps, so a field the API
- * grows later is still reported somewhere.
+ * grows later — or an answer for a question this form did not render — is
+ * still reported somewhere rather than under a control that is not there.
+ *
+ * `renderedQuestionKeys` is the set of questions on screen; when given, an
+ * `answers.<key>` outside it is treated as unplaceable.
  */
-export function contactDetailsTarget(refusal: {
-  code: string;
-  field?: string;
-}): ContactDetailsTarget | null {
+export function contactDetailsTarget(
+  refusal: { code: string; field?: string },
+  renderedQuestionKeys?: readonly string[],
+): ContactDetailsTarget | null {
   if (refusal.code !== CONTACT_DETAILS_IN_TEXT || !refusal.field) return null;
 
   if (refusal.field === 'description') return { target: 'description' };
@@ -39,7 +43,9 @@ export function contactDetailsTarget(refusal: {
   const answerPrefix = 'answers.';
   if (refusal.field.startsWith(answerPrefix)) {
     const questionKey = refusal.field.slice(answerPrefix.length);
-    return questionKey ? { target: 'answer', questionKey } : null;
+    if (!questionKey) return null;
+    if (renderedQuestionKeys && !renderedQuestionKeys.includes(questionKey)) return null;
+    return { target: 'answer', questionKey };
   }
 
   return null;

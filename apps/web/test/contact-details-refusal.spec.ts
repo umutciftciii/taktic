@@ -22,6 +22,16 @@ describe('contactDetailsTarget', () => {
     ).toEqual({ target: 'answer', questionKey: 'extra_notes' });
   });
 
+  it('places an answer only when the form rendered that question', () => {
+    const refusal = { code: CONTACT_DETAILS_IN_TEXT, field: 'answers.extra_notes' };
+    expect(contactDetailsTarget(refusal, ['extra_notes', 'other'])).toEqual({
+      target: 'answer',
+      questionKey: 'extra_notes',
+    });
+    expect(contactDetailsTarget(refusal, ['other'])).toBeNull();
+    expect(contactDetailsTarget(refusal, [])).toBeNull();
+  });
+
   it('answers null for any other refusal, or a field the form has no control for', () => {
     expect(contactDetailsTarget({ code: 'CUSTOMER_IDENTITY_CONFLICT', field: 'description' })).toBeNull();
     expect(contactDetailsTarget({ code: CONTACT_DETAILS_IN_TEXT })).toBeNull();

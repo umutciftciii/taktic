@@ -429,7 +429,10 @@ export function RequestForm({
       // A refusal about one field is shown under that field, which may sit on
       // a step the customer has already left. Go back to it, so the sentence
       // is on screen and not behind a hidden panel.
-      const target = contactDetailsTarget(result);
+      const target = contactDetailsTarget(
+        result,
+        answerableQuestions.map((question) => question.key),
+      );
       if (target) setStep(target.target === 'addressNote' ? 2 : 1);
     });
   }
@@ -438,7 +441,9 @@ export function RequestForm({
    * The field the last refusal was about, when it was about one. Everything
    * else — the banner above the steps, the other fields — reads `null`.
    */
-  const refusedField: ContactDetailsTarget | null = failure ? contactDetailsTarget(failure) : null;
+  const refusedField: ContactDetailsTarget | null = failure
+    ? contactDetailsTarget(failure, answerableQuestions.map((question) => question.key))
+    : null;
   const fieldError = (target: ContactDetailsTarget['target'], questionKey?: string) => {
     if (!refusedField || refusedField.target !== target) return null;
     if (refusedField.target === 'answer' && refusedField.questionKey !== questionKey) return null;

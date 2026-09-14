@@ -41,8 +41,13 @@ export default async function RequestOfferDetailPage({
     }),
   );
 
+  // Closed by the platform with its request: nothing left to accept or reject.
+  const closed = offer.status === 'CANCELLED';
   const actionable =
-    offer.status !== 'ACCEPTED' && offer.status !== 'REJECTED' && offer.status !== 'WITHDRAWN';
+    !closed &&
+    offer.status !== 'ACCEPTED' &&
+    offer.status !== 'REJECTED' &&
+    offer.status !== 'WITHDRAWN';
 
   // Read from the API so the screen and the rule that guards the accept agree
   // about which text is current. With sharing off there is nothing to confirm
@@ -77,7 +82,7 @@ export default async function RequestOfferDetailPage({
               <dt>Durum</dt>
               <dd>
                 <span className={offerStatusClass(offer.status)} data-testid="offer-status">
-                  {statusLabel(offer.status)}
+                  {offerStatusLabel(offer.status)}
                 </span>
               </dd>
               <dt>Tahmini başlangıç</dt>
@@ -136,6 +141,12 @@ export default async function RequestOfferDetailPage({
             made. Accepting and rejecting are unchanged, and so is every state
             that makes them unavailable.
           */}
+          {closed ? (
+            <div className="cdash-notice" role="status" data-testid="offer-closed-note">
+              {CLOSED_OFFER_TEXT}
+            </div>
+          ) : null}
+
           {actionable ? (
             <section className="cdash-detail-card">
               <h2>Aksiyonlar</h2>
@@ -183,11 +194,14 @@ export default async function RequestOfferDetailPage({
             </section>
           ) : null}
 
-          <div className="cdash-notice">
-            {disclosure.enabled
-              ? 'Teklifi kabul ettiğinizde eşleşme tamamlanır ve iletişim bilgileriniz yalnızca kabul ettiğiniz hizmet verenle karşılıklı olarak paylaşılır.'
-              : 'Teklifi kabul ettiğinizde hizmet veren bilgilendirilir.'}
-          </div>
+          {/* A promise about accepting has no place under an offer that cannot be. */}
+          {closed ? null : (
+            <div className="cdash-notice">
+              {disclosure.enabled
+                ? 'Teklifi kabul ettiğinizde eşleşme tamamlanır ve iletişim bilgileriniz yalnızca kabul ettiğiniz hizmet verenle karşılıklı olarak paylaşılır.'
+                : 'Teklifi kabul ettiğinizde hizmet veren bilgilendirilir.'}
+            </div>
+          )}
         </div>
       </div>
     </CustomerShell>
@@ -292,6 +306,17 @@ function ActionButton({
       </button>
     </form>
   );
+}
+
+/** The same sentence the offers list uses, so the two screens agree. */
+const CLOSED_OFFER_TEXT = 'Talep kaldırıldığı için kapatıldı.';
+
+/**
+ * "Kapatıldı" rather than the generic "İptal": the customer did not cancel
+ * anything — the platform closed the offer with the request.
+ */
+function offerStatusLabel(status: string): string {
+  return status === 'CANCELLED' ? 'Kapatıldı' : statusLabel(status);
 }
 
 function offerStatusClass(status: string): string {

@@ -105,7 +105,7 @@ export function DescriptionField({
           required={question?.isRequired ?? required}
           data-testid="request-description"
           maxLength={SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH}
-          aria-describedby="request-description-help request-description-counter request-description-contact"
+          aria-describedby="request-description-help request-description-counter"
           aria-invalid={error ? true : undefined}
           defaultValue={defaultValue}
           onChange={(event) => {
@@ -122,20 +122,16 @@ export function DescriptionField({
         </p>
       ) : null}
       {/*
-        The live hint, while typing. Polite rather than an alert: it appears
-        mid-sentence and a screen reader should not be interrupted for it. It
-        gives way to the server's refusal above so the two never say the same
-        thing twice.
+        The live hint, while typing. A live region that is empty until there is
+        a detection — not a node in the field's `aria-describedby`, which would
+        be read on every focus whether hidden or not. Polite rather than an
+        alert: it appears mid-sentence and should not interrupt. It gives way to
+        the server's refusal above so the two never say the same thing twice.
       */}
-      <p
-        className="field-hint"
-        id="request-description-contact"
-        role="status"
-        data-testid="contact-details-hint"
-        hidden={!contactHint || Boolean(error)}
-      >
-        {CONTACT_DETAILS_HINT}: telefon, e-posta ve bağlantılar teklif kabul edildiğinde otomatik
-        paylaşılır.
+      <p className="field-hint" role="status" data-testid="contact-details-hint">
+        {contactHint && !error
+          ? `${CONTACT_DETAILS_HINT}: telefon, e-posta ve bağlantılar teklif kabul edildiğinde otomatik paylaşılır.`
+          : null}
       </p>
       {/*
         * The help text and the counter share one row — guidance on the left,

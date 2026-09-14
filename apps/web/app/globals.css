@@ -770,6 +770,8 @@ input[readonly] {
   font-weight: 600;
   color: var(--color-neutral-900);
 }
+/* The live region stays mounted; it takes no room while it has nothing to say. */
+.field-hint:empty { display: none; }
 
 .form-row [aria-invalid='true'] {
   border-color: var(--color-accent);
