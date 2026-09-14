@@ -351,7 +351,7 @@ not, işletme adı + link, zaman, çözüm). Açık rapor varsa üç düğme:
 | `GET /service-requests/:id/reports` | SUPER_ADMIN | o talebin tüm raporları |
 | `POST /service-requests/:id/reports/resolve` | SUPER_ADMIN | `{ resolution: 'DISMISSED'\|'REQUEST_REMOVED', resolutionNote?, removalReason? }` |
 | `POST /service-requests/:id/reopen` | SUPER_ADMIN | gövde yok; `{ moderationNote? }` |
-| `GET/PUT /operations-settings` | SUPER_ADMIN (mevcut) | `+ marketplaceAutoPublishEnabled` (scheduler toggle deseni) |
+| `GET/PUT /operations-settings/marketplace-publish` | SUPER_ADMIN | `{ enabled }`; satır yoksa `false` (fail-closed); değişiklikte `OperationsSettingsChange` (scheduler toggle deseni). *Uygulama notu:* anahtar genel `/operations-settings` gövdesine değil, kendi alt ucuna kondu. |
 
 Neden `PATCH /status` değil de `resolve`: karar ile raporların kapanması **tek transaction**
 olmalı; iki ayrı admin isteği "kaldırıldı ama kuyrukta açık" ya da tersini üretebilir.
@@ -525,7 +525,7 @@ OTP adımının normal forma taşınması v2 (açık karar B).
 
 | Katman | Bugün | Öneri |
 |---|---|---|
-| `POST /service-requests` IP | **Yok** | `AuthModule` `forRoot` listesine `service-requests` adlı throttler: **5 / 10 dk / IP** (`RequestDraftThrottlerGuard` deseniyle `ServiceRequestThrottlerGuard`, `throttlerName` override; `req.ip` → `TRUST_PROXY`). Sabitler `service-requests.constants.ts`, env yok. |
+| `POST /service-requests` IP | **Yok** | `AuthModule` `forRoot` listesine `service-requests` adlı throttler: **5 / 10 dk / IP** (`RequestDraftThrottlerGuard` deseniyle `ServiceRequestThrottlerGuard`, `throttlerName` override; `req.ip` → `TRUST_PROXY`). Sabitler `service-requests.constants.ts`. *Uygulama notu:* limit/pencere `SERVICE_REQUEST_RATE_LIMIT_MAX` / `SERVICE_REQUEST_RATE_LIMIT_WINDOW_SECONDS` ile geçersiz kılınabilir (varsayılan 5 / 600; `auth` throttler emsali; E2E `1000` verir). Telefon ve açık talep sınırları env'siz sabit. |
 | Telefon başına | Yok | Tx içinde sayım: son 24 saatte aynı `customerPhone` ile `status ∈ {SUBMITTED, APPROVED}` talep ≥ **5** → 429 `REQUEST_RATE_LIMITED`. Mevcut `@@index([phoneVerifiedAt])` yetmez; `@@index([customerPhone, submittedAt])` eklenir. |
 | Kullanıcı başına | Yok | Aynı sayım `customerId` ile (oturumlu müşteri); misafirde telefon sayımı zaten kapsar. |
 | Açık talep tavanı | Yok | Aynı telefonla **açık (`APPROVED`) talep ≥ 10** → 429. Acil talep senaryosunu bozmaz. |
@@ -737,7 +737,7 @@ Bu tablo artık açık soru listesi değil, v1'in kabul edilmiş kararlarıdır.
 | G | Teklif `message` alanında PII filtresi | v1 hayır (yön ters: provider→müşteri; ayrı iş). |
 | H | Asılsız rapor sayacı / provider itibar etkisi | v1 hayır; kuyrukta bildiren adı görünür, admin gözlemler. |
 | I | Müşteriye dönük gerekçe sözlüğü metinleri | Bölüm 5 taslağı esas alınır; metinler uygulama planında son hâlini alır. |
-| J | Rapor günlük bütçesi 20; talep hız sınırları 5/10 dk IP, 5/24 s telefon, 10 açık talep | Kodda sabit; env yok. |
+| J | Rapor günlük bütçesi 20; talep hız sınırları 5/10 dk IP, 5/24 s telefon, 10 açık talep | Kodda sabit. *Uygulama notu:* yalnız IP bütçesi `SERVICE_REQUEST_RATE_LIMIT_MAX` / `SERVICE_REQUEST_RATE_LIMIT_WINDOW_SECONDS` ile geçersiz kılınabilir (varsayılan 5 / 600; E2E `1000`); diğerleri env'siz. |
 
 Sonraki adım: `superpowers:writing-plans` ile uygulama planı; sıralama
 (1) migration + Prisma + anahtar, (2) oluşturma/yayın yolu + `RequestPublishOutbox`,

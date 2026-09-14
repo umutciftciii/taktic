@@ -194,6 +194,24 @@ iki dry-run DB DROP edildi; aktif DB'de migration sayısı 59, yeni kolon/tablo 
 7. **Admin onayında tx içi re-read** (Task 4 review): admin "Onayla" kaydı, talebin
    arada doğrulama transaction'ıyla yayınlanmış olabileceğini hesaba katıp durumu
    transaction içinde yeniden okur; aksi hâlde `request-published` iki kez kuyruklanırdı.
+8. **Anahtar ucu** spec §3.4'te `GET/PUT /operations-settings` gövdesine ek alan olarak
+   yazılıydı; uygulama `GET/PUT /operations-settings/marketplace-publish` (`{ enabled }`)
+   şeklinde ayrı bir alt uç kullandı. Spec §3.4 / §4.2 / §8 J bu notla güncellendi.
+
+### 6.1 Son inceleme düzeltme dalgası (I-1..I-3, T14)
+
+Bütün dal incelemesinin bulguları, her biri kendi commit'inde:
+
+- **I-1** `833eab9b` — PII filtresi binlik ayraçlı bütçe aralığını ("50.000 - 60.000 TL")
+  telefon sanıyordu; `contact-patterns.json` `amountRange` deseni, shared + api aynı gövde,
+  iki spec'e üç NEGATIVE vaka.
+- **I-2** `847274d0` — admin "Reddet" formu yalnız `APPROVED/IN_REVIEW/SUBMITTED`'da açık;
+  409 `REQUEST_NOT_REMOVABLE` → `?statusError=notRemovable` uyarısı; panel metinleri ve
+  API/rapor paneli ipucu kapanmış talebi de kapsar.
+- **I-3** `8d09038c` — kodsuz 429 (IP throttler) web formunda `REQUEST_RATE_LIMITED`
+  Türkçe metniyle gösterilir; İngilizce `ThrottlerException` müşteriye ulaşmaz.
+- **T14** `d5c77fa9` — `request-removal-refund.spec.ts`: kaldırma sonrası provider detayı
+  404, yeni teklif 404, müşteri kabul 400, geri çekme 409, mesaj kanalı 404 tek vakada.
 
 ## 7. Operasyon notları
 
