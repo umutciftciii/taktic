@@ -4255,3 +4255,164 @@ button:disabled {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/*
+ * Request reports: the queue, the "Bildirimler" card on the request detail,
+ * and the auto-publish card on operations settings.
+ */
+
+.admin-hint {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  max-width: 34ch;
+}
+
+.report-queue-tabs {
+  margin: -6px 0 14px;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.report-queue-excerpt {
+  display: block;
+  max-width: 32ch;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.report-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.report-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fffbeb;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.report-item.is-resolved {
+  background: #f8fafc;
+}
+
+.report-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.report-item-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.report-item-resolution {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.report-item-resolution-note {
+  flex-basis: 100%;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.report-decisions {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-decisions-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.report-decision-form {
+  margin: 0;
+  max-width: 560px;
+}
+
+.report-decision-form button[type='submit'] {
+  align-self: flex-start;
+}
+
+.report-decision-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.report-remove-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.report-remove-fieldset > legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.report-remove-fieldset:disabled {
+  opacity: 0.6;
+}
+
+.status-reject-field select {
+  padding: 8px 10px;
+  font-size: 13px;
+  border-radius: 8px;
+  max-width: 100%;
+}
+
+.status-reject-note {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.operations-subheading {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}

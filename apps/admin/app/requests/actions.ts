@@ -72,6 +72,83 @@ export async function cancelRequestAction(formData: FormData) {
   revalidatePath(`/requests/${id}`);
 }
 
+/**
+ * The one decision about a request's open reports: either the request is fine
+ * and the reports are dismissed, or the reports are upheld and the request is
+ * taken down. The API does the rest in one transaction — closing every open
+ * report, rejecting the request, refunding the credits — so this action only
+ * carries the decision and lands the operator back on the request with a
+ * reason when the API refuses it.
+ *
+ * `removalReason` travels only with a removal. It is the sentence the customer
+ * is told, so a dismissal has no business carrying one.
+ */
+export async function resolveReportsAction(formData: FormData) {
+  const id = readFormString(formData, 'id');
+  const resolution = readFormString(formData, 'resolution');
+
+  try {
+    await apiFetch<ServiceRequest>(`/service-requests/${id}/reports/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        resolution,
+        resolutionNote: readOptionalFormString(formData, 'resolutionNote'),
+        removalReason:
+          resolution === 'REQUEST_REMOVED'
+            ? readOptionalFormString(formData, 'removalReason')
+            : undefined,
+      }),
+    });
+  } catch (error) {
+    const code = conflictCode(error);
+    if (code === 'REQUEST_NOT_REMOVABLE') {
+      redirect(`/requests/${id}?reportError=notRemovable`);
+    }
+    if (code === 'NO_OPEN_REPORTS') {
+      redirect(`/requests/${id}?reportError=noOpen`);
+    }
+
+    throw error;
+  }
+
+  revalidatePath('/requests/reports');
+  revalidatePath(`/requests/${id}`);
+  revalidatePath('/requests');
+}
+
+/**
+ * Puts a request back after a report removed it. Only a REJECTED request with
+ * a removal behind it qualifies, and the same phone rule that guards approval
+ * guards this — the request goes back to APPROVED, so an unverified number is
+ * refused the same way and with the same message.
+ */
+export async function reopenRequestAction(formData: FormData) {
+  const id = readFormString(formData, 'id');
+
+  try {
+    await apiFetch<ServiceRequest>(`/service-requests/${id}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({
+        moderationNote: readOptionalFormString(formData, 'moderationNote'),
+      }),
+    });
+  } catch (error) {
+    const code = conflictCode(error);
+    if (code === 'PHONE_NOT_VERIFIED') {
+      redirect(`/requests/${id}?statusError=phoneNotVerified`);
+    }
+    if (code === 'REQUEST_NOT_REOPENABLE') {
+      redirect(`/requests/${id}?reportError=notReopenable`);
+    }
+
+    throw error;
+  }
+
+  revalidatePath('/requests/reports');
+  revalidatePath(`/requests/${id}`);
+  revalidatePath('/requests');
+}
+
 export async function recalculateRequestQualityAction(formData: FormData) {
   const id = readFormString(formData, 'id');
 

@@ -1,6 +1,8 @@
+import Link from 'next/link';
 import {
   apiFetch,
   formatDateTime,
+  MarketplacePublishSettings,
   OPERATIONS_SETTING_LABELS,
   OperationsSettings,
   requireAdmin,
@@ -10,6 +12,7 @@ import {
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { saveOperationsSettingsAction } from './actions';
+import { AutoPublishToggle } from './auto-publish-toggle';
 import { SchedulerToggle } from './scheduler-toggle';
 
 /**
@@ -48,6 +51,10 @@ const OK_MESSAGES: Record<string, string> = {
     'Zamanlanmış iş açıldı. İş, kendi cron zamanındaki ilk çalışmasından itibaren devreye girer.',
   'scheduler-off':
     'Zamanlanmış iş kapatıldı. Sıradaki cron çalışması hiçbir işlem yapmaz; sunucu yeniden başlatmaya gerek yoktur.',
+  'auto-publish-on':
+    'Otomatik yayın açıldı. Bundan sonra gönderilen pazar talepleri moderasyon beklemeden eşleşen hizmet verenlere iletilir.',
+  'auto-publish-off':
+    'Otomatik yayın kapatıldı. Bundan sonra gönderilen pazar talepleri onay kuyruğuna düşer; yayındaki talepler geri çekilmez.',
 };
 
 const RUN_OUTCOME_LABELS: Record<string, string> = {
@@ -65,9 +72,10 @@ export default async function OperationsSettingsPage({
   const errorMessage = (params.error ?? '').trim();
   const okMessage = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
 
-  const [settings, schedulers] = await Promise.all([
+  const [settings, schedulers, publish] = await Promise.all([
     apiFetch<OperationsSettings>('/operations-settings'),
     apiFetch<SchedulerSettings>('/operations-settings/schedulers'),
+    apiFetch<MarketplacePublishSettings>('/operations-settings/marketplace-publish'),
   ]);
 
   // A rejected save carries the operator's own value back in the query, so the
@@ -187,6 +195,68 @@ export default async function OperationsSettingsPage({
                           )}
                         </td>
                         <td>{change.newValue}</td>
+                        <td>{change.changedBy?.name ?? '-'}</td>
+                        <td>{formatDateTime(change.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            id="otomatik-yayin"
+            title="Pazar talepleri otomatik yayınlansın"
+            subtitle="Açıkken yeni talepler moderasyon beklemeden eşleşen hizmet verenlere iletilir; kapalıyken bugünkü onay akışı sürer."
+          >
+            <div className="scheduler-item-head" data-testid="auto-publish">
+              <div className="scheduler-item-text">
+                <p className="scheduler-item-impact">
+                  Yalnız bundan sonra gönderilen talepleri etkiler: onay bekleyen bir talep
+                  kuyruğunda kalır, yayındaki bir talep geri çekilmez. Telefonu doğrulanmamış bir
+                  talep açıkken de yayınlanmaz. Hizmet verenler yayındaki bir talebi bildirebilir;
+                  bildirimler <Link href="/requests/reports">Talep bildirimleri</Link> kuyruğuna düşer.
+                </p>
+              </div>
+              <AutoPublishToggle enabled={publish.enabled} />
+            </div>
+            <div className="scheduler-item-meta">
+              <span
+                className={publish.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
+                data-testid="auto-publish-state"
+              >
+                {publish.enabled ? 'Açık' : 'Kapalı'}
+              </span>
+            </div>
+
+            <h3 className="operations-subheading">Son değişiklikler</h3>
+            {publish.recentChanges.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }} data-testid="auto-publish-audit-empty">
+                Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda.
+              </p>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table" data-testid="auto-publish-audit">
+                  <thead>
+                    <tr>
+                      <th>Eski</th>
+                      <th>Yeni</th>
+                      <th>Yönetici</th>
+                      <th>Zaman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {publish.recentChanges.map((change) => (
+                      <tr key={change.id}>
+                        <td>
+                          {change.previousValue === null ? (
+                            <span className="muted">varsayılan (kapalı)</span>
+                          ) : (
+                            schedulerStateLabel(change.previousValue)
+                          )}
+                        </td>
+                        <td>{schedulerStateLabel(change.newValue)}</td>
                         <td>{change.changedBy?.name ?? '-'}</td>
                         <td>{formatDateTime(change.createdAt)}</td>
                       </tr>

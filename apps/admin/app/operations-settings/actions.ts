@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   apiFetch,
+  MarketplacePublishSettings,
   OperationsSettings,
   SCHEDULER_JOB_KEYS,
   SchedulerSettings,
@@ -93,6 +94,50 @@ export async function toggleSchedulerAction(formData: FormData) {
 /** Always back to the jobs card, so the operator lands on what they changed. */
 function schedulerUrl(params: Record<string, string>): string {
   return `/operations-settings?${new URLSearchParams(params).toString()}#zamanlanmis-isler`;
+}
+
+/**
+ * Switches marketplace auto-publish on or off.
+ *
+ * The same shape as `toggleSchedulerAction`, on its own endpoint: the form
+ * posts the state it wants, computed from what is currently true, so a double
+ * submission asks for the same thing twice and the audit trail records one
+ * change. The operator's identity comes from the session on the API side.
+ *
+ * Only the *next* request is affected. One already waiting in "Yeni Talep"
+ * stays there until a moderator acts on it, and one already published is not
+ * pulled back when the switch goes off.
+ */
+export async function toggleAutoPublishAction(formData: FormData) {
+  const enabled = readString(formData, 'enabled').trim();
+
+  if (enabled !== 'true' && enabled !== 'false') {
+    redirect(autoPublishUrl({ error: 'Otomatik yayın durumu yalnızca açık veya kapalı olabilir.' }));
+  }
+
+  let errorMessage: string | null = null;
+  try {
+    await apiFetch<MarketplacePublishSettings>('/operations-settings/marketplace-publish', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: enabled === 'true' }),
+    });
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    errorMessage = extractApiMessage(error);
+  }
+
+  if (errorMessage) {
+    redirect(autoPublishUrl({ error: errorMessage }));
+  }
+
+  revalidatePath('/operations-settings');
+  revalidatePath('/requests');
+  redirect(autoPublishUrl({ ok: enabled === 'true' ? 'auto-publish-on' : 'auto-publish-off' }));
+}
+
+/** Back to the auto-publish card, so the operator lands on what they changed. */
+function autoPublishUrl(params: Record<string, string>): string {
+  return `/operations-settings?${new URLSearchParams(params).toString()}#otomatik-yayin`;
 }
 
 /** The same three rules the DTO enforces: a number, whole hours, in range. */

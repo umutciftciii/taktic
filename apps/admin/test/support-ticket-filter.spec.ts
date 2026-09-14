@@ -37,6 +37,7 @@ const EMPTY_SUMMARY: AdminSummary = {
   refundableOffers: 0,
   packagePurchases: 0,
   openSupportTickets: 0,
+  openRequestReports: 0,
 };
 
 /** The `?status=` value carried by a href, exactly as a browser would read it. */

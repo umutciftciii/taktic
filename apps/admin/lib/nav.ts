@@ -18,6 +18,7 @@ export const navGroups: NavGroup[] = [
     title: 'Operasyon',
     items: [
       { href: '/requests', label: 'Talepler' },
+      { href: '/requests/reports', label: 'Talep bildirimleri' },
       { href: '/customers', label: 'Hizmet Alanlar' },
       { href: '/offers', label: 'Teklifler' },
       { href: '/providers', label: 'Hizmet Verenler' },
@@ -80,9 +81,33 @@ export const navGroups: NavGroup[] = [
   },
 ];
 
-export function isNavItemActive(item: NavItem, pathname: string): boolean {
+function matchesNavItem(item: NavItem, pathname: string): boolean {
   if (item.exact) {
     return pathname === item.href;
   }
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
+}
+
+/**
+ * Whether a sidebar row is the one the operator is on.
+ *
+ * A row matches its own path and everything under it, so `/requests` stays lit
+ * on `/requests/<id>`. When two rows both match — `/requests` and
+ * `/requests/reports` on the report queue — only the more specific one wins,
+ * otherwise the sidebar highlights two rows for one screen.
+ */
+export function isNavItemActive(item: NavItem, pathname: string): boolean {
+  if (!matchesNavItem(item, pathname)) {
+    return false;
+  }
+
+  return !navGroups.some((group) =>
+    group.items.some(
+      (other) =>
+        other !== item &&
+        other.href.length > item.href.length &&
+        other.href.startsWith(`${item.href}/`) &&
+        matchesNavItem(other, pathname),
+    ),
+  );
 }

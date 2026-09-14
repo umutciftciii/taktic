@@ -5,6 +5,10 @@ import {
   fetchOrNotFound,
   Offer,
   QualityScoreBreakdown,
+  REMOVAL_REASON_CUSTOMER_LABELS,
+  REPORT_REASON_ADMIN_LABELS,
+  REPORT_REASON_KEYS,
+  RequestReport,
   ServiceRequest,
   formatBudgetRange,
   formatDate,
@@ -13,6 +17,8 @@ import {
   qualityBadgeClass,
   qualityBreakdownLabel,
   qualityLabel,
+  reportReasonLabel,
+  reportResolutionLabel,
   requestStatusLabel,
   statusBadgeClass,
   statusLabel,
@@ -25,12 +31,30 @@ import {
   cancelRequestAction,
   completeRequestAction,
   recalculateRequestQualityAction,
+  reopenRequestAction,
+  resolveReportsAction,
   updateRequestStatusAction,
 } from '../actions';
 
 type RequestDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ statusError?: string }>;
+  searchParams: Promise<{ statusError?: string; reportError?: string }>;
+};
+
+/**
+ * The statuses a report can take a request down from. A matched request is
+ * out of the marketplace already and has a provider on it; removing it is the
+ * lifecycle's "İptal et", not a report decision. The API enforces the same
+ * list (REQUEST_NOT_REMOVABLE); this only decides whether the button is live.
+ */
+const REMOVABLE_STATUSES: ReadonlySet<string> = new Set(['APPROVED', 'IN_REVIEW', 'SUBMITTED']);
+
+const REPORT_ERROR_MESSAGES: Record<string, string> = {
+  notRemovable:
+    'Talep kaldırılmadı. Talep eşleşmiş ya da zaten kapanmış durumda; eşleşmiş talep için "İptal et" kullanın.',
+  noOpen: 'Karar kaydedilmedi. Bu talebin açık bildirimi kalmamış; sayfa yenilendi.',
+  notReopenable:
+    'Talep geri açılmadı. Yalnız bir bildirim sonucu kaldırılmış ve hâlâ reddedilmiş durumdaki talep geri açılabilir.',
 };
 
 const RECENT_OFFERS_LIMIT = 3;
@@ -61,11 +85,18 @@ export default async function RequestDetailPage({
   searchParams,
 }: RequestDetailPageProps) {
   const { id } = await params;
-  const { statusError } = await searchParams;
+  const { statusError, reportError } = await searchParams;
   const request = await fetchOrNotFound(() =>
     apiFetch<ServiceRequest>(`/service-requests/${id}`),
   );
-  const offers = await apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]);
+  const [offers, reports] = await Promise.all([
+    apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]),
+    // Operator-only: a reporter's note is shown here and nowhere the customer
+    // or another provider can see.
+    apiFetch<RequestReport[]>(`/service-requests/${id}/reports`).catch(
+      () => [] as RequestReport[],
+    ),
+  ]);
   // Audit only: this panel reports whether contact details were opened and
   // under which disclosure version. It renders no contact value — the operator
   // already has the customer and provider panels for that, and this feature
@@ -81,6 +112,14 @@ export default async function RequestDetailPage({
   const categoryName = request.category.name;
   const headerTitle = categoryName ? `${categoryName} Talebi` : 'Talep Detayı';
   const qualityFillPercent = Math.min(100, Math.max(0, request.qualityScore));
+  const openReports = reports.filter((report) => report.resolvedAt === null);
+  const canRemove = REMOVABLE_STATUSES.has(request.status);
+  // Derived, not stored: the request is down *because of a report* only when
+  // it is REJECTED and some report's decision was the removal.
+  const canReopen =
+    request.status === 'REJECTED' &&
+    reports.some((report) => report.resolution === 'REQUEST_REMOVED');
+  const reportErrorMessage = reportError ? (REPORT_ERROR_MESSAGES[reportError] ?? null) : null;
 
   return (
     <main className="request-detail-page">
@@ -204,6 +243,9 @@ export default async function RequestDetailPage({
                 <span className="status-current-tag">Mevcut durum</span>
               ) : null}
             </summary>
+            <p className="status-reject-note">
+              Reddetme, aktif teklifleri kapatır ve harcanan kredileri iade eder.
+            </p>
             <form action={updateRequestStatusAction} className="status-reject-form">
               <input type="hidden" name="id" value={request.id} />
               <input type="hidden" name="status" value="REJECTED" />
@@ -516,6 +558,169 @@ export default async function RequestDetailPage({
               </div>
             ) : null}
           </dl>
+        </SectionCard>
+
+        <SectionCard
+          className="card-wide"
+          id="bildirimler"
+          title="Bildirimler"
+          subtitle="Hizmet verenlerin bu talep hakkındaki bildirimleri ve verilen kararlar. Bildiren ve notu yalnız yönetici görür."
+        >
+          {reportErrorMessage ? (
+            <div className="status-action-error" role="alert" data-testid="report-error">
+              {reportErrorMessage}
+            </div>
+          ) : null}
+
+          {reports.length === 0 ? (
+            <EmptyState
+              title="Bildirim yok."
+              description="Bu talep hakkında hizmet verenlerden bir bildirim gelmedi."
+            />
+          ) : (
+            <ul className="report-list" data-testid="report-list">
+              {reports.map((report) => (
+                <li
+                  className={report.resolvedAt ? 'report-item is-resolved' : 'report-item'}
+                  key={report.id}
+                  data-testid="report-item"
+                >
+                  <div className="report-item-head">
+                    <span className="badge badge-muted">{reportReasonLabel(report.reason)}</span>
+                    <Link className="cell-link" href={`/providers/${report.reporter.id}`}>
+                      {report.reporter.businessName}
+                    </Link>
+                    <span className="cell-muted">{formatDateTime(report.createdAt)}</span>
+                  </div>
+                  {report.note ? (
+                    <p className="report-item-note">{report.note}</p>
+                  ) : (
+                    <p className="report-item-note cell-muted">Not yazılmamış.</p>
+                  )}
+                  <div className="report-item-resolution">
+                    {report.resolvedAt && report.resolution ? (
+                      <>
+                        <span
+                          className={
+                            report.resolution === 'REQUEST_REMOVED'
+                              ? 'badge badge-bad'
+                              : 'badge badge-good'
+                          }
+                        >
+                          {reportResolutionLabel(report.resolution)}
+                        </span>
+                        <span className="cell-muted">
+                          {formatDateTime(report.resolvedAt)}
+                          {report.resolvedBy?.name ? ` · ${report.resolvedBy.name}` : ''}
+                        </span>
+                        {report.resolutionNote ? (
+                          <span className="report-item-resolution-note">
+                            {report.resolutionNote}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="badge badge-warn">Karar bekliyor</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {openReports.length > 0 ? (
+            <div className="report-decisions" data-testid="report-decisions">
+              <p className="report-decisions-intro">
+                {openReports.length} açık bildirim var. Karar tüm açık bildirimleri birlikte
+                kapatır.
+              </p>
+
+              <form action={resolveReportsAction} className="status-reject-form report-decision-form">
+                <input type="hidden" name="id" value={request.id} />
+                <input type="hidden" name="resolution" value="DISMISSED" />
+                <label className="status-reject-field">
+                  <span>Not (opsiyonel, yalnız yönetici görür)</span>
+                  <textarea name="resolutionNote" placeholder="Neden uygun bulundu?" />
+                </label>
+                <button className="btn btn-secondary btn-sm" type="submit" data-testid="report-dismiss">
+                  Uygun bulundu
+                </button>
+              </form>
+
+              {/*
+                Open by default: the operator came here from the queue to
+                decide, and the required reason select is the guard against a
+                careless removal, not the fold. The fold is still there to
+                collapse the form once read.
+              */}
+              <details className="status-reject-block report-remove-block" open>
+                <summary data-testid="report-remove-toggle">Talebi kaldır</summary>
+                <form action={resolveReportsAction} className="status-reject-form report-decision-form">
+                  <fieldset className="report-remove-fieldset" disabled={!canRemove}>
+                    <legend>Talebi kaldır</legend>
+                    <input type="hidden" name="id" value={request.id} />
+                    <input type="hidden" name="resolution" value="REQUEST_REMOVED" />
+                    <label className="status-reject-field">
+                      <span>Gerekçe (zorunlu; müşteriye gösterilecek metin yanında)</span>
+                      <select name="removalReason" required defaultValue="">
+                        <option value="" disabled>
+                          Gerekçe seçin
+                        </option>
+                        {REPORT_REASON_KEYS.map((key) => (
+                          <option key={key} value={key}>
+                            {REPORT_REASON_ADMIN_LABELS[key]} — “{REMOVAL_REASON_CUSTOMER_LABELS[key]}”
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="status-reject-field">
+                      <span>Not (opsiyonel, yalnız yönetici görür)</span>
+                      <textarea name="resolutionNote" placeholder="Karar gerekçesi" />
+                    </label>
+                    <p className="report-decision-hint">
+                      Kaldırma talebi reddeder, aktif teklifleri kapatır ve harcanan kredileri
+                      iade eder. Müşteriye yalnız seçilen gerekçe gösterilir.
+                    </p>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      type="submit"
+                      disabled={!canRemove}
+                      aria-disabled={!canRemove}
+                      data-testid="report-remove"
+                      title={canRemove ? undefined : "Eşleşmiş talep için 'İptal et' kullanın."}
+                    >
+                      Talebi kaldır
+                    </button>
+                  </fieldset>
+                  {canRemove ? null : (
+                    <p className="report-decision-hint" role="note">
+                      Eşleşmiş talep için &apos;İptal et&apos; kullanın.
+                    </p>
+                  )}
+                </form>
+              </details>
+            </div>
+          ) : null}
+
+          {canReopen ? (
+            <form action={reopenRequestAction} className="status-reject-form report-decision-form">
+              <input type="hidden" name="id" value={request.id} />
+              <p className="report-decisions-intro">
+                Bu talep bir bildirim sonucu kaldırıldı. Geri açılırsa yeniden onaylı duruma
+                geçer ve eşleşen hizmet verenlere gösterilir.
+              </p>
+              <label className="status-reject-field">
+                <span>Moderasyon notu (opsiyonel)</span>
+                <textarea name="moderationNote" placeholder="Yalnızca admin görür" />
+              </label>
+              <p className="report-decision-hint" role="note">
+                Kapatılan teklifler geri açılmaz; iadeler geri alınmaz.
+              </p>
+              <button className="btn btn-primary btn-sm" type="submit" data-testid="report-reopen">
+                Talebi geri aç
+              </button>
+            </form>
+          ) : null}
         </SectionCard>
 
         <SectionCard title="Müşteri" subtitle="İletişim bilgileri ve bağlı hesap.">

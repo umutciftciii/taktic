@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildAdminDashboardMetrics, resolveMetricTone } from '../lib/dashboard-metrics';
+import {
+  OPEN_REQUEST_REPORTS_HREF,
+  buildAdminDashboardMetrics,
+  resolveMetricTone,
+} from '../lib/dashboard-metrics';
 import {
   OPEN_SUPPORT_TICKETS_FILTER,
   OPEN_SUPPORT_TICKETS_HREF,
@@ -31,6 +35,7 @@ const EMPTY_SUMMARY: AdminSummary = {
   refundableOffers: 0,
   packagePurchases: 0,
   openSupportTickets: 0,
+  openRequestReports: 0,
 };
 
 function metric(summary: Partial<AdminSummary>, key: string) {
@@ -118,6 +123,33 @@ describe('the open support tickets card', () => {
   it('shows the number the summary carries, and a badge only while it is positive', () => {
     expect(metric({ openSupportTickets: 0 }, 'openSupportTickets').tone).toBe('neutral');
     expect(metric({ openSupportTickets: 1 }, 'openSupportTickets').tone).toBe('warning');
+  });
+});
+
+describe('the open request reports card', () => {
+  it('is labelled and pointed at the open tab of the report queue', () => {
+    const card = metric({ openRequestReports: 2 }, 'openRequestReports');
+
+    expect(card.label).toBe('Açık talep bildirimi');
+    expect(card.value).toBe(2);
+    expect(card.href).toBe('/requests/reports?state=open');
+    expect(card.href).toBe(OPEN_REQUEST_REPORTS_HREF);
+  });
+
+  it('wears a badge only while there is something to decide', () => {
+    expect(metric({ openRequestReports: 0 }, 'openRequestReports').tone).toBe('neutral');
+    expect(metric({ openRequestReports: 1 }, 'openRequestReports').tone).toBe('warning');
+  });
+
+  it('treats a summary from an API that does not send the field as nothing to do', () => {
+    const summary = { ...EMPTY_SUMMARY } as Partial<AdminSummary>;
+    delete summary.openRequestReports;
+    const card = buildAdminDashboardMetrics(summary as AdminSummary).find(
+      (candidate) => candidate.key === 'openRequestReports',
+    );
+
+    expect(card?.value).toBe(0);
+    expect(card?.tone).toBe('neutral');
   });
 });
 
