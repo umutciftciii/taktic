@@ -724,9 +724,20 @@ export class ServiceRequestsService {
     const shouldModerate = moderatedStatuses.has(dto.status);
     const now = new Date();
 
-    const request = await runSerializable(
+    const { request, publishes } = await runSerializable(
       this.prisma,
       async (tx) => {
+        // The status as it is *now*, under the transaction, not as the
+        // pre-flight read above saw it. `existing` decides what the operator
+        // may ask for; this decides what the save actually changes. Between
+        // the two the customer's own verification can publish the request
+        // (`PhoneVerificationService.verifyCode`), and an approval that lands
+        // on an already-live row must not book its fan-out a second time.
+        const current = await tx.serviceRequest.findUniqueOrThrow({
+          where: { id },
+          select: { status: true, directShowcaseProviderId: true },
+        });
+
         const updated = await tx.serviceRequest.update({
       where: { id },
       data: {
@@ -797,16 +808,21 @@ export class ServiceRequestsService {
          * intents and the status commit as one fact; delivered after the
          * commit, below.
          */
-        if (isPublishingTransition(existing.status, dto.status, updated.directShowcaseProviderId)) {
+        const publishes = isPublishingTransition(
+          current.status,
+          dto.status,
+          updated.directShowcaseProviderId,
+        );
+        if (publishes) {
           await this.publishOutbox.enqueue(tx, id, now);
         }
 
-        return updated;
+        return { request: updated, publishes };
       },
       { label: 'serviceRequests.updateStatus' },
     );
 
-    if (isPublishingTransition(existing.status, dto.status, request.directShowcaseProviderId)) {
+    if (publishes) {
       this.publishOutbox.deliverSoon();
     }
 

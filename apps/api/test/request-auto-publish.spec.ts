@@ -1,6 +1,6 @@
 import { NotificationStatus, ServiceRequestStatus, UserRole } from '@prisma/client';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import type { CreateServiceRequestDto } from '../src/modules/service-requests/dto/create-service-request.dto';
 import { ServiceRequestsService } from '../src/modules/service-requests/service-requests.service';
@@ -39,6 +39,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   process.env.REQUIRE_PHONE_VERIFICATION = 'false';
+  vi.restoreAllMocks();
 });
 
 async function setAutoPublish(enabled: boolean) {
@@ -244,6 +245,73 @@ describe('marketplace auto-publish', () => {
 });
 
 describe('moderation approval through the outbox', () => {
+  it('does not book a second fan-out when the request went live before the admin save committed', async () => {
+    await setAutoPublish(true);
+    const category = await createCategory(ctx.prisma, 'Klima');
+    const providerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    await createDiscoverableProvider(ctx.prisma, {
+      categoryId: category.id,
+      userId: providerUser.id,
+    });
+    // A request that waited (created before the switch was flipped on).
+    await setAutoPublish(false);
+    const res = await request(ctx.server)
+      .post('/service-requests')
+      .send(serviceRequestPayload(category.slug))
+      .expect(201);
+    await setAutoPublish(true);
+    ctx.notifications.clear();
+
+    // The race, made deterministic: the admin save has read the row as
+    // SUBMITTED (its pre-flight read), and before its transaction opens the
+    // customer's own verification publishes the request — the same call
+    // verifyCode makes, committed in its own transaction.
+    const service = ctx.app.get(ServiceRequestsService);
+    const publishedAt = new Date();
+    type Preflight = { ensureRequestExists: (id: string) => Promise<{ status: string }> };
+    const realPreflight = (service as unknown as Preflight).ensureRequestExists.bind(service);
+    const preflight = vi
+      .spyOn(service as unknown as Preflight, 'ensureRequestExists')
+      .mockImplementationOnce(async (requestId: string) => {
+        const stale = await realPreflight(requestId);
+        expect(stale.status).toBe(ServiceRequestStatus.SUBMITTED);
+        const first = await ctx.prisma.$transaction((tx) =>
+          service.publishRequestInTransaction(tx, requestId, publishedAt),
+        );
+        expect(first).toBe(true);
+        return stale;
+      });
+
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const adminCookie = await loginAs(ctx.prisma, admin.id);
+    await request(ctx.server)
+      .patch(`/service-requests/${res.body.id}/status`)
+      .set('Cookie', adminCookie)
+      .send({ status: ServiceRequestStatus.APPROVED, moderationNote: 'ok' })
+      .expect(200);
+
+    // Re-approval keeps its contract — the note is saved and the window is
+    // refreshed — but the row was already live, so nothing new is owed.
+    const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: res.body.id } });
+    expect(row.status).toBe(ServiceRequestStatus.APPROVED);
+    expect(row.moderationNote).toBe('ok');
+    expect(preflight).toHaveBeenCalledTimes(1);
+    expect(row.approvedAt!.getTime()).toBeGreaterThan(publishedAt.getTime());
+
+    await outbox.deliverPending();
+    const published = await ctx.prisma.notificationLog.findMany({
+      where: { requestId: res.body.id, template: 'request-published' },
+    });
+    expect(published).toHaveLength(1);
+    expect(published[0]!.dedupeKey).toBe(`request-published:${res.body.id}:${publishedAt.toISOString()}`);
+    expect(
+      await ctx.prisma.notificationLog.count({
+        where: { requestId: res.body.id, template: 'request-available' },
+      }),
+    ).toBe(1);
+    expect(ctx.notifications.ofTemplate('request-published')).toHaveLength(1);
+  });
+
   it('enqueues the fan-out in the approval transaction and delivers it after the commit', async () => {
     const category = await createCategory(ctx.prisma, 'Klima');
     const providerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
