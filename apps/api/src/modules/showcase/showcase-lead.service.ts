@@ -22,6 +22,8 @@ import { TransactionalMailService } from '../notifications/transactional-mail.se
 import { PhoneVerificationService } from '../phone-verification/phone-verification.service';
 import { normalizePhoneNumber } from '../phone-verification/phone.util';
 import { resolveArea } from '../locations/turkey-locations';
+import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
+import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
 import { ServiceRequestsService } from '../service-requests/service-requests.service';
 import {
   CreateShowcaseLeadDto,
@@ -120,6 +122,9 @@ export class ShowcaseLeadService {
     @Inject(PhoneVerificationService)
     private readonly phoneVerification: PhoneVerificationService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(MarketplacePublishSettingsService)
+    private readonly publishSettings: MarketplacePublishSettingsService,
+    @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
   ) {}
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -356,12 +361,17 @@ export class ShowcaseLeadService {
    * thing from the other side — `ShowcaseLead_release_needs_decision` refuses a
    * `releasedAt` that is not accompanied by this customer's RELEASE.
    *
-   * `RELEASE` clears the gate and leaves the request `SUBMITTED`, which puts it
-   * in the **ordinary moderation queue**. That is the answer to the one real
-   * cost of skipping moderation on the way in: unread text reached one business
-   * that chose to advertise, and it does not reach the market until an operator
-   * has read it. When it is approved, the publish outbox fans it out exactly as
-   * it does for any other request — there is no special case, because by then
+   * `RELEASE` always clears the gate; what happens next depends on the
+   * marketplace auto-publish switch. Off, the request is left `SUBMITTED`,
+   * which puts it in the **ordinary moderation queue** — the answer to the one
+   * real cost of skipping moderation on the way in: unread text reached one
+   * business that chose to advertise, and it does not reach the market until an
+   * operator has read it. When it is later approved, the publish outbox fans it
+   * out exactly as it does for any other request. On, there is nobody left to
+   * moderate it: the customer's RELEASE **is** the publish decision, so the
+   * same transaction that clears the gate calls
+   * `ServiceRequestsService.publishRequestInTransaction` and books the same
+   * fan-out immediately — there is no special case either way, because by then
    * there is nothing special about the request.
    *
    * `KEEP_CLOSED` cancels the request through the existing cancellation path.
@@ -374,6 +384,10 @@ export class ShowcaseLeadService {
     dto: ShowcaseFallbackDecisionDto,
   ) {
     const now = new Date();
+    // Read once, outside the transaction — the same value has to decide both
+    // whether this call publishes and whether it owes a delivery sweep
+    // afterwards.
+    const autoPublish = await this.publishSettings.isAutoPublishEnabled();
 
     const outcome = await runSerializable(
       this.prisma,
@@ -450,7 +464,13 @@ export class ShowcaseLeadService {
             data: { directShowcaseProviderId: null },
           });
 
-          return { decision: 'RELEASE' as const, leadId: lead.id };
+          // The market's reason to wait — "unread text must pass an operator
+          // first" — no longer exists when auto-publish is on: the release is
+          // the customer's decision and the request goes live right here.
+          const published =
+            autoPublish && (await this.requests.publishRequestInTransaction(tx, requestId, now));
+
+          return { decision: 'RELEASE' as const, leadId: lead.id, published };
         }
 
         const moved = await tx.showcaseLead.updateMany({
@@ -484,6 +504,10 @@ export class ShowcaseLeadService {
       },
       { label: 'showcase.decideFallback' },
     );
+
+    if (outcome.decision === 'RELEASE' && outcome.published) {
+      this.publishOutbox.deliverSoon();
+    }
 
     return this.presentForCustomer(outcome.leadId);
   }
