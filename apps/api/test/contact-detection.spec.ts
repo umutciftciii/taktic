@@ -16,6 +16,7 @@ const POSITIVE: Array<[string, 'phone' | 'email' | 'url']> = [
   ['0532.123.45.67', 'phone'],
   ['+90.532.123.45.67', 'phone'],
   ['Bütçe 50.000 TL 0532 123 45 67', 'phone'],
+  ['Ölçüler 30 40 50 60 70 80 0532 123 45 67', 'phone'],
   ['mail: ali@example.com', 'email'],
   ['ali [at] example [dot] com', 'email'],
   ['ali (at) example.com', 'email'],
@@ -71,6 +72,12 @@ describe('api detectContactDetails', () => {
   it('stays fast on a run of thousands of digit tokens', () => {
     const startedAt = performance.now();
     expect(apiDetect(DIGIT_SPAM)).toBeNull();
+    expect(performance.now() - startedAt).toBeLessThan(200);
+  });
+
+  it('still finds a phone number written after thousands of digit tokens', () => {
+    const startedAt = performance.now();
+    expect(apiDetect(`${DIGIT_SPAM} 0532 123 45 67`)?.kind).toBe('phone');
     expect(performance.now() - startedAt).toBeLessThan(200);
   });
 

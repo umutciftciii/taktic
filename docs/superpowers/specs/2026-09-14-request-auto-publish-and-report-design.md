@@ -555,7 +555,8 @@ Tespit (Türkçe odaklı, yanlış pozitifi sınırlı):
   için birleşir). Adayın denenen dilimleri: kısa adayda (≤ 13+3 hane) bütünü ya da baştan
   token düşürülmüş sonekleri ("Daire 7 0532 123 45 67" bulunur; "90 100 110 120 130"
   listesinin ilk parçası telefon sayılmaz), uzun adayda (IBAN, liste, rakam spam'i) yalnız
-  baştan başlayan en fazla 13 token'lık dilimler. Dilimin birleşik rakamları 10–13 haneli
+  iki ucundaki en fazla 13 token'lık pencereler — baştan başlayanlar ve sonda bitenler
+  ("30 40 50 60 70 80 0532 123 45 67" bulunur, IBAN'ın ortası taranmaz). Dilimin birleşik rakamları 10–13 haneli
   **ve** `0`, `90` ya da `5` ile başlıyorsa telefon; URL içindeki dilim atlanır.
   "15000 TL", "12.03.2026", "34000", "50.000 - 60.000 TL", "₺5.000.000–₺6.000.000",
   "50000-60000 lira", "5 000 000 - 6 000 000 TL", "15.09.2026 - 20.09.2026",

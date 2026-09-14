@@ -196,24 +196,31 @@ function phoneRuns(text: string, tokens: NumberToken[]): NumberToken[][] {
 }
 
 /**
- * The slices of a run that may be a phone number, longest first.
+ * The slices of a run that may be a phone number.
  *
  * A short run — a number with a stray "Daire 7" or "0090" in front of it —
  * may drop leading tokens, so the number is found behind them. It may not
  * drop trailing tokens: a list of measurements ("90 100 110 120 130") would
  * otherwise yield a "90…" phone number from its first few entries.
+ * `phoneRunSlackDigits` (3) is how much such a stray prefix may add on top
+ * of the longest phone number before the run stops counting as short.
  *
- * A long run — an IBAN, a list, digit spam — is judged from its start only,
- * so a 0/5-prefixed stretch buried in the middle does not turn it into a
- * phone number. Every token carries at least one digit, so no slice longer
- * than phoneDigitsMax tokens can qualify; that bounds the work per run.
+ * A long run — an IBAN, a list, digit spam — is judged only at its two
+ * ends: the windows anchored at its start and the windows anchored at its
+ * end, so a number written after a list ("30 40 50 60 70 80 0532 123 45 67")
+ * is still found, while a 0/5-prefixed stretch buried in the middle of an
+ * IBAN does not turn it into one. Every token carries at least one digit,
+ * so no window longer than phoneDigitsMax tokens can qualify; that bounds
+ * the work per run to a couple of dozen slices whatever the run's length.
  */
 function phoneSlices(run: NumberToken[]): NumberToken[][] {
   const total = run.reduce((sum, token) => sum + token.digits.length, 0);
   const slices: NumberToken[][] = [];
   if (total > patterns.phoneDigitsMax + patterns.phoneRunSlackDigits) {
-    for (let to = Math.min(run.length, patterns.phoneDigitsMax); to > 0; to -= 1) {
-      slices.push(run.slice(0, to));
+    const window = Math.min(run.length, patterns.phoneDigitsMax);
+    for (let to = window; to > 0; to -= 1) slices.push(run.slice(0, to));
+    for (let from = run.length - window; from < run.length; from += 1) {
+      if (from > 0) slices.push(run.slice(from));
     }
     return slices;
   }
@@ -259,8 +266,6 @@ export function detectContactDetails(text: string): ContactDetection | null {
       const last = slice[slice.length - 1];
       if (!first || !last) continue;
       const digits = slice.map((token) => token.digits).join('');
-      // Slices come longest first; once one is too short, the rest are too.
-      if (digits.length < patterns.phoneDigitsMin) break;
       if (!isPhoneDigits(digits)) continue;
       // The match starts at the first digit (a leading "+" included), so
       // "(0532) 123 45 67" reports "0532) 123 45 67" — informational only,
