@@ -644,18 +644,23 @@ export type ReviewReportReason =
   | 'OTHER';
 
 /**
- * Reports the first review on the provider's list, through the native
- * dialog, and waits for the page's "received" notice — by test id, for the
- * route-announcer reason `reportRequest` gives.
+ * Reports one review on the provider's list — the row named by `reviewId`,
+ * or the newest when none is — through the native dialog, and waits for the
+ * page's "received" notice — by test id, for the route-announcer reason
+ * `reportRequest` gives.
  */
 export async function reportReview(
   provider: Actor,
   providerId: string,
   reason: ReviewReportReason,
   note?: string,
+  reviewId?: string,
 ): Promise<void> {
   await provider.gotoWeb(`/providers/${providerId}/degerlendirmeler`);
-  await provider.page.getByTestId('review-report-button').first().click();
+  const row = reviewId
+    ? provider.page.locator(`[data-testid="review-row"][data-review-id="${reviewId}"]`)
+    : provider.page.getByTestId('review-row').first();
+  await row.getByTestId('review-report-button').click();
 
   // One dialog per row; the open one is the one the click just raised.
   const dialog = provider.page.locator('dialog.report-dialog[open]');

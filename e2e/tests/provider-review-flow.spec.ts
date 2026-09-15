@@ -266,7 +266,7 @@ test.describe('provider review flow', () => {
       await expect(customer.page.getByTestId('offer-review-summary')).toHaveText('★ 4,7 · 3 değerlendirme');
 
       // ---- the provider reports the comment; nothing hides ----------------
-      await reportReview(provider, providerAccount.id, 'OFFENSIVE', 'Bu yorum işle ilgili değil.');
+      await reportReview(provider, providerAccount.id, 'OFFENSIVE', 'Bu yorum işle ilgili değil.', reviewId);
       await visitor.page.reload();
       await expect(publicRowWith(visitor.page, COMMENT)).toHaveCount(1);
 
