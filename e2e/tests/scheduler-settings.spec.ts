@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCustomer, prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
@@ -314,6 +316,11 @@ test.describe('provider reviews switch', () => {
       await expect(admin.page.getByTestId('provider-reviews-state')).toHaveText('Kapalı');
       await expect(admin.page.getByTestId('provider-reviews-audit-empty')).toBeVisible();
       expect(await storedReviewFlag()).toBe(false);
+      mkdirSync(resolve(__dirname, '..', 'test-results', 'provider-review-screens'), { recursive: true });
+      await card.scrollIntoViewIfNeeded();
+      await admin.page.screenshot({
+        path: resolve(__dirname, '..', 'test-results', 'provider-review-screens', 'admin-switch-off-1280.png'),
+      });
 
       // ---- on ---------------------------------------------------------------
       await admin.page.getByTestId('provider-reviews-toggle').click();

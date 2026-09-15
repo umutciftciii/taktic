@@ -276,6 +276,15 @@ test.describe('provider review flow', () => {
       await expect(row).toHaveCount(1);
       await expect(row).toContainText(providerAccount.businessName);
       await expect(row).toContainText('Hakaret');
+      mkdirSync(SCREENSHOT_DIR, { recursive: true });
+      await capture(admin.page, 'admin-review-queue', 1280);
+      await admin.gotoAdmin(`/provider-reviews/${reviewId}`);
+      await expect(admin.page.getByTestId('review-report-decisions')).toBeVisible();
+      await capture(admin.page, 'admin-review-detail', 1280);
+      await visitor.page.setViewportSize({ width: 1280, height: 900 });
+      await capture(visitor.page, 'public-profile-three-reviews', 1280);
+      await customer.gotoWeb(`/requests/${requestId}/offers`);
+      await capture(customer.page, 'customer-offer-card-rating', 1280);
 
       // ---- REMOVE_COMMENT: the star stays, the comment goes ---------------
       await moderateReview(admin, reviewId, 'REMOVE_COMMENT');
@@ -769,6 +778,9 @@ test.describe('provider review flow', () => {
       // band are still there — the rating did not push them out.
       await expect(shelfCard.getByTestId('showcase-card-price')).toContainText('₺1.500,00');
       await expect(shelfCard.getByTestId('showcase-card-area')).toContainText(location.district);
+      mkdirSync(SCREENSHOT_DIR, { recursive: true });
+      await shelfCard.scrollIntoViewIfNeeded();
+      await shelfCard.screenshot({ path: resolve(SCREENSHOT_DIR, 'vitrin-shelf-card-rating-1280.png') });
       const [ratingSize, priceSize] = await Promise.all([
         shelfCard.getByTestId('showcase-card-rating').evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
         shelfCard.getByTestId('showcase-card-price').evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
