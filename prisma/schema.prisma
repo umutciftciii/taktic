@@ -140,6 +140,30 @@ enum ServiceRequestReportResolution {
   REQUEST_REMOVED
 }
 
+/// Why the reviewed business brought a comment in front of an operator.
+enum ProviderReviewReportReason {
+  OFFENSIVE
+  CONTAINS_CONTACT_INFO
+  NOT_ABOUT_THIS_JOB
+  SUSPECTED_FAKE
+  OTHER
+}
+
+/// One operator action on one review. Append-only: a row is written per action
+/// and never updated or deleted; the review row only carries the derived state.
+enum ProviderReviewModerationAction {
+  REMOVE_COMMENT
+  REMOVE_REVIEW
+  RESTORE
+}
+
+/// The one decision an operator takes about a review report.
+enum ProviderReviewReportResolution {
+  DISMISSED
+  COMMENT_REMOVED
+  REVIEW_REMOVED
+}
+
 enum NotificationChannel {
   EMAIL
   SMS
@@ -398,6 +422,9 @@ model User {
   showcasePriceTermsAcceptances ShowcaseCardPriceTermsAcceptance[]
   showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[] @relation("ShowcasePackageTermsAcceptedBy")
   resolvedRequestReports        ServiceRequestReport[]             @relation("ServiceRequestReportResolvedBy")
+  providerReviews               ProviderReview[]                   @relation("ProviderReviewCustomer")
+  resolvedReviewReports         ProviderReviewReport[]             @relation("ProviderReviewReportResolvedBy")
+  reviewModerations             ProviderReviewModeration[]         @relation("ProviderReviewModerationPerformedBy")
 
   @@index([role])
   @@index([isActive])
@@ -507,6 +534,14 @@ model OperationsSettings {
   /// fail-closed on every request creation, switched on by a person on the
   /// operations screen and never by a migration or an environment variable.
   marketplaceAutoPublishEnabled           Boolean  @default(false)
+  /// Whether customers may rate the business whose offer they accepted once
+  /// the request is completed, and whether those ratings are shown.
+  ///
+  /// Same contract as `marketplaceAutoPublishEnabled`: false by default, read
+  /// fail-closed on every review write and every public projection, switched
+  /// on by a person on the operations screen and never by a migration or an
+  /// environment variable.
+  providerReviewsEnabled                  Boolean  @default(false)
   createdAt                               DateTime @default(now())
   updatedAt                               DateTime @updatedAt
   /// Who last saved this. Nullable and SetNull for the same reason
@@ -905,6 +940,10 @@ model ServiceRequest {
   showcaseLeadSource     ShowcaseLead?          @relation("ShowcaseLeadRequest")
   directShowcaseProvider ProviderProfile?       @relation("ServiceRequestDirectShowcaseProvider", fields: [directShowcaseProviderId], references: [id], onDelete: Restrict)
   reports                ServiceRequestReport[]
+  /// A list only because Prisma's one-to-one needs a scalar `@unique` on the
+  /// review's side and the review's uniqueness is `(requestId, providerId)`.
+  /// At most one row in practice: a request has one accepted offer.
+  reviews                ProviderReview[]
 
   @@index([categoryId])
   @@index([entryCategoryId])
@@ -1180,6 +1219,8 @@ model ProviderProfile {
   showcaseEntitlements          ShowcaseEntitlement[]
   directShowcaseRequests        ServiceRequest[]                   @relation("ServiceRequestDirectShowcaseProvider")
   requestReports                ServiceRequestReport[]
+  reviews                       ProviderReview[]
+  reviewReports                 ProviderReviewReport[]
 
   @@index([status])
   @@index([city])
@@ -1340,6 +1381,9 @@ model Offer {
   /// The vitrin lead this offer answered, when it answered one. Unique on the
   /// lead's side: a lead has one response.
   showcaseLead       ShowcaseLead?               @relation("ShowcaseLeadRespondedOffer")
+  /// The customer's rating of this offer's delivery. Unique on the review's
+  /// side: one review per accepted offer.
+  review             ProviderReview?
   // A PostgreSQL partial unique index — "Offer_one_accepted_per_request",
   // UNIQUE ("requestId") WHERE status = 'ACCEPTED' — is created by the
   // add_request_matching migration. Prisma cannot express partial indexes in
@@ -3490,6 +3534,109 @@ model ServiceRequestReport {
   /// The per-provider daily budget count.
   @@index([reporterProviderId, createdAt])
   @@index([resolvedAt, createdAt])
+}
+
+/// A customer's rating of the business whose offer they accepted on their own,
+/// now completed, request. Created once; never edited or deleted by anyone.
+/// Only moderation writes `commentRemovedAt`/`removedAt`, always together with
+/// a ProviderReviewModeration row in the same transaction.
+///
+/// Two PostgreSQL CHECKs ("ProviderReview_rating_range",
+/// "ProviderReview_comment_removal_needs_comment") and the live-rows partial
+/// index ("ProviderReview_live_by_provider_idx", WHERE "removedAt" IS NULL)
+/// live in the migration's raw SQL; Prisma cannot express them.
+model ProviderReview {
+  id               String    @id @default(cuid())
+  requestId        String
+  /// The accepted offer. Unique: one review per delivered offer. `providerId`
+  /// is copied from this offer inside the create transaction — never from a
+  /// request body.
+  offerId          String    @unique
+  providerId       String
+  /// The request's owner. NOT NULL: `/complete` requires a session, so the
+  /// reviewer is always a signed-in CUSTOMER.
+  customerUserId   String
+  /// 1..5 — CHECK "ProviderReview_rating_range" in raw SQL.
+  rating           Int
+  /// Trimmed, whitespace-collapsed; NULL when empty. Bounded by
+  /// limits.providerReviewCommentMaxLength. Never rendered as HTML anywhere.
+  comment          String?
+  /// Set by REMOVE_COMMENT. The text stays on the row for the audit trail and
+  /// the operator; every non-admin projection treats it as absent.
+  commentRemovedAt DateTime?
+  /// Set by REMOVE_REVIEW. Excluded from every aggregate and every list except
+  /// the customer's own and the operator's. Cleared by RESTORE.
+  removedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  request    ServiceRequest             @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  offer      Offer                      @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  provider   ProviderProfile            @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  customer   User                       @relation("ProviderReviewCustomer", fields: [customerUserId], references: [id], onDelete: Restrict)
+  reports    ProviderReviewReport[]
+  moderation ProviderReviewModeration[]
+
+  /// One review per request + provider — the database's answer to a
+  /// double-click and to a re-submission after a removal.
+  @@unique([requestId, providerId])
+  @@index([customerUserId, createdAt])
+  @@index([providerId, createdAt])
+}
+
+/// The reviewed business telling an operator that a comment needs a look.
+/// Append-only: opened once, resolved once. A report never hides anything.
+///
+/// A PostgreSQL CHECK ("ProviderReviewReport_resolution_pair",
+/// ("resolvedAt" IS NULL) = ("resolution" IS NULL)) and a partial index on the
+/// open queue ("ProviderReviewReport_open_idx", WHERE "resolvedAt" IS NULL)
+/// live in the migration's raw SQL; Prisma cannot express either.
+model ProviderReviewReport {
+  id                 String                          @id @default(cuid())
+  reviewId           String
+  reporterProviderId String
+  reason             ProviderReviewReportReason
+  /// Optional free text (≤500). Operator-only.
+  note               String?
+  createdAt          DateTime                        @default(now())
+  resolvedAt         DateTime?
+  resolvedByUserId   String?
+  resolution         ProviderReviewReportResolution?
+  resolutionNote     String?
+
+  review     ProviderReview  @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  reporter   ProviderProfile @relation(fields: [reporterProviderId], references: [id], onDelete: Restrict)
+  resolvedBy User?           @relation("ProviderReviewReportResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  // "ProviderReviewReport_one_open_per_review": UNIQUE ("reviewId") WHERE
+  // "resolvedAt" IS NULL — raw SQL, Prisma cannot express it. A second open
+  // report on one review is unrepresentable; a new report after a decision is.
+  @@index([reviewId, createdAt])
+  @@index([reporterProviderId, createdAt])
+  @@index([resolvedAt, createdAt])
+}
+
+/// Every operator action on a review: who, what, why, when. Never updated.
+///
+/// A PostgreSQL CHECK ("ProviderReviewModeration_reason_by_action",
+/// ("action" = 'RESTORE') = ("reason" IS NULL)) lives in the migration's raw
+/// SQL; Prisma cannot express it.
+model ProviderReviewModeration {
+  id            String                         @id @default(cuid())
+  reviewId      String
+  action        ProviderReviewModerationAction
+  /// Required for REMOVE_*, NULL for RESTORE — CHECK in raw SQL. The key of
+  /// the fixed label the customer is mailed; never the operator's note.
+  reason        ProviderReviewReportReason?
+  /// Operator-only.
+  note          String?
+  performedById String
+  createdAt     DateTime                       @default(now())
+
+  review      ProviderReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  performedBy User           @relation("ProviderReviewModerationPerformedBy", fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([reviewId, createdAt])
+  @@index([performedById])
 }
 
 /// Which request form a draft belongs to. The form page asks for its own kind

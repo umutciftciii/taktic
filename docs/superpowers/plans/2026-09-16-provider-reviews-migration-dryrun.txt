@@ -1,0 +1,196 @@
+Sağlayıcı değerlendirmeleri — migration dry-run (2026-09-16)
+
+İzole veritabanları (ikisi de bu iş için açıldı, iş sonunda DROP edildi; aktif
+DATABASE_URL hiçbir adımda shadow/hedef olarak kullanılmadı):
+  taktic_shadow_reviews   `prisma migrate diff --from-migrations … --shadow-database-url`
+                          için boş shadow DB
+  taktic_reviews_dryrun   aktif `taktic` DB'nin `pg_dump` kopyası
+                          (`docker exec taktic-postgres sh -c 'pg_dump … | psql …'`)
+
+Uygulanan migration (yalnız bu bekliyordu; 60 → 61):
+  20260916120000_add_provider_reviews   → saf DDL
+
+DDL'in niteliği (açıkça): hiçbir satır yeniden yazılmaz, DML yok.
+  CREATE TYPE  ProviderReviewReportReason (OFFENSIVE, CONTAINS_CONTACT_INFO,
+               NOT_ABOUT_THIS_JOB, SUSPECTED_FAKE, OTHER)
+  CREATE TYPE  ProviderReviewModerationAction (REMOVE_COMMENT, REMOVE_REVIEW, RESTORE)
+  CREATE TYPE  ProviderReviewReportResolution (DISMISSED, COMMENT_REMOVED, REVIEW_REMOVED)
+  ALTER TABLE  OperationsSettings ADD COLUMN providerReviewsEnabled BOOLEAN NOT NULL DEFAULT false
+  CREATE TABLE ProviderReview (id, requestId, offerId, providerId, customerUserId, rating,
+               comment, commentRemovedAt, removedAt, createdAt;
+               CHECK rating BETWEEN 1 AND 5; CHECK commentRemovedAt IS NULL OR comment IS NOT NULL)
+  CREATE TABLE ProviderReviewReport (id, reviewId, reporterProviderId, reason, note,
+               createdAt, resolvedAt, resolvedByUserId, resolution, resolutionNote;
+               CHECK (resolvedAt IS NULL) = (resolution IS NULL))
+  CREATE TABLE ProviderReviewModeration (id, reviewId, action, reason, note, performedById,
+               createdAt; CHECK (action = 'RESTORE') = (reason IS NULL))
+  CREATE INDEX ProviderReview: _offerId_key (UNIQUE), _requestId_providerId_key (UNIQUE),
+               _customerUserId_createdAt_idx, _providerId_createdAt_idx,
+               _live_by_provider_idx (partial: removedAt IS NULL, INCLUDE rating)
+               ProviderReviewReport: _reviewId_createdAt_idx, _reporterProviderId_createdAt_idx,
+               _resolvedAt_createdAt_idx, _one_open_per_review (UNIQUE partial: resolvedAt IS NULL),
+               _open_idx (partial: resolvedAt IS NULL)
+               ProviderReviewModeration: _reviewId_createdAt_idx, _performedById_idx
+  FK           ProviderReview: requestId → ServiceRequest, offerId → Offer, providerId →
+               ProviderProfile, customerUserId → User (hepsi RESTRICT)
+               ProviderReviewReport: reviewId → ProviderReview RESTRICT, reporterProviderId →
+               ProviderProfile RESTRICT, resolvedByUserId → User SET NULL
+               ProviderReviewModeration: reviewId → ProviderReview RESTRICT, performedById →
+               User RESTRICT
+
+Şema notu: A3'teki `ServiceRequest.review ProviderReview?` Prisma'da geçerli değil
+(bire-bir ilişki tanımlayan tarafta skaler `@unique` ister; değerlendirmenin tekilliği
+`(requestId, providerId)` çiftinde). DDL'e dokunmadan `ServiceRequest.reviews
+ProviderReview[]` olarak eklendi; `Offer.review ProviderReview?` olduğu gibi (offerId @unique).
+
+Komut 1 — diff (shadow DB üzerinden; çıktı migration.sql'in ilk yarısı, sonuna A3 raw SQL eklendi):
+  pnpm exec prisma migrate diff --from-migrations prisma/migrations \
+    --to-schema-datamodel prisma/schema.prisma \
+    --shadow-database-url 'postgresql://…@localhost:5433/taktic_shadow_reviews?schema=public' --script
+  → 3 CREATE TYPE, 1 ALTER TABLE ADD COLUMN, 3 CREATE TABLE, 9 CREATE INDEX, 9 ADD FOREIGN KEY
+
+Komut 2 — deploy (dry-run kopyası):
+  DATABASE_URL='postgresql://…@localhost:5433/taktic_reviews_dryrun?schema=public' \
+    pnpm exec prisma migrate deploy
+  Prisma schema loaded from prisma/schema.prisma
+  Datasource "db": PostgreSQL database "taktic_reviews_dryrun", schema "public" at "localhost:5433"
+  61 migrations found in prisma/migrations
+  Applying migration `20260916120000_add_provider_reviews`
+  The following migration(s) have been applied:
+  migrations/
+    └─ 20260916120000_add_provider_reviews/
+      └─ migration.sql
+        
+  All migrations have been successfully applied.
+
+Parmak izi (tablo | satır | md5(string_agg(… ORDER BY id))) — önce → sonra:
+  ServiceRequest    18  abd6f002…  → aynı   (id|status|completedAt)
+  Offer              9  b0e46bff…  → aynı   (id|status|acceptedAt)
+  ProviderProfile    4  878e5172…  → aynı   (id|status)
+  User              15  ce2ad95c…  → aynı   (id|role)
+  OperationsSettings 1             → aynı satır (aşağıda)
+  _prisma_migrations 60 → 61
+
+Tüm tabloların satır sayısı (59 tablo, tek tek count(*)) — tek fark:
+  + ProviderReview 0, + ProviderReviewReport 0, + ProviderReviewModeration 0  (yeni tablolar)
+  _prisma_migrations 60 → 61
+  Diğer 58 tablo satır sayısı birebir aynı (59 → 62 tablo).
+
+Sonrası doğrulamalar (dry-run DB):
+  OperationsSettings.providerReviewsEnabled  → kolon: boolean NOT NULL DEFAULT false
+  singleton satırı önce → sonra:
+    singleton | marketplaceAutoPublishEnabled=f | 48 | updatedAt 2026-09-15 09:19:31.655
+    singleton | providerReviewsEnabled=f | marketplaceAutoPublishEnabled=f | 48 | updatedAt aynı
+    → mevcut satır yeniden yazılmadı, yeni kolon varsayılan false ile doldu.
+  Enum etiketleri, kısıtlar ve indeksler aşağıdaki \d çıktısıyla birebir.
+
+\d çıktıları (dry-run DB):
+
+                                Table "public.ProviderReview"
+      Column      |              Type              | Collation | Nullable |      Default      
+------------------+--------------------------------+-----------+----------+-------------------
+ id               | text                           |           | not null | 
+ requestId        | text                           |           | not null | 
+ offerId          | text                           |           | not null | 
+ providerId       | text                           |           | not null | 
+ customerUserId   | text                           |           | not null | 
+ rating           | integer                        |           | not null | 
+ comment          | text                           |           |          | 
+ commentRemovedAt | timestamp(3) without time zone |           |          | 
+ removedAt        | timestamp(3) without time zone |           |          | 
+ createdAt        | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+Indexes:
+    "ProviderReview_pkey" PRIMARY KEY, btree (id)
+    "ProviderReview_customerUserId_createdAt_idx" btree ("customerUserId", "createdAt")
+    "ProviderReview_live_by_provider_idx" btree ("providerId", "createdAt" DESC) INCLUDE (rating) WHERE "removedAt" IS NULL
+    "ProviderReview_offerId_key" UNIQUE, btree ("offerId")
+    "ProviderReview_providerId_createdAt_idx" btree ("providerId", "createdAt")
+    "ProviderReview_requestId_providerId_key" UNIQUE, btree ("requestId", "providerId")
+Check constraints:
+    "ProviderReview_comment_removal_needs_comment" CHECK ("commentRemovedAt" IS NULL OR comment IS NOT NULL)
+    "ProviderReview_rating_range" CHECK (rating >= 1 AND rating <= 5)
+Foreign-key constraints:
+    "ProviderReview_customerUserId_fkey" FOREIGN KEY ("customerUserId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "ProviderReview_offerId_fkey" FOREIGN KEY ("offerId") REFERENCES "Offer"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "ProviderReview_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "ProviderProfile"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "ProviderReview_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "ServiceRequest"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+Referenced by:
+    TABLE ""ProviderReviewModeration"" CONSTRAINT "ProviderReviewModeration_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "ProviderReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""ProviderReviewReport"" CONSTRAINT "ProviderReviewReport_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "ProviderReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+                               Table "public.ProviderReviewReport"
+       Column       |               Type               | Collation | Nullable |      Default      
+--------------------+----------------------------------+-----------+----------+-------------------
+ id                 | text                             |           | not null | 
+ reviewId           | text                             |           | not null | 
+ reporterProviderId | text                             |           | not null | 
+ reason             | "ProviderReviewReportReason"     |           | not null | 
+ note               | text                             |           |          | 
+ createdAt          | timestamp(3) without time zone   |           | not null | CURRENT_TIMESTAMP
+ resolvedAt         | timestamp(3) without time zone   |           |          | 
+ resolvedByUserId   | text                             |           |          | 
+ resolution         | "ProviderReviewReportResolution" |           |          | 
+ resolutionNote     | text                             |           |          | 
+Indexes:
+    "ProviderReviewReport_pkey" PRIMARY KEY, btree (id)
+    "ProviderReviewReport_one_open_per_review" UNIQUE, btree ("reviewId") WHERE "resolvedAt" IS NULL
+    "ProviderReviewReport_open_idx" btree ("createdAt") WHERE "resolvedAt" IS NULL
+    "ProviderReviewReport_reporterProviderId_createdAt_idx" btree ("reporterProviderId", "createdAt")
+    "ProviderReviewReport_resolvedAt_createdAt_idx" btree ("resolvedAt", "createdAt")
+    "ProviderReviewReport_reviewId_createdAt_idx" btree ("reviewId", "createdAt")
+Check constraints:
+    "ProviderReviewReport_resolution_pair" CHECK (("resolvedAt" IS NULL) = (resolution IS NULL))
+Foreign-key constraints:
+    "ProviderReviewReport_reporterProviderId_fkey" FOREIGN KEY ("reporterProviderId") REFERENCES "ProviderProfile"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "ProviderReviewReport_resolvedByUserId_fkey" FOREIGN KEY ("resolvedByUserId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE SET NULL
+    "ProviderReviewReport_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "ProviderReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+                           Table "public.ProviderReviewModeration"
+    Column     |               Type               | Collation | Nullable |      Default      
+---------------+----------------------------------+-----------+----------+-------------------
+ id            | text                             |           | not null | 
+ reviewId      | text                             |           | not null | 
+ action        | "ProviderReviewModerationAction" |           | not null | 
+ reason        | "ProviderReviewReportReason"     |           |          | 
+ note          | text                             |           |          | 
+ performedById | text                             |           | not null | 
+ createdAt     | timestamp(3) without time zone   |           | not null | CURRENT_TIMESTAMP
+Indexes:
+    "ProviderReviewModeration_pkey" PRIMARY KEY, btree (id)
+    "ProviderReviewModeration_performedById_idx" btree ("performedById")
+    "ProviderReviewModeration_reviewId_createdAt_idx" btree ("reviewId", "createdAt")
+Check constraints:
+    "ProviderReviewModeration_reason_by_action" CHECK ((action = 'RESTORE'::"ProviderReviewModerationAction") = (reason IS NULL))
+Foreign-key constraints:
+    "ProviderReviewModeration_performedById_fkey" FOREIGN KEY ("performedById") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "ProviderReviewModeration_reviewId_fkey" FOREIGN KEY ("reviewId") REFERENCES "ProviderReview"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+      column_name       | data_type | is_nullable | column_default 
+------------------------+-----------+-------------+----------------
+ providerReviewsEnabled | boolean   | NO          | false
+(1 row)
+
+    id     | providerReviewsEnabled | marketplaceAutoPublishEnabled | unviewedOfferRefundWindowHours |        updatedAt        
+-----------+------------------------+-------------------------------+--------------------------------+-------------------------
+ singleton | f                      | f                             |                             48 | 2026-09-15 09:19:31.655
+(1 row)
+
+            typname             |                                 string_agg                                  
+--------------------------------+-----------------------------------------------------------------------------
+ ProviderReviewModerationAction | REMOVE_COMMENT, REMOVE_REVIEW, RESTORE
+ ProviderReviewReportReason     | OFFENSIVE, CONTAINS_CONTACT_INFO, NOT_ABOUT_THIS_JOB, SUSPECTED_FAKE, OTHER
+ ProviderReviewReportResolution | DISMISSED, COMMENT_REMOVED, REVIEW_REMOVED
+(3 rows)
+
+
+Aktif `taktic` DB (kontrol): _prisma_migrations 60, ProviderReview* tabloları yok,
+OperationsSettings.providerReviewsEnabled kolonu yok → dokunulmadı. İki dry-run DB DROP edildi.
+
+Şema testi (apps/api/test/provider-review-schema.spec.ts, checkout'a özel test DB'ye harness'ın
+kendi migrate deploy'u ile): 5/5 PASS — (requestId, providerId) ve offerId tekilliği P2002;
+rating_range, comment_removal_needs_comment, resolution_pair, reason_by_action CHECK'leri
+kısıt adıyla; one_open_per_review kısmi tekil indeksi ikinci açık raporu reddedip
+karar sonrası yenisine izin veriyor. Not: kısmi tekil indeks ihlali Prisma 6.19'da
+PrismaClientUnknownRequestError değil, `P2002 (target: ['reviewId'])` olarak geliyor.
+
+Sonuç: migration saf DDL; veri parmak izleri değişmez; anahtar varsayılan kapalı doğar.
