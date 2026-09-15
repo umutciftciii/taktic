@@ -5,6 +5,7 @@ import { EntitlementsModule } from '../entitlements/entitlements.module';
 import { NumberingModule } from '../numbering/numbering.module';
 import { OperationsSettingsModule } from '../operations-settings/operations-settings.module';
 import { ProviderClaimModule } from '../provider-claim/provider-claim.module';
+import { ProviderReviewsModule } from '../provider-reviews/provider-reviews.module';
 import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
 import { ProvidersController } from './providers.controller';
 import { ProvidersService } from './providers.service';
@@ -22,6 +23,10 @@ import { ProvidersService } from './providers.service';
     // direct lead has to mark that lead answered in the transaction that
     // created the offer.
     ShowcaseLifecycleModule,
+    // The provider's own rating on their dashboard. ProviderReviewsModule
+    // imports only PrismaModule and AuthModule — its one reference to this
+    // module is a pure function import — so there is no cycle.
+    ProviderReviewsModule,
   ],
   controllers: [ProvidersController],
   providers: [ProvidersService],

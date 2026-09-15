@@ -15,7 +15,7 @@ import {
   TransactionalMailService,
   readProviderReviewsEnabled,
 } from '../notifications/transactional-mail.service';
-import { isPubliclyVisibleProvider } from '../providers/providers.service';
+import { isPubliclyVisibleProvider } from '../providers/provider-visibility';
 import { CreateProviderReviewDto } from './dto/create-provider-review.dto';
 import {
   toPublicSummary,

@@ -687,12 +687,25 @@ export class ServiceRequestsService {
             provider: { select: { id: true, businessName: true } },
           },
         },
+        /*
+         * The customer's own review of the matched provider — enough to show
+         * "you rated this 4" or "your review was removed" on the row, and no
+         * more. The comment lives on the review screen, not here. A list
+         * relation on the schema, but the unique index on `offerId` plus a
+         * single matched offer means at most one row per request in practice.
+         */
+        reviews: {
+          take: 1,
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, rating: true, removedAt: true },
+        },
       },
     });
 
-    return requests.map(({ showcaseLeadSource, ...request }) => ({
+    return requests.map(({ showcaseLeadSource, reviews, ...request }) => ({
       ...withQualityLabel(request),
       offersCount: request._count.offers,
+      review: reviews[0] ?? null,
       showcaseLead: showcaseLeadSource
         ? {
             id: showcaseLeadSource.id,

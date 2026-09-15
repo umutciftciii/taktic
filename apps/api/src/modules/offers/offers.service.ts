@@ -27,6 +27,7 @@ import {
   readContactSharingConfig,
 } from '../contact-sharing/contact-sharing.config';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
+import { ProviderReviewsService } from '../provider-reviews/provider-reviews.service';
 import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import {
@@ -61,6 +62,7 @@ export class OffersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
   ) {}
 
   async listOffers(filters: OfferListFilters) {
@@ -327,6 +329,7 @@ export class OffersService {
       include: {
         provider: {
           select: {
+            id: true,
             businessName: true,
             city: true,
             district: true,
@@ -335,10 +338,17 @@ export class OffersService {
       },
     });
 
+    // One read for every provider on the request. Null below the public
+    // threshold and null for everybody while the switch is off — the service
+    // decides both, so this card and the vitrin card can never disagree.
+    const summaries = await this.reviews.publicSummariesForProviders([
+      ...new Set(offers.map((offer) => offer.providerId)),
+    ]);
+
     return offers.map((offer) => ({
       id: offer.id,
       offerNumber: offer.offerNumber,
-      provider: offer.provider,
+      provider: { ...offer.provider, reviewSummary: summaries.get(offer.providerId) ?? null },
       status: offer.status,
       priceAmount: offer.priceAmount,
       currency: offer.currency,
@@ -354,7 +364,22 @@ export class OffersService {
 
   async getRequestOffer(requestId: string, offerId: string, user: AuthUser | null = null) {
     const offer = await this.getRequestOfferOrThrow(requestId, offerId, user);
-    return toCustomerOfferDetail(offer);
+    return this.withProviderReviewSummary(toCustomerOfferDetail(offer));
+  }
+
+  /**
+   * The provider's public rating on the customer's offer detail — the same
+   * value the preview list carries, read the same way, so the two customer
+   * surfaces agree. Called after every write has committed: the summary is a
+   * read of somebody else's rows and has no place inside an offer's
+   * transaction.
+   */
+  private async withProviderReviewSummary<T extends { provider: { id: string } }>(detail: T) {
+    const summaries = await this.reviews.publicSummariesForProviders([detail.provider.id]);
+    return {
+      ...detail,
+      provider: { ...detail.provider, reviewSummary: summaries.get(detail.provider.id) ?? null },
+    };
   }
 
   /**
@@ -403,7 +428,7 @@ export class OffersService {
       include: customerOfferInclude,
     });
 
-    return toCustomerOfferDetail(offer);
+    return this.withProviderReviewSummary(toCustomerOfferDetail(offer));
   }
 
   async updateRequestOfferAction(
@@ -470,7 +495,7 @@ export class OffersService {
         `request ${requestId}`,
       );
 
-      return accepted.detail;
+      return this.withProviderReviewSummary(accepted.detail);
     }
 
     const now = new Date();
@@ -514,7 +539,7 @@ export class OffersService {
       await this.notify(() => this.mail.sendOfferNotSelected([offerId]), `offer ${offerId}`);
     }
 
-    return toCustomerOfferDetail(offer);
+    return this.withProviderReviewSummary(toCustomerOfferDetail(offer));
   }
 
   /**
@@ -1083,6 +1108,9 @@ const offerInclude = {
 const customerOfferInclude = {
   provider: {
     select: {
+      // The id is what the public rating and the public review list are keyed
+      // on; it is already public on every vitrin card.
+      id: true,
       businessName: true,
       city: true,
       district: true,

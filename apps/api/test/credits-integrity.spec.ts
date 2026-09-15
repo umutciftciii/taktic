@@ -1,5 +1,6 @@
 import {
   CreditTransactionType,
+  OfferPackageType,
   OfferStatus,
   PackagePurchaseStatus,
   UserRole,
@@ -11,6 +12,8 @@ import {
   createApprovedRequest,
   createCategory,
   createDiscoverableProvider,
+  createEntitlement,
+  createOfferPackage,
   createTestApp,
   createUser,
   currentCreditBalance,
@@ -415,5 +418,90 @@ describe('offer status after a successful submission', () => {
     expect(spend.referenceId).toBe(offer.id);
     expect(spend.amount).toBe(-COST);
     expect(spend.balanceAfter).toBe(0);
+  });
+});
+
+describe('provider reviews and the credit economy', () => {
+  it('a review, its removal and its restore move no credit and no entitlement', async () => {
+    await ctx.prisma.operationsSettings.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton', unviewedOfferRefundWindowHours: 48, providerReviewsEnabled: true },
+      update: { providerReviewsEnabled: true },
+    });
+    const { category, provider } = await offerFixture({ credits: 5 });
+    const pkg = await createOfferPackage(ctx.prisma, { type: OfferPackageType.MONTHLY_QUOTA });
+    await createEntitlement(ctx.prisma, {
+      providerId: provider.id,
+      packageId: pkg.id,
+      type: OfferPackageType.MONTHLY_QUOTA,
+      scopeCategoryIds: [category.id],
+    });
+
+    // A completed job the customer may rate, written straight to the tables.
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const customerCookie = await loginAs(ctx.prisma, customer.id);
+    const serviceRequest = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      customerId: customer.id,
+    });
+    const offer = await ctx.prisma.offer.create({
+      data: {
+        requestId: serviceRequest.id,
+        providerId: provider.id,
+        status: OfferStatus.ACCEPTED,
+        acceptedAt: new Date(),
+        priceAmount: 1000,
+        message: 'Teklif',
+      },
+    });
+    await ctx.prisma.serviceRequest.update({
+      where: { id: serviceRequest.id },
+      data: {
+        status: 'COMPLETED',
+        matchedOfferId: offer.id,
+        matchedAt: new Date(),
+        completedAt: new Date(),
+      },
+    });
+
+    const snapshot = async () => ({
+      ledger: await ctx.prisma.providerCreditTransaction.aggregate({
+        where: { providerId: provider.id },
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+      balance: await currentCreditBalance(ctx.prisma, provider.id),
+      entitlements: await ctx.prisma.providerPackageEntitlement.findMany({
+        where: { providerId: provider.id },
+        orderBy: { id: 'asc' },
+        include: { scopes: { orderBy: { id: 'asc' } } },
+      }),
+    });
+    const before = await snapshot();
+    expect(before.ledger._count._all).toBe(1);
+    expect(before.balance).toBe(5);
+    expect(before.entitlements).toHaveLength(1);
+
+    const created = await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/review`)
+      .set('Cookie', customerCookie)
+      .send({ rating: 2, comment: 'Geç kaldı.' })
+      .expect(201);
+    const reviewId = created.body.review.id as string;
+
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const adminCookie = await loginAs(ctx.prisma, admin.id);
+    await request(ctx.server)
+      .post(`/provider-reviews/${reviewId}/moderate`)
+      .set('Cookie', adminCookie)
+      .send({ action: 'REMOVE_REVIEW', reason: 'OTHER' })
+      .expect(201);
+    await request(ctx.server)
+      .post(`/provider-reviews/${reviewId}/moderate`)
+      .set('Cookie', adminCookie)
+      .send({ action: 'RESTORE' })
+      .expect(201);
+
+    expect(await snapshot()).toEqual(before);
   });
 });
