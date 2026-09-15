@@ -5,6 +5,7 @@ import {
   MarketplacePublishSettings,
   OPERATIONS_SETTING_LABELS,
   OperationsSettings,
+  ProviderReviewSettings,
   requireAdmin,
   SCHEDULER_JOB_COPY,
   SchedulerSettings,
@@ -13,6 +14,7 @@ import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { saveOperationsSettingsAction } from './actions';
 import { AutoPublishToggle } from './auto-publish-toggle';
+import { ProviderReviewsToggle } from './provider-reviews-toggle';
 import { SchedulerToggle } from './scheduler-toggle';
 
 /**
@@ -55,6 +57,10 @@ const OK_MESSAGES: Record<string, string> = {
     'Otomatik yayın açıldı. Bundan sonra gönderilen pazar talepleri moderasyon beklemeden eşleşen hizmet verenlere iletilir.',
   'auto-publish-off':
     'Otomatik yayın kapatıldı. Bundan sonra gönderilen pazar talepleri onay kuyruğuna düşer; yayındaki talepler geri çekilmez.',
+  'provider-reviews-on':
+    'Hizmet veren değerlendirmeleri açıldı. Bundan sonra tamamlanan işlerde müşteriye değerlendirme daveti gider; mevcut değerlendirmeler public profil ve teklif kartlarında görünür.',
+  'provider-reviews-off':
+    'Hizmet veren değerlendirmeleri kapatıldı. Müşteri değerlendirme yazamaz, davet gönderilmez; mevcut değerlendirmeler silinmez, yalnız gizlenir.',
 };
 
 const RUN_OUTCOME_LABELS: Record<string, string> = {
@@ -72,10 +78,11 @@ export default async function OperationsSettingsPage({
   const errorMessage = (params.error ?? '').trim();
   const okMessage = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
 
-  const [settings, schedulers, publish] = await Promise.all([
+  const [settings, schedulers, publish, reviews] = await Promise.all([
     apiFetch<OperationsSettings>('/operations-settings'),
     apiFetch<SchedulerSettings>('/operations-settings/schedulers'),
     apiFetch<MarketplacePublishSettings>('/operations-settings/marketplace-publish'),
+    apiFetch<ProviderReviewSettings>('/operations-settings/provider-reviews'),
   ]);
 
   // A rejected save carries the operator's own value back in the query, so the
@@ -248,6 +255,70 @@ export default async function OperationsSettingsPage({
                   </thead>
                   <tbody>
                     {publish.recentChanges.map((change) => (
+                      <tr key={change.id}>
+                        <td>
+                          {change.previousValue === null ? (
+                            <span className="muted">varsayılan (kapalı)</span>
+                          ) : (
+                            schedulerStateLabel(change.previousValue)
+                          )}
+                        </td>
+                        <td>{schedulerStateLabel(change.newValue)}</td>
+                        <td>{change.changedBy?.name ?? '-'}</td>
+                        <td>{formatDateTime(change.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            id="degerlendirmeler"
+            title="Hizmet veren değerlendirmeleri"
+            subtitle="Açıkken müşteri, tamamlanan işin hizmet verenini değerlendirebilir; public profil ve teklif kartlarında ortalama görünür. Kapalıyken mevcut değerlendirmeler silinmez, yalnız gizlenir."
+          >
+            <div className="scheduler-item-head" data-testid="provider-reviews">
+              <div className="scheduler-item-text">
+                <p className="scheduler-item-impact">
+                  Açıkken iş tamamlandığında müşteriye değerlendirme daveti gider ve
+                  değerlendirme geldiğinde hizmet verene haber verilir. Ortalama puan, en az üç
+                  değerlendirmesi olan hizmet verenler için gösterilir. Hizmet verenler uygunsuz bir
+                  yorumu bildirebilir; bildirimler{' '}
+                  <Link href="/provider-reviews/reports">Değerlendirme bildirimleri</Link> kuyruğuna
+                  düşer. Puanlar kredi, teklif sıralaması, paket ya da vitrin hakkını etkilemez.
+                </p>
+              </div>
+              <ProviderReviewsToggle enabled={reviews.enabled} />
+            </div>
+            <div className="scheduler-item-meta">
+              <span
+                className={reviews.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
+                data-testid="provider-reviews-state"
+              >
+                {reviews.enabled ? 'Açık' : 'Kapalı'}
+              </span>
+            </div>
+
+            <h3 className="operations-subheading">Son değişiklikler</h3>
+            {reviews.recentChanges.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }} data-testid="provider-reviews-audit-empty">
+                Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda.
+              </p>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table" data-testid="provider-reviews-audit">
+                  <thead>
+                    <tr>
+                      <th>Eski</th>
+                      <th>Yeni</th>
+                      <th>Yönetici</th>
+                      <th>Zaman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reviews.recentChanges.map((change) => (
                       <tr key={change.id}>
                         <td>
                           {change.previousValue === null ? (

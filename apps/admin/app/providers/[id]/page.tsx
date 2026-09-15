@@ -1,14 +1,17 @@
 import { serviceAreaLabel } from '@taktic/shared';
 import Link from 'next/link';
 import {
+  ApiError,
   apiFetch,
   AdminProviderServiceCategories,
   Category,
   fetchOrNotFound,
   ProviderProfile,
   ProviderRecentPackagePurchase,
+  type ProviderReviewsPage,
   formatDateTime,
   formatPrice,
+  reviewResolutionLabel,
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
@@ -142,9 +145,16 @@ export default async function ProviderDetailPage({
   // operator's view the categories screen uses. Neither is reachable without a
   // SUPER_ADMIN session, which is what makes drafts nameable here and nowhere
   // else.
-  const [serviceCategories, categories] = await Promise.all([
+  const [serviceCategories, categories, reviews] = await Promise.all([
     apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`),
     apiFetch<Category[]>('/categories?includeInactive=true'),
+    // The provider's own list, which the provider route serves to an operator
+    // as well. A failure hides the card rather than the screen: the reviews
+    // are context here, not the subject.
+    apiFetch<ProviderReviewsPage>(`/providers/${id}/reviews?limit=10`).catch((error: unknown) => {
+      if (error instanceof ApiError) return null;
+      throw error;
+    }),
   ]);
 
   const claim = provider.claim ?? null;
@@ -614,6 +624,84 @@ export default async function ProviderDetailPage({
                       </td>
                       <td className="col-actions">
                         <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
+                          Detay
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Değerlendirmeler"
+          subtitle={
+            reviews && reviews.summary.count > 0 && reviews.summary.average !== null
+              ? `Ortalama ${reviews.summary.average.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} · ${reviews.summary.count} değerlendirme (yayında olanlar)`
+              : 'Müşterilerin bu işletme hakkında bıraktığı değerlendirmeler; yayında olanlar.'
+          }
+          className="card-wide"
+        >
+          {!reviews ? (
+            <p className="cell-muted" style={{ margin: 0 }}>
+              Değerlendirmeler yüklenemedi.
+            </p>
+          ) : reviews.items.length === 0 ? (
+            <EmptyState title="Henüz değerlendirme yok." />
+          ) : (
+            <div className="table-scroll">
+              <table className="data-table" data-testid="provider-review-list">
+                <thead>
+                  <tr>
+                    <th>Tarih</th>
+                    <th>Puan</th>
+                    <th>Yorum</th>
+                    <th>Talep</th>
+                    <th>Bildirim</th>
+                    <th className="col-actions">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reviews.items.map((item) => (
+                    <tr key={item.id} data-testid="provider-review-row">
+                      <td>{formatDateTime(item.createdAt)}</td>
+                      <td>
+                        <span className="badge badge-muted" aria-label={`5 üzerinden ${item.rating}`}>
+                          ★ {item.rating}
+                        </span>
+                      </td>
+                      <td>
+                        {item.commentRemoved ? (
+                          <span className="cell-muted">Yorum kaldırıldı</span>
+                        ) : item.comment ? (
+                          <span className="report-queue-excerpt">{item.comment}</span>
+                        ) : (
+                          <span className="cell-muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        <Link className="cell-link" href={`/requests/${item.request.id}`}>
+                          <code className="display-number">
+                            {item.request.requestNumber ?? `#${item.request.id.slice(-8)}`}
+                          </code>
+                        </Link>
+                        <div className="cell-muted">{item.request.categoryName}</div>
+                      </td>
+                      <td>
+                        {item.myReport ? (
+                          <span className={item.myReport.resolution ? 'badge badge-muted' : 'badge badge-warn'}>
+                            {item.myReport.resolution
+                              ? reviewResolutionLabel(item.myReport.resolution)
+                              : 'Karar bekliyor'}
+                          </span>
+                        ) : (
+                          <span className="cell-muted">—</span>
+                        )}
+                      </td>
+                      <td className="col-actions">
+                        <Link className="btn btn-ghost btn-sm" href={`/provider-reviews/${item.id}`}>
                           Detay
                         </Link>
                       </td>

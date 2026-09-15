@@ -19,6 +19,10 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: '/requests', label: 'Talepler' },
       { href: '/requests/reports', label: 'Talep bildirimleri' },
+      // The other report queue: comments providers flagged on their reviews.
+      // Beside the request queue because an operator triages both the same
+      // way — read what was reported, decide, move on.
+      { href: '/provider-reviews/reports', label: 'Değerlendirme bildirimleri' },
       { href: '/customers', label: 'Hizmet Alanlar' },
       { href: '/offers', label: 'Teklifler' },
       { href: '/providers', label: 'Hizmet Verenler' },

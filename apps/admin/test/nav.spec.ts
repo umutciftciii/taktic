@@ -56,3 +56,20 @@ describe('exact rows', () => {
     expect(activeHrefs('/finance/credit-ledger')).toEqual(['/finance/credit-ledger']);
   });
 });
+
+describe('the review report queue row', () => {
+  it('sits in Operasyon right after Talep bildirimleri', () => {
+    const operasyon = navGroups.find((group) => group.title === 'Operasyon');
+    const hrefs = operasyon?.items.map((entry) => entry.href) ?? [];
+
+    expect(hrefs.indexOf('/provider-reviews/reports')).toBe(hrefs.indexOf('/requests/reports') + 1);
+    expect(item('/provider-reviews/reports').label).toBe('Değerlendirme bildirimleri');
+  });
+
+  it('lights on the queue and on a review detail, and nothing else does', () => {
+    expect(activeHrefs('/provider-reviews/reports')).toEqual(['/provider-reviews/reports']);
+    // A review detail lives under the same prefix but is not the queue; no
+    // row claims it, which is the same answer the vitrin review screens give.
+    expect(activeHrefs('/provider-reviews/abc123')).toEqual([]);
+  });
+});
