@@ -722,6 +722,9 @@ test.describe('provider review flow', () => {
       await offerForm.locator('input[name="priceAmount"]').fill('1500.00');
       await offerForm.locator('textarea[name="message"]').fill('Kartta yazan kapsamda, yarın.');
       await owner.page.getByRole('button', { name: 'Teklifi gönder' }).click();
+      // The action is an in-flight POST; the re-rendered "your offer" block
+      // is what says it committed, and only then is the row there to read.
+      await expect(owner.page.getByRole('link', { name: 'Teklifi görüntüle' })).toBeVisible();
       await assertNoErrorScreen(owner.page);
 
       const offer = await prisma().offer.findFirstOrThrow({

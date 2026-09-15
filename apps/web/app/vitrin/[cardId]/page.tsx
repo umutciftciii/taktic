@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
+  ApiError,
   apiFetch,
   getContactDisclosure,
   getCurrentUser,
   type Category,
+  type PublicReviewsPage,
   type ShowcaseFeedCard,
 } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
@@ -85,7 +87,7 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
     notFound();
   }
 
-  const [provinces, category, disclosure, user, draft] = await Promise.all([
+  const [provinces, category, disclosure, user, draft, publicReviews] = await Promise.all([
     // The canonical province/district list, from the same API that validates a
     // submitted request — the list the marketplace form is built from.
     apiFetch<ProvinceWithDistricts[]>('/locations/provinces').catch(
@@ -105,6 +107,11 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
     // the draft belongs to a different account than the one now signed in.
     // Keyed by the card too: a draft written for one business is not another's.
     readCurrentDraft({ formType: 'SHOWCASE_LEAD', categorySlug: card.category.slug, cardId }),
+    // The business's public rating, from the same list the profile renders.
+    // The API answers 404 while the switch is off, and null hides the line
+    // entirely; a null *summary* on a 200 is "not enough yet" and is shown.
+    // The card's own `provider.reviewSummary` cannot tell those two apart.
+    loadPublicReviewSummary(card.provider.id),
   ]);
 
   const questions = category?.questions ?? [];
@@ -151,8 +158,8 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
               {card.provider.businessName}
             </Link>
           </p>
-          {card.provider.reviewSummary !== undefined ? (
-            <RatingSummaryLine summary={card.provider.reviewSummary} testId="showcase-card-review-summary" />
+          {publicReviews ? (
+            <RatingSummaryLine summary={publicReviews.summary} testId="showcase-card-review-summary" />
           ) : null}
         </header>
 
@@ -271,6 +278,17 @@ function locationQuery(prefill: {
   if (prefill.phone) params.set('phone', prefill.phone);
   const query = params.toString();
   return query ? `&${query}` : '';
+}
+
+async function loadPublicReviewSummary(providerId: string): Promise<PublicReviewsPage | null> {
+  try {
+    return await apiFetch<PublicReviewsPage>(
+      `/providers/${encodeURIComponent(providerId)}/reviews/public?limit=1`,
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
 }
 
 async function loadCard(cardId: string): Promise<ShowcaseFeedCard | null> {

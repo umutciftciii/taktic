@@ -657,13 +657,14 @@ export async function reportReview(
   await provider.gotoWeb(`/providers/${providerId}/degerlendirmeler`);
   await provider.page.getByTestId('review-report-button').first().click();
 
-  const dialog = provider.page.locator('dialog.report-dialog');
+  // One dialog per row; the open one is the one the click just raised.
+  const dialog = provider.page.locator('dialog.report-dialog[open]');
   await expect(dialog).toBeVisible();
-  await provider.page.getByTestId('review-report-reason').selectOption(reason);
+  await dialog.getByTestId('review-report-reason').selectOption(reason);
   if (note) {
-    await provider.page.getByTestId('review-report-note').fill(note);
+    await dialog.getByTestId('review-report-note').fill(note);
   }
-  await provider.page.getByTestId('review-report-submit').click();
+  await dialog.getByTestId('review-report-submit').click();
 
   await expect(provider.page.getByTestId('review-report-received')).toHaveCount(1);
   await expect(provider.page.getByTestId('review-row-report-open')).toHaveCount(1);

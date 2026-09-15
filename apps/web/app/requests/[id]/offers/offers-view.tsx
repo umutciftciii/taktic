@@ -18,6 +18,12 @@ type OffersViewProps = {
   requestId: string;
   /** Already filtered and sorted by the server: no withdrawn offers, price ascending. */
   offers: RequestOfferPreview[];
+  /**
+   * Whether provider reviews are on, as the server read the switch. Off, no
+   * card mentions a rating at all — not even the "not enough yet" sentence,
+   * which would announce a feature that does not exist for this customer.
+   */
+  reviewsEnabled?: boolean;
 };
 
 /**
@@ -25,7 +31,7 @@ type OffersViewProps = {
  * table. Nothing is fetched here — the server handed over the exact set the
  * customer may act on, and switching view never changes it.
  */
-export function OffersView({ requestId, offers }: OffersViewProps) {
+export function OffersView({ requestId, offers, reviewsEnabled = false }: OffersViewProps) {
   const [mode, setMode] = useState<'list' | 'compare'>('list');
 
   if (offers.length === 0) {
@@ -81,7 +87,13 @@ export function OffersView({ requestId, offers }: OffersViewProps) {
       {mode === 'list' ? (
         <div>
           {offers.map((offer) => (
-            <OfferRow key={offer.id} offer={offer} requestId={requestId} isLowest={offer.id === lowestId} />
+            <OfferRow
+              key={offer.id}
+              offer={offer}
+              requestId={requestId}
+              isLowest={offer.id === lowestId}
+              reviewsEnabled={reviewsEnabled}
+            />
           ))}
         </div>
       ) : (
@@ -95,10 +107,12 @@ function OfferRow({
   offer,
   requestId,
   isLowest,
+  reviewsEnabled,
 }: {
   offer: RequestOfferPreview;
   requestId: string;
   isLowest: boolean;
+  reviewsEnabled: boolean;
 }) {
   const initials = getInitials(offer.provider.businessName);
   const offerReference = offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`;
@@ -135,7 +149,7 @@ function OfferRow({
               here on purpose — a customer comparing offers should see that a
               rating is absent rather than wonder whether the card forgot it.
             */}
-            {offer.provider.reviewSummary !== undefined ? (
+            {reviewsEnabled && offer.provider.reviewSummary !== undefined ? (
               <RatingSummaryLine summary={offer.provider.reviewSummary} testId="offer-review-summary" />
             ) : null}
           </div>

@@ -48,10 +48,13 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   ]);
 
   const summary = myRequests.find((request) => request.id === id) ?? null;
-  // Whether this customer may (still) rate the matched provider. Asked only
-  // once the job is done — the only state the call to action exists in — and a
-  // failure hides the call to action rather than the page.
-  const reviewState = summary?.status === 'COMPLETED' ? await safeFetchReviewState(id) : null;
+  // The customer's review state for this request. Read for every status, not
+  // only COMPLETED, because it also answers whether reviews are on at all:
+  // `disabled` is what the API says while the switch is off, and that is the
+  // one signal this page has for hiding every rating on the offer cards. A
+  // failure hides them too — the safe side of a missing line.
+  const reviewState = await safeFetchReviewState(id);
+  const reviewsEnabled = reviewState !== null && reviewState.eligibility !== 'disabled';
   // A withdrawn offer is not a choice the customer has, so it is kept out of the
   // comparison list and its count entirely. It stays visible further down, as a
   // neutral history line, because the customer did once receive it.
@@ -199,7 +202,7 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
         </section>
       ) : null}
 
-      <OffersView requestId={id} offers={sortedOffers} />
+      <OffersView requestId={id} offers={sortedOffers} reviewsEnabled={reviewsEnabled} />
 
       {withdrawnOffers.length > 0 ? (
         <>
