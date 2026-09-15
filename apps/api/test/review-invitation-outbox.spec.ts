@@ -187,6 +187,26 @@ describe('ReviewInvitationOutbox', () => {
     expect(ctx.notifications.ofTemplate('review-invitation')).toHaveLength(0);
   });
 
+  it('writes no intent when no settings row exists yet, without disturbing the completion', async () => {
+    // No operationsSettings row at all: the transactional read fails closed
+    // on a missing row exactly as it does on a false column, and the
+    // completion itself still commits.
+    expect(await ctx.prisma.operationsSettings.count()).toBe(0);
+    const { customerCookie, serviceRequest } = await matchedRequest();
+
+    await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/complete`)
+      .set('Cookie', customerCookie)
+      .expect(201);
+    await outbox.deliverPending();
+
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    expect(stored.status).toBe(ServiceRequestStatus.COMPLETED);
+    expect(await invitationLogs(serviceRequest.id)).toHaveLength(0);
+  });
+
   it("an admin completing on the customer's behalf still invites the customer", async () => {
     await enableReviews();
     const { customer, serviceRequest } = await matchedRequest();

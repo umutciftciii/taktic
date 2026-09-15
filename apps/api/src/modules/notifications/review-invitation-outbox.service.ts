@@ -3,7 +3,7 @@ import { Prisma, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { deliverPendingIntents, IntentDeliveryResult, intentRow } from './notification-intents';
-import { readProviderReviewsEnabled, TransactionalMailService } from './transactional-mail.service';
+import { TransactionalMailService } from './transactional-mail.service';
 
 /**
  * The review invitation as a durable intent rather than a synchronous send.
@@ -72,7 +72,19 @@ export class ReviewInvitationOutbox implements OnModuleDestroy {
     requestId: string,
     _completedAt: Date,
   ): Promise<{ enqueued: number }> {
-    if (!(await readProviderReviewsEnabled(tx))) {
+    // Read the switch on the caller's transaction and let a failed read
+    // propagate. `readProviderReviewsEnabled` swallows errors, which is right
+    // for its callers outside a transaction; here a swallowed 40001/P2034 (or
+    // any DB error) would leave the transaction aborted on the Postgres side
+    // while this callback returns normally — the COMMIT then quietly rolls
+    // back, the caller is told 201 with the request still MATCHED, and
+    // `runSerializable` never sees the P2034 it exists to retry. Missing row
+    // or false column still fails closed.
+    const settings = await tx.operationsSettings.findUnique({
+      where: { id: 'singleton' },
+      select: { providerReviewsEnabled: true },
+    });
+    if (!(settings?.providerReviewsEnabled ?? false)) {
       return { enqueued: 0 };
     }
 
