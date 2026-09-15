@@ -414,3 +414,42 @@ describe('the worker reads each offer own schedule', () => {
     expect(dryRun.items[0]!.eligibleAt).not.toBeNull();
   });
 });
+
+describe('provider reviews switch', () => {
+  it('is off by default, flips with an audit row, and refuses non-boolean', async () => {
+    const { cookie } = await superAdminCookie();
+
+    const before = await request(ctx.server)
+      .get('/operations-settings/provider-reviews')
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(before.body).toMatchObject({ enabled: false, recentChanges: [] });
+
+    const on = await request(ctx.server)
+      .put('/operations-settings/provider-reviews')
+      .set('Cookie', cookie)
+      .send({ enabled: true })
+      .expect(200);
+    expect(on.body.enabled).toBe(true);
+    expect(on.body.recentChanges[0]).toMatchObject({
+      setting: 'providerReviewsEnabled',
+      previousValue: null,
+      newValue: 'true',
+    });
+
+    await request(ctx.server)
+      .put('/operations-settings/provider-reviews')
+      .set('Cookie', cookie)
+      .send({ enabled: 'evet' })
+      .expect(400);
+    // Same value twice writes no second change row.
+    await request(ctx.server)
+      .put('/operations-settings/provider-reviews')
+      .set('Cookie', cookie)
+      .send({ enabled: true })
+      .expect(200);
+    expect(
+      await ctx.prisma.operationsSettingsChange.count({ where: { setting: 'providerReviewsEnabled' } }),
+    ).toBe(1);
+  });
+});
