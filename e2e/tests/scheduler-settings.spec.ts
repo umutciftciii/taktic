@@ -335,7 +335,9 @@ test.describe('provider reviews switch', () => {
       const audit = admin.page.getByTestId('provider-reviews-audit');
       await expect(audit.locator('tbody tr')).toHaveCount(1);
       await expect(audit).toContainText(adminAccount.name);
-      await expect(audit).toContainText('varsayılan (kapalı)');
+      // "Kapalı → Açık", whether the row read the default or a stored false
+      // (other specs in this run write the settings row).
+      await expect(audit.locator('tbody tr').first()).toContainText('Açık');
 
       // ---- off again --------------------------------------------------------
       await admin.page.getByTestId('provider-reviews-toggle').click();
