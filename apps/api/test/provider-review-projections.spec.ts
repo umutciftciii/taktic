@@ -174,6 +174,9 @@ const feedUrl = '/showcase/feed';
 const cardUrl = (cardId: string) => `/showcase/cards/${cardId}`;
 const dashboardUrl = '/providers/me/dashboard';
 const panelSummaryUrl = (providerId: string) => `/providers/${providerId}/reviews/summary`;
+const publicListUrl = (providerId: string) => `/providers/${providerId}/reviews/public`;
+const adminReviewUrl = (reviewId: string) => `/provider-reviews/${reviewId}`;
+const moderateUrl = (reviewId: string) => `/provider-reviews/${reviewId}/moderate`;
 const myRequestsUrl = '/service-requests/my';
 
 /** The strings every fixture plants that must never reach a public body. */
@@ -404,6 +407,113 @@ describe('the vitrin feed and the public card', () => {
     const offCard = await request(ctx.server).get(cardUrl(ratedCard.id)).expect(200);
     expect(offCard.body.provider.reviewSummary).toBeNull();
     expect(offCard.body.provider.id).toBe(rated.provider.id);
+  });
+});
+
+describe('the public threshold, on every public surface at once', () => {
+  it('nothing public under three live reviews; everything at three; REMOVE_COMMENT keeps three; REMOVE_REVIEW takes it back under', async () => {
+    await setReviewsEnabled(true);
+    const category = await createCategory(ctx.prisma, 'Klima', {
+      kind: ServiceCategoryKind.LEAF,
+      offerCreditCost: 1,
+    });
+    const fixture = await providerFixture(category.id);
+    const card = await placeCard(fixture, new Date(Date.now() - 60_000), 'Kart');
+    const { customer, cookie } = await customerSession();
+    const serviceRequest = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      customerId: customer.id,
+    });
+    const offer = await pendingOffer(fixture, serviceRequest.id, new Date());
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const adminCookie = await loginAs(ctx.prisma, admin.id);
+
+    /** What every public surface says about the fixture's provider right now. */
+    const publicSurfaces = async () => {
+      const list = await request(ctx.server).get(publicListUrl(fixture.provider.id)).expect(200);
+      const previews = await request(ctx.server)
+        .get(offersUrl(serviceRequest.id))
+        .set('Cookie', cookie)
+        .expect(200);
+      const detail = await request(ctx.server)
+        .get(offerUrl(serviceRequest.id, offer.id))
+        .set('Cookie', cookie)
+        .expect(200);
+      const feed = await request(ctx.server).get(feedUrl).expect(200);
+      const publicCard = await request(ctx.server).get(cardUrl(card.id)).expect(200);
+      return {
+        list: list.body as { summary: unknown; items: unknown[]; nextCursor: unknown },
+        preview: indexBy(previews.body, 'id')(offer.id).provider.reviewSummary as unknown,
+        detail: detail.body.provider.reviewSummary as unknown,
+        feed: indexBy(feed.body.cards, 'cardId')(card.id).provider.reviewSummary as unknown,
+        card: publicCard.body.provider.reviewSummary as unknown,
+      };
+    };
+    const expectNothingPublic = async () => {
+      const surfaces = await publicSurfaces();
+      expect(surfaces.list).toEqual({ summary: null, items: [], nextCursor: null });
+      expect(surfaces.preview).toBeNull();
+      expect(surfaces.detail).toBeNull();
+      expect(surfaces.feed).toBeNull();
+      expect(surfaces.card).toBeNull();
+    };
+    const expectPublic = async (summary: { count: number; average: number }, itemCount: number) => {
+      const surfaces = await publicSurfaces();
+      expect(surfaces.list.summary).toEqual(summary);
+      expect(surfaces.list.items).toHaveLength(itemCount);
+      expect(surfaces.preview).toEqual(summary);
+      expect(surfaces.detail).toEqual(summary);
+      expect(surfaces.feed).toEqual(summary);
+      expect(surfaces.card).toEqual(summary);
+    };
+    const panelCount = async () =>
+      (
+        await request(ctx.server)
+          .get(panelSummaryUrl(fixture.provider.id))
+          .set('Cookie', fixture.ownerCookie)
+          .expect(200)
+      ).body.count as number;
+
+    // 0, 1, 2: the section does not exist yet, anywhere.
+    await expectNothingPublic();
+    const first = await review(fixture, { rating: 5, comment: 'Yorum metni.' });
+    await expectNothingPublic();
+    const second = await review(fixture, { rating: 4, comment: 'Yorum metni.' });
+    await expectNothingPublic();
+    expect(await panelCount()).toBe(2);
+
+    // 2 -> 3: the same numbers appear on every surface in the same instant.
+    await review(fixture, { rating: 3, comment: 'Yorum metni.' });
+    await expectPublic({ count: 3, average: 4 }, 3);
+
+    // REMOVE_COMMENT keeps the star: still three, one comment fewer.
+    await request(ctx.server)
+      .post(moderateUrl(first.review.id))
+      .set('Cookie', adminCookie)
+      .send({ action: 'REMOVE_COMMENT', reason: 'OTHER' })
+      .expect(201);
+    await expectPublic({ count: 3, average: 4 }, 2);
+
+    // 3 -> 2 by REMOVE_REVIEW: every public surface goes dark again, while
+    // the provider's panel keeps the live count and the operator still sees
+    // the removed row.
+    await request(ctx.server)
+      .post(moderateUrl(second.review.id))
+      .set('Cookie', adminCookie)
+      .send({ action: 'REMOVE_REVIEW', reason: 'SUSPECTED_FAKE' })
+      .expect(201);
+    await expectNothingPublic();
+    expect(await panelCount()).toBe(2);
+    const adminDetail = await request(ctx.server)
+      .get(adminReviewUrl(second.review.id))
+      .set('Cookie', adminCookie)
+      .expect(200);
+    expect(adminDetail.body).toMatchObject({
+      id: second.review.id,
+      rating: 4,
+      comment: 'Yorum metni.',
+      removed: true,
+    });
   });
 });
 
