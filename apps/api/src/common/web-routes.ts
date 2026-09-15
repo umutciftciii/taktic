@@ -134,8 +134,9 @@ export function customerSupportTicketUrl(ticketId: string): string {
 /**
  * One ticket in the operator queue. `apps/admin/app/support/[id]`.
  *
- * One of the two links in this file that are *not* on the web application
- * (the other is `adminRequestUrl` below), and it is here rather than in a file
+ * One of the three links in this file that are *not* on the web application
+ * (the others are `adminRequestUrl` and `adminProviderReviewUrl` below), and
+ * it is here rather than in a file
  * of its own because the rule the module comment states applies to it
  * unchanged: the path is a literal this repository owns, and a route that
  * moves has to break the build rather than a link in an operator's inbox. It
@@ -155,6 +156,31 @@ export function adminSupportTicketUrl(ticketId: string): string {
  */
 export function adminRequestUrl(requestId: string): string {
   return `${getAdminAppBaseUrl()}/requests/${encodeURIComponent(requestId)}`;
+}
+
+// ───────────────────────────── provider reviews ─────────────────────────────
+
+/**
+ * The customer's review form for one completed request.
+ * `apps/web/app/requests/[id]/degerlendir`.
+ */
+export function customerReviewUrl(requestId: string): string {
+  return publicWebUrl(`/requests/${encodeURIComponent(requestId)}/degerlendir`);
+}
+
+/** The provider's own review list. `apps/web/app/providers/[id]/degerlendirmeler`. */
+export function providerReviewsUrl(providerId: string): string {
+  return publicWebUrl(`/providers/${encodeURIComponent(providerId)}/degerlendirmeler`);
+}
+
+/**
+ * One review in the operator panel. `apps/admin/app/provider-reviews/[id]`.
+ *
+ * Support-inbox notices only, on the same rule as `adminRequestUrl` above: a
+ * customer or a provider is never sent here.
+ */
+export function adminProviderReviewUrl(reviewId: string): string {
+  return `${getAdminAppBaseUrl()}/provider-reviews/${encodeURIComponent(reviewId)}`;
 }
 
 // ───────────────────────────── vitrin, phase two ─────────────────────────────

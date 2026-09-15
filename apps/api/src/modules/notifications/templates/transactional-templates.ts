@@ -42,7 +42,9 @@ import {
  *   NumberedEntityType covers requests, offers and purchases only.
  * - `welcome_credits` (04) — there is no welcome grant. Credits arrive by
  *   purchase or by an admin grant, and neither happens on approval.
- * - `provider_rating`, `provider_job_count` (07) — there is no rating system.
+ * - `provider_rating` (07) — replaced by the review summary, which only the
+ *   public profile and offer cards render, never a mail.
+ * - `provider_job_count` (07) — no such count is computed anywhere.
  * - `expected_offer_range` (06) — nothing forecasts offer volume.
  * - `acceptance_rate` (11) — no such metric is computed anywhere.
  * - `existing_offer_count` (09) — computable, but it would tell a provider how
@@ -171,6 +173,21 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   // mailing a reporter's words to the person they reported.
   'request-removed',
   'request-report-new-for-support',
+  // Reviews: four messages, each to exactly one audience; the comment text is
+  // in none of them.
+  //
+  //  - the request was completed     → the customer, invited to rate the work
+  //  - a review arrived              → the provider, told the star count only
+  //  - the provider reported it      → the support inbox, without the note
+  //  - an operator removed it        → the customer, with a fixed reason
+  //
+  // The comment is read on the public profile and in the panel, each behind
+  // its own session; a mail that quoted it would put a customer's words in a
+  // provider's inbox and a reporter's words next to the review they reported.
+  'review-invitation',
+  'review-received',
+  'review-report-new-for-support',
+  'review-removed',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -272,6 +289,19 @@ export function transactionalSubject(
       return 'Talebiniz yayından kaldırıldı';
     case 'request-report-new-for-support':
       return withSuffix('Yeni talep bildirimi', text(data.requestNumber));
+    case 'review-invitation':
+      return withSuffix('İşiniz tamamlandı — hizmet vereni değerlendirin', text(data.businessName));
+    case 'review-received':
+      return withSuffix('Yeni değerlendirme aldınız', text(data.requestNumber));
+    case 'review-report-new-for-support':
+      return 'Yeni değerlendirme bildirimi';
+    // The scope is the news: a customer whose comment was taken down still
+    // has their stars on the provider's profile, and the subject says so.
+    case 'review-removed':
+      return withSuffix(
+        `${text(data.scopeLabel) ?? 'Değerlendirmeniz'} kaldırıldı`,
+        text(data.requestNumber),
+      );
     // The ticket's own subject is the suffix on all five, because it is the one
     // thing that tells two tickets apart in a mailbox — and it is truncated,
     // because a customer may type two hundred characters into it and a subject
@@ -416,6 +446,14 @@ export function buildDocument(
       return requestRemoved(subject, fullName, data);
     case 'request-report-new-for-support':
       return requestReportNewForSupport(subject, fullName, data);
+    case 'review-invitation':
+      return reviewInvitation(subject, fullName, data);
+    case 'review-received':
+      return reviewReceived(subject, fullName, data);
+    case 'review-report-new-for-support':
+      return reviewReportNewForSupport(subject, fullName, data);
+    case 'review-removed':
+      return reviewRemoved(subject, fullName, data);
     case 'support-ticket-created':
       return supportTicketCreated(subject, fullName, data);
     case 'support-ticket-new-for-support':
@@ -1644,6 +1682,178 @@ function requestReportNewForSupport(subject: string, fullName: string, data: Dat
       ]),
       spacer(24),
       cta('Talebi panelde aç', text(data.adminRequestUrl), 'primary'),
+    ]),
+  };
+}
+
+// ─────────────── 16d · request.completed → the customer who asked ────────────
+
+/**
+ * The work is done; the customer is invited to rate it.
+ *
+ * The mail carries what the form will ask about — which request, which
+ * business, and until when — and one promise the form keeps: the name, phone
+ * and e-mail of the person writing are not shown with the review, and a
+ * comment cannot carry contact details. The deadline is a formatted date the
+ * call site computed, not a duration, so the message and the form agree on
+ * the day.
+ */
+function reviewInvitation(subject: string, fullName: string, data: Data): EmailDocument {
+  const businessName = text(data.businessName) ?? 'Hizmet veren';
+  const categoryName = text(data.categoryName) ?? 'talebiniz';
+
+  return {
+    subject,
+    preheader: 'Tamamlanan işinizin hizmet verenini birkaç saniyede değerlendirin.',
+    audience: 'HİZMET ALAN',
+    kicker: 'İş tamamlandı',
+    heading: 'Hizmet vereni değerlendirin',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${businessName} ile ${categoryName} işiniz tamamlandı olarak işaretlendi. ` +
+          'Deneyiminizi 1–5 yıldızla değerlendirebilir, dilerseniz kısa bir yorum ' +
+          'bırakabilirsiniz.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', text(data.requestNumber)),
+        row('Hizmet veren', text(data.businessName)),
+        row('Son tarih', text(data.windowEndsAt)),
+      ]),
+      spacer(16),
+      paragraph(
+        'Yorumunuz herkese açık görünür; adınız, telefonunuz ve e-postanız paylaşılmaz. ' +
+          'Yorumda iletişim bilgisi bulunamaz.',
+      ),
+      spacer(24),
+      cta('Değerlendir', text(data.reviewUrl), 'primary'),
+    ]),
+  };
+}
+
+// ────────────── 16e · review.created → the provider who was rated ────────────
+
+/**
+ * A review arrived; the provider is told the star count and where to read it.
+ *
+ * The comment is deliberately not here. It is public on the provider's
+ * profile and it is on the list this message links to, and both of those
+ * render the current text — a mail is a copy nobody can take down, and a
+ * comment an operator removes an hour later would still be in the inbox.
+ * The customer's name is not here either: the review is anonymous on the
+ * profile, and it is anonymous in the mail.
+ */
+function reviewReceived(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Tamamladığınız bir iş için yeni bir değerlendirme aldınız.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Yeni değerlendirme',
+    heading: 'Yeni değerlendirme aldınız',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Tamamladığınız bir iş için müşteriniz bir değerlendirme bıraktı. Değerlendirmenin ' +
+          'tamamını ve puan özetinizi panelinizden görebilirsiniz.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', text(data.requestNumber)),
+        row('Kategori', text(data.categoryName)),
+        row('Puan', starRating(data.rating)),
+      ]),
+      spacer(16),
+      paragraph(
+        'Değerlendirmenin platform kurallarına aykırı olduğunu düşünüyorsanız, ' +
+          'değerlendirme sayfasından bildirebilirsiniz.',
+      ),
+      spacer(24),
+      cta('Değerlendirmeleri gör', text(data.reviewsUrl), 'primary'),
+    ]),
+  };
+}
+
+/** The star count as a recipient reads it, and null — no row — when there is none. */
+function starRating(value: string | null | undefined): string | null {
+  const rating = int(value);
+  return rating === null ? null : `★ ${rating} / 5`;
+}
+
+// ───────────────── 16f · review.reported → the support inbox ─────────────────
+
+/**
+ * A provider reported a review; the support mailbox is told.
+ *
+ * Three fields and a link, on the rule `requestReportNewForSupport` follows:
+ * the reporter's note is not in the message. It is read in the panel, next to
+ * the review it is about and behind the operator's own session — and so is
+ * the review's comment, for the same reason.
+ */
+function reviewReportNewForSupport(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Bir hizmet veren bir değerlendirmeyi bildirdi.',
+    audience: 'DESTEK',
+    kicker: 'Yeni bildirim',
+    heading: 'Yeni değerlendirme bildirimi',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph(
+        'Bir hizmet veren, profilindeki bir değerlendirmeyi platform kurallarına aykırı ' +
+          'olabileceği gerekçesiyle bildirdi.',
+      ),
+      spacer(4),
+      dataTable([
+        row('İşletme', text(data.businessName)),
+        row('Talep', text(data.requestNumber)),
+        row('Gerekçe', text(data.reasonLabel)),
+      ]),
+      spacer(24),
+      cta('Değerlendirmeyi panelde aç', text(data.adminReviewUrl), 'primary'),
+    ]),
+  };
+}
+
+// ─────────── 16g · review.removed → the customer who wrote it ────────────────
+
+/**
+ * An operator took a review, or only its comment, down; the customer is told.
+ *
+ * `scopeLabel` is what was removed — "Yorumunuz" when the stars stayed on the
+ * profile, "Değerlendirmeniz" when the whole review went — and `reasonLabel`
+ * is a fixed customer-facing label the operator chose. What it must not say
+ * is the reason it is a separate template: no reporter, no operator's note,
+ * no reason code. The one link is the one thing the customer can do next.
+ */
+function reviewRemoved(subject: string, fullName: string, data: Data): EmailDocument {
+  const scopeLabel = text(data.scopeLabel) ?? 'Değerlendirmeniz';
+
+  return {
+    subject,
+    preheader: `${scopeLabel} platform kurallarına uygunluk incelemesi sonucunda kaldırıldı.`,
+    audience: 'HİZMET ALAN',
+    kicker: 'Kaldırıldı',
+    heading: `${scopeLabel} kaldırıldı`,
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${scopeLabel} platform kurallarına uygunluk incelemesi sonucunda kaldırıldı ve ` +
+          'artık hizmet verenin profilinde gösterilmiyor.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', text(data.requestNumber)),
+        row('Gerekçe', text(data.reasonLabel)),
+      ]),
+      spacer(16),
+      paragraph('Bu karara itiraz etmek isterseniz destek ekibine yazabilirsiniz.'),
+      spacer(24),
+      cta('Destek ekibine yaz', text(data.supportUrl), 'primary'),
     ]),
   };
 }
