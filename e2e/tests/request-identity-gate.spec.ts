@@ -63,6 +63,14 @@ const FORM_LABEL: Record<FormKind, string> = {
 const DRAFT_COOKIE = 'taktic_request_draft';
 const CONFLICT_SENTENCE =
   'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.';
+/**
+ * What the submit itself says when the contact details turned out to be an
+ * account's after the gate had opened. Unlike the gate's own sentence above
+ * it never says which detail collided, nor that there were two accounts: the
+ * API refuses every identity collision with one code and one message.
+ */
+const SUBMIT_CONFLICT_SENTENCE =
+  'Bu iletişim bilgileri kayıtlı bir hesapla eşleşiyor. Giriş yapın ya da daha önce talep oluşturduysanız hesabınızı etkinleştirin.';
 const NEW_PASSWORD = 'YeniSifre123!';
 
 /**
@@ -1155,7 +1163,7 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
       await visitor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
       const refusal = visitor.page.getByTestId('request-submit-error');
       await expect(refusal).toBeVisible();
-      await expect(refusal).toHaveText(CONFLICT_SENTENCE);
+      await expect(refusal).toHaveText(SUBMIT_CONFLICT_SENTENCE);
       await expect(visitor.page).not.toHaveURL(/\/requests\/success/);
       await assertNoErrorScreen(visitor.page);
 

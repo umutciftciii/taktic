@@ -47,14 +47,16 @@ describe('requestRefusalText', () => {
     );
   });
 
-  it('names the identity conflict in the product’s words', () => {
+  it('words the identity conflict without saying which contact detail collided', () => {
+    // The API's sentence is already neutral; the form keeps its own so the
+    // wording cannot drift into naming the number or the address.
     expect(
       requestRefusalText({
         code: 'CUSTOMER_IDENTITY_CONFLICT',
-        message: 'Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.',
+        message: 'Bu telefon numarası veya e-posta adresi kayıtlı bir hesapla eşleşiyor.',
       }),
     ).toBe(
-      'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
+      'Bu iletişim bilgileri kayıtlı bir hesapla eşleşiyor. Giriş yapın ya da daha önce talep oluşturduysanız hesabınızı etkinleştirin.',
     );
   });
 });
