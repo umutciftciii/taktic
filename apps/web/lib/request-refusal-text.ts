@@ -6,8 +6,8 @@
  * 1. A **specific** code the API named (`SHOWCASE_LEAD_AREA_NOT_SERVED`,
  *    `PHONE_VERIFICATION_INVALID`, …) has a sentence of its own here.
  * 2. Otherwise the API's own message when it gave one for the client — a
- *    conflict such as "Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.",
- *    a DTO validation message — is shown as-is.
+ *    conflict the request service refused with, a DTO validation message —
+ *    is shown as-is.
  *
  * The generic sentence is the last resort only: a refusal with no code and no
  * message, or a server error. It must never win over a message the API worded
@@ -36,8 +36,12 @@ export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
     'Hizmet veren hesabıyla vitrin talebi gönderilemez. Müşteri olarak devam etmek için oturumu kapatın.',
   REQUEST_FORBIDDEN:
     'Hizmet veren hesabıyla talep oluşturulamaz. Müşteri olarak devam etmek için oturumu kapatın.',
+  // Every identity refusal, worded once and without saying which of the two
+  // collided: the number or the address belongs to an account — this
+  // visitor's, or somebody else's — and the identity gate ahead of the form is
+  // where the owner signs in or activates.
   CUSTOMER_IDENTITY_CONFLICT:
-    'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
+    'Bu iletişim bilgileri kayıtlı bir hesapla eşleşiyor. Giriş yapın ya da daha önce talep oluşturduysanız hesabınızı etkinleştirin.',
   // Normally shown under the field the API named; this is the banner's
   // wording when the field is one the form cannot point at.
   [CONTACT_DETAILS_IN_TEXT]: CONTACT_DETAILS_ERROR,

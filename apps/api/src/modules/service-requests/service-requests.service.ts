@@ -9,6 +9,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  canonicalAccountPhone,
+  customerIdentityConflictException,
+  findAccountByPhone,
+  uniqueViolationField,
+} from '../../common/account-identity';
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
@@ -57,7 +63,6 @@ export const ACCOUNT_CONTACT_INCOMPLETE_CODE = 'ACCOUNT_CONTACT_INCOMPLETE';
  * Returned when a request creation is refused because the provided phone and
  * email belong to two different customers.
  */
-export const CUSTOMER_IDENTITY_CONFLICT_CODE = 'CUSTOMER_IDENTITY_CONFLICT';
 
 type QuestionOption = {
   key: string;
@@ -1283,6 +1288,21 @@ export class ServiceRequestsService {
   }
 }
 
+/**
+ * Who a new request belongs to.
+ *
+ * A signed-in customer owns their request, whoever the contact person on it
+ * is: an alternate contact is a fact about the request, never an account, so
+ * nothing below runs for them and no row is created from those fields.
+ *
+ * Everybody else gets a fresh auto-created customer — or nothing at all. A
+ * number or an address that already belongs to an account, of any kind, is a
+ * refusal: the request is not hung on that account and no second account is
+ * opened beside it. The identity gate in front of the forms sends the owner to
+ * sign in or activate before they get here, so this is the guarantee behind
+ * that courtesy, and the unique indexes on User.phone and User.email are the
+ * guarantee behind this pre-read for the race it cannot see.
+ */
 async function resolveCustomerForCreate(
   tx: Prisma.TransactionClient,
   data: { customerName: string; customerPhone: string; customerEmail: string },
@@ -1292,35 +1312,18 @@ async function resolveCustomerForCreate(
     return user.id;
   }
 
-  const phone = data.customerPhone;
+  // Stored in E.164 and nothing else. The request keeps the number in its own
+  // column exactly as before; it is the account that has to be spelled one way.
+  const phone = canonicalAccountPhone(data.customerPhone);
   const email = data.customerEmail;
 
   const [byPhone, byEmail] = await Promise.all([
-    tx.user.findFirst({
-      where: { role: UserRole.CUSTOMER, phone },
-      select: { id: true },
-    }),
-    tx.user.findFirst({
-      where: { role: UserRole.CUSTOMER, email },
-      select: { id: true },
-    }),
+    findAccountByPhone(tx, phone),
+    tx.user.findUnique({ where: { email }, select: { id: true } }),
   ]);
 
-  if (byPhone && byEmail && byPhone.id !== byEmail.id) {
-    throw new ConflictException({
-      statusCode: HttpStatus.CONFLICT,
-      error: 'Conflict',
-      code: CUSTOMER_IDENTITY_CONFLICT_CODE,
-      message: 'Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.',
-    });
-  }
-
-  if (byPhone) {
-    return byPhone.id;
-  }
-
-  if (byEmail) {
-    return byEmail.id;
+  if (byPhone || byEmail) {
+    throw customerIdentityConflictException();
   }
 
   try {
@@ -1338,13 +1341,8 @@ async function resolveCustomerForCreate(
     });
     return created.id;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      throw new ConflictException({
-        statusCode: HttpStatus.CONFLICT,
-        error: 'Conflict',
-        code: CUSTOMER_IDENTITY_CONFLICT_CODE,
-        message: 'Müşteri kaydı oluşturulamadı: telefon veya e-posta başka bir kayıtla çakışıyor.',
-      });
+    if (uniqueViolationField(error) !== null) {
+      throw customerIdentityConflictException();
     }
     throw error;
   }

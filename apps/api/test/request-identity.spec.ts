@@ -69,8 +69,8 @@ describe('POST /auth/request-identity-check', () => {
   });
 
   it('matches a stored phone regardless of which un-canonicalised spelling wrote it', async () => {
-    // resolveCustomerForCreate and self-registration never canonicalise —
-    // whatever the visitor typed is what lands in the row.
+    // Rows written before every path canonicalised carry whatever the visitor
+    // typed, and they are still somebody's account.
     await activeCustomer('5551110012', 'bare@example.test');
     await activeCustomer('905551110013', 'countrycode@example.test');
 
