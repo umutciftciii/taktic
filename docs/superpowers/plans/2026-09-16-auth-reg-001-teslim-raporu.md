@@ -102,7 +102,7 @@ RED koşuda aynı testler `[201, 201]` vermişti.
 | `pnpm build` | geçti |
 | E2E Chromium | `request-identity-gate` 22/22; `showcase-placement-lead`, `marketplace-journey`, `account-email-role-conflict`, `customer-panel`, `hero-request-demo`, `request-contact-autofill`, `phone-verification-gate`, `account-recovery`, `login-screen` 35/35 |
 | E2E WebKit | 84/84 (`request-identity-gate`, `showcase-*`, `login-screen` dâhil) |
-| CI | PR'da üç iş bekleniyor (bkz. PR) |
+| CI (PR #81, run 35025650518) | `typecheck · lint · test · build` 12m09s ✓ · `e2e (chromium)` 14m27s ✓ · `e2e (webkit · sign-in and mobile shells)` 10m03s ✓ |
 
 ## 8. Merge / deploy gerekleri
 
