@@ -244,7 +244,7 @@ describe('POST /auth/register-customer — claim behaviour', () => {
     expect(live).toHaveLength(1);
   });
 
-  it('keeps the plain duplicate error for an already activated account', async () => {
+  it('keeps the plain duplicate refusal for an already activated account', async () => {
     const existing = await createUser(ctx.prisma, {
       role: UserRole.CUSTOMER,
       customerOrigin: CustomerOrigin.REGISTERED,
@@ -256,7 +256,10 @@ describe('POST /auth/register-customer — claim behaviour', () => {
       .send({ name: 'Taklit', email: existing.email, password: 'BaskaSifre123!' })
       .expect(409);
 
-    expect(response.body.code).toBeUndefined();
+    // The canonical identity refusal, and no activation mail: the account is
+    // somebody's already.
+    expect(response.body.code).toBe('CUSTOMER_IDENTITY_CONFLICT');
     expect(response.headers['set-cookie']).toBeUndefined();
+    expect(ctx.notifications.lastOfTemplate('customer-activation')).toBeUndefined();
   });
 });

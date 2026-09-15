@@ -9,7 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
-import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
+import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
 import { resolveArea } from '../locations/turkey-locations';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateAccountProfileDto } from './dto/update-account-profile.dto';
@@ -79,7 +79,7 @@ export class AccountService {
 
   async updateProfile(userId: string, dto: UpdateAccountProfileDto): Promise<AccountProfile> {
     const name = dto.name.trim();
-    const phone = normalizeAccountPhone(dto.phone);
+    const phone = canonicalAccountPhone(dto.phone);
     const city = normalizeAccountCity(dto.city);
 
     // Asked before the write only so the customer gets the rule's own sentence
@@ -214,12 +214,9 @@ export class AccountService {
    * file.
    */
   private async assertPhoneIsFree(userId: string, phone: string): Promise<void> {
-    const existing = await this.prisma.user.findFirst({
-      where: { phone: { in: equivalentPhoneSpellings(phone) }, id: { not: userId } },
-      select: { id: true },
-    });
+    const existing = await findAccountByPhone(this.prisma, phone);
 
-    if (existing) {
+    if (existing && existing.id !== userId) {
       throw phoneTakenException();
     }
   }
@@ -248,26 +245,6 @@ function toProfile(user: {
 
 function phoneTakenException() {
   return new ConflictException('Bu telefon numarası başka bir hesaba ait.');
-}
-
-/**
- * The account's telephone number in the one canonical form.
- *
- * `normalizePhoneNumber` is the product's existing rule — the one the one-time
- * code path validates against — and it is reused rather than restated so the
- * profile screen cannot accept a number the rest of the platform would refuse
- * to text. Its own refusal is in English and aimed at an API caller, so it is
- * translated here into the sentence a customer standing in front of the form
- * can act on.
- */
-function normalizeAccountPhone(value: string): string {
-  try {
-    return normalizePhoneNumber(value);
-  } catch {
-    throw new BadRequestException(
-      'Telefon numarası geçerli görünmüyor. Örnek: 0555 123 45 67',
-    );
-  }
 }
 
 /**

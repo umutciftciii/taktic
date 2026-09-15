@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
+import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { AdminInviteService } from './admin-invite.service';
@@ -44,7 +45,9 @@ export class UsersService {
   async create(dto: CreateUserDto, actor: AuthUser) {
     const name = dto.name.trim();
     const email = dto.email.trim().toLowerCase();
-    const phone = dto.phone ? dto.phone.trim() : null;
+    // E.164 like every other path that writes User.phone, so the unique index
+    // is a rule about numbers rather than about spellings.
+    const phone = dto.phone && dto.phone.trim() ? canonicalAccountPhone(dto.phone) : null;
 
     if (name.length < 2) {
       throw new BadRequestException('Name must be at least 2 characters');
@@ -59,10 +62,8 @@ export class UsersService {
     }
 
     if (phone) {
-      const existingPhone = await this.prisma.user.findUnique({
-        where: { phone },
-        select: { id: true },
-      });
+      // Widened to the older spellings rows may still carry.
+      const existingPhone = await findAccountByPhone(this.prisma, phone);
       if (existingPhone) {
         throw new ConflictException('Bu telefon başka bir kullanıcıya ait.');
       }

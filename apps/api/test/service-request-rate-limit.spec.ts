@@ -1,11 +1,13 @@
 import request from 'supertest';
-import { ServiceRequestStatus } from '@prisma/client';
+import { ServiceRequestStatus, UserRole } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createApprovedRequest,
   createCategory,
   createTestApp,
+  createUser,
   daysAgo,
+  loginAs,
   resetAuthThrottle,
   resetDatabase,
   serviceRequestPayload,
@@ -65,6 +67,12 @@ describe('POST /service-requests rate limits', () => {
   it('answers 429 REQUEST_RATE_LIMITED on the 6th request in 24h from the same phone', async () => {
     const category = await createCategory(ctx.prisma);
     const phone = '05552220001';
+    // A signed-in customer naming the number as an alternate contact: a guest
+    // could not send six — after the first, the number belongs to an account
+    // and a guest is refused for it (customer-uniqueness.spec.ts). The budget
+    // is keyed on the request's phone, which is the alternate contact's.
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '+905559990001' });
+    const cookie = await loginAs(ctx.prisma, customer.id);
 
     const statuses: Array<{ status: number; body: Record<string, unknown> }> = [];
     for (let attempt = 0; attempt < SERVICE_REQUEST_MAX_PER_PHONE_PER_DAY + 1; attempt += 1) {
@@ -74,8 +82,10 @@ describe('POST /service-requests rate limits', () => {
       resetAuthThrottle(ctx.app);
       const response = await request(ctx.server)
         .post('/service-requests')
+        .set('Cookie', cookie)
         .send(
           serviceRequestPayload(category.slug, {
+            useAlternateContact: true,
             customerPhone: phone,
             customerEmail: `phone-limit-${attempt}@example.test`,
             customerName: `Müşteri ${attempt}`,

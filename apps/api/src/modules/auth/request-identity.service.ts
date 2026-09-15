@@ -51,14 +51,12 @@ function kindOf(row: Row | null): RowKind {
  *
  * Both rows are read together — one `Promise.all` on the one client the caller
  * passed, be that a transaction or the plain service — and judged jointly;
- * there is no "first match wins". `User.phone` is not canonicalised on every write path —
- * `resolveCustomerForCreate` only strips non-digits, and self-registration is
- * trim-only — so the phone lookup widens to every spelling the platform is
- * known to store (see `equivalentPhoneSpellings`) rather than the one
- * `resolveCustomerForCreate` would produce for a fresh row. This is a
- * superset of what that function acts on at submit time, not an exact mirror
- * of it — the pre-check would rather over-match an existing account than tell
- * its owner they are new.
+ * there is no "first match wins". Every path that writes `User.phone` now
+ * stores E.164, but rows written before that carry whatever the visitor typed,
+ * so the phone lookup widens to every spelling the platform is known to store
+ * (see `equivalentPhoneSpellings`) — the same widening
+ * `resolveCustomerForCreate` applies at submit time, so the two agree on who
+ * already has an account.
  */
 @Injectable()
 export class RequestIdentityService {
