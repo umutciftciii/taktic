@@ -7,7 +7,7 @@ import {
   REVIEW_REASON_CUSTOMER_LABELS,
   REVIEW_REPORT_REASON_KEYS,
   type ReviewModerationAction,
-} from '../../../lib/api';
+} from '../../../lib/reviews';
 import { moderateReviewAction } from './actions';
 
 type ReviewModerationFormProps = {

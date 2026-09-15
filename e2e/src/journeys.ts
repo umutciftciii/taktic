@@ -583,3 +583,134 @@ export async function reopenRequest(admin: Actor, requestId: string): Promise<vo
   await admin.gotoAdmin(`/requests/${requestId}`);
   await expect(admin.page.getByTestId('request-status')).toHaveText('Onaylandı');
 }
+
+/* ---- provider reviews ---------------------------------------------------- */
+
+/**
+ * Marks the customer's matched request done from its offers page and waits
+ * for the screen the action lands on.
+ *
+ * With reviews on, the action redirects to the review form; with them off,
+ * back to the request. The caller says which it expects, and the wait is on
+ * the page's own content rather than the URL — a server action is an
+ * in-flight POST, and asserting the URL early would race it.
+ */
+export async function completeRequest(
+  customer: Actor,
+  requestId: string,
+  expect_: 'review-form' | 'offers-page' = 'review-form',
+): Promise<void> {
+  await customer.gotoWeb(`/requests/${requestId}/offers`);
+  await customer.page.getByRole('button', { name: 'Hizmet tamamlandı' }).click();
+
+  if (expect_ === 'review-form') {
+    await expect(customer.page.getByTestId('review-submit')).toBeVisible();
+  } else {
+    await expect(customer.page.getByTestId('request-status')).toHaveText('Tamamlandı');
+    await expect(customer.page.getByTestId('request-review-cta')).toHaveCount(0);
+  }
+  await assertNoErrorScreen(customer.page);
+}
+
+/**
+ * Rates the provider from the review page. The proof is the customer's own
+ * review rendered back with the star they gave — the page re-reads the API
+ * after the action, so what is asserted is the stored row, not the click.
+ */
+export async function submitReview(
+  customer: Actor,
+  requestId: string,
+  rating: 1 | 2 | 3 | 4 | 5,
+  comment?: string,
+): Promise<void> {
+  await customer.gotoWeb(`/requests/${requestId}/degerlendir`);
+  await customer.page.getByTestId(`rating-${rating}`).check();
+  if (comment) {
+    await customer.page.getByTestId('review-comment').fill(comment);
+  }
+  await customer.page.getByTestId('review-submit').click();
+
+  await expect(customer.page.getByTestId('review-done')).toBeVisible();
+  await expect(customer.page.getByTestId('review-stars')).toHaveAttribute('data-value', String(rating));
+  await assertNoErrorScreen(customer.page);
+}
+
+/** The reasons the provider's review report dialog offers, as the API stores them. */
+export type ReviewReportReason =
+  | 'OFFENSIVE'
+  | 'CONTAINS_CONTACT_INFO'
+  | 'NOT_ABOUT_THIS_JOB'
+  | 'SUSPECTED_FAKE'
+  | 'OTHER';
+
+/**
+ * Reports the first review on the provider's list, through the native
+ * dialog, and waits for the page's "received" notice — by test id, for the
+ * route-announcer reason `reportRequest` gives.
+ */
+export async function reportReview(
+  provider: Actor,
+  providerId: string,
+  reason: ReviewReportReason,
+  note?: string,
+): Promise<void> {
+  await provider.gotoWeb(`/providers/${providerId}/degerlendirmeler`);
+  await provider.page.getByTestId('review-report-button').first().click();
+
+  const dialog = provider.page.locator('dialog.report-dialog');
+  await expect(dialog).toBeVisible();
+  await provider.page.getByTestId('review-report-reason').selectOption(reason);
+  if (note) {
+    await provider.page.getByTestId('review-report-note').fill(note);
+  }
+  await provider.page.getByTestId('review-report-submit').click();
+
+  await expect(provider.page.getByTestId('review-report-received')).toHaveCount(1);
+  await expect(provider.page.getByTestId('review-row-report-open')).toHaveCount(1);
+  await assertNoErrorScreen(provider.page);
+}
+
+/**
+ * The operator's decision on one review, from its detail screen. The state
+ * badge re-rendered after the action is the proof that the API applied it.
+ */
+export async function moderateReview(
+  admin: Actor,
+  reviewId: string,
+  action: 'REMOVE_COMMENT' | 'REMOVE_REVIEW' | 'RESTORE',
+  reason: ReviewReportReason = 'OTHER',
+): Promise<void> {
+  await admin.gotoAdmin(`/provider-reviews/${reviewId}`);
+  await admin.page.getByTestId(`moderate-${action}`).click();
+  await expect(admin.page.getByTestId('moderation-form')).toBeVisible();
+  if (action !== 'RESTORE') {
+    await admin.page.getByTestId('moderation-reason').selectOption(reason);
+  }
+  await admin.page.getByTestId('moderation-submit').click();
+
+  const expected =
+    action === 'RESTORE' ? 'Yayında' : action === 'REMOVE_COMMENT' ? 'Yorum kaldırıldı' : 'Kaldırıldı';
+  await expect(admin.page.getByTestId('review-state')).toHaveText(expected);
+  await expect(admin.page.getByTestId('review-ok')).toBeVisible();
+  await assertNoErrorScreen(admin.page);
+}
+
+/**
+ * Turns provider reviews on from the operations screen, the way an operator
+ * does. Idempotent, and the same contract as `enableAutoPublish`: the
+ * re-rendered switch carrying `aria-checked="true"` is the proof.
+ */
+export async function enableProviderReviews(admin: Actor): Promise<void> {
+  await admin.gotoAdmin('/operations-settings');
+  const toggle = admin.page.getByTestId('provider-reviews-toggle');
+  await expect(toggle).toBeVisible();
+
+  if ((await toggle.getAttribute('aria-checked')) !== 'true') {
+    await toggle.click();
+    await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+  }
+  await assertNoErrorScreen(admin.page);
+}
