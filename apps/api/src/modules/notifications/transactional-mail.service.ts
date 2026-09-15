@@ -1543,11 +1543,14 @@ export class TransactionalMailService {
       case 'review-invitation': {
         const request = await loadRequestForReviewInvitation(this.prisma, source.ids[0]);
         // Rebuilt only while the invitation is still worth acting on: the job
-        // is COMPLETED, the window has not closed, no review has been written
-        // and the feature is on. Any of those gone and the outbox records a
-        // safe "unavailable" rather than a link to a form that will 404.
+        // is COMPLETED and has an owner to sign in as, the window has not
+        // closed, no review has been written and the feature is on. Any of
+        // those gone and the outbox records a safe "unavailable" rather than
+        // a link to a form that will 404 — or, for an owner-less legacy
+        // request, 403 to everybody.
         if (
           !request?.customerEmail ||
+          !request.customerId ||
           request.status !== ServiceRequestStatus.COMPLETED ||
           !request.completedAt ||
           !request.matchedOffer

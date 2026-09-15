@@ -263,9 +263,14 @@ export class ProviderReviewsService {
 
   /**
    * The public projection of the same numbers: `toPublicSummary` is the one
-   * place the minimum-count threshold lives, so offer cards, the vitrin and
-   * the public list can never disagree about who has a rating. Fails closed:
-   * with the switch off every id maps to null after a single settings read.
+   * place the minimum-count threshold lives, and this method is the one place
+   * the provider's visibility is applied to it, so offer cards, the vitrin and
+   * the public list can never disagree about who has a rating. Fails closed
+   * twice over: with the switch off every id maps to null after a single
+   * settings read, and a provider `listPublic` would 404 for — suspended,
+   * rejected, unknown — maps to null whatever its numbers, because a rating
+   * on an offer card for a provider whose public page says "not found" would
+   * be one surface contradicting another.
    */
   async publicSummariesForProviders(
     providerIds: readonly string[],
@@ -274,15 +279,28 @@ export class ProviderReviewsService {
     if (providerIds.length === 0) {
       return result;
     }
+    for (const id of providerIds) {
+      result.set(id, null);
+    }
 
     if (!(await readProviderReviewsEnabled(this.prisma))) {
-      for (const id of providerIds) {
-        result.set(id, null);
-      }
       return result;
     }
 
-    for (const [id, summary] of await this.summariesForProviders(providerIds)) {
+    // One read for every id, filtered through the same predicate the public
+    // list and the public profile use — never a status set of this file's own.
+    const providers = await this.prisma.providerProfile.findMany({
+      where: { id: { in: [...new Set(providerIds)] } },
+      select: { id: true, status: true },
+    });
+    const visibleIds = providers
+      .filter((provider) => isPubliclyVisibleProvider(provider.status))
+      .map((provider) => provider.id);
+    if (visibleIds.length === 0) {
+      return result;
+    }
+
+    for (const [id, summary] of await this.summariesForProviders(visibleIds)) {
       result.set(id, toPublicSummary(summary));
     }
     return result;

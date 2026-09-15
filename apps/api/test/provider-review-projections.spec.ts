@@ -1,4 +1,10 @@
-import { OfferStatus, ServiceCategoryKind, ServiceRequestStatus, UserRole } from '@prisma/client';
+import {
+  OfferStatus,
+  ProviderStatus,
+  ServiceCategoryKind,
+  ServiceRequestStatus,
+  UserRole,
+} from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -167,6 +173,7 @@ const offerUrl = (requestId: string, offerId: string) =>
 const feedUrl = '/showcase/feed';
 const cardUrl = (cardId: string) => `/showcase/cards/${cardId}`;
 const dashboardUrl = '/providers/me/dashboard';
+const panelSummaryUrl = (providerId: string) => `/providers/${providerId}/reviews/summary`;
 const myRequestsUrl = '/service-requests/my';
 
 /** The strings every fixture plants that must never reach a public body. */
@@ -288,6 +295,73 @@ describe('offer previews', () => {
       .set('Cookie', cookie)
       .expect(200);
     expect(offDetail.body.provider.reviewSummary).toBeNull();
+  });
+});
+
+describe('public summaries and provider visibility', () => {
+  it('a provider the public list would 404 for has no summary on the offer preview or detail, while the panel keeps the exact count', async () => {
+    await setReviewsEnabled(true);
+    const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: 1 });
+    const fixture = await providerFixture(category.id);
+    await threeReviews(fixture, 5);
+
+    const { customer, cookie } = await customerSession();
+    const serviceRequest = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      customerId: customer.id,
+    });
+    const offer = await pendingOffer(fixture, serviceRequest.id, new Date());
+
+    // APPROVED: the same summary on both customer surfaces.
+    const approved = await request(ctx.server)
+      .get(offersUrl(serviceRequest.id))
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(approved.body).toHaveLength(1);
+    expect(approved.body[0].provider.reviewSummary).toEqual({ count: 3, average: 5 });
+    const approvedDetail = await request(ctx.server)
+      .get(offerUrl(serviceRequest.id, offer.id))
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(approvedDetail.body.provider.reviewSummary).toEqual({ count: 3, average: 5 });
+
+    // SUSPENDED: the public list answers "Provider not found", so the offer
+    // card must not carry a rating for the same provider. The offer itself
+    // is still shown — the card's other fields are not this feature's to
+    // change.
+    await ctx.prisma.providerProfile.update({
+      where: { id: fixture.provider.id },
+      data: { status: ProviderStatus.SUSPENDED },
+    });
+    const suspended = await request(ctx.server)
+      .get(offersUrl(serviceRequest.id))
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(suspended.body).toHaveLength(1);
+    expect(suspended.body[0].provider).toEqual({
+      id: fixture.provider.id,
+      businessName: fixture.provider.businessName,
+      city: fixture.provider.city,
+      district: fixture.provider.district,
+      reviewSummary: null,
+    });
+    const suspendedDetail = await request(ctx.server)
+      .get(offerUrl(serviceRequest.id, offer.id))
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(suspendedDetail.body.provider.reviewSummary).toBeNull();
+    expect(suspendedDetail.body.provider.id).toBe(fixture.provider.id);
+
+    // The provider's own panel is not a public surface: the numbers stay.
+    const panel = await request(ctx.server)
+      .get(panelSummaryUrl(fixture.provider.id))
+      .set('Cookie', fixture.ownerCookie)
+      .expect(200);
+    expect(panel.body).toEqual({
+      count: 3,
+      average: 5,
+      distribution: { '1': 0, '2': 0, '3': 0, '4': 0, '5': 3 },
+    });
   });
 });
 

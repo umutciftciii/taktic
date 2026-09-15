@@ -1,8 +1,9 @@
-import { NotificationStatus, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { NotificationStatus, OfferStatus, ServiceRequestStatus, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { intentRow } from '../src/modules/notifications/notification-intents';
 import { ReviewInvitationOutbox } from '../src/modules/notifications/review-invitation-outbox.service';
+import { TransactionalMailService } from '../src/modules/notifications/transactional-mail.service';
 import { SchedulerRunRegistry } from '../src/modules/operations-settings/scheduler-run-registry.service';
 import { SchedulerSettingsService } from '../src/modules/operations-settings/scheduler-settings.service';
 import { RequestLifecycleSchedulerService } from '../src/modules/request-lifecycle/request-lifecycle-scheduler.service';
@@ -227,6 +228,63 @@ describe('ReviewInvitationOutbox', () => {
     const sent = ctx.notifications.ofTemplate('review-invitation');
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(serviceRequest.customerEmail);
+  });
+
+  it('an owner-less legacy request completed by an admin owes no invitation, and its key rebuilds to nothing', async () => {
+    await enableReviews();
+    // A request from before customer accounts: an address on the row but no
+    // `customerId`. Matched by direct writes — the accept path is not what
+    // this case is about.
+    const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: 1 });
+    const serviceRequest = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      customerId: null,
+    });
+    const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, {
+      userId: ownerUser.id,
+      categoryId: category.id,
+    });
+    const offer = await ctx.prisma.offer.create({
+      data: {
+        requestId: serviceRequest.id,
+        providerId: provider.id,
+        status: OfferStatus.ACCEPTED,
+        acceptedAt: new Date(),
+        priceAmount: 1000,
+        message: 'Teklif',
+      },
+    });
+    await ctx.prisma.serviceRequest.update({
+      where: { id: serviceRequest.id },
+      data: {
+        status: ServiceRequestStatus.MATCHED,
+        matchedOfferId: offer.id,
+        matchedAt: new Date(),
+      },
+    });
+
+    await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/complete`)
+      .set('Cookie', await adminCookie())
+      .expect(201);
+    await outbox.deliverPending();
+
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    expect(stored.status).toBe(ServiceRequestStatus.COMPLETED);
+    expect(stored.customerId).toBeNull();
+    expect(await invitationLogs(serviceRequest.id)).toHaveLength(0);
+    expect(ctx.notifications.ofTemplate('review-invitation')).toHaveLength(0);
+
+    // The admin retry path derives the message from the key alone and must
+    // reach the same answer: nobody can sign in as this request's owner, so
+    // there is no form to invite anyone to.
+    const mail = ctx.app.get(TransactionalMailService);
+    expect(
+      await mail.composeRetryMessage('review-invitation', `review-invitation:${serviceRequest.id}`),
+    ).toBeNull();
   });
 
   it('enqueues nothing for a request that is not COMPLETED', async () => {

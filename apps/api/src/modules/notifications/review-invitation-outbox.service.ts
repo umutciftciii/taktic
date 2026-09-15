@@ -59,9 +59,13 @@ export class ReviewInvitationOutbox implements OnModuleDestroy {
    *
    * Read after the status update, so it is the transition's own answer: a
    * request that is not COMPLETED, or one with no address to write to, owes
-   * nothing. With the feature switched off nothing is written either — there
-   * is no backlog of invitations waiting for the switch to flip, because a
-   * customer who finished a job weeks ago is not the one to invite.
+   * nothing. Nor does an owner-less request — a legacy row with no
+   * `customerId`, which a SUPER_ADMIN can still complete: the review form is
+   * gated on the signed-in owner, so an invitation would link to a page that
+   * answers 403 to everybody. With the feature switched off nothing is
+   * written either — there is no backlog of invitations waiting for the
+   * switch to flip, because a customer who finished a job weeks ago is not
+   * the one to invite.
    *
    * `completedAt` is accepted so a later version can carry the instant in the
    * key without changing the call sites; v1 does not, since a request is
@@ -94,7 +98,12 @@ export class ReviewInvitationOutbox implements OnModuleDestroy {
     });
 
     const to = request?.customerEmail?.trim();
-    if (!request || request.status !== ServiceRequestStatus.COMPLETED || !to) {
+    if (
+      !request ||
+      request.status !== ServiceRequestStatus.COMPLETED ||
+      !request.customerId ||
+      !to
+    ) {
       return { enqueued: 0 };
     }
 
