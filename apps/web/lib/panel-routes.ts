@@ -45,6 +45,8 @@ const PANEL_ROUTES = [
   '/providers/:id/subscriptions',
   '/providers/:id/offers',
   '/providers/:id/offers/:offerId',
+  // The reviews customers left on the jobs those offers won.
+  '/providers/:id/degerlendirmeler',
   '/providers/:id/requests',
   '/providers/:id/requests/:requestId',
   '/providers/:id/package-purchases',
@@ -76,6 +78,9 @@ const PANEL_ROUTES = [
   // whole market is irreversible, so it lives behind the ordinary customer
   // session rather than behind a link.
   '/requests/:id/vitrin-karar',
+  // The customer's review of a completed job — their own request, their own
+  // session, the same panel the request lives in.
+  '/requests/:id/degerlendir',
 ] as const;
 
 /**

@@ -7,8 +7,10 @@ import {
   getCurrentUser,
   ProviderOffer,
   ProviderProfile,
+  type ReviewSummary,
   statusLabel,
 } from '../../../lib/api';
+import { ReviewSummaryCard } from '../../review-summary-card';
 import { ProviderShell } from '../provider-shell';
 import { readCreditBalance } from '../provider-data';
 import { providerStatusBadgeClass } from '../provider-ui';
@@ -33,15 +35,19 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
     notFound();
   }
 
-  const [offers, creditBalance] = await Promise.all([
+  const [offers, creditBalance, reviewSummary] = await Promise.all([
     safeOffers(id),
     readCreditBalance(id),
+    safeReviewSummary(id),
   ]);
 
   /*
-   * The rail's figures are counted from this provider's own offers. Anything
-   * the platform does not record — an average response time, a rating — is not
-   * shown at all rather than filled in.
+   * The rail's figures are counted from this provider's own offers, and the
+   * rating from the reviews customers left on the jobs those offers won —
+   * every live review, no public threshold, because this is the business's
+   * own screen (see `reviewSummary` on the dashboard route). Anything the
+   * platform does not record — an average response time — is not shown at
+   * all rather than filled in.
    */
   const totalOffers = offers.length;
   const wonOffers = offers.filter((offer) => offer.status === 'ACCEPTED').length;
@@ -234,6 +240,19 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
             </div>
           </div>
 
+          {reviewSummary ? (
+            <div className="rail-panel" data-testid="profile-review-summary">
+              <span className="rail-title">Değerlendirmeler</span>
+              <ReviewSummaryCard summary={reviewSummary} showDistribution={false} />
+              <Link
+                className="pdash-btn pdash-btn-secondary pdash-btn-block"
+                href={`/providers/${provider.id}/degerlendirmeler`}
+              >
+                Tümünü gör
+              </Link>
+            </div>
+          ) : null}
+
           <div className="rail-note">
             <strong>Profilini güçlendir.</strong> Tanıtım metnini doldur, hizmet kategorilerini ve
             bölgelerini güncel tut: eşleşme bu iki alana göre yapılır.
@@ -242,6 +261,15 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
       </div>
     </ProviderShell>
   );
+}
+
+/** The same rule for the rating: a failure hides the card, never shows a zero. */
+async function safeReviewSummary(providerId: string): Promise<ReviewSummary | null> {
+  try {
+    return await apiFetch<ReviewSummary>(`/providers/${providerId}/reviews/summary`);
+  } catch {
+    return null;
+  }
 }
 
 /** The rail can live without the offer list; a failure just hides the numbers. */
