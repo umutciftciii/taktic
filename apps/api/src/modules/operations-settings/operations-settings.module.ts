@@ -5,6 +5,8 @@ import { MarketplacePublishSettingsController } from './marketplace-publish-sett
 import { MarketplacePublishSettingsService } from './marketplace-publish-settings.service';
 import { OperationsSettingsController } from './operations-settings.controller';
 import { OperationsSettingsService } from './operations-settings.service';
+import { ProviderReviewSettingsController } from './provider-review-settings.controller';
+import { ProviderReviewSettingsService } from './provider-review-settings.service';
 import { RefundPolicyController } from './refund-policy.controller';
 import { SchedulerRunRegistry } from './scheduler-run-registry.service';
 import { SchedulerSettingsController } from './scheduler-settings.controller';
@@ -26,18 +28,21 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     RefundPolicyController,
     SchedulerSettingsController,
     MarketplacePublishSettingsController,
+    ProviderReviewSettingsController,
   ],
   providers: [
     OperationsSettingsService,
     SchedulerSettingsService,
     SchedulerRunRegistry,
     MarketplacePublishSettingsService,
+    ProviderReviewSettingsService,
   ],
   exports: [
     OperationsSettingsService,
     SchedulerSettingsService,
     SchedulerRunRegistry,
     MarketplacePublishSettingsService,
+    ProviderReviewSettingsService,
   ],
 })
 export class OperationsSettingsModule {}

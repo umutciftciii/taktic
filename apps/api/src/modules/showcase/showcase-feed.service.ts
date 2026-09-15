@@ -9,6 +9,7 @@ import { describeArea } from '../../common/provider-service-area-scope';
 import { showcaseAreaKey, showcaseCandidateAreaKeys } from '../../common/showcase-area-key';
 import { PrismaService } from '../../prisma/prisma.service';
 import { resolveArea } from '../locations/turkey-locations';
+import { ProviderReviewsService } from '../provider-reviews/provider-reviews.service';
 import { ShowcaseFeedQueryDto } from './dto/showcase-feed.dto';
 import { SHOWCASE_FEED_DEFAULT_LIMIT, SHOWCASE_FEED_MAX_LIMIT } from './showcase.constants';
 import { showcaseAreaUnknown } from './showcase.errors';
@@ -86,7 +87,10 @@ import { showcaseAreaUnknown } from './showcase.errors';
  */
 @Injectable()
 export class ShowcaseFeedService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
+  ) {}
 
   async list(query: ShowcaseFeedQueryDto) {
     const city = query.city?.trim();
@@ -135,6 +139,15 @@ export class ShowcaseFeedService {
     const nextCursor =
       rows.length > limit && page.length > 0 ? encodeCursor(page[page.length - 1]!) : null;
 
+    /*
+     * The provider's public rating, attached after the page is cut. It is not
+     * a column the SQL reads and not a field in the sort key: a rating changes
+     * what a card *says*, never where it sits — see "No field in this ordering
+     * can be bought" above, and a rating is the one thing a business would
+     * most like to buy a position with.
+     */
+    const cards = await this.withReviewSummaries(page.map(toFeedCard));
+
     return {
       // Null when the visitor named no place, so a client cannot render a
       // heading about a location nobody chose.
@@ -146,7 +159,7 @@ export class ShowcaseFeedService {
             label: describeArea(area),
           }
         : null,
-      cards: page.map(toFeedCard),
+      cards,
       nextCursor,
     };
   }
@@ -170,7 +183,23 @@ export class ShowcaseFeedService {
       return null;
     }
 
-    return toFeedCard(row);
+    const [card] = await this.withReviewSummaries([toFeedCard(row)]);
+    return card ?? null;
+  }
+
+  /**
+   * One read for every provider on the page. The service answers null below
+   * the public threshold and null for everybody while the switch is off, so a
+   * card never carries a rating the public review list would deny.
+   */
+  private async withReviewSummaries(cards: FeedCard[]) {
+    const summaries = await this.reviews.publicSummariesForProviders([
+      ...new Set(cards.map((card) => card.provider.id)),
+    ]);
+    return cards.map((card) => ({
+      ...card,
+      provider: { ...card.provider, reviewSummary: summaries.get(card.provider.id) ?? null },
+    }));
   }
 }
 
@@ -309,7 +338,10 @@ function toFeedCard(row: FeedRow) {
   };
 }
 
-export type ShowcaseFeedCard = ReturnType<typeof toFeedCard>;
+type FeedCard = ReturnType<typeof toFeedCard>;
+
+/** The card as the visitor receives it: the row's projection plus the rating. */
+export type ShowcaseFeedCard = Awaited<ReturnType<ShowcaseFeedService['list']>>['cards'][number];
 
 type FeedCursor = {
   providerRank: number;

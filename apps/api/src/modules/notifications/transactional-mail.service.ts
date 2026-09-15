@@ -7,6 +7,7 @@ import {
   PackagePurchaseKind,
   PackagePurchaseStatus,
   Prisma,
+  ProviderReviewReportReason,
   ProviderStatus,
   ServiceCategoryStatus,
   ServiceRequestReportReason,
@@ -24,11 +25,13 @@ import {
 } from '../../common/provider-request-matching';
 import { describeArea } from '../../common/provider-service-area-scope';
 import {
+  adminProviderReviewUrl,
   adminRequestUrl,
   adminSupportTicketUrl,
   customerAccountUrl,
   customerNewRequestUrl,
   customerRequestUrl,
+  customerReviewUrl,
   customerShowcaseDecisionUrl,
   customerSupportTicketUrl,
   customerSupportUrl,
@@ -38,6 +41,7 @@ import {
   providerProfileUrl,
   providerRequestUrl,
   providerRequestsUrl,
+  providerReviewsUrl,
   providerShowcaseCardUrl,
   providerShowcaseLeadUrl,
   providerShowcaseNewCardUrl,
@@ -50,6 +54,13 @@ import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   refundReasonLabel,
 } from '../offers/refund-policy';
+import {
+  REVIEW_REASON_ADMIN_LABELS,
+  REVIEW_REASON_CUSTOMER_LABELS,
+  REVIEW_SCOPE_LABELS,
+  ReviewRemovalScope,
+} from '../provider-reviews/provider-review-copy';
+import { isReviewWindowOpen, reviewWindowEndsAt } from '../provider-reviews/provider-review-window';
 import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.constants';
 import {
   REMOVAL_REASON_CUSTOMER_LABELS,
@@ -67,6 +78,7 @@ import {
   NotificationDispatcher,
 } from './notification-dispatcher.service';
 import { NotificationMessage } from './notification.port';
+import { formatDate } from './templates/format';
 import {
   TransactionalEmailTemplate,
   transactionalSubject,
@@ -800,6 +812,104 @@ export class TransactionalMailService {
     );
   }
 
+  // ──────────────────────── 16d-16g · provider reviews ───────────────────────
+
+  /**
+   * A review arrived; the provider who was rated is told the star count.
+   *
+   * Keyed on the review row, which is never deleted: one notice per review,
+   * however many times the create endpoint's caller retries. Not sent — and
+   * not rebuilt — for a review an operator has since removed: the message
+   * links a list the review is no longer on.
+   *
+   * The comment is not in the data bag, and neither is the customer's name or
+   * anything else about them. The review is anonymous on the provider's own
+   * page, and a mail must not be a quieter route around that.
+   *
+   * There is no `sendReviewInvitation` counterpart here on purpose: the
+   * invitation is enqueued inside the completing transaction and delivered by
+   * its outbox through {@link composeRetryMessage}, so that the customer is
+   * told exactly once and only if the completion committed.
+   */
+  async sendReviewReceived(reviewId: string) {
+    const review = await loadReview(this.prisma, reviewId);
+    if (!review || review.removedAt) {
+      return;
+    }
+
+    const to = recipientFor(review.provider);
+    if (!to) {
+      return;
+    }
+
+    await this.send('review-received', to, reviewReceivedData(review), {
+      requestId: review.request.id,
+      providerId: review.provider.id,
+      userId: review.provider.userId,
+      dedupeKey: `${RETRY_DEDUPE_PREFIXES['review-received']}:${review.id}`,
+    });
+  }
+
+  /**
+   * A provider reported a review; the support mailbox is told.
+   *
+   * Keyed on the report, so each report is one notice. The message names the
+   * business, the request and the reason, and links the operator panel; the
+   * reporter's note and the review's comment are not in it — both are read in
+   * the panel, behind the operator's own session. `providerId` on the log
+   * names the reporter for the audit screen, which is operator-only.
+   */
+  async sendReviewReportNewForSupport(reportId: string) {
+    const report = await loadReviewReport(this.prisma, reportId);
+    if (!report) {
+      return;
+    }
+
+    await this.send(
+      'review-report-new-for-support',
+      readSupportInboxEmail(),
+      reviewReportNewForSupportData(report),
+      {
+        requestId: report.review.request.id,
+        providerId: report.reporterProviderId,
+        dedupeKey: `${RETRY_DEDUPE_PREFIXES['review-report-new-for-support']}:${report.id}`,
+      },
+    );
+  }
+
+  /**
+   * A review, or just its comment, taken down by an operator; the customer
+   * who wrote it is told.
+   *
+   * Called once, after the moderation transaction has committed — and only
+   * from there. `removedAt` is in the key so a review removed, restored and
+   * removed again is told each time, exactly as `request-removed` does. The
+   * scope and the reason are *not* in the key: a retry reads both back out of
+   * the review row and its latest removal, which the decision wrote from the
+   * same dictionary. The reason reaches the customer as its fixed label and
+   * nothing more — never the reporter, never the operator's note.
+   */
+  async sendReviewRemoved(reviewId: string, removedAt: Date) {
+    const review = await loadReview(this.prisma, reviewId);
+    const scope = removalScopeOf(review);
+    if (!review?.request.customerEmail || !scope) {
+      return;
+    }
+
+    const prefix = RETRY_DEDUPE_PREFIXES['review-removed'];
+    await this.send(
+      'review-removed',
+      review.request.customerEmail,
+      reviewRemovedData(review, scope),
+      {
+        requestId: review.request.id,
+        userId: review.request.customerId,
+        providerId: review.provider.id,
+        dedupeKey: `${prefix}:${review.id}:${removedAt.toISOString()}`,
+      },
+    );
+  }
+
   // ───────────────────────── 17-21 · support tickets ─────────────────────────
 
   /**
@@ -1427,6 +1537,70 @@ export class TransactionalMailService {
         });
         return report
           ? { to: readSupportInboxEmail(), data: requestReportNewForSupportData(report) }
+          : null;
+      }
+
+      case 'review-invitation': {
+        const request = await loadRequestForReviewInvitation(this.prisma, source.ids[0]);
+        // Rebuilt only while the invitation is still worth acting on: the job
+        // is COMPLETED and has an owner to sign in as, the window has not
+        // closed, no review has been written and the feature is on. Any of
+        // those gone and the outbox records a safe "unavailable" rather than
+        // a link to a form that will 404 — or, for an owner-less legacy
+        // request, 403 to everybody.
+        if (
+          !request?.customerEmail ||
+          !request.customerId ||
+          request.status !== ServiceRequestStatus.COMPLETED ||
+          !request.completedAt ||
+          !request.matchedOffer
+        ) {
+          return null;
+        }
+
+        if (!isReviewWindowOpen(request.completedAt) || request.reviews.length > 0) {
+          return null;
+        }
+
+        if (!(await readProviderReviewsEnabled(this.prisma))) {
+          return null;
+        }
+
+        return {
+          to: request.customerEmail,
+          data: reviewInvitationData(
+            request,
+            request.completedAt,
+            request.matchedOffer.provider.businessName,
+          ),
+        };
+      }
+
+      case 'review-received': {
+        const review = await loadReview(this.prisma, source.ids[0]);
+        if (!review || review.removedAt) {
+          return null;
+        }
+
+        const to = recipientFor(review.provider);
+        return to ? { to, data: reviewReceivedData(review) } : null;
+      }
+
+      case 'review-report-new-for-support': {
+        const report = await loadReviewReport(this.prisma, source.ids[0]);
+        return report
+          ? { to: readSupportInboxEmail(), data: reviewReportNewForSupportData(report) }
+          : null;
+      }
+
+      case 'review-removed': {
+        const review = await loadReview(this.prisma, source.ids[0]);
+        // Rebuilt only while a removal still stands. After RESTORE both
+        // timestamps are NULL, the scope is null, and the customer is not told
+        // a second time about something that is back on the page.
+        const scope = removalScopeOf(review);
+        return review?.request.customerEmail && scope
+          ? { to: review.request.customerEmail, data: reviewRemovedData(review, scope) }
           : null;
       }
 
@@ -2109,6 +2283,202 @@ type MatchedProvider = Awaited<ReturnType<typeof findMatchingProviders>>[number]
 type RefundTransaction = NonNullable<Awaited<ReturnType<typeof loadRefundTransaction>>>;
 type LoadedPackagePurchase = NonNullable<Awaited<ReturnType<typeof loadPackagePurchase>>>;
 
+// ───────────────────────── provider reviews · sources ────────────────────────
+
+/**
+ * Whether the provider-review feature is on, read straight from the settings
+ * row and failing closed.
+ *
+ * NotificationsModule is global and imports nothing from the operations
+ * settings module, so this reads the one column it needs with the Prisma
+ * client it already has. A missing row, a missing column or a failed query
+ * all mean "off": a mail that invites a customer to a form that returns 404
+ * is worse than no mail.
+ */
+export async function readProviderReviewsEnabled(
+  prisma: Pick<PrismaService, 'operationsSettings'>,
+): Promise<boolean> {
+  try {
+    const row = await prisma.operationsSettings.findUnique({
+      where: { id: 'singleton' },
+      select: { providerReviewsEnabled: true },
+    });
+    return row?.providerReviewsEnabled ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A review with what its three messages need and nothing more. The comment is
+ * deliberately not selected: no message carries it, and a field that is never
+ * loaded cannot leak through a future data builder.
+ */
+function loadReview(prisma: PrismaService, reviewId: string) {
+  return prisma.providerReview.findUnique({
+    where: { id: reviewId },
+    select: {
+      id: true,
+      rating: true,
+      removedAt: true,
+      commentRemovedAt: true,
+      createdAt: true,
+      request: {
+        select: {
+          id: true,
+          requestNumber: true,
+          customerName: true,
+          customerEmail: true,
+          customerId: true,
+          category: { select: { name: true } },
+        },
+      },
+      provider: {
+        select: {
+          id: true,
+          businessName: true,
+          contactName: true,
+          email: true,
+          userId: true,
+          user: { select: { email: true } },
+        },
+      },
+      /** The latest removal, whose reason the customer's notice names. */
+      moderation: {
+        where: { action: { in: ['REMOVE_COMMENT', 'REMOVE_REVIEW'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { action: true, reason: true, createdAt: true },
+      },
+    },
+  });
+}
+
+type LoadedReview = NonNullable<Awaited<ReturnType<typeof loadReview>>>;
+
+/** The report row and the review it names. The note is not selected — see `loadReview`. */
+function loadReviewReport(prisma: PrismaService, reportId: string) {
+  return prisma.providerReviewReport.findUnique({
+    where: { id: reportId },
+    select: {
+      id: true,
+      reason: true,
+      reporterProviderId: true,
+      review: {
+        select: {
+          id: true,
+          provider: { select: { businessName: true } },
+          request: { select: { id: true, requestNumber: true } },
+        },
+      },
+    },
+  });
+}
+
+type LoadedReviewReport = NonNullable<Awaited<ReturnType<typeof loadReviewReport>>>;
+
+/**
+ * The completed request the invitation is rebuilt from. `reviews` is a list
+ * relation on the request (one row per provider), taken one deep: the
+ * invitation only needs to know whether any review exists yet.
+ */
+function loadRequestForReviewInvitation(prisma: PrismaService, requestId: string) {
+  return prisma.serviceRequest.findUnique({
+    where: { id: requestId },
+    select: {
+      id: true,
+      requestNumber: true,
+      status: true,
+      completedAt: true,
+      customerId: true,
+      customerName: true,
+      customerEmail: true,
+      category: { select: { name: true } },
+      matchedOffer: { select: { provider: { select: { businessName: true } } } },
+      reviews: { select: { id: true }, take: 1 },
+    },
+  });
+}
+
+type LoadedReviewInvitationRequest = NonNullable<
+  Awaited<ReturnType<typeof loadRequestForReviewInvitation>>
+>;
+
+/**
+ * What a removal took down, read from the row itself: the whole review when
+ * `removedAt` is set, the comment alone when only `commentRemovedAt` is, and
+ * nothing — null — when neither is, which is the state RESTORE leaves behind.
+ */
+function removalScopeOf(
+  review: Pick<LoadedReview, 'removedAt' | 'commentRemovedAt'> | null,
+): ReviewRemovalScope | null {
+  if (!review) {
+    return null;
+  }
+  if (review.removedAt) {
+    return 'REVIEW';
+  }
+  return review.commentRemovedAt ? 'COMMENT' : null;
+}
+
+/**
+ * `completedAt` and the business are passed separately because the loader's
+ * row types them as nullable and the rebuild has already refused both nulls:
+ * the builder states what it needs rather than re-checking it.
+ */
+function reviewInvitationData(
+  request: LoadedReviewInvitationRequest,
+  completedAt: Date,
+  businessName: string,
+): MailData {
+  return {
+    // The customer's own name, in their own inbox.
+    fullName: request.customerName,
+    businessName,
+    categoryName: request.category.name,
+    requestNumber: request.requestNumber,
+    windowEndsAt: formatDate(reviewWindowEndsAt(completedAt)),
+    reviewUrl: customerReviewUrl(request.id),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+function reviewReceivedData(review: LoadedReview): MailData {
+  return {
+    fullName: review.provider.contactName,
+    rating: String(review.rating),
+    categoryName: review.request.category.name,
+    requestNumber: review.request.requestNumber,
+    reviewsUrl: providerReviewsUrl(review.provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+function reviewReportNewForSupportData(report: LoadedReviewReport): MailData {
+  return {
+    fullName: SUPPORT_INBOX_SALUTATION,
+    reasonLabel: REVIEW_REASON_ADMIN_LABELS[report.reason],
+    businessName: report.review.provider.businessName,
+    requestNumber: report.review.request.requestNumber ?? report.review.request.id,
+    adminReviewUrl: adminProviderReviewUrl(report.review.id),
+    accountUrl: null,
+  };
+}
+
+function reviewRemovedData(review: LoadedReview, scope: ReviewRemovalScope): MailData {
+  // The label, never the key, and OTHER's label as the floor for a removal
+  // whose moderation row cannot be found.
+  const reason: ProviderReviewReportReason = review.moderation[0]?.reason ?? 'OTHER';
+  return {
+    fullName: review.request.customerName,
+    scopeLabel: REVIEW_SCOPE_LABELS[scope],
+    reasonLabel: REVIEW_REASON_CUSTOMER_LABELS[reason],
+    requestNumber: review.request.requestNumber,
+    supportUrl: customerSupportUrl(),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
 /**
  * The payload builders.
  *
@@ -2550,6 +2920,16 @@ const RETRY_DEDUPE_PREFIXES = {
   // support notice is keyed on the report row, which is never deleted.
   'request-removed': 'request-removed',
   'request-report-new-for-support': 'request-report',
+  // The provider-review family. The invitation is not merely retryable but
+  // *delivered* through this table, by the outbox the completing transaction
+  // enqueues into. The customer's removal notice carries the review id and the
+  // removal instant — the scope and the reason are read back from the row.
+  // The provider's notice and the support notice are keyed on rows this
+  // product never deletes.
+  'review-invitation': 'review-invitation',
+  'review-received': 'review-received',
+  'review-report-new-for-support': 'review-report-new',
+  'review-removed': 'review-removed',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -2607,6 +2987,11 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   /** The request only; the ISO timestamp after it has colons of its own and is not an id. */
   'request-removed': 1,
   'request-report-new-for-support': 1,
+  'review-invitation': 1,
+  'review-received': 1,
+  'review-report-new-for-support': 1,
+  /** The review only; the ISO timestamp after it is ignored, as for request-removed. */
+  'review-removed': 1,
 };
 
 /**

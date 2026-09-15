@@ -1,5 +1,8 @@
 {
   "serviceRequestDescriptionMaxLength": 5000,
   "supportTicketSubjectMaxLength": 120,
-  "supportTicketMessageMaxLength": 2000
+  "supportTicketMessageMaxLength": 2000,
+  "providerReviewCommentMaxLength": 600,
+  "providerReviewPublicMinCount": 3,
+  "providerReviewWindowDays": 90
 }

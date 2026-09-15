@@ -63,8 +63,10 @@ import {
   isProviderClaimEnabled,
 } from '../provider-claim/provider-claim.config';
 import { ProviderClaimService } from '../provider-claim/provider-claim.service';
+import { ProviderReviewsService } from '../provider-reviews/provider-reviews.service';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
+import { isPubliclyVisibleProvider } from './provider-visibility';
 import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -193,6 +195,7 @@ export class ProvidersService {
     private readonly showcaseLeads: ShowcaseLeadLifecycleService,
     @Inject(ShowcasePlacementService)
     private readonly showcasePlacements: ShowcasePlacementService,
+    @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
   ) {}
 
   async createProvider(
@@ -751,20 +754,30 @@ export class ProvidersService {
       return { provider: null };
     }
 
-    const [creditBalance, activeOffersCount, recentOffersCount, matchingApprovedRequestsCount] =
-      await Promise.all([
-        this.getProviderCreditBalance(provider.id),
-        this.prisma.offer.count({
-          where: {
-            providerId: provider.id,
-            status: { in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED] },
-          },
-        }),
-        this.prisma.offer.count({ where: { providerId: provider.id } }),
-        provider.status === ProviderStatus.APPROVED
-          ? this.countMatchingApprovedRequests(provider.id)
-          : Promise.resolve(0),
-      ]);
+    const [
+      creditBalance,
+      activeOffersCount,
+      recentOffersCount,
+      matchingApprovedRequestsCount,
+      reviewSummary,
+    ] = await Promise.all([
+      this.getProviderCreditBalance(provider.id),
+      this.prisma.offer.count({
+        where: {
+          providerId: provider.id,
+          status: { in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED] },
+        },
+      }),
+      this.prisma.offer.count({ where: { providerId: provider.id } }),
+      provider.status === ProviderStatus.APPROVED
+        ? this.countMatchingApprovedRequests(provider.id)
+        : Promise.resolve(0),
+      // The exact figures, not the public projection: this is the business
+      // reading its own reviews, and one review is a fact on its own screen
+      // whatever the public threshold says. Not gated by the switch either —
+      // the panel keeps showing its data while the feature is off.
+      this.reviews.summaryForProvider(provider.id),
+    ]);
 
     return {
       provider: withVisibleServiceCategories(provider),
@@ -772,6 +785,7 @@ export class ProvidersService {
       activeOffersCount,
       recentOffersCount,
       matchingApprovedRequestsCount,
+      reviewSummary,
     };
   }
 
@@ -1929,20 +1943,6 @@ function withVisibleServiceCategories<
 }
 
 export type ProviderVisibility = 'public' | 'owner' | 'admin';
-
-/**
- * Only an approved provider is a public entity. Everything else — a draft, an
- * application under review, a rejected or suspended profile — is private
- * moderation state and must not be discoverable by id.
- *
- * Deliberately an allow-list: a status added later stays private until someone
- * consciously decides it should be public.
- */
-const PUBLICLY_VISIBLE_STATUSES: ReadonlySet<ProviderStatus> = new Set([ProviderStatus.APPROVED]);
-
-export function isPubliclyVisibleProvider(status: ProviderStatus): boolean {
-  return PUBLICLY_VISIBLE_STATUSES.has(status);
-}
 
 function resolveProviderVisibility(
   provider: { userId: string | null },

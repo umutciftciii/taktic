@@ -18,6 +18,7 @@ import { SupportTicketsModule } from './modules/support-tickets/support-tickets.
 import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
 import { ProviderInvitesModule } from './modules/provider-invites/provider-invites.module';
 import { ProvidersModule } from './modules/providers/providers.module';
+import { ProviderReviewsModule } from './modules/provider-reviews/provider-reviews.module';
 import { RequestReportsModule } from './modules/request-reports/request-reports.module';
 import { OffersModule } from './modules/offers/offers.module';
 import { OperationsSettingsModule } from './modules/operations-settings/operations-settings.module';
@@ -63,6 +64,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ServiceRequestsModule,
     ProviderClaimModule,
     ProvidersModule,
+    ProviderReviewsModule,
     ProviderInvitesModule,
     OffersModule,
     PhoneVerificationModule,

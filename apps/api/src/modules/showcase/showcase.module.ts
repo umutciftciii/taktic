@@ -5,6 +5,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { OperationsSettingsModule } from '../operations-settings/operations-settings.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
+import { ProviderReviewsModule } from '../provider-reviews/provider-reviews.module';
 import { ShowcaseLifecycleModule } from './showcase-lifecycle.module';
 import { ServiceRequestsModule } from '../service-requests/service-requests.module';
 import { UploadsModule } from '../uploads/uploads.module';
@@ -106,6 +107,9 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
     // them puts nobody in a cycle — see ShowcaseLifecycleModule.
     ShowcaseLifecycleModule,
     ServiceRequestsModule,
+    // The public rating printed on a feed card. That module imports only
+    // PrismaModule and AuthModule, so nothing here comes back round.
+    ProviderReviewsModule,
   ],
   controllers: [
     ProviderShowcaseCardsController,

@@ -222,6 +222,39 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     adminRequestUrl: `${ADMIN}/requests/r1`,
     accountUrl: null,
   },
+  'review-invitation': {
+    fullName: 'Ayşe Yılmaz',
+    businessName: 'Usta Klima',
+    categoryName: 'Klima servisi',
+    requestNumber: 'TR-2026-000123',
+    windowEndsAt: '14 Aralık 2026',
+    reviewUrl: `${WEB}/requests/req_1/degerlendir`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'review-received': {
+    fullName: 'Mehmet Usta',
+    rating: '5',
+    categoryName: 'Klima servisi',
+    requestNumber: 'TR-2026-000123',
+    reviewsUrl: `${WEB}/providers/prov_1/degerlendirmeler`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'review-report-new-for-support': {
+    fullName: 'Destek Ekibi',
+    reasonLabel: 'Hakaret / uygunsuz dil',
+    businessName: 'Usta Klima',
+    requestNumber: 'TR-2026-000123',
+    adminReviewUrl: `${ADMIN}/provider-reviews/rev_1`,
+    accountUrl: null,
+  },
+  'review-removed': {
+    fullName: 'Ayşe Yılmaz',
+    scopeLabel: 'Yorumunuz',
+    reasonLabel: 'İletişim bilgisi içeriyor',
+    requestNumber: 'TR-2026-000123',
+    supportUrl: `${WEB}/destek`,
+    accountUrl: `${WEB}/account/profile`,
+  },
   'support-ticket-created': {
     fullName: 'Deniz Yılmaz',
     ticketReference: 'tkt_c1a2b3',
@@ -516,8 +549,8 @@ describe('transactional e-mail rendering', () => {
     // The literal count is the point of this line: a template added without a
     // payload here would still render, silently, with every field missing.
     // Twenty-eight before vitrin's four, then the seven of the run's life,
-    // then the two of a request report.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(41);
+    // then the two of a request report, then the four of a provider review.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(45);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -751,6 +784,10 @@ describe('transactional e-mail rendering', () => {
       'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
       'request-removed': 'Talebiniz yayından kaldırıldı',
       'request-report-new-for-support': 'Yeni talep bildirimi — #T-90412',
+      'review-invitation': 'İşiniz tamamlandı — hizmet vereni değerlendirin — Usta Klima',
+      'review-received': 'Yeni değerlendirme aldınız — TR-2026-000123',
+      'review-report-new-for-support': 'Yeni değerlendirme bildirimi',
+      'review-removed': 'Yorumunuz kaldırıldı — TR-2026-000123',
       'support-ticket-created': 'Destek talebiniz alındı — Faturam ulaşmadı',
       'support-ticket-new-for-support': 'Yeni destek talebi — Faturam ulaşmadı',
       'support-ticket-customer-reply': 'Destek talebine müşteri yanıtı — Faturam ulaşmadı',
@@ -799,6 +836,70 @@ describe('transactional e-mail rendering', () => {
       expect(html).toContain(`${ADMIN}/requests/r1`);
       // No note field is read: the reporter's free text stays in the panel.
       expect(text).not.toMatch(/Not:|Açıklama/);
+    });
+  });
+
+  describe('a provider review, to the customer, the provider and the support inbox', () => {
+    it('invites the customer with request, business and deadline, and links the form', () => {
+      const { html, text } = render(messageFor('review-invitation'));
+
+      expect(html).toContain('Hizmet vereni değerlendirin');
+      expect(html).toContain('Usta Klima');
+      expect(html).toContain('14 Aralık 2026');
+      expect(html).toContain(`${WEB}/requests/req_1/degerlendir`);
+      expect(text).toContain('iletişim bilgisi bulunamaz');
+    });
+
+    it('tells the provider the star count only, and never a comment', () => {
+      const { html, text } = render(
+        messageFor('review-received', { comment: 'Çok kaba davrandı' }),
+      );
+
+      expect(html).toContain('★ 5 / 5');
+      expect(html).toContain(`${WEB}/providers/prov_1/degerlendirmeler`);
+      // The comment is read on the page, behind the provider's session, and
+      // nowhere else — even when the payload happens to carry one.
+      expect(text).not.toContain('Çok kaba davrandı');
+      expect(text).not.toMatch(/Yorum:/);
+    });
+
+    it('drops the rating row rather than printing a broken star count', () => {
+      const { html } = render(messageFor('review-received', { rating: null }));
+
+      expect(html).not.toContain('★');
+      expect(html).not.toContain('/ 5');
+    });
+
+    it('tells the support inbox business, request and reason, and links the panel', () => {
+      const { html, text } = render(
+        messageFor('review-report-new-for-support', { note: 'Bu müşteri rakibim olabilir' }),
+      );
+
+      expect(html).toContain('Yeni değerlendirme bildirimi');
+      expect(html).toContain('Hakaret / uygunsuz dil');
+      expect(html).toContain('Usta Klima');
+      expect(html).toContain(`${ADMIN}/provider-reviews/rev_1`);
+      // No note field is read: the reporter's free text stays in the panel.
+      expect(text).not.toContain('Bu müşteri rakibim olabilir');
+      expect(text).not.toMatch(/Not:|Açıklama/);
+    });
+
+    it('tells the customer what was removed and the fixed reason, and offers support', () => {
+      const { html, text } = render(messageFor('review-removed'));
+
+      expect(html).toContain('Yorumunuz kaldırıldı');
+      expect(html).toContain('İletişim bilgisi içeriyor');
+      expect(html).toContain(`${WEB}/destek`);
+      // Nothing says who reported, or what the operator wrote.
+      expect(text).not.toMatch(/bildiren|bildirdi|rapor/i);
+    });
+
+    it('falls back to the whole review when no scope was given', () => {
+      expect(transactionalSubject('review-removed', { requestNumber: 'TR-1' })).toBe(
+        'Değerlendirmeniz kaldırıldı — TR-1',
+      );
+      const { html } = render(messageFor('review-removed', { scopeLabel: null }));
+      expect(html).toContain('Değerlendirmeniz kaldırıldı');
     });
   });
 

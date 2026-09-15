@@ -9,7 +9,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { detectContactDetails } from '../../common/contact-detection';
+import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
@@ -22,6 +22,7 @@ import {
 import { CategoriesService, RoutingResolution } from '../categories/categories.service';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
+import { ReviewInvitationOutbox } from '../notifications/review-invitation-outbox.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
 import { resolveLocation } from '../locations/turkey-locations';
@@ -57,34 +58,6 @@ export const ACCOUNT_CONTACT_INCOMPLETE_CODE = 'ACCOUNT_CONTACT_INCOMPLETE';
  * email belong to two different customers.
  */
 export const CUSTOMER_IDENTITY_CONFLICT_CODE = 'CUSTOMER_IDENTITY_CONFLICT';
-
-/**
- * Returned when a free-text field — the description, the address note, or a
- * TEXT/TEXTAREA answer — carries something that looks like a phone number,
- * e-mail address, or link. Requests now publish to providers without an
- * operator reading them first, so this is the only gate left against a
- * customer routing a provider off-platform before an offer is even made;
- * contact details are shared automatically once an offer is accepted.
- */
-export const CONTACT_DETAILS_IN_TEXT_CODE = 'CONTACT_DETAILS_IN_TEXT';
-
-/** Refuses `value` if it carries a phone number, e-mail address, or link. */
-function assertNoContactDetails(field: string, value: string | null) {
-  if (!value) return;
-
-  const found = detectContactDetails(value);
-  if (found) {
-    throw new BadRequestException({
-      statusCode: HttpStatus.BAD_REQUEST,
-      error: 'Bad Request',
-      code: CONTACT_DETAILS_IN_TEXT_CODE,
-      field,
-      kind: found.kind,
-      message:
-        'İletişim bilgisi (telefon, e-posta, bağlantı) paylaşılamaz; bilgiler teklif kabul edildiğinde otomatik paylaşılır.',
-    });
-  }
-}
 
 type QuestionOption = {
   key: string;
@@ -231,6 +204,7 @@ export class ServiceRequestsService {
     @Inject(MarketplacePublishSettingsService)
     private readonly publishSettings: MarketplacePublishSettingsService,
     @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
+    @Inject(ReviewInvitationOutbox) private readonly reviewInvitations: ReviewInvitationOutbox,
   ) {}
 
   /**
@@ -713,12 +687,25 @@ export class ServiceRequestsService {
             provider: { select: { id: true, businessName: true } },
           },
         },
+        /*
+         * The customer's own review of the matched provider — enough to show
+         * "you rated this 4" or "your review was removed" on the row, and no
+         * more. The comment lives on the review screen, not here. A list
+         * relation on the schema, but the unique index on `offerId` plus a
+         * single matched offer means at most one row per request in practice.
+         */
+        reviews: {
+          take: 1,
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, rating: true, removedAt: true },
+        },
       },
     });
 
-    return requests.map(({ showcaseLeadSource, ...request }) => ({
+    return requests.map(({ showcaseLeadSource, reviews, ...request }) => ({
       ...withQualityLabel(request),
       offersCount: request._count.offers,
+      review: reviews[0] ?? null,
       showcaseLead: showcaseLeadSource
         ? {
             id: showcaseLeadSource.id,
@@ -1091,7 +1078,9 @@ export class ServiceRequestsService {
    * SUPER_ADMIN may do this — a provider cannot declare its own job finished.
    *
    * The transition is a conditional update, so it is also the concurrency
-   * guard: a second call finds no MATCHED row and gets a 409.
+   * guard: a second call finds no MATCHED row and gets a 409. It runs in a
+   * transaction only so the review invitation can be written beside it;
+   * nothing is sent until after the commit.
    */
   async completeServiceRequest(id: string, user: AuthUser) {
     const request = await this.getRequestForLifecycleAction(id, user);
@@ -1101,14 +1090,28 @@ export class ServiceRequestsService {
     }
 
     const now = new Date();
-    const updated = await this.prisma.serviceRequest.updateMany({
-      where: { id, status: ServiceRequestStatus.MATCHED },
-      data: { status: ServiceRequestStatus.COMPLETED, completedAt: now },
-    });
 
-    if (updated.count !== 1) {
-      throw new ConflictException('Only a matched request can be completed');
-    }
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const updated = await tx.serviceRequest.updateMany({
+          where: { id, status: ServiceRequestStatus.MATCHED },
+          data: { status: ServiceRequestStatus.COMPLETED, completedAt: now },
+        });
+
+        if (updated.count !== 1) {
+          throw new ConflictException('Only a matched request can be completed');
+        }
+
+        // The invitation is owed by the same transaction that finished the job:
+        // a crash between the two can no longer lose it, and a retry of this
+        // request collides on (template, dedupeKey) and adds nothing.
+        await this.reviewInvitations.enqueue(tx, id, now);
+      },
+      { label: 'serviceRequests.complete' },
+    );
+
+    this.reviewInvitations.deliverSoon();
 
     return this.getLifecycleProjection(id);
   }
