@@ -6,10 +6,13 @@ import type { CustomerServiceRequest } from '../../../lib/api';
 import { CategoryVisual } from '../../category-visual';
 import { IconArrowRight, IconSearch } from '../../landing-icons';
 import { formatDateTime, statusLabel } from '../../../lib/request-formatters';
+import { ReviewStars } from '../../review-stars';
 import { statusPillClass } from '../../status-pill';
 
 type RequestsBoardProps = {
   requests: CustomerServiceRequest[];
+  /** Whether provider reviews are on, as the server read the switch. */
+  reviewsEnabled?: boolean;
 };
 
 /** The status groups the board filters by, matched against the API's own enum. */
@@ -25,7 +28,7 @@ const TABS: ReadonlyArray<{ key: string; label: string; match: (status: string) 
   { key: 'done', label: 'Tamamlanan', match: (s) => s === 'COMPLETED' },
 ];
 
-export function RequestsBoard({ requests }: RequestsBoardProps) {
+export function RequestsBoard({ requests, reviewsEnabled = false }: RequestsBoardProps) {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState('all');
 
@@ -118,7 +121,7 @@ export function RequestsBoard({ requests }: RequestsBoardProps) {
       ) : (
         <div className="rowlist" style={{ marginTop: 16 }}>
           {filtered.map((request) => (
-            <RequestRow key={request.id} request={request} />
+            <RequestRow key={request.id} request={request} reviewsEnabled={reviewsEnabled} />
           ))}
         </div>
       )}
@@ -140,7 +143,41 @@ function statusNote(request: CustomerServiceRequest): string | null {
     : 'Talebin geçerlilik süresi doldu. Yeni teklif alınmıyor.';
 }
 
-function RequestRow({ request }: { request: CustomerServiceRequest }) {
+/**
+ * What the row says about the customer's review of this job: the star they
+ * gave, that it was taken down, or the invitation to write one. The window
+ * is not checked here — the review page answers for that, and a customer
+ * whose 90 days ran out is told so there rather than by a missing button.
+ */
+function ReviewRowAction({ request }: { request: CustomerServiceRequest }) {
+  const review = request.review ?? null;
+  const href = `/requests/${request.id}/degerlendir`;
+
+  if (review && review.removedAt) {
+    return (
+      <Link className="cdash-btn cdash-btn-secondary" href={href} data-testid="review-removed-note">
+        Değerlendirme kaldırıldı
+      </Link>
+    );
+  }
+
+  if (review) {
+    return (
+      <Link className="cdash-btn cdash-btn-secondary" href={href} data-testid="review-given">
+        <ReviewStars value={review.rating} testId="review-row-stars" />
+        <span>Değerlendirmeniz</span>
+      </Link>
+    );
+  }
+
+  return (
+    <Link className="cdash-btn cdash-btn-primary" href={href} data-testid="review-cta">
+      Değerlendir
+    </Link>
+  );
+}
+
+function RequestRow({ request, reviewsEnabled }: { request: CustomerServiceRequest; reviewsEnabled: boolean }) {
   const hasOffers = request.offersCount > 0;
   const note = statusNote(request);
   const ctaLabel = hasOffers ? 'Teklifleri gör' : 'Detaylar';
@@ -193,6 +230,14 @@ function RequestRow({ request }: { request: CustomerServiceRequest }) {
           {ctaLabel}
           <IconArrowRight size={12} />
         </Link>
+        {/*
+          The review, on the row of a completed job. `reviewsEnabled` is the
+          switch as the server read it; while it is off the completed row is
+          exactly what it was before the feature — no button, no star.
+        */}
+        {reviewsEnabled && request.status === 'COMPLETED' ? (
+          <ReviewRowAction request={request} />
+        ) : null}
       </div>
     </article>
   );

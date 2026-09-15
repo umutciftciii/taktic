@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
   apiFetch,
+  type CustomerReviewState,
   CustomerServiceRequest,
   MatchedProviderContact,
   fetchOrNotFound,
@@ -14,6 +15,7 @@ import {
 } from '../../../../lib/api';
 import { CustomerShell } from '../../customer-shell';
 import { IconArrowLeft, IconCheck, IconMail, IconPhone } from '../../../landing-icons';
+import { ReviewStars } from '../../../review-stars';
 import { statusPillClass } from '../../../status-pill';
 import { completeRequestAction, sendPhoneCodeAction, verifyPhoneCodeAction } from './actions';
 import { OffersView } from './offers-view';
@@ -46,6 +48,10 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   ]);
 
   const summary = myRequests.find((request) => request.id === id) ?? null;
+  // Whether this customer may (still) rate the matched provider. Asked only
+  // once the job is done — the only state the call to action exists in — and a
+  // failure hides the call to action rather than the page.
+  const reviewState = summary?.status === 'COMPLETED' ? await safeFetchReviewState(id) : null;
   // A withdrawn offer is not a choice the customer has, so it is kept out of the
   // comparison list and its count entirely. It stays visible further down, as a
   // neutral history line, because the customer did once receive it.
@@ -110,6 +116,31 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
                 Hizmet tamamlandı
               </button>
             </form>
+          ) : null}
+
+          {/*
+            The review call to action, only once the job is done and only while
+            reviews are on. The API's customer state is what says both: it is
+            `disabled` with the switch off, and the link is simply absent then —
+            the completed request looks exactly as it did before the feature.
+          */}
+          {summary?.status === 'COMPLETED' && reviewState && reviewState.eligibility !== 'disabled' ? (
+            <div className="cdash-review-cta" data-testid="request-review-cta" style={{ marginTop: 16 }}>
+              {reviewState.review ? (
+                <>
+                  <ReviewStars value={reviewState.review.rating} />
+                  <Link className="cdash-btn cdash-btn-secondary" href={`/requests/${id}/degerlendir`}>
+                    Değerlendirmenizi görün
+                  </Link>
+                </>
+              ) : reviewState.eligibility === 'ok' ? (
+                <Link className="cdash-btn cdash-btn-primary" href={`/requests/${id}/degerlendir`}>
+                  Hizmet vereni değerlendir
+                </Link>
+              ) : (
+                <span className="cdash-offer-sub">Değerlendirme süresi doldu.</span>
+              )}
+            </div>
           ) : null}
         </div>
 
@@ -394,6 +425,14 @@ function MatchedContactSection({ contact }: { contact: MatchedProviderContact })
       </section>
     </>
   );
+}
+
+async function safeFetchReviewState(requestId: string): Promise<CustomerReviewState | null> {
+  try {
+    return await apiFetch<CustomerReviewState>(`/service-requests/${requestId}/review`);
+  } catch {
+    return null;
+  }
 }
 
 async function safeFetchMyRequests(): Promise<CustomerServiceRequest[]> {

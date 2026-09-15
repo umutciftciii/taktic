@@ -1,7 +1,9 @@
 export * from './formatters';
 export * from './request-reports';
+export * from './reviews';
 import type { ServiceAreaScope } from '@taktic/shared';
 import type { ProviderRequestReport } from './request-reports';
+import type { PublicReviewSummary, ReviewSummary } from './reviews';
 import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   unviewedOfferRefundNotice,
@@ -159,8 +161,16 @@ export type CustomerServiceRequest = {
   phoneVerifiedAt: string | null;
   /** Set by the expiry scheduler when the request's 14-day window ran out. */
   expiredAt: string | null;
+  /** Set when the customer marked the job done; the review window runs from here. */
+  completedAt?: string | null;
   submittedAt: string;
   offersCount: number;
+  /**
+   * The customer's own review of the matched provider — enough for the row to
+   * say "you rated this 4" or "your review was removed", and no more. The
+   * comment lives on the review screen, not here.
+   */
+  review?: { id: string; rating: number; removedAt: string | null } | null;
   category: {
     id: string;
     name: string;
@@ -284,6 +294,8 @@ export type ProviderDashboard = {
   activeOffersCount?: number;
   recentOffersCount?: number;
   matchingApprovedRequestsCount?: number;
+  /** The business's own figures — every live review, no public threshold. */
+  reviewSummary?: ReviewSummary;
 };
 
 export type RequestQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -482,9 +494,16 @@ export type RequestOfferPreview = {
   id: string;
   offerNumber: string | null;
   provider: {
+    id: string;
     businessName: string;
     city: string;
     district: string;
+    /**
+     * The provider's public rating, read from the provider rather than the
+     * offer: null below the public threshold and null for everybody while the
+     * switch is off, decided by the API so this card and the vitrin agree.
+     */
+    reviewSummary: PublicReviewSummary;
   };
   status: OfferStatus;
   priceAmount: number;
@@ -1552,7 +1571,14 @@ export type ShowcaseFeedCard = {
    * promised, not a formatting choice.
    */
   areas: ShowcaseFeedCardArea[];
-  provider: { id: string; businessName: string; city: string; district: string };
+  provider: {
+    id: string;
+    businessName: string;
+    city: string;
+    district: string;
+    /** The same public rating the offer card carries; see `RequestOfferPreview`. */
+    reviewSummary?: PublicReviewSummary;
+  };
   listedServicePriceAmount?: number | null;
   listedServiceCurrency?: string;
 };
