@@ -10,6 +10,7 @@ import {
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { readCurrentDraft } from '../../../lib/request-drafts';
 import { areaSentence } from '../../showcase-shelf';
+import { RatingSummaryLine } from '../../review-stars';
 import { faceFromFeedCard, ShowcaseCardFace } from '../../showcase-card-face';
 import { ShowcaseLeadForm } from './lead-form';
 
@@ -138,13 +139,29 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
         <header className="lp-section-head">
           <span className="kicker">{card.category.name}</span>
           <h1 className="lp-section-title">{card.title}</h1>
-          <p className="lp-section-sub">{card.provider.businessName}</p>
+          {/*
+            The business behind the card, as a link to its public page, and
+            its public rating under it. This is the one vitrin surface where
+            the threshold sentence is shown: a visitor deciding on this card
+            should see that a rating is absent, not wonder whether the page
+            forgot it. The shelf card says nothing below the threshold.
+          */}
+          <p className="lp-section-sub">
+            <Link href={`/isletme/${card.provider.id}`} data-testid="showcase-card-provider-link">
+              {card.provider.businessName}
+            </Link>
+          </p>
+          {card.provider.reviewSummary !== undefined ? (
+            <RatingSummaryLine summary={card.provider.reviewSummary} testId="showcase-card-review-summary" />
+          ) : null}
         </header>
 
         <div className="vitrin-public">
           <div className="showcase-public-body">
             <ShowcaseCardFace
-              card={{ ...faceFromFeedCard(card), providerName: null }}
+              // The business and its rating are in the header above; the face
+              // on this page is the offer itself.
+              card={{ ...faceFromFeedCard(card), providerName: null, reviewSummary: null }}
               testId="showcase-card-face"
               eager
               titleAs="h2"

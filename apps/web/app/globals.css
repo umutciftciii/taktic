@@ -6206,14 +6206,7 @@ body.has-drawer-open {
 /* The vitrin face: a compact rating line under the business name. Sized
    below the price and the area band on purpose — the card's job is to say
    what it costs and where it works; the rating is a detail beside those. */
-.vitrin-face-rating {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.3;
-  color: var(--color-neutral-800);
-  font-variant-numeric: tabular-nums;
-}
-.vitrin-face-rating .review-summary { font-size: 12px; }
+.vitrin-face-rating.review-summary { font-size: 12px; line-height: 1.3; }
 
 /* The customer's form. The stars are labels for five native radios; the
    radio stays in the tab order (not display:none) so arrows and Space work,
