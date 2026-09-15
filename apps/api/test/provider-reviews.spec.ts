@@ -130,6 +130,17 @@ describe('normalizeComment', () => {
     expect(normalizeComment('a\n\n\n\n\nb')).toBe('a\n\nb');
     expect(normalizeComment('x\u0007y\u007Fz')).toBe('xyz');
   });
+
+  it('normalises every line ending to LF — a lone CR is a line break, never deleted', () => {
+    expect(normalizeComment('a\rb')).toBe('a\nb');
+    expect(normalizeComment('a\r\nb\rc\nd')).toBe('a\nb\nc\nd');
+    // CR-only blank lines are capped like LF ones, and a tab is still one space.
+    expect(normalizeComment('a\r\r\r\rb')).toBe('a\n\nb');
+    expect(normalizeComment('a\r\n\r\n\r\nb')).toBe('a\n\nb');
+    expect(normalizeComment('a\t\tb')).toBe('a b');
+    // The other C0 controls and DEL go; the letters around them touch.
+    expect(normalizeComment('a\u0000b\u0008c\u000Bd\u000Ce\u000Ef\u001Fg\u007Fh')).toBe('abcdefgh');
+  });
 });
 
 describe('toReviewSummary / toPublicSummary', () => {
@@ -327,6 +338,39 @@ describe('POST /service-requests/:id/review', () => {
 
     // The boundary itself is accepted.
     await post({ rating: 5, comment: 'b'.repeat(600) }).expect(201);
+  });
+
+  it('stores a multi-line comment with LF endings, runs the contact filter on the normalised text, and keeps markup as literal text', async () => {
+    await enableReviews();
+    const { customerCookie, serviceRequest, winner } = await completedRequest();
+    const post = (body: Record<string, unknown>) =>
+      request(ctx.server).post(reviewUrl(serviceRequest.id)).set('Cookie', customerCookie).send(body);
+
+    // A phone number that only reads as one once the CR is a line break is
+    // still a phone number: the filter sees what will be stored.
+    const hidden = await post({ rating: 5, comment: 'Ara:\r0532 123 45 67' }).expect(400);
+    expect(hidden.body).toMatchObject({ code: 'CONTACT_DETAILS_IN_TEXT', field: 'comment' });
+    expect(await ctx.prisma.providerReview.count()).toBe(0);
+
+    const raw = 'Birinci satır.\r\nİkinci satır.\rÜçüncü <script>alert(1)</script> satır.';
+    const expected = 'Birinci satır.\nİkinci satır.\nÜçüncü <script>alert(1)</script> satır.';
+    expect(normalizeComment(raw)).toBe(expected);
+    const created = await post({ rating: 5, comment: raw }).expect(201);
+    expect(created.body.review.comment).toBe(expected);
+
+    const stored = await ctx.prisma.providerReview.findUniqueOrThrow({ where: { offerId: winner.offerId } });
+    expect(stored.comment).toBe(expected);
+    expect(stored.comment).toContain('\n');
+    expect(stored.comment).not.toContain('\r');
+
+    // The API renders no HTML: the tag goes out exactly as it came in — as
+    // text, neither stripped nor escaped. Escaping is the screen's job.
+    const state = await request(ctx.server)
+      .get(reviewUrl(serviceRequest.id))
+      .set('Cookie', customerCookie)
+      .expect(200);
+    expect(state.body.review.comment).toBe(expected);
+    expect(state.body.review.comment).toContain('<script>alert(1)</script>');
   });
 
   it('is 404 REVIEWS_DISABLED while the switch is off and GET reports disabled', async () => {
