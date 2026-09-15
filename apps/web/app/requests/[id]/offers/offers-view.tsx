@@ -12,11 +12,18 @@ import {
   statusLabel,
 } from '../../../../lib/formatters';
 import { IconArrowRight, IconClipList, IconCompare } from '../../../landing-icons';
+import { RatingSummaryLine } from '../../../review-stars';
 
 type OffersViewProps = {
   requestId: string;
   /** Already filtered and sorted by the server: no withdrawn offers, price ascending. */
   offers: RequestOfferPreview[];
+  /**
+   * Whether provider reviews are on, as the server read the switch. Off, no
+   * card mentions a rating at all — not even the "not enough yet" sentence,
+   * which would announce a feature that does not exist for this customer.
+   */
+  reviewsEnabled?: boolean;
 };
 
 /**
@@ -24,7 +31,7 @@ type OffersViewProps = {
  * table. Nothing is fetched here — the server handed over the exact set the
  * customer may act on, and switching view never changes it.
  */
-export function OffersView({ requestId, offers }: OffersViewProps) {
+export function OffersView({ requestId, offers, reviewsEnabled = false }: OffersViewProps) {
   const [mode, setMode] = useState<'list' | 'compare'>('list');
 
   if (offers.length === 0) {
@@ -80,7 +87,13 @@ export function OffersView({ requestId, offers }: OffersViewProps) {
       {mode === 'list' ? (
         <div>
           {offers.map((offer) => (
-            <OfferRow key={offer.id} offer={offer} requestId={requestId} isLowest={offer.id === lowestId} />
+            <OfferRow
+              key={offer.id}
+              offer={offer}
+              requestId={requestId}
+              isLowest={offer.id === lowestId}
+              reviewsEnabled={reviewsEnabled}
+            />
           ))}
         </div>
       ) : (
@@ -94,10 +107,12 @@ function OfferRow({
   offer,
   requestId,
   isLowest,
+  reviewsEnabled,
 }: {
   offer: RequestOfferPreview;
   requestId: string;
   isLowest: boolean;
+  reviewsEnabled: boolean;
 }) {
   const initials = getInitials(offer.provider.businessName);
   const offerReference = offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`;
@@ -111,12 +126,32 @@ function OfferRow({
             {initials}
           </span>
           <div style={{ minWidth: 0 }}>
-            <h3 className="cdash-offer-name">{offer.provider.businessName}</h3>
+            {/*
+              The name opens the business's public page. The page itself applies
+              the visibility rule (an unlistable business is a 404 there), so
+              the link carries nothing but the id the offer already has.
+            */}
+            <h3 className="cdash-offer-name">
+              <Link href={`/isletme/${offer.provider.id}`} data-testid="offer-provider-link">
+                {offer.provider.businessName}
+              </Link>
+            </h3>
             <p className="cdash-offer-sub">
               {offer.provider.city}
               {offer.provider.district ? `, ${offer.provider.district}` : ''} ·{' '}
               {formatDateTime(offer.submittedAt)} · {offerReference}
             </p>
+            {/*
+              The provider's public rating, read from the provider and not the
+              offer: null below the public threshold and null for everybody
+              while the feature is off, so the same business reads the same on
+              every card and on the vitrin. The threshold sentence is shown
+              here on purpose — a customer comparing offers should see that a
+              rating is absent rather than wonder whether the card forgot it.
+            */}
+            {reviewsEnabled && offer.provider.reviewSummary !== undefined ? (
+              <RatingSummaryLine summary={offer.provider.reviewSummary} testId="offer-review-summary" />
+            ) : null}
           </div>
           <span className={offerStatusClass(offer.status)}>{offerStatusLabel(offer.status)}</span>
         </div>
@@ -199,9 +234,12 @@ const COMPARE_ROWS: ReadonlyArray<{
 /**
  * The same offers, side by side.
  *
- * Only the fields the offer actually carries appear as rows: no experience,
- * rating or "materials included" column, because no offer records those. The
- * highlighted column is the cheapest one — a fact, not a recommendation.
+ * Only the fields the offer actually carries appear as rows: no experience or
+ * "materials included" column, because no offer records those. The rating is
+ * the provider's public summary, read from the provider rather than the
+ * offer, and it stays on the list card rather than becoming a row here —
+ * the table compares what was offered, not who offered it. The highlighted
+ * column is the cheapest one — a fact, not a recommendation.
  */
 function CompareTable({
   offers,

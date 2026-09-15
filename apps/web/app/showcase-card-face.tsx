@@ -3,12 +3,14 @@ import type { ReactNode } from 'react';
 import {
   formatPrice,
   SHOWCASE_CARD_KIND_LABELS,
+  type PublicReviewSummary,
   type ShowcaseCard,
   type ShowcaseCardKind,
   type ShowcaseCardVersion,
   type ShowcaseFeedCard,
 } from '../lib/api';
 import { categoryImageSrc } from './category-art';
+import { RatingSummaryLine } from './review-stars';
 
 /**
  * The one face a vitrin card has.
@@ -33,6 +35,16 @@ export type ShowcaseFaceData = {
   listedServiceCurrency?: string;
   areaLabels: string[];
   providerName?: string | null;
+  /**
+   * The business's public rating, when the face is drawn from the feed.
+   * Null below the public threshold and while the feature is off; absent on
+   * the provider's own screens, which draw from a version rather than a
+   * feed card. Only a non-null summary renders a line: below the threshold
+   * the face says nothing, so the price and the area band stay the loudest
+   * lines after the title — the threshold sentence belongs on the profile
+   * and the card's own page, not on a shelf.
+   */
+  reviewSummary?: PublicReviewSummary | null;
 };
 
 export function ShowcaseCardFace({
@@ -83,6 +95,13 @@ export function ShowcaseCardFace({
         </p>
         <Title className="vitrin-face-title">{href ? <Link href={href}>{card.title}</Link> : card.title}</Title>
         {card.providerName ? <p className="vitrin-face-provider">{card.providerName}</p> : null}
+        {card.reviewSummary ? (
+          <RatingSummaryLine
+            summary={card.reviewSummary}
+            testId="showcase-card-rating"
+            className="vitrin-face-rating"
+          />
+        ) : null}
         {typeof card.listedServicePriceAmount === 'number' ? (
           <p className="vitrin-face-price" data-testid="showcase-card-price">
             {formatPrice(card.listedServicePriceAmount, card.listedServiceCurrency ?? 'TRY')}
@@ -112,6 +131,7 @@ export function faceFromFeedCard(card: ShowcaseFeedCard): ShowcaseFaceData {
     listedServiceCurrency: card.listedServiceCurrency,
     areaLabels: card.areas.length > 0 ? card.areas.map((area) => area.label) : [card.areaLabel],
     providerName: card.provider.businessName,
+    reviewSummary: card.provider.reviewSummary ?? null,
   };
 }
 

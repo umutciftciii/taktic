@@ -2,6 +2,9 @@ import type { ServiceAreaScope } from '@taktic/shared';
 import { urgencyLabel as sharedUrgencyLabel } from '@taktic/shared';
 import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
+// Re-exported by the `export *` further down; imported by name as well
+// because a re-export does not put the names in this module's own scope.
+import type { ReviewModerationAction, ReviewReportReason, ReviewReportResolution } from './reviews';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -1519,6 +1522,12 @@ export function notificationTemplateLabel(template: string): string {
     'showcase-placement-ending-7d': 'Vitrin: yayına 7 gün kaldı',
     'showcase-placement-ending-3d': 'Vitrin: yayına 3 gün kaldı',
     'showcase-placement-expired': 'Vitrin: yayın sona erdi',
+    // Provider reviews: the invitation, the provider's copy, the support
+    // notice for a report, and the customer's removal notice.
+    'review-invitation': 'Değerlendirme daveti',
+    'review-received': 'Yeni değerlendirme',
+    'review-report-new-for-support': 'Değerlendirme bildirimi (destek)',
+    'review-removed': 'Değerlendirme kaldırıldı',
   };
 
   return labels[template] ?? template;
@@ -1968,6 +1977,7 @@ export const OPERATIONS_SETTING_LABELS: Record<string, string> = {
   showcaseLeadSlaSchedulerEnabled: 'Vitrin talebi yanıt süresi işi',
   showcasePlacementExpirySchedulerEnabled: 'Vitrin yerleşimi süre dolumu işi',
   marketplaceAutoPublishEnabled: 'Pazar taleplerinin otomatik yayını',
+  providerReviewsEnabled: 'Hizmet veren değerlendirmeleri',
 };
 
 /* ---- scheduled jobs ------------------------------------------------------ */
@@ -2087,6 +2097,141 @@ export const SCHEDULER_JOB_COPY: Record<
 export type MarketplacePublishSettings = {
   enabled: boolean;
   recentChanges: OperationsSettingsChange[];
+};
+
+/**
+ * The provider-review switch: the same shape as the auto-publish one, on
+ * its own endpoint (`/operations-settings/provider-reviews`). Off by
+ * default and fail-closed on the API side; only a SUPER_ADMIN reads or
+ * writes it, which is every operator this app admits.
+ */
+export type ProviderReviewSettings = MarketplacePublishSettings;
+
+/* ---- provider reviews ---------------------------------------------------- */
+
+// The reasons, resolutions, actions and their labels live in `./reviews`,
+// which is client-safe (the moderation form is a Client Component and cannot
+// pull in this module's next/headers import). Re-exported here so server code
+// keeps one import.
+export * from './reviews';
+
+/** The provider's own figures — every live review, no public threshold. */
+export type ReviewSummary = {
+  count: number;
+  average: number | null;
+  distribution: Record<'1' | '2' | '3' | '4' | '5', number>;
+};
+
+/** One row of the provider's list, as the operator reads it through the provider route. */
+export type ProviderReviewItem = {
+  id: string;
+  rating: number;
+  comment: string | null;
+  commentRemoved: boolean;
+  createdAt: string;
+  request: { id: string; requestNumber: string | null; categoryName: string };
+  myReport: {
+    reason: ReviewReportReason;
+    createdAt: string;
+    resolution: ReviewReportResolution | null;
+  } | null;
+};
+
+export type ProviderReviewsPage = {
+  summary: ReviewSummary;
+  items: ProviderReviewItem[];
+  nextCursor: string | null;
+};
+
+/** One report on the operator's queue, with enough of its review to triage it. */
+export type ReviewReportQueueItem = {
+  report: {
+    id: string;
+    reason: ReviewReportReason;
+    note: string | null;
+    createdAt: string;
+    resolvedAt: string | null;
+    resolution: ReviewReportResolution | null;
+  };
+  review: {
+    id: string;
+    rating: number;
+    commentExcerpt: string;
+    commentRemoved: boolean;
+    removed: boolean;
+    createdAt: string;
+  };
+  provider: { id: string; businessName: string };
+  request: { id: string; requestNumber: string | null; categoryName: string };
+  lastDecision: {
+    action: ReviewModerationAction;
+    reason: ReviewReportReason | null;
+    createdAt: string;
+  } | null;
+};
+
+export type ReviewReportQueue = {
+  items: ReviewReportQueueItem[];
+  nextCursor: string | null;
+};
+
+/**
+ * Everything an operator may see about one review: the text even after its
+ * removal, the customer's name, every report with its note, and the log.
+ */
+export type AdminReviewDetail = {
+  id: string;
+  rating: number;
+  comment: string | null;
+  commentRemoved: boolean;
+  commentRemovedAt: string | null;
+  removed: boolean;
+  removedAt: string | null;
+  createdAt: string;
+  provider: { id: string; businessName: string };
+  request: {
+    id: string;
+    requestNumber: string | null;
+    categoryName: string;
+    city: string;
+    district: string;
+    customerName: string;
+  };
+  reports: Array<{
+    id: string;
+    reason: ReviewReportReason;
+    note: string | null;
+    createdAt: string;
+    resolvedAt: string | null;
+    resolution: ReviewReportResolution | null;
+    resolutionNote: string | null;
+    reporter: { id: string; businessName: string };
+    resolvedBy: { id: string; name: string | null } | null;
+  }>;
+  moderation: Array<{
+    id: string;
+    action: ReviewModerationAction;
+    reason: ReviewReportReason | null;
+    note: string | null;
+    createdAt: string;
+    performedBy: { id: string; name: string | null };
+  }>;
+};
+
+/** The customer's review state for one request, as the operator reads it on the request screen. */
+export type CustomerReviewState = {
+  eligibility: 'ok' | 'disabled' | 'not-completed' | 'window-closed' | 'already-reviewed' | 'removed';
+  windowEndsAt: string | null;
+  provider: { id: string; businessName: string } | null;
+  review: {
+    id: string;
+    rating: number;
+    comment: string | null;
+    createdAt: string;
+    commentRemoved: boolean;
+    removed: boolean;
+    removalReason: ReviewReportReason | null;
+  } | null;
 };
 
 /* ---- request reports ----------------------------------------------------- */

@@ -4,11 +4,13 @@ import {
   apiFetch,
   formatDateTime,
   formatPrice,
+  formatRating,
   getCurrentUser,
   getRefundPolicy,
   ProviderDashboard,
   ProviderOffer,
   ProviderRequestListItem,
+  ratingLabel,
   statusLabel,
   urgencyLabel,
 } from '../../../lib/api';
@@ -55,6 +57,7 @@ export default async function MyProviderPage() {
   const activeOffers = dashboard.activeOffersCount ?? 0;
   const totalOffers = dashboard.recentOffersCount ?? 0;
   const matchingRequests = dashboard.matchingApprovedRequestsCount ?? 0;
+  const reviewSummary = dashboard.reviewSummary ?? null;
 
   /*
    * The opportunity and offer lists are the same data the dedicated screens
@@ -130,6 +133,30 @@ export default async function MyProviderPage() {
           <span className="metric-value">{totalOffers}</span>
           <span className="metric-hint">son dönem</span>
         </div>
+        {/*
+          The business's own figures — every live review, no public threshold.
+          Absent, not zero, when the dashboard did not carry them: an older API
+          answers without the field and the strip simply has four cells.
+        */}
+        {reviewSummary ? (
+          <div className="metric-cell" data-testid="dashboard-review-summary">
+            <span className="metric-label">Değerlendirme</span>
+            {reviewSummary.count > 0 && reviewSummary.average !== null ? (
+              <>
+                <span className="metric-value">
+                  <span aria-hidden="true">★ </span>
+                  {formatRating(reviewSummary.average)}
+                </span>
+                <span className="metric-hint">{ratingLabel(reviewSummary.count)}</span>
+              </>
+            ) : (
+              <>
+                <span className="metric-value">—</span>
+                <span className="metric-hint">henüz değerlendirme yok</span>
+              </>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <div className="split">
@@ -264,6 +291,12 @@ export default async function MyProviderPage() {
             </Link>
             <Link className="pdash-btn pdash-btn-secondary pdash-btn-block" href={`/providers/${provider.id}`}>
               İşletme profili
+            </Link>
+            <Link
+              className="pdash-btn pdash-btn-secondary pdash-btn-block"
+              href={`/providers/${provider.id}/degerlendirmeler`}
+            >
+              Değerlendirmeler
             </Link>
           </div>
 

@@ -291,6 +291,14 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *                          `role="alert"` under the field — the construction
  *                          where WebKit's route announcer once collided
  *
+ * The review flow, for both reasons at once:
+ *
+ *   provider-review-flow   a native `<dialog>` the provider reports from, a
+ *                          radio group the customer rates with (arrow keys
+ *                          are the engine's), the operator's decision forms,
+ *                          and a redirect off a server action that lands the
+ *                          customer on a new screen — on 320px too
+ *
  * And the identity gate, for the first reason again:
  *
  *   request-identity-gate  the pre-check on both request forms and the draft
@@ -322,7 +330,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|provider-review-flow|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

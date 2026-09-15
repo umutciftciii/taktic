@@ -1,5 +1,10 @@
 import { cache } from 'react';
-import { apiFetch, type CustomerServiceRequest, type RequestOfferPreview } from '../../lib/api';
+import {
+  apiFetch,
+  type CustomerReviewState,
+  type CustomerServiceRequest,
+  type RequestOfferPreview,
+} from '../../lib/api';
 
 /**
  * The customer panel's own data, loaded once per render wherever it is needed.
@@ -134,4 +139,32 @@ export async function loadCustomerMatches(
       }
     }),
   );
+}
+
+/**
+ * Whether the customer may be invited to review at all — the provider-review
+ * switch, as the API reads it.
+ *
+ * The switch has no public endpoint of its own, and this app must not grow
+ * one for a screen (the API contract is PR-A's). What every customer *can*
+ * read is their own review state for a request, and that state says
+ * `disabled` exactly when the switch is off — for every request, whatever its
+ * status. So one completed request is asked, once, and its answer stands for
+ * the board. With no completed request there is nothing to invite a review
+ * of, and the question is not asked.
+ *
+ * A failure reads as "off": the board then shows the completed rows exactly
+ * as they were before the feature, which is the safe side of a missing call
+ * to action.
+ */
+export async function loadReviewsEnabled(requests: CustomerServiceRequest[]): Promise<boolean> {
+  const completed = requests.find((request) => request.status === 'COMPLETED');
+  if (!completed) return false;
+
+  try {
+    const state = await apiFetch<CustomerReviewState>(`/service-requests/${completed.id}/review`);
+    return state.eligibility !== 'disabled';
+  } catch {
+    return false;
+  }
 }

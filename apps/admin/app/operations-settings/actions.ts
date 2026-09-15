@@ -6,6 +6,7 @@ import {
   apiFetch,
   MarketplacePublishSettings,
   OperationsSettings,
+  ProviderReviewSettings,
   SCHEDULER_JOB_KEYS,
   SchedulerSettings,
 } from '../../lib/api';
@@ -138,6 +139,52 @@ export async function toggleAutoPublishAction(formData: FormData) {
 /** Back to the auto-publish card, so the operator lands on what they changed. */
 function autoPublishUrl(params: Record<string, string>): string {
   return `/operations-settings?${new URLSearchParams(params).toString()}#otomatik-yayin`;
+}
+
+/**
+ * Switches provider reviews on or off.
+ *
+ * The same shape as the two toggles above, on its own endpoint. What the
+ * switch governs is on the API side: with it off, no customer can write a
+ * review, no invitation is mailed, and every public surface reads as if
+ * reviews did not exist — while existing rows stay where they are. Turning
+ * it back on shows them again unchanged.
+ *
+ * The API accepts this from a SUPER_ADMIN alone, which is every operator
+ * this panel signs in; the identity comes from the session, never the form.
+ */
+export async function toggleProviderReviewsAction(formData: FormData) {
+  const enabled = readString(formData, 'enabled').trim();
+
+  if (enabled !== 'true' && enabled !== 'false') {
+    redirect(
+      providerReviewsUrl({ error: 'Değerlendirme durumu yalnızca açık veya kapalı olabilir.' }),
+    );
+  }
+
+  let errorMessage: string | null = null;
+  try {
+    await apiFetch<ProviderReviewSettings>('/operations-settings/provider-reviews', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: enabled === 'true' }),
+    });
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    errorMessage = extractApiMessage(error);
+  }
+
+  if (errorMessage) {
+    redirect(providerReviewsUrl({ error: errorMessage }));
+  }
+
+  revalidatePath('/operations-settings');
+  revalidatePath('/provider-reviews/reports');
+  redirect(providerReviewsUrl({ ok: enabled === 'true' ? 'provider-reviews-on' : 'provider-reviews-off' }));
+}
+
+/** Back to the reviews card, so the operator lands on what they changed. */
+function providerReviewsUrl(params: Record<string, string>): string {
+  return `/operations-settings?${new URLSearchParams(params).toString()}#degerlendirmeler`;
 }
 
 /** The same three rules the DTO enforces: a number, whole hours, in range. */

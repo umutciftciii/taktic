@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCustomer, prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
@@ -254,6 +256,132 @@ test.describe('scheduled jobs', () => {
       await assertNoErrorScreen(admin.page);
     } finally {
       await admin.close();
+    }
+  });
+});
+
+/**
+ * The provider-review switch on the same screen: the same `role="switch"`
+ * contract as the jobs above, on its own row of the settings table.
+ *
+ * What is asserted is what the API will read on the next review request —
+ * the stored flag — and that the trail records the operator by name. What
+ * the switch *does* is the review flow spec's subject.
+ */
+test.describe('provider reviews switch', () => {
+  async function resetProviderReviews(): Promise<void> {
+    await prisma().operationsSettingsChange.deleteMany({
+      where: { setting: 'providerReviewsEnabled' },
+    });
+    await prisma().operationsSettings.updateMany({
+      where: { id: 'singleton' },
+      data: { providerReviewsEnabled: false },
+    });
+  }
+
+  async function storedReviewFlag(): Promise<boolean> {
+    const row = await prisma().operationsSettings.findUnique({
+      where: { id: 'singleton' },
+      select: { providerReviewsEnabled: true },
+    });
+    return row?.providerReviewsEnabled ?? false;
+  }
+
+  test.beforeEach(async () => {
+    await resetProviderReviews();
+  });
+
+  test.afterEach(async () => {
+    await resetProviderReviews();
+  });
+
+  test('is off by default; the super admin switches it on and off and the trail records it', async ({
+    browser,
+  }) => {
+    const adminAccount = await createAdmin();
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+
+    try {
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin('/operations-settings');
+
+      // ---- the shipped state: off, with no change on record --------------
+      const card = admin.page.getByTestId('provider-reviews');
+      await expect(card).toBeVisible();
+      await expect(card).toContainText('en az üç değerlendirme');
+      await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
+        'aria-checked',
+        'false',
+      );
+      await expect(admin.page.getByTestId('provider-reviews-state')).toHaveText('Kapalı');
+      await expect(admin.page.getByTestId('provider-reviews-audit-empty')).toBeVisible();
+      expect(await storedReviewFlag()).toBe(false);
+      mkdirSync(resolve(__dirname, '..', 'test-results', 'provider-review-screens'), { recursive: true });
+      await card.scrollIntoViewIfNeeded();
+      await admin.page.screenshot({
+        path: resolve(__dirname, '..', 'test-results', 'provider-review-screens', 'admin-switch-off-1280.png'),
+      });
+
+      // ---- on ---------------------------------------------------------------
+      await admin.page.getByTestId('provider-reviews-toggle').click();
+      await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+      await expect(admin.page.getByTestId('provider-reviews-state')).toHaveText('Açık');
+      await assertNoErrorScreen(admin.page);
+      expect(await storedReviewFlag()).toBe(true);
+
+      // The other switches on the screen are untouched.
+      await expect(admin.page.getByTestId('auto-publish-toggle')).toHaveAttribute('aria-checked', 'false');
+      for (const job of JOB_KEYS) {
+        expect(await storedFlag(job)).toBe(false);
+      }
+
+      // ---- the trail says who -------------------------------------------------
+      const audit = admin.page.getByTestId('provider-reviews-audit');
+      await expect(audit.locator('tbody tr')).toHaveCount(1);
+      await expect(audit).toContainText(adminAccount.name);
+      // "Kapalı → Açık", whether the row read the default or a stored false
+      // (other specs in this run write the settings row).
+      await expect(audit.locator('tbody tr').first()).toContainText('Açık');
+
+      // ---- off again --------------------------------------------------------
+      await admin.page.getByTestId('provider-reviews-toggle').click();
+      await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
+        'aria-checked',
+        'false',
+      );
+      expect(await storedReviewFlag()).toBe(false);
+      await expect(admin.page.getByTestId('provider-reviews-audit').locator('tbody tr')).toHaveCount(2);
+
+      // A refresh is not a decision: re-reading the screen adds no third row.
+      await admin.page.reload();
+      await expect(admin.page.getByTestId('provider-reviews-audit').locator('tbody tr')).toHaveCount(2);
+      expect(await horizontalOverflow(admin.page)).toBeLessThanOrEqual(0);
+    } finally {
+      await admin.close();
+    }
+  });
+
+  test('a customer reaches neither the card nor the endpoint', async ({ browser }) => {
+    const customerAccount = await createCustomer();
+    const customer = await Actor.open(browser, 'customer', primaryRuntime);
+
+    try {
+      await customer.loginToWeb(customerAccount.email, customerAccount.password);
+      await customer.gotoAdmin('/operations-settings');
+      await expect(customer.page).toHaveURL(/\/login/);
+      await expect(customer.page.getByTestId('provider-reviews-toggle')).toHaveCount(0);
+
+      const response = await customer.page.request.put(
+        `${primaryRuntime.apiUrl}/operations-settings/provider-reviews`,
+        { data: { enabled: true } },
+      );
+      expect([401, 403]).toContain(response.status());
+      expect(await storedReviewFlag()).toBe(false);
+    } finally {
+      await customer.close();
     }
   });
 });

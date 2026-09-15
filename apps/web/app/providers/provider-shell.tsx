@@ -20,6 +20,7 @@ import {
   IconProfile,
   IconSearch,
   IconSend,
+  IconStar,
   IconStore,
 } from '../landing-icons';
 import { PanelDrawer } from '../panel-drawer';
@@ -31,6 +32,7 @@ type ProviderShellActive =
   | 'dashboard'
   | 'requests'
   | 'offers'
+  | 'reviews'
   | 'showcase'
   | 'showcase-leads'
   | 'messages'
@@ -89,6 +91,7 @@ export async function ProviderShell({
   const subtitle = (businessName && businessName.trim()) || 'Hizmet Veren';
   const requestsHref = providerId ? `/providers/${providerId}/requests` : '/providers/me';
   const offersHref = providerId ? `/providers/${providerId}/offers` : null;
+  const reviewsHref = providerId ? `/providers/${providerId}/degerlendirmeler` : null;
   const creditsHref = providerId ? `/providers/${providerId}/credits` : null;
   const subscriptionsHref = providerId ? `/providers/${providerId}/subscriptions` : null;
   const packagesHref = providerId ? `/providers/${providerId}/package-purchases` : null;
@@ -122,6 +125,10 @@ export async function ProviderShell({
       count: counts.requests,
     },
     { key: 'offers', label: 'Tekliflerim', Icon: IconSend, href: offersHref, count: counts.offers },
+    // What customers said about the jobs those offers won. Right under the
+    // offers because that is where it comes from; no badge, because a review
+    // is not something waiting on the business.
+    { key: 'reviews', label: 'Değerlendirmeler', Icon: IconStar, href: reviewsHref },
     // Vitrin sits with the other things the business owns rather than with the
     // ones it answers. It is gated on the provider profile like every other
     // entry that needs an id: a card belongs to a business, and an account with

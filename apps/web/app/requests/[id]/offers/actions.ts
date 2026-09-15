@@ -2,12 +2,24 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { apiFetch, ApiError, CustomerServiceRequest } from '../../../../lib/api';
+import {
+  apiFetch,
+  ApiError,
+  type CustomerReviewState,
+  CustomerServiceRequest,
+} from '../../../../lib/api';
 
 /**
  * Marks a matched request as delivered. The API only accepts this from the
  * customer who owns the request (or an admin), and only while the request is
  * MATCHED, so nothing here needs to re-check either.
+ *
+ * Lands on the review screen rather than back on the offers page: the moment
+ * the job is done is the moment the customer is asked about it. The review
+ * page itself decides what it shows — the form when reviews are on, and a
+ * plain "this request is complete" otherwise — so with the feature off this
+ * still ends on a page that makes sense. `redirect` throws, so it sits after
+ * the revalidations and outside any try/catch.
  */
 export async function completeRequestAction(formData: FormData) {
   const requestId = readFormString(formData, 'requestId');
@@ -18,6 +30,26 @@ export async function completeRequestAction(formData: FormData) {
 
   revalidatePath('/requests/my');
   revalidatePath(`/requests/${requestId}/offers`);
+  redirect(await completionDestination(requestId));
+}
+
+/**
+ * Where a completed request lands. The review page when the feature is on;
+ * the request's own page when it is off, because the review page answers 404
+ * then and a customer who just marked a job done must not be shown one.
+ * The state read here is the same one the review page reads.
+ */
+async function completionDestination(requestId: string): Promise<string> {
+  try {
+    const state = await apiFetch<CustomerReviewState>(`/service-requests/${requestId}/review`);
+    if (state.eligibility !== 'disabled') {
+      return `/requests/${requestId}/degerlendir`;
+    }
+  } catch {
+    // An unreadable state is not a reason to strand the customer; the
+    // offers page is always there.
+  }
+  return `/requests/${requestId}/offers`;
 }
 
 /**

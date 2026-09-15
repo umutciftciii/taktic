@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import {
+  ApiError,
   apiFetch,
+  type CustomerReviewState,
   ContactRevealDetail,
   fetchOrNotFound,
   Offer,
@@ -19,6 +21,8 @@ import {
   qualityLabel,
   reportReasonLabel,
   reportResolutionLabel,
+  reviewStateBadgeClass,
+  reviewStateLabel,
   requestStatusLabel,
   statusBadgeClass,
   statusLabel,
@@ -90,7 +94,7 @@ export default async function RequestDetailPage({
   const request = await fetchOrNotFound(() =>
     apiFetch<ServiceRequest>(`/service-requests/${id}`),
   );
-  const [offers, reportsResult] = await Promise.all([
+  const [offers, reportsResult, reviewState] = await Promise.all([
     apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]),
     // Operator-only: a reporter's note is shown here and nowhere the customer
     // or another provider can see. A failed load is kept apart from an empty
@@ -100,6 +104,13 @@ export default async function RequestDetailPage({
       (reports) => ({ reports, failed: false as const }),
       () => ({ reports: [] as RequestReport[], failed: true as const }),
     ),
+    // The customer's review of the matched provider, read the way the
+    // customer's own screen reads it (a SUPER_ADMIN may look). Null hides
+    // the card rather than the screen; the review has its own page.
+    apiFetch<CustomerReviewState>(`/service-requests/${id}/review`).catch((error: unknown) => {
+      if (error instanceof ApiError) return null;
+      throw error;
+    }),
   ]);
   const reports = reportsResult.reports;
   const reportsFailed = reportsResult.failed;
@@ -881,6 +892,70 @@ export default async function RequestDetailPage({
                 </div>
               ))}
             </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Değerlendirme"
+          subtitle="Müşterinin, kabul ettiği teklifin hizmet vereni hakkındaki değerlendirmesi."
+        >
+          {reviewState?.review ? (
+            <dl className="info-grid" data-testid="request-review">
+              <div>
+                <dt>Puan</dt>
+                <dd>
+                  <span className="badge badge-muted" aria-label={`5 üzerinden ${reviewState.review.rating}`}>
+                    ★ {reviewState.review.rating}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>Durum</dt>
+                <dd>
+                  <span
+                    className={reviewStateBadgeClass({
+                      removed: reviewState.review.removed,
+                      commentRemoved: reviewState.review.commentRemoved,
+                    })}
+                  >
+                    {reviewStateLabel({
+                      removed: reviewState.review.removed,
+                      commentRemoved: reviewState.review.commentRemoved,
+                    })}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>Hizmet veren</dt>
+                <dd>
+                  {reviewState.provider ? (
+                    <Link className="cell-link" href={`/providers/${reviewState.provider.id}`}>
+                      {reviewState.provider.businessName}
+                    </Link>
+                  ) : (
+                    '—'
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Tarih</dt>
+                <dd>{formatDateTime(reviewState.review.createdAt)}</dd>
+              </div>
+              <div className="info-grid-full">
+                <dt>Detay</dt>
+                <dd>
+                  <Link className="btn btn-ghost btn-sm" href={`/provider-reviews/${reviewState.review.id}`}>
+                    Değerlendirmeyi aç
+                  </Link>
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="cell-muted" style={{ margin: 0 }} data-testid="request-review-none">
+              {reviewState?.eligibility === 'disabled'
+                ? 'Değerlendirme özelliği kapalı.'
+                : 'Değerlendirme yok.'}
+            </p>
           )}
         </SectionCard>
       </div>

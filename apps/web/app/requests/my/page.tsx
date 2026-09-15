@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '../../../lib/api';
 import { IconPlus } from '../../landing-icons';
 import { CustomerShell } from '../customer-shell';
-import { loadCustomerRequests } from '../customer-panel-data';
+import { loadCustomerRequests, loadReviewsEnabled } from '../customer-panel-data';
 import { RequestsBoard } from './requests-board';
 
 export default async function MyRequestsPage() {
@@ -15,6 +15,7 @@ export default async function MyRequestsPage() {
   // The same memoised load the sidebar counters use, so the panel asks for
   // this list once per render however many parts of it need the list.
   const requests = await loadCustomerRequests();
+  const reviewsEnabled = await loadReviewsEnabled(requests);
 
   /*
    * Every number on this screen is counted from the customer's own requests.
@@ -66,7 +67,7 @@ export default async function MyRequestsPage() {
         </div>
       </section>
 
-      <RequestsBoard requests={requests} />
+      <RequestsBoard requests={requests} reviewsEnabled={reviewsEnabled} />
     </CustomerShell>
   );
 }
