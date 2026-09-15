@@ -1944,10 +1944,6 @@ function withVisibleServiceCategories<
 
 export type ProviderVisibility = 'public' | 'owner' | 'admin';
 
-// Kept on this module's surface for its existing importers; the definition
-// moved to provider-visibility.ts — see the note there.
-export { isPubliclyVisibleProvider };
-
 function resolveProviderVisibility(
   provider: { userId: string | null },
   user: AuthUser | null,

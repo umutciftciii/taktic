@@ -9,7 +9,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { assertNoContactDetails, CONTACT_DETAILS_IN_TEXT_CODE } from '../../common/contact-guard';
+import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';

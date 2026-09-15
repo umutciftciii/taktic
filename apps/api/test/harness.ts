@@ -201,6 +201,14 @@ export function resetAuthThrottle(app: INestApplication): void {
 
 const TRUNCATED_TABLES = [
   'CompanySettings',
+  // Provider reviews, children first: the moderation log and the reports
+  // reference the review, which references the request, offer, provider and
+  // customer further down. TRUNCATE … CASCADE would reach them through those
+  // parents anyway; listing them keeps the reset explicit and the graph
+  // readable.
+  'ProviderReviewModeration',
+  'ProviderReviewReport',
+  'ProviderReview',
   // Vitrin, in dependency order. The audit rows and the review reference
   // versions; the card and its versions reference each other, which TRUNCATE …
   // CASCADE handles regardless of the order here — the order is kept anyway so
