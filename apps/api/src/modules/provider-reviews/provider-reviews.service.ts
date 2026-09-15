@@ -4,6 +4,7 @@ import {
   Prisma,
   ProviderReviewModerationAction,
   ProviderReviewReportReason,
+  ProviderReviewReportResolution,
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
@@ -14,15 +15,24 @@ import {
   TransactionalMailService,
   readProviderReviewsEnabled,
 } from '../notifications/transactional-mail.service';
+import { isPubliclyVisibleProvider } from '../providers/providers.service';
 import { CreateProviderReviewDto } from './dto/create-provider-review.dto';
+import {
+  toPublicSummary,
+  toReviewSummary,
+  type PublicReviewSummary,
+  type ReviewSummary,
+} from './provider-review-aggregate';
 import { normalizeComment } from './provider-review-comment';
 import { conflict, notFound } from './provider-review.errors';
 import { isReviewWindowOpen, reviewWindowEndsAt } from './provider-review-window';
 import {
   MATCH_INCONSISTENT_CODE,
+  PUBLIC_REVIEW_LIST_MAX_LIMIT,
   REQUEST_NOT_COMPLETED_CODE,
   REVIEWS_DISABLED_CODE,
   REVIEW_ALREADY_EXISTS_CODE,
+  REVIEW_LIST_MAX_LIMIT,
   REVIEW_WINDOW_CLOSED_CODE,
 } from './provider-reviews.constants';
 
@@ -49,6 +59,52 @@ export type CustomerReviewState = {
     removalReason: ProviderReviewReportReason | null;
   } | null;
 };
+
+/**
+ * One row of the provider's own list: the job, the verdict and the provider's
+ * own report — never the customer.
+ */
+export type ProviderReviewItem = {
+  id: string;
+  rating: number;
+  comment: string | null;
+  commentRemoved: boolean;
+  createdAt: string;
+  request: { id: string; requestNumber: string | null; categoryName: string };
+  myReport: {
+    reason: ProviderReviewReportReason;
+    createdAt: string;
+    resolution: ProviderReviewReportResolution | null;
+  } | null;
+};
+
+/** One row of the public list: nothing that could name the reviewer. */
+export type PublicReviewItem = {
+  id: string;
+  rating: number;
+  comment: string;
+  /** YYYY-MM — the month, never the day. */
+  month: string;
+  categoryName: string;
+};
+
+export type ProviderReviewList = {
+  summary: ReviewSummary;
+  items: ProviderReviewItem[];
+  nextCursor: string | null;
+};
+
+export type PublicReviewList = {
+  summary: PublicReviewSummary;
+  items: PublicReviewItem[];
+  nextCursor: string | null;
+};
+
+/** Newest first; the id breaks ties so a cursor never skips or repeats a row. */
+const REVIEW_LIST_ORDER = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+] satisfies Prisma.ProviderReviewOrderByWithRelationInput[];
 
 const REMOVAL_ACTIONS: ProviderReviewModerationAction[] = [
   ProviderReviewModerationAction.REMOVE_COMMENT,
@@ -170,6 +226,194 @@ export class ProviderReviewsService {
   }
 
   /**
+   * Live rows only (`removedAt IS NULL`), one `groupBy` for every id, and an
+   * empty summary for an id with no rows so a caller can index the map
+   * without a fallback. Not gated by the switch: this feeds the provider's
+   * own panel, which keeps showing its data while the feature is off.
+   */
+  async summariesForProviders(providerIds: readonly string[]): Promise<Map<string, ReviewSummary>> {
+    const result = new Map<string, ReviewSummary>();
+    if (providerIds.length === 0) {
+      return result;
+    }
+
+    const rows = await this.prisma.providerReview.groupBy({
+      by: ['providerId', 'rating'],
+      where: { providerId: { in: [...providerIds] }, removedAt: null },
+      _count: { _all: true },
+    });
+
+    for (const id of providerIds) {
+      result.set(id, toReviewSummary([]));
+    }
+
+    const byProvider = new Map<string, { rating: number; count: number }[]>();
+    for (const row of rows) {
+      byProvider.set(row.providerId, [
+        ...(byProvider.get(row.providerId) ?? []),
+        { rating: row.rating, count: row._count._all },
+      ]);
+    }
+    for (const [id, entries] of byProvider) {
+      result.set(id, toReviewSummary(entries));
+    }
+
+    return result;
+  }
+
+  /**
+   * The public projection of the same numbers: `toPublicSummary` is the one
+   * place the minimum-count threshold lives, so offer cards, the vitrin and
+   * the public list can never disagree about who has a rating. Fails closed:
+   * with the switch off every id maps to null after a single settings read.
+   */
+  async publicSummariesForProviders(
+    providerIds: readonly string[],
+  ): Promise<Map<string, PublicReviewSummary>> {
+    const result = new Map<string, PublicReviewSummary>();
+    if (providerIds.length === 0) {
+      return result;
+    }
+
+    if (!(await readProviderReviewsEnabled(this.prisma))) {
+      for (const id of providerIds) {
+        result.set(id, null);
+      }
+      return result;
+    }
+
+    for (const [id, summary] of await this.summariesForProviders(providerIds)) {
+      result.set(id, toPublicSummary(summary));
+    }
+    return result;
+  }
+
+  async summaryForProvider(providerId: string): Promise<ReviewSummary> {
+    return (await this.summariesForProviders([providerId])).get(providerId) ?? toReviewSummary([]);
+  }
+
+  /**
+   * The provider's own list. Removed reviews are gone; a removed comment
+   * leaves the star and a `commentRemoved` flag; `myReport` is the latest
+   * report *this* provider filed. Access is the guard's job — the owner or a
+   * SUPER_ADMIN — so nothing here checks the caller.
+   */
+  async listForProvider(
+    providerId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<ProviderReviewList> {
+    const take = clampLimit(limit, REVIEW_LIST_MAX_LIMIT);
+    const rows = await this.prisma.providerReview.findMany({
+      where: { providerId, removedAt: null },
+      orderBy: REVIEW_LIST_ORDER,
+      take: take + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        rating: true,
+        comment: true,
+        commentRemovedAt: true,
+        createdAt: true,
+        request: {
+          select: { id: true, requestNumber: true, category: { select: { name: true } } },
+        },
+        reports: {
+          where: { reporterProviderId: providerId },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { reason: true, createdAt: true, resolution: true },
+        },
+      },
+    });
+
+    const page = rows.slice(0, take);
+    return {
+      summary: await this.summaryForProvider(providerId),
+      items: page.map((row) => ({
+        id: row.id,
+        rating: row.rating,
+        comment: row.commentRemovedAt ? null : row.comment,
+        commentRemoved: row.commentRemovedAt !== null,
+        createdAt: row.createdAt.toISOString(),
+        request: {
+          id: row.request.id,
+          requestNumber: row.request.requestNumber,
+          categoryName: row.request.category.name,
+        },
+        myReport: row.reports[0]
+          ? {
+              reason: row.reports[0].reason,
+              createdAt: row.reports[0].createdAt.toISOString(),
+              resolution: row.reports[0].resolution,
+            }
+          : null,
+      })),
+      nextCursor: rows.length > take ? (page[page.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  /**
+   * What a visitor sees. 404 — the same "Provider not found" as the public
+   * profile — when the provider is not listable or the switch is off, so an
+   * unlistable provider's reviews are indistinguishable from a non-existent
+   * provider's. Below the public threshold the list is empty as well as the
+   * summary null: the section does not exist yet, and two lone comments with
+   * a month and a category would be easier to pin on a person than a
+   * rating.
+   */
+  async listPublic(
+    providerId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PublicReviewList> {
+    const provider = await this.prisma.providerProfile.findUnique({
+      where: { id: providerId },
+      select: { status: true },
+    });
+    if (
+      !provider ||
+      !isPubliclyVisibleProvider(provider.status) ||
+      !(await readProviderReviewsEnabled(this.prisma))
+    ) {
+      throw new NotFoundException('Provider not found');
+    }
+
+    const summary = toPublicSummary(await this.summaryForProvider(providerId));
+    if (summary === null) {
+      return { summary, items: [], nextCursor: null };
+    }
+
+    const take = clampLimit(limit, PUBLIC_REVIEW_LIST_MAX_LIMIT);
+    const rows = await this.prisma.providerReview.findMany({
+      where: { providerId, removedAt: null, commentRemovedAt: null, comment: { not: null } },
+      orderBy: REVIEW_LIST_ORDER,
+      take: take + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        rating: true,
+        comment: true,
+        createdAt: true,
+        request: { select: { category: { select: { name: true } } } },
+      },
+    });
+
+    const page = rows.slice(0, take);
+    return {
+      summary,
+      items: page.map((row) => ({
+        id: row.id,
+        rating: row.rating,
+        comment: row.comment ?? '',
+        month: row.createdAt.toISOString().slice(0, 7),
+        categoryName: row.request.category.name,
+      })),
+      nextCursor: rows.length > take ? (page[page.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  /**
    * 404 when the request does not exist; a SUPER_ADMIN may look; anyone else
    * who is not the owning customer is refused — the same rule as the lifecycle
    * actions in `ServiceRequestsService`.
@@ -254,4 +498,8 @@ function toCustomerReviewState(request: CustomerReviewRequest, enabled: boolean)
         }
       : null,
   };
+}
+
+function clampLimit(limit: number, max: number): number {
+  return Number.isInteger(limit) ? Math.min(Math.max(1, limit), max) : max;
 }
