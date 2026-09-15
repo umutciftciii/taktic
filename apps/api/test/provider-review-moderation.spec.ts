@@ -141,11 +141,30 @@ function report(fixture: ProviderFixture, reviewId: string, body: Record<string,
 const LEAKS = /Müşteri |0555|@example\.test|User |gizli/;
 
 describe('provider review reports', () => {
-  it('only the reviewed provider can report, once while open; a rival is 404; no comment is 409 REVIEW_NOT_REPORTABLE', async () => {
+  it('only the reviewed provider can report, once while open; a super admin is 403, a rival is 404; no comment is 409 REVIEW_NOT_REPORTABLE', async () => {
     const owner = await providerFixture();
     const rival = await providerFixture(owner.category.id);
+    const admin = await adminSession();
     const commented = await review(owner, { rating: 1, comment: 'Berbat, hiç gelmedi.' });
     const bare = await review(owner, { rating: 2 });
+
+    // A report is the reviewed business's own statement, so an operator —
+    // who may act for a provider on every other panel route — is refused
+    // here, and before the review is even looked up.
+    const adminTry = await request(ctx.server)
+      .post(reportUrl(owner.provider.id, commented.review.id))
+      .set('Cookie', admin.cookie)
+      .send({ reason: 'OFFENSIVE' });
+    expect(adminTry.status).toBe(403);
+    const adminMissing = await request(ctx.server)
+      .post(reportUrl(owner.provider.id, 'no-such-review'))
+      .set('Cookie', admin.cookie)
+      .send({ reason: 'OFFENSIVE' });
+    expect(adminMissing.status).toBe(403);
+    expect(await ctx.prisma.providerReviewReport.count()).toBe(0);
+
+    // The operator's other panel reads are untouched.
+    await request(ctx.server).get(panelUrl(owner.provider.id)).set('Cookie', admin.cookie).expect(200);
 
     // The rival cannot tell this review from a non-existent one.
     const rivalTry = await report(rival, commented.review.id, { reason: 'OFFENSIVE' });

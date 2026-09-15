@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
+import { RolesGuard } from '../auth/roles.guard';
 import { CreateProviderReviewReportDto } from './dto/create-provider-review-report.dto';
 import { ProviderReviewModerationService } from './provider-review-moderation.service';
 import { ProviderReviewsService } from './provider-reviews.service';
@@ -8,7 +11,8 @@ import { REVIEW_LIST_DEFAULT_LIMIT, REVIEW_LIST_MAX_LIMIT } from './provider-rev
 
 /**
  * The provider's own reviews. `ProviderAccessGuard` admits the owning
- * PROVIDER or a SUPER_ADMIN; nothing below checks the caller again. Two
+ * PROVIDER or a SUPER_ADMIN; the reads below check the caller no further.
+ * The report route alone narrows that to the owner — see `report`. Two
  * segments after `/providers/:providerId`, so `ProvidersController`'s
  * `GET :id` never captures these paths whatever the module order.
  */
@@ -36,11 +40,19 @@ export class ProviderPanelReviewsController {
   }
 
   /**
-   * The reviewed provider flags a comment. The service reads the review
-   * under `providerId`, so the guard's owner check is also the "your own
-   * review" check: another provider's review is a 404.
+   * The reviewed provider flags a comment. A report is the business's own
+   * statement about a review of its own work, so unlike the reads above it
+   * is not something an operator does on a provider's behalf: the
+   * method-level `RolesGuard` runs after the class guards and turns a
+   * SUPER_ADMIN into a 403 before the review is looked up, so the answer
+   * says nothing about whether the review exists. What gets through is a
+   * PROVIDER whom `ProviderAccessGuard` has already bound to `providerId`.
+   * The service reads the review under that id, so the owner check is also
+   * the "your own review" check: another provider's review is a 404.
    */
   @Post(':reviewId/reports')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.PROVIDER)
   report(
     @Param('providerId') providerId: string,
     @Param('reviewId') reviewId: string,
