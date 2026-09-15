@@ -8,6 +8,7 @@ import {
 import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
+import { findAccountByPhone } from '../../common/account-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createSessionForUser, SessionMeta } from '../auth/session.util';
 import { NotificationDispatcher } from '../notifications/notification-dispatcher.service';
@@ -238,6 +239,43 @@ export class CustomerActivationService {
     }
 
     await this.issueAndNotify(customer.id, customer.email, customer.name, null);
+    return { status: 'activation-sent' as const };
+  }
+
+  /**
+   * The phone half of {@link requestActivationForEmail}: someone tried to
+   * register with a number that already belongs to an auto-created,
+   * password-less account.
+   *
+   * The link goes to the address that account has on file. The address the
+   * visitor typed is not an input here at all — it cannot become the
+   * recipient, because a number typed beside a stranger's address must not
+   * mail that stranger a way into the account.
+   */
+  async requestActivationForPhone(phone: string) {
+    const customer = await findAccountByPhone(this.prisma, phone);
+    if (!customer) {
+      return null;
+    }
+
+    const account = await this.prisma.user.findUnique({
+      where: { id: customer.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        customerOrigin: true,
+        passwordHash: true,
+      },
+    });
+
+    if (!account || !account.email || !isClaimableCustomer(account)) {
+      return null;
+    }
+
+    await this.issueAndNotify(account.id, account.email, account.name, null);
     return { status: 'activation-sent' as const };
   }
 

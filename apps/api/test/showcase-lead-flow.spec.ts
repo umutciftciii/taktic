@@ -487,7 +487,11 @@ describe('the body is the marketplace request body', () => {
 
     expect(response.status).toBe(409);
     expect(response.body.code).toBe('CUSTOMER_IDENTITY_CONFLICT');
-    expect(response.body.message).toBe('Telefon ve e-posta farklı müşteri kayıtlarıyla eşleşiyor.');
+    // One sentence for every identity refusal: it never says which of the two
+    // collided, nor that there were two accounts rather than one.
+    expect(response.body.message).toBe(
+      'Bu telefon numarası veya e-posta adresi kayıtlı bir hesapla eşleşiyor. Giriş yapın ya da daha önce talep oluşturduysanız hesabınızı etkinleştirin.',
+    );
     expect(await ctx.prisma.serviceRequest.count()).toBe(0);
     expect(await ctx.prisma.showcaseLead.count()).toBe(0);
   });
@@ -535,12 +539,19 @@ describe('the telephone number has to be proved first', () => {
      * which is correct behaviour and is asserted separately. What is proved
      * here is that one proved number buys one lead, and that has to be shown
      * where nothing else would refuse the second attempt anyway.
+     *
+     * Sent by the customer the first lead created, signed in: a guest posting
+     * the same contact again is refused for the account that now holds it
+     * (customer-uniqueness.spec.ts), which would answer before the proof did.
      */
     const secondCard = await publishAnotherCard(owner.id, category.id, 'İkinci kart');
+    const cookie = await loginAs(ctx.prisma, created.customerId as string);
+    const { customerName: _n, customerPhone: _p, customerEmail: _e, ...accountBody } = payload;
 
     const second = await request(ctx.server)
       .post(`/showcase/cards/${secondCard.id}/leads`)
-      .send({ ...payload, description: 'İkinci deneme' });
+      .set('Cookie', cookie)
+      .send({ ...accountBody, description: 'İkinci deneme' });
 
     expect(second.status).toBe(409);
     expect(second.body.code).toBe('SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED');
@@ -754,6 +765,12 @@ describe('the rate limits and the double-submitted form', () => {
     const { card, category, owner } = await published();
     const local = '05551112233';
     const international = '+905551112233';
+    // Six leads from one number cannot all be a guest's: after the first, that
+    // number belongs to an account and a guest is refused for it. A signed-in
+    // customer naming the number as an alternate contact is what keeps the
+    // spelling under test rather than the account.
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '+905550009999' });
+    const cookie = await loginAs(ctx.prisma, customer.id);
 
     // Six cards, because the dedupe window means one card cannot take six
     // leads from one person — which is the point of that window.
@@ -771,8 +788,10 @@ describe('the rate limits and the double-submitted form', () => {
 
       const response = await request(ctx.server)
         .post(`/showcase/cards/${cards[index]}/leads`)
+        .set('Cookie', cookie)
         .send(
           showcaseLeadPayload(category.slug, {
+            useAlternateContact: true,
             customerPhone: phone,
             description: `Talep ${index}`,
           }),
@@ -784,7 +803,8 @@ describe('the rate limits and the double-submitted form', () => {
     await proveShowcaseLeadPhone(ctx.prisma, local);
     const refused = await request(ctx.server)
       .post(`/showcase/cards/${cards[5]}/leads`)
-      .send(showcaseLeadPayload(category.slug, { customerPhone: local }));
+      .set('Cookie', cookie)
+      .send(showcaseLeadPayload(category.slug, { useAlternateContact: true, customerPhone: local }));
 
     expect(refused.status).toBe(429);
     expect(refused.body.code).toBe('SHOWCASE_LEAD_RATE_LIMITED');

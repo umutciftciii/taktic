@@ -13,7 +13,7 @@ import {
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { EmailVerificationService } from '../email-verification/email-verification.service';
 import { AuthService } from './auth.service';
-import { EmailAlreadyRegisteredException } from './auth.errors';
+import { AccountIdentityConflictException } from './auth.errors';
 import { AuthThrottlerGuard } from './auth.throttler';
 import { clearSessionCookie, getSessionIdFromRequest, sessionCookie } from './cookie';
 import { LoginDto } from './dto/login.dto';
@@ -63,19 +63,26 @@ export class AuthController {
         currentSessionId: getSessionIdFromRequest(request),
       });
     } catch (error) {
-      if (error instanceof EmailAlreadyRegisteredException) {
-        // The address may belong to an account the platform auto-created for a
-        // guest service request. Those have no password, so instead of a
-        // dead-end "already registered" we re-send the activation link. The
-        // response never carries the token: proving mailbox ownership stays
-        // mandatory, so this cannot be used to take over the account.
-        const claim = await this.activationService.requestActivationForEmail(dto.email);
+      if (error instanceof AccountIdentityConflictException && error.field !== null) {
+        // The address — or the number — may belong to an account the platform
+        // auto-created for a guest service request. Those have no password, so
+        // instead of a dead-end "already registered" we re-send the activation
+        // link. It goes to the address the account has on file and never to
+        // the one just typed: a number typed next to a stranger's address must
+        // not mail that stranger a way into the account. The response never
+        // carries the token, so proving mailbox ownership stays mandatory and
+        // this cannot be used to take over the account.
+        const claim =
+          error.field === 'email'
+            ? await this.activationService.requestActivationForEmail(error.value ?? '')
+            : await this.activationService.requestActivationForPhone(error.value ?? '');
         if (claim) {
           throw new ConflictException({
             statusCode: 409,
             code: ACTIVATION_REQUIRED_CODE,
             message:
-              'Bu e-posta ile daha önce talep oluşturulmuş. Hesabınızı etkinleştirmeniz için bağlantı gönderildi.',
+              'Bu iletişim bilgileriyle daha önce talep oluşturulmuş. Hesabınızı etkinleştirmeniz için ' +
+              'hesabınıza kayıtlı e-posta adresine bağlantı gönderildi.',
           });
         }
       }

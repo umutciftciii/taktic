@@ -290,14 +290,15 @@ describe('service request contact details', () => {
     expect(stored.customerEmail).toBe('misafir@example.test');
 
     // The password-less account a guest request creates behind the scenes, as
-    // ever — and it is the contact the guest gave that identifies it.
+    // ever — and it is the contact the guest gave that identifies it. The
+    // account stores the number in E.164; the request keeps it as typed.
     const owner = await ctx.prisma.user.findUniqueOrThrow({
       where: { id: stored.customerId as string },
       select: { email: true, phone: true, role: true },
     });
     expect(owner).toEqual({
       email: 'misafir@example.test',
-      phone: '05551110008',
+      phone: '+905551110008',
       role: UserRole.CUSTOMER,
     });
   });

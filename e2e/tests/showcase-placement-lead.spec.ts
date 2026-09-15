@@ -682,9 +682,10 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
       const refusal = visitor.page.getByTestId('showcase-lead-error');
       await expect(refusal).toBeVisible();
-      // The product's own sentence for the code, not the API's message.
+      // The product's own sentence for the code, not the API's message — and
+      // one that does not say which of the two collided.
       await expect(refusal).toHaveText(
-        'Bu telefon numarası ve e-posta iki farklı müşteri hesabına bağlı. Tek bir hesaba ait iletişim bilgileriyle devam edin.',
+        'Bu iletişim bilgileri kayıtlı bir hesapla eşleşiyor. Giriş yapın ya da daha önce talep oluşturduysanız hesabınızı etkinleştirin.',
       );
       await expect(visitor.page.getByTestId('showcase-lead-sent')).toHaveCount(0);
 

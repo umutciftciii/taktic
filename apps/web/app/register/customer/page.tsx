@@ -27,10 +27,10 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
 
         {notice === 'activation-sent' ? (
           <div className="auth-screen-notice" role="status">
-            Bu e-posta ile daha önce talep oluşturulmuş ve sizin adınıza bir hesap açılmış.
-            Hesabınızı kullanabilmeniz için e-posta adresinize bir etkinleştirme bağlantısı
-            gönderdik. Bağlantıdan şifrenizi belirledikten sonra taleplerinize ve tekliflerinize
-            erişebilirsiniz.
+            Bu iletişim bilgileriyle daha önce talep oluşturulmuş ve sizin adınıza bir hesap
+            açılmış. Hesabınızı kullanabilmeniz için hesabınıza kayıtlı e-posta adresine bir
+            etkinleştirme bağlantısı gönderdik. Bağlantıdan şifrenizi belirledikten sonra
+            taleplerinize ve tekliflerinize erişebilirsiniz.
           </div>
         ) : null}
 

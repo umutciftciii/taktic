@@ -1,12 +1,11 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
+import { CustomerOrigin, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import {
   assertEmailFreeForAccountKind,
@@ -17,8 +16,13 @@ import {
   type MarketplaceAccountKind,
 } from '../../common/account-email';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  canonicalAccountPhone,
+  findAccountByPhone,
+  uniqueViolationField,
+} from '../../common/account-identity';
 import { AuthUser } from './auth.types';
-import { EmailAlreadyRegisteredException } from './auth.errors';
+import { AccountIdentityConflictException } from './auth.errors';
 import { sessionTouchIntervalSeconds } from './auth.constants';
 import {
   createSessionForUser,
@@ -253,6 +257,7 @@ export class AuthService {
     // two simultaneous registrations can both pass it — which is why the catch
     // below asks the same question again of the account that actually won.
     await assertEmailFreeForAccountKind(this.prisma, email, role);
+    await this.assertContactFree(email, phone);
 
     try {
       const user = await this.prisma.user.create({
@@ -289,28 +294,56 @@ export class AuthService {
         user,
       };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const target = Array.isArray(error.meta?.target)
-          ? error.meta.target.join(',')
-          : String(error.meta?.target ?? '');
-        if (target.includes('phone')) {
-          throw new ConflictException('Phone already registered');
-        }
+      // The unique indexes on User.phone and User.email are what actually keep
+      // one number and one address to one account, so this branch is where a
+      // lost race lands. Whoever won it is committed by now, so reading them
+      // back is the same question the pre-check asked — and it gives the loser
+      // of a cross-role race the same sentence as the caller who was simply
+      // second.
+      const field = uniqueViolationField(error);
+      if (field === 'phone') {
+        throw new AccountIdentityConflictException('phone', phone);
+      }
 
-        // The unique index on User.email is what actually keeps one address to
-        // one account, so this branch is where a lost race lands. Whoever won
-        // it is committed by now, so reading them back is the same question the
-        // pre-check asked — and it gives the loser of a cross-role race the
-        // same sentence as the caller who was simply second.
+      if (field === 'email') {
         const winner = await findAccountByEmail(this.prisma, email);
         if (winner && conflictsWithAccountKind(winner, role)) {
           throw crossRoleEmailConflictException();
         }
 
-        throw new EmailAlreadyRegisteredException(email);
+        throw new AccountIdentityConflictException('email', email);
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Refuses before the write when the address or the number is already on an
+   * account of any kind.
+   *
+   * Both are read together and judged together: a number on one account and
+   * an address on another is refused without naming either, because there is
+   * no single account the visitor could be sent to activate. A single match
+   * keeps its field on the exception so the controller can offer activation
+   * for an auto-created customer — the field never reaches the response.
+   */
+  private async assertContactFree(email: string, phone: string | null): Promise<void> {
+    const [byEmail, byPhone] = await Promise.all([
+      findAccountByEmail(this.prisma, email),
+      phone ? findAccountByPhone(this.prisma, phone) : Promise.resolve(null),
+    ]);
+
+    if (byEmail && byPhone && byEmail.id !== byPhone.id) {
+      throw new AccountIdentityConflictException(null, null);
+    }
+
+    if (byEmail) {
+      throw new AccountIdentityConflictException('email', email);
+    }
+
+    if (byPhone) {
+      throw new AccountIdentityConflictException('phone', phone);
     }
   }
 }
@@ -375,5 +408,7 @@ function normalizeOptionalPhone(value: string | null | undefined) {
     throw new BadRequestException('Phone cannot be empty when provided');
   }
 
-  return trimmed;
+  // Stored in E.164 and nothing else, so that the unique index on User.phone
+  // is a rule about numbers rather than about spellings.
+  return canonicalAccountPhone(trimmed);
 }
