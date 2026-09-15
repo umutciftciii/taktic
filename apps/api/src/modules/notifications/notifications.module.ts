@@ -9,6 +9,7 @@ import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationPort } from './notification.port';
 import { RequestExpiryOutbox } from './request-expiry-outbox.service';
 import { RequestPublishOutbox } from './request-publish-outbox.service';
+import { ReviewInvitationOutbox } from './review-invitation-outbox.service';
 import { ShowcaseLifecycleOutbox } from './showcase-lifecycle-outbox.service';
 import { isNotificationOutboxEnabled } from './notification-outbox';
 import { resolveEmailTransportKind } from './email-transport';
@@ -66,6 +67,9 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     // The approval fan-out as a durable intent: enqueued inside the publishing
     // transaction by the requests module, swept by the request lifecycle tick.
     RequestPublishOutbox,
+    // The review invitation as a durable intent: enqueued inside the completing
+    // transaction by the requests module, swept by the same lifecycle tick.
+    ReviewInvitationOutbox,
   ],
   exports: [
     NotificationPort,
@@ -76,6 +80,7 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     RequestExpiryOutbox,
     ShowcaseLifecycleOutbox,
     RequestPublishOutbox,
+    ReviewInvitationOutbox,
   ],
 })
 export class NotificationsModule {}

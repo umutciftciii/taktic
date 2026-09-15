@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { warnIfLegacySchedulerFlagSet } from '../../common/legacy-scheduler-flags';
 import { readSchedulerCron } from '../../common/scheduler-cron';
 import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
+import { ReviewInvitationOutbox } from '../notifications/review-invitation-outbox.service';
 import { SchedulerRunRegistry } from '../operations-settings/scheduler-run-registry.service';
 import { SchedulerSettingsService } from '../operations-settings/scheduler-settings.service';
 import { RequestExpiryService } from './request-expiry.service';
@@ -43,6 +44,8 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
     @Inject(SchedulerSettingsService) private readonly settings: SchedulerSettingsService,
     @Inject(SchedulerRunRegistry) private readonly runs: SchedulerRunRegistry,
     @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
+    @Inject(ReviewInvitationOutbox)
+    private readonly reviewInvitationOutbox: ReviewInvitationOutbox,
   ) {}
 
   onModuleInit() {
@@ -86,11 +89,14 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
       // The publish outbox rides the same tick: anything a request handler's
       // post-commit delivery did not finish is swept here, with no cron of its own.
       const publish = await this.publishOutbox.deliverPending({ limit });
+      // So does the review invitation outbox: a completion whose post-commit
+      // delivery died is swept here rather than waiting for an admin retry.
+      const invitations = await this.reviewInvitationOutbox.deliverPending({ limit });
       const summary =
         `processed=${result.processed} expired=${result.expired} ` +
         `skipped=${result.skipped} failed=${result.failed} ` +
         `enqueued=${result.enqueued} notified=${result.notified} ` +
-        `publishSent=${publish.sent}`;
+        `publishSent=${publish.sent} reviewInvitationsSent=${invitations.sent}`;
       this.logger.log(`Request expiry summary ${summary}`);
       this.runs.record('request-expiry', {
         startedAt,

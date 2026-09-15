@@ -22,6 +22,7 @@ import {
 import { CategoriesService, RoutingResolution } from '../categories/categories.service';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
+import { ReviewInvitationOutbox } from '../notifications/review-invitation-outbox.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
 import { resolveLocation } from '../locations/turkey-locations';
@@ -203,6 +204,7 @@ export class ServiceRequestsService {
     @Inject(MarketplacePublishSettingsService)
     private readonly publishSettings: MarketplacePublishSettingsService,
     @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
+    @Inject(ReviewInvitationOutbox) private readonly reviewInvitations: ReviewInvitationOutbox,
   ) {}
 
   /**
@@ -1063,7 +1065,9 @@ export class ServiceRequestsService {
    * SUPER_ADMIN may do this — a provider cannot declare its own job finished.
    *
    * The transition is a conditional update, so it is also the concurrency
-   * guard: a second call finds no MATCHED row and gets a 409.
+   * guard: a second call finds no MATCHED row and gets a 409. It runs in a
+   * transaction only so the review invitation can be written beside it;
+   * nothing is sent until after the commit.
    */
   async completeServiceRequest(id: string, user: AuthUser) {
     const request = await this.getRequestForLifecycleAction(id, user);
@@ -1073,14 +1077,28 @@ export class ServiceRequestsService {
     }
 
     const now = new Date();
-    const updated = await this.prisma.serviceRequest.updateMany({
-      where: { id, status: ServiceRequestStatus.MATCHED },
-      data: { status: ServiceRequestStatus.COMPLETED, completedAt: now },
-    });
 
-    if (updated.count !== 1) {
-      throw new ConflictException('Only a matched request can be completed');
-    }
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const updated = await tx.serviceRequest.updateMany({
+          where: { id, status: ServiceRequestStatus.MATCHED },
+          data: { status: ServiceRequestStatus.COMPLETED, completedAt: now },
+        });
+
+        if (updated.count !== 1) {
+          throw new ConflictException('Only a matched request can be completed');
+        }
+
+        // The invitation is owed by the same transaction that finished the job:
+        // a crash between the two can no longer lose it, and a retry of this
+        // request collides on (template, dedupeKey) and adds nothing.
+        await this.reviewInvitations.enqueue(tx, id, now);
+      },
+      { label: 'serviceRequests.complete' },
+    );
+
+    this.reviewInvitations.deliverSoon();
 
     return this.getLifecycleProjection(id);
   }
