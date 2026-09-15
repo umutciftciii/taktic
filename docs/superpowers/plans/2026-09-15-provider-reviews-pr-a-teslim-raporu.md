@@ -75,12 +75,22 @@ tam suite koşusu bu yüzden 34 hata verdi; tek başına tekrarında 2390/2390.
 | 3-eşiği tutarsızlığı | Tek helper `toPublicSummary`; tüm public yüzeyler `publicSummariesForProviders` | projections spec (teklif/feed/kart/dashboard) |
 | Onaysız sağlayıcı / PII sızıntısı | `publicSummariesForProviders` yalnız `APPROVED`; public liste 404; public item allow-list; `loadReview` yorumu select etmez | projections spec SUSPENDED → null; aggregate spec key-set + PII regex |
 
+## Ek karar turu (2026-09-15, PR #79 içinde)
+
+| Karar | Uygulama | Test kanıtı |
+|---|---|---|
+| 1. Yorum normalize | `normalizeComment`: `\r\n` ve tek `\r` → `\n`; ardından diğer C0/DEL kontrolleri silinir (tab → tek boşluk), `\n{3,}` → `\n\n`, trim. Kelime birleşmesi yok. (`f9a6b9d4`) | `provider-reviews.spec`: CRLF, lone CR (`a\rb`→`a\nb`), karışık uçlar, çok satırlı yorumun API'den aynen dönmesi, yalnız normalize sonrası görünen telefon → 400 `CONTACT_DETAILS_IN_TEXT`, `<script>` literal metin |
+| 2. Üç eşiği | Üretim kodu değişmedi (tüm public yüzeyler `publicSummariesForProviders`/`toPublicSummary`); tek akışlı test eklendi (`fd13c469`) | `provider-review-projections.spec`: 0/1/2 → tüm yüzeylerde `null` + `items: []`; 2→3 beş yüzeyde birden dolu; `REMOVE_COMMENT` 3'te kalır; `REMOVE_REVIEW` 3→2 public karanlık, panel `count: 2`, admin detay kaldırılmış satırı görür |
+| 3. Rapor yetkisi | `POST /providers/:id/reviews/:reviewId/reports` metot düzeyinde `RolesGuard` + `@Roles(PROVIDER)`; SUPER_ADMIN 403 (lookup öncesi, varlık sızmaz); `ProviderAccessGuard` ve admin uçları değişmedi (`48012bc4`) | `provider-review-moderation.spec`: admin → 403 + 0 satır (var olan ve olmayan review için), sahibi → 201, başka sağlayıcı → 404, ikinci açık rapor → 409 |
+
+Doğrulama (yeni head): typecheck/lint/build temiz · `pnpm test` api **2393/2393**, web 17 dosya, admin 3, shared 5 · Chromium E2E 232/232 · WebKit 79/79. Migration ve `providerReviewsEnabled=false` varsayılanı değişmedi.
+
 ## Bilinen küçük notlar (merge engeli değil; ledger'da)
 
-- `normalizeComment` regex'i plan-verbatim: yalnız `\r` (CR) satır sonu silinir (CRLF çalışır). Karar: plan metni; istenirse `` sınıftan çıkarılır.
+- `normalizeComment` regex'i plan-verbatim: yalnız `\r` (CR) satır sonu silinir (CRLF çalışır). Karar: plan metni; istenirse `
+` sınıftan çıkarılır.
 - Public özet her çağrıda bir ek indeksli `providerProfile` sorgusu (sayfa boyutuyla sınırlı).
 - `listQueue` bilinmeyen cursor → boş sayfa (talep raporları üstten başlar) — PR-B admin UI bunu hesaba katmalı.
-- `ProviderAccessGuard` SUPER_ADMIN'i geçirdiği için admin, panel rotasından sağlayıcı adına rapor açabilir (A5 kabulü).
 - Rapor oluşturma tx dışı: eşzamanlı `REMOVE_REVIEW` sonrası açık rapor kalabilir (admin dismiss eder). 20/gün bütçesi read-then-insert.
 - `MATCH_INCONSISTENT` dalı doğrudan testsiz (savunma amaçlı).
 
