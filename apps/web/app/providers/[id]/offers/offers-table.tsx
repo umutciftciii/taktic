@@ -86,104 +86,127 @@ export function OffersTable({ providerId, offers }: OffersTableProps) {
           </button>
         </div>
       ) : (
-        <div className="tablewrap" style={{ marginTop: 16 }}>
-          <table className="pdash-table" style={{ minWidth: 800 }}>
+        /*
+          One table, two layouts, no horizontal scroll at either.
+
+          From 900px up it is a real table with fixed column widths, so the
+          action column has the same width on every row whatever each row
+          offers. Below that the CSS turns every row into a card: cells stack
+          with their header as a label (`data-label`), and the actions become
+          a full-width block. The markup is the same table in both — a screen
+          reader still gets a table with headers.
+        */
+        <div className="offers-table-wrap" style={{ marginTop: 16 }} data-testid="offers-table-wrap">
+          <table className="pdash-table offers-table" data-testid="offers-table">
             <thead>
               <tr>
-                <th>Talep</th>
-                <th>Referans</th>
-                <th>Tutar</th>
-                <th>Durum</th>
-                <th>Kredi</th>
-                <th>İade politikası</th>
-                <th />
+                <th scope="col">Talep</th>
+                <th scope="col">Referans</th>
+                <th scope="col">Tutar</th>
+                <th scope="col">Durum</th>
+                <th scope="col">Kredi</th>
+                <th scope="col">İade politikası</th>
+                <th scope="col">
+                  <span className="visually-hidden">İşlemler</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((offer) => (
-                <tr key={offer.id}>
-                  <td>
-                    <strong>{offer.request.category.name}</strong>
-                    <div className="pdash-card-sub">
-                      {offer.request.city}/{offer.request.district} ·{' '}
-                      {formatDateTime(offer.submittedAt)}
-                    </div>
-                  </td>
-                  <td>
-                    <span className="pdash-card-sub">
-                      {offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`}
-                    </span>
-                  </td>
-                  <td>{formatPrice(offer.priceAmount, offer.currency)}</td>
-                  <td>
-                    <span className={providerStatusBadgeClass(offer.status)}>
-                      {providerOfferStatusLabel(offer.status)}
-                    </span>
-                  </td>
-                  <td>
-                    −{offer.creditCost}
-                    {offer.creditRefundedAt ? (
+              {filtered.map((offer) => {
+                const showRequest = canOpenRequestDetail(offer.request.status);
+                const showWithdraw = canWithdrawOffer(offer.status, offer.request.status);
+                return (
+                  <tr key={offer.id} data-testid="offer-row" data-offer-id={offer.id}>
+                    <td data-label="Talep">
+                      <strong>{offer.request.category.name}</strong>
                       <div className="pdash-card-sub">
-                        +{offer.creditCost} iade · {formatDateTime(offer.creditRefundedAt)}
+                        {offer.request.city}/{offer.request.district} ·{' '}
+                        {formatDateTime(offer.submittedAt)}
                       </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    {/*
-                      Nothing at all for an offer from before the policy: its
-                      refund terms were different and it has no standing under
-                      this one to report.
-                    */}
-                    {offer.refundEligibility.policyStatus ? (
-                      <span
-                        className={providerRefundBadgeClass(offer.refundEligibility.policyStatus)}
-                      >
-                        {offer.refundEligibility.policyStatusLabel}
+                    </td>
+                    <td data-label="Referans">
+                      <span className="pdash-card-sub">
+                        {offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`}
                       </span>
-                    ) : (
-                      <span className="pdash-card-sub">-</span>
-                    )}
-                  </td>
-                  <td>
-                    <div className="pdash-actions">
-                      {/*
-                        A link, not the action itself: withdrawing is irreversible
-                        and unrefunded, so it is only ever confirmed on the detail
-                        screen where those consequences are spelled out.
-                      */}
-                      {canWithdrawOffer(offer.status, offer.request.status) ? (
-                        <Link
-                          className="pdash-btn pdash-btn-ghost pdash-btn-sm"
-                          href={`/providers/${providerId}/offers/${offer.id}#geri-cek`}
-                        >
-                          Geri çek
-                        </Link>
+                    </td>
+                    <td data-label="Tutar">{formatPrice(offer.priceAmount, offer.currency)}</td>
+                    <td data-label="Durum">
+                      <span className={providerStatusBadgeClass(offer.status)}>
+                        {providerOfferStatusLabel(offer.status)}
+                      </span>
+                    </td>
+                    <td data-label="Kredi">
+                      −{offer.creditCost}
+                      {offer.creditRefundedAt ? (
+                        <div className="pdash-card-sub">
+                          +{offer.creditCost} iade · {formatDateTime(offer.creditRefundedAt)}
+                        </div>
                       ) : null}
+                    </td>
+                    <td data-label="İade politikası">
                       {/*
-                        Only while the request is still open: the provider
-                        panel's request screen is the discovery screen, and
-                        discovery answers 404 for a request that has matched,
-                        completed, expired or been cancelled.
+                        Nothing at all for an offer from before the policy: its
+                        refund terms were different and it has no standing under
+                        this one to report.
                       */}
-                      {canOpenRequestDetail(offer.request.status) ? (
-                        <Link
-                          className="pdash-btn pdash-btn-secondary pdash-btn-sm"
-                          href={`/providers/${providerId}/requests/${offer.request.id}`}
-                          data-testid="offer-row-request-link"
+                      {offer.refundEligibility.policyStatus ? (
+                        <span
+                          className={providerRefundBadgeClass(offer.refundEligibility.policyStatus)}
                         >
-                          Talep
-                        </Link>
-                      ) : null}
-                      <Link
-                        className="pdash-btn pdash-btn-primary pdash-btn-sm"
-                        href={`/providers/${providerId}/offers/${offer.id}`}
-                      >
-                        Teklif Detayı
-                      </Link>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                          {offer.refundEligibility.policyStatusLabel}
+                        </span>
+                      ) : (
+                        <span className="pdash-card-sub">-</span>
+                      )}
+                    </td>
+                    <td className="offers-table-actions-cell">
+                      {/*
+                        Three fixed slots, so the primary action stands in the
+                        same place on every row and a row with fewer secondary
+                        actions leaves its slots empty rather than shifting the
+                        others. Withdrawing is a link, not the action itself: it
+                        is irreversible and unrefunded, so it is only confirmed
+                        on the detail screen where those consequences are
+                        spelled out. The request link shows only while the
+                        request is still open — discovery answers 404 otherwise.
+                      */}
+                      <div className="offers-table-actions" data-testid="offer-row-actions">
+                        <span className="offers-table-slot">
+                          {showRequest ? (
+                            <Link
+                              className="pdash-btn pdash-btn-secondary pdash-btn-sm"
+                              href={`/providers/${providerId}/requests/${offer.request.id}`}
+                              data-testid="offer-row-request-link"
+                            >
+                              Talep
+                            </Link>
+                          ) : null}
+                        </span>
+                        <span className="offers-table-slot">
+                          {showWithdraw ? (
+                            <Link
+                              className="pdash-btn pdash-btn-ghost pdash-btn-sm"
+                              href={`/providers/${providerId}/offers/${offer.id}#geri-cek`}
+                              data-testid="offer-row-withdraw-link"
+                            >
+                              Geri çek
+                            </Link>
+                          ) : null}
+                        </span>
+                        <span className="offers-table-slot offers-table-slot-primary">
+                          <Link
+                            className="pdash-btn pdash-btn-primary pdash-btn-sm"
+                            href={`/providers/${providerId}/offers/${offer.id}`}
+                            data-testid="offer-row-detail-link"
+                          >
+                            Teklif detayı
+                          </Link>
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

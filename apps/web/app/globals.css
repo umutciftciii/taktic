@@ -6430,3 +6430,72 @@ body.has-drawer-open {
   .cdash-meta-list { grid-template-columns: minmax(0, 1fr); }
   .cdash-meta-list dt { padding-bottom: 2px; border-bottom: 0; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   The provider's "Tekliflerim" table.
+
+   No horizontal scroll at any width. From 900px up a fixed-layout table whose
+   action column is the same width on every row; below that each row is a
+   card and each cell carries its header as a label.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.offers-table-wrap { width: 100%; min-width: 0; overflow: hidden; }
+.offers-table { table-layout: fixed; width: 100%; }
+.offers-table td { overflow-wrap: anywhere; }
+.offers-table th:nth-child(1) { width: 26%; }
+.offers-table th:nth-child(2) { width: 12%; }
+.offers-table th:nth-child(3) { width: 11%; }
+.offers-table th:nth-child(4) { width: 12%; }
+.offers-table th:nth-child(5) { width: 11%; }
+.offers-table th:nth-child(6) { width: 12%; }
+.offers-table th:nth-child(7) { width: 16%; }
+.offers-table .pdash-badge { max-width: 100%; white-space: normal; line-height: 1.3; }
+
+/* Three slots, always three, so the primary button never moves. */
+.offers-table-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  justify-items: stretch;
+}
+.offers-table-slot { display: flex; min-width: 0; }
+.offers-table-slot:empty { display: none; }
+.offers-table-slot .pdash-btn { width: 100%; justify-content: center; white-space: nowrap; }
+.offers-table-slot-primary { order: -1; }
+@media (min-width: 1200px) {
+  .offers-table th:nth-child(7) { width: 22%; }
+  .offers-table th:nth-child(1) { width: 22%; }
+  .offers-table th:nth-child(2) { width: 10%; }
+  .offers-table-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .offers-table-slot:empty { display: block; }
+  .offers-table-slot-primary { order: 0; }
+}
+
+@media (max-width: 899px) {
+  .offers-table, .offers-table tbody, .offers-table tr, .offers-table td { display: block; width: 100%; }
+  .offers-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .offers-table tr {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--color-divider);
+    border-bottom: 2px solid var(--color-text);
+    margin-bottom: var(--space-3);
+  }
+  .offers-table td { padding: 0; border: 0; min-width: 0; }
+  .offers-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    font-family: var(--font-heading);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-neutral-700);
+  }
+  .offers-table td:first-child { grid-column: 1 / -1; }
+  .offers-table-actions-cell { grid-column: 1 / -1; padding-top: var(--space-2); border-top: 1px solid var(--color-divider); }
+  .offers-table-actions { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); }
+}
