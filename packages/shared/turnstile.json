@@ -1,0 +1,12 @@
+{
+  "headerName": "x-turnstile-token",
+  "testTokenPrefix": "turnstile-test:",
+  "testUnavailableAction": "__unavailable__",
+  "actions": {
+    "serviceRequestCreate": "service-request-create",
+    "showcaseLeadCreate": "showcase-lead-create",
+    "phoneCodeSend": "phone-code-send",
+    "identityCheck": "identity-check",
+    "identityActivate": "identity-activate"
+  }
+}

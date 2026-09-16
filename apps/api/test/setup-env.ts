@@ -63,3 +63,14 @@ delete process.env.PHONE_VERIFICATION_TEST_BYPASS_ENABLED;
 delete process.env.PHONE_VERIFICATION_TEST_BYPASS_PHONES;
 delete process.env.PHONE_VERIFICATION_TEST_BYPASS_CODE;
 delete process.env.PHONE_VERIFICATION_TEST_BYPASS_EXPIRES_AT;
+// Turnstile is off for the suite as a whole: the hundred-odd specs that post
+// to the protected routes are about other things, and `off` is accepted here
+// only because NODE_ENV is "test" (turnstile.config.ts). The guard itself is
+// exercised by turnstile-protection.spec.ts, which overrides the verifier
+// with the real Cloudflare one over a stand-in fetch. Any Cloudflare secret
+// the developer has exported is dropped so it can neither reach a real
+// siteverify nor collide with the `off` mode at boot.
+process.env.TURNSTILE_MODE = 'off';
+delete process.env.TURNSTILE_SECRET_KEY;
+delete process.env.TURNSTILE_EXPECTED_HOSTNAMES;
+delete process.env.TURNSTILE_SITEVERIFY_TIMEOUT_MS;

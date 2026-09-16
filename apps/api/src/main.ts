@@ -11,6 +11,7 @@ import { assertEmailTransportConfig } from './modules/notifications/email-transp
 import { assertPaymentProviderConfig } from './modules/payments/payment-provider.config';
 import { assertPhoneVerificationTestBypassConfig } from './modules/phone-verification/phone-verification-test-bypass.config';
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
+import { assertTurnstileConfig } from './modules/turnstile/turnstile.config';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
 async function bootstrap() {
@@ -67,6 +68,13 @@ async function bootstrap() {
   // stops the process here — with the variable's name and never its value —
   // rather than being silently ignored where somebody might rely on it.
   assertPhoneVerificationTestBypassConfig();
+
+  // The Turnstile verifier, before a single request form can be posted. An
+  // unset TURNSTILE_MODE means Cloudflare, and Cloudflare without its secret
+  // and hostnames stops the process here rather than running every customer
+  // write unprotected; a bypass mode outside NODE_ENV=test or a declared local
+  // stack stops it just the same. The message names variables, never values.
+  assertTurnstileConfig();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // Keeps the untouched request bytes on `req.rawBody`. The payment webhook
