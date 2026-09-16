@@ -49,6 +49,7 @@ import {
 } from './service-requests.constants';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { normalizePreferredDateRange } from './preferred-date-range';
 
 /**
  * Returned when a signed-in customer's own account carries no complete contact
@@ -272,7 +273,11 @@ export class ServiceRequestsService {
       },
     });
 
-    const preferredDate = normalizeOptionalDate(dto.preferredDate, 'Preferred date');
+    // One clock for the whole creation: the range rule's "today" and every
+    // timestamp written below read the same instant.
+    const now = new Date();
+    // Two calendar days in Istanbul, or none; see the rule's own file.
+    const preferredDateRange = normalizePreferredDateRange(dto, now);
     const disclosure = resolveContactDisclosure(dto);
     // The DTO already refused an impossible triple; this turns the accepted one
     // into the canonical spelling the rest of the product compares against —
@@ -303,7 +308,7 @@ export class ServiceRequestsService {
       neighborhood: location.neighborhood,
       addressNote: normalizeNullableString(dto.addressNote),
       ...normalizeBudgetRange(dto.budgetMin, dto.budgetMax),
-      preferredDate,
+      ...preferredDateRange,
       urgency: normalizeNullableString(dto.urgency),
       description: normalizeNullableString(dto.description),
     };
@@ -350,7 +355,6 @@ export class ServiceRequestsService {
     const awaitsVerification =
       autoPublish && isPhoneVerificationRequired() && !context.phoneVerifiedAt;
     const publishAtCreate = autoPublish && !awaitsVerification;
-    const now = new Date();
 
     const request = await runSerializable(
       this.prisma,
@@ -1775,16 +1779,3 @@ function normalizeBudgetRange(
   return { budgetMin, budgetMax };
 }
 
-function normalizeOptionalDate(value: string | null | undefined, fieldName: string) {
-  const normalized = normalizeNullableString(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) {
-    throw new BadRequestException(`${fieldName} must be a valid date`);
-  }
-
-  return date;
-}

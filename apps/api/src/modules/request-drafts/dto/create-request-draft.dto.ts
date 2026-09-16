@@ -28,6 +28,7 @@ export class RequestDraftPayloadDto {
   @IsOptional() @IsString() @MaxLength(32) urgency?: string;
   @IsOptional() @IsString() @MaxLength(16) urgencyBucket?: string;
   @IsOptional() @IsString() @MaxLength(32) preferredDate?: string;
+  @IsOptional() @IsString() @MaxLength(32) preferredDateEnd?: string;
   @IsOptional() @IsInt() budgetMin?: number;
   @IsOptional() @IsInt() budgetMax?: number;
   @IsOptional() @IsString() @MaxLength(20_000) description?: string;

@@ -849,7 +849,14 @@ model ServiceRequest {
   addressNote                 String?
   budgetMin                   Int?
   budgetMax                   Int?
+  /// The first day the customer wants the work done, as a calendar day in
+  /// Europe/Istanbul stored at UTC midnight (`new Date('YYYY-MM-DD')`). Every
+  /// request written before the range existed carries only this column.
   preferredDate               DateTime?
+  /// The last day of the customer's range, same representation. NULL means
+  /// "no end was given" — a legacy single date, or a request with no dates —
+  /// and every reader treats it as the same day as `preferredDate`.
+  preferredDateEnd            DateTime?
   urgency                     String?
   description                 String?
   qualityScore                Int                  @default(0)
