@@ -70,14 +70,14 @@ test.describe('offer withdrawal', () => {
         providerId: leavingProvider.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1400.00',
+        priceAmount: '1400,00',
         message: 'Bu hafta içinde başlayabiliriz.',
       });
       await submitOffer(staying, {
         providerId: stayingProvider.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1650.00',
+        priceAmount: '1650,00',
         message: 'Montaj ve bakım dahil.',
       });
 
@@ -128,6 +128,10 @@ test.describe('offer withdrawal', () => {
       await expect(customer.page.getByTestId('withdrawn-offers')).toContainText(
         'Teklif geri çekildi',
       );
+      // The customer never opened this one, so it is history and not a
+      // cancellation notice — that sentence is for an offer they had read
+      // (offer-experience.spec.ts).
+      await expect(customer.page.getByTestId('offer-withdrawn-notice')).toHaveCount(0);
       // Neutral history, not a comparable price: the withdrawn amount is gone
       // from the screen entirely.
       const offersBody = await customer.page.locator('body').innerText();
@@ -200,7 +204,7 @@ test.describe('an admin decision on the customer’s behalf', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1500.00',
+        priceAmount: '1500,00',
         message: 'Yarın başlayabiliriz.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);

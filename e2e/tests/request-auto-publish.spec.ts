@@ -110,7 +110,7 @@ test.describe('request auto-publish', () => {
           providerId: providerAccount.id,
           requestId,
           expectedCreditCost: CATEGORY_COST,
-          priceAmount: '1500.00',
+          priceAmount: '1500,00',
           message: 'Hemen başlayabiliriz.',
         });
         expect(await creditBalance(providerAccount.id)).toBe(STARTING_CREDITS - CATEGORY_COST);

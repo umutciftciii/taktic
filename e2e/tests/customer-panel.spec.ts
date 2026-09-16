@@ -60,7 +60,7 @@ async function requestWithOneOffer(browser: Parameters<typeof Actor.open>[0]) {
     providerId: providerAccount.id,
     requestId,
     expectedCreditCost: CATEGORY_COST,
-    priceAmount: '2200.00',
+    priceAmount: '2200,00',
     message: 'Klimanızdaki sorunu aynı gün giderebiliriz.',
   });
   const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);

@@ -20,6 +20,7 @@ export type RequestDraftPayload = {
   urgency?: string;
   urgencyBucket?: string;
   preferredDate?: string;
+  preferredDateEnd?: string;
   budgetMin?: number;
   budgetMax?: number;
   description?: string;
@@ -183,6 +184,7 @@ export async function draftPayloadFromForm(formData: FormData): Promise<RequestD
     urgency: opt('urgency'),
     urgencyBucket: opt('urgencyBucket'),
     preferredDate: opt('preferredDate'),
+    preferredDateEnd: opt('preferredDateEnd'),
     ...(budgetMin !== null ? { budgetMin } : {}),
     ...(budgetMax !== null ? { budgetMax } : {}),
     description: opt('description'),

@@ -17,6 +17,7 @@ import { readCreditBalance } from '../../../../provider-data';
 import { leadDeadlineLabel, leadIsAnswerable, showcaseLeadBadgeClass } from '../../showcase-lead-ui';
 import { ReportDialog } from '../../../requests/[requestId]/report-dialog';
 import { createShowcaseLeadOfferAction } from './actions';
+import { OfferPriceField } from '../../../../offer-price-field';
 
 type LeadPageProps = {
   params: Promise<{ id: string; leadId: string }>;
@@ -275,19 +276,7 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
             teklif kredisi harcanmaz.
           </p>
 
-          <label className="pdash-form-row">
-            <span>Teklif tutarı *</span>
-            <input
-              name="priceAmount"
-              type="number"
-              step="0.01"
-              min="1"
-              inputMode="decimal"
-              placeholder="Örn. 1500.00"
-              required
-            />
-            <small>Ondalıklı fiyat girebilirsiniz. Örn: 149,90 veya 1500.00 TRY.</small>
-          </label>
+          <OfferPriceField />
 
           <div className="pdash-form-grid">
             <label className="pdash-form-row">

@@ -11,6 +11,7 @@ import {
 import {
   formatCredits,
   formatDate,
+  formatDateRange,
   formatDateTime,
   formatLocation,
   formatMoneyMinor,
@@ -2690,7 +2691,10 @@ function int(value: string | null | undefined): number | null {
  * values: no dangling "·", no empty parentheses, no "undefined".
  */
 function preferredTime(data: Data): string | null {
-  return joinNonEmpty([formatDate(data.preferredDate), urgencyLabel(data.urgency)], ' · ');
+  return joinNonEmpty(
+    [formatDateRange(data.preferredDate, data.preferredDateEnd), urgencyLabel(data.urgency)],
+    ' · ',
+  );
 }
 
 function joinNonEmpty(parts: (string | null)[], separator: string): string | null {

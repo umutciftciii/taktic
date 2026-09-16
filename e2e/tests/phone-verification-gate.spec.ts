@@ -126,7 +126,7 @@ test.describe('phone verification gate', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '2100.00',
+        priceAmount: '2100,00',
         message: 'Doğrulanmış talep için teklifimiz.',
       });
 
@@ -176,7 +176,7 @@ test.describe('phone verification gate', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1250.00',
+        priceAmount: '1250,00',
         message: 'Doğrulama zorunlu değilken de teklif verebiliriz.',
       });
 

@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { apiFetch, RoutingResolution, ServiceRequest } from '../../lib/api';
+import { apiFetch, getCurrentUser, RoutingResolution, ServiceRequest, type ShowcaseFeed } from '../../lib/api';
 import { describeApiRefusal, type ApiRefusal } from '../../lib/api-refusal';
 import { draftConsumedBySubmission, readDraftState } from '../../lib/draft-state';
 import {
@@ -108,6 +108,106 @@ export async function saveMarketplaceDraftAction(
     },
     replace,
   });
+}
+
+export type HandOffResult =
+  | { ok: true; href: string }
+  | {
+      ok: false;
+      code:
+        | 'CARD_UNAVAILABLE'
+        | 'IDENTITY_MISSING'
+        | 'DRAFT_EXISTS'
+        | 'DRAFT_NOT_CONTINUABLE'
+        | 'DRAFT_BUSY'
+        | 'DRAFT_FAILED';
+    };
+
+/**
+ * Hands a half-written marketplace request over to one business's vitrin form.
+ *
+ * ## What travels, and how
+ *
+ * Everything the customer typed that the vitrin form can hold — description,
+ * category answers, the location triple, the address note, the date range,
+ * the budget, the urgency — is parked as a `RequestDraft` keyed on the card
+ * (`SHOWCASE_LEAD` + the card's category + the card id), which is exactly the
+ * draft that form already restores on load. The browser is handed nothing but
+ * the opaque draft token in its HttpOnly cookie and a URL that names the card:
+ * no field value and no personal detail ever enters the address bar.
+ *
+ * The contact fields are deliberately *not* in the draft — the draft payload
+ * refuses them by contract. A visitor types their number again on the card's
+ * form, because that form has to verify it anyway; a signed-in customer's
+ * contact comes from the account there as it does here.
+ *
+ * ## What is checked before anything is saved
+ *
+ * The card is re-read from the feed for this category and this place. A card
+ * that has come off the air, or whose run no longer covers the district, is
+ * refused *here*, with nothing written: the customer keeps every field on
+ * screen and the form falls back to the general request. The vitrin page and
+ * the lead endpoint check again for themselves — this is a courtesy, not the
+ * rule.
+ *
+ * ## What is not done
+ *
+ * No `ServiceRequest`, no `ShowcaseLead`, no message of any kind. Those are
+ * the vitrin form's to create, under its own rules — the mandatory telephone
+ * verification and the customer's acil/normal choice — when the customer
+ * sends it from there.
+ */
+export async function handOffToShowcaseAction(
+  formData: FormData,
+  target: { cardId: string; categoryId: string },
+): Promise<HandOffResult> {
+  const city = readFormString(formData, 'city').trim();
+  const district = readFormString(formData, 'district').trim();
+  const neighborhood = readFormString(formData, 'neighborhood').trim();
+
+  let card: ShowcaseFeed['cards'][number] | undefined;
+  try {
+    const params = new URLSearchParams({ categoryId: target.categoryId, city, district });
+    if (neighborhood) params.set('neighborhood', neighborhood);
+    const feed = await apiFetch<ShowcaseFeed>(`/showcase/feed?${params.toString()}`);
+    card = feed.cards.find((entry) => entry.cardId === target.cardId);
+  } catch {
+    card = undefined;
+  }
+  if (!card) {
+    return { ok: false, code: 'CARD_UNAVAILABLE' };
+  }
+
+  // The identity the draft is bound to. A visitor's is what they typed on the
+  // contact step; a signed-in customer's is the account's, so only that
+  // account can open the draft on the card's page.
+  const user = await getCurrentUser();
+  const identity =
+    user?.role === 'CUSTOMER'
+      ? { phone: user.phone ?? '', email: user.email ?? '' }
+      : {
+          phone: readFormString(formData, 'customerPhone').trim(),
+          email: readFormString(formData, 'customerEmail').trim(),
+        };
+  if (!identity.phone || !identity.email) {
+    return { ok: false, code: 'IDENTITY_MISSING' };
+  }
+
+  const saved = await saveRequestDraftAction({
+    formType: 'SHOWCASE_LEAD',
+    categorySlug: card.category.slug,
+    cardId: card.cardId,
+    payload: await draftPayloadFromForm(formData),
+    identity,
+    replace: formData.get('replaceDraft') === 'true',
+  });
+  if (!saved.ok) {
+    return { ok: false, code: saved.code };
+  }
+
+  // Straight onto the card's form (`step=form` is the page's own switch, not
+  // data); the draft the form restores travels in the cookie, never here.
+  return { ok: true, href: `/vitrin/${encodeURIComponent(card.cardId)}?step=form` };
 }
 
 function readFormString(formData: FormData, key: string) {

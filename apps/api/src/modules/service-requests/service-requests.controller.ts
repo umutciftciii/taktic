@@ -45,6 +45,17 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.listCustomerServiceRequests(user.id);
   }
 
+  /**
+   * The owning customer's single-request read. Declared before `:id` so the
+   * literal `my/` segment wins; the admin route below never sees it.
+   */
+  @Get('my/:id')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  getMyServiceRequest(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.serviceRequestsService.getCustomerServiceRequest(user.id, id);
+  }
+
   @Get(':id')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)

@@ -449,7 +449,7 @@ function Comparison() {
 const ctaBullets = [
   'Kategori seç',
   'Hizmet bölgeni belirle',
-  'Admin onayından sonra talepleri gör',
+  'Talepleri gör',
   'Krediyle teklif ver',
 ];
 

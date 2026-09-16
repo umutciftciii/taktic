@@ -155,6 +155,10 @@ export type CustomerServiceRequest = {
   customerEmail: string | null;
   city: string;
   district: string;
+  /** The preferred range's two ends as stored instants; the end is null on a legacy single date. */
+  preferredDate: string | null;
+  preferredDateEnd: string | null;
+  urgency: string | null;
   qualityScore: number;
   qualityLabel: RequestQualityLabel;
   /** null until the customer proves control of customerPhone with a one-time code. */
@@ -359,6 +363,7 @@ export type ProviderRequestListItem = {
   budgetMin: number | null;
   budgetMax: number | null;
   preferredDate: string | null;
+  preferredDateEnd: string | null;
   urgency: string | null;
   qualityScore: number;
   qualityLabel: RequestQualityLabel;
@@ -461,6 +466,7 @@ export type ProviderOffer = {
     budgetMin: number | null;
     budgetMax: number | null;
     preferredDate: string | null;
+    preferredDateEnd: string | null;
     urgency: string | null;
     qualityScore: number;
     status: string;
@@ -515,11 +521,12 @@ export type RequestOfferPreview = {
   creditCost: number;
   creditRefundedAt: string | null;
   submittedAt: string;
+  /** When the customer opened it; null until they do. */
+  viewedAt: string | null;
 };
 
 export type RequestOfferDetail = RequestOfferPreview & {
   requestId: string;
-  viewedAt: string | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
 };
@@ -1697,6 +1704,7 @@ export type ShowcaseProviderLead = {
     description: string | null;
     urgency: string | null;
     preferredDate: string | null;
+    preferredDateEnd: string | null;
     budgetMin: number | null;
     budgetMax: number | null;
     qualityScore: number;

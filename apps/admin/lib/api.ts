@@ -258,6 +258,8 @@ export type ServiceRequest = {
   budgetMin: number | null;
   budgetMax: number | null;
   preferredDate: string | null;
+  /** Null on a legacy single date; the range's last day otherwise. */
+  preferredDateEnd?: string | null;
   urgency: string | null;
   description: string | null;
   moderatedAt: string | null;
@@ -1878,7 +1880,7 @@ export function formatPrice(amountMinor: number, currency: string = 'TRY') {
  * hydration. The shared implementation pins both the zone and the locale, so
  * SSR and the first client render agree by construction.
  */
-export { formatDate, formatDateTime, formatTime } from '@taktic/shared';
+export { formatDate, formatDateRange, formatDateTime, formatTime } from '@taktic/shared';
 
 /**
  * Carries the HTTP status so callers can map an upstream 404 onto Next's

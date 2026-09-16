@@ -73,7 +73,7 @@ test.describe('access boundaries', () => {
         providerId: fixture.providerAccount.id,
         requestId: fixture.requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1400.00',
+        priceAmount: '1400,00',
         message: 'Teklifimiz ektedir.',
       });
       const offerId = await readProviderOfferId(
@@ -183,7 +183,7 @@ test.describe('pricing conflicts', () => {
       await expect(provider.page.getByTestId('offer-credit-cost')).toHaveText(
         String(CATEGORY_COST),
       );
-      await fillOfferForm(provider, '1600.00', 'Formu doldururken fiyat değişti.');
+      await fillOfferForm(provider, '1600,00', 'Formu doldururken fiyat değişti.');
 
       // Admin re-prices the category underneath them.
       const newCost = CATEGORY_COST + 3;
@@ -210,7 +210,7 @@ test.describe('pricing conflicts', () => {
 
       // Resubmitting at the price now on screen goes through, at the new price.
       await expect(provider.page.getByTestId('offer-credit-cost')).toHaveText(String(newCost));
-      await fillOfferForm(provider, '1600.00', 'Güncel fiyatla tekrar gönderiyoruz.');
+      await fillOfferForm(provider, '1600,00', 'Güncel fiyatla tekrar gönderiyoruz.');
       await provider.page.getByRole('button', { name: 'Teklifi Gönder' }).click();
 
       await expect(

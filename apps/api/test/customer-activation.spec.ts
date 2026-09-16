@@ -73,6 +73,11 @@ describe('guest service request → activation token', () => {
     expect(activationUrl).toBeTruthy();
     expect(message?.to).toBe(customer.email);
     expect(tokenFromUrl(activationUrl!)).toHaveLength(43);
+    // The link brings them to their own request's offer screen once the
+    // password is set — a relative path only, through the safe-redirect filter.
+    expect(new URL(activationUrl!).searchParams.get('redirectTo')).toBe(
+      `/requests/${created.id}/offers`,
+    );
   });
 
   it('does not issue a token when the request comes from an activated customer', async () => {

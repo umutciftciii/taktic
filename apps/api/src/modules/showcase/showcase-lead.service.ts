@@ -799,6 +799,7 @@ const providerLeadSelect = {
       description: true,
       urgency: true,
       preferredDate: true,
+      preferredDateEnd: true,
       budgetMin: true,
       budgetMax: true,
       qualityScore: true,

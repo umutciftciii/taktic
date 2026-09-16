@@ -211,3 +211,24 @@ export async function withNoActiveShowcasePlacements<T>(run: () => Promise<T>): 
     }
   }
 }
+
+/**
+ * Takes live runs off the air after a test.
+ *
+ * The home shelf lists the newest live cards up to a fixed limit, so a spec
+ * that leaves its placements live pushes another spec's card off the shelf
+ * and fails it later in the run. `EXPIRED`, with `endAt` a second after
+ * `startAt` so the CHECK on the window holds — the same retirement
+ * request-identity-gate.spec.ts performs.
+ */
+export async function retireShowcasePlacements(ids: readonly string[]): Promise<void> {
+  const db = prisma();
+  for (const id of ids) {
+    const run = await db.showcasePlacement.findUnique({ where: { id }, select: { startAt: true } });
+    if (!run) continue;
+    await db.showcasePlacement.update({
+      where: { id },
+      data: { status: 'EXPIRED', endAt: new Date(run.startAt.getTime() + 1000) },
+    });
+  }
+}

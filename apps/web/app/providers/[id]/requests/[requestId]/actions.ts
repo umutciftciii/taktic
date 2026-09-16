@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { ApiError, apiFetch, parseDecimalToMinor, ProviderOffer } from '../../../../../lib/api';
+import { ApiError, apiFetch, ProviderOffer } from '../../../../../lib/api';
+import { parseLiraToMinor } from '../../../../../lib/lira-input';
 
 /** Pricing conflicts the API reports with a machine-readable code. */
 type OfferConflict = {
@@ -15,11 +16,13 @@ export async function createOfferAction(formData: FormData) {
   const providerId = readFormString(formData, 'providerId');
   const requestId = readFormString(formData, 'requestId');
 
-  // The form accepts a human-readable decimal (e.g. "1500,00" or "149.90").
-  // parseDecimalToMinor converts it to the minor-unit integer (kuruş for TRY).
-  // null is passed straight through; the API DTO enforces @Min(100) and surfaces
-  // a clear validation error if the value is missing or below 1,00.
-  const priceAmountMinor = parseDecimalToMinor(readFormString(formData, 'priceAmount'));
+  // The field posts what the provider sees — Turkish lira, grouped and with a
+  // comma before the kuruş ("4.500,00"). parseLiraToMinor is the one place
+  // that text becomes a number: the minor-unit integer (kuruş) the API's DTO
+  // has always taken, moved digit by digit and never multiplied. null is
+  // passed straight through; the DTO enforces @Min(100) and answers a clear
+  // validation error if the value is missing or below 1,00.
+  const priceAmountMinor = parseLiraToMinor(readFormString(formData, 'priceAmount'));
 
   try {
     await apiFetch<ProviderOffer>(`/providers/${providerId}/requests/${requestId}/offers`, {

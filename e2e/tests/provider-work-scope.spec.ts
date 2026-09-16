@@ -73,8 +73,8 @@ test.describe('accepted offer work scope', () => {
       await rival.loginToWeb(rivalAccount.email, rivalAccount.password);
 
       for (const [actor, account, price] of [
-        [winner, winnerAccount, '2200.00'],
-        [rival, rivalAccount, '2400.00'],
+        [winner, winnerAccount, '2200,00'],
+        [rival, rivalAccount, '2400,00'],
       ] as const) {
         await submitOffer(actor, {
           providerId: account.id,

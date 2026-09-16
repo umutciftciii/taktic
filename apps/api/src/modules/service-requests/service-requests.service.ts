@@ -49,6 +49,7 @@ import {
 } from './service-requests.constants';
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { normalizePreferredDateRange } from './preferred-date-range';
 
 /**
  * Returned when a signed-in customer's own account carries no complete contact
@@ -272,7 +273,11 @@ export class ServiceRequestsService {
       },
     });
 
-    const preferredDate = normalizeOptionalDate(dto.preferredDate, 'Preferred date');
+    // One clock for the whole creation: the range rule's "today" and every
+    // timestamp written below read the same instant.
+    const now = new Date();
+    // Two calendar days in Istanbul, or none; see the rule's own file.
+    const preferredDateRange = normalizePreferredDateRange(dto, now);
     const disclosure = resolveContactDisclosure(dto);
     // The DTO already refused an impossible triple; this turns the accepted one
     // into the canonical spelling the rest of the product compares against —
@@ -303,7 +308,7 @@ export class ServiceRequestsService {
       neighborhood: location.neighborhood,
       addressNote: normalizeNullableString(dto.addressNote),
       ...normalizeBudgetRange(dto.budgetMin, dto.budgetMax),
-      preferredDate,
+      ...preferredDateRange,
       urgency: normalizeNullableString(dto.urgency),
       description: normalizeNullableString(dto.description),
     };
@@ -350,7 +355,6 @@ export class ServiceRequestsService {
     const awaitsVerification =
       autoPublish && isPhoneVerificationRequired() && !context.phoneVerifiedAt;
     const publishAtCreate = autoPublish && !awaitsVerification;
-    const now = new Date();
 
     const request = await runSerializable(
       this.prisma,
@@ -493,7 +497,12 @@ export class ServiceRequestsService {
     // notification problem must not surface as a failed submission.
     if (request.customerId) {
       try {
-        await this.customerActivation.issueForAutoCreatedCustomer(request.customerId);
+        // The link lands them on this request's own offer screen once the
+        // password is set — the API's safe-path check filters the value, and
+        // the screen itself re-checks ownership through the session.
+        await this.customerActivation.issueForAutoCreatedCustomer(request.customerId, {
+          redirectTo: `/requests/${request.id}/offers`,
+        });
       } catch (error) {
         this.logger.error(
           `Failed to issue activation link for request ${request.id}`,
@@ -648,95 +657,33 @@ export class ServiceRequestsService {
     const requests = await this.prisma.serviceRequest.findMany({
       where: { customerId },
       orderBy: { submittedAt: 'desc' },
-      include: {
-        category: {
-          select: { id: true, name: true, slug: true },
-        },
-        _count: {
-          // The customer's own count is of offers they can still act on. An
-          // offer its provider withdrew is no longer one of them, and counting
-          // it would promise a choice that is not there. The admin listing above
-          // keeps the unfiltered total on purpose.
-          select: { offers: { where: { status: { not: OfferStatus.WITHDRAWN } } } },
-        },
-        /*
-         * The vitrin lead, when the request came from a card.
-         *
-         * On the customer's own list rather than behind a second endpoint,
-         * because the decision it carries has to be *findable*: the fallback
-         * question is mailed once and never chased, so a customer who deleted
-         * the message needs to meet it again where they already look.
-         *
-         * Narrow on purpose. The customer is told which business they wrote to,
-         * what they were promised and where the lead stands — and nothing about
-         * the placement: not its id, not what it cost, not when it ends.
-         */
-        showcaseLeadSource: {
-          select: {
-            id: true,
-            status: true,
-            urgencyBucket: true,
-            slaHoursSnapshot: true,
-            slaDueAt: true,
-            breachedAt: true,
-            fallbackAskedAt: true,
-            fallbackDecision: true,
-            fallbackDecidedAt: true,
-            releasedAt: true,
-            closedAt: true,
-            closeReason: true,
-            createdAt: true,
-            kindSnapshot: true,
-            listedPriceSnapshot: true,
-            cardVersion: { select: { title: true } },
-            provider: { select: { id: true, businessName: true } },
-          },
-        },
-        /*
-         * The customer's own review of the matched provider — enough to show
-         * "you rated this 4" or "your review was removed" on the row, and no
-         * more. The comment lives on the review screen, not here. A list
-         * relation on the schema, but the unique index on `offerId` plus a
-         * single matched offer means at most one row per request in practice.
-         */
-        reviews: {
-          take: 1,
-          orderBy: { createdAt: 'asc' },
-          select: { id: true, rating: true, removedAt: true },
-        },
-      },
+      include: customerRequestInclude,
     });
 
-    return requests.map(({ showcaseLeadSource, reviews, ...request }) => ({
-      ...withQualityLabel(request),
-      offersCount: request._count.offers,
-      review: reviews[0] ?? null,
-      showcaseLead: showcaseLeadSource
-        ? {
-            id: showcaseLeadSource.id,
-            status: showcaseLeadSource.status,
-            urgencyBucket: showcaseLeadSource.urgencyBucket,
-            slaHours: showcaseLeadSource.slaHoursSnapshot,
-            slaDueAt: showcaseLeadSource.slaDueAt,
-            breachedAt: showcaseLeadSource.breachedAt,
-            fallbackAskedAt: showcaseLeadSource.fallbackAskedAt,
-            fallbackDecision: showcaseLeadSource.fallbackDecision,
-            fallbackDecidedAt: showcaseLeadSource.fallbackDecidedAt,
-            releasedAt: showcaseLeadSource.releasedAt,
-            closedAt: showcaseLeadSource.closedAt,
-            closeReason: showcaseLeadSource.closeReason,
-            createdAt: showcaseLeadSource.createdAt,
-            cardTitle: showcaseLeadSource.cardVersion.title,
-            kind: showcaseLeadSource.kindSnapshot,
-            // Absent rather than null on a promotion card, exactly as the feed
-            // does it: a client cannot render a price it was never given.
-            ...(showcaseLeadSource.kindSnapshot === 'SERVICE'
-              ? { listedServicePriceAmount: showcaseLeadSource.listedPriceSnapshot }
-              : {}),
-            provider: showcaseLeadSource.provider,
-          }
-        : null,
-    }));
+    return requests.map(toCustomerServiceRequest);
+  }
+
+  /**
+   * One request, read by the customer who owns it.
+   *
+   * The success screen renders the request's real state from this — not from
+   * a flag in its own URL — so the answer has to be safe to point any id at.
+   * `where: { id, customerId }` makes another customer's request and a request
+   * that does not exist the same 404: the caller learns nothing from the
+   * difference. Same include, same mapper as the list, so the two screens can
+   * never disagree about a status, a reference or a vitrin lead.
+   */
+  async getCustomerServiceRequest(customerId: string, id: string) {
+    const request = await this.prisma.serviceRequest.findFirst({
+      where: { id, customerId },
+      include: customerRequestInclude,
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    return toCustomerServiceRequest(request);
   }
 
   async getServiceRequest(id: string) {
@@ -1289,6 +1236,105 @@ export class ServiceRequestsService {
 }
 
 /**
+ * What the customer's own screens read about a request — the list and the
+ * single-request read share it, so they cannot drift apart.
+ */
+const customerRequestInclude = {
+  category: {
+    select: { id: true, name: true, slug: true },
+  },
+  _count: {
+    // The customer's own count is of offers they can still act on. An
+    // offer its provider withdrew is no longer one of them, and counting
+    // it would promise a choice that is not there. The admin listing above
+    // keeps the unfiltered total on purpose.
+    select: { offers: { where: { status: { not: OfferStatus.WITHDRAWN } } } },
+  },
+  /*
+   * The vitrin lead, when the request came from a card.
+   *
+   * On the customer's own list rather than behind a second endpoint,
+   * because the decision it carries has to be *findable*: the fallback
+   * question is mailed once and never chased, so a customer who deleted
+   * the message needs to meet it again where they already look.
+   *
+   * Narrow on purpose. The customer is told which business they wrote to,
+   * what they were promised and where the lead stands — and nothing about
+   * the placement: not its id, not what it cost, not when it ends.
+   */
+  showcaseLeadSource: {
+    select: {
+      id: true,
+      status: true,
+      urgencyBucket: true,
+      slaHoursSnapshot: true,
+      slaDueAt: true,
+      breachedAt: true,
+      fallbackAskedAt: true,
+      fallbackDecision: true,
+      fallbackDecidedAt: true,
+      releasedAt: true,
+      closedAt: true,
+      closeReason: true,
+      createdAt: true,
+      kindSnapshot: true,
+      listedPriceSnapshot: true,
+      cardVersion: { select: { title: true } },
+      provider: { select: { id: true, businessName: true } },
+    },
+  },
+  /*
+   * The customer's own review of the matched provider — enough to show
+   * "you rated this 4" or "your review was removed" on the row, and no
+   * more. The comment lives on the review screen, not here. A list
+   * relation on the schema, but the unique index on `offerId` plus a
+   * single matched offer means at most one row per request in practice.
+   */
+  reviews: {
+    take: 1,
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, rating: true, removedAt: true },
+  },
+} satisfies Prisma.ServiceRequestInclude;
+
+type CustomerRequestRow = Prisma.ServiceRequestGetPayload<{
+  include: typeof customerRequestInclude;
+}>;
+
+function toCustomerServiceRequest({ showcaseLeadSource, reviews, ...request }: CustomerRequestRow) {
+  return {
+    ...withQualityLabel(request),
+    offersCount: request._count.offers,
+    review: reviews[0] ?? null,
+    showcaseLead: showcaseLeadSource
+      ? {
+          id: showcaseLeadSource.id,
+          status: showcaseLeadSource.status,
+          urgencyBucket: showcaseLeadSource.urgencyBucket,
+          slaHours: showcaseLeadSource.slaHoursSnapshot,
+          slaDueAt: showcaseLeadSource.slaDueAt,
+          breachedAt: showcaseLeadSource.breachedAt,
+          fallbackAskedAt: showcaseLeadSource.fallbackAskedAt,
+          fallbackDecision: showcaseLeadSource.fallbackDecision,
+          fallbackDecidedAt: showcaseLeadSource.fallbackDecidedAt,
+          releasedAt: showcaseLeadSource.releasedAt,
+          closedAt: showcaseLeadSource.closedAt,
+          closeReason: showcaseLeadSource.closeReason,
+          createdAt: showcaseLeadSource.createdAt,
+          cardTitle: showcaseLeadSource.cardVersion.title,
+          kind: showcaseLeadSource.kindSnapshot,
+          // Absent rather than null on a promotion card, exactly as the feed
+          // does it: a client cannot render a price it was never given.
+          ...(showcaseLeadSource.kindSnapshot === 'SERVICE'
+            ? { listedServicePriceAmount: showcaseLeadSource.listedPriceSnapshot }
+            : {}),
+          provider: showcaseLeadSource.provider,
+        }
+      : null,
+  };
+}
+
+/**
  * Who a new request belongs to.
  *
  * A signed-in customer owns their request, whoever the contact person on it
@@ -1775,16 +1821,3 @@ function normalizeBudgetRange(
   return { budgetMin, budgetMax };
 }
 
-function normalizeOptionalDate(value: string | null | undefined, fieldName: string) {
-  const normalized = normalizeNullableString(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) {
-    throw new BadRequestException(`${fieldName} must be a valid date`);
-  }
-
-  return date;
-}

@@ -10,7 +10,12 @@ import {
   type FormEvent,
   type RefObject,
 } from 'react';
-import type { ContactDisclosureConfig, Question, RouterSelection } from '../../../lib/api';
+import type {
+  ContactDisclosureConfig,
+  Question,
+  RouterSelection,
+  ShowcaseFeedCard,
+} from '../../../lib/api';
 import { DRAFT_STATE_FIELD, draftStateFor } from '../../../lib/draft-state';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import type { RequestDraftPayload } from '../../../lib/request-drafts';
@@ -34,10 +39,14 @@ import { useIdentityCheck } from '../../request-fields/identity-check';
 import { IdentityNotice } from '../../request-fields/identity-notice';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
-import { UrgencySelect } from '../../request-fields/timing-fields';
-import { saveMarketplaceDraftAction, type SubmitRequestResult } from '../actions';
+import { TimingFields } from '../../request-fields/timing-fields';
+import {
+  handOffToShowcaseAction,
+  saveMarketplaceDraftAction,
+  type SubmitRequestResult,
+} from '../actions';
 import { BudgetFields } from './budget-fields';
-import { ShowcaseMatches } from './showcase-matches';
+import { ShowcaseMatches, type HandOffFailure } from './showcase-matches';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
 export type { AccountContact };
@@ -243,6 +252,16 @@ export function RequestForm({
   /** The API's refusal of the last submission, shown inline until the next try. */
   const [failure, setFailure] = useState<Extract<SubmitRequestResult, { ok: false }> | null>(null);
   const [submitting, startSubmit] = useTransition();
+
+  /*
+   * The business the customer chose to address the request to, or null for
+   * the ordinary marketplace request. One form value: choosing changes what
+   * the primary button does, never what has been typed. See ShowcaseMatches.
+   */
+  const [selectedCard, setSelectedCard] = useState<ShowcaseFeedCard | null>(null);
+  const [handOffFailure, setHandOffFailure] = useState<HandOffFailure | null>(null);
+  const [handOffDraftExists, setHandOffDraftExists] = useState(false);
+  const [handingOff, startHandOff] = useTransition();
   /** "Hesap değiştir" — a server action that redirects, so it runs in a transition. */
   const [, startSwitch] = useTransition();
 
@@ -403,7 +422,11 @@ export function RequestForm({
     // The gate stands until the check said `new-customer`; a visitor cannot
     // reach this step otherwise, but submit is where the rule finally holds.
     if (!identity.gateOpen) return;
-    if (submitBlocked || submitting) return;
+    if (submitBlocked || submitting || handingOff) return;
+    // With a business chosen the primary button is not a submit at all, but an
+    // Enter key in a field still reaches here: the request is never posted to
+    // the market behind a choice that said otherwise.
+    if (selectedCard) return;
 
     setFailure(null);
     startSubmit(async () => {
@@ -419,10 +442,9 @@ export function RequestForm({
       }
       if (result.ok) {
         // The action already cleared the draft cookie; nothing else to undo.
-        // `published` reports what the API answered — a request born live is
-        // already in front of providers, and the success page says so.
-        const published = result.status === 'APPROVED' ? '&published=1' : '';
-        router.push(`/requests/success?id=${encodeURIComponent(result.requestId)}${published}`);
+        // Only the id travels: the success page reads the request's real
+        // state from the API rather than from a flag this form would set.
+        router.push(`/requests/success?id=${encodeURIComponent(result.requestId)}`);
         return;
       }
       setFailure(result);
@@ -434,6 +456,44 @@ export function RequestForm({
         answerableQuestions.map((question) => question.key),
       );
       if (target) setStep(target.target === 'addressNote' ? 2 : 1);
+    });
+  }
+
+  /**
+   * "Seçili işletmeye devam et": parks the form as a draft keyed on the chosen
+   * card and moves to that business's vitrin form, which restores it. Nothing
+   * is posted to the market. Every refusal lands beside the cards, with the
+   * form untouched; a card that has gone off the air also drops the choice, so
+   * the button is a submit again and the general request is one click away.
+   */
+  function handOff(replace: boolean) {
+    const form = formRef.current;
+    const card = selectedCard;
+    if (!form || !card || handingOff) return;
+    if (step === 2 && !stepIsValid(2)) return;
+
+    setHandOffFailure(null);
+    setHandOffDraftExists(false);
+    startHandOff(async () => {
+      const data = new FormData(form);
+      if (replace) data.set('replaceDraft', 'true');
+      let result: Awaited<ReturnType<typeof handOffToShowcaseAction>>;
+      try {
+        result = await handOffToShowcaseAction(data, { cardId: card.cardId, categoryId });
+      } catch (error) {
+        console.error('[request] hand-off: transport failure', error);
+        result = { ok: false, code: 'DRAFT_FAILED' };
+      }
+      if (result.ok) {
+        router.push(result.href);
+        return;
+      }
+      if (result.code === 'DRAFT_EXISTS') {
+        setHandOffDraftExists(true);
+        return;
+      }
+      if (result.code === 'CARD_UNAVAILABLE') setSelectedCard(null);
+      setHandOffFailure(result.code);
     });
   }
 
@@ -772,28 +832,30 @@ export function RequestForm({
               city={place.city}
               district={place.district}
               neighborhood={place.neighborhood}
+              selected={selectedCard}
+              onSelect={(card) => {
+                setSelectedCard(card);
+                setHandOffFailure(null);
+                setHandOffDraftExists(false);
+              }}
+              guest={accountContact === null}
+              failure={handOffFailure}
+              draftExists={handOffDraftExists}
+              onReplaceDraft={() => handOff(true)}
+              onKeepDraft={() => setHandOffDraftExists(false)}
+              busy={handingOff}
             />
 
             <section className="form-section">
               <h2>Zaman ve bütçe</h2>
               <div className="form-grid">
-                <UrgencySelect defaultValue={initialDraft?.urgency} />
-                <label className="form-row">
-                  <span>
-                    {preferredDateQuestion?.label ?? 'Tercih edilen tarih'}
-                    {preferredDateQuestion?.isRequired ? ' *' : ''}
-                  </span>
-                  <input
-                    name="preferredDate"
-                    type="date"
-                    required={preferredDateQuestion?.isRequired ?? false}
-                    defaultValue={initialDraft?.preferredDate}
-                    data-testid="request-preferred-date"
-                  />
-                  {preferredDateQuestion?.helpText ? (
-                    <span className="help-text">{preferredDateQuestion.helpText}</span>
-                  ) : null}
-                </label>
+                <TimingFields
+                  dateQuestion={preferredDateQuestion}
+                  defaultUrgency={initialDraft?.urgency}
+                  defaultStart={initialDraft?.preferredDate}
+                  defaultEnd={initialDraft?.preferredDateEnd}
+                  onChange={refreshSignals}
+                />
                 <BudgetFields
                   minLabel={budgetQuestion?.label ?? 'Minimum bütçe'}
                   required={budgetQuestion?.isRequired ?? false}
@@ -839,7 +901,26 @@ export function RequestForm({
               and the customer saw nothing. A signed-in customer's step has no
               empty field left to refuse it.
             */}
-            {isLast ? (
+            {isLast && selectedCard ? (
+              /*
+                A business is chosen: the primary action leaves for its vitrin
+                form instead of posting to the market. `type="button"` on
+                purpose — this must never submit — and its own key, so React
+                cannot recycle the node into the submit button below mid-click.
+              */
+              <button
+                key="handoff"
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handOff(false)}
+                disabled={handingOff}
+                aria-busy={handingOff || undefined}
+                data-testid="request-handoff-cta"
+              >
+                {handingOff ? 'Aktarılıyor…' : 'Seçili işletmeye devam et'}
+                <IconArrowRight />
+              </button>
+            ) : isLast ? (
               /*
                 Withheld only for the one case the API will refuse anyway: a
                 signed-in customer whose account has no complete contact and who

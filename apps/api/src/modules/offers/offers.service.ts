@@ -359,6 +359,10 @@ export class OffersService {
       creditCost: offer.creditCost,
       creditRefundedAt: offer.creditRefundedAt,
       submittedAt: offer.submittedAt,
+      // Whether the customer opened it. The list needs this for one sentence:
+      // an offer they read and the provider then withdrew is told to them as
+      // a cancellation, not filed away as history they never saw.
+      viewedAt: offer.viewedAt,
     }));
   }
 

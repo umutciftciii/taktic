@@ -1,5 +1,6 @@
 import { OfferStatus, ServiceRequestStatus, UserRole } from '@prisma/client';
 import request from 'supertest';
+import { endOfWeekIsoDay, todayIsoDay } from '../src/common/date-only';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
@@ -94,7 +95,10 @@ async function approvedRequestWithAnswers() {
     .send(
       serviceRequestPayload(category.slug, {
         description: DESCRIPTION,
-        preferredDate: '2026-09-15',
+        // A whole range that agrees with the urgency: the API refuses a lone
+        // date, a past day and an end beyond this week's Sunday.
+        preferredDate: todayIsoDay(),
+        preferredDateEnd: endOfWeekIsoDay(todayIsoDay()),
         urgency: 'THIS_WEEK',
         budgetMin: 150000,
         budgetMax: 300000,

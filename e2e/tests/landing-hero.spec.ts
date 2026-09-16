@@ -93,6 +93,18 @@ test.describe('the home page hero slogan', () => {
       expect(collapse(await heading.innerText())).toBe(SLOGAN);
       await expect(visitor.page.getByRole('heading', { level: 1, name: SLOGAN })).toBeVisible();
 
+      // The provider band's third step: providers see requests as soon as
+      // they are enrolled — there is no operator approval to wait for, and
+      // the old sentence promised one.
+      const steps = visitor.page.locator('.lp-cta-band-bullet');
+      await expect(steps).toHaveText([
+        /Kategori seç/,
+        /Hizmet bölgeni belirle/,
+        /^\s*3\s*Talepleri gör\s*$/,
+        /Krediyle teklif ver/,
+      ]);
+      await expect(visitor.page.locator('.lp-cta-band')).not.toContainText('Admin onayından sonra');
+
       // Three sentences, three lines, each starting below the one before it.
       const lines = heading.locator('.lp-h1-line');
       await expect(lines).toHaveCount(3);

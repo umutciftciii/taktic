@@ -150,9 +150,20 @@ export class CreateServiceRequestDto {
   @Min(100)
   budgetMax?: number | null;
 
+  /**
+   * The first and last day the customer wants the work done, each a calendar
+   * day in Europe/Istanbul written `YYYY-MM-DD`. Both may be omitted — the
+   * only shape a client from before the range existed knows — but one without
+   * the other, a day in the past, a reversed pair or a pair at odds with
+   * `urgency` is refused by `normalizePreferredDateRange` in the service.
+   */
   @IsOptional()
   @IsString()
   preferredDate?: string | null;
+
+  @IsOptional()
+  @IsString()
+  preferredDateEnd?: string | null;
 
   @IsOptional()
   @IsString()

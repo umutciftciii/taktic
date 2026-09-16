@@ -8,6 +8,7 @@ import {
   RequestQualityBreakdownComponent,
   formatPrice,
   formatDate,
+  formatDateRange,
   formatDateTime,
   qualityLabel,
   qualityBreakdownLabel,
@@ -23,6 +24,7 @@ import {
   formatBudgetRange,
 } from '../../../provider-ui';
 import { createOfferAction } from './actions';
+import { OfferPriceField } from '../../../offer-price-field';
 import { ReportDialog } from './report-dialog';
 
 type ProviderRequestDetailPageProps = {
@@ -186,8 +188,10 @@ export default async function ProviderRequestDetailPage({
             </div>
             <div className="metric-cell">
               <span className="metric-label">Tercih edilen tarih</span>
-              <span className="metric-value" style={{ fontSize: 20 }}>
-                {request.preferredDate ? formatDate(request.preferredDate) : '—'}
+              <span className="metric-value" style={{ fontSize: 20 }} data-testid="request-preferred-range">
+                {request.preferredDate
+                  ? formatDateRange(request.preferredDate, request.preferredDateEnd)
+                  : '—'}
               </span>
             </div>
             <div className="metric-cell">
@@ -355,24 +359,7 @@ export default async function ProviderRequestDetailPage({
                 */}
                 <input type="hidden" name="expectedCreditCost" value={offerCreditCost ?? ''} />
 
-                <label className="pdash-form-row">
-                  <span>Teklif tutarı *</span>
-                  <input
-                    name="priceAmount"
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    inputMode="decimal"
-                    placeholder="Örn. 1500.00"
-                    style={{
-                      fontFamily: 'var(--font-heading)',
-                      fontWeight: 800,
-                      fontSize: 18,
-                    }}
-                    required
-                  />
-                  <small>Ondalıklı fiyat girebilirsiniz. Örn: 149,90 veya 1500.00 TRY.</small>
-                </label>
+                <OfferPriceField />
 
                 <div className="pdash-form-grid">
                   <label className="pdash-form-row">

@@ -36,7 +36,9 @@ export type ServiceRequestPayload = {
   addressNote: string | null;
   budgetMin: number | null;
   budgetMax: number | null;
+  /** `YYYY-MM-DD`, both ends or neither — the API refuses a half range. */
   preferredDate: string | null;
+  preferredDateEnd: string | null;
   urgency: string | null;
   description: string | null;
   contactDisclosureAccepted: boolean;
@@ -73,7 +75,10 @@ export function buildServiceRequestPayload(formData: FormData): ServiceRequestPa
     // optional semantics and the wire format are both unchanged.
     budgetMin: parseLiraToMinor(readFormString(formData, 'budgetMin')),
     budgetMax: parseLiraToMinor(readFormString(formData, 'budgetMax')),
+    // The two date inputs' own values, `YYYY-MM-DD`, posted as the strings
+    // they are: no Date is constructed here, so no zone can move the day.
     preferredDate: readOptionalFormString(formData, 'preferredDate'),
+    preferredDateEnd: readOptionalFormString(formData, 'preferredDateEnd'),
     // The timing select's own value (TODAY / THIS_WEEK / FLEXIBLE), or null
     // when the customer left it on "Seçiniz".
     urgency: readOptionalFormString(formData, 'urgency'),

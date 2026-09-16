@@ -61,6 +61,18 @@ export default async function RequestOfferDetailPage({
         <span>Tekliflere dön</span>
       </Link>
 
+      {/*
+        The customer opened this offer and its provider has since taken it
+        back. Said first, before the price, so the rest of the page reads as
+        history: the accept and shortlist controls below are already gone for
+        a withdrawn offer, and this is what tells them why.
+      */}
+      {offer.status === 'WITHDRAWN' && offer.viewedAt ? (
+        <div className="notice cdash-notice-warn" role="status" data-testid="offer-withdrawn-notice">
+          Bu teklif hizmet veren tarafından iptal edilmiştir.
+        </div>
+      ) : null}
+
       <header className="cdash-page-head">
         <span className="kicker">Teklif detayı</span>
         <h1 className="cdash-page-title">{offer.provider.businessName}</h1>
