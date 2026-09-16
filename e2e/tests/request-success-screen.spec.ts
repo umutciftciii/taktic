@@ -16,7 +16,11 @@ import {
   fillRequestForm,
   submitRequestForm,
 } from '../src/journeys';
-import { seedApprovedShowcaseCard, seedLiveShowcasePlacement } from '../src/showcase-fixtures';
+import {
+  retireShowcasePlacements,
+  seedApprovedShowcaseCard,
+  seedLiveShowcasePlacement,
+} from '../src/showcase-fixtures';
 import { primaryRuntime } from '../src/runtime';
 
 /**
@@ -214,6 +218,7 @@ test.describe('request success screen', () => {
       expect(text).not.toContain('ön inceleme');
     } finally {
       await actor.close();
+      await retireShowcasePlacements([placement.id]);
     }
   });
 });

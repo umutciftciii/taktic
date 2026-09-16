@@ -14,7 +14,11 @@ import {
 } from '../src/fixtures';
 import { completeContactStep } from '../src/journeys';
 import { isProviderReviewsEnabled, seedReview, setProviderReviewsEnabled } from '../src/review-fixtures';
-import { seedApprovedShowcaseCard, seedLiveShowcasePlacement } from '../src/showcase-fixtures';
+import {
+  retireShowcasePlacements,
+  seedApprovedShowcaseCard,
+  seedLiveShowcasePlacement,
+} from '../src/showcase-fixtures';
 import { artifactsDir, primaryRuntime } from '../src/runtime';
 
 const SCREENSHOT_DIR = resolve(artifactsDir, 'screens');
@@ -48,6 +52,13 @@ const SCREENSHOT_DIR = resolve(artifactsDir, 'screens');
 
 const WIDTHS = [320, 768, 1024, 1440] as const;
 
+/** Every run this file put on the air, retired after each test so the home shelf stays other specs'. */
+const placementsOnAir: string[] = [];
+
+test.afterEach(async () => {
+  await retireShowcasePlacements(placementsOnAir.splice(0));
+});
+
 async function overflowOf(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 }
@@ -68,6 +79,7 @@ async function seedCardFor(options: {
     city: options.city,
     district: options.district,
   });
+  placementsOnAir.push(placement.id);
   return { card, placement };
 }
 
