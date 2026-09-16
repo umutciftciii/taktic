@@ -1054,6 +1054,7 @@ input[readonly] {
 }
 
 .pdash-notice-warn,
+.cdash-notice-warn,
 .provider-apply-notice.is-warning,
 .auth-screen-notice {
   background: var(--color-neutral-200);
@@ -6389,3 +6390,7 @@ body.has-drawer-open {
 .provider-choice-rating { margin: 0; }
 .provider-choice-general .provider-choice-meta { color: var(--color-neutral-700); }
 .provider-choice-note { display: block; font-size: 14px; }
+
+/* The withdrawn-offer sentence on a history row: its own line under the row's
+   facts, so it never competes with the name and the date for width. */
+.cdash-history-notice { flex-basis: 100%; font-weight: 600; color: var(--color-neutral-800); }

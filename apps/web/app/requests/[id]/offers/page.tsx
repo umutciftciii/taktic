@@ -216,13 +216,33 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
             Name, date and the fact of the withdrawal — nothing else. The price
             is deliberately absent: it is not an amount the customer can take,
             and showing it next to the live offers would read as a comparison.
+
+            One sentence more for an offer the customer had already opened: they
+            read it as a live choice, so its disappearance is told to them as a
+            cancellation rather than filed away. It is about the offer only —
+            the provider's credit and refund are not the customer's business
+            and are not mentioned.
           */}
           <ul className="cdash-history" data-testid="withdrawn-offers">
             {withdrawnOffers.map((offer) => (
-              <li className="cdash-history-item" key={offer.id}>
+              <li
+                className="cdash-history-item"
+                key={offer.id}
+                data-testid="withdrawn-offer"
+                data-viewed={offer.viewedAt ? 'true' : 'false'}
+              >
                 <span className="tag tag-neutral">Teklif geri çekildi</span>
                 <span className="cdash-history-name">{offer.provider.businessName}</span>
                 <span className="cdash-history-time">{formatDateTime(offer.submittedAt)}</span>
+                {offer.viewedAt ? (
+                  <span
+                    className="cdash-history-notice"
+                    role="status"
+                    data-testid="offer-withdrawn-notice"
+                  >
+                    Bu teklif hizmet veren tarafından iptal edilmiştir.
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
