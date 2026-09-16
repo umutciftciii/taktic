@@ -119,6 +119,24 @@ const sharedEnv = {
 const trustedProxyApiEnv = { TRUST_PROXY: '1' };
 const trustedProxyWebEnv = { WEB_TRUST_PROXY: 'true' };
 
+/**
+ * Turnstile in its deterministic test mode, on every stack.
+ *
+ * The browser never loads a byte from Cloudflare: the web app's adapter mints
+ * a token of the shape the API's test verifier accepts, carries it exactly as
+ * it would carry a real one — server action argument, one request header —
+ * and the API's guard, replay cache and error mapping run for real. A token
+ * that never reaches the API fails the scenario the way a bot would fail it,
+ * which is the point of running this mode rather than switching the gate off.
+ *
+ * The API accepts `test` here because NODE_ENV is "test"; the web accepts it
+ * only on a declared local stack, so it is told it is one. Neither is a
+ * secret and neither can reach a real widget (see turnstile.config.ts and
+ * lib/turnstile.ts for the two gates).
+ */
+const turnstileApiEnv = { TURNSTILE_MODE: 'test' };
+const turnstileWebEnv = { TURNSTILE_MODE: 'test', APP_ENVIRONMENT: 'local' };
+
 function apiServer(runtime: Runtime) {
   return {
     // The compiled entry point, so the suite exercises the same artefact CI
@@ -133,6 +151,7 @@ function apiServer(runtime: Runtime) {
     env: {
       ...sharedEnv,
       ...trustedProxyApiEnv,
+      ...turnstileApiEnv,
       API_PORT: String(runtime.ports.api),
       REQUIRE_PHONE_VERIFICATION: String(runtime.requirePhoneVerification),
       // The phone-verification test bypass, and only on the runtime whose
@@ -234,8 +253,9 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
       // confirmation screen say, so it has to agree with its own API.
       PROVIDER_CLAIM_ENABLED: String(runtime.providerClaim),
       // Only the web app forwards a client address to the API — see
-      // trustedProxyWebEnv. The admin app has no such path.
-      ...(app === 'web' ? trustedProxyWebEnv : {}),
+      // trustedProxyWebEnv. The admin app has no such path, and no Turnstile
+      // widget either.
+      ...(app === 'web' ? { ...trustedProxyWebEnv, ...turnstileWebEnv } : {}),
     },
   };
 }
@@ -299,6 +319,15 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *                          and a redirect off a server action that lands the
  *                          customer on a new screen — on 320px too
  *
+ * And the Turnstile gate, for the overlay reason and the cookie reason at
+ * once:
+ *
+ *   turnstile-protection   a widget slot that draws in place on whichever
+ *                          step is showing, a refusal under the field with
+ *                          `role="alert"`, and the same forms as the identity
+ *                          gate — driven by a page-level override the engine
+ *                          has to run before the app's own script does
+ *
  * And the identity gate, for the first reason again:
  *
  *   request-identity-gate  the pre-check on both request forms and the draft
@@ -330,7 +359,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];
