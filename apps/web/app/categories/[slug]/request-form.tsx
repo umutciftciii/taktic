@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -36,6 +37,13 @@ import {
 import { DescriptionField } from '../../request-fields/description-field';
 import { ContactDisclosureField } from '../../request-fields/disclosure-field';
 import { useIdentityCheck } from '../../request-fields/identity-check';
+import { TurnstileSlot, useTurnstile } from '../../request-fields/turnstile';
+import {
+  TURNSTILE_ACTIONS,
+  TURNSTILE_CHALLENGE_FAILED,
+  turnstileHeaders,
+  type TurnstileWebConfig,
+} from '../../../lib/turnstile';
 import { IdentityNotice } from '../../request-fields/identity-notice';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
@@ -90,7 +98,12 @@ type RequestFormProps = {
    * redirects, so a refusal can be shown inline with everything the customer
    * typed still on screen; the component navigates on success.
    */
-  action: (formData: FormData) => Promise<SubmitRequestResult>;
+  action: (formData: FormData, turnstileToken: string | null) => Promise<SubmitRequestResult>;
+  /**
+   * How the Turnstile widget is rendered on this stack — read by the page from
+   * the server's environment at request time. See lib/turnstile.ts.
+   */
+  turnstile: TurnstileWebConfig;
   /**
    * A draft the customer parked before leaving to sign in or activate an
    * account, restored into the fields. Null when there is nothing to restore.
@@ -147,6 +160,7 @@ export function RequestForm({
   provinces,
   accountContact = null,
   action,
+  turnstile: turnstileConfig,
   initialDraft = null,
   wrongAccount = false,
   formPath,
@@ -216,12 +230,27 @@ export function RequestForm({
   const [guestContact, setGuestContact] = useState(EMPTY_ALTERNATE_CONTACT);
 
   /*
+   * The Turnstile adapter, one per form. Every protected call below — the
+   * identity check, the activation link, the submission — asks it for a fresh
+   * token first; the token goes into that one call's header and nowhere else.
+   */
+  const turnstile = useTurnstile(turnstileConfig);
+  const acquireIdentityToken = useCallback(
+    () => turnstile.acquire(TURNSTILE_ACTIONS.identityCheck),
+    [turnstile.acquire],
+  );
+
+  /*
    * The gate on the contact step. A visitor's number and e-mail are checked
    * once all three fields are filled and left; only a `new-customer` answer
    * opens the way forward. For a signed-in customer the check is disabled and
    * the gate stands open — their identity is the session's, already resolved.
    */
-  const identity = useIdentityCheck({ ...guestContact, enabled: accountContact === null });
+  const identity = useIdentityCheck({
+    ...guestContact,
+    enabled: accountContact === null,
+    acquireToken: acquireIdentityToken,
+  });
 
   /*
    * The two ways off the contact step for somebody who already has an account,
@@ -429,11 +458,21 @@ export function RequestForm({
     if (selectedCard) return;
 
     setFailure(null);
+    // Read before the transition: React resets nothing here, but the token is
+    // asked for per submission and the FormData must not carry it.
+    const data = new FormData(form);
     startSubmit(async () => {
       let result: SubmitRequestResult;
       try {
-        result = await action(new FormData(form));
+        const token = await turnstile.acquire(TURNSTILE_ACTIONS.serviceRequestCreate);
+        result = await action(data, token);
       } catch (error) {
+        if (error instanceof Error && error.message === TURNSTILE_CHALLENGE_FAILED) {
+          // The widget could not produce a token: nothing was sent. Said in
+          // the banner like any other refusal, with "tekrar deneyin".
+          setFailure({ ok: false, code: TURNSTILE_CHALLENGE_FAILED, message: null });
+          return;
+        }
         // The action itself never throws — it answers every refusal — so this
         // is the transport: a dropped connection, a deploy mid-flight. Said
         // inline like any other failure rather than handed to the error page.
@@ -557,9 +596,10 @@ export function RequestForm({
   async function sendActivation() {
     setDraftBusy(true);
     try {
+      const token = await turnstile.acquire(TURNSTILE_ACTIONS.identityActivate);
       const response = await fetch('/api/auth/request-identity-check/activate', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...turnstileHeaders(token) },
         body: JSON.stringify({
           phone: guestContact.phone.trim(),
           email: guestContact.email.trim(),
@@ -867,6 +907,14 @@ export function RequestForm({
               </div>
             </section>
           </div>
+
+          {/*
+            The Turnstile widget's place: outside the step panels, so a
+            challenge that needs the customer is drawn on whichever step is
+            showing — the contact step's identity check and the last step's
+            submission both run through it.
+          */}
+          <TurnstileSlot turnstile={turnstile} />
 
           <div className="step-foot">
             <div className="inline-actions">

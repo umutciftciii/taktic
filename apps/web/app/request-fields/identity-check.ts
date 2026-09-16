@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { turnstileHeaders } from '../../lib/turnstile';
 
 export type IdentityStatus =
   | 'idle' | 'checking' | 'ok' | 'login-required' | 'activation-required'
@@ -42,7 +43,19 @@ export function identityReducer(state: IdentityState, action: IdentityAction): I
 
 const API_STATUSES = new Set(['new-customer', 'login-required', 'activation-required', 'identity-conflict', 'unavailable']);
 
-export function useIdentityCheck(input: { name: string; phone: string; email: string; enabled: boolean }) {
+export function useIdentityCheck(input: {
+  name: string;
+  phone: string;
+  email: string;
+  enabled: boolean;
+  /**
+   * The Turnstile token for one check, asked for right before the POST and
+   * carried in its header. A widget that cannot produce one fails the check
+   * the way a dropped connection does — `error`, with "Tekrar dene" — and
+   * says nothing more, because the check has not been made.
+   */
+  acquireToken?: () => Promise<string | null>;
+}) {
   const [state, dispatch] = useReducer(identityReducer, { status: 'idle', seq: 0, phone: '', email: '' });
   const controllerRef = useRef<AbortController | null>(null);
   /*
@@ -85,10 +98,16 @@ export function useIdentityCheck(input: { name: string; phone: string; email: st
     const seq = seqRef.current;
     dispatch({ type: 'start', phone: input.phone, email: input.email });
 
-    fetch('/api/auth/request-identity-check', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phone, email }), signal: controller.signal,
-    })
+    const token = input.acquireToken ? input.acquireToken() : Promise.resolve<string | null>(null);
+    token
+      .then((value) =>
+        fetch('/api/auth/request-identity-check', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...turnstileHeaders(value) },
+          body: JSON.stringify({ phone, email }),
+          signal: controller.signal,
+        }),
+      )
       .then(async (response) => {
         if (!response.ok) throw new Error(String(response.status));
         const body = (await response.json()) as { status?: string };
@@ -105,7 +124,7 @@ export function useIdentityCheck(input: { name: string; phone: string; email: st
         void error;
         dispatch({ type: 'failure', seq });
       });
-  }, [input.enabled, input.name, input.phone, input.email]);
+  }, [input.enabled, input.name, input.phone, input.email, input.acquireToken]);
 
   return { status: input.enabled ? state.status : ('ok' as const), check, retry: check, gateOpen: !input.enabled || state.status === 'ok' };
 }

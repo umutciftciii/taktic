@@ -12,6 +12,7 @@ import {
 } from '../../lib/request-drafts';
 import { decodeRouterSelections, encodeRouterSelections } from '../../lib/request-flow';
 import { buildServiceRequestPayload } from '../../lib/service-request-payload';
+import { turnstileHeaders } from '../../lib/turnstile';
 
 /**
  * One step of a routed flow.
@@ -64,14 +65,23 @@ export type SubmitRequestResult =
  * — a conflict on the contact fields, a DTO message — is shown inline beside
  * what caused it, and only the successful submission navigates (the component
  * does that, with the id returned here).
+ *
+ * The Turnstile token is a second argument, not a form field, on purpose:
+ * the FormData is also what a draft is built from (`draftPayloadFromForm`),
+ * and a token must never be parked. It goes into one request header and is
+ * gone when the call returns; the API alone judges it.
  */
-export async function submitServiceRequestAction(formData: FormData): Promise<SubmitRequestResult> {
+export async function submitServiceRequestAction(
+  formData: FormData,
+  turnstileToken: string | null,
+): Promise<SubmitRequestResult> {
   try {
     // The body is built by the one function both request forms share — this
     // one and the vitrin card's — so the field names and the optional/required
     // split cannot drift between them.
     const request = await apiFetch<ServiceRequest>('/service-requests', {
       method: 'POST',
+      headers: turnstileHeaders(turnstileToken),
       body: JSON.stringify(buildServiceRequestPayload(formData)),
     });
     // The API consumed the draft inside the request's own transaction — when

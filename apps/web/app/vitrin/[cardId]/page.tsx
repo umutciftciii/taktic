@@ -15,6 +15,7 @@ import { areaSentence } from '../../showcase-shelf';
 import { RatingSummaryLine } from '../../review-stars';
 import { faceFromFeedCard, ShowcaseCardFace } from '../../showcase-card-face';
 import { ShowcaseLeadForm } from './lead-form';
+import { readTurnstileWebConfig } from '../../../lib/turnstile';
 
 type CardPageProps = {
   params: Promise<{ cardId: string }>;
@@ -234,6 +235,7 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
                   showDisclosure={showDisclosure}
                   accountContact={accountContact}
                   prefill={prefill}
+                  turnstile={readTurnstileWebConfig()}
                   initialDraft={draft.kind === 'payload' ? draft.payload : null}
                   wrongAccount={draft.kind === 'wrong-account'}
                   formPath={formPath}

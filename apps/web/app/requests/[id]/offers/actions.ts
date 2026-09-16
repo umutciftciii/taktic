@@ -8,6 +8,7 @@ import {
   type CustomerReviewState,
   CustomerServiceRequest,
 } from '../../../../lib/api';
+import { turnstileHeaders } from '../../../../lib/turnstile';
 
 /**
  * Marks a matched request as delivered. The API only accepts this from the
@@ -56,11 +57,14 @@ async function completionDestination(requestId: string): Promise<string> {
  * Requests a one-time code for the request's phone number.
  *
  * The outcome travels back as a status word in the query string — never the
- * code itself, which the API does not return to anyone.
+ * code itself, which the API does not return to anyone. The Turnstile token
+ * comes as an argument from the client component that asked the widget for
+ * it, and is carried in one header for this one call.
  */
-export async function sendPhoneCodeAction(formData: FormData) {
-  const requestId = readFormString(formData, 'requestId');
-  const status = await callVerificationApi(`/service-requests/${requestId}/phone-verification`);
+export async function sendPhoneCodeAction(requestId: string, turnstileToken: string | null) {
+  const status = await callVerificationApi(`/service-requests/${requestId}/phone-verification`, undefined, {
+    headers: turnstileHeaders(turnstileToken),
+  });
 
   revalidatePath(`/requests/${requestId}/offers`);
   redirect(`/requests/${requestId}/offers?verification=${status}`);
@@ -80,10 +84,15 @@ export async function verifyPhoneCodeAction(formData: FormData) {
 }
 
 /** Maps the API result onto a small, safe vocabulary the page can render. */
-async function callVerificationApi(path: string, body?: Record<string, string>) {
+async function callVerificationApi(
+  path: string,
+  body?: Record<string, string>,
+  init: { headers?: Record<string, string> } = {},
+) {
   try {
     await apiFetch(path, {
       method: 'POST',
+      headers: init.headers ?? {},
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     return 'ok';
@@ -95,6 +104,10 @@ async function callVerificationApi(path: string, body?: Record<string, string>) 
     if (error.status === 429) return 'rate-limited';
     if (error.status === 400) return 'invalid';
     if (error.status === 409) return 'already-verified';
+    // The Turnstile gate, worded on the page from the same short vocabulary:
+    // a refused or missing token, and a check that could not be made.
+    if (error.status === 403 && /TURNSTILE_/.test(error.body)) return 'challenge-failed';
+    if (error.status === 503 && /TURNSTILE_UNAVAILABLE/.test(error.body)) return 'challenge-unavailable';
     return 'failed';
   }
 }

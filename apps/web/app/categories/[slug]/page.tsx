@@ -12,6 +12,7 @@ import { decodeRouterSelections } from '../../../lib/request-flow';
 import { CategoryVisual } from '../../category-visual';
 import { submitServiceRequestAction } from '../actions';
 import { RequestForm } from './request-form';
+import { readTurnstileWebConfig } from '../../../lib/turnstile';
 import { RouterStep } from './router-step';
 
 type CategoryPageProps = {
@@ -169,6 +170,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
             provinces={provinces}
             accountContact={accountContact}
             action={submitServiceRequestAction}
+            turnstile={readTurnstileWebConfig()}
             initialDraft={draft.kind === 'payload' ? draft.payload : null}
             wrongAccount={draft.kind === 'wrong-account'}
             formPath={formPath}

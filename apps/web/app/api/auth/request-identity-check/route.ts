@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiUrl } from '../../../api-base';
 import { clientForwardingHeaders } from '../../../../lib/forwarded-for';
+import { TURNSTILE_TOKEN_HEADER, turnstileHeaders } from '../../../../lib/turnstile';
 
 /**
  * Same-origin hop for the identity pre-check. Forwards the body as-is and the
@@ -13,7 +14,12 @@ export async function POST(request: NextRequest) {
     const upstream = await fetch(`${apiUrl}/auth/request-identity-check`, {
       method: 'POST',
       cache: 'no-store',
-      headers: { 'content-type': 'application/json', ...(await clientForwardingHeaders()) },
+      headers: {
+        'content-type': 'application/json',
+        ...(await clientForwardingHeaders()),
+        // The Turnstile token, forwarded as received: the API verifies it, this hop never does.
+        ...turnstileHeaders(request.headers.get(TURNSTILE_TOKEN_HEADER)),
+      },
       body,
     });
     return new NextResponse(await upstream.text(), {

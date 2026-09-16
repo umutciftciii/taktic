@@ -5701,6 +5701,23 @@ body.has-drawer-open {
   flex: 1 1 240px;
 }
 
+/*
+ * The Turnstile widget's slot (request-fields/turnstile.tsx). An empty grid
+ * — and so zero height — while Cloudflare is satisfied without the customer;
+ * the widget draws itself inside the container only when it needs them, and
+ * the one sentence below it appears only on a stack where the check cannot
+ * run. Never `display: none`: a widget rendered into a hidden box cannot
+ * measure itself.
+ */
+.turnstile-slot {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.turnstile-slot > p {
+  margin: 0;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    Vitrin — VIT-DESIGN-002
 
