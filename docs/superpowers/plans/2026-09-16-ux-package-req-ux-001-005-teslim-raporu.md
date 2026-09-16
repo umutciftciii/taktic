@@ -71,7 +71,7 @@ Throwaway DB `DROP DATABASE` ile silindi; yerel `taktic` 61 migration'da kaldı.
 | `pnpm build` | 3/3 |
 | `pnpm e2e` (Chromium) | 249/249 |
 | `pnpm e2e:webkit` | 94/94 (yeni dört spec WebKit `testMatch`'e eklendi) |
-| CI (#82) | bekleniyor — rapor sonuna işlenecek |
+| CI (#82, run 35099366703) | 3/3 geçti: `typecheck · lint · test · build`, `e2e (chromium)`, `e2e (webkit · sign-in and mobile shells)` |
 
 Not: `playwright test` doğrudan çağrıldığında `prepare-database` (outbox temizliği) atlanır ve aynı saat içinde tekrar koşularda `provider-review-flow` eski SMS kodunu okuyup düşer; `pnpm e2e` ile temiz koşuda geçti.
 
