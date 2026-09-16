@@ -197,6 +197,8 @@ const OFFER_PREVIEW_KEYS = [
   'creditCost',
   'creditRefundedAt',
   'submittedAt',
+  // Added for the customer's withdrawn-offer notice; see listRequestOffers.
+  'viewedAt',
 ];
 
 /** A SERVICE feed card's keys before this change. */
