@@ -51,12 +51,33 @@ describe('buildServiceRequestPayload', () => {
       budgetMin: null,
       budgetMax: null,
       preferredDate: null,
+      preferredDateEnd: null,
       urgency: 'THIS_WEEK',
       description: 'Salon kliması soğutmuyor.',
       contactDisclosureAccepted: false,
       contactDisclosureVersion: null,
       answers: [],
     });
+  });
+
+  it('posts the two date-only ends exactly as the inputs hold them', () => {
+    const payload = buildServiceRequestPayload(
+      form({
+        categorySlug: 'x',
+        city: 'İstanbul',
+        district: 'Kadıköy',
+        questionMeta: '[]',
+        urgency: 'TODAY',
+        preferredDate: '2026-09-15',
+        preferredDateEnd: '2026-09-15',
+      }),
+    );
+
+    // No Date construction on the way: a `YYYY-MM-DD` string in, the same
+    // string out, so the browser's zone can never shift the day.
+    expect(payload.preferredDate).toBe('2026-09-15');
+    expect(payload.preferredDateEnd).toBe('2026-09-15');
+    expect(payload.urgency).toBe('TODAY');
   });
 
   it('leaves the contact fields out when the form never rendered them', () => {

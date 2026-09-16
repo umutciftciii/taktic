@@ -34,7 +34,7 @@ import { useIdentityCheck } from '../../request-fields/identity-check';
 import { IdentityNotice } from '../../request-fields/identity-notice';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
-import { UrgencySelect } from '../../request-fields/timing-fields';
+import { TimingFields } from '../../request-fields/timing-fields';
 import { saveMarketplaceDraftAction, type SubmitRequestResult } from '../actions';
 import { BudgetFields } from './budget-fields';
 import { ShowcaseMatches } from './showcase-matches';
@@ -777,23 +777,13 @@ export function RequestForm({
             <section className="form-section">
               <h2>Zaman ve bütçe</h2>
               <div className="form-grid">
-                <UrgencySelect defaultValue={initialDraft?.urgency} />
-                <label className="form-row">
-                  <span>
-                    {preferredDateQuestion?.label ?? 'Tercih edilen tarih'}
-                    {preferredDateQuestion?.isRequired ? ' *' : ''}
-                  </span>
-                  <input
-                    name="preferredDate"
-                    type="date"
-                    required={preferredDateQuestion?.isRequired ?? false}
-                    defaultValue={initialDraft?.preferredDate}
-                    data-testid="request-preferred-date"
-                  />
-                  {preferredDateQuestion?.helpText ? (
-                    <span className="help-text">{preferredDateQuestion.helpText}</span>
-                  ) : null}
-                </label>
+                <TimingFields
+                  dateQuestion={preferredDateQuestion}
+                  defaultUrgency={initialDraft?.urgency}
+                  defaultStart={initialDraft?.preferredDate}
+                  defaultEnd={initialDraft?.preferredDateEnd}
+                  onChange={refreshSignals}
+                />
                 <BudgetFields
                   minLabel={budgetQuestion?.label ?? 'Minimum bütçe'}
                   required={budgetQuestion?.isRequired ?? false}

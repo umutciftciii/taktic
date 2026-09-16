@@ -6296,3 +6296,24 @@ body.has-drawer-open {
 .isletme-card h2 { margin: 0; font-size: 16px; }
 .isletme-card p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
 .isletme-reviews { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Timing: urgency + preferred date range (request form and vitrin lead form)
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* The range is a fieldset so the two dates share one label for a screen
+   reader; it is styled as the surrounding `.form-row`s are, and spans the
+   whole grid row so the pair never wraps to two different columns. */
+.timing-range { grid-column: 1 / -1; margin: 0; padding: 0; border: 0; min-width: 0; }
+.timing-range > legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--color-neutral-800);
+}
+.timing-range-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: var(--space-3); }
+.timing-range-inputs .form-row > span:first-child { font-weight: 500; color: var(--color-neutral-700); }
+.timing-reapply { align-self: flex-start; }

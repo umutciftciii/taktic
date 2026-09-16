@@ -23,7 +23,8 @@ import { useIdentityCheck } from '../../request-fields/identity-check';
 import { IdentityNotice } from '../../request-fields/identity-notice';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
-import { UrgencySelect } from '../../request-fields/timing-fields';
+import { TimingFields } from '../../request-fields/timing-fields';
+import { BudgetFields } from '../../categories/[slug]/budget-fields';
 import {
   confirmShowcaseLeadVerificationAction,
   createShowcaseLeadAction,
@@ -597,16 +598,39 @@ export function ShowcaseLeadForm({
             if (areaNotServed) setFailure(null);
           }}
         />
+        <label className="form-row">
+          <span>Adres notu</span>
+          <textarea
+            name="addressNote"
+            placeholder="Ek bilgi / yol tarifi"
+            defaultValue={initialDraft?.addressNote}
+            data-testid="showcase-lead-address-note"
+          />
+        </label>
       </section>
 
       <section className="showcase-lead-section">
-        <h3>Zamanlama</h3>
+        <h3>Zamanlama ve bütçe</h3>
+        {/*
+          The same three controls the marketplace form has, so a request that
+          started there and was handed over to this card arrives with its date
+          range and budget intact and editable. All optional — a customer who
+          opened this card directly may leave them blank, exactly as before.
+        */}
         <div className="form-grid">
-          <UrgencySelect
-            label="İşi ne zaman yaptırmak istiyorsunuz?"
-            helpText="İşin kendisi için istediğiniz zaman."
-            testId="showcase-lead-urgency"
-            defaultValue={initialDraft?.urgency}
+          <TimingFields
+            urgencyLabel="İşi ne zaman yaptırmak istiyorsunuz?"
+            urgencyHelpText="İşin kendisi için istediğiniz zaman; Bugün veya Bu hafta seçildiğinde tarihler otomatik dolar."
+            urgencyTestId="showcase-lead-urgency"
+            defaultUrgency={initialDraft?.urgency}
+            defaultStart={initialDraft?.preferredDate}
+            defaultEnd={initialDraft?.preferredDateEnd}
+          />
+          <BudgetFields
+            minLabel="Minimum bütçe"
+            required={false}
+            defaultMin={initialDraft?.budgetMin}
+            defaultMax={initialDraft?.budgetMax}
           />
         </div>
         <fieldset className="pdash-form-row">
