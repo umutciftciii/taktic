@@ -110,7 +110,7 @@ Compose'a yalnız api/web için `APP_ENVIRONMENT` + değersiz `TURNSTILE_*` akta
 | Typecheck · lint · build | `pnpm typecheck && pnpm lint && pnpm build` | geçti |
 | E2E Chromium | `pnpm e2e` (tam suite) | **257 geçti** (yeni `turnstile-protection` 8 senaryo dahil; ilk koşuda 1 senaryo Playwright `aria-disabled` aktivasyon kuralı yüzünden düzeltildi, tekrar 8/8) |
 | E2E WebKit | `pnpm e2e:webkit` | **102 geçti** (3.3 dk; `turnstile-protection` 8 senaryo WebKit'te de) |
-| CI | PR üzerinde | ilk head: 3/3 ✅ · düzeltme head'i: bu satır CI sonucuyla güncellenecek |
+| CI | PR üzerinde | ilk head: 3/3 ✅ · düzeltme head'i `3ade11c1`: `typecheck · lint · test · build` ✅ · `e2e (chromium)` ✅ · `e2e (webkit)` ✅ |
 | Boot kanıtı (compose env) | `docker compose config` → env → `node dist/main.js` / `next start` | aşağıda §4.1 |
 
 ### 4.1 Boot kanıtı — mevcut compose, değersiz `.env`
