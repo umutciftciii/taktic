@@ -133,3 +133,95 @@ export function formatIsoDay(value: DateInput): string {
   const moment = toDate(value);
   return moment ? isoDayFormatter.format(moment) : '';
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Date-only arithmetic
+//
+// A request's preferred date range is two calendar days, not two instants: the
+// customer means "the 15th", whatever hour the server happens to write it at.
+// Everything below therefore works on `YYYY-MM-DD` strings and does its
+// arithmetic on `Date.UTC(...)` of those strings — a fixed, zone-free calendar —
+// and the only place a real clock enters is `todayIsoDay`, which reads it
+// through the product's zone. The API keeps a byte-for-byte mirror of these
+// functions (apps/api/src/common/date-only.ts); it cannot import this package.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type IsoDay = string;
+
+const ISO_DAY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** `2026-09-15` and nothing else: no time part, no other order, and a day that exists. */
+export function isIsoDay(value: unknown): value is IsoDay {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const match = ISO_DAY_PATTERN.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const [, year, month, day] = match.map(Number) as [number, number, number, number];
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  return (
+    utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day
+  );
+}
+
+/** The calendar day it is right now in Europe/Istanbul. The one clock read in this file. */
+export function todayIsoDay(now: Date = new Date()): IsoDay {
+  return isoDayFormatter.format(now);
+}
+
+function isoDayToUtc(day: IsoDay): Date {
+  const [year, month, date] = day.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(year, month - 1, date));
+}
+
+function utcToIsoDay(utc: Date): IsoDay {
+  const year = utc.getUTCFullYear();
+  const month = String(utc.getUTCMonth() + 1).padStart(2, '0');
+  const date = String(utc.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${date}`;
+}
+
+/** `days` may be negative. Month and year ends roll over as the calendar does. */
+export function addIsoDays(day: IsoDay, days: number): IsoDay {
+  const utc = isoDayToUtc(day);
+  utc.setUTCDate(utc.getUTCDate() + days);
+  return utcToIsoDay(utc);
+}
+
+/**
+ * The Sunday that closes the week containing `day`, Monday-first as the
+ * Turkish calendar runs. A Sunday is its own answer.
+ */
+export function endOfWeekIsoDay(day: IsoDay): IsoDay {
+  const weekday = isoDayToUtc(day).getUTCDay(); // 0 = Sunday
+  return addIsoDays(day, (7 - weekday) % 7);
+}
+
+/** Negative, zero or positive — the ISO form sorts lexically by construction. */
+export function compareIsoDays(left: IsoDay, right: IsoDay): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * `15 Eyl 2026 – 21 Eyl 2026`, or a single date when the ends agree or the
+ * end is absent — which is what every request written before the range
+ * existed carries. Accepts stored instants as well as ISO days, because the
+ * projections hand over what the column holds.
+ */
+export function formatDateRange(start: DateInput, end: DateInput): string {
+  const first = formatDate(start);
+  if (first === EMPTY) {
+    return EMPTY;
+  }
+
+  const last = formatDate(end);
+  if (last === EMPTY || last === first) {
+    return first;
+  }
+
+  return `${first} – ${last}`;
+}

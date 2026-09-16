@@ -24,10 +24,16 @@ export {
   TAKTIC_TIME_ZONE,
   formatDate,
   formatDateTime,
+  addIsoDays,
+  compareIsoDays,
+  endOfWeekIsoDay,
+  formatDateRange,
   formatIsoDay,
   formatTime,
+  isIsoDay,
+  todayIsoDay,
 } from './datetime';
-export type { DateInput } from './datetime';
+export type { DateInput, IsoDay } from './datetime';
 
 export {
   serviceAreaCovers,
