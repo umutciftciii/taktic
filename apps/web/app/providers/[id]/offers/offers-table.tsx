@@ -89,7 +89,7 @@ export function OffersTable({ providerId, offers }: OffersTableProps) {
         /*
           One table, two layouts, no horizontal scroll at either.
 
-          From 900px up it is a real table with fixed column widths, so the
+          From 1100px up it is a real table with fixed column widths, so the
           action column has the same width on every row whatever each row
           offers. Below that the CSS turns every row into a card: cells stack
           with their header as a label (`data-label`), and the actions become
@@ -129,7 +129,9 @@ export function OffersTable({ providerId, offers }: OffersTableProps) {
                         {offer.offerNumber ?? `#${offer.id.slice(-6).toUpperCase()}`}
                       </span>
                     </td>
-                    <td data-label="Tutar">{formatPrice(offer.priceAmount, offer.currency)}</td>
+                    <td data-label="Tutar" className="offers-table-price">
+                      {formatPrice(offer.priceAmount, offer.currency)}
+                    </td>
                     <td data-label="Durum">
                       <span className={providerStatusBadgeClass(offer.status)}>
                         {providerOfferStatusLabel(offer.status)}

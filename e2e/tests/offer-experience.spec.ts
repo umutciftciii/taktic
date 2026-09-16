@@ -140,6 +140,7 @@ test.describe('offer experience', () => {
           badge.locator('xpath=ancestor::section[1]').boundingBox(),
         ]);
         expect(badgeBox && cardBox && badgeBox.x + badgeBox.width <= cardBox.x + cardBox.width + 0.5).toBe(true);
+        await badge.scrollIntoViewIfNeeded();
         await capture(leaving.page, 'provider-offer-panel', width);
       }
       await leaving.page.setViewportSize({ width: 1280, height: 900 });
@@ -219,6 +220,20 @@ test.describe('offer experience', () => {
           const rows = actor.page.getByTestId('offer-row');
           await expect(rows).toHaveCount(1);
           await expect(rows.first().getByTestId('offer-row-detail-link')).toBeVisible();
+          // Every action button is whole: inside the table's box, and none of
+          // its own text clipped — a wrapper that hides overflow would
+          // otherwise pass the width check while cutting "Teklif detayı" off.
+          const clipped = await actor.page.evaluate(() => {
+            const wrap = document.querySelector('[data-testid="offers-table-wrap"]')!.getBoundingClientRect();
+            return [...document.querySelectorAll('[data-testid="offer-row-actions"] a')].flatMap((el) => {
+              const box = el.getBoundingClientRect();
+              const problems: string[] = [];
+              if (box.right > wrap.right + 0.5) problems.push(`${el.textContent} runs past the table`);
+              if (el.scrollWidth > el.clientWidth + 1) problems.push(`${el.textContent} text is clipped`);
+              return problems;
+            });
+          });
+          expect(clipped, `${name} @ ${width}px`).toEqual([]);
           await capture(actor.page, name, width);
         }
       }
