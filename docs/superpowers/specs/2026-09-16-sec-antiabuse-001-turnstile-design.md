@@ -71,9 +71,12 @@ Prisma şeması, ödeme, kredi, e-posta/SMS sağlayıcıları, scheduler yok.
    loglanır). Açıkça `test`/`off` yalnız varsayılanın zaten `test` olacağı yerde kabul;
    staging/production'da boot reddi. `NODE_ENV` tek başına ortam kararı vermez
    (yerel stack production build olabilir; web `next start` altında hep production).
-   Compose api/web servislerine `APP_ENVIRONMENT=${APP_ENVIRONMENT:-local}` ve
-   değersiz `TURNSTILE_*` aktarır. Cloudflare'ın test anahtarları hiçbir yerde
-   varsayılan değildir.
+   **Base `docker-compose.yml` ortamı asla kararlaştırmaz:** `APP_ENVIRONMENT:
+   ${APP_ENVIRONMENT:-}` (unset → bildirilmemiş → cloudflare/fail-closed); yerel
+   bildirim yalnız açıkça `-f` ile yüklenen `docker-compose.local.yml`'de
+   (`pnpm stack:up`), `docker-compose.override.yml` adıyla **değil** (otomatik
+   yüklenirdi). `TURNSTILE_*` değersiz aktarılır. Cloudflare'ın test anahtarları
+   hiçbir yerde varsayılan değildir.
 
 **Hata sözleşmesi (guard).**
 
@@ -148,7 +151,7 @@ Paylaşılan sabitler (`packages/shared/turnstile.json`): header adı, test-toke
 | Değişken | Uygulama | Ortam | Güvenli varsayılan |
 |---|---|---|---|
 | `TURNSTILE_MODE` | api, web | hepsi | yok → ortamı izler: local/test → `test`; staging/prod/bilinmeyen → `cloudflare` |
-| `APP_ENVIRONMENT` | api, web | hepsi | compose `local` geçer; staging/prod kendini bildirir; bilinmeyen = kapalı |
+| `APP_ENVIRONMENT` | api, web | hepsi | base compose aynen aktarır (unset → kapalı); `docker-compose.local.yml` `local` der; staging/prod kendini bildirir |
 | `TURNSTILE_SECRET_KEY` | **yalnız api** | staging/prod | yok → boot reddi |
 | `TURNSTILE_EXPECTED_HOSTNAMES` | api | staging/prod | yok → boot reddi |
 | `TURNSTILE_SITEVERIFY_TIMEOUT_MS` | api | opsiyonel | 5000 |
@@ -156,13 +159,14 @@ Paylaşılan sabitler (`packages/shared/turnstile.json`): header adı, test-toke
 | `APP_ENVIRONMENT=local` | api, web | local | `test`/`off` için ön koşul |
 
 `.env.example`'a yorumlu, değersiz. Gerçek `.env`, GitHub secret, Cloudflare paneli
-bu işte değişmez. Compose yalnız api/web servislerine `APP_ENVIRONMENT` (varsayılan
-`local`) ve boş-when-unset `TURNSTILE_*` aktarımı alır; yerel stack değersiz `.env` ile
-aynen boot eder.
+bu işte değişmez. Base compose api/web'e `APP_ENVIRONMENT` ve `TURNSTILE_*`'ı boş-when-unset aktarır;
+`docker-compose.local.yml` (`pnpm stack:up`) api+web için `local` der; yerel stack değersiz
+`.env` ile aynen boot eder, base compose tek başına kapalıdır.
 
 | Ortam | Mod | Secret/hostname/site key yoksa |
 |---|---|---|
-| Yerel (compose, `APP_ENVIRONMENT=local`) ve test (`NODE_ENV=test`) | `test` adapter | Normal açılır; Cloudflare çağrısı yok |
+| Yerel (`pnpm stack:up` → `APP_ENVIRONMENT=local`) ve test (`NODE_ENV=test`) | `test` adapter | Normal açılır; Cloudflare çağrısı yok |
+| Base compose tek başına (`APP_ENVIRONMENT` yok) | `cloudflare` | API boot reddi; web formları kapalı |
 | Staging (`APP_ENVIRONMENT=staging`) | `cloudflare` | API boot reddi; web formları kapalı |
 | Production (`APP_ENVIRONMENT=production`) ve bildirilmemiş | `cloudflare` | API boot reddi; web formları kapalı |
 

@@ -63,10 +63,13 @@ Korunan route'lar: `service-requests.controller.ts` (POST), `showcase-public.con
 | `requests/[id]/offers/phone-verification-card.tsx` | Kart client bileşenine taşındı; yalnız "kod gönder" token ister, "Doğrula" düz form. Sayfa numarayı maskeleyip verir. |
 | `lib/request-refusal-text.ts` | `TURNSTILE_REQUIRED/FAILED` → "Güvenlik doğrulaması başarısız oldu. Lütfen tekrar deneyin."; `TURNSTILE_UNAVAILABLE` → "…şu anda yapılamıyor. Lütfen birkaç saniye sonra tekrar deneyin."; `TURNSTILE_CHALLENGE_FAILED` (widget) → "…tamamlanamadı. Lütfen tekrar deneyin." |
 
-**Compose (`docker-compose.yml`, yalnız api + web):** `APP_ENVIRONMENT: ${APP_ENVIRONMENT:-local}` ve
-boş-when-unset `TURNSTILE_MODE` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_EXPECTED_HOSTNAMES` /
-`TURNSTILE_SITEVERIFY_TIMEOUT_MS` (api), `TURNSTILE_MODE` / `TURNSTILE_SITE_KEY` (web). Değer yok; secret
-yalnız api servisine.
+**Compose (son güvenlik düzeltmesi):** base `docker-compose.yml` api+web'e `APP_ENVIRONMENT: ${APP_ENVIRONMENT:-}`
+— **asla `local`'a düşmez**; host bir şey demezse süreç bildirilmemiş = production gibi kapalı. Yerel bildirim
+yalnız `docker-compose.local.yml`'de (api+web `APP_ENVIRONMENT: local`, başka hiçbir şey), yalnız açık `-f` ile
+yüklenir (`pnpm stack:up` / `pnpm stack:down`); `docker-compose.override.yml` adı bilerek kullanılmadı (otomatik
+yüklenirdi). `TURNSTILE_*` boş-when-unset; secret yalnız api'ye. `apps/api/test/compose-environment.spec.ts` iki
+dosyanın bu sözleşmesini satır düzeyinde sabitler (base'de `local` yok, override dosyası yok, local dosya yalnız
+api+web).
 
 **Test altyapısı:** `apps/api/test/setup-env.ts` suite geneli `TURNSTILE_MODE=off` (NODE_ENV=test ile izinli),
 `harness.ts` `turnstileVerifier` override'ı; `e2e/playwright.config.ts` **mod adı geçmez** — API'ler NODE_ENV=test,
@@ -78,7 +81,8 @@ WebKit `testMatch`'e `turnstile-protection` eklendi.
 
 | Ortam | `APP_ENVIRONMENT` | Turnstile modu (mod boşken) | Secret / hostname / site key yoksa |
 |---|---|---|---|
-| Yerel geliştirme (compose) | `local` (compose varsayılanı) | **test adapter** | Uygulama normal açılır; gerçek Cloudflare çağrısı yok |
+| Yerel geliştirme (`pnpm stack:up` = base + `docker-compose.local.yml`) | `local` (local dosyadan) | **test adapter** | Uygulama normal açılır; gerçek Cloudflare çağrısı yok |
+| Base compose tek başına | — (host demedi) | **cloudflare** | API **boot reddi**; web formları **kapalı** |
 | Birim / E2E test | — / `local` (NODE_ENV=test) | **test adapter** | aynı |
 | Staging | `staging` (deployment bildirir) | **cloudflare** | API **boot reddi**; web formları **kapalı** (slot uyarısı, düğmeler disabled, gate açılmaz) |
 | Production | `production` (deployment bildirir) | **cloudflare** | aynı |
@@ -90,7 +94,7 @@ altında hep production'dır.
 
 | Değişken | Uygulama | Gerekli ortam | Güvenli varsayılan / yokken davranış |
 |---|---|---|---|
-| `APP_ENVIRONMENT` | api, web | staging, prod bildirir; compose `local` geçer | yok → production gibi kapalı |
+| `APP_ENVIRONMENT` | api, web | staging/prod kendi ortamında bildirir; yerel `docker-compose.local.yml` | yok → production gibi kapalı (base compose aynen aktarır, varsayılan vermez) |
 | `TURNSTILE_MODE` | api, web | opsiyonel | yok → ortamı izler (yukarıdaki tablo) |
 | `TURNSTILE_SECRET_KEY` | **yalnız api** | staging, prod | yoksa API boot etmez |
 | `TURNSTILE_EXPECTED_HOSTNAMES` | api | staging, prod | yoksa API boot etmez; virgülle ayrılmış, küçük harfe indirgenir |
@@ -98,35 +102,36 @@ altında hep production'dır.
 | `TURNSTILE_SITE_KEY` | web | staging, prod | yoksa formlar kapalı |
 
 `.env.example`'a yorumlu/değersiz eklendi. Gerçek `.env`, GitHub secret, Cloudflare, DB, container değişmedi.
-Compose'a yalnız api/web için `APP_ENVIRONMENT` + değersiz `TURNSTILE_*` aktarımı eklendi (runtime sözleşmesi).
+Base compose'a yalnız api/web için değersiz `APP_ENVIRONMENT` + `TURNSTILE_*` aktarımı; yerel bildirim ayrı
+`docker-compose.local.yml` + `pnpm stack:up`. Host'ta `pnpm dev` ile API için `APP_ENVIRONMENT=local` export edilir.
 
 ## 4. Test sayıları ve CI
 
 | Paket | Komut | Sonuç |
 |---|---|---|
-| API | `pnpm --filter @taktic/api test` | **123 dosya / 2554 test geçti** (yeni: `turnstile-config` 26, `turnstile-verifiers` 19, `turnstile-protection` 66, `turnstile-boot` 5) |
+| API | `pnpm --filter @taktic/api test` | **124 dosya / 2564 test geçti** (yeni: `compose-environment` 10, `turnstile-config` 26, `turnstile-verifiers` 19, `turnstile-protection` 66, `turnstile-boot` 5) |
 | Web | `pnpm --filter @taktic/web test` | 19 dosya / 141 test (yeni `turnstile.spec.ts` 14) |
 | Shared / Admin | `pnpm test` | 165 / 49 geçti |
 | Typecheck · lint · build | `pnpm typecheck && pnpm lint && pnpm build` | geçti |
 | E2E Chromium | `pnpm e2e` (tam suite) | **257 geçti** (yeni `turnstile-protection` 8 senaryo dahil; ilk koşuda 1 senaryo Playwright `aria-disabled` aktivasyon kuralı yüzünden düzeltildi, tekrar 8/8) |
 | E2E WebKit | `pnpm e2e:webkit` | **102 geçti** (3.3 dk; `turnstile-protection` 8 senaryo WebKit'te de) |
-| CI | PR üzerinde | ilk head: 3/3 ✅ · düzeltme head'i `3ade11c1`: `typecheck · lint · test · build` ✅ · `e2e (chromium)` ✅ · `e2e (webkit)` ✅ |
+| CI | PR üzerinde | ilk head 3/3 ✅ · `3ade11c1` 3/3 ✅ · compose düzeltmesi head'i: CI sonucuyla güncellenecek |
 | Boot kanıtı (compose env) | `docker compose config` → env → `node dist/main.js` / `next start` | aşağıda §4.1 |
 
-### 4.1 Boot kanıtı — mevcut compose, değersiz `.env`
+### 4.1 Boot kanıtı — compose-config + boot probe, `.env` yokken
 
-`.env` bulunmayan worktree'de `docker compose config` api/web için şunu üretir: `APP_ENVIRONMENT=local`,
-`NODE_ENV=development`, `TURNSTILE_MODE=''`, `TURNSTILE_SECRET_KEY=''`, `TURNSTILE_EXPECTED_HOSTNAMES=''`,
-`TURNSTILE_SITE_KEY=''` (web). Bu env **aynen** derlenmiş `apps/api/dist/main.js` ve `next start`'a verildi
-(container/DB'ye dokunmadan; yalnız `postgres` hostname'i → localhost:5433 `taktic_e2e`, portlar 390x):
+`.env` bulunmayan worktree'de her senaryo için `docker compose … config` çalıştırılıp api/web env'i **aynen**
+derlenmiş `apps/api/dist/main.js` ve `next start`'a verildi (container/DB'ye dokunmadan; yalnız `postgres`
+hostname'i → localhost:5433 `taktic_e2e`, portlar 39xx). Web satırları ayrıca boot etmiş bir local API'ye karşı
+alındı (web'in **kendi** kapalı durumu; API'siz sayfa zaten 500).
 
-| Adım | Sonuç |
-|---|---|
-| 1. API, local compose env | `/health` 200 · `POST /service-requests` header'sız → `403 TURNSTILE_REQUIRED` · `identity-check` + `turnstile-test:identity-check:…` → 200 · API log'unda `challenges.cloudflare.com` 0 |
-| 2. Web, local compose env | `/categories/<slug>` 200 · HTML `data-turnstile-mode="test"` · Cloudflare script 0 |
-| 3. API `APP_ENVIRONMENT=staging`, secret yok | exit 1: `TURNSTILE_SECRET_KEY is required: TURNSTILE_MODE is "cloudflare" (the default for APP_ENVIRONMENT "staging")…` · `/health` cevap yok |
-| 4. API `APP_ENVIRONMENT=production` + `TURNSTILE_MODE=off` | exit 1: `TURNSTILE_MODE=off is refused here…` (`APP_ENVIRONMENT=staging` + `test` de aynı) |
-| 5. Web `APP_ENVIRONMENT=staging`, site key yok | `/categories/<slug>` 200 · `data-turnstile-mode="unconfigured"` · `turnstile-unconfigured` uyarısı 1 |
+| Senaryo | `compose config` → `APP_ENVIRONMENT` / `TURNSTILE_MODE` | API | Web |
+|---|---|---|---|
+| `pnpm stack:up` (base + local), değersiz `.env` | `local` / `''` | `/health` 200 · header'sız POST → 403 `TURNSTILE_REQUIRED` · test token → 200 · log'da Cloudflare 0 | `/categories/<slug>` 200 · `data-turnstile-mode="test"` · Cloudflare script 0 |
+| Base compose, `APP_ENVIRONMENT` yok | `''` / `''` | **boot etmez**: `TURNSTILE_SECRET_KEY is required: TURNSTILE_MODE is "cloudflare" (the default for APP_ENVIRONMENT not set)…` | `data-turnstile-mode="unconfigured"` · uyarı 1 · submit/kod-iste kapalı |
+| Base + `APP_ENVIRONMENT=staging`, anahtar yok | `staging` / `''` | **boot etmez**: `… (the default for APP_ENVIRONMENT "staging")` | `unconfigured` · uyarı 1 |
+| Base + `APP_ENVIRONMENT=production` + `TURNSTILE_MODE=off` | `production` / `off` | **boot etmez**: `TURNSTILE_MODE=off is refused here…` | `unconfigured` · uyarı 1 |
+| Base + `APP_ENVIRONMENT=production` + `TURNSTILE_MODE=test` | `production` / `test` | **boot etmez**: `TURNSTILE_MODE=test is refused here…` | — |
 
 E2E'de aynı kapalı web (`turnstileClosedWebRuntime`) üç senaryoyla: normal form gate açılmaz ("Devam et"
 `aria-disabled`, zorla tıklama adım ilerletmez, talep 0); vitrin kod-iste ve gönder disabled + ipucu "Güvenlik
