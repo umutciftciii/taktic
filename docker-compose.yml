@@ -112,6 +112,23 @@ services:
       # configuration reader accepts it only for https or loopback and refuses
       # it under NODE_ENV=production.
       LEMON_SQUEEZY_API_BASE_URL: ${LEMON_SQUEEZY_API_BASE_URL:-}
+      # Which deployment this is. `local` is what makes this a development
+      # stack to every environment-gated behaviour the API has: with nothing
+      # else set, Turnstile resolves to its deterministic test adapter (no
+      # secret, no site key, no byte to Cloudflare) and the API boots as it
+      # always did. Staging and production declare themselves the same way
+      # and get the strict mode — see .env.example and turnstile.config.ts.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-local}
+      # Turnstile, forwarded as "empty when unset", which the reader treats
+      # exactly like unset. Left empty, the local stack runs the test adapter;
+      # a developer proving a real widget against localhost sets the mode to
+      # `cloudflare` with a local widget's secret and hostname — from the
+      # untracked .env or the shell, never from a committed file. The secret
+      # is forwarded to this service only.
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      TURNSTILE_EXPECTED_HOSTNAMES: ${TURNSTILE_EXPECTED_HOSTNAMES:-}
+      TURNSTILE_SITEVERIFY_TIMEOUT_MS: ${TURNSTILE_SITEVERIFY_TIMEOUT_MS:-}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross
       # the Docker Desktop VirtioFS/gRPC-FUSE boundary on macOS.
@@ -144,6 +161,13 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
       API_INTERNAL_URL: http://api:3001
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
+      # The same declaration the API makes, read at request time (never baked
+      # in at build): on `local` the request forms render the Turnstile test
+      # adapter with nothing else set. The public site key is the only
+      # Turnstile value this service ever sees; the secret is the API's.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-local}
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:

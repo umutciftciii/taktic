@@ -20,6 +20,7 @@ import {
   primaryRuntime,
   providerClaimRuntime,
   repoRoot,
+  turnstileClosedWebRuntime,
   type Runtime,
 } from './src/runtime';
 
@@ -120,22 +121,25 @@ const trustedProxyApiEnv = { TRUST_PROXY: '1' };
 const trustedProxyWebEnv = { WEB_TRUST_PROXY: 'true' };
 
 /**
- * Turnstile in its deterministic test mode, on every stack.
+ * Turnstile in its deterministic test adapter, on every stack — by default,
+ * not by request.
  *
- * The browser never loads a byte from Cloudflare: the web app's adapter mints
- * a token of the shape the API's test verifier accepts, carries it exactly as
+ * Nothing here names a mode. The API resolves an unset TURNSTILE_MODE from
+ * the environment it runs in (NODE_ENV=test here, APP_ENVIRONMENT=local on a
+ * developer's compose stack) and the web from APP_ENVIRONMENT alone, so this
+ * suite exercises the exact default the local docker-compose stack boots
+ * with: no secret, no site key, no byte to Cloudflare. The web app's adapter
+ * mints a token of the shape the API's test verifier accepts, carries it as
  * it would carry a real one — server action argument, one request header —
  * and the API's guard, replay cache and error mapping run for real. A token
  * that never reaches the API fails the scenario the way a bot would fail it,
- * which is the point of running this mode rather than switching the gate off.
+ * which is the point of the adapter rather than switching the gate off.
  *
- * The API accepts `test` here because NODE_ENV is "test"; the web accepts it
- * only on a declared local stack, so it is told it is one. Neither is a
- * secret and neither can reach a real widget (see turnstile.config.ts and
- * lib/turnstile.ts for the two gates).
+ * The API's runtimes already run under NODE_ENV=test (sharedEnv); the web is
+ * told it is a local stack, which is not a secret and cannot reach a real
+ * widget (see turnstile.config.ts and lib/turnstile.ts for the two gates).
  */
-const turnstileApiEnv = { TURNSTILE_MODE: 'test' };
-const turnstileWebEnv = { TURNSTILE_MODE: 'test', APP_ENVIRONMENT: 'local' };
+const turnstileWebEnv = { APP_ENVIRONMENT: 'local' };
 
 function apiServer(runtime: Runtime) {
   return {
@@ -151,7 +155,6 @@ function apiServer(runtime: Runtime) {
     env: {
       ...sharedEnv,
       ...trustedProxyApiEnv,
-      ...turnstileApiEnv,
       API_PORT: String(runtime.ports.api),
       REQUIRE_PHONE_VERIFICATION: String(runtime.requirePhoneVerification),
       // The phone-verification test bypass, and only on the runtime whose
@@ -229,6 +232,23 @@ function lemonSqueezyStubServer() {
     stdout: 'pipe' as const,
     stderr: 'pipe' as const,
     env: { ...process.env, LEMON_STUB_PORT: String(lemonStubPort) },
+  };
+}
+
+/**
+ * The web server that cannot run Turnstile: a staging declaration and no
+ * site key, in front of the primary API. See turnstileClosedWebRuntime.
+ */
+function turnstileClosedWebServer() {
+  const base = nextServer(turnstileClosedWebRuntime, 'web');
+  return {
+    ...base,
+    env: {
+      ...base.env,
+      APP_ENVIRONMENT: 'staging',
+      TURNSTILE_MODE: '',
+      TURNSTILE_SITE_KEY: '',
+    },
   };
 }
 
@@ -428,5 +448,6 @@ export default defineConfig({
     apiServer(lemonSqueezyRuntime),
     nextServer(lemonSqueezyRuntime, 'web'),
     nextServer(lemonSqueezyRuntime, 'admin'),
+    turnstileClosedWebServer(),
   ],
 });

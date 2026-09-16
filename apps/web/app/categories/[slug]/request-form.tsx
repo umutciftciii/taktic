@@ -312,7 +312,13 @@ export function RequestForm({
    * withholds submit until they name a contact person instead.
    */
   const accountContactIncomplete = Boolean(accountContact) && !accountContactComplete;
-  const submitBlocked = accountContactIncomplete && !useAlternateContact;
+  /*
+   * Withheld for the one case the API will refuse anyway, and for a stack
+   * whose Turnstile check cannot run: the slot above the buttons says why
+   * (TurnstileSlot), and a submit that cannot carry a token is not offered.
+   */
+  const submitBlocked =
+    (accountContactIncomplete && !useAlternateContact) || turnstile.status === 'unconfigured';
 
   const shown = useMemo(() => visibleQuestions(questions, answers), [questions, answers]);
 
@@ -983,9 +989,11 @@ export function RequestForm({
                 disabled={submitBlocked || submitting}
                 aria-busy={submitting || undefined}
                 title={
-                  submitBlocked
-                    ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
-                    : undefined
+                  turnstile.status === 'unconfigured'
+                    ? 'Güvenlik doğrulaması şu anda kullanılamıyor.'
+                    : submitBlocked
+                      ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
+                      : undefined
                 }
               >
                 {submitting ? 'Gönderiliyor…' : 'Talebi Gönder'}

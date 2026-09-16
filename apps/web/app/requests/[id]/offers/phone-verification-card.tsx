@@ -70,7 +70,11 @@ export function PhoneVerificationCard({
 
       <div className="verify-row">
         <form onSubmit={onSend}>
-          <button className="cdash-btn cdash-btn-secondary" type="submit" disabled={sending}>
+          <button
+            className="cdash-btn cdash-btn-secondary"
+            type="submit"
+            disabled={sending || turnstile.status === 'unconfigured'}
+          >
             Doğrulama kodu gönder
           </button>
         </form>

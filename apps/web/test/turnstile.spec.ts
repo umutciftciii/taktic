@@ -21,17 +21,34 @@ function env(values: Record<string, string | undefined>): NodeJS.ProcessEnv {
 }
 
 describe('readTurnstileWebConfig', () => {
-  it('defaults to cloudflare and carries the site key', () => {
-    expect(readTurnstileWebConfig(env({ TURNSTILE_SITE_KEY: ` ${SITE_KEY} ` }))).toEqual({
+  it('is the test adapter with nothing set on a declared local stack — what the compose passes', () => {
+    expect(readTurnstileWebConfig(env({ NODE_ENV: 'production', APP_ENVIRONMENT: 'local' }))).toEqual({ mode: 'test' });
+    expect(
+      readTurnstileWebConfig(env({ NODE_ENV: 'development', APP_ENVIRONMENT: 'local', TURNSTILE_MODE: '', TURNSTILE_SITE_KEY: '' })),
+    ).toEqual({ mode: 'test' });
+  });
+
+  it('is cloudflare with nothing set anywhere else, and carries the site key', () => {
+    expect(readTurnstileWebConfig(env({ APP_ENVIRONMENT: 'staging', TURNSTILE_SITE_KEY: ` ${SITE_KEY} ` }))).toEqual({
       mode: 'cloudflare',
       siteKey: SITE_KEY,
     });
+    expect(readTurnstileWebConfig(env({ TURNSTILE_SITE_KEY: SITE_KEY }))).toEqual({ mode: 'cloudflare', siteKey: SITE_KEY });
   });
 
-  it('is unconfigured — not off — when cloudflare has no site key', () => {
+  it('is unconfigured — closed, not off — when cloudflare has no site key', () => {
     expect(readTurnstileWebConfig(env({}))).toEqual({ mode: 'unconfigured' });
+    expect(readTurnstileWebConfig(env({ APP_ENVIRONMENT: 'staging' }))).toEqual({ mode: 'unconfigured' });
+    expect(readTurnstileWebConfig(env({ APP_ENVIRONMENT: 'production', TURNSTILE_SITE_KEY: '' }))).toEqual({ mode: 'unconfigured' });
     expect(readTurnstileWebConfig(env({ TURNSTILE_MODE: 'cloudflare', TURNSTILE_SITE_KEY: '' }))).toEqual({
       mode: 'unconfigured',
+    });
+  });
+
+  it('honours an explicit cloudflare on a local stack, site key and all', () => {
+    expect(readTurnstileWebConfig(env({ APP_ENVIRONMENT: 'local', TURNSTILE_MODE: 'cloudflare', TURNSTILE_SITE_KEY: SITE_KEY }))).toEqual({
+      mode: 'cloudflare',
+      siteKey: SITE_KEY,
     });
   });
 

@@ -63,12 +63,17 @@ Prisma şeması, ödeme, kredi, e-posta/SMS sağlayıcıları, scheduler yok.
    X-Forwarded-For doğrudan okunmaz.
 7. **Fail-closed.** Guard, controller'dan önce çalışır; ret → hiçbir servis metodu
    çağrılmaz → hiçbir yazma, SMS, mail, taslak tüketimi, NotificationLog olmaz.
-8. **Boot stratejisi.** `TURNSTILE_MODE` (`cloudflare` | `test` | `off`; varsayılan
-   `cloudflare`). `cloudflare` → `TURNSTILE_SECRET_KEY` ve
+8. **Boot stratejisi (v2, merge öncesi düzeltme).** `TURNSTILE_MODE` (`cloudflare` |
+   `test` | `off`). **Boşken ortamı izler:** `APP_ENVIRONMENT=local` ya da `NODE_ENV=test`
+   → `test` adapter (anahtar yok, ağ yok, uygulama normal açılır); `staging` /
+   `production` / bildirilmemiş → `cloudflare` → `TURNSTILE_SECRET_KEY` ve
    `TURNSTILE_EXPECTED_HOSTNAMES` zorunlu, yoksa **boot reddi** (değer değil, ad
-   loglanır). `test`/`off` → yalnız `NODE_ENV=test` ya da (`APP_ENVIRONMENT=local`
-   ve `NODE_ENV≠production`) iken; staging/production benzeri her yapılandırmada
-   boot reddi. Cloudflare'ın test anahtarları hiçbir yerde varsayılan değildir.
+   loglanır). Açıkça `test`/`off` yalnız varsayılanın zaten `test` olacağı yerde kabul;
+   staging/production'da boot reddi. `NODE_ENV` tek başına ortam kararı vermez
+   (yerel stack production build olabilir; web `next start` altında hep production).
+   Compose api/web servislerine `APP_ENVIRONMENT=${APP_ENVIRONMENT:-local}` ve
+   değersiz `TURNSTILE_*` aktarır. Cloudflare'ın test anahtarları hiçbir yerde
+   varsayılan değildir.
 
 **Hata sözleşmesi (guard).**
 
@@ -142,17 +147,24 @@ Paylaşılan sabitler (`packages/shared/turnstile.json`): header adı, test-toke
 
 | Değişken | Uygulama | Ortam | Güvenli varsayılan |
 |---|---|---|---|
-| `TURNSTILE_MODE` | api, web | hepsi | yok → `cloudflare` (anahtar ister) |
+| `TURNSTILE_MODE` | api, web | hepsi | yok → ortamı izler: local/test → `test`; staging/prod/bilinmeyen → `cloudflare` |
+| `APP_ENVIRONMENT` | api, web | hepsi | compose `local` geçer; staging/prod kendini bildirir; bilinmeyen = kapalı |
 | `TURNSTILE_SECRET_KEY` | **yalnız api** | staging/prod | yok → boot reddi |
 | `TURNSTILE_EXPECTED_HOSTNAMES` | api | staging/prod | yok → boot reddi |
 | `TURNSTILE_SITEVERIFY_TIMEOUT_MS` | api | opsiyonel | 5000 |
 | `TURNSTILE_SITE_KEY` | web | staging/prod | yok → widget "kullanılamıyor" |
 | `APP_ENVIRONMENT=local` | api, web | local | `test`/`off` için ön koşul |
 
-`.env.example`'a yorumlu, değersiz. Gerçek `.env`, compose, GitHub secret,
-Cloudflare paneli bu işte değişmez. **Not:** compose API/web servislerine yeni
-değişken geçirmediği için yerel Docker stack'i merge sonrası `TURNSTILE_MODE` +
-`APP_ENVIRONMENT` eklenene kadar boot etmez — bilinçli, gürültülü fail-closed.
+`.env.example`'a yorumlu, değersiz. Gerçek `.env`, GitHub secret, Cloudflare paneli
+bu işte değişmez. Compose yalnız api/web servislerine `APP_ENVIRONMENT` (varsayılan
+`local`) ve boş-when-unset `TURNSTILE_*` aktarımı alır; yerel stack değersiz `.env` ile
+aynen boot eder.
+
+| Ortam | Mod | Secret/hostname/site key yoksa |
+|---|---|---|
+| Yerel (compose, `APP_ENVIRONMENT=local`) ve test (`NODE_ENV=test`) | `test` adapter | Normal açılır; Cloudflare çağrısı yok |
+| Staging (`APP_ENVIRONMENT=staging`) | `cloudflare` | API boot reddi; web formları kapalı |
+| Production (`APP_ENVIRONMENT=production`) ve bildirilmemiş | `cloudflare` | API boot reddi; web formları kapalı |
 
 ---
 

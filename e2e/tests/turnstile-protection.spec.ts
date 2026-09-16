@@ -15,7 +15,7 @@ import {
 } from '../src/fixtures';
 import { createRequest, expectIdentityGateOpen, settleIdentityGate } from '../src/journeys';
 import { emailCountFor, smsEntriesFor, waitForLatestSmsCode } from '../src/outbox';
-import { primaryRuntime } from '../src/runtime';
+import { primaryRuntime, turnstileClosedWebRuntime } from '../src/runtime';
 import { retireShowcasePlacements, seedApprovedShowcaseCard, seedLiveShowcasePlacement } from '../src/showcase-fixtures';
 
 /**
@@ -370,6 +370,96 @@ test.describe('Turnstile: teklifler sayfasında telefon kodu', () => {
       await expectNoTokenAnywhere(customer);
     } finally {
       await customer.close();
+    }
+  });
+});
+
+test.describe('Turnstile: staging gibi yapılandırılmış ama site key\'siz web', () => {
+  /**
+   * The web server on turnstileClosedWebRuntime declares itself staging and
+   * carries no TURNSTILE_SITE_KEY. Its forms must be closed, not open: the
+   * slot says the check cannot run, the identity gate never opens, no code
+   * can be asked for and nothing can be submitted. The API behind it is the
+   * primary one, so an escaped request would still be refused — but nothing
+   * escapes.
+   */
+  test('normal talep formu: kapı açılmaz, slot "kullanılamıyor" der, talep yok', async ({ browser }, testInfo) => {
+    const category = await createCategory(3, { namePrefix: 'E2E Turnstile Kapalı' });
+    const values = requestFormValues(uniqueLocation(), 'E2E Kapalı Ziyaretçi');
+    addressSerial += 1;
+    const visitor = await Actor.open(browser, 'web', turnstileClosedWebRuntime, {
+      extraHTTPHeaders: { 'x-forwarded-for': `10.${89 + testInfo.retry}.0.${(addressSerial % 200) + 1}` },
+    });
+
+    try {
+      await visitor.gotoWeb(`/categories/${category.slug}`);
+      await assertNoErrorScreen(visitor.page);
+      await expect(visitor.page.getByTestId('turnstile-slot')).toHaveAttribute('data-turnstile-mode', 'unconfigured');
+      await expect(visitor.page.getByTestId('turnstile-unconfigured')).toBeVisible();
+      await expect(visitor.page.locator('script[src*="challenges.cloudflare.com"]')).toHaveCount(0);
+      const before = await counts();
+
+      const form = visitor.page.locator('form.form-card');
+      await form.locator('input[name="customerName"]').fill(values.customerName);
+      await form.locator('input[name="customerPhone"]').fill(values.customerPhone);
+      await form.locator('input[name="customerEmail"]').fill(values.customerEmail);
+      await form.locator('input[name="customerEmail"]').blur();
+      // No token can be produced, so no check is made and the gate stays shut
+      // with the plain "could not be checked" sentence.
+      await expect(visitor.page.getByTestId('identity-error')).toContainText(IDENTITY_UNANSWERED);
+      const next = visitor.page.getByRole('button', { name: 'Devam et' });
+      await expect(next).toHaveAttribute('aria-disabled', 'true');
+      // Forced past Playwright's own actionability check, so the click really
+      // lands on the control: the form runs the check again, it fails again,
+      // and the step does not move.
+      await next.click({ force: true });
+      await expect(visitor.page.getByTestId('identity-error')).toContainText(IDENTITY_UNANSWERED);
+      await expect(visitor.page.locator('#request-step-contact')).toBeVisible();
+      await expect(visitor.page.locator('#request-step-detail')).toBeHidden();
+      expect((await counts()).requests).toBe(before.requests);
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  test('vitrin formu: kod isteme ve gönder düğmeleri kapalı, ipucu söyler', async ({ browser }) => {
+    const stage = await seedShowcase('E2E Turnstile Kapalı Vitrin');
+    const visitor = await Actor.open(browser, 'web', turnstileClosedWebRuntime);
+
+    try {
+      await visitor.gotoWeb(`/vitrin/${stage.cardId}?step=form`);
+      await assertNoErrorScreen(visitor.page);
+      await expect(visitor.page.getByTestId('turnstile-unconfigured')).toBeVisible();
+      await expect(visitor.page.getByTestId('showcase-lead-phone-send')).toBeDisabled();
+      await expect(visitor.page.getByTestId('showcase-lead-submit')).toBeDisabled();
+      await expect(visitor.page.getByTestId('showcase-lead-submit-hint')).toHaveText('Güvenlik doğrulaması şu anda kullanılamıyor.');
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  test('teklifler sayfası: oturumlu müşteri için kod isteme düğmesi kapalı', async ({ browser }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(3, { namePrefix: 'E2E Turnstile Kapalı OTP' });
+    const account = await createCustomer('E2E Kapalı Müşteri');
+    // The request is opened on the working stack; the closed one only reads it.
+    const open = await Actor.open(browser, 'customer', primaryRuntime);
+    let requestId: string;
+    try {
+      await open.loginToWeb(account.email, account.password);
+      requestId = await createRequest(open, category, requestFormValues(location, account.name));
+    } finally {
+      await open.close();
+    }
+
+    const closed = await Actor.open(browser, 'customer', turnstileClosedWebRuntime);
+    try {
+      await closed.loginToWeb(account.email, account.password);
+      await closed.gotoWeb(`/requests/${requestId}/offers`);
+      await expect(closed.page.getByTestId('turnstile-unconfigured')).toBeVisible();
+      await expect(closed.page.getByRole('button', { name: 'Doğrulama kodu gönder' })).toBeDisabled();
+    } finally {
+      await closed.close();
     }
   });
 });

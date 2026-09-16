@@ -34,7 +34,7 @@ test-token öneki. JSON, çünkü API `@taktic/shared`'i CommonJS'ten `require` 
 
 | Dosya | Karar |
 |---|---|
-| `turnstile.config.ts` | `TURNSTILE_MODE` çözümü; unset → `cloudflare`. Bypass (`test`/`off`) yalnız `NODE_ENV=test` ya da `APP_ENVIRONMENT=local` + `NODE_ENV≠production`. Staging bilinçli olarak dışarıda: staging gerçek widget'ın kanıtlandığı yer. `off` + secret birlikte → ret. `parseAppEnvironment` `common/app-environment.ts`'e çıkarıldı. |
+| `turnstile.config.ts` | `TURNSTILE_MODE` çözümü. **Boşken ortamı izler:** `APP_ENVIRONMENT=local` ya da `NODE_ENV=test` → `test`; staging/production/bildirilmemiş → `cloudflare` (secret + hostname zorunlu, yoksa boot reddi). Açık `test`/`off` yalnız local/test'te; staging/prod'da boot reddi. `NODE_ENV` tek başına ortam kararı vermez. `off` + secret birlikte → ret. `parseAppEnvironment` `common/app-environment.ts`'e çıkarıldı. |
 | `cloudflare-turnstile.verifier.ts` | `fetch` enjekte; form-encoded POST; `AbortController` timeout; `success && hostname ∈ liste && action === beklenen`; diğer her şey ret. Log'a yalnız `error-codes` ve action; token/secret asla. |
 | `test-turnstile.verifier.ts` | `turnstile-test:<action>:<nonce>`; `__unavailable__` → 503 yolu. Gerçek Cloudflare token'ı bile reddedilir. |
 | `off-turnstile.verifier.ts` | Entegrasyon suite'i için; yalnız izinli ortamda bağlanır. |
@@ -54,7 +54,7 @@ Korunan route'lar: `service-requests.controller.ts` (POST), `showcase-public.con
 
 | Dosya | Karar |
 |---|---|
-| `lib/turnstile.ts` | `readTurnstileWebConfig` — `TURNSTILE_MODE` + `TURNSTILE_SITE_KEY` sunucuda **istek zamanında** okunur (`NEXT_PUBLIC_` değil: build tek, E2E stack'leri farklı env). `test`/`off` yalnız `APP_ENVIRONMENT=local`; aksi `unconfigured` = kapalı. `turnstileHeaders`, `resolveTestTurnstileToken`. |
+| `lib/turnstile.ts` | `readTurnstileWebConfig` — `TURNSTILE_MODE` + `TURNSTILE_SITE_KEY` sunucuda **istek zamanında** okunur (`NEXT_PUBLIC_` değil: build tek, E2E stack'leri farklı env). Boş mod `APP_ENVIRONMENT=local` → `test`, aksi `cloudflare` (site key yoksa `unconfigured` = **kapalı**: slot uyarısı + gönder/kod-iste düğmeleri disabled + kimlik gate'i açılmaz). `test`/`off` yalnız local. `turnstileHeaders`, `resolveTestTurnstileToken`. |
 | `app/request-fields/turnstile.tsx` | Tek adapter: `useTurnstile(config)` + `<TurnstileSlot>`. `cloudflare`: api.js explicit, `execution:'execute'`, `appearance:'interaction-only'`, action başına yeni widget; `test`: ağ yok, `window.__TAKTIC_TURNSTILE_TEST__` ile E2E yönlendirmesi; `off`: token yok; `unconfigured`: acquire reddeder, slot "kullanılamıyor". Challenge'lar sırayla (kuyruk). |
 | `request-fields/identity-check.ts` | Opsiyonel `acquireToken`; alım/ret → mevcut `error` durumu ("İletişim bilgileri doğrulanamadı, tekrar deneyin.") — hesap durumu hakkında hiçbir ek bilgi yok. |
 | `categories/actions.ts`, `vitrin/[cardId]/actions.ts`, `requests/[id]/offers/actions.ts` | Token **ayrı argüman**, FormData'da değil → `draftPayloadFromForm`'a giremez. Header yalnız korunan çağrıda. |
@@ -63,41 +63,76 @@ Korunan route'lar: `service-requests.controller.ts` (POST), `showcase-public.con
 | `requests/[id]/offers/phone-verification-card.tsx` | Kart client bileşenine taşındı; yalnız "kod gönder" token ister, "Doğrula" düz form. Sayfa numarayı maskeleyip verir. |
 | `lib/request-refusal-text.ts` | `TURNSTILE_REQUIRED/FAILED` → "Güvenlik doğrulaması başarısız oldu. Lütfen tekrar deneyin."; `TURNSTILE_UNAVAILABLE` → "…şu anda yapılamıyor. Lütfen birkaç saniye sonra tekrar deneyin."; `TURNSTILE_CHALLENGE_FAILED` (widget) → "…tamamlanamadı. Lütfen tekrar deneyin." |
 
-**Test altyapısı:** `apps/api/test/setup-env.ts` suite geneli `TURNSTILE_MODE=off` (NODE_ENV=test ile izinli),
-`harness.ts` `turnstileVerifier` override'ı; `e2e/playwright.config.ts` API `test` modu, web `test` +
-`APP_ENVIRONMENT=local`; WebKit `testMatch`'e `turnstile-protection` eklendi.
+**Compose (`docker-compose.yml`, yalnız api + web):** `APP_ENVIRONMENT: ${APP_ENVIRONMENT:-local}` ve
+boş-when-unset `TURNSTILE_MODE` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_EXPECTED_HOSTNAMES` /
+`TURNSTILE_SITEVERIFY_TIMEOUT_MS` (api), `TURNSTILE_MODE` / `TURNSTILE_SITE_KEY` (web). Değer yok; secret
+yalnız api servisine.
 
-## 3. Yeni environment değişkenleri
+**Test altyapısı:** `apps/api/test/setup-env.ts` suite geneli `TURNSTILE_MODE=off` (NODE_ENV=test ile izinli),
+`harness.ts` `turnstileVerifier` override'ı; `e2e/playwright.config.ts` **mod adı geçmez** — API'ler NODE_ENV=test,
+web'ler `APP_ENVIRONMENT=local` ile varsayılan `test` adapter'ına düşer (compose'un boot ettiği yolun aynısı);
+ek bir web süreci (`turnstileClosedWebRuntime`, :3250) `APP_ENVIRONMENT=staging` + site key'siz — kapalı web kanıtı.
+WebKit `testMatch`'e `turnstile-protection` eklendi.
+
+## 3. Environment matrisi ve yeni değişkenler
+
+| Ortam | `APP_ENVIRONMENT` | Turnstile modu (mod boşken) | Secret / hostname / site key yoksa |
+|---|---|---|---|
+| Yerel geliştirme (compose) | `local` (compose varsayılanı) | **test adapter** | Uygulama normal açılır; gerçek Cloudflare çağrısı yok |
+| Birim / E2E test | — / `local` (NODE_ENV=test) | **test adapter** | aynı |
+| Staging | `staging` (deployment bildirir) | **cloudflare** | API **boot reddi**; web formları **kapalı** (slot uyarısı, düğmeler disabled, gate açılmaz) |
+| Production | `production` (deployment bildirir) | **cloudflare** | aynı |
+| Bildirilmemiş | — | **cloudflare** | aynı (bilinmeyen = kapalı) |
+
+`test`/`off` açıkça verilirse yalnız ilk iki satırda kabul; staging/production'da boot reddi (`TURNSTILE_MODE=off is
+refused here …`). `NODE_ENV` tek başına ortam kararı vermez: yerel stack production build olabilir, web `next start`
+altında hep production'dır.
 
 | Değişken | Uygulama | Gerekli ortam | Güvenli varsayılan / yokken davranış |
 |---|---|---|---|
-| `TURNSTILE_MODE` | api, web | tümü | unset → `cloudflare`. `test`/`off` yalnız NODE_ENV=test ya da `APP_ENVIRONMENT=local`; staging/prod'da boot reddi |
+| `APP_ENVIRONMENT` | api, web | staging, prod bildirir; compose `local` geçer | yok → production gibi kapalı |
+| `TURNSTILE_MODE` | api, web | opsiyonel | yok → ortamı izler (yukarıdaki tablo) |
 | `TURNSTILE_SECRET_KEY` | **yalnız api** | staging, prod | yoksa API boot etmez |
 | `TURNSTILE_EXPECTED_HOSTNAMES` | api | staging, prod | yoksa API boot etmez; virgülle ayrılmış, küçük harfe indirgenir |
 | `TURNSTILE_SITEVERIFY_TIMEOUT_MS` | api | opsiyonel | 5000; pozitif tam sayı değilse boot reddi |
-| `TURNSTILE_SITE_KEY` | web | staging, prod | yoksa forms "kullanılamıyor" der, submit etmez (web'de de kapalı) |
-| `APP_ENVIRONMENT=local` | api, web | local | bypass modlarının ön koşulu |
+| `TURNSTILE_SITE_KEY` | web | staging, prod | yoksa formlar kapalı |
 
-`.env.example`'a yorumlu/değersiz eklendi. Gerçek `.env`, compose, GitHub secret, Cloudflare değişmedi.
-
-> **Yerel Docker uyarısı (bilinçli):** `docker-compose.yml` api/web servislerine env'i açık listeyle geçirir ve
-> `TURNSTILE_MODE`/`APP_ENVIRONMENT` listede yok. Merge sonrası yerel `taktic-api` **boot etmez**
-> (`TURNSTILE_SECRET_KEY is required…`) ve web formları "kullanılamıyor" der — sessiz korumasız çalışma
-> yerine gürültülü fail-closed. Eşitleme sırasında compose'a `TURNSTILE_MODE: ${TURNSTILE_MODE:-}` ve
-> `APP_ENVIRONMENT: ${APP_ENVIRONMENT:-}` (api + web) eklenip `.env`'e `TURNSTILE_MODE=test`,
-> `APP_ENVIRONMENT=local` yazılmalı. Bu işte yapılmadı (kapsam dışı).
+`.env.example`'a yorumlu/değersiz eklendi. Gerçek `.env`, GitHub secret, Cloudflare, DB, container değişmedi.
+Compose'a yalnız api/web için `APP_ENVIRONMENT` + değersiz `TURNSTILE_*` aktarımı eklendi (runtime sözleşmesi).
 
 ## 4. Test sayıları ve CI
 
 | Paket | Komut | Sonuç |
 |---|---|---|
-| API | `pnpm --filter @taktic/api test` | **123 dosya / 2544 test geçti** (yeni: `turnstile-config` 19, `turnstile-verifiers` 19, `turnstile-protection` 66, `turnstile-boot` 2) |
-| Web | `pnpm --filter @taktic/web test` | 19 dosya / 139 test (yeni `turnstile.spec.ts` 12) |
+| API | `pnpm --filter @taktic/api test` | **123 dosya / 2554 test geçti** (yeni: `turnstile-config` 26, `turnstile-verifiers` 19, `turnstile-protection` 66, `turnstile-boot` 5) |
+| Web | `pnpm --filter @taktic/web test` | 19 dosya / 141 test (yeni `turnstile.spec.ts` 14) |
 | Shared / Admin | `pnpm test` | 165 / 49 geçti |
 | Typecheck · lint · build | `pnpm typecheck && pnpm lint && pnpm build` | geçti |
-| E2E Chromium | `pnpm e2e` (tam suite) | **254 geçti** (7.7 dk; yeni `turnstile-protection` 5 senaryo dahil) |
-| E2E WebKit | `pnpm e2e:webkit` | **99 geçti** (4.7 dk; `turnstile-protection` 5 senaryo WebKit'te de) |
-| CI | PR üzerinde | PR #83: `typecheck · lint · test · build` ✅ · `e2e (chromium)` ✅ · `e2e (webkit)` ✅ |
+| E2E Chromium | `pnpm e2e` (tam suite) | **257 geçti** (yeni `turnstile-protection` 8 senaryo dahil; ilk koşuda 1 senaryo Playwright `aria-disabled` aktivasyon kuralı yüzünden düzeltildi, tekrar 8/8) |
+| E2E WebKit | `pnpm e2e:webkit` | **102 geçti** (3.3 dk; `turnstile-protection` 8 senaryo WebKit'te de) |
+| CI | PR üzerinde | ilk head: 3/3 ✅ · düzeltme head'i: bu satır CI sonucuyla güncellenecek |
+| Boot kanıtı (compose env) | `docker compose config` → env → `node dist/main.js` / `next start` | aşağıda §4.1 |
+
+### 4.1 Boot kanıtı — mevcut compose, değersiz `.env`
+
+`.env` bulunmayan worktree'de `docker compose config` api/web için şunu üretir: `APP_ENVIRONMENT=local`,
+`NODE_ENV=development`, `TURNSTILE_MODE=''`, `TURNSTILE_SECRET_KEY=''`, `TURNSTILE_EXPECTED_HOSTNAMES=''`,
+`TURNSTILE_SITE_KEY=''` (web). Bu env **aynen** derlenmiş `apps/api/dist/main.js` ve `next start`'a verildi
+(container/DB'ye dokunmadan; yalnız `postgres` hostname'i → localhost:5433 `taktic_e2e`, portlar 390x):
+
+| Adım | Sonuç |
+|---|---|
+| 1. API, local compose env | `/health` 200 · `POST /service-requests` header'sız → `403 TURNSTILE_REQUIRED` · `identity-check` + `turnstile-test:identity-check:…` → 200 · API log'unda `challenges.cloudflare.com` 0 |
+| 2. Web, local compose env | `/categories/<slug>` 200 · HTML `data-turnstile-mode="test"` · Cloudflare script 0 |
+| 3. API `APP_ENVIRONMENT=staging`, secret yok | exit 1: `TURNSTILE_SECRET_KEY is required: TURNSTILE_MODE is "cloudflare" (the default for APP_ENVIRONMENT "staging")…` · `/health` cevap yok |
+| 4. API `APP_ENVIRONMENT=production` + `TURNSTILE_MODE=off` | exit 1: `TURNSTILE_MODE=off is refused here…` (`APP_ENVIRONMENT=staging` + `test` de aynı) |
+| 5. Web `APP_ENVIRONMENT=staging`, site key yok | `/categories/<slug>` 200 · `data-turnstile-mode="unconfigured"` · `turnstile-unconfigured` uyarısı 1 |
+
+E2E'de aynı kapalı web (`turnstileClosedWebRuntime`) üç senaryoyla: normal form gate açılmaz ("Devam et"
+`aria-disabled`, zorla tıklama adım ilerletmez, talep 0); vitrin kod-iste ve gönder disabled + ipucu "Güvenlik
+doğrulaması şu anda kullanılamıyor."; teklifler sayfası kod-iste disabled. Playwright config'inde mod adı geçmez;
+beş stack varsayılan yoldan `test` adapter'ına düşer ve tüm mevcut akışlar (normal talep, vitrin lead, iki SMS yolu,
+identity check, activation) bu yolla çalışır.
 
 Kanıtlanan spec maddeleri (`apps/api/test/turnstile-protection.spec.ts`, 6 route × matris):
 geçerli token → eski davranış ve yan etki (+1 kayıt / +1 SMS / +1 mail); eksik / geçersiz / action uyuşmaz /
@@ -105,7 +140,8 @@ hostname uyuşmaz → 403 ve **0 yan etki** (ServiceRequest, ShowcaseLead, Phone
 CustomerActivationToken, tüketilmiş RequestDraft, User, SMS, mail); timeout / 5xx / bozuk JSON → 503 ve 0 yan
 etki; aynı token tekrar / başka uçta (ilk kullanım reddedilmiş olsa bile) → 403; taslak tüketilmez; IP throttle
 geçerli token'larla da 429; kimlik throttle Turnstile'dan önce; mevcut 403 (sağlayıcı oturumu) aynen.
-`turnstile-boot.spec.ts`: secret'sız `cloudflare` ve staging'de `off` → uygulama grafiği boot etmez.
+`turnstile-boot.spec.ts`: local'de hiçbir değer olmadan boot + `TestTurnstileVerifier` bağlı; staging'de değer yok →
+boot etmez; bildirilmemiş + NODE_ENV=production → boot etmez; production'da `test` → boot etmez.
 E2E (`e2e/tests/turnstile-protection.spec.ts`): normal form (identity check ret → "Tekrar dene" → geçer;
 submit `invalid`/`error`/`unavailable` → üç ayrı cümle, 0 talep; sonra başarı), aktivasyon bağlantısı
 (`invalid` → mail yok, "sent" yok, hesap durumu sızmaz; retry → mail 1), vitrin (SMS `invalid` → 0 SMS;

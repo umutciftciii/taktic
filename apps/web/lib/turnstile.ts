@@ -9,7 +9,7 @@ import turnstile from '../../../packages/shared/turnstile.json';
  * only place a token is ever judged. What is decided here is only *how* the
  * widget is rendered, from two server-side variables read at request time:
  *
- *   TURNSTILE_MODE      cloudflare (default) | test | off
+ *   TURNSTILE_MODE      cloudflare | test | off — unset follows APP_ENVIRONMENT, below
  *   TURNSTILE_SITE_KEY  the widget's public site key — public by design, and
  *                       kept apart from TURNSTILE_SECRET_KEY, which is the
  *                       API's and is never read by this application
@@ -18,11 +18,17 @@ import turnstile from '../../../packages/shared/turnstile.json';
  * `next build` folds those into the bundle, and the browser suite builds
  * once and starts several stacks with different environments.
  *
- * `test` and `off` are accepted only on a stack that declares itself local
- * (APP_ENVIRONMENT=local). Anywhere else they read as unconfigured, which is
- * closed: the slot says the check cannot run and the forms do not submit.
- * The API applies the same rule on its side, so a web stack that got this
- * wrong could at most show a working widget to a server that refuses it.
+ * An unset TURNSTILE_MODE follows the environment the stack declares, the
+ * same way the API's does: `test` on APP_ENVIRONMENT=local — so the local
+ * docker compose, which passes that and nothing else, renders the test
+ * adapter and never loads a byte from Cloudflare — and `cloudflare`
+ * everywhere else, where the site key is then required. Without it the
+ * config is `unconfigured`, which is closed: the slot says the check cannot
+ * run, the send and submit controls are disabled, and a call that got
+ * through anyway would be refused by the API. `test` and `off` asked for
+ * explicitly are accepted only on a local stack; anywhere else they read as
+ * unconfigured too. NODE_ENV takes no part: under `next start` it is always
+ * "production", local stack or not.
  */
 
 export const TURNSTILE_TOKEN_HEADER = turnstile.headerName;
@@ -41,7 +47,8 @@ export type TurnstileWebConfig =
   | { mode: 'unconfigured' };
 
 export function readTurnstileWebConfig(env: NodeJS.ProcessEnv = process.env): TurnstileWebConfig {
-  const mode = env.TURNSTILE_MODE?.trim() || 'cloudflare';
+  const local = env.APP_ENVIRONMENT?.trim() === 'local';
+  const mode = env.TURNSTILE_MODE?.trim() || (local ? 'test' : 'cloudflare');
 
   if (mode === 'cloudflare') {
     const siteKey = env.TURNSTILE_SITE_KEY?.trim() ?? '';
@@ -49,7 +56,7 @@ export function readTurnstileWebConfig(env: NodeJS.ProcessEnv = process.env): Tu
   }
 
   if (mode === 'test' || mode === 'off') {
-    return env.APP_ENVIRONMENT?.trim() === 'local' ? { mode } : { mode: 'unconfigured' };
+    return local ? { mode } : { mode: 'unconfigured' };
   }
 
   return { mode: 'unconfigured' };

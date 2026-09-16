@@ -9,25 +9,42 @@ import { parseAppEnvironment } from '../../common/app-environment';
  *   cloudflare  the real thing: every protected request carries a token that
  *               is sent to Cloudflare's siteverify with this deployment's
  *               secret, and the answer is checked for success, hostname and
- *               action. This is what an unset TURNSTILE_MODE means, so a
- *               deployment that forgot to configure anything gets the strict
- *               mode — and then fails at boot because the secret is missing,
- *               rather than quietly running unprotected.
+ *               action. Requires the secret and the hostname list; without
+ *               them the process refuses to boot rather than run unprotected.
  *   test        a deterministic stand-in: tokens of the form
  *               `turnstile-test:<action>:<nonce>` are accepted when the
  *               action matches, nothing else is, and no network is involved.
- *               For the browser suite, which has to prove the token reaches
- *               the API without ever reaching Cloudflare.
- *   off         the guard lets everything through. For the integration suite,
- *               whose hundred-odd specs are about other things.
+ *               What a local stack and the browser suite run on.
+ *   off         the guard lets everything through. For the integration
+ *               suite, whose hundred-odd specs are about other things.
  *
- * `test` and `off` are bypasses, and a bypass is accepted only where a test
- * can be running: under NODE_ENV=test, or on a stack that declares itself
- * `local` in APP_ENVIRONMENT and is not started as production. Staging is
- * deliberately not on that list — staging is where the real widget, the real
- * hostname and the real secret are proved before production, so a staging
- * stack without Cloudflare would be proving nothing. An undeclared environment
- * is unknown, and unknown is closed (see app-environment.ts).
+ * ## What an unset TURNSTILE_MODE means
+ *
+ * It follows the environment the process declares, which is the same
+ * variable every other environment-gated behaviour reads (APP_ENVIRONMENT,
+ * see app-environment.ts):
+ *
+ *   local, or NODE_ENV=test   → test        the stack boots with no Turnstile
+ *                                            value at all — the local docker
+ *                                            compose passes APP_ENVIRONMENT=local
+ *                                            and nothing else — and never
+ *                                            contacts Cloudflare
+ *   staging, production        → cloudflare  and the secret and hostnames are
+ *   undeclared                               required, so a deployment that
+ *                                            forgot to configure anything stops
+ *                                            here instead of running open
+ *
+ * An undeclared environment is unknown, and unknown is closed. `test` and
+ * `off` are bypasses, and asking for one explicitly is accepted only where
+ * the default would have chosen `test` anyway; on staging or production the
+ * process refuses to boot with either. Staging is deliberately not local:
+ * it is where the real widget, hostname and secret are proved before
+ * production, so a staging stack without Cloudflare would prove nothing.
+ *
+ * NODE_ENV does not decide any of this on its own. A local stack may be
+ * started as a production build (the web app always is, under `next start`)
+ * and is still local; the one thing NODE_ENV says here is that `test` is a
+ * unit-test worker, which never has a declared environment.
  *
  * ## What never leaves this file
  *
@@ -61,16 +78,14 @@ export type TurnstileConfig =
   | { mode: 'off' };
 
 /**
- * Whether a bypass mode may run in this process. Nothing about a request takes
- * part; `env` is a parameter only so the contract can be tested without
- * mutating the suite's own environment.
+ * Whether this process is one a test adapter may run in: a declared local
+ * stack, or a unit-test worker. Nothing about a request takes part; `env` is
+ * a parameter only so the contract can be tested without mutating the
+ * suite's own environment.
  */
 export function isTurnstileBypassPermitted(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.NODE_ENV === 'test') {
     return true;
-  }
-  if (env.NODE_ENV === 'production') {
-    return false;
   }
   return readAppEnvironmentFrom(env) === 'local';
 }
@@ -82,7 +97,7 @@ function readAppEnvironmentFrom(env: NodeJS.ProcessEnv) {
 function readMode(env: NodeJS.ProcessEnv): TurnstileMode {
   const raw = env[VARS.mode]?.trim();
   if (!raw) {
-    return 'cloudflare';
+    return isTurnstileBypassPermitted(env) ? 'test' : 'cloudflare';
   }
   if (!(TURNSTILE_MODES as readonly string[]).includes(raw)) {
     throw new Error(`${VARS.mode} must be one of ${TURNSTILE_MODES.join(', ')} (received "${raw}")`);
@@ -124,10 +139,12 @@ export function resolveTurnstileConfig(env: NodeJS.ProcessEnv = process.env): Tu
   if (mode === 'cloudflare') {
     const secretKey = env[VARS.secretKey]?.trim() ?? '';
     if (!secretKey) {
+      const environment = readAppEnvironmentFrom(env);
       throw new Error(
-        `${VARS.secretKey} is required: ${VARS.mode} is "cloudflare" (the default), and every ` +
-          `protected request is verified with it. Set the secret from the Cloudflare dashboard — ` +
-          `or, on a local stack only, ${VARS.mode}=test with APP_ENVIRONMENT=local.`,
+        `${VARS.secretKey} is required: ${VARS.mode} is "cloudflare"` +
+          `${env[VARS.mode]?.trim() ? '' : ` (the default for APP_ENVIRONMENT ${environment ? `"${environment}"` : 'not set'})`}, ` +
+          `and every protected request is verified with it. Set the secret from the Cloudflare ` +
+          `dashboard, or declare APP_ENVIRONMENT=local on a local stack.`,
       );
     }
     const expectedHostnames = readHostnames(env);
@@ -143,8 +160,8 @@ export function resolveTurnstileConfig(env: NodeJS.ProcessEnv = process.env): Tu
   const environment = readAppEnvironmentFrom(env);
   if (!isTurnstileBypassPermitted(env)) {
     throw new Error(
-      `${VARS.mode}=${mode} is refused here: a Turnstile bypass runs only under NODE_ENV=test or ` +
-        `when APP_ENVIRONMENT is "local" and NODE_ENV is not "production" ` +
+      `${VARS.mode}=${mode} is refused here: a Turnstile bypass runs only on a stack that declares ` +
+        `APP_ENVIRONMENT=local, or under NODE_ENV=test ` +
         `(APP_ENVIRONMENT is ${environment ? `"${environment}"` : 'not set'}, ` +
         `NODE_ENV is "${env.NODE_ENV ?? ''}"). Remove the variable from this deployment.`,
     );

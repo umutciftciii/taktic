@@ -261,7 +261,9 @@ export function ShowcaseLeadForm({
       : guestContact.phone;
 
   const accountContactIncomplete = accountContact !== null && !accountContactIsComplete(accountContact);
-  const submitBlocked = accountContactIncomplete && !useAlternateContact;
+  /** A stack whose Turnstile check cannot run: no code is asked for and nothing is sent. */
+  const turnstileClosed = turnstile.status === 'unconfigured';
+  const submitBlocked = (accountContactIncomplete && !useAlternateContact) || turnstileClosed;
   const verified = verification.status === 'verified';
   const phoneLocked = verification.status !== 'idle';
   const gateOpen = identity.gateOpen;
@@ -520,13 +522,15 @@ export function ShowcaseLeadForm({
    * code and no request before the contact check), then the proof, then the
    * one case the API would refuse anyway.
    */
-  const submitHint = !gateOpen
-    ? 'Göndermeden önce iletişim bilgilerinizin kontrolü tamamlanmalı.'
-    : !verified
-      ? 'Göndermeden önce telefon numaranızı doğrulayın.'
-      : submitBlocked
-        ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
-        : null;
+  const submitHint = turnstileClosed
+    ? 'Güvenlik doğrulaması şu anda kullanılamıyor.'
+    : !gateOpen
+      ? 'Göndermeden önce iletişim bilgilerinizin kontrolü tamamlanmalı.'
+      : !verified
+        ? 'Göndermeden önce telefon numaranızı doğrulayın.'
+        : submitBlocked
+          ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
+          : null;
 
   return (
     <form
@@ -583,6 +587,7 @@ export function ShowcaseLeadForm({
               state={verification}
               busy={pending}
               gateOpen={gateOpen}
+              sendClosed={turnstileClosed}
               onSend={sendCode}
               onConfirm={confirmCode}
               onReset={resetVerification}
@@ -777,6 +782,7 @@ function PhoneProof({
   state,
   busy,
   gateOpen,
+  sendClosed,
   onSend,
   onConfirm,
   onReset,
@@ -785,6 +791,8 @@ function PhoneProof({
   state: Verification;
   busy: boolean;
   gateOpen: boolean;
+  /** The stack cannot run the Turnstile check: no code can be asked for. */
+  sendClosed: boolean;
   onSend: () => void;
   onConfirm: (code: string) => void;
   onReset: () => void;
@@ -861,7 +869,7 @@ function PhoneProof({
           <button
             type="button"
             className="pdash-btn pdash-btn-ghost"
-            disabled={busy || sending || !gateOpen}
+            disabled={busy || sending || !gateOpen || sendClosed}
             onClick={onSend}
           >
             Kodu yeniden gönder
@@ -885,7 +893,7 @@ function PhoneProof({
         <button
           type="button"
           className="pdash-btn pdash-btn-primary"
-          disabled={busy || !phone.trim() || !gateOpen}
+          disabled={busy || !phone.trim() || !gateOpen || sendClosed}
           onClick={onSend}
           title={!gateOpen ? 'Önce iletişim bilgilerinizin kontrolü tamamlanmalı.' : undefined}
           data-testid="showcase-lead-phone-send"

@@ -17,9 +17,55 @@ function env(values: Record<string, string | undefined>): NodeJS.ProcessEnv {
   return { ...values } as NodeJS.ProcessEnv;
 }
 
+describe('resolveTurnstileConfig — what an unset TURNSTILE_MODE means', () => {
+  it('is the test adapter on a declared local stack, whatever NODE_ENV says', () => {
+    expect(resolveTurnstileConfig(env({ NODE_ENV: 'development', APP_ENVIRONMENT: 'local' }))).toEqual({ mode: 'test' });
+    expect(resolveTurnstileConfig(env({ NODE_ENV: 'production', APP_ENVIRONMENT: 'local' }))).toEqual({ mode: 'test' });
+  });
+
+  it('is the test adapter under NODE_ENV=test', () => {
+    expect(resolveTurnstileConfig(env({ NODE_ENV: 'test' }))).toEqual({ mode: 'test' });
+  });
+
+  it('is exactly what the local docker-compose stack passes, and boots without a single value', () => {
+    // docker-compose.yml: NODE_ENV=development, APP_ENVIRONMENT defaults to
+    // local, every TURNSTILE_* variable is forwarded as empty-when-unset.
+    const compose = env({
+      NODE_ENV: 'development',
+      APP_ENVIRONMENT: 'local',
+      TURNSTILE_MODE: '',
+      TURNSTILE_SECRET_KEY: '',
+      TURNSTILE_EXPECTED_HOSTNAMES: '',
+      TURNSTILE_SITEVERIFY_TIMEOUT_MS: '',
+    });
+    expect(resolveTurnstileConfig(compose)).toEqual({ mode: 'test' });
+  });
+
+  it.each([
+    ['staging', { NODE_ENV: 'development', APP_ENVIRONMENT: 'staging' }],
+    ['production', { NODE_ENV: 'production', APP_ENVIRONMENT: 'production' }],
+    ['an undeclared environment', { NODE_ENV: 'development' }],
+    ['an undeclared environment started as production', { NODE_ENV: 'production' }],
+  ])('is cloudflare on %s, and then fails closed without the secret', (_label, values) => {
+    expect(() => resolveTurnstileConfig(env(values))).toThrow(TURNSTILE_VARS.secretKey);
+  });
+});
+
 describe('resolveTurnstileConfig — cloudflare', () => {
-  it('is the mode an unset TURNSTILE_MODE resolves to, and then needs the secret', () => {
-    expect(() => resolveTurnstileConfig(env({}))).toThrow(TURNSTILE_VARS.secretKey);
+  it('is what TURNSTILE_MODE=cloudflare means anywhere, a local stack included', () => {
+    expect(() => resolveTurnstileConfig(env({ APP_ENVIRONMENT: 'local', TURNSTILE_MODE: 'cloudflare' }))).toThrow(
+      TURNSTILE_VARS.secretKey,
+    );
+    expect(
+      resolveTurnstileConfig(
+        env({
+          APP_ENVIRONMENT: 'local',
+          TURNSTILE_MODE: 'cloudflare',
+          TURNSTILE_SECRET_KEY: SECRET,
+          TURNSTILE_EXPECTED_HOSTNAMES: 'localhost',
+        }),
+      ),
+    ).toMatchObject({ mode: 'cloudflare', expectedHostnames: new Set(['localhost']) });
   });
 
   it('needs the expected hostnames as well', () => {
@@ -101,8 +147,8 @@ describe('resolveTurnstileConfig — test and off', () => {
   it.each([
     ['staging', { NODE_ENV: 'development', APP_ENVIRONMENT: 'staging' }],
     ['production', { NODE_ENV: 'development', APP_ENVIRONMENT: 'production' }],
-    ['NODE_ENV=production on a local stack', { NODE_ENV: 'production', APP_ENVIRONMENT: 'local' }],
     ['an undeclared environment', { NODE_ENV: 'development' }],
+    ['an undeclared environment started as production', { NODE_ENV: 'production' }],
   ])('refuses to boot with TURNSTILE_MODE=test on %s', (_label, values) => {
     expect(() => resolveTurnstileConfig(env({ ...values, TURNSTILE_MODE: 'test' }))).toThrow(
       /TURNSTILE_MODE=test is refused here/,
@@ -129,11 +175,13 @@ describe('resolveTurnstileConfig — test and off', () => {
 });
 
 describe('isTurnstileBypassPermitted', () => {
-  it('is the same gate the two bypass modes use', () => {
+  it('is the same gate the two bypass modes and the unset default use: APP_ENVIRONMENT decides, NODE_ENV=test alone qualifies', () => {
     expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'test' }))).toBe(true);
     expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'development', APP_ENVIRONMENT: 'local' }))).toBe(true);
+    expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'production', APP_ENVIRONMENT: 'local' }))).toBe(true);
     expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'development', APP_ENVIRONMENT: 'staging' }))).toBe(false);
-    expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'production', APP_ENVIRONMENT: 'local' }))).toBe(false);
+    expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'development', APP_ENVIRONMENT: 'production' }))).toBe(false);
     expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'development' }))).toBe(false);
+    expect(isTurnstileBypassPermitted(env({ NODE_ENV: 'production' }))).toBe(false);
   });
 });
