@@ -6317,3 +6317,75 @@ body.has-drawer-open {
 .timing-range-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: var(--space-3); }
 .timing-range-inputs .form-row > span:first-child { font-weight: 500; color: var(--color-neutral-700); }
 .timing-reapply { align-self: flex-start; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Provider choice cards inside the marketplace request form.
+
+   A radio group whose options are cards. The radio itself is visually hidden
+   but stays in the tab order, so the group keeps native keyboard behaviour;
+   the card shows the state through `.is-selected` and `:focus-within`. Every
+   track is `min(240px, 100%)` and every cell `min-width: 0`, so the block
+   fits a 320px phone without a horizontal scrollbar.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.provider-choice-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.provider-choice {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-4);
+  border: 2px solid var(--color-divider);
+  background: var(--color-bg);
+  cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.provider-choice:hover { border-color: var(--color-text); }
+.provider-choice.is-selected { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.provider-choice:focus-within { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+/* Hidden to the eye only: still focusable, still announced with its label. */
+.provider-choice-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.provider-choice-mark {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 2px solid var(--color-text);
+  border-radius: 50%;
+  background: var(--color-bg);
+}
+.provider-choice.is-selected .provider-choice-mark {
+  border-color: var(--color-accent);
+  background: radial-gradient(circle, var(--color-accent) 0 45%, transparent 50%);
+}
+
+.provider-choice-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.provider-choice-name { font-family: var(--font-heading); font-weight: 700; font-size: 15px; }
+.provider-choice-meta { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--color-neutral-800); }
+.provider-choice-line { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.provider-choice-key { font-weight: 600; color: var(--color-neutral-700); }
+.provider-choice-key::after { content: ':'; }
+.provider-choice-rating { margin: 0; }
+.provider-choice-general .provider-choice-meta { color: var(--color-neutral-700); }
+.provider-choice-note { display: block; font-size: 14px; }
