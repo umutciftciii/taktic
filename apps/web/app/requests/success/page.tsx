@@ -6,6 +6,7 @@ import {
   fetchOrNotFound,
   getCurrentUser,
 } from '../../../lib/api';
+import { GuestActivationNote } from './activation-note';
 
 type RequestSuccessPageProps = {
   searchParams: Promise<{ id?: string }>;
@@ -87,12 +88,7 @@ function GuestReceipt({ id }: { id: string }) {
           <p style={{ marginTop: 14 }}>
             Talep referansı: <code data-testid="request-success-reference">{referenceFromId(id)}</code>
           </p>
-          <p className="notice" role="status" style={{ marginTop: 14 }}>
-            Hesabınızı etkinleştirmeniz için e-posta adresinize bir bağlantı gönderdik. E-postanızı
-            kontrol edin; bağlantı ulaşmadıysa aynı e-posta adresiyle{' '}
-            <Link href="/register/customer">kayıt olmayı</Link> deneyin, bağlantı yeniden
-            gönderilir.
-          </p>
+          <GuestActivationNote />
           <div className="inline-actions" style={{ marginTop: 24 }}>
             <Link className="btn btn-primary" href="/">
               Ana sayfaya dön

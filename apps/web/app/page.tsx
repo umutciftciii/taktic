@@ -12,14 +12,12 @@ import { ShowcaseShelf } from './showcase-shelf';
 import { LandingFAQ } from './landing-faq';
 import { StartChoiceModal } from './start-choice-modal';
 import { CategoryVisual } from './category-visual';
+import { StepCard, steps } from './landing-steps';
 import {
   IconArrowRight,
   IconCheck,
   IconClipList,
-  IconCompare,
-  IconEdit,
   IconShield,
-  IconThumbsUp,
   IconUsers,
   IconWallet,
   IconX,
@@ -176,37 +174,6 @@ function PopularCategories({ categories }: { categories: Category[] }) {
   );
 }
 
-type Step = {
-  n: number;
-  title: string;
-  desc: string;
-  Icon: IconComponent;
-};
-
-const steps: Step[] = [
-  {
-    n: 1,
-    Icon: IconEdit,
-    title: 'İhtiyacını anlat',
-    desc:
-      'Kategoriye özel soruları yanıtla, lokasyon ve zaman bilgisini gir. Talebin kalite skoru ile yayına alınır.',
-  },
-  {
-    n: 2,
-    Icon: IconCompare,
-    title: 'Teklifleri karşılaştır',
-    desc:
-      'Uygun hizmet verenlerden gelen teklifleri fiyat, deneyim ve açıklamaya göre incele.',
-  },
-  {
-    n: 3,
-    Icon: IconThumbsUp,
-    title: 'Uygun olanı seç',
-    desc:
-      'Beğendiğin teklifi kabul et; eşleşme kaydedildiğinde iletişim bilgileri karşılıklı paylaşılır.',
-  },
-];
-
 function HowItWorks() {
   return (
     <section className="lp-section lp-section-white" id="nasil-calisir">
@@ -223,19 +190,9 @@ function HowItWorks() {
         </div>
 
         <div className="lp-steps-grid">
-          {steps.map((s) => {
-            const { Icon: StepIcon } = s;
-            return (
-              <article className="lp-step-card" key={s.n}>
-                <span className="lp-step-num">0{s.n}</span>
-                <span className="lp-step-icon">
-                  <StepIcon size={20} />
-                </span>
-                <h3 className="lp-step-title">{s.title}</h3>
-                <p className="lp-step-desc">{s.desc}</p>
-              </article>
-            );
-          })}
+          {steps.map((step) => (
+            <StepCard step={step} key={step.n} />
+          ))}
         </div>
       </div>
     </section>
