@@ -1,6 +1,6 @@
 # REQ-UX-006 — Adım kartları ve misafir aktivasyon notu — Teslim Raporu
 
-Tarih: 2026-09-17 · Branch: `claude/req-ux-006-cards-activation-e2dc6e` (taban `main` @ `70034dbe`) · PR: _(aşağıda)_ · Merge: **yapılmadı**
+Tarih: 2026-09-17 · Branch: `claude/req-ux-006-cards-activation-e2dc6e` (taban `main` @ `70034dbe`) · PR: https://github.com/umutciftciii/taktic/pull/84 · Merge: **yapılmadı**
 
 Migration yok. API, Prisma, Docker/compose, `.env`, Turnstile, ödeme, SMS, e-posta gönderimi ve admin uygulamasına dokunulmadı; yalnız web bileşeni/CSS/test dosyaları değişti.
 
@@ -52,7 +52,7 @@ Erişilebilirlik: `h3` başlık, ikon `aria-hidden="true"`; klavye etkileşimi o
 | `pnpm build` | geçti |
 | `pnpm e2e` (Chromium, tam suite) | 258/258 |
 | `pnpm e2e:webkit` | 103/103 (`landing-steps` + `request-success-screen` dahil) |
-| CI | _(PR açıldıktan sonra)_ |
+| CI (#84, run 35153002464) | 3/3 geçti: `typecheck · lint · test · build` (8m49s — API suite dahil, flaky test burada geçti), `e2e (chromium)` (15m03s), `e2e (webkit · sign-in and mobile shells)` (9m32s) |
 
 ## Responsive kanıt (Chromium; `docs/superpowers/plans/2026-09-17-req-ux-006-screens/`)
 
