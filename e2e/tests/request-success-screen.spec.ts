@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen, expectNotFoundScreen } from '../src/actors';
 import {
   createCategory,
@@ -21,7 +23,7 @@ import {
   seedApprovedShowcaseCard,
   seedLiveShowcasePlacement,
 } from '../src/showcase-fixtures';
-import { primaryRuntime } from '../src/runtime';
+import { artifactsDir, primaryRuntime } from '../src/runtime';
 
 /**
  * The screen after a request is sent, worded from the request itself.
@@ -44,11 +46,85 @@ import { primaryRuntime } from '../src/runtime';
 /** Sentences that must never appear on a screen for somebody who is not the owner. */
 const CLAIMS = ['yayınlandı', 'yayında', 'ön inceleme', 'onay', 'teklif', 'işletmesine iletildi'];
 
+/** The activation note, as a reader hears it — one sentence, one link inside it. */
+const ACTIVATION_NOTE =
+  'Hesabınızı etkinleştirmeniz için e-posta adresinize bir bağlantı gönderdik. ' +
+  'E-postanızı kontrol edin; bağlantı ulaşmadıysa aynı e-posta adresiyle kayıt olmayı deneyin, ' +
+  'bağlantı yeniden gönderilir.';
+
+/** The widths the guest receipt is measured at, narrowest first. */
+const WIDTHS = [320, 375, 768, 1024, 1440] as const;
+
+const SCREENSHOT_DIR = resolve(artifactsDir, 'screens');
+
 async function expectNoClaims(page: Page) {
   const text = (await page.getByTestId('request-success').innerText()).toLowerCase();
   for (const claim of CLAIMS) {
     expect(text, `the guest receipt must not say "${claim}"`).not.toContain(claim);
   }
+}
+
+/**
+ * The activation note reads as one block of prose.
+ *
+ * The notice box it sits in is a flex row, and a paragraph with a link in the
+ * middle laid out as a flex row becomes three columns: the words before the
+ * link, the link, the words after it. What a browser can show is where the
+ * link ended up. In prose the words before it are longer than any line the
+ * note can have, so the link is never on the first line; as a column it began
+ * at the very top of the box.
+ */
+async function expectActivationNoteReadsAsProse(page: Page, label: string) {
+  const note = page.getByTestId('request-success-activation-note');
+  await expect(note).toBeVisible();
+  expect((await note.innerText()).replace(/\s+/g, ' ').trim(), `${label}: the note's wording`).toBe(
+    ACTIVATION_NOTE,
+  );
+  const link = note.getByRole('link', { name: 'kayıt olmayı' });
+  await expect(link).toHaveAttribute('href', '/register/customer');
+
+  const geometry = await note.evaluate((element) => {
+    const anchor = element.querySelector('a');
+    if (!anchor) throw new Error('the activation note has no link');
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    const parent = (element.parentElement as HTMLElement).getBoundingClientRect();
+    const linkBox = anchor.getBoundingClientRect();
+    return {
+      display: style.display,
+      fontSize: Number.parseFloat(style.fontSize),
+      lineHeight: Number.parseFloat(style.lineHeight),
+      left: box.left,
+      right: box.right,
+      width: box.width,
+      top: box.top,
+      parentWidth: parent.width,
+      linkTop: linkBox.top,
+      linkRight: linkBox.right,
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    };
+  });
+  const viewport = page.viewportSize()?.width ?? 0;
+
+  expect(geometry.display, `${label}: the note is laid out as a flex row`).not.toBe('flex');
+  expect(geometry.width, `${label}: the note does not fill its column`).toBeGreaterThanOrEqual(
+    geometry.parentWidth - 1,
+  );
+  expect(geometry.left, `${label}: the note starts off screen`).toBeGreaterThanOrEqual(0);
+  expect(geometry.right, `${label}: the note runs past the right edge`).toBeLessThanOrEqual(viewport + 1);
+  expect(geometry.scrollWidth, `${label}: the note's text is wider than the note`).toBeLessThanOrEqual(
+    geometry.clientWidth + 1,
+  );
+  expect(geometry.lineHeight, `${label}: the lines are set too tight to read`).toBeGreaterThanOrEqual(
+    geometry.fontSize * 1.4,
+  );
+  expect(geometry.linkRight, `${label}: the link runs past the note`).toBeLessThanOrEqual(geometry.right + 1);
+  // The link flows with the sentence: it is on a later line, not a column
+  // beginning at the top of the box.
+  expect(geometry.linkTop - geometry.top, `${label}: the link is a column at the top of the note`).toBeGreaterThanOrEqual(
+    geometry.lineHeight,
+  );
 }
 
 test.describe('request success screen', () => {
@@ -84,6 +160,30 @@ test.describe('request success screen', () => {
       await visitor.gotoWeb(`/requests/success?id=${id}&published=1`);
       await expect(page.getByTestId('request-success')).toHaveAttribute('data-variant', 'guest');
       await expectNoClaims(page);
+
+      // The activation note reads as one block at every width, and the rest
+      // of the receipt — the neutral wording, the one way home — is as it was.
+      await visitor.gotoWeb(`/requests/success?id=${id}`);
+      for (const width of WIDTHS) {
+        const label = `guest receipt @${width}`;
+        await page.setViewportSize({ width, height: 900 });
+        await assertNoErrorScreen(page);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+          `${label}: the page is wider than the viewport`,
+        ).toBeLessThanOrEqual(0);
+        await expectActivationNoteReadsAsProse(page, label);
+        await expect(page.getByTestId('request-success-title')).toHaveText('Talebiniz alındı');
+        await expect(page.getByRole('link', { name: 'Ana sayfaya dön' })).toBeVisible();
+        await expectNoClaims(page);
+
+        mkdirSync(SCREENSHOT_DIR, { recursive: true });
+        await page.getByTestId('request-success').scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: resolve(SCREENSHOT_DIR, `request-success-guest-${width}.png`),
+          fullPage: false,
+        });
+      }
 
       // The account opened behind the request is the one the activation link
       // will sign in, and the link comes back to this request's offers.

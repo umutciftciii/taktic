@@ -1053,6 +1053,18 @@ input[readonly] {
   border-left: 3px solid var(--color-text);
 }
 
+/*
+ * A notice that is one paragraph of prose with a link in it. The box above is
+ * a flex row for an icon beside a message; a paragraph laid out that way
+ * splits at every inline element, and the words before a link, the link and
+ * the words after it become three columns. Block flow, and room between the
+ * lines for a phone to wrap it onto several.
+ */
+.notice-prose {
+  display: block;
+  line-height: 1.55;
+}
+
 .pdash-notice-warn,
 .cdash-notice-warn,
 .provider-apply-notice.is-warning,
@@ -2298,7 +2310,15 @@ input[readonly] {
   .cat-page-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* How it works — three ruled cells. */
+/*
+ * How it works — three ruled cells, like the trust grid below.
+ *
+ * Every cell carries the same inset on both sides, so a title starts at the
+ * same distance from its cell's edge whether the cell is first in a row of
+ * three, alone on a second row at 768px, or stacked at 320px. The first cell
+ * used to drop its left padding to sit flush with the section head, which
+ * put its heading 24px left of the other two whenever the row wrapped.
+ */
 .lp-steps-grid {
   display: flex;
   flex-wrap: wrap;
@@ -2310,26 +2330,70 @@ input[readonly] {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-6);
   border-right: 1px solid var(--color-divider);
 }
 
-.lp-step-card:first-child { padding-left: 0; }
 .lp-step-card:last-child { border-right: 0; }
+
+/*
+ * Below 552px the cells no longer fit two abreast (each is at least 260px,
+ * the gutter is 16px a side) and stack instead. A rule down the right of a
+ * stacked cell frames nothing, so the rule moves under each cell.
+ */
+@media (max-width: 551.98px) {
+  .lp-step-card {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  .lp-step-card:last-child { border-bottom: 0; }
+}
+
+/*
+ * The heading block: the icon in a framed box, the number and the title
+ * stacked beside it. The box is the height of the two lines it sits next to,
+ * so the icon reads as this step's and not as one of a row of three across
+ * the grid.
+ */
+.lp-step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.lp-step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 2px solid var(--color-text);
+  color: var(--color-text);
+}
+
+.lp-step-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
 
 .lp-step-num {
   font-family: var(--font-heading);
   font-weight: var(--font-heading-weight);
   font-size: 13px;
+  line-height: 1;
   color: var(--color-accent);
 }
-
-.lp-step-icon { color: var(--color-neutral-700); }
 
 .lp-step-title {
   margin: 0;
   font-size: 22px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .lp-step-desc {
