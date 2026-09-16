@@ -11,6 +11,7 @@ import {
   ProviderOffer,
   unviewedOfferRefundNotice,
   formatDate,
+  formatDateRange,
   formatPrice,
   formatDateTime,
   urgencyLabel,
@@ -452,7 +453,11 @@ function WorkScopeCard({
         </div>
         <div className="pdash-info-row">
           <dt>Tercih edilen tarih</dt>
-          <dd>{offer.request.preferredDate ? formatDate(offer.request.preferredDate) : '-'}</dd>
+          <dd>
+            {offer.request.preferredDate
+              ? formatDateRange(offer.request.preferredDate, offer.request.preferredDateEnd)
+              : '-'}
+          </dd>
         </div>
         <div className="pdash-info-row">
           <dt>Aciliyet</dt>

@@ -14,6 +14,7 @@ import {
   ServiceRequest,
   formatBudgetRange,
   formatDate,
+  formatDateRange,
   formatDateTime,
   formatPrice,
   qualityBadgeClass,
@@ -560,7 +561,13 @@ export default async function RequestDetailPage({
             </div>
             <div>
               <dt>Tercih tarihi</dt>
-              <dd>{request.preferredDate ? formatDate(request.preferredDate) : <span className="cell-muted">—</span>}</dd>
+              <dd>
+                {request.preferredDate ? (
+                  formatDateRange(request.preferredDate, request.preferredDateEnd)
+                ) : (
+                  <span className="cell-muted">—</span>
+                )}
+              </dd>
             </div>
             <div>
               <dt>Bütçe</dt>

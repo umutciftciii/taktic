@@ -246,7 +246,7 @@ export function formatMinorAsInput(amountMinor: number | null | undefined): stri
  * hydration. The shared implementation pins both the zone and the locale, so
  * SSR and the first client render agree by construction.
  */
-export { formatDate, formatDateTime, formatTime } from '@taktic/shared';
+export { formatDate, formatDateRange, formatDateTime, formatTime } from '@taktic/shared';
 
 /**
  * The four statuses a support ticket can be in, and how each one reads.

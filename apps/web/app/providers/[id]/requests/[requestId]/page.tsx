@@ -8,6 +8,7 @@ import {
   RequestQualityBreakdownComponent,
   formatPrice,
   formatDate,
+  formatDateRange,
   formatDateTime,
   qualityLabel,
   qualityBreakdownLabel,
@@ -187,8 +188,10 @@ export default async function ProviderRequestDetailPage({
             </div>
             <div className="metric-cell">
               <span className="metric-label">Tercih edilen tarih</span>
-              <span className="metric-value" style={{ fontSize: 20 }}>
-                {request.preferredDate ? formatDate(request.preferredDate) : '—'}
+              <span className="metric-value" style={{ fontSize: 20 }} data-testid="request-preferred-range">
+                {request.preferredDate
+                  ? formatDateRange(request.preferredDate, request.preferredDateEnd)
+                  : '—'}
               </span>
             </div>
             <div className="metric-cell">
