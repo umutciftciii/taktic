@@ -24,7 +24,7 @@ import {
   formatBudgetRange,
 } from '../../../provider-ui';
 import { createOfferAction } from './actions';
-import { OfferPriceField } from './offer-price-field';
+import { OfferPriceField } from '../../../offer-price-field';
 import { ReportDialog } from './report-dialog';
 
 type ProviderRequestDetailPageProps = {

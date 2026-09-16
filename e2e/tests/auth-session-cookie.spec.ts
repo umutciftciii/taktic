@@ -180,9 +180,10 @@ test.describe('the session cookie every auth flow issues', () => {
       await guest.page.locator('input[name="passwordConfirm"]').fill(password);
       await guest.page.getByRole('button', { name: 'Şifreyi Kaydet' }).click();
 
-      // Activation signs them in — landing anywhere but their own panel means
-      // the cookie was refused, which is exactly what Safari used to do.
-      await expect(guest.page).toHaveURL(/\/requests\/my$/);
+      // Activation signs them in and brings them to the request they sent —
+      // landing anywhere but their own panel means the cookie was refused,
+      // which is exactly what Safari used to do.
+      await expect(guest.page).toHaveURL(/\/requests\/[a-z0-9]+\/offers$/);
       await assertNoErrorScreen(guest.page);
 
       await expectSessionMirrorsApi(

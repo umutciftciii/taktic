@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { parseLiraToMinor } from '../../../../../lib/lira-input';
-import { LiraInput } from '../../../../request-fields/lira-input';
+import { parseLiraToMinor } from '../../lib/lira-input';
+import { LiraInput } from '../request-fields/lira-input';
 
 /**
  * The smallest offer the API accepts, in kuruş — one whole lira. Mirrors the
@@ -12,7 +12,9 @@ import { LiraInput } from '../../../../request-fields/lira-input';
 const MIN_OFFER_MINOR = 100;
 
 /**
- * The offer price, written the way lira are written in Turkey.
+ * The offer price, written the way lira are written in Turkey — one field for
+ * both places a provider prices a job: the marketplace request and the vitrin
+ * lead.
  *
  * The same `LiraInput` the customer's budget uses: grouped as it is typed
  * (`4500` → `4.500`), completed when it is left (`4.500,00`), and read back by

@@ -2,7 +2,8 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { ApiError, apiFetch, parseDecimalToMinor } from '../../../../../../lib/api';
+import { ApiError, apiFetch } from '../../../../../../lib/api';
+import { parseLiraToMinor } from '../../../../../../lib/lira-input';
 
 /**
  * Offering on a direct vitrin lead.
@@ -31,7 +32,9 @@ export async function createShowcaseLeadOfferAction(formData: FormData) {
     await apiFetch(`/providers/${providerId}/requests/${requestId}/offers`, {
       method: 'POST',
       body: JSON.stringify({
-        priceAmount: parseDecimalToMinor(readString(formData, 'priceAmount')),
+        // The same lira field as the marketplace offer: grouped text in,
+        // kuruş integer out, no floating point on the way.
+        priceAmount: parseLiraToMinor(readString(formData, 'priceAmount')),
         currency: readOptional(formData, 'currency'),
         estimatedStartDate: readOptional(formData, 'estimatedStartDate'),
         estimatedCompletionDate: readOptional(formData, 'estimatedCompletionDate'),
