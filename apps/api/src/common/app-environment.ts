@@ -34,7 +34,15 @@ export function isAppEnvironment(value: string): value is AppEnvironment {
  * "not production".
  */
 export function readAppEnvironment(): AppEnvironment | null {
-  const raw = process.env.APP_ENVIRONMENT?.trim();
+  return parseAppEnvironment(process.env.APP_ENVIRONMENT);
+}
+
+/**
+ * The same rule applied to a supplied value, for a reader that was handed an
+ * environment rather than reading the process's own (turnstile.config.ts).
+ */
+export function parseAppEnvironment(value: string | undefined): AppEnvironment | null {
+  const raw = value?.trim();
   if (!raw) {
     return null;
   }

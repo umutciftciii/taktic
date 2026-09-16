@@ -112,6 +112,26 @@ services:
       # configuration reader accepts it only for https or loopback and refuses
       # it under NODE_ENV=production.
       LEMON_SQUEEZY_API_BASE_URL: ${LEMON_SQUEEZY_API_BASE_URL:-}
+      # Which deployment this is, forwarded exactly as the host declares it
+      # and never decided here. This file is the one a staging or production
+      # host may run, so an APP_ENVIRONMENT the host forgot to set reaches
+      # the process unset — and unset is treated as production by every
+      # reader: Turnstile falls to its strict Cloudflare mode and refuses to
+      # boot without the secret. The local declaration lives in
+      # docker-compose.local.yml, loaded only by an explicit `-f`; see
+      # `pnpm stack:up`, .env.example and turnstile.config.ts.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-}
+      # Turnstile, forwarded as "empty when unset", which the reader treats
+      # exactly like unset. With the local file loaded the stack runs the
+      # test adapter and needs none of these; a developer proving a real
+      # widget against localhost sets the mode to `cloudflare` with a local
+      # widget's secret and hostname — from the untracked .env or the shell,
+      # never from a committed file. The secret is forwarded to this service
+      # only.
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      TURNSTILE_EXPECTED_HOSTNAMES: ${TURNSTILE_EXPECTED_HOSTNAMES:-}
+      TURNSTILE_SITEVERIFY_TIMEOUT_MS: ${TURNSTILE_SITEVERIFY_TIMEOUT_MS:-}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross
       # the Docker Desktop VirtioFS/gRPC-FUSE boundary on macOS.
@@ -144,6 +164,16 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
       API_INTERNAL_URL: http://api:3001
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
+      # The same declaration the API gets, forwarded the same way — as the
+      # host says it, unset when the host says nothing — and read at request
+      # time (never baked in at build). Unset, the request forms are closed:
+      # the Turnstile check cannot run and nothing can be sent. The local
+      # file declares `local`, on which they render the test adapter. The
+      # public site key is the only Turnstile value this service ever sees;
+      # the secret is the API's.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-}
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:

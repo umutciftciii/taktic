@@ -3,6 +3,9 @@ import { CustomerActivationService } from '../customer-activation/customer-activ
 import { AuthThrottlerGuard } from './auth.throttler';
 import { RequestIdentityActivateDto, RequestIdentityCheckDto } from './dto/request-identity.dto';
 import { RequestIdentityService } from './request-identity.service';
+import { TurnstileAction } from '../turnstile/turnstile.decorators';
+import { TurnstileGuard } from '../turnstile/turnstile.guard';
+import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
 
 /**
  * Asks, before a request form is filled in, whether its author already has an
@@ -20,7 +23,8 @@ export class RequestIdentityController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthThrottlerGuard)
+  @UseGuards(AuthThrottlerGuard, TurnstileGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.identityCheck)
   async check(@Body() dto: RequestIdentityCheckDto) {
     const { status } = await this.identity.classifyNow(dto);
     return { status };
@@ -37,7 +41,8 @@ export class RequestIdentityController {
    */
   @Post('activate')
   @HttpCode(HttpStatus.ACCEPTED)
-  @UseGuards(AuthThrottlerGuard)
+  @UseGuards(AuthThrottlerGuard, TurnstileGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.identityActivate)
   async activate(@Body() dto: RequestIdentityActivateDto) {
     const { status, matchedCustomerId } = await this.identity.classifyNow(dto);
 

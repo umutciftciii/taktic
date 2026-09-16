@@ -10,6 +10,9 @@ import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { ServiceRequestThrottlerGuard } from './service-request.throttler';
 import { ServiceRequestsService } from './service-requests.service';
+import { TurnstileAction } from '../turnstile/turnstile.decorators';
+import { TurnstileGuard } from '../turnstile/turnstile.guard';
+import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
 import { OffersService } from '../offers/offers.service';
 
 @Controller('service-requests')
@@ -20,7 +23,10 @@ export class ServiceRequestsController {
   ) {}
 
   @Post()
-  @UseGuards(ServiceRequestThrottlerGuard, OptionalAuthGuard)
+  // Throttle first (a tokenless flood spends its address's budget, not a
+  // siteverify call each), then the Turnstile gate, then the optional session.
+  @UseGuards(ServiceRequestThrottlerGuard, TurnstileGuard, OptionalAuthGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.serviceRequestCreate)
   createServiceRequest(
     @Body() dto: CreateServiceRequestDto,
     @CurrentUser() user: AuthUser | null,

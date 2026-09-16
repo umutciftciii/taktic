@@ -6,6 +6,9 @@ import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
 import { VerifyPhoneCodeDto } from './dto/verify-phone-code.dto';
 import { PhoneVerificationService, VerificationRequestMeta } from './phone-verification.service';
+import { TurnstileAction } from '../turnstile/turnstile.decorators';
+import { TurnstileGuard } from '../turnstile/turnstile.guard';
+import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
 
 /**
  * Both routes require a signed-in customer who owns the request (or an admin).
@@ -21,7 +24,11 @@ export class PhoneVerificationController {
   ) {}
 
   @Post()
-  @UseGuards(AuthGuard, RolesGuard)
+  // The send is the route that costs an SMS, so it carries the Turnstile gate
+  // as the vitrin's standalone send does; the verify below spends nothing and
+  // has its own attempt budget.
+  @UseGuards(TurnstileGuard, AuthGuard, RolesGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.phoneCodeSend)
   @Roles(UserRole.CUSTOMER, UserRole.SUPER_ADMIN)
   sendCode(
     @Param('requestId') requestId: string,

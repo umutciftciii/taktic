@@ -20,6 +20,7 @@ import {
   primaryRuntime,
   providerClaimRuntime,
   repoRoot,
+  turnstileClosedWebRuntime,
   type Runtime,
 } from './src/runtime';
 
@@ -119,6 +120,27 @@ const sharedEnv = {
 const trustedProxyApiEnv = { TRUST_PROXY: '1' };
 const trustedProxyWebEnv = { WEB_TRUST_PROXY: 'true' };
 
+/**
+ * Turnstile in its deterministic test adapter, on every stack — by default,
+ * not by request.
+ *
+ * Nothing here names a mode. The API resolves an unset TURNSTILE_MODE from
+ * the environment it runs in (NODE_ENV=test here, APP_ENVIRONMENT=local on a
+ * developer's compose stack) and the web from APP_ENVIRONMENT alone, so this
+ * suite exercises the exact default the local docker-compose stack boots
+ * with: no secret, no site key, no byte to Cloudflare. The web app's adapter
+ * mints a token of the shape the API's test verifier accepts, carries it as
+ * it would carry a real one — server action argument, one request header —
+ * and the API's guard, replay cache and error mapping run for real. A token
+ * that never reaches the API fails the scenario the way a bot would fail it,
+ * which is the point of the adapter rather than switching the gate off.
+ *
+ * The API's runtimes already run under NODE_ENV=test (sharedEnv); the web is
+ * told it is a local stack, which is not a secret and cannot reach a real
+ * widget (see turnstile.config.ts and lib/turnstile.ts for the two gates).
+ */
+const turnstileWebEnv = { APP_ENVIRONMENT: 'local' };
+
 function apiServer(runtime: Runtime) {
   return {
     // The compiled entry point, so the suite exercises the same artefact CI
@@ -213,6 +235,23 @@ function lemonSqueezyStubServer() {
   };
 }
 
+/**
+ * The web server that cannot run Turnstile: a staging declaration and no
+ * site key, in front of the primary API. See turnstileClosedWebRuntime.
+ */
+function turnstileClosedWebServer() {
+  const base = nextServer(turnstileClosedWebRuntime, 'web');
+  return {
+    ...base,
+    env: {
+      ...base.env,
+      APP_ENVIRONMENT: 'staging',
+      TURNSTILE_MODE: '',
+      TURNSTILE_SITE_KEY: '',
+    },
+  };
+}
+
 function nextServer(runtime: Runtime, app: 'web' | 'admin') {
   const port = app === 'web' ? runtime.ports.web : runtime.ports.admin;
 
@@ -234,8 +273,9 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
       // confirmation screen say, so it has to agree with its own API.
       PROVIDER_CLAIM_ENABLED: String(runtime.providerClaim),
       // Only the web app forwards a client address to the API — see
-      // trustedProxyWebEnv. The admin app has no such path.
-      ...(app === 'web' ? trustedProxyWebEnv : {}),
+      // trustedProxyWebEnv. The admin app has no such path, and no Turnstile
+      // widget either.
+      ...(app === 'web' ? { ...trustedProxyWebEnv, ...turnstileWebEnv } : {}),
     },
   };
 }
@@ -299,6 +339,15 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *                          and a redirect off a server action that lands the
  *                          customer on a new screen — on 320px too
  *
+ * And the Turnstile gate, for the overlay reason and the cookie reason at
+ * once:
+ *
+ *   turnstile-protection   a widget slot that draws in place on whichever
+ *                          step is showing, a refusal under the field with
+ *                          `role="alert"`, and the same forms as the identity
+ *                          gate — driven by a page-level override the engine
+ *                          has to run before the app's own script does
+ *
  * And the identity gate, for the first reason again:
  *
  *   request-identity-gate  the pre-check on both request forms and the draft
@@ -330,7 +379,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];
@@ -399,5 +448,6 @@ export default defineConfig({
     apiServer(lemonSqueezyRuntime),
     nextServer(lemonSqueezyRuntime, 'web'),
     nextServer(lemonSqueezyRuntime, 'admin'),
+    turnstileClosedWebServer(),
   ],
 });

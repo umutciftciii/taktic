@@ -5,6 +5,8 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "turbo dev",
+    "stack:up": "docker compose -f docker-compose.yml -f docker-compose.local.yml up -d",
+    "stack:down": "docker compose -f docker-compose.yml -f docker-compose.local.yml down",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",

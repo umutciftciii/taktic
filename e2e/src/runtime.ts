@@ -232,6 +232,23 @@ export const lemonSqueezyRuntime = buildRuntime(
   'lemon-squeezy-test',
 );
 
+/**
+ * One more web process, and only a web process: the primary runtime's API
+ * behind a web server that declares itself `staging` and carries no
+ * Turnstile site key. What it proves is the web's own fail-closed rule —
+ * the request forms on such a stack say the check cannot run and offer no
+ * way to send — against a real API, without a sixth API and admin process.
+ * Nothing else in the suite navigates here.
+ */
+export const turnstileClosedWebPort = port(process.env.E2E_TURNSTILE_CLOSED_WEB_PORT, 3250);
+
+export const turnstileClosedWebRuntime: Runtime = {
+  ...primaryRuntime,
+  name: 'turnstile-closed-web',
+  ports: { ...primaryRuntime.ports, web: turnstileClosedWebPort },
+  webUrl: `http://127.0.0.1:${turnstileClosedWebPort}`,
+};
+
 export const runtimes = [
   primaryRuntime,
   phoneGateRuntime,

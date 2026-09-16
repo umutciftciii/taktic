@@ -17,7 +17,9 @@ import { CustomerShell } from '../../customer-shell';
 import { IconArrowLeft, IconCheck, IconMail, IconPhone } from '../../../landing-icons';
 import { ReviewStars } from '../../../review-stars';
 import { statusPillClass } from '../../../status-pill';
-import { completeRequestAction, sendPhoneCodeAction, verifyPhoneCodeAction } from './actions';
+import { completeRequestAction } from './actions';
+import { PhoneVerificationCard } from './phone-verification-card';
+import { readTurnstileWebConfig } from '../../../../lib/turnstile';
 import { OffersView } from './offers-view';
 
 type RequestOffersPageProps = {
@@ -107,8 +109,9 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           {summary && !summary.phoneVerifiedAt ? (
             <PhoneVerificationCard
               requestId={id}
-              customerPhone={summary.customerPhone}
+              maskedPhone={maskPhoneForDisplay(summary.customerPhone)}
               state={verificationState}
+              turnstile={readTurnstileWebConfig()}
             />
           ) : null}
 
@@ -269,79 +272,6 @@ function TimelineStep({
       </div>
     </li>
   );
-}
-
-/**
- * Optional today: while REQUIRE_PHONE_VERIFICATION is off, verifying changes
- * nothing about how the request is handled, so this card informs and invites
- * but never blocks. It also makes no claim that the request *is* verified.
- */
-function PhoneVerificationCard({
-  requestId,
-  customerPhone,
-  state,
-}: {
-  requestId: string;
-  customerPhone: string;
-  state: string | null;
-}) {
-  return (
-    <div className="cdash-verify-card" style={{ marginTop: 24 }}>
-      <span className="cdash-summary-label">Telefon Doğrulama</span>
-      <p className="cdash-summary-body">
-        {maskPhoneForDisplay(customerPhone)} numarasını doğrulayarak talebinizin bize doğru
-        ulaştığını teyit edebilirsiniz. Doğrulama şu anda zorunlu değildir ve talebiniz normal
-        şekilde ilerler.
-      </p>
-
-      {state ? <p className="cdash-summary-body">{verificationMessage(state)}</p> : null}
-
-      <div className="verify-row">
-        <form action={sendPhoneCodeAction}>
-          <input type="hidden" name="requestId" value={requestId} />
-          <button className="cdash-btn cdash-btn-secondary" type="submit">
-            Doğrulama kodu gönder
-          </button>
-        </form>
-
-        <form action={verifyPhoneCodeAction} className="verify-row">
-          <input type="hidden" name="requestId" value={requestId} />
-          <label className="cdash-visually-hidden" htmlFor="phone-code">
-            Doğrulama kodu
-          </label>
-          <input
-            id="phone-code"
-            name="code"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            pattern="\d{6}"
-            placeholder="6 haneli kod"
-            style={{ maxWidth: 160 }}
-            required
-          />
-          <button className="cdash-btn cdash-btn-primary" type="submit">
-            Doğrula
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function verificationMessage(state: string): string {
-  switch (state) {
-    case 'ok':
-      return 'İşlem tamamlandı. Kod gönderildiyse birkaç dakika içinde ulaşır.';
-    case 'invalid':
-      return 'Kod geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.';
-    case 'rate-limited':
-      return 'Çok fazla kod istendi. Lütfen bir süre sonra tekrar deneyin.';
-    case 'already-verified':
-      return 'Bu talebin telefonu zaten doğrulanmış.';
-    default:
-      return 'İşlem şu anda tamamlanamadı. Lütfen daha sonra tekrar deneyin.';
-  }
 }
 
 /** Display-only mask; the server never sends the full number back either. */

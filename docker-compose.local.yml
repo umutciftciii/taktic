@@ -1,0 +1,28 @@
+# The local development stack's own declaration, and nothing else.
+#
+# Loaded only when named explicitly, on top of the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#   pnpm stack:up            (the same command)
+#
+# It is deliberately NOT docker-compose.override.yml, which Compose would
+# load on its own for anyone running `docker compose up` from this directory
+# — a staging or production host included. The base file forwards
+# APP_ENVIRONMENT exactly as the host set it, and a host that set nothing
+# gets a process that treats itself as production: Turnstile in its strict
+# Cloudflare mode, refusing to boot without the secret. This file is how a
+# developer's machine says it is not that. On `local`, with no other value
+# set, the API and the web app run the deterministic Turnstile test adapter
+# and never contact Cloudflare.
+#
+# Both services carry the same word so the API and the forms it serves agree
+# on where they are. The admin app has no environment-gated behaviour and is
+# left alone.
+services:
+  api:
+    environment:
+      APP_ENVIRONMENT: local
+
+  web:
+    environment:
+      APP_ENVIRONMENT: local

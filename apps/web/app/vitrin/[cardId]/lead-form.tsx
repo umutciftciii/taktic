@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from 'react';
 import type { ContactDisclosureConfig, Question, ShowcaseFeedCard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { DRAFT_STATE_FIELD, draftStateFor } from '../../../lib/draft-state';
@@ -20,6 +20,13 @@ import {
 import { DescriptionField } from '../../request-fields/description-field';
 import { ContactDisclosureField } from '../../request-fields/disclosure-field';
 import { useIdentityCheck } from '../../request-fields/identity-check';
+import { TurnstileSlot, useTurnstile } from '../../request-fields/turnstile';
+import {
+  TURNSTILE_ACTIONS,
+  TURNSTILE_CHALLENGE_FAILED,
+  turnstileHeaders,
+  type TurnstileWebConfig,
+} from '../../../lib/turnstile';
 import { IdentityNotice } from '../../request-fields/identity-notice';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
@@ -78,6 +85,11 @@ type LeadFormProps = {
    * server re-resolves and re-checks all of it.
    */
   prefill: { city: string; district: string; neighborhood: string; phone: string };
+  /**
+   * How the Turnstile widget is rendered on this stack — read by the page from
+   * the server's environment at request time. See lib/turnstile.ts.
+   */
+  turnstile: TurnstileWebConfig;
   /**
    * A draft the customer parked before leaving to sign in or activate an
    * account, restored into the fields. Null when there is nothing to restore.
@@ -149,6 +161,7 @@ export function ShowcaseLeadForm({
   showDisclosure,
   accountContact,
   prefill,
+  turnstile: turnstileConfig,
   initialDraft = null,
   wrongAccount = false,
   formPath,
@@ -170,12 +183,27 @@ export function ShowcaseLeadForm({
   const [failure, setFailure] = useState<Extract<LeadActionResult, { ok: false }> | null>(null);
 
   /*
+   * The Turnstile adapter, one per form. The identity check, the activation
+   * link, the SMS send and the submission each ask it for a fresh token right
+   * before their own call; the code confirm spends nothing and asks for none.
+   */
+  const turnstile = useTurnstile(turnstileConfig);
+  const acquireIdentityToken = useCallback(
+    () => turnstile.acquire(TURNSTILE_ACTIONS.identityCheck),
+    [turnstile.acquire],
+  );
+
+  /*
    * The gate on the contact section. A visitor's number and e-mail are checked
    * once all three fields are filled and left; only a `new-customer` answer
    * opens the way to the code and to submit. For a signed-in customer the check
    * is disabled and the gate stands open — their identity is the session's.
    */
-  const identity = useIdentityCheck({ ...guestContact, enabled: accountContact === null });
+  const identity = useIdentityCheck({
+    ...guestContact,
+    enabled: accountContact === null,
+    acquireToken: acquireIdentityToken,
+  });
 
   /*
    * The two ways off the contact section for somebody who already has an
@@ -233,7 +261,9 @@ export function ShowcaseLeadForm({
       : guestContact.phone;
 
   const accountContactIncomplete = accountContact !== null && !accountContactIsComplete(accountContact);
-  const submitBlocked = accountContactIncomplete && !useAlternateContact;
+  /** A stack whose Turnstile check cannot run: no code is asked for and nothing is sent. */
+  const turnstileClosed = turnstile.status === 'unconfigured';
+  const submitBlocked = (accountContactIncomplete && !useAlternateContact) || turnstileClosed;
   const verified = verification.status === 'verified';
   const phoneLocked = verification.status !== 'idle';
   const gateOpen = identity.gateOpen;
@@ -255,7 +285,15 @@ export function ShowcaseLeadForm({
     setFailure(null);
     setVerification({ status: 'sending', phone: target });
     startTransition(async () => {
-      const result = await startShowcaseLeadVerificationAction(target);
+      let result: LeadActionResult;
+      try {
+        const token = await turnstile.acquire(TURNSTILE_ACTIONS.phoneCodeSend);
+        result = await startShowcaseLeadVerificationAction(target, token);
+      } catch {
+        // The widget could not produce a token: no code was asked for. Worded
+        // under the number like any other refusal, with "tekrar deneyin".
+        result = { ok: false, code: TURNSTILE_CHALLENGE_FAILED, message: null };
+      }
       setVerification(
         result.ok
           ? { status: 'code', phone: target, error: null, verifying: false }
@@ -296,8 +334,13 @@ export function ShowcaseLeadForm({
     startTransition(async () => {
       let result: LeadActionResult | undefined;
       try {
-        result = await createShowcaseLeadAction(data);
+        const token = await turnstile.acquire(TURNSTILE_ACTIONS.showcaseLeadCreate);
+        result = await createShowcaseLeadAction(data, token);
       } catch (error) {
+        if (error instanceof Error && error.message === TURNSTILE_CHALLENGE_FAILED) {
+          setFailure({ ok: false, code: TURNSTILE_CHALLENGE_FAILED, message: null });
+          return;
+        }
         // The action answers every refusal itself, so this is the transport: a
         // dropped connection, a deploy mid-flight. Said inline like any other.
         console.error('[vitrin lead] submit: transport failure', error);
@@ -363,9 +406,10 @@ export function ShowcaseLeadForm({
   async function sendActivation() {
     setDraftBusy(true);
     try {
+      const token = await turnstile.acquire(TURNSTILE_ACTIONS.identityActivate);
       const response = await fetch('/api/auth/request-identity-check/activate', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...turnstileHeaders(token) },
         body: JSON.stringify({
           phone: guestContact.phone.trim(),
           email: guestContact.email.trim(),
@@ -478,13 +522,15 @@ export function ShowcaseLeadForm({
    * code and no request before the contact check), then the proof, then the
    * one case the API would refuse anyway.
    */
-  const submitHint = !gateOpen
-    ? 'Göndermeden önce iletişim bilgilerinizin kontrolü tamamlanmalı.'
-    : !verified
-      ? 'Göndermeden önce telefon numaranızı doğrulayın.'
-      : submitBlocked
-        ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
-        : null;
+  const submitHint = turnstileClosed
+    ? 'Güvenlik doğrulaması şu anda kullanılamıyor.'
+    : !gateOpen
+      ? 'Göndermeden önce iletişim bilgilerinizin kontrolü tamamlanmalı.'
+      : !verified
+        ? 'Göndermeden önce telefon numaranızı doğrulayın.'
+        : submitBlocked
+          ? 'Hesabınızdaki iletişim bilgileri eksik. Farklı bir iletişim kişisi tanımlayın.'
+          : null;
 
   return (
     <form
@@ -541,6 +587,7 @@ export function ShowcaseLeadForm({
               state={verification}
               busy={pending}
               gateOpen={gateOpen}
+              sendClosed={turnstileClosed}
               onSend={sendCode}
               onConfirm={confirmCode}
               onReset={resetVerification}
@@ -684,6 +731,12 @@ export function ShowcaseLeadForm({
         )}
       </section>
 
+      {/*
+        The Turnstile widget's place, above the actions: a challenge that needs
+        the customer is drawn here, whichever of the calls above asked for it.
+      */}
+      <TurnstileSlot turnstile={turnstile} />
+
       <div className="pdash-form-foot">
         <button
           type="button"
@@ -729,6 +782,7 @@ function PhoneProof({
   state,
   busy,
   gateOpen,
+  sendClosed,
   onSend,
   onConfirm,
   onReset,
@@ -737,6 +791,8 @@ function PhoneProof({
   state: Verification;
   busy: boolean;
   gateOpen: boolean;
+  /** The stack cannot run the Turnstile check: no code can be asked for. */
+  sendClosed: boolean;
   onSend: () => void;
   onConfirm: (code: string) => void;
   onReset: () => void;
@@ -813,7 +869,7 @@ function PhoneProof({
           <button
             type="button"
             className="pdash-btn pdash-btn-ghost"
-            disabled={busy || sending || !gateOpen}
+            disabled={busy || sending || !gateOpen || sendClosed}
             onClick={onSend}
           >
             Kodu yeniden gönder
@@ -837,7 +893,7 @@ function PhoneProof({
         <button
           type="button"
           className="pdash-btn pdash-btn-primary"
-          disabled={busy || !phone.trim() || !gateOpen}
+          disabled={busy || !phone.trim() || !gateOpen || sendClosed}
           onClick={onSend}
           title={!gateOpen ? 'Önce iletişim bilgilerinizin kontrolü tamamlanmalı.' : undefined}
           data-testid="showcase-lead-phone-send"

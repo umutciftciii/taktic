@@ -45,6 +45,14 @@ export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
   // Normally shown under the field the API named; this is the banner's
   // wording when the field is one the form cannot point at.
   [CONTACT_DETAILS_IN_TEXT]: CONTACT_DETAILS_ERROR,
+  // The Turnstile gate. Three from the API and one from the widget itself,
+  // all worded the same way: short, "try again", and nothing about why —
+  // a sentence that could tell a bot what it got wrong would be a hint.
+  TURNSTILE_REQUIRED: 'Güvenlik doğrulaması başarısız oldu. Lütfen tekrar deneyin.',
+  TURNSTILE_FAILED: 'Güvenlik doğrulaması başarısız oldu. Lütfen tekrar deneyin.',
+  TURNSTILE_UNAVAILABLE:
+    'Güvenlik doğrulaması şu anda yapılamıyor. Lütfen birkaç saniye sonra tekrar deneyin.',
+  TURNSTILE_CHALLENGE_FAILED: 'Güvenlik doğrulaması tamamlanamadı. Lütfen tekrar deneyin.',
 };
 
 const GENERIC_MESSAGE = 'Talebiniz gönderilemedi. Bilgileri kontrol edip tekrar deneyin.';

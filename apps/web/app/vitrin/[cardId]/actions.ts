@@ -11,6 +11,7 @@ import {
   type SaveDraftResult,
 } from '../../../lib/request-drafts';
 import { buildServiceRequestPayload, readFormString } from '../../../lib/service-request-payload';
+import { turnstileHeaders } from '../../../lib/turnstile';
 
 /**
  * The three steps of writing to a business from its vitrin card.
@@ -59,10 +60,14 @@ export type LeadActionResult =
 
 export async function startShowcaseLeadVerificationAction(
   phone: string,
+  turnstileToken: string | null,
 ): Promise<LeadActionResult> {
   try {
     await apiFetch('/showcase/lead-verification', {
       method: 'POST',
+      // The send costs an SMS, so it carries the Turnstile token; the confirm
+      // below spends nothing and carries none.
+      headers: turnstileHeaders(turnstileToken),
       body: JSON.stringify({ phone: phone.trim() }),
     });
   } catch (error) {
@@ -106,12 +111,19 @@ export async function confirmShowcaseLeadVerificationAction(
  * provider id. A body that could name any of the three would be a body deciding
  * whose run it attaches to and what deadline it sets.
  */
-export async function createShowcaseLeadAction(formData: FormData): Promise<LeadActionResult> {
+export async function createShowcaseLeadAction(
+  formData: FormData,
+  turnstileToken: string | null,
+): Promise<LeadActionResult> {
   const cardId = readFormString(formData, 'cardId');
 
   try {
     await apiFetch(`/showcase/cards/${encodeURIComponent(cardId)}/leads`, {
       method: 'POST',
+      // A second argument rather than a form field: the FormData is also what
+      // the draft is built from, and a token is never parked. See the
+      // marketplace action for the same rule.
+      headers: turnstileHeaders(turnstileToken),
       body: JSON.stringify({
         ...buildServiceRequestPayload(formData),
         urgencyBucket: readFormString(formData, 'urgencyBucket'),

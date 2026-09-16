@@ -9,6 +9,9 @@ import { ShowcaseFeedQueryDto } from './dto/showcase-feed.dto';
 import { ShowcaseFeedService } from './showcase-feed.service';
 import { ShowcaseLeadService } from './showcase-lead.service';
 import { showcaseCardNotFound } from './showcase.errors';
+import { TurnstileAction } from '../turnstile/turnstile.decorators';
+import { TurnstileGuard } from '../turnstile/turnstile.guard';
+import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
 
 /**
  * The vitrin surface a visitor sees, and the one thing they can do with it.
@@ -82,6 +85,8 @@ export class ShowcasePublicController {
    */
   @Post('lead-verification')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(TurnstileGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.phoneCodeSend)
   startVerification(
     @Body() dto: ShowcaseLeadVerificationStartDto,
     @Req() req: IncomingRequest,
@@ -106,7 +111,8 @@ export class ShowcasePublicController {
    * decides which, and the status follows the fact.
    */
   @Post('cards/:cardId/leads')
-  @UseGuards(OptionalAuthGuard)
+  @UseGuards(TurnstileGuard, OptionalAuthGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.showcaseLeadCreate)
   @HttpCode(HttpStatus.CREATED)
   async createLead(
     @Param('cardId') cardId: string,

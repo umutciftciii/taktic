@@ -39,12 +39,14 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { NumberingModule } from './modules/numbering/numbering.module';
 import { UsersModule } from './modules/users/users.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { TurnstileModule } from './modules/turnstile/turnstile.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     HealthModule,
     PrismaModule,
+    TurnstileModule,
     NotificationsModule,
     AuthModule,
     AccountModule,

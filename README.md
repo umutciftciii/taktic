@@ -24,11 +24,17 @@ pnpm install
 cp .env.example .env
 ```
 
-4. Start PostgreSQL:
+4. Start PostgreSQL — or the whole local stack:
 
 ```bash
 docker compose up -d postgres
 ```
+
+```bash
+pnpm stack:up
+```
+
+`pnpm stack:up` is `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`. The second file is the local machine's own declaration (`APP_ENVIRONMENT=local` for the api and web services) and is loaded only when named: the base `docker-compose.yml` forwards `APP_ENVIRONMENT` exactly as the host set it, and a host that set nothing gets processes that treat themselves as production — Turnstile in its strict Cloudflare mode, the API refusing to boot without `TURNSTILE_SECRET_KEY`, the request forms closed. That is what a staging or production host running the base file alone should get; a developer's stack says it is local instead, needs no Turnstile value, and never contacts Cloudflare. Running the API on the host directly (`pnpm dev`) needs the same word exported: `APP_ENVIRONMENT=local`.
 
 5. Generate Prisma Client:
 

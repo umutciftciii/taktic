@@ -28,6 +28,7 @@ import {
 } from '../src/modules/notifications/notification.port';
 import { SmsMessage, SmsPort, SmsSendResult } from '../src/modules/notifications/sms.port';
 import { PaymentProviderPort } from '../src/modules/payments/payment-provider.port';
+import { TurnstileVerifierPort } from '../src/modules/turnstile/turnstile-verifier.port';
 import { normalizePhoneNumber } from '../src/modules/phone-verification/phone.util';
 import {
   SHOWCASE_PRICE_TERMS_TEXT,
@@ -145,6 +146,16 @@ export type TestAppOptions = {
    * its own adapter from PAYMENT_PROVIDER exactly as a deployment would.
    */
   paymentProvider?: PaymentProviderPort;
+  /**
+   * Stands in for the bound TurnstileVerifierPort.
+   *
+   * setup-env.ts pins TURNSTILE_MODE=off for the suite, so every other spec's
+   * calls to the protected routes pass without a token. The Turnstile spec
+   * passes the real Cloudflare verifier constructed with a stand-in `fetch`,
+   * so the guard, the replay cache and the error mapping are exercised over
+   * real HTTP without a byte reaching Cloudflare.
+   */
+  turnstileVerifier?: TurnstileVerifierPort;
 };
 
 export async function createTestApp(options: TestAppOptions = {}): Promise<TestContext> {
@@ -159,6 +170,9 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
 
   if (options.paymentProvider) {
     builder.overrideProvider(PaymentProviderPort).useValue(options.paymentProvider);
+  }
+  if (options.turnstileVerifier) {
+    builder.overrideProvider(TurnstileVerifierPort).useValue(options.turnstileVerifier);
   }
 
   const moduleRef = await builder.compile();
