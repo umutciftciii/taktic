@@ -148,6 +148,24 @@ export function formatDate(value: Date | string | null | undefined): string | nu
   }).format(moment);
 }
 
+/**
+ * `15 Eylül 2026 – 21 Eylül 2026`, or the single date when the two ends agree
+ * or the end is absent — which is what every request written before the range
+ * existed carries. Null when there is no start at all.
+ */
+export function formatDateRange(
+  start: Date | string | null | undefined,
+  end: Date | string | null | undefined,
+): string | null {
+  const first = formatDate(start);
+  if (first === null) {
+    return null;
+  }
+
+  const last = formatDate(end);
+  return last === null || last === first ? first : `${first} – ${last}`;
+}
+
 /** `2 kredi`. Turkish has no plural suffix here, so the noun never changes. */
 export function formatCredits(amount: number | null | undefined): string | null {
   if (typeof amount !== 'number' || !Number.isFinite(amount)) {

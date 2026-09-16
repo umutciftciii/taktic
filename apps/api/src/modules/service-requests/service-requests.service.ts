@@ -497,7 +497,12 @@ export class ServiceRequestsService {
     // notification problem must not surface as a failed submission.
     if (request.customerId) {
       try {
-        await this.customerActivation.issueForAutoCreatedCustomer(request.customerId);
+        // The link lands them on this request's own offer screen once the
+        // password is set — the API's safe-path check filters the value, and
+        // the screen itself re-checks ownership through the session.
+        await this.customerActivation.issueForAutoCreatedCustomer(request.customerId, {
+          redirectTo: `/requests/${request.id}/offers`,
+        });
       } catch (error) {
         this.logger.error(
           `Failed to issue activation link for request ${request.id}`,

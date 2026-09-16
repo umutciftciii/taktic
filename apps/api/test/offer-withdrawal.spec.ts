@@ -585,11 +585,39 @@ describe('provider offer withdrawal — what the customer sees', () => {
       .get(`/service-requests/${serviceRequest.id}/offers`)
       .set('Cookie', customerCookie)
       .expect(200);
-    const listed = offers.body as Array<{ id: string; status: string }>;
+    const listed = offers.body as Array<{ id: string; status: string; viewedAt: string | null }>;
     expect(listed.find((item) => item.id === offerId)?.status).toBe(OfferStatus.WITHDRAWN);
     expect(listed.find((item) => item.id === survivor.offerId)?.status).toBe(
       OfferStatus.SUBMITTED,
     );
+    // Never opened by the customer: the list says so, and the screen files it
+    // away as history rather than announcing a cancellation.
+    expect(listed.find((item) => item.id === offerId)?.viewedAt).toBeNull();
+  });
+
+  it('tells the customer list which withdrawn offer they had already opened', async () => {
+    const { provider, cookie, offerId, serviceRequest, customerCookie } =
+      await withdrawalFixture();
+
+    await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/offers/${offerId}/view`)
+      .set('Cookie', customerCookie)
+      .expect(201);
+    await request(ctx.server)
+      .post(withdrawUrl(provider.id, offerId))
+      .set('Cookie', cookie)
+      .expect(201);
+
+    const offers = await request(ctx.server)
+      .get(`/service-requests/${serviceRequest.id}/offers`)
+      .set('Cookie', customerCookie)
+      .expect(200);
+    const row = (offers.body as Array<{ id: string; status: string; viewedAt: string | null }>).find(
+      (item) => item.id === offerId,
+    );
+    expect(row?.status).toBe(OfferStatus.WITHDRAWN);
+    // A real timestamp, not a boolean: the same field the detail already carries.
+    expect(typeof row?.viewedAt).toBe('string');
   });
 
   it('refuses every customer action on the withdrawn offer', async () => {
