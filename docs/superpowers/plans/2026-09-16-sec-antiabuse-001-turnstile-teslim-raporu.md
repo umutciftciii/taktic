@@ -97,7 +97,7 @@ Korunan route'lar: `service-requests.controller.ts` (POST), `showcase-public.con
 | Typecheck · lint · build | `pnpm typecheck && pnpm lint && pnpm build` | geçti |
 | E2E Chromium | `pnpm e2e` (tam suite) | **254 geçti** (7.7 dk; yeni `turnstile-protection` 5 senaryo dahil) |
 | E2E WebKit | `pnpm e2e:webkit` | **99 geçti** (4.7 dk; `turnstile-protection` 5 senaryo WebKit'te de) |
-| CI | PR üzerinde | PR açıldıktan sonra bu satır güncellenecek |
+| CI | PR üzerinde | PR #83: `typecheck · lint · test · build` ✅ · `e2e (chromium)` ✅ · `e2e (webkit)` ✅ |
 
 Kanıtlanan spec maddeleri (`apps/api/test/turnstile-protection.spec.ts`, 6 route × matris):
 geçerli token → eski davranış ve yan etki (+1 kayıt / +1 SMS / +1 mail); eksik / geçersiz / action uyuşmaz /
