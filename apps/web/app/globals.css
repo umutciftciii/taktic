@@ -6394,3 +6394,39 @@ body.has-drawer-open {
 /* The withdrawn-offer sentence on a history row: its own line under the row's
    facts, so it never competes with the name and the date for width. */
 .cdash-history-notice { flex-basis: 100%; font-weight: 600; color: var(--color-neutral-800); }
+
+/* The provider's offer price: the currency sign sits inside the field's box,
+   the input itself is the shared LiraInput. */
+.offer-price-wrap { position: relative; display: block; }
+.offer-price-currency {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--color-neutral-700);
+  pointer-events: none;
+}
+.pdash-form-row .offer-price-input {
+  padding-left: 32px;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 18px;
+}
+
+/* A status badge inside a definition list wraps within its cell instead of
+   running over the border — "Görüntülenme bekleniyor" on a 320px screen is
+   wider than the value column. On a phone the list stacks term over value so
+   the badge has the whole card width to itself. */
+.cdash-meta-list dd .pdash-badge {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.3;
+  text-align: left;
+}
+@media (max-width: 480px) {
+  .cdash-meta-list { grid-template-columns: minmax(0, 1fr); }
+  .cdash-meta-list dt { padding-bottom: 2px; border-bottom: 0; }
+}

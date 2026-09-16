@@ -135,3 +135,46 @@ describe('minorToLiraDraft', () => {
     expect(minorToLiraDraft(99)).toBe('0,99');
   });
 });
+
+/**
+ * The provider's offer price goes through the same three functions as the
+ * customer's budget — one Turkish-lira rule for the whole product. These cases
+ * are the ones the offer form is judged on: what the provider types, what the
+ * field shows when they leave it, and the kuruş integer the API receives.
+ */
+describe('offer price through the shared lira functions', () => {
+  it('turns "4500" into ₺4.500,00 on blur and 450000 kuruş on the wire', () => {
+    expect(completeLiraAmount('4500')).toBe('4.500,00');
+    expect(parseLiraToMinor(completeLiraAmount('4500'))).toBe(450000);
+  });
+
+  it('accepts the grouped and the comma forms as the same amount', () => {
+    expect(parseLiraToMinor('4.500')).toBe(450000);
+    expect(parseLiraToMinor('4.500,00')).toBe(450000);
+    expect(parseLiraToMinor('4500,5')).toBe(450050);
+    expect(completeLiraAmount('4500,5')).toBe('4.500,50');
+  });
+
+  it('reads a dot as grouping, never as a decimal point — and shows it that way', () => {
+    // "12.50" is twelve hundred and fifty lira in this notation; the field
+    // regroups it in front of the provider as they type, so what is sent is
+    // what they saw.
+    expect(formatLiraDraft('12.50')).toBe('1.250');
+    expect(parseLiraToMinor('12.50')).toBe(125000);
+  });
+
+  it('has no negative amounts: the sign is not part of a number here', () => {
+    expect(formatLiraDraft('-4500')).toBe('4.500');
+    expect(parseLiraToMinor('-4500')).toBe(450000);
+  });
+
+  it('leaves an empty price as null so the API can say the field is required', () => {
+    expect(parseLiraToMinor('')).toBeNull();
+    expect(parseLiraToMinor('₺ ')).toBeNull();
+  });
+
+  it('keeps kuruş to two digits and refuses a third silently', () => {
+    expect(completeLiraAmount('1,999')).toBe('1,99');
+    expect(parseLiraToMinor('1,999')).toBe(199);
+  });
+});
