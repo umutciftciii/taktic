@@ -129,7 +129,7 @@ test.describe('provider review flow', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1500.00',
+        priceAmount: '1500,00',
         message: 'Montaj ve ilk bakım dahil.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);
@@ -393,7 +393,7 @@ test.describe('provider review flow', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1200.00',
+        priceAmount: '1200,00',
         message: 'Yarın gelebiliriz.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);
@@ -728,7 +728,7 @@ test.describe('provider review flow', () => {
       await owner.gotoWeb(`/providers/${ownerAccount.id}/vitrin/talepler/${lead.id}`);
       await assertNoErrorScreen(owner.page);
       const offerForm = owner.page.locator('form.pdash-form');
-      await offerForm.locator('input[name="priceAmount"]').fill('1500.00');
+      await offerForm.locator('input[name="priceAmount"]').fill('1500,00');
       await offerForm.locator('textarea[name="message"]').fill('Kartta yazan kapsamda, yarın.');
       await owner.page.getByRole('button', { name: 'Teklifi gönder' }).click();
       // The action is an in-flight POST; the re-rendered "your offer" block

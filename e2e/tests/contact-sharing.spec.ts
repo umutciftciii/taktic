@@ -75,7 +75,7 @@ test.describe('contact sharing', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1300.00',
+        priceAmount: '1300,00',
         message: 'Bu hafta başlayabiliriz.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);
@@ -160,14 +160,14 @@ test.describe('contact sharing', () => {
         providerId: winnerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1500.00',
+        priceAmount: '1500,00',
         message: 'Montaj ve ilk bakım dahil.',
       });
       await submitOffer(loser, {
         providerId: loserAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1800.00',
+        priceAmount: '1800,00',
         message: 'Aynı gün montaj yapabiliriz.',
       });
 
@@ -271,7 +271,7 @@ test.describe('contact sharing', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1900.00',
+        priceAmount: '1900,00',
         message: 'Yarın başlayabilirim.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);

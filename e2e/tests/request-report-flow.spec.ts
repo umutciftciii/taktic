@@ -95,14 +95,14 @@ async function requestWithTwoOffers(
     providerId: seed.reporterAccount.id,
     requestId,
     expectedCreditCost: CATEGORY_COST,
-    priceAmount: '1500.00',
+    priceAmount: '1500,00',
     message: 'Montaj ve ilk bakım dahil.',
   });
   await submitOffer(bystander, {
     providerId: seed.bystanderAccount.id,
     requestId,
     expectedCreditCost: CATEGORY_COST,
-    priceAmount: '1750.00',
+    priceAmount: '1750,00',
     message: 'Aynı gün montaj yapabiliriz.',
   });
 

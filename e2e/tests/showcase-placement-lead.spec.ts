@@ -745,8 +745,12 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
       const matches = visitor.page.getByTestId('showcase-request-matches');
       await expect(matches).toBeVisible();
-      await expect(matches.getByText('E2E Form Ici Vitrin Karti')).toBeVisible();
-      await expect(matches.getByText(`${location.district}, ${location.city}`)).toBeVisible();
+      // The choice card names the business, not the card's title — this is a
+      // choice between businesses, and the card's own page has the title.
+      const choice = matches.locator(`[data-testid="provider-choice-card"][data-card-id="${card.id}"]`);
+      await expect(choice).toBeVisible();
+      await expect(choice.getByText(owner.businessName)).toBeVisible();
+      await expect(choice.getByText(`${location.district}, ${location.city}`)).toBeVisible();
 
       for (const width of NARROW_WIDTHS) {
         await visitor.page.setViewportSize({ width, height: 900 });
@@ -754,12 +758,14 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       }
       await visitor.page.setViewportSize({ width: 1280, height: 900 });
 
-      // Choosing one leaves the marketplace form for that card, carrying the
-      // place the customer already picked so it is not asked twice.
-      await matches.getByTestId('showcase-request-match-cta').first().click();
+      // Choosing one changes the form's value and the primary button, and
+      // nothing else; the hand-off itself is request-provider-choice.spec.ts's
+      // subject. Here: the card's form is where it lands.
+      await choice.click();
+      await visitor.page.getByTestId('request-handoff-cta').click();
       await assertNoErrorScreen(visitor.page);
-      await expect(visitor.page).toHaveURL(new RegExp(`/vitrin/${card.id}`));
-      await expect(visitor.page.getByTestId('showcase-card-decision')).toBeVisible();
+      await expect(visitor.page).toHaveURL(new RegExp(`/vitrin/${card.id}\\?step=form`));
+      await expect(visitor.page.getByTestId('showcase-lead-form')).toBeVisible();
     } finally {
       await visitor.close();
     }

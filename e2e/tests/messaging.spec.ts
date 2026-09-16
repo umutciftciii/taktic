@@ -81,14 +81,14 @@ test.describe('post-match messaging', () => {
         providerId: winnerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1500.00',
+        priceAmount: '1500,00',
         message: 'Montaj ve ilk bakım dahil.',
       });
       await submitOffer(loser, {
         providerId: loserAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1800.00',
+        priceAmount: '1800,00',
         message: 'Aynı gün montaj yapabiliriz.',
       });
 
@@ -309,7 +309,7 @@ test.describe('post-match messaging', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '900.00',
+        priceAmount: '900,00',
         message: 'Hemen başlayabiliriz.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);
@@ -372,7 +372,7 @@ test.describe('post-match messaging', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '900.00',
+        priceAmount: '900,00',
         message: 'Hemen başlayabiliriz.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);
@@ -460,7 +460,7 @@ test.describe('post-match messaging', () => {
         providerId: providerAccount.id,
         requestId,
         expectedCreditCost: CATEGORY_COST,
-        priceAmount: '1100.00',
+        priceAmount: '1100,00',
         message: 'Bu hafta uygunuz.',
       });
       const offerId = await readProviderOfferId(provider, providerAccount.id, requestId);

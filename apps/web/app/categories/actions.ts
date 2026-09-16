@@ -205,7 +205,9 @@ export async function handOffToShowcaseAction(
     return { ok: false, code: saved.code };
   }
 
-  return { ok: true, href: `/vitrin/${encodeURIComponent(card.cardId)}` };
+  // Straight onto the card's form (`step=form` is the page's own switch, not
+  // data); the draft the form restores travels in the cookie, never here.
+  return { ok: true, href: `/vitrin/${encodeURIComponent(card.cardId)}?step=form` };
 }
 
 function readFormString(formData: FormData, key: string) {

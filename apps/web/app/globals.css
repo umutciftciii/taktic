@@ -6439,7 +6439,9 @@ body.has-drawer-open {
    card and each cell carries its header as a label.
    ══════════════════════════════════════════════════════════════════════════ */
 
-.offers-table-wrap { width: 100%; min-width: 0; overflow: hidden; }
+/* No `width: 100%`: the shell gives its children side margins, and a
+   percentage width would add itself to them and run 16px past the phone. */
+.offers-table-wrap { min-width: 0; overflow: hidden; }
 .offers-table { table-layout: fixed; width: 100%; }
 .offers-table td { overflow-wrap: anywhere; }
 .offers-table th:nth-child(1) { width: 26%; }
@@ -6472,7 +6474,7 @@ body.has-drawer-open {
 }
 
 @media (max-width: 899px) {
-  .offers-table, .offers-table tbody, .offers-table tr, .offers-table td { display: block; width: 100%; }
+  .offers-table, .offers-table tbody, .offers-table tr, .offers-table td { display: block; width: 100%; box-sizing: border-box; }
   .offers-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); }
   .offers-table tr {
     display: grid;

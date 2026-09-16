@@ -64,32 +64,31 @@ export async function createRequest(
  * refused once, corrects the field in place and sends again: the second send
  * starts from the form already on screen, not from the category page.
  *
- * The URL check stops at `?id=` on purpose: a request born live arrives with
- * `&published=1` after the id, one that waits for an operator does not, and
- * which of the two happened is the spec's claim to make (see
- * {@link expectPublishedSuccess}), not this step's.
+ * The URL carries the id and nothing else: the success page reads the
+ * request's real state from the API, so which state it is in is the spec's
+ * claim to make (see {@link expectPublishedSuccess}), not this step's.
  */
 export async function submitRequestForm(actor: Actor): Promise<void> {
   await actor.page.getByRole('button', { name: 'Talebi Gönder' }).click();
 
-  await expect(actor.page).toHaveURL(/\/requests\/success\?id=/);
+  await expect(actor.page).toHaveURL(/\/requests\/success\?id=[^&]+$/);
   await assertNoErrorScreen(actor.page);
 }
 
 /**
- * The success page a request born live shows: the heading that promises
- * providers rather than a review, and the flag the form set to get it.
+ * The success page a request born live shows — worded from the request's
+ * APPROVED status as the API reports it, not from anything in the URL.
  */
 export async function expectPublishedSuccess(actor: Actor): Promise<void> {
-  await expect(actor.page).toHaveURL(/\/requests\/success\?id=[^&]+&published=1$/);
-  await expect(actor.page.getByTestId('request-success-title')).toHaveText(
-    'Talebiniz uygun hizmet verenlere iletildi',
-  );
+  await expect(actor.page).toHaveURL(/\/requests\/success\?id=[^&]+$/);
+  await expect(actor.page.getByTestId('request-success')).toHaveAttribute('data-variant', 'published');
+  await expect(actor.page.getByTestId('request-success-title')).toHaveText('Talebiniz yayınlandı');
 }
 
-/** The older success page: the request waits for an operator. */
+/** The success page for a request an operator reads first. */
 export async function expectReviewPendingSuccess(actor: Actor): Promise<void> {
-  await expect(actor.page).not.toHaveURL(/published=1/);
+  await expect(actor.page).toHaveURL(/\/requests\/success\?id=[^&]+$/);
+  await expect(actor.page.getByTestId('request-success')).toHaveAttribute('data-variant', 'review');
   await expect(actor.page.getByTestId('request-success-title')).toHaveText(
     'Talebiniz ön incelemeye gönderildi',
   );
