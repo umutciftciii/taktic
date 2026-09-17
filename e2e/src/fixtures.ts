@@ -386,6 +386,12 @@ export async function createCategory(
      * and a shelf only exists if something is on it.
      */
     parentId?: string | null;
+    /**
+     * The sentence under the form's heading. Defaults to a fixed one; `null`
+     * leaves the column empty, for the screens whose fallback wording is the
+     * subject.
+     */
+    description?: string | null;
   } = {},
 ): Promise<SeededCategory> {
   const suffix = uniqueSuffix();
@@ -395,7 +401,7 @@ export async function createCategory(
     data: {
       name: `${prefix} ${suffix}`,
       slug: `${slugify(prefix)}-${suffix}`,
-      description: 'Uçtan uca test kategorisi',
+      description: options.description === undefined ? 'Uçtan uca test kategorisi' : options.description,
       kind: options.kind ?? 'LEAF',
       status,
       // One fact, two columns: written together here exactly as the
