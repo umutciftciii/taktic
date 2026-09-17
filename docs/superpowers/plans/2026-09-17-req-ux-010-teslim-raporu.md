@@ -8,6 +8,12 @@ endpoint yok. Staging, yerel container/DB, Cloudflare ve dış servislere dokunu
 
 Tasarım notu: `docs/superpowers/specs/2026-09-17-req-ux-010-phone-verification-pending-design.md`.
 
+> **Revizyon (AUTH-PHONE-001, aynı PR):** hesap düzeyinde telefon kanıtı eklendi — bir kez doğrulanan
+> hesap numarasıyla açılan yeni talepler kod istemez ve kapı+auto AÇIK'ta doğrudan `APPROVED` doğar.
+> Bu rapordaki matris "hesap kanıtı yok" durumu için geçerlidir; kanıt varsa yüzeyler `published`/`review`
+> olarak görünür. Ayrıntı: `2026-09-17-auth-phone-001-teslim-raporu.md`. §7'deki "Ön inceleme ✓" riski
+> revizyonda "Yayına alındı" etiketiyle kapatıldı.
+
 ---
 
 ## 1. Durum matrisi (oturumlu sahip, normal marketplace talebi)
