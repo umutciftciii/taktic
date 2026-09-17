@@ -1305,6 +1305,7 @@ function toCustomerServiceRequest({ showcaseLeadSource, reviews, ...request }: C
   return {
     ...withQualityLabel(request),
     offersCount: request._count.offers,
+    awaitingPhoneVerification: isAwaitingPhoneVerification(request),
     review: reviews[0] ?? null,
     showcaseLead: showcaseLeadSource
       ? {
@@ -1332,6 +1333,34 @@ function toCustomerServiceRequest({ showcaseLeadSource, reviews, ...request }: C
         }
       : null,
   };
+}
+
+/**
+ * Whether the one thing this request waits for is the customer's own proof
+ * of their telephone number.
+ *
+ * `SUBMITTED` alone does not say that: an operator's queue, a switch that
+ * flipped after the request was born, and this wait all look the same in the
+ * status column. This is the owner's explicit signal, and it is true only
+ * while every clause holds — the gate is on, the number is unproven, nothing
+ * has moved the request yet, and it is a marketplace request (a vitrin lead
+ * proves its number before it exists and is published by its own flow). It
+ * does not read the instant-publish switch: with the gate on an operator
+ * cannot approve an unproven request either, so the wait is real in both
+ * modes. Only the customer projection carries it; nothing public or
+ * provider-facing does.
+ */
+function isAwaitingPhoneVerification(request: {
+  status: ServiceRequestStatus;
+  phoneVerifiedAt: Date | null;
+  directShowcaseProviderId: string | null;
+}): boolean {
+  return (
+    isPhoneVerificationRequired() &&
+    request.phoneVerifiedAt === null &&
+    request.status === ServiceRequestStatus.SUBMITTED &&
+    request.directShowcaseProviderId === null
+  );
 }
 
 /**
