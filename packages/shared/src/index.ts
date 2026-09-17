@@ -17,6 +17,9 @@ export {
 } from './safe-redirect';
 
 export { URGENCY_LABELS, isUrgencyCode, urgencyLabel } from './urgency';
+
+export { UNVERIFIED_LABEL, VERIFIED_LABEL, contactVerification } from './contact-verification';
+export type { ContactVerification } from './contact-verification';
 export type { UrgencyCode } from './urgency';
 
 export {
