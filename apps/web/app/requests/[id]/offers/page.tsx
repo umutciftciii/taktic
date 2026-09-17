@@ -16,6 +16,7 @@ import {
 } from '../../../../lib/api';
 import {
   maskPhoneForDisplay,
+  noOffersYetText,
   requestSummaryBody,
   requestTimelineSteps,
 } from '../../../../lib/request-lifecycle';
@@ -210,7 +211,12 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
         </section>
       ) : null}
 
-      <OffersView requestId={id} offers={sortedOffers} reviewsEnabled={reviewsEnabled} />
+      <OffersView
+        requestId={id}
+        offers={sortedOffers}
+        reviewsEnabled={reviewsEnabled}
+        emptyText={noOffersYetText(summary)}
+      />
 
       {withdrawnOffers.length > 0 ? (
         <>

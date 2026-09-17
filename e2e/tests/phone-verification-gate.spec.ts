@@ -20,7 +20,12 @@ import {
   submitOffer,
 } from '../src/journeys';
 import { waitForLatestSmsCode } from '../src/outbox';
-import { phoneGateRuntime, primaryRuntime } from '../src/runtime';
+import { artifactsDir, phoneGateRuntime, primaryRuntime } from '../src/runtime';
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+/** Where the verify-state screenshots land, one per width the brief names. */
+const SHOTS = resolve(artifactsDir, 'req-ux-010');
 
 /**
  * Scenario 2 — REQUIRE_PHONE_VERIFICATION, both ways.
@@ -224,6 +229,8 @@ test.describe('phone verification gate', () => {
       expect(stored.phoneVerifiedAt).toBeNull();
       expect(stored.approvedAt).toBeNull();
 
+      await customer.page.screenshot({ path: resolve(SHOTS, 'success-verify-1280.png'), fullPage: true });
+
       // ---- the request page: the card is required, the rail says so ------
       await customer.page.getByTestId('request-success-verify-cta').click();
       await expect(customer.page).toHaveURL(new RegExp(`/requests/${requestId}/offers`));
@@ -237,11 +244,16 @@ test.describe('phone verification gate', () => {
       const timeline = customer.page.getByTestId('request-timeline');
       await expect(timeline).toContainText('Telefon doğrulama');
       await expect(timeline).not.toContainText('Ön inceleme');
+      // The empty offers box must not claim the request reached anybody.
+      await expect(customer.page.getByTestId('offers-empty')).not.toContainText('ulaştı');
+      await expect(customer.page.getByTestId('offers-empty')).toContainText('doğrula');
 
       // ---- the card and the rail fit every width the brief names ----------
+      await mkdir(SHOTS, { recursive: true });
       for (const width of [320, 768, 1440]) {
         await customer.page.setViewportSize({ width, height: 780 });
         await customer.gotoWeb(`/requests/${requestId}/offers`);
+        await customer.page.screenshot({ path: resolve(SHOTS, `request-verify-${width}.png`), fullPage: true });
         await expectNoHorizontalOverflow(customer.page, `${width}px`);
         await expectWithinViewport(customer.page, '[data-testid="phone-verification-card"]', `${width}px`);
         await expectWithinViewport(customer.page, '[data-testid="request-timeline"]', `${width}px`);
@@ -287,6 +299,7 @@ test.describe('phone verification gate', () => {
         'hizmet verenlere iletildi',
       );
       await expect(customer.page.getByTestId('request-timeline')).not.toContainText('Telefon doğrulama');
+      await expect(customer.page.getByTestId('offers-empty')).toContainText('hizmet verenlere ulaştı');
 
       // ---- and the provider finds it, without anyone approving it --------
       expect(await matchingRequestIds(provider, providerAccount.id)).toEqual([requestId]);

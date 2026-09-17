@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   afterVerificationSentence,
+  noOffersYetText,
   phoneVerificationCardCopy,
   requestSummaryBody,
   requestTimelineSteps,
@@ -116,5 +117,28 @@ describe('the verification card', () => {
     const copy = phoneVerificationCardCopy({ required: false, maskedPhone: '905*******01', autoPublishEnabled: true });
     expect(copy).toContain('zorunlu değildir');
     expect(copy).not.toContain('gerekiyor');
+  });
+});
+
+describe('the empty offers box', () => {
+  it('does not claim the request reached anybody while it waits for the customer', () => {
+    const text = noOffersYetText(waiting).toLowerCase();
+    expect(text).not.toContain('ulaştı');
+    expect(text).toContain('doğrula');
+  });
+
+  it('names the review for a request waiting on an operator', () => {
+    const text = noOffersYetText(base).toLowerCase();
+    expect(text).not.toContain('ulaştı');
+    expect(text).toContain('ön inceleme');
+  });
+
+  it('keeps the reached-providers sentence for a live request', () => {
+    expect(noOffersYetText({ ...base, status: 'APPROVED' })).toBe(
+      'Talebiniz hizmet verenlere ulaştı. Teklifler geldikçe burada görüntülenecektir.',
+    );
+    expect(noOffersYetText(null)).toBe(
+      'Talebiniz hizmet verenlere ulaştı. Teklifler geldikçe burada görüntülenecektir.',
+    );
   });
 });

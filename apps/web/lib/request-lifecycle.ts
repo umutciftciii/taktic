@@ -151,3 +151,25 @@ export function phoneVerificationCardCopy({
 
   return `${maskedPhone} numarasını doğrulayarak talebinizin bize doğru ulaştığını teyit edebilirsiniz. Doğrulama şu anda zorunlu değildir ve talebiniz normal şekilde ilerler.`;
 }
+
+const NO_OFFERS_REACHED_TEXT =
+  'Talebiniz hizmet verenlere ulaştı. Teklifler geldikçe burada görüntülenecektir.';
+
+/**
+ * The sentence under "Henüz teklif gelmedi". A request nobody has been shown
+ * yet must not say it reached them: while it waits for the customer's proof
+ * it says so, while it waits for an operator it says that, and only a live
+ * request keeps the sentence it always had. `null` — no summary — keeps the
+ * old sentence too, as the page did before.
+ */
+export function noOffersYetText(summary: RequestLifecycleView | null): string {
+  if (summary?.awaitingPhoneVerification === true) {
+    return 'Talebiniz henüz hizmet verenlere iletilmedi. Telefonunuzu doğruladıktan sonra gelen teklifler burada görüntülenir.';
+  }
+
+  if (summary && (summary.status === 'SUBMITTED' || summary.status === 'IN_REVIEW')) {
+    return 'Talebiniz ön incelemede. Onay sonrasında gelen teklifler burada görüntülenir.';
+  }
+
+  return NO_OFFERS_REACHED_TEXT;
+}
