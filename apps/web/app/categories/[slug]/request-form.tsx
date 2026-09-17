@@ -54,6 +54,7 @@ import {
   type SubmitRequestResult,
 } from '../actions';
 import { BudgetFields } from './budget-fields';
+import { NextStepsNote } from './next-steps-note';
 import { ShowcaseMatches, type HandOffFailure } from './showcase-matches';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '../../landing-icons';
 
@@ -119,6 +120,13 @@ type RequestFormProps = {
    * told to come back to.
    */
   formPath: string;
+  /**
+   * Whether a request is published the moment it is sent, as the page read it
+   * from the API. Only the "Sırada ne var?" note reads it, to say whether an
+   * operator looks first; the API applies the real rule when the request is
+   * posted. Absent means off, which is the sentence shown on any doubt.
+   */
+  autoPublishEnabled?: boolean;
 };
 
 const STEPS = [
@@ -164,6 +172,7 @@ export function RequestForm({
   initialDraft = null,
   wrongAccount = false,
   formPath,
+  autoPublishEnabled = false,
 }: RequestFormProps) {
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -1054,10 +1063,7 @@ export function RequestForm({
             </p>
           </div>
 
-          <div className="rail-note" style={{ marginTop: 24 }}>
-            <strong>Sırada ne var?</strong> Talebiniz ön incelemeden geçtikten sonra bölgenizdeki
-            onaylı hizmet verenlere iletilir ve 14 gün boyunca teklif alır.
-          </div>
+          <NextStepsNote autoPublishEnabled={autoPublishEnabled} />
         </aside>
       </div>
     </form>

@@ -5,6 +5,7 @@ import {
   fetchOrNotFound,
   getContactDisclosure,
   getCurrentUser,
+  getMarketplacePublishPolicy,
 } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { readCurrentDraft } from '../../../lib/request-drafts';
@@ -33,7 +34,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
   // screen of its own flow. The same slug is what the form posts under and what
   // a draft is keyed by — see the hidden `categorySlug` field in the form.
   const entryCategorySlug = entry ?? slug;
-  const [category, user, disclosure, provinces, draft] = await Promise.all([
+  const [category, user, disclosure, provinces, draft, autoPublishEnabled] = await Promise.all([
     // A slug the public may not reach — a draft, a closed category, a group, or
     // simply one that never existed — is a 404 page rather than an error
     // screen. The API already answers 404 for all four, and the reason it does
@@ -52,6 +53,10 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
     // Keyed by the *entry* slug, because that is the slug the form posts and
     // the draft was saved under — in a routed flow it is not this leaf.
     readCurrentDraft({ formType: 'MARKETPLACE', categorySlug: entryCategorySlug }),
+    // Whether providers see the request at once or an operator reads it first
+    // — for the "Sırada ne var?" note only. Read fresh on every load, off on
+    // any failure; the API applies the real rule when the request is posted.
+    getMarketplacePublishPolicy(),
   ]);
   const questions = category.questions ?? [];
   const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
@@ -174,6 +179,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
             initialDraft={draft.kind === 'payload' ? draft.payload : null}
             wrongAccount={draft.kind === 'wrong-account'}
             formPath={formPath}
+            autoPublishEnabled={autoPublishEnabled}
           />
         )}
       </div>

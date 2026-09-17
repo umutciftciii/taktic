@@ -14,6 +14,7 @@ import type { SupportTicketStatus } from './formatters';
 
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { readMarketplacePublishPolicy } from './request-next-steps';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -952,6 +953,31 @@ export async function getRefundPolicy(): Promise<RefundPolicy> {
         DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
       ),
     };
+  }
+}
+
+/**
+ * Whether a marketplace request is published the moment it is sent, for the
+ * form that has to say what happens next.
+ *
+ * Read on every page load with the `cache: 'no-store'` every `apiFetch` uses,
+ * so an operator flipping the switch is reflected on the next request the
+ * customer makes — no client cache holds the old sentence.
+ *
+ * Fail-closed, in two layers: a fetch that fails or times out is "off", and a
+ * body that is not the documented shape with a literal `true` is "off" as well
+ * (see {@link readMarketplacePublishPolicy}). The review sentence is the
+ * promise the platform can keep whatever the switch says; the instant one is
+ * not, so it is never shown on a guess.
+ *
+ * Display only. The API decides the request's real status from the same switch
+ * when the request is posted; nothing here is sent back.
+ */
+export async function getMarketplacePublishPolicy(): Promise<boolean> {
+  try {
+    return readMarketplacePublishPolicy(await apiFetch<unknown>('/marketplace-publish-policy'));
+  } catch {
+    return false;
   }
 }
 
