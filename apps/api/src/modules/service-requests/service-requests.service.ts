@@ -17,6 +17,7 @@ import {
 } from '../../common/account-identity';
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
+import { normalizePhoneNumber } from '../phone-verification/phone.util';
 import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -145,7 +146,16 @@ export type ServiceRequestCreationContext = {
   draftCardId?: string | null;
   onCreated?: (
     tx: Prisma.TransactionClient,
-    request: { id: string; customerId: string | null },
+    request: {
+      id: string;
+      customerId: string | null;
+      /**
+       * Whether the request was born proven by the owning account's own proof
+       * (`User.phoneVerifiedAt`) rather than by anything the caller passed.
+       * The vitrin path reads this to know it has no standalone code to redeem.
+       */
+      inheritedPhoneProof: boolean;
+    },
   ) => Promise<void>;
 };
 
@@ -350,11 +360,15 @@ export class ServiceRequestsService {
     // publishes it in the same transaction that stamps the proof — that is
     // the one case whose receipt tells the customer to verify rather than to
     // wait for an operator.
+    //
+    // Whether the number is proven is decided *inside* the transaction below,
+    // because one of its sources is the owning account's own proof
+    // (`User.phoneVerifiedAt`), and that has to be read under the same
+    // snapshot as everything else this request is built from: a number
+    // changed a moment earlier must not lend its old proof to this request.
     const autoPublish =
       (await this.publishSettings.isAutoPublishEnabled()) && !context.directShowcaseProviderId;
-    const awaitsVerification =
-      autoPublish && isPhoneVerificationRequired() && !context.phoneVerifiedAt;
-    const publishAtCreate = autoPublish && !awaitsVerification;
+    const gateOn = isPhoneVerificationRequired();
 
     const request = await runSerializable(
       this.prisma,
@@ -402,6 +416,23 @@ export class ServiceRequestsService {
         NumberedEntityType.SERVICE_REQUEST,
       );
 
+      // The proof this request is born with, if any: the account's own proof
+      // of the very number this request is stored with, or what the caller
+      // established before the request existed (the vitrin's standalone
+      // code — whose `onCreated` reads the first answer to know whether it
+      // still has a code to redeem). Never anything for a guest or an
+      // alternate contact.
+      const inheritedPhoneProof = await accountProofCoversRequest(
+        tx,
+        user,
+        dto,
+        requestData.customerPhone,
+      );
+      const phoneVerifiedAt = inheritedPhoneProof ? now : (context.phoneVerifiedAt ?? null);
+      // Three things have to agree for a request to be born live (see above),
+      // the third being a number that is either not gated or proven.
+      const publishAtCreate = autoPublish && (!gateOn || phoneVerifiedAt !== null);
+
       const created = await tx.serviceRequest.create({
         data: {
           categoryId: category.id,
@@ -428,11 +459,11 @@ export class ServiceRequestsService {
           ...(context.directShowcaseProviderId
             ? { directShowcaseProviderId: context.directShowcaseProviderId }
             : {}),
-          // Written by the vitrin path in the same transaction, before anything
-          // is committed: a lead reaches a business having already proved its
-          // telephone number, because there is no operator in that flow to
-          // catch what a false number would cost.
-          ...(context.phoneVerifiedAt ? { phoneVerifiedAt: context.phoneVerifiedAt } : {}),
+          // Proven at birth, when it is: by the vitrin path's standalone code
+          // (a lead reaches a business having already proved its number,
+          // because there is no operator in that flow to catch what a false
+          // number would cost), or by the account's own proof of this number.
+          ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
           qualityScore: quality.score,
           qualityScoreBreakdown: quality.breakdown,
           answers: {
@@ -474,7 +505,11 @@ export class ServiceRequestsService {
       // `directShowcaseProviderId` with no lead beside it would be a request
       // one business can see and nobody can explain.
       if (context.onCreated) {
-        await context.onCreated(tx, { id: created.id, customerId: created.customerId });
+        await context.onCreated(tx, {
+          id: created.id,
+          customerId: created.customerId,
+          inheritedPhoneProof,
+        });
       }
 
       // The fan-out this publication owes, written down in the same
@@ -522,6 +557,7 @@ export class ServiceRequestsService {
       // is: the request exists, and a mail problem must not surface as a
       // failed submission. `nextStep` tells the customer what the request is
       // waiting for — their own verification, or an operator.
+      const awaitsVerification = autoPublish && gateOn && request.phoneVerifiedAt === null;
       await this.notify(
         () =>
           this.mail.sendRequestReceived(request.id, {
@@ -1361,6 +1397,45 @@ function isAwaitingPhoneVerification(request: {
     request.status === ServiceRequestStatus.SUBMITTED &&
     request.directShowcaseProviderId === null
   );
+}
+
+/**
+ * Whether the owning account's own proof of its number covers this request.
+ *
+ * Four clauses, each closing a door. The caller is a signed-in customer (a
+ * guest has no account to have proven anything; an admin posting on the
+ * public form is a visitor here). The request is on the account's contact,
+ * not an alternate person's — an alternate contact is a fact about the
+ * request, never about the account, so the account's proof says nothing about
+ * it. The account holds a proof. And the number the request is stored with is
+ * the account's number, compared in E.164 on both sides, read under the
+ * caller's transaction so a number changed a moment ago — whose proof went
+ * with it — cannot lend that proof here.
+ */
+async function accountProofCoversRequest(
+  tx: Prisma.TransactionClient,
+  user: AuthUser | null,
+  dto: CreateServiceRequestDto,
+  customerPhone: string,
+): Promise<boolean> {
+  if (!user || user.role !== UserRole.CUSTOMER || dto.useAlternateContact === true) {
+    return false;
+  }
+
+  const account = await tx.user.findUnique({
+    where: { id: user.id },
+    select: { phone: true, phoneVerifiedAt: true },
+  });
+
+  if (!account?.phone || account.phoneVerifiedAt === null) {
+    return false;
+  }
+
+  try {
+    return normalizePhoneNumber(account.phone) === normalizePhoneNumber(customerPhone);
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -220,27 +220,34 @@ export class ShowcaseLeadService {
            * buy one lead: a second submission finds no unbound row for this
            * number and is refused. No token, no extra table, and nothing to
            * leak — the receipt is the row itself.
+           *
+           * Unless the account already holds the proof of this very number
+           * (`User.phoneVerifiedAt`, checked by the request path under this
+           * same transaction): then there is no standalone code to redeem,
+           * and the request was born proven exactly as an ordinary one is.
            */
-          const verification = await this.phoneVerification.findRedeemableVerification(
-            tx,
-            phone,
-            now,
-            VERIFICATION_REDEMPTION_WINDOW_MINUTES,
-          );
+          if (!created.inheritedPhoneProof) {
+            const verification = await this.phoneVerification.findRedeemableVerification(
+              tx,
+              phone,
+              now,
+              VERIFICATION_REDEMPTION_WINDOW_MINUTES,
+            );
 
-          if (!verification) {
-            throw showcaseLeadPhoneVerificationRequired();
-          }
+            if (!verification) {
+              throw showcaseLeadPhoneVerificationRequired();
+            }
 
-          const bound = await tx.phoneVerification.updateMany({
-            where: { id: verification.id, requestId: null },
-            data: { requestId: created.id },
-          });
+            const bound = await tx.phoneVerification.updateMany({
+              where: { id: verification.id, requestId: null },
+              data: { requestId: created.id },
+            });
 
-          if (bound.count !== 1) {
-            // Two submissions raced for one proof. The loser is refused rather
-            // than granted a lead nothing verified.
-            throw showcaseLeadPhoneVerificationRequired();
+            if (bound.count !== 1) {
+              // Two submissions raced for one proof. The loser is refused rather
+              // than granted a lead nothing verified.
+              throw showcaseLeadPhoneVerificationRequired();
+            }
           }
 
           const lead = await tx.showcaseLead.create({
