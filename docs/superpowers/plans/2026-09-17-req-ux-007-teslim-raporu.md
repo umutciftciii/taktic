@@ -1,6 +1,6 @@
 # REQ-UX-007 — Transactional e-postalarda koyu mod ve istemci uyumu — Teslim Raporu
 
-Tarih: 2026-09-17 · Branch: `claude/transactional-email-dark-mode-26ecb1` (taban `main` @ `7ee6d21b`) · PR: _(aşağıda)_ · Merge: **yapılmadı**
+Tarih: 2026-09-17 · Branch: `claude/transactional-email-dark-mode-26ecb1` (taban `main` @ `7ee6d21b`) · PR: https://github.com/umutciftciii/taktic/pull/85 · Merge: **yapılmadı**
 
 Migration yok. Şablon metinleri, alıcılar, gönderim/dedupe/outbox mantığı, URL'ler, bildirim semantiği, plain-text gövde, asset dosyaları, `.env`/compose/Dockerfile, Turnstile, ödeme/SMS/e-posta gönderici entegrasyonu ve web/admin ekranlarına dokunulmadı. Değişen üretim kodu tek dosya: ortak e-posta shell'i.
 
