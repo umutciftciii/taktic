@@ -113,7 +113,7 @@ Blok telefon/e-posta/iletişim adını içermez (unit + E2E ile kanıtlı). Ekra
 | E2E Chromium — yeni 3 spec (5 test) | `landing-publish-copy` 1/1, `customer-request-content` 3/3, `admin-customer-verification` 1/1 |
 | E2E Chromium — regresyon | `phone-verification-gate request-success-screen customer-panel landing-hero landing-steps account-settings request-auto-publish request-next-steps-note responsive-shell hero-request-demo access-and-errors` → **39/39** (2.0 dk) |
 | E2E WebKit — yeni 3 spec | `pnpm e2e:webkit …` → **5/5** (üç spec `webkitProject().testMatch`'e eklendi) |
-| CI | PR üzerinde; sonuç aşağıya eklenecek |
+| CI (#89) | run 35285960445 @ `8920a1f7` **3/3 geçti**: `typecheck · lint · test · build` 10m40s, `e2e (chromium)` 15m54s, `e2e (webkit · sign-in and mobile shells)` 8m28s. İlk koşu (35284545929 @ `797186d9`) yalnız `admin-customer-verification` ile düştü: müşteri listesi 320'de Linux Chromium'da 2px, WebKit'te 8px taşıyordu — `type=date` input'u Linux'ta daha geniş çizilir ve toolbar alanı altına küçülemiyordu (yerelde Mac'te 0). `.customers-page` kapsamlı `flex-wrap` + `min-width: 0` kuralıyla kapatıldı (`8920a1f7`). Bu satırı ekleyen commit docs-only; kod ağacı `8920a1f7` ile aynıdır. |
 
 RED→GREEN: API `answers`/sızıntı testleri önce `undefined`/400 ile düştü; web `landing-publish-copy` sayfa testleri
 router/async shell mock'ları eklenene kadar düştü, sonra kopya bağlandı; `request-content` helper `is not a function` ile
