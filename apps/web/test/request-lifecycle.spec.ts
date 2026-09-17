@@ -94,6 +94,43 @@ describe('the timeline', () => {
     expect(approved[3]).toMatchObject({ title: 'Eşleşme', done: false });
   });
 
+  it('names the publication, not a review, on a request that went live with nobody moderating it', () => {
+    // Born live on the account's proven number, or published by the customer's
+    // own verification: approved, never moderated.
+    const bornLive = requestTimelineSteps(
+      { ...base, status: 'APPROVED', approvedAt: '2026-09-17T10:00:00.000Z', moderatedAt: null },
+      true,
+    );
+    expect(titles(bornLive)).toEqual(['Talep alındı', 'Yayına alındı', 'Teklif toplama', 'Eşleşme']);
+    expect(bornLive[1]!.done).toBe(true);
+
+    // The same wording with the switch off: it is the row that says so, not the policy.
+    expect(
+      requestTimelineSteps(
+        { ...base, status: 'APPROVED', approvedAt: '2026-09-17T10:00:00.000Z', moderatedAt: null },
+        false,
+      )[1]!.title,
+    ).toBe('Yayına alındı');
+  });
+
+  it('keeps the review step for a request an operator moderated', () => {
+    const moderated = requestTimelineSteps(
+      {
+        ...base,
+        status: 'APPROVED',
+        approvedAt: '2026-09-17T10:00:00.000Z',
+        moderatedAt: '2026-09-17T10:00:00.000Z',
+      },
+      true,
+    );
+    expect(moderated[1]).toMatchObject({ title: 'Ön inceleme', done: true });
+    // Older answers without the two timestamps read as they always did.
+    expect(requestTimelineSteps({ ...base, status: 'APPROVED' }, true)[1]).toMatchObject({
+      title: 'Ön inceleme',
+      done: true,
+    });
+  });
+
   it('renders placeholders and nothing done when the summary is missing', () => {
     const steps = requestTimelineSteps(null, true);
     expect(titles(steps)).toEqual(['Talep alındı', 'Ön inceleme', 'Teklif toplama', 'Eşleşme']);

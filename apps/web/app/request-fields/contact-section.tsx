@@ -15,6 +15,12 @@ export type AccountContact = {
   name: string | null;
   phone: string | null;
   email: string | null;
+  /**
+   * Whether the account has already proven `phone` (see User.phoneVerifiedAt).
+   * The vitrin form reads it to skip asking for a code the API would not
+   * need; the API checks the same fact itself before it opens the lead.
+   */
+  phoneVerified?: boolean;
 };
 
 export type AlternateContact = { name: string; phone: string; email: string };

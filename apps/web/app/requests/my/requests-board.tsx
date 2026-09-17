@@ -8,6 +8,7 @@ import { IconArrowRight, IconSearch } from '../../landing-icons';
 import { formatDateTime, statusLabel } from '../../../lib/request-formatters';
 import { ReviewStars } from '../../review-stars';
 import { statusPillClass } from '../../status-pill';
+import { PHONE_VERIFICATION_ANCHOR } from '../../../lib/request-lifecycle';
 
 type RequestsBoardProps = {
   requests: CustomerServiceRequest[];
@@ -179,9 +180,14 @@ function ReviewRowAction({ request }: { request: CustomerServiceRequest }) {
 
 function RequestRow({ request, reviewsEnabled }: { request: CustomerServiceRequest; reviewsEnabled: boolean }) {
   const hasOffers = request.offersCount > 0;
+  // The API's own word that the request waits for this customer's proof of
+  // their number — never read off the status, which also says SUBMITTED for a
+  // request waiting on an operator.
+  const awaitingPhone = request.awaitingPhoneVerification === true;
   const note = statusNote(request);
   const ctaLabel = hasOffers ? 'Teklifleri gör' : 'Detaylar';
-  const ctaClass = hasOffers ? 'cdash-btn cdash-btn-primary' : 'cdash-btn cdash-btn-secondary';
+  const ctaClass =
+    hasOffers && !awaitingPhone ? 'cdash-btn cdash-btn-primary' : 'cdash-btn cdash-btn-secondary';
   const referenceLabel = request.requestNumber ?? `#${request.id.slice(-6).toUpperCase()}`;
 
   return (
@@ -201,6 +207,11 @@ function RequestRow({ request, reviewsEnabled }: { request: CustomerServiceReque
           <span className={statusPillClass(request.status)} data-testid="request-status">
             {statusLabel(request.status)}
           </span>
+          {awaitingPhone ? (
+            <span className="tag tag-accent" data-testid="request-phone-pending">
+              Telefon doğrulaması bekliyor
+            </span>
+          ) : null}
         </h2>
         <p className="datarow-meta">
           <span>{referenceLabel}</span>
@@ -226,6 +237,18 @@ function RequestRow({ request, reviewsEnabled }: { request: CustomerServiceReque
       </div>
 
       <div className="datarow-actions">
+        {awaitingPhone ? (
+          // The one thing this request needs from the customer, first: the
+          // existing card on the request's own page, by its anchor.
+          <Link
+            className="cdash-btn cdash-btn-primary"
+            href={`/requests/${request.id}/offers#${PHONE_VERIFICATION_ANCHOR}`}
+            data-testid="request-phone-pending-cta"
+          >
+            Telefonu doğrula
+            <IconArrowRight size={12} />
+          </Link>
+        ) : null}
         <Link className={ctaClass} href={`/requests/${request.id}/offers`}>
           {ctaLabel}
           <IconArrowRight size={12} />

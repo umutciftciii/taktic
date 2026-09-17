@@ -48,6 +48,10 @@ export type RequestLifecycleView = {
   submittedAt: string;
   expiredAt: string | null;
   awaitingPhoneVerification?: boolean;
+  /** When the request went live; null while it has not. */
+  approvedAt?: string | null;
+  /** When an operator last moderated it; null on a request nobody moderated. */
+  moderatedAt?: string | null;
 };
 
 const NO_SUMMARY_TEXT =
@@ -105,16 +109,23 @@ export type RequestTimelineStep = {
  * The "Süreç" rail. A request waiting for the customer's proof gets a
  * verification step in front of everything else, and — under instant
  * publish, where no operator follows — no review step at all, so the rail
- * never promises a review that will not happen. Every other request keeps
- * the four steps it always had.
+ * never promises a review that will not happen.
+ *
+ * The second step is named by what really happened to the request, read off
+ * the row's own timestamps: approved with nobody moderating it — born live on
+ * a proven number, or published by the customer's own verification — is
+ * "Yayına alındı", not a review that never took place. A request an operator
+ * moderated, and every request still waiting for one, keeps "Ön inceleme".
  */
 export function requestTimelineSteps(
   summary: RequestLifecycleView | null,
   autoPublishEnabled: boolean,
 ): RequestTimelineStep[] {
   const waiting = summary?.awaitingPhoneVerification === true;
+  const publishedUnmoderated =
+    Boolean(summary?.approvedAt) && summary?.moderatedAt === null;
   const reviewStep: RequestTimelineStep = {
-    title: 'Ön inceleme',
+    title: publishedUnmoderated ? 'Yayına alındı' : 'Ön inceleme',
     done: Boolean(summary && !waiting && summary.status !== 'SUBMITTED' && summary.status !== 'IN_REVIEW'),
   };
 

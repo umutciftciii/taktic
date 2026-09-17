@@ -180,6 +180,12 @@ export function ShowcaseLeadForm({
   const [useAlternateContact, setUseAlternateContact] = useState(false);
   const [alternateContact, setAlternateContact] = useState(EMPTY_ALTERNATE_CONTACT);
   const [verification, setVerification] = useState<Verification>({ status: 'idle' });
+  /**
+   * The API said the account's proof did not cover this lead after all — the
+   * number changed in another tab, say. From then on the form asks for a code
+   * like any other; nothing else can turn the account's proof back on here.
+   */
+  const [accountProofRefused, setAccountProofRefused] = useState(false);
   const [failure, setFailure] = useState<Extract<LeadActionResult, { ok: false }> | null>(null);
 
   /*
@@ -264,7 +270,14 @@ export function ShowcaseLeadForm({
   /** A stack whose Turnstile check cannot run: no code is asked for and nothing is sent. */
   const turnstileClosed = turnstile.status === 'unconfigured';
   const submitBlocked = (accountContactIncomplete && !useAlternateContact) || turnstileClosed;
-  const verified = verification.status === 'verified';
+  /*
+   * The account's own proof of its number covers the default path of a
+   * signed-in customer: no code is asked for, because the API will not need
+   * one — it reads the same fact under the transaction that opens the lead.
+   * An alternate contact is a different number and gets nothing from it.
+   */
+  const accountProof = accountPath && accountContact?.phoneVerified === true && !accountProofRefused;
+  const verified = accountProof || verification.status === 'verified';
   const phoneLocked = verification.status !== 'idle';
   const gateOpen = identity.gateOpen;
 
@@ -354,6 +367,7 @@ export function ShowcaseLeadForm({
       // made again; leaving "verified" on screen would invite a second
       // refusal for the same reason.
       if (result.code === PHONE_PROOF_REQUIRED) {
+        setAccountProofRefused(true);
         resetVerification();
       }
     });
@@ -585,6 +599,7 @@ export function ShowcaseLeadForm({
             <PhoneProof
               phone={phone}
               state={verification}
+              accountProven={accountProof}
               busy={pending}
               gateOpen={gateOpen}
               sendClosed={turnstileClosed}
@@ -780,6 +795,7 @@ export function ShowcaseLeadForm({
 function PhoneProof({
   phone,
   state,
+  accountProven,
   busy,
   gateOpen,
   sendClosed,
@@ -789,6 +805,8 @@ function PhoneProof({
 }: {
   phone: string;
   state: Verification;
+  /** The account already proved this number; no code is asked for. */
+  accountProven: boolean;
   busy: boolean;
   gateOpen: boolean;
   /** The stack cannot run the Turnstile check: no code can be asked for. */
@@ -798,6 +816,17 @@ function PhoneProof({
   onReset: () => void;
 }) {
   const [code, setCode] = useState('');
+
+  if (accountProven) {
+    return (
+      <div className="verify-well showcase-lead-proof" data-testid="showcase-lead-phone-account-proven">
+        <span className="cdash-summary-label">Telefon doğrulandı</span>
+        <p style={{ margin: 0, fontSize: 13 }}>
+          Hesabınızdaki {phone} numarası daha önce doğrulandı; yeniden kod gerekmez.
+        </p>
+      </div>
+    );
+  }
 
   if (state.status === 'verified') {
     return (
