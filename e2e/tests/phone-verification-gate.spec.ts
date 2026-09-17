@@ -16,9 +16,17 @@ import {
   approveRequest,
   createRequest,
   expectApprovalBlockedByPhoneGate,
+  expectPublishedSuccess,
   matchingRequestIds,
+  openRequestFormContactStep,
   submitOffer,
 } from '../src/journeys';
+import {
+  retireShowcasePlacements,
+  seedApprovedShowcaseCard,
+  seedLiveShowcasePlacement,
+} from '../src/showcase-fixtures';
+import { uniquePhone, uniqueSuffix, type SeededCategory } from '../src/fixtures';
 import { waitForLatestSmsCode } from '../src/outbox';
 import { artifactsDir, phoneGateRuntime, primaryRuntime } from '../src/runtime';
 import { mkdir } from 'node:fs/promises';
@@ -43,6 +51,37 @@ const SHOTS = resolve(artifactsDir, 'req-ux-010');
 
 const CATEGORY_COST = 3;
 const STARTING_CREDITS = 8;
+
+/**
+ * A request on the account's own contact — the default path of a signed-in
+ * customer, with the alternate-contact box left unticked — through the three
+ * steps and out to the success page. Returns the new request id.
+ */
+async function submitAccountRequest(
+  customer: Actor,
+  category: SeededCategory,
+  location: { city: string; district: string },
+): Promise<string> {
+  await openRequestFormContactStep(customer, category);
+  await expect(customer.page.getByTestId('account-contact-phone')).toBeVisible();
+  const disclosure = customer.page.getByTestId('contact-disclosure-accept');
+  if ((await disclosure.count()) > 0) {
+    await disclosure.check();
+  }
+  const form = customer.page.locator('form.form-card');
+  const nextStep = customer.page.getByRole('button', { name: 'Devam et' });
+  await nextStep.click();
+  await expect(customer.page.locator('#request-step-detail')).toBeVisible();
+  await form.locator('textarea[name="description"]').fill('Salon klimasının montajı gerekiyor.');
+  await nextStep.click();
+  await expect(customer.page.locator('#request-step-place')).toBeVisible();
+  await form.locator('select[name="city"]').selectOption(location.city);
+  await form.locator('select[name="district"]').selectOption(location.district);
+  await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
+  await expect(customer.page).toHaveURL(/\/requests\/success\?id=/);
+  await assertNoErrorScreen(customer.page);
+  return new URL(customer.page.url()).searchParams.get('id') as string;
+}
 
 /** Nothing may make the document wider than the window it is in. */
 async function expectNoHorizontalOverflow(page: Page, label: string) {
@@ -343,6 +382,156 @@ test.describe('phone verification gate', () => {
       ).toBe(2);
     } finally {
       await Promise.all([customer.close(), provider.close()]);
+    }
+  });
+
+  test('account proof: the first request asks for a code once, the second never, and a changed number asks again', async ({
+    browser,
+  }, testInfo) => {
+    expect(await isAutoPublishEnabled()).toBe(false);
+    await setAutoPublish(true);
+
+    const location = uniqueLocation();
+    const category = await createCategory(CATEGORY_COST);
+    const customerAccount = await createCustomer();
+    const providerAccount = await createProvider({
+      categoryId: category.id,
+      location,
+      credits: STARTING_CREDITS,
+    });
+    // A vitrin card of that provider, for the customer to write to once the
+    // account holds the proof — with no code asked for on that form either.
+    const { card, version } = await seedApprovedShowcaseCard({
+      providerId: providerAccount.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+      title: `E2E Kanıt ${uniqueSuffix()}`,
+    });
+    const { placement } = await seedLiveShowcasePlacement({
+      providerId: providerAccount.id,
+      cardId: card.id,
+      versionId: version.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+    });
+
+    const clientAddress = `10.67.${testInfo.retry}.1`;
+    const customer = await Actor.open(browser, 'customer', phoneGateRuntime, {
+      extraHTTPHeaders: { 'x-forwarded-for': clientAddress },
+    });
+
+    try {
+      await customer.loginToWeb(customerAccount.email, customerAccount.password);
+
+      // ---- first request: the account has proven nothing yet -------------
+      const first = await submitAccountRequest(customer, category, location);
+      await expect(customer.page.getByTestId('request-success')).toHaveAttribute('data-variant', 'verify');
+      expect(
+        (await prisma().user.findUniqueOrThrow({ where: { id: customerAccount.id } })).phoneVerifiedAt,
+      ).toBeNull();
+
+      // The list says so, in a badge and a way to the card, at every width.
+      for (const width of [320, 768, 1440]) {
+        await customer.page.setViewportSize({ width, height: 780 });
+        await customer.gotoWeb('/requests/my');
+        const rowOf = customer.page.locator(`[data-testid="request-card"][data-request-id="${first}"]`);
+        await expect(rowOf.getByTestId('request-phone-pending')).toHaveText('Telefon doğrulaması bekliyor');
+        await expect(rowOf.getByTestId('request-phone-pending-cta')).toHaveAttribute(
+          'href',
+          `/requests/${first}/offers#telefon-dogrulama`,
+        );
+        await expectNoHorizontalOverflow(customer.page, `list ${width}px`);
+        await expectWithinViewport(customer.page, `[data-request-id="${first}"] [data-testid="request-phone-pending"]`, `list ${width}px`);
+        await expectWithinViewport(customer.page, `[data-request-id="${first}"] [data-testid="request-phone-pending-cta"]`, `list ${width}px`);
+      }
+      await customer.page.setViewportSize({ width: 1280, height: 780 });
+
+      // ---- the customer verifies once, on the request's own card ---------
+      await customer.gotoWeb('/requests/my');
+      await customer.page
+        .locator(`[data-testid="request-card"][data-request-id="${first}"]`)
+        .getByTestId('request-phone-pending-cta')
+        .click();
+      await expect(customer.page.getByTestId('phone-verification-card')).toHaveAttribute('data-required', 'true');
+      await customer.page.getByRole('button', { name: 'Doğrulama kodu gönder' }).click();
+      await expect(customer.page).toHaveURL(/verification=ok/);
+      const code = await waitForLatestSmsCode(customerAccount.phone);
+      await customer.page.locator('input[name="code"]').fill(code);
+      await customer.page.getByRole('button', { name: 'Doğrula', exact: true }).click();
+      await expect
+        .poll(
+          async () =>
+            (await prisma().serviceRequest.findUniqueOrThrow({ where: { id: first } })).status,
+          { message: 'verifying should publish the first request', timeout: 15_000 },
+        )
+        .toBe('APPROVED');
+      // The account earned the proof with it.
+      expect(
+        (await prisma().user.findUniqueOrThrow({ where: { id: customerAccount.id } })).phoneVerifiedAt,
+      ).not.toBeNull();
+
+      // ---- second request: born live, no card, no review on the rail -----
+      const second = await submitAccountRequest(customer, category, location);
+      await expectPublishedSuccess(customer);
+      await customer.gotoWeb(`/requests/${second}/offers`);
+      await expect(customer.page.getByTestId('request-status')).toHaveText('Onaylandı');
+      await expect(customer.page.getByTestId('phone-verification-card')).toHaveCount(0);
+      const rail = customer.page.getByTestId('request-timeline');
+      await expect(rail).toContainText('Yayına alındı');
+      await expect(rail).not.toContainText('Ön inceleme');
+      await expect(rail).not.toContainText('Telefon doğrulama');
+      const secondRow = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: second } });
+      expect(secondRow.phoneVerifiedAt).toEqual(secondRow.submittedAt);
+      expect(secondRow.moderatedAt).toBeNull();
+      expect(await prisma().phoneVerification.count({ where: { requestId: second } })).toBe(0);
+      await customer.gotoWeb('/requests/my');
+      await expect(
+        customer.page.locator(`[data-request-id="${second}"] [data-testid="request-phone-pending"]`),
+      ).toHaveCount(0);
+
+      // ---- the vitrin form asks for no code on the proven number ---------
+      await customer.gotoWeb(`/vitrin/${card.id}?step=form`);
+      await expect(customer.page.getByTestId('showcase-lead-form')).toBeVisible();
+      await expect(customer.page.getByTestId('showcase-lead-phone-account-proven')).toBeVisible();
+      await expect(customer.page.getByTestId('showcase-lead-phone-send')).toHaveCount(0);
+      await customer.page.getByLabel('Açıklama *').fill('Salon kliması bakım istiyorum, iki gündür soğutmuyor.');
+      await customer.page.getByTestId('request-city').selectOption(location.city);
+      await customer.page.getByTestId('request-district').selectOption(location.district);
+      await customer.page.getByTestId('showcase-lead-urgency').selectOption('THIS_WEEK');
+      await customer.page.getByTestId('showcase-urgency-urgent').check();
+      const leadDisclosure = customer.page.getByTestId('contact-disclosure-accept');
+      if ((await leadDisclosure.count()) > 0) {
+        await leadDisclosure.check();
+      }
+      await customer.page.getByTestId('showcase-lead-submit').click();
+      await assertNoErrorScreen(customer.page);
+      await expect(customer.page.getByTestId('showcase-lead-sent')).toBeVisible();
+      const lead = await prisma().showcaseLead.findFirstOrThrow({ where: { cardId: card.id }, include: { request: true } });
+      expect(lead.request.customerId).toBe(customerAccount.id);
+      expect(lead.request.phoneVerifiedAt).not.toBeNull();
+      expect(await prisma().phoneVerification.count({ where: { requestId: lead.requestId } })).toBe(0);
+
+      // ---- a new number: the proof went with the old one -----------------
+      await customer.gotoWeb('/account/profile');
+      await customer.page.locator('input[name="phone"]').fill(uniquePhone());
+      await customer.page.getByRole('button', { name: 'Bilgileri kaydet' }).click();
+      await expect(customer.page.getByTestId('account-profile-saved')).toBeVisible();
+      expect(
+        (await prisma().user.findUniqueOrThrow({ where: { id: customerAccount.id } })).phoneVerifiedAt,
+      ).toBeNull();
+
+      const third = await submitAccountRequest(customer, category, location);
+      await expect(customer.page.getByTestId('request-success')).toHaveAttribute('data-variant', 'verify');
+      await customer.gotoWeb(`/requests/${third}/offers`);
+      await expect(customer.page.getByTestId('phone-verification-card')).toHaveAttribute('data-required', 'true');
+      expect(
+        (await prisma().serviceRequest.findUniqueOrThrow({ where: { id: third } })).status,
+      ).toBe('SUBMITTED');
+    } finally {
+      await retireShowcasePlacements([placement.id]);
+      await customer.close();
     }
   });
 
