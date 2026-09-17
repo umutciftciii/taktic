@@ -436,6 +436,8 @@ test.describe('phone verification gate', () => {
       for (const width of [320, 768, 1440]) {
         await customer.page.setViewportSize({ width, height: 780 });
         await customer.gotoWeb('/requests/my');
+        await mkdir(SHOTS, { recursive: true });
+        await customer.page.screenshot({ path: resolve(SHOTS, `list-pending-${width}.png`), fullPage: true });
         const rowOf = customer.page.locator(`[data-testid="request-card"][data-request-id="${first}"]`);
         await expect(rowOf.getByTestId('request-phone-pending')).toHaveText('Telefon doğrulaması bekliyor');
         await expect(rowOf.getByTestId('request-phone-pending-cta')).toHaveAttribute(

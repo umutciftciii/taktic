@@ -208,7 +208,7 @@ function RequestRow({ request, reviewsEnabled }: { request: CustomerServiceReque
             {statusLabel(request.status)}
           </span>
           {awaitingPhone ? (
-            <span className="tag tag-accent" data-testid="request-phone-pending">
+            <span className="tag tag-accent tag-multiline" data-testid="request-phone-pending">
               Telefon doğrulaması bekliyor
             </span>
           ) : null}
