@@ -83,6 +83,11 @@ export async function expectPublishedSuccess(actor: Actor): Promise<void> {
   await expect(actor.page).toHaveURL(/\/requests\/success\?id=[^&]+$/);
   await expect(actor.page.getByTestId('request-success')).toHaveAttribute('data-variant', 'published');
   await expect(actor.page.getByTestId('request-success-title')).toHaveText('Talebiniz yayınlandı');
+  // A request born live has no operator ahead of it: nothing on this screen
+  // may speak of a review or of an approval still to come.
+  const text = (await actor.page.getByTestId('request-success').innerText()).toLowerCase();
+  expect(text, 'the published receipt must not promise a review').not.toContain('ön incele');
+  expect(text, 'the published receipt must not promise an approval').not.toContain('onay');
 }
 
 /** The success page for a request an operator reads first. */

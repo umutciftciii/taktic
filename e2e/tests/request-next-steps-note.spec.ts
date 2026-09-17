@@ -19,7 +19,8 @@ import {
 
 /**
  * The "Sırada ne var?" note on the marketplace request form follows the
- * instant-publish switch.
+ * instant-publish switch — and so does the sentence under the form's heading
+ * when the category has no description of its own.
  *
  * With the switch off an operator reads every request first, and the note says
  * so. With it on, providers see the request at once and the note must not
@@ -39,6 +40,10 @@ const REVIEW_SENTENCE =
   'Talebiniz ön incelemeden geçtikten sonra bölgenizdeki onaylı hizmet verenlere iletilir ve 14 gün boyunca teklif alır.';
 const INSTANT_SENTENCE =
   'Talebiniz bölgenizdeki onaylı hizmet verenlere iletilir ve 14 gün boyunca teklif alır.';
+const REVIEW_INTRO =
+  'Soruları yanıtla, talebin ön incelemeden geçtikten sonra bölgendeki onaylı ustalara iletilir.';
+const INSTANT_INTRO = 'Soruları yanıtla, talebin bölgendeki uygun hizmet verenlere iletilir.';
+const CATEGORY_DESCRIPTION = 'Uçtan uca test kategorisi';
 
 /** The widths the note is measured at: the narrowest phone, a tablet, a desktop. */
 const WIDTHS = [320, 768, 1440] as const;
@@ -55,9 +60,22 @@ async function expectNote(page: Page, state: 'on' | 'off', label: string) {
   await expect(note.locator('strong')).toHaveText(TITLE);
 }
 
-/** The note fits its column and its text fits the note, at this width. */
-async function expectNoteFits(page: Page, label: string) {
-  const note = page.getByTestId('request-next-steps');
+/**
+ * The sentence under the heading. With no category description it follows
+ * the switch; with one, the description is shown in either state and the
+ * switch changes nothing.
+ */
+async function expectIntro(page: Page, expected: string, label: string) {
+  const intro = page.getByTestId('request-form-intro');
+  await expect(intro, `${label}: the intro is on screen`).toBeVisible();
+  expect((await intro.innerText()).replace(/\s+/g, ' ').trim(), `${label}: the intro's wording`).toBe(
+    expected,
+  );
+}
+
+/** The element fits its column and its text fits the element, at this width. */
+async function expectFits(page: Page, testId: string, label: string) {
+  const note = page.getByTestId(testId);
   const geometry = await note.evaluate((element) => {
     const box = element.getBoundingClientRect();
     return {
@@ -96,7 +114,11 @@ test.describe('request form next-steps note', () => {
     browser,
   }) => {
     const location = uniqueLocation();
-    const category = await createCategory(2, { namePrefix: 'E2E Sırada' });
+    // No description of its own, so the sentence under the heading is the
+    // platform's fallback — the one that has to follow the switch.
+    const category = await createCategory(2, { namePrefix: 'E2E Sırada', description: null });
+    // And one with a description, which is shown whatever the switch says.
+    const described = await createCategory(2, { namePrefix: 'E2E Sırada Açıklamalı' });
     const visitor = await Actor.open(browser, 'web', primaryRuntime);
     const page = visitor.page;
 
@@ -106,12 +128,22 @@ test.describe('request form next-steps note', () => {
       await visitor.gotoWeb(`/categories/${category.slug}`);
       await assertNoErrorScreen(page);
       await expectNote(page, 'off', 'switch off');
+      await expectIntro(page, REVIEW_INTRO, 'switch off');
+      await visitor.gotoWeb(`/categories/${described.slug}`);
+      await expectIntro(page, CATEGORY_DESCRIPTION, 'switch off, described category');
 
       // ---- switch on: a fresh load shows the instant sentence -----------
       await setAutoPublish(true);
       await visitor.gotoWeb(`/categories/${category.slug}`);
       await assertNoErrorScreen(page);
       await expectNote(page, 'on', 'switch on');
+      await expectIntro(page, INSTANT_INTRO, 'switch on');
+      // Nothing above the form promises a review or an approval any more.
+      const head = (await page.locator('.req-head').innerText()).toLowerCase();
+      expect(head, 'switch on: the form head speaks of a review').not.toContain('ön incele');
+      expect(head, 'switch on: the form head speaks of an approval').not.toContain('onay');
+      await visitor.gotoWeb(`/categories/${described.slug}`);
+      await expectIntro(page, CATEGORY_DESCRIPTION, 'switch on, described category');
 
       // ---- and it fits at every width, in both states -------------------
       mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -122,8 +154,14 @@ test.describe('request form next-steps note', () => {
           await page.setViewportSize({ width, height: 900 });
           await visitor.gotoWeb(`/categories/${category.slug}`);
           await assertNoErrorScreen(page);
+          await expectIntro(page, state === 'on' ? INSTANT_INTRO : REVIEW_INTRO, label);
+          await expectFits(page, 'request-form-intro', `${label} (intro)`);
+          await page.screenshot({
+            path: resolve(SCREENSHOT_DIR, `request-form-intro-${state}-${width}.png`),
+            fullPage: false,
+          });
           await expectNote(page, state, label);
-          await expectNoteFits(page, label);
+          await expectFits(page, 'request-next-steps', `${label} (note)`);
           await page.getByTestId('request-next-steps').scrollIntoViewIfNeeded();
           await page.screenshot({
             path: resolve(SCREENSHOT_DIR, `request-next-steps-${state}-${width}.png`),
@@ -132,17 +170,18 @@ test.describe('request form next-steps note', () => {
         }
       }
 
-      // ---- switched back off: the review sentence again ----------------
+      // ---- switched back off: the review sentences again ---------------
       await setAutoPublish(false);
       await page.setViewportSize({ width: 1280, height: 900 });
       await visitor.gotoWeb(`/categories/${category.slug}`);
       await expectNote(page, 'off', 'switch off again');
+      await expectIntro(page, REVIEW_INTRO, 'switch off again');
     } finally {
       await visitor.close();
     }
   });
 
-  test('the vitrin lead form carries no such note in either state', async ({ browser }) => {
+  test('the vitrin lead form carries neither sentence in either state', async ({ browser }) => {
     const location = uniqueLocation();
     const category = await createCategory(3, { namePrefix: 'E2E Sırada Vitrin' });
     const owner = await createProvider({ categoryId: category.id, location, credits: 0 });
@@ -172,10 +211,13 @@ test.describe('request form next-steps note', () => {
         await assertNoErrorScreen(page);
         await expect(page.getByTestId('showcase-lead-form')).toBeVisible();
         await expect(page.getByTestId('request-next-steps')).toHaveCount(0);
+        await expect(page.getByTestId('request-form-intro')).toHaveCount(0);
         const text = await page.locator('body').innerText();
         expect(text, `vitrin form, switch ${state ? 'on' : 'off'}`).not.toContain(TITLE);
         expect(text).not.toContain(REVIEW_SENTENCE);
         expect(text).not.toContain(INSTANT_SENTENCE);
+        expect(text).not.toContain(REVIEW_INTRO);
+        expect(text).not.toContain(INSTANT_INTRO);
       }
     } finally {
       await visitor.close();

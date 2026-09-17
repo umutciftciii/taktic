@@ -2,7 +2,7 @@
  * What the marketplace request form says happens next — decided by the
  * instant-publish switch, read from the API on every page load.
  *
- * Both sentences are fixed wording; the switch only chooses between them. The
+ * Every sentence here is fixed wording; the switch only chooses between them. The
  * form has no say in what the API does with the request: this is a description
  * of the platform's rule, not a control over it.
  */
@@ -16,6 +16,20 @@ const INSTANT_SENTENCE =
 
 export function nextStepsNoteText(autoPublishEnabled: boolean): string {
   return autoPublishEnabled ? INSTANT_SENTENCE : REVIEW_SENTENCE;
+}
+
+/*
+ * The sentence under the form's heading, for a category with no description
+ * of its own. It answers the same question as the note — what happens after
+ * the form is sent — so it follows the same switch: the review wording names
+ * an operator, and with instant publish on there is none.
+ */
+const REVIEW_INTRO =
+  'Soruları yanıtla, talebin ön incelemeden geçtikten sonra bölgendeki onaylı ustalara iletilir.';
+const INSTANT_INTRO = 'Soruları yanıtla, talebin bölgendeki uygun hizmet verenlere iletilir.';
+
+export function requestFormIntroText(autoPublishEnabled: boolean): string {
+  return autoPublishEnabled ? INSTANT_INTRO : REVIEW_INTRO;
 }
 
 /**

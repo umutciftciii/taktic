@@ -7,7 +7,9 @@ import {
   createTestApp,
   createUser,
   loginAs,
+  resetAuthThrottle,
   resetDatabase,
+  serviceRequestPayload,
   type TestContext,
 } from './harness';
 
@@ -29,12 +31,29 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // The settings singleton survives resetDatabase; leave the switch off for
+  // whichever spec file runs next.
+  await setAutoPublish(false);
   await ctx.app.close();
 });
 
 beforeEach(async () => {
   await resetDatabase(ctx.prisma);
+  await setAutoPublish(false);
+  resetAuthThrottle(ctx.app);
 });
+
+async function setAutoPublish(enabled: boolean) {
+  await ctx.prisma.operationsSettings.upsert({
+    where: { id: 'singleton' },
+    create: {
+      id: 'singleton',
+      unviewedOfferRefundWindowHours: 48,
+      marketplaceAutoPublishEnabled: enabled,
+    },
+    update: { marketplaceAutoPublishEnabled: enabled },
+  });
+}
 
 describe('GET /service-requests/my/:id', () => {
   it('returns the owner their request, shaped exactly like the list row', async () => {
@@ -113,5 +132,68 @@ describe('GET /service-requests/my/:id', () => {
       .set('Cookie', await loginAs(ctx.prisma, admin.id))
       .expect(403);
     await request(ctx.server).get(`/service-requests/my/${created.id}`).expect(401);
+  });
+
+  /*
+   * The two reads a customer's screens are worded from — the public switch
+   * before the form is sent, the request's own status after — come from the
+   * same setting through the same method. What the policy said when the
+   * request was posted is the status the detail reports; the web never has to
+   * combine the two, and must not.
+   */
+  it('projects the status the switch decided when the request was posted', async () => {
+    const category = await createCategory(ctx.prisma, 'Anahtar', { offerCreditCost: 1 });
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const cookie = await loginAs(ctx.prisma, owner.id);
+
+    // Switch off: the policy says so, and the request is read back waiting.
+    expect((await request(ctx.server).get('/marketplace-publish-policy').expect(200)).body).toEqual({
+      autoPublishEnabled: false,
+    });
+    const waiting = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', cookie)
+      .send(serviceRequestPayload(category.slug))
+      .expect(201);
+    const waitingDetail = await request(ctx.server)
+      .get(`/service-requests/my/${waiting.body.id}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(waitingDetail.body.status).toBe('SUBMITTED');
+
+    // Switch on: the policy says so, and a new request is read back live —
+    // while the one posted before the flip stays exactly as it was.
+    await setAutoPublish(true);
+    expect((await request(ctx.server).get('/marketplace-publish-policy').expect(200)).body).toEqual({
+      autoPublishEnabled: true,
+    });
+    const live = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', cookie)
+      .send(serviceRequestPayload(category.slug))
+      .expect(201);
+    const liveDetail = await request(ctx.server)
+      .get(`/service-requests/my/${live.body.id}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(liveDetail.body.status).toBe('APPROVED');
+    expect(
+      (
+        await request(ctx.server)
+          .get(`/service-requests/my/${waiting.body.id}`)
+          .set('Cookie', cookie)
+          .expect(200)
+      ).body.status,
+    ).toBe('SUBMITTED');
+
+    // The detail carries no more about the switch than the status: nothing
+    // names the setting, and a stranger to the request still gets 404.
+    expect(liveDetail.body).not.toHaveProperty('autoPublishEnabled');
+    expect(liveDetail.body).not.toHaveProperty('marketplaceAutoPublishEnabled');
+    const other = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    await request(ctx.server)
+      .get(`/service-requests/my/${live.body.id}`)
+      .set('Cookie', await loginAs(ctx.prisma, other.id))
+      .expect(404);
   });
 });

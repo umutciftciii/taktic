@@ -6,6 +6,7 @@ import {
   NEXT_STEPS_TITLE,
   nextStepsNoteText,
   readMarketplacePublishPolicy,
+  requestFormIntroText,
 } from '../lib/request-next-steps';
 
 /**
@@ -97,5 +98,27 @@ describe('the note as rendered', () => {
     const markup = renderToStaticMarkup(createElement(NextStepsNote, {}));
     expect(markup).toContain('data-auto-publish="off"');
     expect(textOf(markup)).toBe(`Sırada ne var? ${REVIEW_SENTENCE}`);
+  });
+});
+
+/**
+ * The sentence under the form's heading, shown when the category has no
+ * description of its own. It follows the same switch as the note: the
+ * review wording promises an operator, and with instant publish on there is
+ * none to promise.
+ */
+const REVIEW_INTRO =
+  'Soruları yanıtla, talebin ön incelemeden geçtikten sonra bölgendeki onaylı ustalara iletilir.';
+const INSTANT_INTRO = 'Soruları yanıtla, talebin bölgendeki uygun hizmet verenlere iletilir.';
+
+describe('the form intro sentence', () => {
+  it('promises a review while instant publish is off', () => {
+    expect(requestFormIntroText(false)).toBe(REVIEW_INTRO);
+  });
+
+  it('promises no review or approval while instant publish is on', () => {
+    expect(requestFormIntroText(true)).toBe(INSTANT_INTRO);
+    expect(requestFormIntroText(true).toLowerCase()).not.toContain('ön incele');
+    expect(requestFormIntroText(true).toLowerCase()).not.toContain('onay');
   });
 });

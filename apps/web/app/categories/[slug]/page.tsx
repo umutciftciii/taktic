@@ -10,6 +10,7 @@ import {
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { readCurrentDraft } from '../../../lib/request-drafts';
 import { decodeRouterSelections } from '../../../lib/request-flow';
+import { requestFormIntroText } from '../../../lib/request-next-steps';
 import { CategoryVisual } from '../../category-visual';
 import { submitServiceRequestAction } from '../actions';
 import { RequestForm } from './request-form';
@@ -54,8 +55,9 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
     // the draft was saved under — in a routed flow it is not this leaf.
     readCurrentDraft({ formType: 'MARKETPLACE', categorySlug: entryCategorySlug }),
     // Whether providers see the request at once or an operator reads it first
-    // — for the "Sırada ne var?" note only. Read fresh on every load, off on
-    // any failure; the API applies the real rule when the request is posted.
+    // — for the "Sırada ne var?" note and the sentence under the heading only.
+    // Read fresh on every load, off on any failure; the API applies the real
+    // rule when the request is posted.
     getMarketplacePublishPolicy(),
   ]);
   const questions = category.questions ?? [];
@@ -103,10 +105,13 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
               customer both identify this screen by it.
             */}
             <h1 className="req-head-title">{category.name}</h1>
-            <p className="page-subtitle">
-              {category.description
-                ? category.description
-                : 'Soruları yanıtla, talebin ön incelemeden geçtikten sonra bölgendeki onaylı ustalara iletilir.'}
+            {/*
+              A category's own description wins. Without one, the sentence
+              follows the instant-publish switch like the "Sırada ne var?" note
+              below — it must not promise a review that will not happen.
+            */}
+            <p className="page-subtitle" data-testid="request-form-intro">
+              {category.description ? category.description : requestFormIntroText(autoPublishEnabled)}
             </p>
 
             <div className="req-head-tags">
