@@ -9,9 +9,13 @@ import { escapeHtml } from './format';
  * *output* keeps the structural rules e-mail clients need: nested
  * `role="presentation"` tables, every style inline, a 600px card, the MSO font
  * fallback, `mso-line-height-rule:exactly` on every line height, and a single
- * `<style>` block carrying nothing but the ≤620px media query. Rebuilding it as
- * blocks is what lets every template share one shell without a copy per message
- * drifting apart.
+ * `<style>` block. Rebuilding it as blocks is what lets every template share
+ * one shell without a copy per message drifting apart.
+ *
+ * The one thing the shell carries that the handoff did not is dark mode — see
+ * {@link darkModeCss}. The handoff opted into it with the `color-scheme` meta
+ * and stopped there, which is worse than not opting in: a client that honours
+ * the opt-in paints its own dark canvas under text that is inline `#201e1d`.
  *
  * Three things the design preview had that production must not:
  *
@@ -87,13 +91,71 @@ export type RenderedDocument = {
   text: string;
 };
 
-const INK = '#201e1d';
-const ACCENT = '#ec3013';
-const MUTED = '#6b6663';
-const HAIRLINE = '#d5d1ce';
-const PAGE = '#e7e5e3';
-const CARD = '#ffffff';
-const GHOST_FILL = '#fbfafa';
+/**
+ * The colours, as one table per scheme.
+ *
+ * `light` is the design handoff, unchanged. `dark` is what the same surfaces
+ * become when a client tells us it prefers a dark scheme: the page and the
+ * card go dark, the ink goes light, the 2px structure keeps its contrast by
+ * flipping with the ink, the accent is lifted because `#ec3013` on a dark card
+ * falls under 4.5:1 for the 11px kicker, and the logo band stays white so the
+ * one logo asset — black ink on an opaque white plate — keeps sitting on its
+ * own plate instead of floating as a white rectangle over a dark card.
+ *
+ * Exported so the tests can check the contrast of the pairs the shell uses
+ * rather than only that the strings are present.
+ */
+export type EmailTheme = {
+  page: string;
+  card: string;
+  head: string;
+  ink: string;
+  muted: string;
+  rule: string;
+  hairline: string;
+  accent: string;
+  cta: string;
+  ctaText: string;
+  ghost: string;
+};
+
+export const EMAIL_THEME: { light: EmailTheme; dark: EmailTheme } = {
+  light: {
+    page: '#e7e5e3',
+    card: '#ffffff',
+    head: '#ffffff',
+    ink: '#201e1d',
+    muted: '#6b6663',
+    rule: '#201e1d',
+    hairline: '#d5d1ce',
+    accent: '#ec3013',
+    cta: '#ec3013',
+    ctaText: '#ffffff',
+    ghost: '#fbfafa',
+  },
+  dark: {
+    page: '#121110',
+    card: '#242120',
+    head: '#ffffff',
+    ink: '#f3f1ef',
+    muted: '#b3aca8',
+    rule: '#f3f1ef',
+    hairline: '#3f3b38',
+    accent: '#ff5a3c',
+    cta: '#ec3013',
+    ctaText: '#ffffff',
+    ghost: '#242120',
+  },
+};
+
+const INK = EMAIL_THEME.light.ink;
+const ACCENT = EMAIL_THEME.light.accent;
+const MUTED = EMAIL_THEME.light.muted;
+const HAIRLINE = EMAIL_THEME.light.hairline;
+const PAGE = EMAIL_THEME.light.page;
+const CARD = EMAIL_THEME.light.card;
+const GHOST_FILL = EMAIL_THEME.light.ghost;
+const HEAD = EMAIL_THEME.light.head;
 
 const FONT = 'Arial, Helvetica, sans-serif';
 
@@ -137,19 +199,21 @@ function renderHtml(document: EmailDocument, branding: EmailBranding): string {
 <title>${escapeHtml(document.subject)}</title>
 <!--[if mso]><style>body,table,td,a{font-family:Arial,Helvetica,sans-serif !important;}</style><![endif]-->
 <style>
+  :root{color-scheme:light dark;supported-color-schemes:light dark;}
   @media only screen and (max-width:620px){
     .wrap{width:100% !important;}
     .pad{padding-left:24px !important;padding-right:24px !important;}
     .h1{font-size:26px !important;line-height:32px !important;}
   }
+${darkModeCss()}
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:${PAGE};">
+<body bgcolor="${PAGE}" style="margin:0;padding:0;background-color:${PAGE};">
 <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;">${escapeHtml(document.preheader)}</span>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;background-color:${PAGE};">
-<tr><td align="center" style="padding:32px 12px;">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" class="wrap" style="width:600px;max-width:600px;background-color:${CARD};border:2px solid ${INK};">
-    <tr><td class="pad" style="padding:22px 40px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="${PAGE}" style="width:100%;background-color:${PAGE};">
+<tr><td align="center" class="dm-page" bgcolor="${PAGE}" style="padding:32px 12px;background-color:${PAGE};">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" class="wrap dm-card" bgcolor="${CARD}" style="width:600px;max-width:600px;background-color:${CARD};border:2px solid ${INK};">
+    <tr><td class="pad dm-head" bgcolor="${HEAD}" style="padding:22px 40px;background-color:${HEAD};">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;"><tr>
         <td align="left" style="line-height:0;font-size:0;"><img src="${escapeHtml(branding.logoUrl)}" width="${EMAIL_LOGO_WIDTH}" alt="TakTick" style="display:block;width:${EMAIL_LOGO_WIDTH}px;max-width:${EMAIL_LOGO_WIDTH}px;height:auto;border:0;"></td>
         <td align="right" style="font-family:${FONT};font-size:10px;line-height:24px;mso-line-height-rule:exactly;letter-spacing:0.14em;text-transform:uppercase;color:${MUTED};">${escapeHtml(document.audience)}</td>
@@ -166,6 +230,70 @@ function renderHtml(document: EmailDocument, branding: EmailBranding): string {
   </table>
 </td></tr></table>
 </body></html>`;
+}
+
+/**
+ * Dark mode, in three layers that each cover a different kind of client.
+ *
+ * 1. **Attributes and inline colours** (written by the shell, not here): every
+ *    surface carries `bgcolor` next to its `background-color`, and every
+ *    text-bearing element carries its own `color`. A client that strips
+ *    `<style>` — or that inverts colours on its own, as the Gmail apps and
+ *    Windows Outlook do — sees a light canvas with dark ink on it and inverts
+ *    the two together. Text never inherits its colour from a container whose
+ *    background the client may have replaced.
+ *
+ * 2. **`prefers-color-scheme: dark`** for the clients that honour it (Apple
+ *    Mail on macOS and iOS, Outlook for Mac and iOS, Samsung Mail, Thunderbird):
+ *    class-based overrides with `!important`, since they compete with the inline
+ *    styles the first layer needs. The header band is pinned white on purpose —
+ *    see {@link EMAIL_THEME}.
+ *
+ * 3. **Outlook's rewrite** (outlook.com, Outlook for Windows/Android with the
+ *    new rendering): it recolours elements itself, ignores the media query, and
+ *    marks what it changed with `data-ogsc` (colour) and `data-ogsb`
+ *    (background). The same rules, re-bound under those attributes, put ours
+ *    back. This is the whole of the client-specific CSS; nothing else in the
+ *    shell is conditional on a client.
+ *
+ * Gmail's web client leaves message colours alone in its dark theme and does
+ * not support the media query, so for it the first layer is the whole story.
+ */
+function darkModeCss(): string {
+  const dark = EMAIL_THEME.dark;
+
+  return `  @media (prefers-color-scheme: dark){
+    body,.dm-page{background-color:${dark.page} !important;}
+    .dm-card{background-color:${dark.card} !important;border-color:${dark.rule} !important;}
+    .dm-head{background-color:${HEAD} !important;}
+    .dm-rule{background-color:${dark.rule} !important;}
+    .dm-hair{border-color:${dark.hairline} !important;}
+    .dm-ink{color:${dark.ink} !important;}
+    .dm-muted{color:${dark.muted} !important;}
+    .dm-accent{color:${dark.accent} !important;}
+    .dm-link{color:${dark.ink} !important;}
+    .dm-link-muted{color:${dark.muted} !important;}
+    .dm-cta{background-color:${dark.cta} !important;}
+    .dm-cta-link{color:${dark.ctaText} !important;}
+    .dm-ghost{background-color:${dark.card} !important;border-color:${dark.ink} !important;}
+    .dm-ghost-link{color:${dark.ink} !important;}
+  }
+  [data-ogsb] .dm-page{background-color:${dark.page} !important;}
+  [data-ogsb] .dm-card{background-color:${dark.card} !important;}
+  [data-ogsb] .dm-head{background-color:${HEAD} !important;}
+  [data-ogsb] .dm-rule{background-color:${dark.rule} !important;}
+  [data-ogsb] .dm-cta{background-color:${dark.cta} !important;}
+  [data-ogsb] .dm-ghost{background-color:${dark.card} !important;}
+  [data-ogsc] .dm-card{border-color:${dark.rule} !important;}
+  [data-ogsc] .dm-ghost{border-color:${dark.ink} !important;}
+  [data-ogsc] .dm-hair{border-color:${dark.hairline} !important;}
+  [data-ogsc] .dm-ink{color:${dark.ink} !important;}
+  [data-ogsc] .dm-muted{color:${dark.muted} !important;}
+  [data-ogsc] .dm-accent{color:${dark.accent} !important;}
+  [data-ogsc] .dm-link{color:${dark.ink} !important;}
+  [data-ogsc] .dm-link-muted{color:${dark.muted} !important;}
+  [data-ogsc] .dm-cta-link{color:${dark.ctaText} !important;}
+  [data-ogsc] .dm-ghost-link{color:${dark.ink} !important;}`;
 }
 
 /**
@@ -189,31 +317,31 @@ function renderFooter(
     .join(' · ');
 
   const accountLine = document.accountUrl
-    ? `<br><a href="${escapeHtml(document.accountUrl)}" style="color:${MUTED};text-decoration:underline;">Hesap ayarları</a>`
+    ? `<br><a href="${escapeHtml(document.accountUrl)}" class="dm-link-muted" style="color:${MUTED};text-decoration:underline;">Hesap ayarları</a>`
     : '';
 
-  return `<p style="margin:0 0 10px 0;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;color:${MUTED};">Bu e-posta TakTick hesabınızla ilgili bir işlem sonucu gönderildi.<br>Sorularınız için <a href="mailto:${support}" style="color:${INK};text-decoration:underline;">${support}</a> adresine yazabilirsiniz.</p>
-      <p style="margin:0;font-family:${FONT};font-size:11px;line-height:18px;mso-line-height-rule:exactly;color:${MUTED};">${company}<br>Bu ileti, hesabınızla ilgili zorunlu bir işlem bildirimidir; pazarlama içermez.${accountLine}</p>`;
+  return `<p class="dm-muted" style="margin:0 0 10px 0;font-family:${FONT};font-size:12px;line-height:19px;mso-line-height-rule:exactly;color:${MUTED};">Bu e-posta TakTick hesabınızla ilgili bir işlem sonucu gönderildi.<br>Sorularınız için <a href="mailto:${support}" class="dm-link" style="color:${INK};text-decoration:underline;">${support}</a> adresine yazabilirsiniz.</p>
+      <p class="dm-muted" style="margin:0;font-family:${FONT};font-size:11px;line-height:18px;mso-line-height-rule:exactly;color:${MUTED};">${company}<br>Bu ileti, hesabınızla ilgili zorunlu bir işlem bildirimidir; pazarlama içermez.${accountLine}</p>`;
 }
 
 function ruleHtml(): string {
-  return `<tr><td><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;"><tr><td height="2" style="height:2px;line-height:2px;font-size:0;background-color:${INK};">&nbsp;</td></tr></table></td></tr>`;
+  return `<tr><td><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;"><tr><td height="2" class="dm-rule" bgcolor="${INK}" style="height:2px;line-height:2px;font-size:0;background-color:${INK};">&nbsp;</td></tr></table></td></tr>`;
 }
 
 function kickerHtml(text: string): string {
-  return `<p style="margin:0 0 14px 0;font-family:${FONT};font-size:11px;line-height:16px;mso-line-height-rule:exactly;letter-spacing:0.14em;text-transform:uppercase;color:${ACCENT};font-weight:bold;">${escapeHtml(text)}</p>`;
+  return `<p class="dm-accent" style="margin:0 0 14px 0;font-family:${FONT};font-size:11px;line-height:16px;mso-line-height-rule:exactly;letter-spacing:0.14em;text-transform:uppercase;color:${ACCENT};font-weight:bold;">${escapeHtml(text)}</p>`;
 }
 
 function headingHtml(text: string): string {
-  return `<h1 class="h1" style="margin:0 0 22px 0;font-family:${FONT};font-size:30px;line-height:36px;mso-line-height-rule:exactly;font-weight:bold;letter-spacing:-0.02em;color:${INK};">${escapeHtml(text)}</h1>`;
+  return `<h1 class="h1 dm-ink" style="margin:0 0 22px 0;font-family:${FONT};font-size:30px;line-height:36px;mso-line-height-rule:exactly;font-weight:bold;letter-spacing:-0.02em;color:${INK};">${escapeHtml(text)}</h1>`;
 }
 
 function paragraphHtml(text: string): string {
-  return `<p style="margin:0 0 16px 0;font-family:${FONT};font-size:15px;line-height:24px;mso-line-height-rule:exactly;color:${INK};">${escapeHtml(text)}</p>`;
+  return `<p class="dm-ink" style="margin:0 0 16px 0;font-family:${FONT};font-size:15px;line-height:24px;mso-line-height-rule:exactly;color:${INK};">${escapeHtml(text)}</p>`;
 }
 
 function signatureHtml(): string {
-  return `<p style="margin:26px 0 0 0;font-family:${FONT};font-size:15px;line-height:24px;mso-line-height-rule:exactly;color:${INK};">Saygılarımızla,<br><strong>TakTick Ekibi</strong></p>`;
+  return `<p class="dm-ink" style="margin:26px 0 0 0;font-family:${FONT};font-size:15px;line-height:24px;mso-line-height-rule:exactly;color:${INK};">Saygılarımızla,<br><strong>TakTick Ekibi</strong></p>`;
 }
 
 function blockHtml(block: EmailBlock): string {
@@ -225,10 +353,10 @@ function blockHtml(block: EmailBlock): string {
       return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td height="${block.height}" style="height:${block.height}px;line-height:${block.height}px;font-size:0;">&nbsp;</td></tr></table>`;
 
     case 'sectionLabel':
-      return `<p style="margin:0 0 14px 0;font-family:${FONT};font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:${MUTED};font-weight:bold;">${escapeHtml(block.text)}</p>`;
+      return `<p class="dm-muted" style="margin:0 0 14px 0;font-family:${FONT};font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:${MUTED};font-weight:bold;">${escapeHtml(block.text)}</p>`;
 
     case 'note':
-      return `<p style="margin:0;font-family:${FONT};font-size:13px;line-height:20px;mso-line-height-rule:exactly;color:${MUTED};">${escapeHtml(block.text)}</p>`;
+      return `<p class="dm-muted" style="margin:0;font-family:${FONT};font-size:13px;line-height:20px;mso-line-height-rule:exactly;color:${MUTED};">${escapeHtml(block.text)}</p>`;
 
     case 'cta':
       return ctaHtml(block);
@@ -242,13 +370,14 @@ function ctaHtml(block: Extract<EmailBlock, { kind: 'cta' }>): string {
   const url = assertSafeUrl(block.url);
   const cell =
     block.variant === 'primary'
-      ? `<td bgcolor="${ACCENT}" style="mso-line-height-rule:exactly;line-height:20px;">`
-      : `<td bgcolor="${GHOST_FILL}" style="border:2px solid ${INK};mso-line-height-rule:exactly;line-height:20px;">`;
-  const color = block.variant === 'primary' ? '#ffffff' : INK;
+      ? `<td class="dm-cta" bgcolor="${ACCENT}" style="background-color:${ACCENT};mso-line-height-rule:exactly;line-height:20px;">`
+      : `<td class="dm-ghost" bgcolor="${GHOST_FILL}" style="background-color:${GHOST_FILL};border:2px solid ${INK};mso-line-height-rule:exactly;line-height:20px;">`;
+  const color = block.variant === 'primary' ? EMAIL_THEME.light.ctaText : INK;
+  const linkClass = block.variant === 'primary' ? 'dm-cta-link' : 'dm-ghost-link';
 
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
         ${cell}
-          <a href="${escapeHtml(url)}" style="display:block;padding:15px 26px;font-family:${FONT};font-size:14px;font-weight:bold;letter-spacing:0.06em;text-transform:uppercase;color:${color};text-decoration:none;">${escapeHtml(block.label)}</a>
+          <a href="${escapeHtml(url)}" class="${linkClass}" style="display:block;padding:15px 26px;font-family:${FONT};font-size:14px;font-weight:bold;letter-spacing:0.06em;text-transform:uppercase;color:${color};text-decoration:none;">${escapeHtml(block.label)}</a>
         </td></tr></table>`;
 }
 
@@ -257,13 +386,13 @@ function dataTableHtml(rows: EmailDataRow[]): string {
     .map(
       (row) => `
     <tr>
-      <td width="150" style="width:150px;padding:12px 12px 12px 0;border-bottom:1px solid ${HAIRLINE};font-family:${FONT};font-size:11px;line-height:16px;mso-line-height-rule:exactly;letter-spacing:0.09em;text-transform:uppercase;color:${MUTED};vertical-align:top;">${escapeHtml(row.label)}</td>
-      <td style="padding:12px 0;border-bottom:1px solid ${HAIRLINE};font-family:${FONT};font-size:15px;line-height:22px;mso-line-height-rule:exactly;color:${INK};font-weight:bold;vertical-align:top;">${escapeHtml(row.value)}</td>
+      <td width="150" class="dm-hair dm-muted" style="width:150px;padding:12px 12px 12px 0;border-bottom:1px solid ${HAIRLINE};font-family:${FONT};font-size:11px;line-height:16px;mso-line-height-rule:exactly;letter-spacing:0.09em;text-transform:uppercase;color:${MUTED};vertical-align:top;">${escapeHtml(row.label)}</td>
+      <td class="dm-hair dm-ink" style="padding:12px 0;border-bottom:1px solid ${HAIRLINE};font-family:${FONT};font-size:15px;line-height:22px;mso-line-height-rule:exactly;color:${INK};font-weight:bold;vertical-align:top;">${escapeHtml(row.value)}</td>
     </tr>`,
     )
     .join('');
 
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-top:1px solid ${HAIRLINE};">${cells}
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="dm-hair" style="width:100%;border-top:1px solid ${HAIRLINE};">${cells}
   </table>`;
 }
 
