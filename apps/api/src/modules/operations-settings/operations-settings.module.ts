@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { MarketplacePublishPolicyController } from './marketplace-publish-policy.controller';
 import { MarketplacePublishSettingsController } from './marketplace-publish-settings.controller';
 import { MarketplacePublishSettingsService } from './marketplace-publish-settings.service';
 import { OperationsSettingsController } from './operations-settings.controller';
@@ -28,6 +29,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     RefundPolicyController,
     SchedulerSettingsController,
     MarketplacePublishSettingsController,
+    MarketplacePublishPolicyController,
     ProviderReviewSettingsController,
   ],
   providers: [
