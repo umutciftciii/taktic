@@ -5,7 +5,14 @@ import {
   type CustomerServiceRequest,
   fetchOrNotFound,
   getCurrentUser,
+  getMarketplacePublishPolicy,
 } from '../../../lib/api';
+import {
+  afterVerificationSentence,
+  maskPhoneForDisplay,
+  PHONE_VERIFICATION_ANCHOR,
+  VERIFY_PHONE_TITLE,
+} from '../../../lib/request-lifecycle';
 import { GuestActivationNote } from './activation-note';
 
 type RequestSuccessPageProps = {
@@ -41,7 +48,9 @@ function referenceFromId(id: string) {
  *   for one that does not exist, and this page turns both into the same
  *   not-found screen — an id alone discloses nothing about anybody's request.
  *   A vitrin lead is worded as addressed to one business; `APPROVED` as live;
- *   everything else as waiting for review.
+ *   a request the API marks `awaitingPhoneVerification` as waiting for the
+ *   customer's own proof of their number, with the way to the existing
+ *   verification card; everything else as waiting for review.
  * - **A visitor** with no session — a guest who just sent the form. There is
  *   no authorised call to make, so nothing is claimed: a neutral receipt with
  *   a reference derived from the id, and the way to the account the platform
@@ -69,7 +78,13 @@ export default async function RequestSuccessPage({ searchParams }: RequestSucces
     apiFetch<CustomerServiceRequest>(`/service-requests/my/${encodeURIComponent(id)}`),
   );
 
-  return <CustomerReceipt request={request} />;
+  // Only a request waiting for the customer's own proof needs to say what
+  // that proof leads to; every other variant is worded from the status alone.
+  const autoPublishEnabled = request.awaitingPhoneVerification
+    ? await getMarketplacePublishPolicy()
+    : false;
+
+  return <CustomerReceipt request={request} autoPublishEnabled={autoPublishEnabled} />;
 }
 
 function GuestReceipt({ id }: { id: string }) {
@@ -100,12 +115,27 @@ function GuestReceipt({ id }: { id: string }) {
   );
 }
 
-function CustomerReceipt({ request }: { request: CustomerServiceRequest }) {
+function CustomerReceipt({
+  request,
+  autoPublishEnabled,
+}: {
+  request: CustomerServiceRequest;
+  autoPublishEnabled: boolean;
+}) {
   const reference = request.requestNumber ?? referenceFromId(request.id);
   // A lead the customer has since released to the market is an ordinary
   // request again and is worded by its status below.
   const lead = request.showcaseLead && !request.showcaseLead.releasedAt ? request.showcaseLead : null;
-  const variant = lead ? 'targeted' : request.status === 'APPROVED' ? 'published' : 'review';
+  // `verify` is the API's explicit word that the request waits for the
+  // customer's own proof of their number — never inferred from SUBMITTED,
+  // which is also what a request waiting for an operator says.
+  const variant = lead
+    ? 'targeted'
+    : request.status === 'APPROVED'
+      ? 'published'
+      : request.awaitingPhoneVerification === true
+        ? 'verify'
+        : 'review';
 
   return (
     <main>
@@ -121,6 +151,18 @@ function CustomerReceipt({ request }: { request: CustomerServiceRequest }) {
                 Talebiniz yalnız seçtiğiniz işletmeye gönderildi; genel pazara açılmadı ve başka
                 hizmet verenler görmez. İşletme size {lead.slaHours} saat içinde dönüş yapmayı
                 taahhüt etti.
+              </p>
+            </>
+          ) : variant === 'verify' ? (
+            <>
+              <span className="kicker">Talep alındı</span>
+              <h1 className="page-title" data-testid="request-success-title">
+                {VERIFY_PHONE_TITLE}
+              </h1>
+              <p className="page-subtitle">
+                Talebiniz kaydedildi, ancak hizmet verenlere iletilmesi için{' '}
+                {maskPhoneForDisplay(request.customerPhone)} numarasını doğrulamanız gerekiyor.{' '}
+                {afterVerificationSentence(autoPublishEnabled)}
               </p>
             </>
           ) : variant === 'published' ? (
@@ -150,9 +192,21 @@ function CustomerReceipt({ request }: { request: CustomerServiceRequest }) {
             Talep referansı: <code data-testid="request-success-reference">{reference}</code>
           </p>
           <div className="inline-actions" style={{ marginTop: 24 }}>
-            <Link className="btn btn-primary" href={`/requests/${request.id}/offers`}>
-              Teklifleri görüntüle
-            </Link>
+            {variant === 'verify' ? (
+              // The existing card on the request's own page; the link carries
+              // the request id and nothing else.
+              <Link
+                className="btn btn-primary"
+                href={`/requests/${request.id}/offers#${PHONE_VERIFICATION_ANCHOR}`}
+                data-testid="request-success-verify-cta"
+              >
+                Telefonumu doğrula
+              </Link>
+            ) : (
+              <Link className="btn btn-primary" href={`/requests/${request.id}/offers`}>
+                Teklifleri görüntüle
+              </Link>
+            )}
             <Link className="btn btn-secondary" href="/requests/my">
               Taleplerim
             </Link>

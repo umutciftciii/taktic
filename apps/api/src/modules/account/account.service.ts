@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
+import { runSerializable } from '../../common/serializable-transaction';
 import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
 import { resolveArea } from '../locations/turkey-locations';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -52,6 +53,16 @@ export type AccountProfile = {
  * write their own profile" is a property of the shape of this service rather
  * than a check somebody has to remember to write.
  */
+const profileSelect = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  city: true,
+  role: true,
+  passwordHash: true,
+} as const;
+
 @Injectable()
 export class AccountService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -88,19 +99,30 @@ export class AccountService {
     await this.assertPhoneIsFree(userId, phone);
 
     try {
-      const updated = await this.prisma.user.update({
-        where: { id: userId },
-        data: { name, phone, city },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          city: true,
-          role: true,
-          passwordHash: true,
+      // The proof of the number goes with the number, and never outlives it:
+      // the stored number is read and the row rewritten under one
+      // serializable transaction, and `phoneVerifiedAt` is cleared in the
+      // very write that changes the number, so no moment exists in which the
+      // new number carries the old number's proof. Compared in E.164 — the
+      // same number in another spelling is not a change and keeps its proof;
+      // older rows may still carry a non-canonical spelling (AUTH-REG-002).
+      const updated = await runSerializable(
+        this.prisma,
+        async (tx) => {
+          const current = await tx.user.findUniqueOrThrow({
+            where: { id: userId },
+            select: { phone: true },
+          });
+          const numberChanged = !sameAccountNumber(current.phone, phone);
+
+          return tx.user.update({
+            where: { id: userId },
+            data: { name, phone, city, ...(numberChanged ? { phoneVerifiedAt: null } : {}) },
+            select: profileSelect,
+          });
         },
-      });
+        { label: 'account.updateProfile' },
+      );
 
       return toProfile(updated);
     } catch (error) {
@@ -241,6 +263,16 @@ function toProfile(user: {
     // The hash itself never leaves this function.
     hasPassword: Boolean(user.passwordHash),
   };
+}
+
+/** Whether the stored spelling names the new (E.164) number. */
+function sameAccountNumber(stored: string | null, phone: string): boolean {
+  if (!stored) return false;
+  try {
+    return canonicalAccountPhone(stored) === phone;
+  } catch {
+    return false;
+  }
 }
 
 function phoneTakenException() {

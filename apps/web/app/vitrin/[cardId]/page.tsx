@@ -120,7 +120,14 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
   // The signed-in customer's own contact, for the form to show. Only a CUSTOMER
   // account has one — see the category page for why an admin is a visitor here.
   const accountContact =
-    user?.role === 'CUSTOMER' ? { name: user.name, phone: user.phone, email: user.email } : null;
+    user?.role === 'CUSTOMER'
+      ? {
+          name: user.name,
+          phone: user.phone,
+          email: user.email,
+          phoneVerified: Boolean(user.phoneVerifiedAt),
+        }
+      : null;
 
   const coverage = areaSentence(card);
   const nextStepHref = `/vitrin/${cardId}?step=form${locationQuery(prefill)}`;

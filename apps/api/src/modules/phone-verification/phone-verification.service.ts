@@ -193,6 +193,31 @@ export class PhoneVerificationService {
           return { ok: false as const };
         }
 
+        // The account earns the proof too — when the owner themself entered
+        // the code, and the number they proved is the account's own number
+        // as it stands *now*. The `phone` clause in the WHERE is what makes
+        // that safe against a number changed while the code was in flight:
+        // the old number's proof cannot land on the new one. An alternate
+        // contact's number never matches, an operator entering the code on
+        // the customer's behalf is not the owner, and a proof already on file
+        // is left where it is.
+        //
+        // The account's number is compared in E.164 (older rows may still
+        // carry another spelling — AUTH-REG-002) and the write is guarded on
+        // the exact stored string, so it lands only on the row as it was read.
+        if (user.role === UserRole.CUSTOMER && serviceRequest.customerId === user.id) {
+          const account = await tx.user.findUnique({
+            where: { id: user.id },
+            select: { phone: true },
+          });
+          if (account?.phone && sameNumber(account.phone, normalizedPhone)) {
+            await tx.user.updateMany({
+              where: { id: user.id, phone: account.phone, phoneVerifiedAt: null },
+              data: { phoneVerifiedAt: now },
+            });
+          }
+        }
+
         // Verification was the last thing the request waited for: publish it
         // here, in the same transaction, so "verified" and "live" are one
         // commit. The switch is read outside the transaction — it is an
@@ -513,6 +538,15 @@ async function acceptedCode(
   }
 
   return isPhoneVerificationTestBypassMatch(normalizedPhone, code, now) ? 'test-bypass' : null;
+}
+
+/** Whether two spellings name one number; an unparseable one names none. */
+function sameNumber(stored: string, normalized: string): boolean {
+  try {
+    return normalizePhoneNumber(stored) === normalized;
+  } catch {
+    return false;
+  }
 }
 
 function generateCode(): string {

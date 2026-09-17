@@ -3,12 +3,20 @@
 import { useState, useTransition, type FormEvent } from 'react';
 import { TURNSTILE_ACTIONS, type TurnstileWebConfig } from '../../../../lib/turnstile';
 import { TurnstileSlot, useTurnstile } from '../../../request-fields/turnstile';
+import {
+  PHONE_VERIFICATION_ANCHOR,
+  phoneVerificationCardCopy,
+  VERIFY_PHONE_TITLE,
+} from '../../../../lib/request-lifecycle';
 import { sendPhoneCodeAction, verifyPhoneCodeAction } from './actions';
 
 /**
- * Optional today: while REQUIRE_PHONE_VERIFICATION is off, verifying changes
- * nothing about how the request is handled, so this card informs and invites
- * but never blocks. It also makes no claim that the request *is* verified.
+ * Two moods, one card. `required` is the API's own word
+ * (`awaitingPhoneVerification`) that the request goes nowhere without this
+ * proof: the card then leads with the heading the receipt used and says what
+ * the proof leads to. Otherwise — the gate off — verifying changes nothing
+ * about how the request is handled, so the card informs and invites but never
+ * blocks. Neither mood claims that the request *is* verified.
  *
  * A client component because the send — the half that costs an SMS — asks the
  * Turnstile widget for a token before it calls the action. The verify half is
@@ -17,12 +25,18 @@ import { sendPhoneCodeAction, verifyPhoneCodeAction } from './actions';
 export function PhoneVerificationCard({
   requestId,
   maskedPhone,
+  required,
+  autoPublishEnabled,
   state,
   turnstile: config,
 }: {
   requestId: string;
   /** Already masked by the page; the full number never reaches this component. */
   maskedPhone: string;
+  /** The request waits for this proof and nothing else. */
+  required: boolean;
+  /** What the proof leads to; read by the page, fail-closed. */
+  autoPublishEnabled: boolean;
   state: string | null;
   turnstile: TurnstileWebConfig;
 }) {
@@ -50,11 +64,17 @@ export function PhoneVerificationCard({
   }
 
   return (
-    <div className="cdash-verify-card" style={{ marginTop: 24 }}>
+    <div
+      className="cdash-verify-card"
+      id={PHONE_VERIFICATION_ANCHOR}
+      data-testid="phone-verification-card"
+      data-required={required ? 'true' : 'false'}
+      style={{ marginTop: 24 }}
+    >
       <span className="cdash-summary-label">Telefon Doğrulama</span>
+      {required ? <h3 className="cdash-verify-title">{VERIFY_PHONE_TITLE}</h3> : null}
       <p className="cdash-summary-body">
-        {maskedPhone} numarasını doğrulayarak talebinizin bize doğru ulaştığını teyit
-        edebilirsiniz. Doğrulama şu anda zorunlu değildir ve talebiniz normal şekilde ilerler.
+        {phoneVerificationCardCopy({ required, maskedPhone, autoPublishEnabled })}
       </p>
 
       {state ? (

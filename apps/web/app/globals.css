@@ -4108,7 +4108,13 @@ input[readonly] {
   font-size: 18px;
 }
 
-.datarow-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/*
+ * `flex: none` keeps the actions at their own width beside the body, but
+ * without a ceiling that width is the buttons laid side by side — two of them
+ * on a 320px row is wider than the row, and `flex-wrap` never gets to act.
+ * Capped at the row, so the second button folds under the first instead.
+ */
+.datarow-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-2); max-width: 100%; }
 
 .cdash-card-note {
   margin: 0;
@@ -4583,6 +4589,16 @@ input[readonly] {
 .cdash-contact-note { margin: 0; font-size: 13px; color: var(--color-neutral-700); }
 
 .cdash-verify-card { display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-surface); }
+
+/* The heading a required verification leads with — the receipt's own words. */
+.cdash-verify-title { margin: 0; font-size: 20px; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+
+/*
+ * A tag whose words may break onto a second line. `.tag` is nowrap by design
+ * — a status word never wraps — but a sentence-length badge on a 320px row
+ * ("Telefon doğrulaması bekliyor") has to fold rather than widen the page.
+ */
+.tag-multiline { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; text-align: left; }
 
 /* ══════════════════════════════════════════════════════════════════════════
    Provider panel — credits and packages

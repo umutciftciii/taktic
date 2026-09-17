@@ -16,6 +16,12 @@ import { RatingSummaryLine } from '../../../review-stars';
 
 type OffersViewProps = {
   requestId: string;
+  /**
+   * What the empty box says under "Henüz teklif gelmedi". The page chooses it
+   * from the request's real state (see `noOffersYetText`); left out, the
+   * reached-providers sentence the box always had.
+   */
+  emptyText?: string;
   /** Already filtered and sorted by the server: no withdrawn offers, price ascending. */
   offers: RequestOfferPreview[];
   /**
@@ -31,14 +37,14 @@ type OffersViewProps = {
  * table. Nothing is fetched here — the server handed over the exact set the
  * customer may act on, and switching view never changes it.
  */
-export function OffersView({ requestId, offers, reviewsEnabled = false }: OffersViewProps) {
+export function OffersView({ requestId, offers, reviewsEnabled = false, emptyText }: OffersViewProps) {
   const [mode, setMode] = useState<'list' | 'compare'>('list');
 
   if (offers.length === 0) {
     return (
-      <div className="cdash-empty">
+      <div className="cdash-empty" data-testid="offers-empty">
         <h3>Henüz teklif gelmedi</h3>
-        <p>Talebiniz hizmet verenlere ulaştı. Teklifler geldikçe burada görüntülenecektir.</p>
+        <p>{emptyText ?? 'Talebiniz hizmet verenlere ulaştı. Teklifler geldikçe burada görüntülenecektir.'}</p>
         <Link className="cdash-btn cdash-btn-secondary" href="/requests/my">
           Taleplere dön
         </Link>

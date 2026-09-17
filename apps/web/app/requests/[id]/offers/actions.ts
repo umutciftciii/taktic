@@ -8,6 +8,7 @@ import {
   type CustomerReviewState,
   CustomerServiceRequest,
 } from '../../../../lib/api';
+import { clientForwardingHeaders } from '../../../../lib/forwarded-for';
 import { turnstileHeaders } from '../../../../lib/turnstile';
 
 /**
@@ -60,10 +61,15 @@ async function completionDestination(requestId: string): Promise<string> {
  * code itself, which the API does not return to anyone. The Turnstile token
  * comes as an argument from the client component that asked the widget for
  * it, and is carried in one header for this one call.
+ *
+ * The client's forwarded address travels with it, under the same contract
+ * the draft path uses (`clientForwardingHeaders`): the API counts codes per
+ * address, and without the header every customer would be spending the web
+ * server's one budget.
  */
 export async function sendPhoneCodeAction(requestId: string, turnstileToken: string | null) {
   const status = await callVerificationApi(`/service-requests/${requestId}/phone-verification`, undefined, {
-    headers: turnstileHeaders(turnstileToken),
+    headers: { ...(await clientForwardingHeaders()), ...turnstileHeaders(turnstileToken) },
   });
 
   revalidatePath(`/requests/${requestId}/offers`);
@@ -76,6 +82,8 @@ export async function verifyPhoneCodeAction(formData: FormData) {
   const status = await callVerificationApi(
     `/service-requests/${requestId}/phone-verification/verify`,
     { code },
+    // Same address on the verify, so the audit row names the client.
+    { headers: await clientForwardingHeaders() },
   );
 
   revalidatePath('/requests/my');

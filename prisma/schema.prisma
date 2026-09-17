@@ -374,6 +374,23 @@ model User {
   /// Nothing is gated on it today. It records a fact; it does not (yet) grant
   /// or withhold anything.
   emailVerifiedAt DateTime?
+  /// When this account proved control of `phone` with a one-time code — on
+  /// one of its own requests whose contact was the account's number — and
+  /// never for any other reason.
+  ///
+  /// The proof is for the number in `phone` as it is *now*: the profile path
+  /// clears this in the same statement that changes the number, so a proof
+  /// can never outlive the number it was for. A different spelling of the same
+  /// number is not a change — every write to `phone` is E.164 (AUTH-REG-001).
+  ///
+  /// NULL means "no proof on file", which every account created before this
+  /// column existed carries: nothing is backfilled, and a request that
+  /// verified its own number before this existed does not count — the
+  /// account earns its proof at its next real verification.
+  ///
+  /// What it grants: a new request on the account's own number is born with
+  /// `ServiceRequest.phoneVerifiedAt` set, so the gate does not ask twice.
+  phoneVerifiedAt DateTime?
   /// The province the account keeps on file, in the canonical spelling
   /// `turkey-locations.ts` publishes — the same vocabulary a service request
   /// and a provider service area are stored in, so the three can be compared
@@ -864,7 +881,11 @@ model ServiceRequest {
   moderatedAt                 DateTime?
   moderationNote              String?
   rejectionReason             String?
-  /// When the customer proved control of customerPhone via a one-time code.
+  /// When this request's customerPhone stood proven: the instant the customer
+  /// entered a one-time code on this request (a consumed PhoneVerification row
+  /// bound to it says so), or — for a request on the account's own already
+  /// proven number — the instant the request was created, with no
+  /// PhoneVerification row of its own (see User.phoneVerifiedAt).
   /// NULL means "not verified" — including every request created before phone
   /// verification existed. What that blocks depends on REQUIRE_PHONE_VERIFICATION.
   phoneVerifiedAt             DateTime?

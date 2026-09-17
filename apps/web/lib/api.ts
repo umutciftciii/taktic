@@ -145,6 +145,11 @@ export type AuthUser = {
   name: string | null;
   role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
   isActive: boolean;
+  /**
+   * When the account proved its own `phone` (User.phoneVerifiedAt). Only on
+   * the session's own user; display only — the API decides what it grants.
+   */
+  phoneVerifiedAt?: string | null;
 };
 
 export type CustomerServiceRequest = {
@@ -164,6 +169,17 @@ export type CustomerServiceRequest = {
   qualityLabel: RequestQualityLabel;
   /** null until the customer proves control of customerPhone with a one-time code. */
   phoneVerifiedAt: string | null;
+  /**
+   * True only while the one thing the request waits for is that proof: the
+   * gate is on, the number is unproven and the request is still SUBMITTED.
+   * The owner's own reads carry it; `SUBMITTED` alone never means this.
+   * Optional so an older API answer reads as "not waiting on you".
+   */
+  awaitingPhoneVerification?: boolean;
+  /** When the request went live — at birth, on verification, or by an operator. */
+  approvedAt?: string | null;
+  /** When an operator last moderated it; null on a request nobody moderated. */
+  moderatedAt?: string | null;
   /** Set by the expiry scheduler when the request's 14-day window ran out. */
   expiredAt: string | null;
   /** Set when the customer marked the job done; the review window runs from here. */
