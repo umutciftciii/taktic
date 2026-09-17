@@ -207,8 +207,9 @@ test.describe('phone verification gate', () => {
     // run already spends close to the limit. Same arrangement as the
     // identity-gate and Turnstile specs (see the TRUST_PROXY note in the
     // Playwright config).
+    const clientAddress = `10.66.${testInfo.retry}.1`;
     const customer = await Actor.open(browser, 'customer', phoneGateRuntime, {
-      extraHTTPHeaders: { 'x-forwarded-for': `10.66.${testInfo.retry}.1` },
+      extraHTTPHeaders: { 'x-forwarded-for': clientAddress },
     });
     const provider = await Actor.open(browser, 'provider', phoneGateRuntime);
 
@@ -278,6 +279,16 @@ test.describe('phone verification gate', () => {
       await customer.gotoWeb(`/requests/${requestId}/offers`);
       await customer.page.getByRole('button', { name: 'Doğrulama kodu gönder' }).click();
       await expect(customer.page).toHaveURL(/verification=ok/);
+
+      // The send reached the API as this customer, not as the web server:
+      // the per-address budget is theirs alone, which is what keeps one
+      // customer's codes from spending everybody's.
+      const issued = await prisma().phoneVerification.findFirstOrThrow({
+        where: { requestId },
+        orderBy: { createdAt: 'desc' },
+        select: { ipAddress: true },
+      });
+      expect(issued.ipAddress).toBe(clientAddress);
 
       const code = await waitForLatestSmsCode(values.customerPhone);
       await customer.page.locator('input[name="code"]').fill(code);

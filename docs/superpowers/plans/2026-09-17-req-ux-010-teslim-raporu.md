@@ -57,6 +57,7 @@ E2E aynı şeyi gerçek stack'te doğrular (SENT=2, toplam=2). KAPALI + doğrula
 | `apps/web/app/requests/[id]/offers/page.tsx` | özet/çizelge yardımcılardan; `data-testid` `request-summary-body`, `request-timeline`; policy yalnız bekleyen talepte okunur |
 | `…/phone-verification-card.tsx` | `required`/`autoPublishEnabled` prop'ları, `id="telefon-dogrulama"`, `data-required`, zorunluyken başlık |
 | `…/offers-view.tsx` | `emptyText` prop'u; boş kutu bekleyen talepte "ulaştı" demez |
+| `…/offers/actions.ts` | kod gönder/doğrula action'ları istemci adresini `clientForwardingHeaders()` ile iletir (per-IP OTP bütçesi artık müşteriye ait; §6) |
 | `apps/web/lib/api.ts`, `apps/web/app/globals.css` | tip alanı; `.cdash-verify-title` |
 
 Admin ve provider ekranları, e-posta şablonları (`request-received` zaten `nextStep: 'verify'` taşıyor) ve `/requests/my` panosu değişmedi.
@@ -67,7 +68,7 @@ Admin ve provider ekranları, e-posta şablonları (`request-received` zaten `ne
 - Web (RED→GREEN): `request-success-screen.spec.ts` +4 (verify AÇIK/KAPALI/okunamadı, `SUBMITTED`+`false` → `review` ve policy çağrılmaz); `request-lifecycle.spec.ts` 13 test (özet, çizelge, kart, boş kutu). Web toplam 207 yeşil; admin 49, shared 165 yeşil.
 - E2E: `phone-verification-gate.spec.ts › gate on + instant publish…` — `phoneGateRuntime` + `setAutoPublish(true)` (afterEach geri alır), iki tarayıcı (müşteri + provider, admin yok): makbuz `verify` → CTA → kart zorunlu → 320/768/1440'ta sayfa taşması yok, kart ve çizelge viewport içinde, buton metni kesilmemiş → provider listesi boş → kod test SMS outbox'ından → `APPROVED`, `approvedAt === phoneVerifiedAt`, `moderatedAt` NULL → sayfa "Onaylandı", kart yok → provider görür → SENT 2 / toplam 2. Ekran görüntüleri `e2e/.artifacts/req-ux-010/` (gitignored). İlgili 8 spec (43 test) + gate spec'inin 3 testi yerelde yeşil.
 - `pnpm typecheck`, `pnpm lint`, `pnpm build` yeşil. CI üçlüsü PR üzerinde.
-- İlk CI koşusunda `e2e (chromium)` kırmızıydı: yeni senaryonun OTP gönderimi, tüm suite'in paylaştığı `127.0.0.1` başına saatlik 10 kod bütçesini (`OTP_MAX_SENDS_PER_IP_PER_HOUR`) doldurdu ve daha geç koşan `turnstile-protection` `rate-limited` aldı. Yerelde alt küme koşulduğu için görünmedi. Düzeltme: müşteri aktörü identity-gate/Turnstile spec'leriyle aynı sözleşmeyle kendi `x-forwarded-for` adresini taşır (`TRUST_PROXY=1`); ürün limiti değişmedi.
+- İlk CI koşusunda `e2e (chromium)` kırmızıydı: yeni senaryonun OTP gönderimi, tüm suite'in paylaştığı `127.0.0.1` başına saatlik 10 kod bütçesini (`OTP_MAX_SENDS_PER_IP_PER_HOUR`) doldurdu ve daha geç koşan `turnstile-protection` `rate-limited` aldı. Yerelde alt küme koşulduğu için görünmedi. Düzeltme iki parça: (1) müşteri aktörü identity-gate/Turnstile spec'leriyle aynı sözleşmeyle kendi `x-forwarded-for` adresini taşır; (2) bu tek başına yetmedi — `sendPhoneCodeAction`/`verifyPhoneCodeAction` istemci adresini API'ye **iletmiyordu** (`apiFetch` yalnız çerez taşır), yani `WEB_TRUST_PROXY` topolojisinde her müşterinin kod isteği API'ye web sunucusunun adresiyle düşüyor ve tek bir saatlik 10'luk bütçeyi paylaşıyordu. İki action artık taslak yolunun kullandığı `clientForwardingHeaders()` ile adresi iletir; E2E `PhoneVerification.ipAddress === <müşteri adresi>` diye doğrular. Ürün limiti değişmedi.
 
 ## 7. Açık riskler / kapsam dışı bırakılanlar
 
