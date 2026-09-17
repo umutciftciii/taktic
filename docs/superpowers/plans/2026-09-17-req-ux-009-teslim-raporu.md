@@ -59,7 +59,7 @@ Tasarım notu ve tam envanter: `docs/superpowers/specs/2026-09-17-req-ux-009-aut
 | `pnpm test` | shared 165/165 · admin 49/49 · web 190/190 (24 dosya) · api **2945/2945** (126 dosya) |
 | `pnpm build` | geçti (3/3) |
 | `pnpm e2e request-next-steps-note request-success-screen request-auto-publish` | 7/7 (Chromium) |
-| CI | __CI__ |
+| CI (#87) | run 35230936859 @ `b4c81298` 3/3 geçti: `typecheck · lint · test · build` 10m17s, `e2e (chromium)` 13m15s, `e2e (webkit · sign-in and mobile shells)` 11m53s. Bu satırı ekleyen commit docs-only; kod ağacı `b4c81298` ile aynıdır. |
 
 ## 7. Responsive kanıt (Chromium; `docs/superpowers/plans/2026-09-17-req-ux-009-screens/`)
 
