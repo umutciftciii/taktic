@@ -1,6 +1,6 @@
 # REQ-UX-009 — Otomatik yayınla çelişen müşteri kopyaları: envanter ve düzeltme — Teslim Raporu
 
-Tarih: 2026-09-17 · Branch: `claude/auto-publish-copy-alignment-9bd419` (taban `main` @ `1a5d3b5d`) · PR: __PR_URL__ · Merge: **yapılmadı**
+Tarih: 2026-09-17 · Branch: `claude/auto-publish-copy-alignment-9bd419` (taban `main` @ `1a5d3b5d`) · PR: https://github.com/umutciftciii/taktic/pull/87 · Merge: **yapılmadı**
 
 Migration yok. Prisma/schema, `.env`, compose/Dockerfile, Turnstile, ödeme/SMS/e-posta, `OperationsSettings` yazma yolu, talep durum geçişi ve outbox/dedupe değişmedi. API kodu değişmedi. Staging, yerel container/DB, Cloudflare ve dış servislere dokunulmadı.
 
