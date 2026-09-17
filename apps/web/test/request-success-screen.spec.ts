@@ -90,6 +90,13 @@ function myRequest(status: string, extra: Record<string, unknown> = {}) {
     });
 }
 
+function publishPolicy(autoPublishEnabled: boolean | 'unreadable') {
+  routes['/marketplace-publish-policy'] = () =>
+    autoPublishEnabled === 'unreadable'
+      ? new Response('down', { status: 503 })
+      : Response.json({ autoPublishEnabled });
+}
+
 function noSuchRequest() {
   routes[`/service-requests/my/${REQUEST_ID}`] = () =>
     new Response('{"statusCode":404,"message":"Service request not found"}', { status: 404 });
@@ -143,6 +150,60 @@ describe('the owning customer, signed in', () => {
     expect(variantOf(markup)).toBe('review');
     expect(titleOf(markup)).toBe('Talebiniz ön incelemeye gönderildi');
     expect(textOf(markup)).not.toContain('yayınlandı');
+  });
+
+  it('is asked to verify their phone when the request waits for that, under instant publish', async () => {
+    signedIn(OWNER);
+    myRequest('SUBMITTED', { awaitingPhoneVerification: true });
+    publishPolicy(true);
+
+    const markup = await render();
+    expect(variantOf(markup)).toBe('verify');
+    expect(titleOf(markup)).toBe('Telefonunuzu doğrulayın');
+    const text = textOf(markup);
+    // The number, masked, so the customer knows which phone will ring.
+    expect(text).toContain('905*******01');
+    expect(text).toContain('bölgenizdeki uygun hizmet verenlere iletilir');
+    expect(text).not.toContain('ön incele');
+    expect(text).not.toContain('yayınlandı');
+    expect(text).not.toContain('onay');
+    // The primary action goes to the existing verification card, and carries
+    // nothing but the request id — no code, no token.
+    expect(markup).toContain(`href="/requests/${REQUEST_ID}/offers#telefon-dogrulama"`);
+    expect(markup).toContain('Telefonumu doğrula');
+  });
+
+  it('is asked to verify, and then told of a review, when instant publish is off', async () => {
+    signedIn(OWNER);
+    myRequest('SUBMITTED', { awaitingPhoneVerification: true });
+    publishPolicy(false);
+
+    const markup = await render();
+    expect(variantOf(markup)).toBe('verify');
+    expect(titleOf(markup)).toBe('Telefonunuzu doğrulayın');
+    const text = textOf(markup);
+    expect(text).toContain('ön incelemeye alınır');
+    expect(text).not.toContain('yayınlandı');
+  });
+
+  it('falls back to the review sentence when the policy cannot be read', async () => {
+    signedIn(OWNER);
+    myRequest('SUBMITTED', { awaitingPhoneVerification: true });
+    publishPolicy('unreadable');
+
+    const markup = await render();
+    expect(variantOf(markup)).toBe('verify');
+    expect(textOf(markup)).toContain('ön incelemeye alınır');
+  });
+
+  it('is told a SUBMITTED request that is not waiting on them went to review, without reading the policy', async () => {
+    signedIn(OWNER);
+    myRequest('SUBMITTED', { awaitingPhoneVerification: false });
+    // No policy route: a call to it would throw.
+
+    const markup = await render();
+    expect(variantOf(markup)).toBe('review');
+    expect(textOf(markup)).not.toContain('doğrula');
   });
 
   it('reads the status from the API alone: the URL cannot promote a waiting request', async () => {

@@ -11,8 +11,14 @@ import {
   RequestOfferPreview,
   formatDateTime,
   getCurrentUser,
+  getMarketplacePublishPolicy,
   statusLabel,
 } from '../../../../lib/api';
+import {
+  maskPhoneForDisplay,
+  requestSummaryBody,
+  requestTimelineSteps,
+} from '../../../../lib/request-lifecycle';
 import { CustomerShell } from '../../customer-shell';
 import { IconArrowLeft, IconCheck, IconMail, IconPhone } from '../../../landing-icons';
 import { ReviewStars } from '../../../review-stars';
@@ -50,6 +56,12 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   ]);
 
   const summary = myRequests.find((request) => request.id === id) ?? null;
+  // Only a request waiting for the customer's own proof needs to say what
+  // that proof leads to — publish or review — and that is the switch's word,
+  // read fail-closed exactly as the request form reads it. Display only: the
+  // API decides what verifying does in its own flow.
+  const awaitingVerification = summary?.awaitingPhoneVerification === true;
+  const autoPublishEnabled = awaitingVerification ? await getMarketplacePublishPolicy() : false;
   // The customer's review state for this request. Read for every status, not
   // only COMPLETED, because it also answers whether reviews are on at all:
   // `disabled` is what the API says while the switch is off, and that is the
@@ -104,12 +116,16 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           <hr className="cdash-summary-divider" />
 
           <span className="cdash-summary-label">Talep özeti</span>
-          <p className="cdash-summary-body">{summaryBody(summary)}</p>
+          <p className="cdash-summary-body" data-testid="request-summary-body">
+            {requestSummaryBody(summary, autoPublishEnabled)}
+          </p>
 
           {summary && !summary.phoneVerifiedAt ? (
             <PhoneVerificationCard
               requestId={id}
               maskedPhone={maskPhoneForDisplay(summary.customerPhone)}
+              required={awaitingVerification}
+              autoPublishEnabled={autoPublishEnabled}
               state={verificationState}
               turnstile={readTurnstileWebConfig()}
             />
@@ -166,21 +182,10 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
 
           <div style={{ marginTop: 24 }}>
             <span className="cdash-summary-label">Süreç</span>
-            <ol className="pdash-timeline" style={{ marginTop: 12 }}>
-              <TimelineStep title="Talep alındı" done meta={summary ? formatDateTime(summary.submittedAt) : null} />
-              <TimelineStep
-                title="Ön inceleme"
-                done={Boolean(summary && summary.status !== 'SUBMITTED' && summary.status !== 'IN_REVIEW')}
-              />
-              <TimelineStep
-                title="Teklif toplama"
-                done={Boolean(summary && summary.offersCount > 0)}
-                meta={summary ? `${summary.offersCount} teklif` : null}
-              />
-              <TimelineStep
-                title="Eşleşme"
-                done={summary?.status === 'MATCHED' || summary?.status === 'COMPLETED'}
-              />
+            <ol className="pdash-timeline" style={{ marginTop: 12 }} data-testid="request-timeline">
+              {requestTimelineSteps(summary, autoPublishEnabled).map((step) => (
+                <TimelineStep key={step.title} title={step.title} done={step.done} meta={step.meta} />
+              ))}
             </ol>
           </div>
         </aside>
@@ -272,38 +277,6 @@ function TimelineStep({
       </div>
     </li>
   );
-}
-
-/** Display-only mask; the server never sends the full number back either. */
-function maskPhoneForDisplay(value: string): string {
-  const digits = value.replace(/\D/g, '');
-  if (digits.length < 4) {
-    return '***';
-  }
-  return `${digits.slice(0, 3)}${'*'.repeat(Math.max(digits.length - 5, 0))}${digits.slice(-2)}`;
-}
-
-function summaryBody(summary: CustomerServiceRequest | null) {
-  if (!summary) {
-    return 'Bu talebe ait özet bilgileri görüntülenemiyor. Talebiniz başka bir hesaptan oluşturulmuş olabilir.';
-  }
-
-  if (summary.status === 'MATCHED') {
-    return 'Bir teklifi kabul ettiniz. Talebiniz artık yeni teklif almıyor. Hizmet tamamlandığında aşağıdan işaretleyebilirsiniz.';
-  }
-
-  if (summary.status === 'COMPLETED') {
-    return 'Bu talep tamamlandı olarak işaretlendi.';
-  }
-
-  // Neutral and factual: the window closed, and that is all it means.
-  if (summary.status === 'EXPIRED') {
-    return summary.expiredAt
-      ? `Talebin geçerlilik süresi ${formatDateTime(summary.expiredAt)} tarihinde doldu. Talep artık yeni teklif almıyor; daha önce gelen teklifleri aşağıda görebilirsiniz.`
-      : 'Talebin geçerlilik süresi doldu. Talep artık yeni teklif almıyor; daha önce gelen teklifleri aşağıda görebilirsiniz.';
-  }
-
-  return 'Talebiniz hizmet verenlere iletildi. Aşağıdaki kartlarda gelen teklifleri inceleyebilirsiniz.';
 }
 
 /**

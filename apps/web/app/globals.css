@@ -4584,6 +4584,9 @@ input[readonly] {
 
 .cdash-verify-card { display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-surface); }
 
+/* The heading a required verification leads with — the receipt's own words. */
+.cdash-verify-title { margin: 0; font-size: 20px; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+
 /* ══════════════════════════════════════════════════════════════════════════
    Provider panel — credits and packages
    ══════════════════════════════════════════════════════════════════════ */

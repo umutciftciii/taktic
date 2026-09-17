@@ -164,6 +164,13 @@ export type CustomerServiceRequest = {
   qualityLabel: RequestQualityLabel;
   /** null until the customer proves control of customerPhone with a one-time code. */
   phoneVerifiedAt: string | null;
+  /**
+   * True only while the one thing the request waits for is that proof: the
+   * gate is on, the number is unproven and the request is still SUBMITTED.
+   * The owner's own reads carry it; `SUBMITTED` alone never means this.
+   * Optional so an older API answer reads as "not waiting on you".
+   */
+  awaitingPhoneVerification?: boolean;
   /** Set by the expiry scheduler when the request's 14-day window ran out. */
   expiredAt: string | null;
   /** Set when the customer marked the job done; the review window runs from here. */
