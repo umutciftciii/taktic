@@ -17,6 +17,7 @@ import {
 import { EmptyState } from '../../components/empty-state';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
+import { provenChannels } from '../../lib/customer-verification';
 
 const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_SORT_BY: CustomerSortField = 'lastRequestAt';
@@ -299,6 +300,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
                   <th>Müşteri</th>
                   <th>Telefon</th>
                   <th>E-posta</th>
+                  <th>Doğrulama</th>
                   <th>Şehir</th>
                   <th className="col-num">Talep</th>
                   <th className="col-num">Teklif</th>
@@ -387,6 +389,9 @@ function CustomerRow({ customer }: { customer: CustomerSummary }) {
         )}
       </td>
       <td>
+        <CustomerVerificationCell customer={customer} />
+      </td>
+      <td>
         {customer.lastRequestCity ? (
           customer.lastRequestCity
         ) : (
@@ -437,5 +442,36 @@ function CustomerRow({ customer }: { customer: CustomerSummary }) {
         </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * The proven channels as scannable pills — "E-posta", "Telefon" — and a
+ * muted "Yok" when neither is. Read from the two account columns alone
+ * (`lib/customer-verification.ts`); a request of theirs verified by code
+ * never lights one of these. Neutral rather than red for the unproven case:
+ * it is a fact about the account, not a fault in it.
+ */
+function CustomerVerificationCell({ customer }: { customer: CustomerSummary }) {
+  const proven = provenChannels(customer);
+  return (
+    <div className="badge-row" data-testid="customer-verification" data-verified={proven.map((b) => b.channel).join(' ')}>
+      {proven.length === 0 ? (
+        <span className="cell-muted" aria-label="Doğrulanmış iletişim kanalı yok">
+          Yok
+        </span>
+      ) : (
+        proven.map((badge) => (
+          <span
+            className="badge badge-good"
+            key={badge.channel}
+            aria-label={badge.ariaLabel}
+            title={badge.at ? `${badge.ariaLabel} · ${formatDateTime(badge.at)}` : badge.ariaLabel}
+          >
+            {badge.subject}
+          </span>
+        ))
+      )}
+    </div>
   );
 }
