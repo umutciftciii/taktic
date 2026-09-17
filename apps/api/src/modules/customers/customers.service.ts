@@ -33,6 +33,15 @@ type CustomerListItem = {
   createdAt: Date;
   lastLoginAt: Date | null;
   customerOrigin: CustomerOrigin | null;
+  /**
+   * The account's own proofs — `User.emailVerifiedAt` / `User.phoneVerifiedAt`
+   * and nothing else. A request of theirs verified by one-time code says
+   * nothing here: that proof was for the request's number at the time, not
+   * for the account's number now. NULL is "never proven", including every
+   * account older than the columns.
+   */
+  emailVerifiedAt: Date | null;
+  phoneVerifiedAt: Date | null;
   requestCount: number;
   offerCount: number;
   acceptedOfferCount: number;
@@ -102,6 +111,9 @@ export class CustomersService {
         createdAt: true,
         lastLoginAt: true,
         customerOrigin: true,
+        // Two more columns on the same row — no lookup per customer.
+        emailVerifiedAt: true,
+        phoneVerifiedAt: true,
       },
     });
 
@@ -196,6 +208,8 @@ export class CustomersService {
         createdAt: customer.createdAt,
         lastLoginAt: customer.lastLoginAt,
         customerOrigin: customer.customerOrigin,
+        emailVerifiedAt: customer.emailVerifiedAt,
+        phoneVerifiedAt: customer.phoneVerifiedAt,
         requestCount: requestStat?.count ?? 0,
         offerCount: offerStat?.total ?? 0,
         acceptedOfferCount: offerStat?.accepted ?? 0,
@@ -239,6 +253,8 @@ export class CustomersService {
         updatedAt: true,
         lastLoginAt: true,
         customerOrigin: true,
+        emailVerifiedAt: true,
+        phoneVerifiedAt: true,
         passwordHash: true,
       },
     });
@@ -356,6 +372,9 @@ export class CustomersService {
         updatedAt: user.updatedAt,
         lastLoginAt: user.lastLoginAt,
         customerOrigin: user.customerOrigin,
+        // The same two account columns the list carries; see CustomerListItem.
+        emailVerifiedAt: user.emailVerifiedAt,
+        phoneVerifiedAt: user.phoneVerifiedAt,
         hasPassword,
       },
       metrics: {

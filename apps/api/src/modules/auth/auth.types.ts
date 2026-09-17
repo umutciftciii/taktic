@@ -13,4 +13,6 @@ export type AuthUser = {
    * AuthUser from a narrower read are not forced to carry it.
    */
   phoneVerifiedAt?: Date | null;
+  /** When the account proved its own `email` (see User.emailVerifiedAt). Same terms. */
+  emailVerifiedAt?: Date | null;
 };

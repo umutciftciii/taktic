@@ -42,6 +42,13 @@ export type AccountProfile = {
    * cannot fill.
    */
   hasPassword: boolean;
+  /**
+   * The account's own proofs: `User.emailVerifiedAt` and `User.phoneVerifiedAt`,
+   * read for the settings screen's badges. Display only — nothing here grants
+   * or withholds anything, and NULL is simply "not proven".
+   */
+  emailVerifiedAt: Date | null;
+  phoneVerifiedAt: Date | null;
 };
 
 /**
@@ -61,6 +68,8 @@ const profileSelect = {
   city: true,
   role: true,
   passwordHash: true,
+  emailVerifiedAt: true,
+  phoneVerifiedAt: true,
 } as const;
 
 @Injectable()
@@ -70,15 +79,7 @@ export class AccountService {
   async getProfile(userId: string): Promise<AccountProfile> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        city: true,
-        role: true,
-        passwordHash: true,
-      },
+      select: profileSelect,
     });
 
     if (!user) {
@@ -252,6 +253,8 @@ function toProfile(user: {
   city: string | null;
   role: string;
   passwordHash: string | null;
+  emailVerifiedAt: Date | null;
+  phoneVerifiedAt: Date | null;
 }): AccountProfile {
   return {
     id: user.id,
@@ -260,6 +263,8 @@ function toProfile(user: {
     phone: user.phone,
     city: user.city,
     role: user.role,
+    emailVerifiedAt: user.emailVerifiedAt,
+    phoneVerifiedAt: user.phoneVerifiedAt,
     // The hash itself never leaves this function.
     hasPassword: Boolean(user.passwordHash),
   };
