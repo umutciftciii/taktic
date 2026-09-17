@@ -182,7 +182,7 @@ test.describe('phone verification gate', () => {
 
   test('gate on + instant publish: the receipt asks for the phone, and verifying publishes with no operator', async ({
     browser,
-  }) => {
+  }, testInfo) => {
     // The switch is one row shared by every runtime; every other spec depends
     // on it being OFF, and the `afterEach` below puts it back.
     expect(await isAutoPublishEnabled()).toBe(false);
@@ -200,7 +200,16 @@ test.describe('phone verification gate', () => {
     // Two browsers: the customer who must verify, and the provider who must
     // not see anything until they do. No admin actor at all — nobody
     // approves this request.
-    const customer = await Actor.open(browser, 'customer', phoneGateRuntime);
+    //
+    // The customer carries an address of their own: the one-time code they
+    // ask for is counted per client address (ten an hour), and every browser
+    // that sends no header is 127.0.0.1 to the API — a bucket the rest of the
+    // run already spends close to the limit. Same arrangement as the
+    // identity-gate and Turnstile specs (see the TRUST_PROXY note in the
+    // Playwright config).
+    const customer = await Actor.open(browser, 'customer', phoneGateRuntime, {
+      extraHTTPHeaders: { 'x-forwarded-for': `10.66.${testInfo.retry}.1` },
+    });
     const provider = await Actor.open(browser, 'provider', phoneGateRuntime);
 
     try {

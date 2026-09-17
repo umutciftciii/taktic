@@ -67,6 +67,7 @@ Admin ve provider ekranları, e-posta şablonları (`request-received` zaten `ne
 - Web (RED→GREEN): `request-success-screen.spec.ts` +4 (verify AÇIK/KAPALI/okunamadı, `SUBMITTED`+`false` → `review` ve policy çağrılmaz); `request-lifecycle.spec.ts` 13 test (özet, çizelge, kart, boş kutu). Web toplam 207 yeşil; admin 49, shared 165 yeşil.
 - E2E: `phone-verification-gate.spec.ts › gate on + instant publish…` — `phoneGateRuntime` + `setAutoPublish(true)` (afterEach geri alır), iki tarayıcı (müşteri + provider, admin yok): makbuz `verify` → CTA → kart zorunlu → 320/768/1440'ta sayfa taşması yok, kart ve çizelge viewport içinde, buton metni kesilmemiş → provider listesi boş → kod test SMS outbox'ından → `APPROVED`, `approvedAt === phoneVerifiedAt`, `moderatedAt` NULL → sayfa "Onaylandı", kart yok → provider görür → SENT 2 / toplam 2. Ekran görüntüleri `e2e/.artifacts/req-ux-010/` (gitignored). İlgili 8 spec (43 test) + gate spec'inin 3 testi yerelde yeşil.
 - `pnpm typecheck`, `pnpm lint`, `pnpm build` yeşil. CI üçlüsü PR üzerinde.
+- İlk CI koşusunda `e2e (chromium)` kırmızıydı: yeni senaryonun OTP gönderimi, tüm suite'in paylaştığı `127.0.0.1` başına saatlik 10 kod bütçesini (`OTP_MAX_SENDS_PER_IP_PER_HOUR`) doldurdu ve daha geç koşan `turnstile-protection` `rate-limited` aldı. Yerelde alt küme koşulduğu için görünmedi. Düzeltme: müşteri aktörü identity-gate/Turnstile spec'leriyle aynı sözleşmeyle kendi `x-forwarded-for` adresini taşır (`TRUST_PROXY=1`); ürün limiti değişmedi.
 
 ## 7. Açık riskler / kapsam dışı bırakılanlar
 
