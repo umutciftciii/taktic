@@ -74,7 +74,7 @@ Yalnız Apple Mail'e özgü bir çözüm değildir: Katman 1 istemciden bağıms
 | `pnpm test` | shared 165, admin 49, web 153, API 2938/2938 (125 dosya) geçti |
 | `pnpm build` | geçti |
 | E2E | **Etkilenmiyor**: E2E'nin kullandığı `file-outbox-notification.adapter.ts` ve `console-notification.adapter.ts` `renderEmail`'i hiç çağırmaz; HTML yalnız `resend-notification.adapter.ts`'te üretilir. Yerelde koşulmadı; CI'daki iki E2E işi PR üzerinde koşar. |
-| CI | _(PR açıldıktan sonra aşağıda)_ |
+| CI (#85, run 35211124301, head `c175b037`) | 3/3 geçti: `typecheck · lint · test · build` (12m51s), `e2e (chromium)` (13m06s), `e2e (webkit · sign-in and mobile shells)` (11m24s). Bu satırı ekleyen docs commit'i için CI yeniden koşar. |
 
 ## Görsel kanıt (Chromium 700px, `docs/superpowers/plans/2026-09-17-req-ux-007-screens/`)
 
