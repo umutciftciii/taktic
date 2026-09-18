@@ -149,5 +149,5 @@ Kalite kapıları: docs-only olduğu için `pnpm typecheck/lint/test/build` etki
 | --- | --- |
 | PR | [#92](https://github.com/umutciftciii/taktic/pull/92) — `claude/seo-002-organic-content-strategy-df74e4` → `main` |
 | İlk commit | `1778332c` (iki belge) |
-| Head | bu rapor commit'i (PR'daki son commit; CI bu head'de koşar) |
-| CI | PR üzerinde `CI` workflow'u 3/3 beklenir; sonuç PR checks sekmesinde |
+| Head (CI kanıtı) | `3333b4da` — CI run `35361508660`: **3/3 success** (`typecheck · lint · test · build`, `e2e (chromium)`, `e2e (webkit · sign-in and mobile shells)`) |
+| Son head | bu satırı ekleyen rapor commit'i (yalnız bu dosya); CI aynı workflow'la yeniden koşar, sonuç PR checks sekmesinde |
