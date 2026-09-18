@@ -36,6 +36,32 @@ type CardPageProps = {
 };
 
 /**
+ * Indexable for a card on the air, on the clean path only: every query this
+ * page reads — the form step, the sent flag, the location and phone prefill —
+ * is the same card mid-conversation, and is noindex. Title and summary are
+ * the business's own words made safe for a snippet; the listed price, the
+ * coverage and the rating are never in here.
+ */
+export async function generateMetadata({ params, searchParams }: CardPageProps): Promise<Metadata> {
+  const { cardId } = await params;
+  const card = await loadCard(cardId);
+  if (!card) {
+    return privatePageMetadata('Vitrin kartı bulunamadı');
+  }
+
+  return publicPageMetadata({
+    route: '/vitrin/:cardId',
+    params: { cardId: card.cardId },
+    title: seoText(card.title, SEO_TITLE_MAX) ?? card.provider.businessName,
+    description:
+      seoText(card.summary, SEO_DESCRIPTION_MAX) ??
+      `${card.provider.businessName} tarafından sunulan ${card.category.name} hizmeti.`,
+    image: card.imageUrl ?? SEO_DEFAULT_IMAGE,
+    searchParams: (await searchParams) ?? {},
+  });
+}
+
+/**
  * One vitrin card: what it covers, and — if the customer is inside that
  * coverage — the form that writes to the business behind it.
  *
@@ -70,32 +96,6 @@ type CardPageProps = {
  * free-text district ended up refused by the DTO and reported as a generic
  * failure.
  */
-/**
- * Indexable for a card on the air, on the clean path only: every query this
- * page reads — the form step, the sent flag, the location and phone prefill —
- * is the same card mid-conversation, and is noindex. Title and summary are
- * the business's own words made safe for a snippet; the listed price, the
- * coverage and the rating are never in here.
- */
-export async function generateMetadata({ params, searchParams }: CardPageProps): Promise<Metadata> {
-  const { cardId } = await params;
-  const card = await loadCard(cardId);
-  if (!card) {
-    return privatePageMetadata('Vitrin kartı bulunamadı');
-  }
-
-  return publicPageMetadata({
-    route: '/vitrin/:cardId',
-    params: { cardId: card.cardId },
-    title: seoText(card.title, SEO_TITLE_MAX) ?? card.provider.businessName,
-    description:
-      seoText(card.summary, SEO_DESCRIPTION_MAX) ??
-      `${card.provider.businessName} tarafından sunulan ${card.category.name} hizmeti.`,
-    image: card.imageUrl ?? SEO_DEFAULT_IMAGE,
-    searchParams: (await searchParams) ?? {},
-  });
-}
-
 export default async function ShowcaseCardPublicPage({ params, searchParams }: CardPageProps) {
   const { cardId } = await params;
   const query = (await searchParams) ?? {};

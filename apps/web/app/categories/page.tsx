@@ -52,10 +52,7 @@ export default async function CategoriesPage({ searchParams }: CategoriesPagePro
 
         <header className="cat-page-head">
           <h1 className="cat-page-title">Hizmet kategorileri</h1>
-          <p className="cat-page-subtitle">
-            Kategoriyi seç, o kategoriye özel soruları yanıtla. Talebin incelendikten sonra
-            bölgendeki onaylı hizmet verenlere iletilir.
-          </p>
+          <p className="cat-page-subtitle">{CATALOGUE_INTRO}</p>
         </header>
 
         <div className="cat-page-search">

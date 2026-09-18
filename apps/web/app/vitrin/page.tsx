@@ -67,10 +67,7 @@ export default async function ShowcaseDirectoryPage({ searchParams }: ShowcaseDi
         <header className="lp-section-head">
           <span className="kicker">Vitrin</span>
           <h1 className="lp-section-title">Vitrin hizmetleri</h1>
-          <p className="lp-section-sub">
-            Kartlar hizmet bölgeleriyle birlikte listelenir. İsterseniz bölgeye göre daraltın;
-            daraltmasanız da yayındaki tüm hizmetleri görürsünüz.
-          </p>
+          <p className="lp-section-sub">{SHELF_INTRO}</p>
         </header>
 
         {/*
