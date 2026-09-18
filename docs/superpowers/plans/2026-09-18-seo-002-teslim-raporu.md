@@ -1,7 +1,7 @@
 # SEO-002 — Organik keşif ve içerik/landing stratejisi — Teslim Raporu
 
 Tarih: 2026-09-18 · Branch `claude/seo-002-organic-content-strategy-df74e4` (taban `origin/main` @
-`e51c950c`, temiz worktree doğrulandı) · **Docs-only PR** · PR/head/CI bilgisi §8'de.
+`e51c950c`, temiz worktree doğrulandı) · PR [#92](https://github.com/umutciftciii/taktic/pull/92) · **Docs-only PR** · head/CI §8'de.
 
 Değişen: yalnız iki dosya — `docs/superpowers/specs/2026-09-18-seo-002-organic-discovery-content-strategy.md`
 (strateji) ve bu rapor. Üretim route'u, metadata, sitemap/robots, veritabanı, migration, gerçek `.env`,
@@ -145,10 +145,9 @@ Kalite kapıları: docs-only olduğu için `pnpm typecheck/lint/test/build` etki
 
 - Taban: `origin/main` @ `e51c950c`; worktree temiz (başlangıçta `git status --short` boş).
 - Değişen dosyalar: 2 (yalnız `docs/superpowers/`).
-- PR / head / CI: aşağıya commit sonrası yazıldı.
-
 | Alan | Değer |
 | --- | --- |
-| PR | (commit sonrası doldurulur) |
-| Head | (commit sonrası doldurulur) |
-| CI | (commit sonrası doldurulur) |
+| PR | [#92](https://github.com/umutciftciii/taktic/pull/92) — `claude/seo-002-organic-content-strategy-df74e4` → `main` |
+| İlk commit | `1778332c` (iki belge) |
+| Head | bu rapor commit'i (PR'daki son commit; CI bu head'de koşar) |
+| CI | PR üzerinde `CI` workflow'u 3/3 beklenir; sonuç PR checks sekmesinde |
