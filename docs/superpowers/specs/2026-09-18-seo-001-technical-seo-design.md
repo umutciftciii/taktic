@@ -171,14 +171,24 @@ parametreli kopya ise aynı sayfadır; canonical temiz URL'e toplar. Kampanya pa
   - `title: '<title> · TakTick'` (sözleşme sayfasının mevcut ayracı); ana sayfada kök title aynen.
   - `robots`: `indexable && !filtered` → `{ index: true, follow: true }`; `indexable && filtered` →
     `{ index: false, follow: true }`; `!indexable` → `{ index: false, follow: false }`.
-  - `alternates.canonical`: yalnız `indexable && !filtered` → `origin + path` (query'siz, path
-    segmentleri `encodeURIComponent`).
+  - `alternates.canonical`: yalnız `indexable && !filtered` → `canonicalUrl(origin, route, params)`
+    (aşağıdaki **kanonik URL standardı**).
   - `openGraph` ve `twitter`: aynı title/description; `url` = canonical (yalnız varsa); `siteName`,
     `locale: 'tr_TR'`, `type: 'website'`; `images` yalnız origin varsa ve görsel `https://` absolute
     ya da `/` ile başlayan site-relative ise (origin ile birleştirilir). `twitter.card`:
     `summary_large_image` görsel varsa, yoksa `summary`.
 - `privatePageMetadata(title?)` → `{ title?, robots: { index: false, follow: false } }` (sözleşme,
   provider-invite ve isletme-bulunamadı için).
+- **Kanonik URL standardı** (`lib/seo-routes.ts` `absoluteUrl` / `canonicalUrl` — tek kaynak):
+  `origin + temiz path`; **trailing slash yok**; query/fragment yok; dinamik segment
+  `encodeURIComponent`; **kök = çıplak origin** (`https://host`, `https://host/` değil — Next
+  `trailingSlash: false` altında canonical'ı böyle basar; ikinci bir yazım bırakılmaz). `canonical`,
+  `og:url`, Twitter, JSON-LD `url`/`item`/`logo` ve sitemap `<loc>` **hepsi** bu iki fonksiyondan
+  geçer; byte düzeyinde aynı dizedir (unit: `seo-routes.spec`, `seo-sitemap.spec` "canonicalUrl ile
+  aynı"; E2E: her allowlist sayfasında `canonical === og:url === JSON-LD url === sitemap <loc>`).
+  Rooted olmayan path, `?`/`#` taşıyan path ya da origin'den fazlası olan origin fırlatır (unit
+  testte yakalanır, production'da `//` üretilemez). `/categories/` gibi slash'lı istek Next'in 308'i
+  ile temiz path'e iner; E2E bunu doğrular.
 - **Kök layout** `generateMetadata()`: `metadataBase` yalnız origin geçerliyken; `robots`
   varsayılanı **her zaman** `{ index: false, follow: false }` — opt-in etmeyen her sayfa
   (paneller, auth, hata, 404) kapalı. `title.default`/`description` mevcut metinler.
@@ -215,26 +225,41 @@ Mevcut görünür kopya değişmez; yalnız `<head>` içeriği eklenir/düzenlen
 
 **sitemap.ts**
 - indexable değilse `[]` (boş urlset; robots zaten Disallow, referans verilmez).
-- indexable ise, çerezsiz `fetch` (`app/api-base.ts` `apiUrl`, `cache: 'no-store'`; ziyaretçi çerezi
-  sitemap'e taşınmaz) ile:
-  1. Statik: `/`, `/categories`, `/vitrin` — `lastModified` **yok** (gerçek tarih yok).
-  2. `GET /categories` → `/categories/<slug>`, `lastModified = updatedAt` (public projeksiyonda
-     zaten dönüyor; web `Category` tipine `updatedAt?: string` eklenir).
-  3. **Yeni API endpoint** `GET /providers/public-directory` → `{ providers: [{ id, updatedAt }] }`;
-     yalnız `isPubliclyVisibleProvider` (APPROVED), `orderBy id`, iki alan. `providers.controller.ts`'de
-     `@Get(':id')` öncesine. → `/isletme/<id>`, `lastModified = updatedAt`.
-  4. `GET /showcase/feed?limit=48` cursor ile sonuna kadar → `/vitrin/<cardId>`; `lastModified`
-     **yok** (feed kartı tarih taşımıyor; uydurulmaz). Aynı predicate `getPublicCard`'ın 404
-     kuralıyla birebir (`showcase-feed.service.ts:462-467` vs `:549-554`).
-- Her satır: `origin + '/segment/' + encodeURIComponent(id|slug)`; `/categories/<slug>`
-  `isPubliclyListable ⊂ isPubliclyReachable` olduğundan 200; APPROVED sağlayıcı → sayfa 200; feed
-  kartı → `getPublicCard` 200.
-- Herhangi bir kaynak fetch hatası: o kaynak atlanır, statik satırlar kalır (sitemap 500 vermez).
-- Sayfalama, filtre, panel URL'leri yok. 50k satır/50 MB sınırı bugünkü hacimde uzak; sitemap index
-  SEO-002'ye not.
+- indexable ise **tek** çerezsiz `fetch` (`app/api-base.ts` `apiUrl`, `cache: 'no-store'`; ziyaretçi
+  çerezi taşınmaz): `GET /sitemap/entries` →
+  `{ categories: [{slug, updatedAt}], providers: [{id, updatedAt}], showcaseCards: [{cardId}] }`.
+  1. Statik: `/`, `/categories`, `/vitrin` — `lastModified` **yok**.
+  2. `/categories/<slug>`, `lastModified = updatedAt`.
+  3. `/isletme/<id>`, `lastModified = updatedAt`.
+  4. `/vitrin/<cardId>`; `lastModified` **yok** (uydurulmaz).
+- Her satır `canonicalUrl` ile üretilir (sayfanın canonical'ıyla aynı bytes). Tekrar eden kayıt bir
+  kez; alanı eksik satır atlanır.
+- **Fail-closed:** fetch hatası ya da tanınmayan gövde → yalnız 3 statik satır (doğrulanamayan
+  hiçbir dinamik URL listelenmez; sitemap 500 vermez). Sayfa/cursor yürüyüşü **yok** — tek istek,
+  sonlanma/tekrar sorunu yapısal olarak ortadan kalktı.
 
-**Veri erişimi:** kategori 1 sorgu; sağlayıcı 1 sorgu; feed sayfa başına 1 sorgu + review özeti
-batch'i (mevcut `withReviewSummaries`), N+1 yok.
+**API kaynağı: `GET /sitemap/entries` (`apps/api/src/modules/sitemap/`)**
+
+Neden yeni ve neden tek uç: mevcut public uçlar sitemap için ya yetersiz ya da fazlaydı —
+`GET /providers` admin-only, onaylı işletme listesi veren public uç yok; `GET /showcase/feed` kart
+başına 20+ alan + sayfa başına review-özeti sorgusu + cursor yürüyüşü (N istek) taşıyor;
+`GET /categories` yeterli ama üçü ayrı istek olurdu. İlk taslaktaki `GET /providers/public-directory`
+kaldırıldı: adı ve yeri ürün için genel bir "dizin API'si" gibi okunuyordu.
+
+| Karar | Gerekçe |
+| --- | --- |
+| Controller `SitemapController` `@Controller('sitemap')`, tek handler `@Get('entries')` | Amacı adında; `/sitemap` altında başka yol yok (`GET /sitemap`, `/sitemap/providers` → 404) |
+| Service `SitemapService.listEntries()` | `CategoriesService.listCategories({ isSuperAdmin:false })` (public listeleme, aynı predicate), `ProviderProfile` `status in PUBLICLY_VISIBLE_PROVIDER_STATUSES` (`provider-visibility.ts`), canlı kartlar `livePlacementPredicate(now)` |
+| `showcase-live-placement.ts` (yeni, saf) | Feed, tek-kart ve sitemap sorguları **aynı** SQL parçasını kullanır; "listede var ama sayfa 404" sapması yapısal olarak imkânsız |
+| Projection | Yalnız `slug/id/cardId` + `updatedAt` (kart için tarih yok). İşletme adı, il/ilçe, kart başlığı/fiyatı, iletişim, moderasyon notu, kredi/ödeme **yok** (test: response text'inde bu kalıplar aranır) |
+| DTO / query | Parametre yok; query string yok sayılır (`?includeInactive=&limit=&cursor=&q=` aynı gövde) |
+| Pagination / cursor | Yok: 3 sorgu, satır başına iş yok; hacim sitemap'in 50k sınırının çok altında (sitemap index SEO-002) |
+| Auth | Guard yok; oturum okunmaz → ziyaretçi/müşteri/sağlayıcı/operatör **aynı** gövde (test) |
+| Metot | Yalnız GET; POST/PUT/PATCH/DELETE 404 (Nest, handler yok — test) |
+| `Cache-Control: no-store` | Gövde "şu an public olanlar"; operatörün çektiği kart bir sonraki sitemap'te yok olmalı, cache süresi bitince değil. Web tarafı zaten `cache:'no-store'`; sitemap nadir çekilir, yük sorunu yok |
+| Modül | `SitemapModule` imports `PrismaModule`, `CategoriesModule`; provider/vitrin kuralları saf fonksiyon — döngü yok, `ShowcaseModule` export'u değişmedi |
+
+**Veri erişimi:** web→API 1 istek; API'de 3 sorgu (`Promise.all`), N+1 yok.
 
 ---
 
@@ -244,6 +269,7 @@ batch'i (mevcut `withReviewSummaries`), N+1 yok.
   `>`→`>`, `&`→`&`, U+2028/2029 kaçışı (script-breakout'a karşı); şema kurucuları:
   `organizationSchema(origin)`, `webSiteSchema(origin)`, `breadcrumbSchema(items)`,
   `categoryServiceSchema(...)`, `providerLocalBusinessSchema(...)`, `showcaseServiceSchema(...)`.
+- Şemalardaki her URL (`url`, `item`, `logo`) `absoluteUrl`/`canonicalUrl`'den geçer — canonical ile aynı bytes.
 - `apps/web/app/json-ld.tsx`: `<JsonLd data>` server component → `<script type="application/ld+json"
   dangerouslySetInnerHTML={{ __html: serializeJsonLd(data) }} />`.
 - **Yalnız** `resolveSeoSite().indexable && !filtered` iken render edilir; aksi halde `null`.
@@ -273,13 +299,21 @@ batch'i (mevcut `withReviewSummaries`), N+1 yok.
   aynı URL; fallback'ler; `seoText` tag/PII/uzunluk; puan/fiyat asla girmez.
 - `seo-json-ld.spec.ts`: `</script>` kaçışı; şemalarda `aggregateRating`/`telephone`/`offers`/
   `areaServed` anahtarı yok; iletişimli description düşer.
-- `seo-sitemap.spec.ts`: builder'a sahte fetch — kapalı ortamda `[]`; APPROVED-olmayan/pasif kayıt
-  yok (fetch seviyesinde public projeksiyon zaten filtreler; builder yalnız verileni yazar, 200 dönen
-  URL'ler E2E'de doğrulanır); slug/id kaçışı; kaynak hatası → statik satırlar.
+- `seo-sitemap.spec.ts`: builder'a sahte fetch — kapalı ortamda `[]` ve istek yok; tam olarak bir
+  istek (`/sitemap/entries`); her satır `canonicalUrl` ile aynı dize; slug/id kaçışı; tekrar eden
+  kayıt bir kez; fetch hatası ve tanınmayan gövde (null/dize/dizi/yanlış alan) → yalnız statik
+  satırlar (fail-closed); query/trailing slash/panel path asla.
+- `seo-routes.spec.ts` ek: `absoluteUrl`/`canonicalUrl` — kök çıplak origin, trailing slash yok,
+  query/fragment/rooted-olmayan path/bozuk origin fırlatır.
 - `compose-environment.spec.ts` (api): web servisi `WEB_APP_URL`/`WEB_ORIGIN` boş-iken-boş alır.
 
-**API integration** (`apps/api/test/provider-public-directory.spec.ts`): yalnız APPROVED; projeksiyon
-yalnız `id`+`updatedAt`; auth gerektirmez.
+**API integration** (`apps/api/test/sitemap-entries.spec.ts`, 13 test): yalnız ACTIVE leaf kategori
+(DRAFT/INACTIVE/GROUP/ROUTER yok); yalnız APPROVED işletme (DRAFT/PENDING/REJECTED/SUSPENDED yok);
+yalnız feed'in servis ettiği kartlar (süresi bitmiş, askıya alınmış işletmenin kartı yok) ve feed +
+`GET /showcase/cards/:id` ile birebir; alan kümesi tam olarak sitemap alanları, işletme/kart içeriği
+ve PII response metninde yok; anonim = müşteri = sağlayıcı = operatör gövdesi; `Cache-Control:
+no-store`; query yok sayılır; POST/PUT/PATCH/DELETE 404; `/sitemap`, `/sitemap/providers`,
+`/providers/public-directory` 404.
 
 **E2E** (`e2e/tests/seo-indexing.spec.ts`, chromium):
 - Yeni web süreci `seoProductionWebServer()` (`turnstileClosedWebServer` örüntüsü, port 3260):
@@ -287,8 +321,12 @@ yalnız `id`+`updatedAt`; auth gerektirmez.
   Turnstile bu stack'te `unconfigured`/kapalı (form yok, Cloudflare script yok) — SEO testleri form
   göndermez.
 - Production-benzeri: `/`, `/categories`, `/categories/<slug>`, `/isletme/<id>`, `/vitrin`,
-  `/vitrin/<cardId>` → `meta robots index,follow`, `link canonical = https://taktick.example<path>`,
-  `og:url` aynı, JSON-LD parse edilir ve `aggregateRating`/`telephone` içermez; `?utm_source=`
+  `/vitrin/<cardId>` → `meta robots index,follow`, `link canonical = https://taktick.example<path>`
+  (kök çıplak origin), `og:url` aynı, JSON-LD parse edilir ve `aggregateRating`/`telephone` içermez;
+  **byte eşitliği**: altı sayfada `canonical === og:url === JSON-LD url === sitemap <loc>` (tam bir
+  satır); `/categories/`, `/isletme/<id>/` 308 ile temiz path'e iner ve canonical temiz;
+  `GET /sitemap/entries` (primary API) canlı kayıtları içerir, DRAFT/PENDING/expired içermez, PII/
+  içerik yok, `no-store`, POST 404, `/providers/public-directory` 404; `?utm_source=`
   canonical temiz; `?q=`, `?cursor=`, `?il=`, `?step=form` → noindex ve canonical yok; `/login`,
   `/providers/register`, `/requests/success`, `/requests/my` → noindex; `/robots.txt` Allow +
   Disallow + `Sitemap:`; `/sitemap.xml` fixture URL'lerini içerir, PENDING_REVIEW sağlayıcı / DRAFT

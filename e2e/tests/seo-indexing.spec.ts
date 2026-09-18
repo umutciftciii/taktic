@@ -172,22 +172,25 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
     try {
       const home = await headOf(visitor, '/');
       expect(home.robots).toBe('index, follow');
-      // Next prints the root without its trailing slash (`trailingSlash: false`);
-      // `https://host` and `https://host/` are one URL to a crawler.
+      // The canonical standard: origin + path, no trailing slash, and the root
+      // is the bare origin. The same bytes on og:url, in the JSON-LD and in
+      // the sitemap (checked against the sitemap below).
       expect(home.canonical).toBe(SEO_PRODUCTION_ORIGIN);
       expect(home.ogUrl).toBe(home.canonical);
+      expect(home.jsonLd).toContainEqual(expect.objectContaining({ '@type': 'WebSite', url: home.canonical }));
       expect(home.title).toBe('TakTic — Yerel hizmet teklifleri, adil teklif kredisi');
       expect(home.ogTitle).toBe(home.title);
       expect(home.twitterTitle).toBe(home.title);
       expect(home.jsonLd.map((block) => (block as { '@type': string })['@type']).sort()).toEqual(['Organization', 'WebSite']);
       expect(home.jsonLd).toContainEqual(
-        expect.objectContaining({ '@type': 'Organization', name: 'TakTick', url: `${SEO_PRODUCTION_ORIGIN}/` }),
+        expect.objectContaining({ '@type': 'Organization', name: 'TakTick', url: SEO_PRODUCTION_ORIGIN }),
       );
       expectCleanJsonLd(home.jsonLd);
 
       const catalogue = await headOf(visitor, '/categories');
       expect(catalogue.robots).toBe('index, follow');
       expect(catalogue.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/categories`);
+      expect(catalogue.ogUrl).toBe(catalogue.canonical);
       expect(catalogue.title).toBe('Hizmet kategorileri · TakTick');
 
       const category = await headOf(visitor, `/categories/${stage.category.slug}`);
@@ -222,6 +225,7 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
       const shelf = await headOf(visitor, '/vitrin');
       expect(shelf.robots).toBe('index, follow');
       expect(shelf.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/vitrin`);
+      expect(shelf.ogUrl).toBe(shelf.canonical);
 
       const card = await headOf(visitor, `/vitrin/${stage.cardId}`);
       expect(card.robots).toBe('index, follow');
@@ -232,6 +236,50 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
       expectCleanJsonLd(card.jsonLd);
       // The card's listed price is on the page; it is not in the structured data.
       expect(JSON.stringify(card.jsonLd)).not.toMatch(/1500|1\.500|150000/);
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  test('one URL form everywhere: canonical = og:url = JSON-LD url = sitemap <loc>, byte for byte', async ({ browser, request }) => {
+    const stage = await seedStage();
+    const visitor = await Actor.open(browser, 'web', seoProductionWebRuntime);
+
+    try {
+      const sitemap = await fetchText(request, seoProductionWebRuntime, '/sitemap.xml');
+      const locs = Array.from(sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)).map((match) => match[1]!);
+
+      const pages = [
+        '/',
+        '/categories',
+        `/categories/${stage.category.slug}`,
+        `/isletme/${stage.provider.id}`,
+        '/vitrin',
+        `/vitrin/${stage.cardId}`,
+      ];
+      for (const path of pages) {
+        const head = await headOf(visitor, path);
+        const canonical = head.canonical;
+        expect(canonical, path).toBe(path === '/' ? SEO_PRODUCTION_ORIGIN : `${SEO_PRODUCTION_ORIGIN}${path}`);
+        expect(canonical, path).not.toMatch(/[?#]|\/$/);
+        expect(head.ogUrl, path).toBe(canonical);
+        // Exactly one sitemap row is this page, and it is the same string.
+        expect(locs.filter((loc) => loc === canonical), path).toHaveLength(1);
+        // Every JSON-LD block that names the page names it the same way.
+        for (const block of head.jsonLd as { '@type': string; url?: string }[]) {
+          if (block['@type'] !== 'BreadcrumbList' && block['@type'] !== 'Organization') {
+            expect(block.url, `${path} ${block['@type']}`).toBe(canonical);
+          }
+        }
+      }
+
+      // A trailing slash is not a second page: Next redirects it, and the
+      // canonical is the clean form.
+      for (const path of ['/categories/', `/isletme/${stage.provider.id}/`]) {
+        await visitor.gotoWeb(path);
+        expect(new URL(visitor.page.url()).pathname, path).toBe(path.slice(0, -1));
+        expect((await readHead(visitor.page)).canonical, path).toBe(`${SEO_PRODUCTION_ORIGIN}${path.slice(0, -1)}`);
+      }
     } finally {
       await visitor.close();
     }
@@ -331,7 +379,8 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
     expect(sitemap.headers['content-type']).toContain('xml');
     const urls = Array.from(sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)).map((match) => match[1]!);
 
-    expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/`);
+    expect(urls).toContain(SEO_PRODUCTION_ORIGIN);
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/`);
     expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/categories`);
     expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin`);
     expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/categories/${stage.category.slug}`);
@@ -343,8 +392,8 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
     expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${stage.expiredCardId}`);
 
     for (const url of urls) {
-      expect(url, url).toMatch(new RegExp(`^${SEO_PRODUCTION_ORIGIN.replace('.', '\\.')}/`));
-      expect(url, url).not.toMatch(/[?#]/);
+      expect(url, url).toMatch(new RegExp(`^${SEO_PRODUCTION_ORIGIN.replace('.', '\\.')}(/|$)`));
+      expect(url, url).not.toMatch(/[?#]|\/$/);
       expect(url, url).not.toMatch(/\/(providers|requests|account|login|register|api|mesajlar|destek)(\/|$)/);
     }
 
@@ -354,7 +403,34 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
     expect(sitemap.body).toMatch(
       new RegExp(`<loc>${escapedOrigin}/categories/${stage.category.slug}</loc>\\s*<lastmod>${categoryRow.updatedAt.toISOString()}</lastmod>`),
     );
-    expect(sitemap.body).toMatch(new RegExp(`<loc>${escapedOrigin}/</loc>\\s*</url>`));
+    expect(sitemap.body).toMatch(new RegExp(`<loc>${escapedOrigin}</loc>\\s*</url>`));
+
+    // The one source the sitemap is built from lists the same records and no
+    // other: nothing unreleased, pending or expired leaves the API either.
+    const source = await request.get(`${primaryRuntime.apiUrl}/sitemap/entries`);
+    expect(source.status()).toBe(200);
+    expect(source.headers()['cache-control']).toBe('no-store');
+    const entries = (await source.json()) as {
+      categories: { slug: string; updatedAt: string }[];
+      providers: { id: string; updatedAt: string }[];
+      showcaseCards: { cardId: string }[];
+    };
+    expect(Object.keys(entries).sort()).toEqual(['categories', 'providers', 'showcaseCards']);
+    expect(entries.categories.map((row) => row.slug)).toContain(stage.category.slug);
+    expect(entries.categories.map((row) => row.slug)).not.toContain(stage.draftCategory.slug);
+    expect(entries.providers.map((row) => row.id)).toContain(stage.provider.id);
+    expect(entries.providers.map((row) => row.id)).not.toContain(stage.pendingProvider.id);
+    expect(entries.showcaseCards.map((row) => row.cardId)).toContain(stage.cardId);
+    expect(entries.showcaseCards.map((row) => row.cardId)).not.toContain(stage.expiredCardId);
+    // Identifiers only: no name, city, title, price or contact detail.
+    expect(JSON.stringify(entries)).not.toMatch(new RegExp(stage.provider.businessName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    expect(JSON.stringify(entries)).not.toMatch(/example\.test|İşletme|Vitrin|1500|150000/);
+    // The sitemap has one row per dynamic record the source names, and no more.
+    const dynamicRows = urls.filter((url) => /\/(categories|isletme|vitrin)\/./.test(url));
+    expect(dynamicRows).toHaveLength(entries.categories.length + entries.providers.length + entries.showcaseCards.length);
+    // Read-only, and only this path.
+    expect((await request.post(`${primaryRuntime.apiUrl}/sitemap/entries`, { data: {} })).status()).toBe(404);
+    expect((await request.get(`${primaryRuntime.apiUrl}/providers/public-directory`)).status()).toBe(404);
 
     // Every listed page is a page: fetched on the test host, all answer 200.
     for (const url of urls) {

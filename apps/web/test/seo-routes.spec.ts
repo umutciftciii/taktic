@@ -6,7 +6,9 @@ import {
   INDEXABLE_ROUTES,
   NOINDEX_CRAWLABLE_ROUTES,
   ROBOTS_DISALLOW,
+  absoluteUrl,
   canonicalPath,
+  canonicalUrl,
   hasFunctionalQuery,
 } from '../lib/seo-routes';
 
@@ -128,5 +130,38 @@ describe('canonicalPath — the clean path a page is indexed under', () => {
 
   it('refuses a missing segment rather than printing a placeholder', () => {
     expect(() => canonicalPath('/categories/:slug', {})).toThrow(/slug/);
+  });
+});
+
+describe('absoluteUrl / canonicalUrl — the one URL form every surface prints', () => {
+  const ORIGIN = 'https://taktick.example';
+
+  it('prints the root as the bare origin, never with a trailing slash', () => {
+    expect(absoluteUrl(ORIGIN, '/')).toBe('https://taktick.example');
+    expect(canonicalUrl(ORIGIN, '/', {})).toBe('https://taktick.example');
+  });
+
+  it('joins a path onto the origin with no trailing slash', () => {
+    expect(absoluteUrl(ORIGIN, '/categories')).toBe('https://taktick.example/categories');
+    expect(absoluteUrl(ORIGIN, '/categories/')).toBe('https://taktick.example/categories');
+    expect(absoluteUrl(ORIGIN, '/brand/logo.png')).toBe('https://taktick.example/brand/logo.png');
+  });
+
+  it('refuses a path that is not rooted or that carries a query or fragment', () => {
+    expect(() => absoluteUrl(ORIGIN, 'categories')).toThrow(/rooted/);
+    expect(() => absoluteUrl(ORIGIN, '/categories?q=x')).toThrow(/query/);
+    expect(() => absoluteUrl(ORIGIN, '/categories#top')).toThrow(/query/);
+  });
+
+  it('refuses an origin with a trailing slash or a path, so no double slash can be built', () => {
+    expect(() => absoluteUrl('https://taktick.example/', '/categories')).toThrow(/origin/);
+    expect(() => absoluteUrl('https://taktick.example/app', '/categories')).toThrow(/origin/);
+  });
+
+  it('escapes dynamic segments through canonicalPath', () => {
+    expect(canonicalUrl(ORIGIN, '/isletme/:id', { id: 'a b' })).toBe('https://taktick.example/isletme/a%20b');
+    expect(canonicalUrl(ORIGIN, '/categories/:slug', { slug: 'klima-bakimi' })).toBe(
+      'https://taktick.example/categories/klima-bakimi',
+    );
   });
 });

@@ -1,33 +1,33 @@
-import { canonicalPath } from './seo-routes';
+import { canonicalUrl } from './seo-routes';
 import type { SeoSite } from './seo-site';
 
 /**
- * What `sitemap.xml` lists: the six allow-listed routes, filled in from the
- * same public API answers the pages themselves render from.
+ * What `sitemap.xml` lists: the six allow-listed routes, the three static ones
+ * by name and the three dynamic ones filled in from one API answer.
  *
- * ## Only URLs that answer 200
+ * ## One request, one source
  *
- *   /categories/<slug>   from `GET /categories` — the public listing, which
- *                        is ACTIVE leaves only, a strict subset of what the
- *                        detail page serves (isPubliclyListable ⊂
- *                        isPubliclyReachable in the API's taxonomy rules)
- *   /isletme/<id>        from `GET /providers/public-directory` — approved
- *                        profiles, the one status the public page renders
- *   /vitrin/<cardId>     from `GET /showcase/feed`, walked to the end — the
- *                        same predicate `GET /showcase/cards/:id` answers a
- *                        card with, so a listed card is a card that is served
+ * `GET /sitemap/entries` is the API's own statement of which public records
+ * exist right now — category slugs, approved business ids, the ids of cards
+ * on the air — each decided by the visibility rule the corresponding page
+ * applies (the API's `SitemapService` reads the same three rules). It carries
+ * identifiers and `updatedAt` only, so nothing here has to know what a
+ * business or a card is; and it is one round trip whatever the counts, so
+ * there is no page to walk and no cursor to stop.
  *
- * No row is invented, no query string is added, and no date is made up:
- * `lastModified` is the row's own `updatedAt` where the API sends one, and
- * absent where it does not (the static surfaces, a feed card).
+ * ## Every row is the page's own canonical
  *
- * ## Never a 500
+ * Each URL is built by `canonicalUrl`, the function the page's
+ * `<link rel="canonical">` is built by, so the sitemap row and the page agree
+ * byte for byte. No date is invented: `lastModified` is the row's `updatedAt`
+ * where the API sent one, and absent otherwise.
  *
- * A source that fails is skipped and the rest is listed; a sitemap with the
- * categories and no businesses is a sitemap, and a crawler that gets a 500
- * instead may drop the whole file. The caller decides how the fetch is done —
- * without the visitor's cookies, see app/sitemap.ts — and this module only
- * reads what comes back.
+ * ## Fails closed
+ *
+ * An API that errors, or a body this module does not recognise, yields the
+ * three static rows and nothing dynamic: a page that could not be confirmed
+ * public is not listed. A row without the field it needs is skipped, and a
+ * record the API happens to repeat is listed once.
  */
 
 /** Same shape as one entry of Next's `MetadataRoute.Sitemap`. */
@@ -35,11 +35,7 @@ export type SitemapEntry = { url: string; lastModified?: Date };
 
 export type SitemapFetch = (path: string) => Promise<unknown>;
 
-/** The feed's own page ceiling (SHOWCASE_FEED_MAX_LIMIT on the API). */
-const FEED_PAGE_SIZE = 48;
-
-/** Enough for any realistic number of live placements; a runaway cursor stops here. */
-const FEED_MAX_PAGES = 200;
+export const SITEMAP_ENTRIES_PATH = '/sitemap/entries';
 
 export async function buildSitemap(site: SeoSite, fetchJson: SitemapFetch): Promise<SitemapEntry[]> {
   if (!site.indexable) {
@@ -48,90 +44,58 @@ export async function buildSitemap(site: SeoSite, fetchJson: SitemapFetch): Prom
 
   const origin = site.origin;
   const entries: SitemapEntry[] = [
-    { url: `${origin}/` },
-    { url: `${origin}/categories` },
-    { url: `${origin}/vitrin` },
+    { url: canonicalUrl(origin, '/', {}) },
+    { url: canonicalUrl(origin, '/categories', {}) },
+    { url: canonicalUrl(origin, '/vitrin', {}) },
   ];
 
-  const [categories, providers, cards] = await Promise.all([
-    attempt(() => listCategories(fetchJson)),
-    attempt(() => listProviders(fetchJson)),
-    attempt(() => listCards(fetchJson)),
-  ]);
+  const body = await readEntries(fetchJson);
+  if (!body) {
+    return entries;
+  }
 
-  for (const category of categories) {
-    entries.push(entry(origin, canonicalPath('/categories/:slug', { slug: category.slug }), category.updatedAt));
+  const seen = new Set<string>();
+  const add = (url: string, updatedAt: string | null) => {
+    if (seen.has(url)) return;
+    seen.add(url);
+    const lastModified = updatedAt ? new Date(updatedAt) : null;
+    entries.push({
+      url,
+      ...(lastModified && !Number.isNaN(lastModified.getTime()) ? { lastModified } : {}),
+    });
+  };
+
+  for (const row of body.categories) {
+    const slug = stringField(row, 'slug');
+    if (slug) add(canonicalUrl(origin, '/categories/:slug', { slug }), stringField(row, 'updatedAt'));
   }
-  for (const provider of providers) {
-    entries.push(entry(origin, canonicalPath('/isletme/:id', { id: provider.id }), provider.updatedAt));
+  for (const row of body.providers) {
+    const id = stringField(row, 'id');
+    if (id) add(canonicalUrl(origin, '/isletme/:id', { id }), stringField(row, 'updatedAt'));
   }
-  for (const card of cards) {
-    entries.push(entry(origin, canonicalPath('/vitrin/:cardId', { cardId: card.cardId })));
+  for (const row of body.showcaseCards) {
+    const cardId = stringField(row, 'cardId');
+    if (cardId) add(canonicalUrl(origin, '/vitrin/:cardId', { cardId }), null);
   }
 
   return entries;
 }
 
-function entry(origin: string, path: string, updatedAt?: string): SitemapEntry {
-  const lastModified = updatedAt ? new Date(updatedAt) : null;
-  return {
-    url: `${origin}${path}`,
-    ...(lastModified && !Number.isNaN(lastModified.getTime()) ? { lastModified } : {}),
-  };
-}
+type EntriesBody = { categories: unknown[]; providers: unknown[]; showcaseCards: unknown[] };
 
-async function attempt<T>(load: () => Promise<T[]>): Promise<T[]> {
+/** The API's answer, or null for an error or a body of any other shape. */
+async function readEntries(fetchJson: SitemapFetch): Promise<EntriesBody | null> {
+  let body: unknown;
   try {
-    return await load();
+    body = await fetchJson(SITEMAP_ENTRIES_PATH);
   } catch {
-    return [];
-  }
-}
-
-async function listCategories(fetchJson: SitemapFetch): Promise<{ slug: string; updatedAt?: string }[]> {
-  const rows = await fetchJson('/categories');
-  if (!Array.isArray(rows)) return [];
-  return rows.flatMap((row) => {
-    const slug = stringField(row, 'slug');
-    return slug ? [{ slug, updatedAt: stringField(row, 'updatedAt') ?? undefined }] : [];
-  });
-}
-
-async function listProviders(fetchJson: SitemapFetch): Promise<{ id: string; updatedAt?: string }[]> {
-  const body = await fetchJson('/providers/public-directory');
-  const rows = body && typeof body === 'object' ? (body as { providers?: unknown }).providers : null;
-  if (!Array.isArray(rows)) return [];
-  return rows.flatMap((row) => {
-    const id = stringField(row, 'id');
-    return id ? [{ id, updatedAt: stringField(row, 'updatedAt') ?? undefined }] : [];
-  });
-}
-
-async function listCards(fetchJson: SitemapFetch): Promise<{ cardId: string }[]> {
-  const found: { cardId: string }[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | null = null;
-
-  for (let page = 0; page < FEED_MAX_PAGES; page += 1) {
-    const query = new URLSearchParams({ limit: String(FEED_PAGE_SIZE) });
-    if (cursor) query.set('cursor', cursor);
-    const body = await fetchJson(`/showcase/feed?${query.toString()}`);
-    const feed = body && typeof body === 'object' ? (body as { cards?: unknown; nextCursor?: unknown }) : null;
-    const cards = Array.isArray(feed?.cards) ? feed.cards : [];
-
-    for (const card of cards) {
-      const cardId = stringField(card, 'cardId');
-      if (cardId && !found.some((known) => known.cardId === cardId)) found.push({ cardId });
-    }
-
-    const next = typeof feed?.nextCursor === 'string' && feed.nextCursor ? feed.nextCursor : null;
-    // A cursor that comes back unchanged is a feed that will never end.
-    if (!next || seenCursors.has(next)) break;
-    seenCursors.add(next);
-    cursor = next;
+    return null;
   }
 
-  return found;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const { categories, providers, showcaseCards } = body as Record<string, unknown>;
+  if (!Array.isArray(categories) || !Array.isArray(providers) || !Array.isArray(showcaseCards)) return null;
+  return { categories, providers, showcaseCards };
 }
 
 function stringField(row: unknown, name: string): string | null {

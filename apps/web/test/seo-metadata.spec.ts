@@ -128,7 +128,9 @@ describe('publicPageMetadata — an indexable page', () => {
       OPEN,
     );
     expect(metadata.title).toBe('TakTic — ana');
-    expect(metadata.openGraph).toMatchObject({ title: 'TakTic — ana', url: 'https://taktick.example/' });
+    // The root is the bare origin: the same string the sitemap and the JSON-LD print.
+    expect(metadata.alternates).toEqual({ canonical: 'https://taktick.example' });
+    expect(metadata.openGraph).toMatchObject({ title: 'TakTic — ana', url: 'https://taktick.example' });
   });
 
   it('escapes the dynamic segment in the canonical', () => {

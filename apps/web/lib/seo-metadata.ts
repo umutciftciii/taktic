@@ -1,6 +1,6 @@
 import { detectContactDetails } from '@taktic/shared';
 import type { Metadata } from 'next';
-import { canonicalPath, hasFunctionalQuery, type IndexableRoute } from './seo-routes';
+import { absoluteUrl, canonicalUrl, hasFunctionalQuery, type IndexableRoute } from './seo-routes';
 import { resolveSeoSite, type SeoSite } from './seo-site';
 
 /**
@@ -68,7 +68,7 @@ export function rootMetadata(site: SeoSite = resolveSeoSite()): Metadata {
 export function publicPageMetadata(input: PublicPageInput, site: SeoSite = resolveSeoSite()): Metadata {
   const title = typeof input.title === 'string' ? `${input.title} · ${SEO_SITE_NAME}` : input.title.absolute;
   const variant = hasFunctionalQuery(input.route, input.searchParams);
-  const canonical = site.indexable && !variant ? `${site.origin}${canonicalPath(input.route, input.params)}` : null;
+  const canonical = site.indexable && !variant ? canonicalUrl(site.origin, input.route, input.params) : null;
   const image = seoImageUrl(input.image, site);
 
   return {
@@ -142,7 +142,11 @@ export function seoImageUrl(value: string | null | undefined, site: SeoSite): st
   if (!value || !site.indexable) return null;
 
   if (value.startsWith('/') && !value.startsWith('//')) {
-    return `${site.origin}${value}`;
+    try {
+      return absoluteUrl(site.origin, value);
+    } catch {
+      return null;
+    }
   }
 
   try {

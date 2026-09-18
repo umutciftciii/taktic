@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   Prisma,
   ProviderServiceAreaScope,
-  ProviderStatus,
   ShowcaseCardKind,
 } from '@prisma/client';
 import { describeArea } from '../../common/provider-service-area-scope';
@@ -13,6 +12,7 @@ import { ProviderReviewsService } from '../provider-reviews/provider-reviews.ser
 import { ShowcaseFeedQueryDto } from './dto/showcase-feed.dto';
 import { SHOWCASE_FEED_DEFAULT_LIMIT, SHOWCASE_FEED_MAX_LIMIT } from './showcase.constants';
 import { showcaseAreaUnknown } from './showcase.errors';
+import { livePlacementPredicate } from './showcase-live-placement';
 
 /**
  * The home page's vitrin shelf: which paid cards a visitor in one place sees,
@@ -459,12 +459,7 @@ function buildFeedQuery(input: {
         AND ${areaMatch}
         ${categoryMatch}
         ${kindMatch}
-        AND p."status" = 'ACTIVE'
-        AND p."startAt" <= ${input.now}
-        AND p."endAt"   >  ${input.now}
-        AND c."status" = 'APPROVED'
-        AND v."reviewStatus" = 'APPROVED'
-        AND pr."status" = ${Prisma.raw(`'${ProviderStatus.APPROVED}'`)}::"ProviderStatus"
+        AND ${livePlacementPredicate(input.now)}
     ),
     -- One shelf row per card, so a card matching two of the visitor's three
     -- candidate keys is one result rather than two. The closest match wins,
@@ -546,12 +541,7 @@ function buildSingleCardQuery(cardId: string, now: Date): Prisma.Sql {
     JOIN "ProviderProfile"     pr  ON pr."id" = p."providerId"
     JOIN "ServiceCategory"     cat ON cat."id" = p."categoryId"
     WHERE p."cardId" = ${cardId}
-      AND p."status" = 'ACTIVE'
-      AND p."startAt" <= ${now}
-      AND p."endAt"   >  ${now}
-      AND c."status" = 'APPROVED'
-      AND v."reviewStatus" = 'APPROVED'
-      AND pr."status" = ${Prisma.raw(`'${ProviderStatus.APPROVED}'`)}::"ProviderStatus"
+      AND ${livePlacementPredicate(now)}
     ORDER BY "scopeRank" DESC, s."city" ASC
     LIMIT 1
   `;

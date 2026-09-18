@@ -1,5 +1,5 @@
 import { SEO_DESCRIPTION_MAX, SEO_SITE_NAME, SEO_TITLE_MAX, seoText } from './seo-metadata';
-import { canonicalPath } from './seo-routes';
+import { absoluteUrl, canonicalUrl } from './seo-routes';
 
 /**
  * The structured data the indexable pages carry, and how it is put into a
@@ -48,20 +48,21 @@ export function serializeJsonLd(data: JsonLd): string {
 
 const CONTEXT = 'https://schema.org';
 
+/** Every URL below goes through `absoluteUrl`, so it is the canonical's bytes. */
 function organizationRef(origin: string) {
-  return { '@type': 'Organization', name: SEO_SITE_NAME, url: `${origin}/` };
+  return { '@type': 'Organization', name: SEO_SITE_NAME, url: absoluteUrl(origin, '/') };
 }
 
 export function organizationSchema(origin: string): JsonLd {
   return {
     '@context': CONTEXT,
     ...organizationRef(origin),
-    logo: `${origin}/brand/logo.png`,
+    logo: absoluteUrl(origin, '/brand/logo.png'),
   };
 }
 
 export function webSiteSchema(origin: string): JsonLd {
-  return { '@context': CONTEXT, '@type': 'WebSite', name: SEO_SITE_NAME, url: `${origin}/` };
+  return { '@context': CONTEXT, '@type': 'WebSite', name: SEO_SITE_NAME, url: absoluteUrl(origin, '/') };
 }
 
 export type BreadcrumbItem = { name: string; path?: string };
@@ -74,7 +75,7 @@ export function breadcrumbSchema(origin: string, items: BreadcrumbItem[]): JsonL
       '@type': 'ListItem',
       position: index + 1,
       name: item.name,
-      ...(item.path ? { item: `${origin}${item.path}` } : {}),
+      ...(item.path ? { item: absoluteUrl(origin, item.path) } : {}),
     })),
   };
 }
@@ -89,7 +90,7 @@ export function categoryServiceSchema(
     '@type': 'Service',
     name: category.name,
     serviceType: category.name,
-    url: `${origin}${canonicalPath('/categories/:slug', { slug: category.slug })}`,
+    url: canonicalUrl(origin, '/categories/:slug', { slug: category.slug }),
     ...(description ? { description } : {}),
     provider: organizationRef(origin),
   };
@@ -117,7 +118,7 @@ function localBusinessRef(origin: string, provider: ProviderFacts) {
   return {
     '@type': 'LocalBusiness',
     name: seoText(provider.businessName, SEO_TITLE_MAX) ?? provider.businessName,
-    url: `${origin}${canonicalPath('/isletme/:id', { id: provider.id })}`,
+    url: canonicalUrl(origin, '/isletme/:id', { id: provider.id }),
     address: postalAddress(provider),
   };
 }
@@ -154,7 +155,7 @@ export function showcaseServiceSchema(
     '@type': 'Service',
     name: seoText(card.title, SEO_TITLE_MAX) ?? card.provider.businessName,
     serviceType: card.category.name,
-    url: `${origin}${canonicalPath('/vitrin/:cardId', { cardId: card.cardId })}`,
+    url: canonicalUrl(origin, '/vitrin/:cardId', { cardId: card.cardId }),
     ...(description ? { description } : {}),
     provider: localBusinessRef(origin, card.provider),
   };

@@ -116,3 +116,38 @@ export function canonicalPath(route: IndexableRoute, params: Record<string, stri
     });
   return `/${segments.join('/')}`;
 }
+
+/**
+ * The one URL form every surface prints — canonical link, `og:url`, Twitter,
+ * JSON-LD `url`, sitemap `<loc>` — so a page and the sitemap row that names
+ * it are the same bytes:
+ *
+ *   origin + path, no trailing slash, no query, no fragment;
+ *   the root is the bare origin (`https://host`, not `https://host/`).
+ *
+ * The root rule follows what Next prints for a canonical under
+ * `trailingSlash: false`; printing the other form anywhere else would leave
+ * two spellings of the home page in the crawler's hands. Everything is
+ * checked rather than normalised: a path without a leading slash, a path
+ * carrying `?` or `#`, or an origin that is more than an origin is a
+ * programming error and throws here, in a unit test, rather than becoming a
+ * `https://host//x` in production.
+ */
+export function absoluteUrl(origin: string, path: string): string {
+  if (!/^https?:\/\/[^/?#]+$/.test(origin)) {
+    throw new Error(`absoluteUrl: "${origin}" is not a bare origin`);
+  }
+  if (!path.startsWith('/')) {
+    throw new Error(`absoluteUrl: path "${path}" is not rooted`);
+  }
+  if (/[?#]/.test(path)) {
+    throw new Error(`absoluteUrl: path "${path}" carries a query or fragment`);
+  }
+  const trimmed = path.replace(/\/+$/, '');
+  return `${origin}${trimmed}`;
+}
+
+/** `absoluteUrl` over `canonicalPath`: the URL a route is indexed under. */
+export function canonicalUrl(origin: string, route: IndexableRoute, params: Record<string, string>): string {
+  return absoluteUrl(origin, canonicalPath(route, params));
+}

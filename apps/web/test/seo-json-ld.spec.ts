@@ -66,7 +66,7 @@ describe('the schemas carry only what the repository can vouch for', () => {
       '@context': 'https://schema.org',
       '@type': 'Organization',
       name: 'TakTick',
-      url: `${ORIGIN}/`,
+      url: ORIGIN,
       logo: `${ORIGIN}/brand/logo.png`,
     });
   });
@@ -76,7 +76,7 @@ describe('the schemas carry only what the repository can vouch for', () => {
       '@context': 'https://schema.org',
       '@type': 'WebSite',
       name: 'TakTick',
-      url: `${ORIGIN}/`,
+      url: ORIGIN,
     });
   });
 
@@ -85,7 +85,7 @@ describe('the schemas carry only what the repository can vouch for', () => {
       '@context': 'https://schema.org',
       '@type': 'BreadcrumbList',
       itemListElement: [
-        { '@type': 'ListItem', position: 1, name: 'Ana sayfa', item: `${ORIGIN}/` },
+        { '@type': 'ListItem', position: 1, name: 'Ana sayfa', item: ORIGIN },
         { '@type': 'ListItem', position: 2, name: 'Kategoriler', item: `${ORIGIN}/categories` },
         { '@type': 'ListItem', position: 3, name: 'Klima' },
       ],
@@ -101,7 +101,7 @@ describe('the schemas carry only what the repository can vouch for', () => {
       serviceType: 'Klima bakımı',
       url: `${ORIGIN}/categories/klima`,
       description: 'Yıllık bakım.',
-      provider: { '@type': 'Organization', name: 'TakTick', url: `${ORIGIN}/` },
+      provider: { '@type': 'Organization', name: 'TakTick', url: ORIGIN },
     });
     const without = categoryServiceSchema(ORIGIN, { name: 'Klima bakımı', slug: 'klima', description: null });
     expect(without).not.toHaveProperty('description');
