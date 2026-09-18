@@ -1,12 +1,25 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import {
+  ApiError,
   apiFetch,
   Category,
-  fetchOrNotFound,
   getContactDisclosure,
   getCurrentUser,
   getMarketplacePublishPolicy,
 } from '../../../lib/api';
+import { breadcrumbSchema, categoryServiceSchema } from '../../../lib/seo-json-ld';
+import {
+  SEO_DEFAULT_IMAGE,
+  SEO_DESCRIPTION_MAX,
+  privatePageMetadata,
+  publicPageMetadata,
+  seoText,
+  structuredDataOrigin,
+} from '../../../lib/seo-metadata';
+import { JsonLd } from '../../json-ld';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { readCurrentDraft } from '../../../lib/request-drafts';
 import { decodeRouterSelections } from '../../../lib/request-flow';
@@ -28,20 +41,62 @@ type CategoryPageProps = {
   searchParams: Promise<{ entry?: string; r?: string }>;
 };
 
+/**
+ * The category, or null for one the public may not reach — a draft, a closed
+ * category, a group, or one that never existed. The API already answers 404
+ * for all four, and the reason it does is the same one this page must not
+ * undo: "you may not see it" and "it is not there" have to look identical
+ * from outside. Cached per request so the metadata and the page share one
+ * round trip.
+ */
+const loadCategory = cache(async (slug: string): Promise<Category | null> => {
+  try {
+    return await apiFetch<Category>(`/categories/${slug}`);
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 403 || error.status === 400)) {
+      return null;
+    }
+    throw error;
+  }
+});
+
+/**
+ * Indexable on the clean path only: `?entry=` and `?r=` are a routed flow in
+ * progress, the same page mid-conversation, and are noindex. The description
+ * is the operator's own text made safe for a snippet, with a plain fallback
+ * when there is none.
+ */
+export async function generateMetadata({ params, searchParams }: CategoryPageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const category = await loadCategory(slug);
+  if (!category) {
+    return privatePageMetadata('Sayfa bulunamadı');
+  }
+
+  return publicPageMetadata({
+    route: '/categories/:slug',
+    params: { slug: category.slug },
+    title: category.name,
+    description:
+      seoText(category.description, SEO_DESCRIPTION_MAX) ??
+      `${category.name} için talep oluşturun; bölgenizdeki onaylı hizmet verenlerden teklif alın.`,
+    image: category.coverImageUrl ?? category.imageUrl ?? SEO_DEFAULT_IMAGE,
+    searchParams: await searchParams,
+  });
+}
+
 export default async function CategoryPage({ params, searchParams }: CategoryPageProps) {
   const { slug } = await params;
   const { entry, r } = await searchParams;
+  const structuredOrigin = structuredDataOrigin('/categories/:slug', { entry, r });
   // A router that arrives without an entry is itself the entry: it is the first
   // screen of its own flow. The same slug is what the form posts under and what
   // a draft is keyed by — see the hidden `categorySlug` field in the form.
   const entryCategorySlug = entry ?? slug;
-  const [category, user, disclosure, provinces, draft, autoPublishEnabled] = await Promise.all([
-    // A slug the public may not reach — a draft, a closed category, a group, or
-    // simply one that never existed — is a 404 page rather than an error
-    // screen. The API already answers 404 for all four, and the reason it does
-    // is the same one this page must not undo: "you may not see it" and "it is
-    // not there" have to look identical from outside.
-    fetchOrNotFound(() => apiFetch<Category>(`/categories/${slug}`)),
+  const [loaded, user, disclosure, provinces, draft, autoPublishEnabled] = await Promise.all([
+    // A slug the public may not reach is a 404 page rather than an error
+    // screen — see loadCategory.
+    loadCategory(slug),
     getCurrentUser(),
     getContactDisclosure(),
     // The canonical province/district list, from the same API that validates a
@@ -60,6 +115,10 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
     // rule when the request is posted.
     getMarketplacePublishPolicy(),
   ]);
+  if (!loaded) {
+    notFound();
+  }
+  const category = loaded;
   const questions = category.questions ?? [];
   const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
 
@@ -91,6 +150,18 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
 
   return (
     <main className="req-page">
+      <JsonLd data={structuredOrigin ? categoryServiceSchema(structuredOrigin, category) : null} />
+      <JsonLd
+        data={
+          structuredOrigin
+            ? breadcrumbSchema(structuredOrigin, [
+                { name: 'Ana sayfa', path: '/' },
+                { name: 'Kategoriler', path: '/categories' },
+                { name: category.name },
+              ])
+            : null
+        }
+      />
       <section className="req-head">
         <div className="lp-container req-head-inner">
           <div className="req-head-text">

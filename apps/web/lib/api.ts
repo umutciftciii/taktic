@@ -115,6 +115,8 @@ export type Category = {
   kind?: CategoryKind;
   sortOrder: number;
   questions?: Question[];
+  /** When the row last changed; the sitemap's `lastmod`, and nothing else reads it. */
+  updatedAt?: string;
 };
 
 /** One step of a routed flow, as the customer's browser carries it. */

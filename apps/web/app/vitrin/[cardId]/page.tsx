@@ -1,5 +1,7 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import {
   ApiError,
   apiFetch,
@@ -11,6 +13,17 @@ import {
 } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { readCurrentDraft } from '../../../lib/request-drafts';
+import { showcaseServiceSchema } from '../../../lib/seo-json-ld';
+import {
+  SEO_DEFAULT_IMAGE,
+  SEO_DESCRIPTION_MAX,
+  SEO_TITLE_MAX,
+  privatePageMetadata,
+  publicPageMetadata,
+  seoText,
+  structuredDataOrigin,
+} from '../../../lib/seo-metadata';
+import { JsonLd } from '../../json-ld';
 import { areaSentence } from '../../showcase-shelf';
 import { RatingSummaryLine } from '../../review-stars';
 import { faceFromFeedCard, ShowcaseCardFace } from '../../showcase-card-face';
@@ -21,6 +34,32 @@ type CardPageProps = {
   params: Promise<{ cardId: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
+/**
+ * Indexable for a card on the air, on the clean path only: every query this
+ * page reads — the form step, the sent flag, the location and phone prefill —
+ * is the same card mid-conversation, and is noindex. Title and summary are
+ * the business's own words made safe for a snippet; the listed price, the
+ * coverage and the rating are never in here.
+ */
+export async function generateMetadata({ params, searchParams }: CardPageProps): Promise<Metadata> {
+  const { cardId } = await params;
+  const card = await loadCard(cardId);
+  if (!card) {
+    return privatePageMetadata('Vitrin kartı bulunamadı');
+  }
+
+  return publicPageMetadata({
+    route: '/vitrin/:cardId',
+    params: { cardId: card.cardId },
+    title: seoText(card.title, SEO_TITLE_MAX) ?? card.provider.businessName,
+    description:
+      seoText(card.summary, SEO_DESCRIPTION_MAX) ??
+      `${card.provider.businessName} tarafından sunulan ${card.category.name} hizmeti.`,
+    image: card.imageUrl ?? SEO_DEFAULT_IMAGE,
+    searchParams: (await searchParams) ?? {},
+  });
+}
 
 /**
  * One vitrin card: what it covers, and — if the customer is inside that
@@ -60,6 +99,7 @@ type CardPageProps = {
 export default async function ShowcaseCardPublicPage({ params, searchParams }: CardPageProps) {
   const { cardId } = await params;
   const query = (await searchParams) ?? {};
+  const structuredOrigin = structuredDataOrigin('/vitrin/:cardId', query);
   /*
    * No step at all is the scope panel: the decision comes before the form. Any
    * step name opens the form — the older `phone` / `code` / `form` steps were
@@ -142,6 +182,7 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
 
   return (
     <main className="lp-section">
+      <JsonLd data={structuredOrigin ? showcaseServiceSchema(structuredOrigin, card) : null} />
       <div className="lp-container showcase-public">
         <nav className="pdash-crumbs" aria-label="Breadcrumb">
           <Link href="/">Ana sayfa</Link>
@@ -300,13 +341,14 @@ async function loadPublicReviewSummary(providerId: string): Promise<PublicReview
   }
 }
 
-async function loadCard(cardId: string): Promise<ShowcaseFeedCard | null> {
+/** Cached per request so the metadata and the page share one round trip. */
+const loadCard = cache(async (cardId: string): Promise<ShowcaseFeedCard | null> => {
   try {
     return await apiFetch<ShowcaseFeedCard>(`/showcase/cards/${cardId}`);
   } catch {
     return null;
   }
-}
+});
 
 function readParam(value: string | string[] | undefined): string | null {
   const raw = Array.isArray(value) ? value[0] : value;

@@ -20,6 +20,8 @@ import {
   primaryRuntime,
   providerClaimRuntime,
   repoRoot,
+  SEO_PRODUCTION_ORIGIN,
+  seoProductionWebRuntime,
   turnstileClosedWebRuntime,
   type Runtime,
 } from './src/runtime';
@@ -252,6 +254,24 @@ function turnstileClosedWebServer() {
   };
 }
 
+/**
+ * The web server that may be indexed: a production declaration and a public
+ * origin, in front of the primary API. See seoProductionWebRuntime.
+ */
+function seoProductionWebServer() {
+  const base = nextServer(seoProductionWebRuntime, 'web');
+  return {
+    ...base,
+    env: {
+      ...base.env,
+      APP_ENVIRONMENT: 'production',
+      WEB_APP_URL: SEO_PRODUCTION_ORIGIN,
+      TURNSTILE_MODE: '',
+      TURNSTILE_SITE_KEY: '',
+    },
+  };
+}
+
 function nextServer(runtime: Runtime, app: 'web' | 'admin') {
   const port = app === 'web' ? runtime.ports.web : runtime.ports.admin;
 
@@ -449,5 +469,6 @@ export default defineConfig({
     nextServer(lemonSqueezyRuntime, 'web'),
     nextServer(lemonSqueezyRuntime, 'admin'),
     turnstileClosedWebServer(),
+    seoProductionWebServer(),
   ],
 });

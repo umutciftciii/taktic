@@ -17,6 +17,9 @@ import { ProviderStatus } from '@prisma/client';
  */
 const PUBLICLY_VISIBLE_STATUSES: ReadonlySet<ProviderStatus> = new Set([ProviderStatus.APPROVED]);
 
+/** The same allow-list as an array, for a `where: { status: { in } }` (the sitemap's query). */
+export const PUBLICLY_VISIBLE_PROVIDER_STATUSES: readonly ProviderStatus[] = [...PUBLICLY_VISIBLE_STATUSES];
+
 export function isPubliclyVisibleProvider(status: ProviderStatus): boolean {
   return PUBLICLY_VISIBLE_STATUSES.has(status);
 }

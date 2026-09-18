@@ -73,7 +73,7 @@ function publishPolicy(state: boolean | 'unreadable' | 'malformed') {
 
 async function renderHome(): Promise<string> {
   const { default: HomePage } = await import('../app/page');
-  return renderToStaticMarkup(await HomePage());
+  return renderToStaticMarkup(await HomePage({}));
 }
 
 function textOf(markup: string): string {

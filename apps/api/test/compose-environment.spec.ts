@@ -64,6 +64,15 @@ describe('docker-compose.yml — the base file a deployment may run', () => {
     expect(admin.some((line) => /TURNSTILE|APP_ENVIRONMENT/.test(line))).toBe(false);
   });
 
+  it('forwards the public origin to the web empty-when-unset, so its SEO gate can only open on a declared value', () => {
+    const web = serviceEnvironmentLines(base, 'web');
+    expect(readVariable(web, 'WEB_APP_URL')).toBe('${WEB_APP_URL:-}');
+    expect(readVariable(web, 'WEB_ORIGIN')).toBe('${WEB_ORIGIN:-}');
+    // Never the API's loopback default: a loopback origin is a closed site
+    // anyway, but the web must not be handed one it could mistake for real.
+    expect(web.some((line) => /WEB_(APP_URL|ORIGIN):.*localhost/.test(line))).toBe(false);
+  });
+
   it('rendered with nothing set, is what the API refuses to boot on', () => {
     // Exactly the values a host with no APP_ENVIRONMENT hands the process.
     expect(() =>

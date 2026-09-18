@@ -1,5 +1,7 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { apiFetch, type ShowcaseFeed } from '../../lib/api';
+import { SEO_DEFAULT_IMAGE, publicPageMetadata } from '../../lib/seo-metadata';
 import type { ProvinceWithDistricts } from '../../lib/locations';
 import { ShowcaseShelfCard } from '../showcase-shelf';
 
@@ -26,6 +28,25 @@ type ShowcaseDirectoryProps = {
  * which is what makes the whole screen a server component: no client bundle,
  * and a list somebody can bookmark or send to a friend.
  */
+/** The sentence under the heading — also the page's description for a search result. */
+const SHELF_INTRO =
+  'Kartlar hizmet bölgeleriyle birlikte listelenir. İsterseniz bölgeye göre daraltın; daraltmasanız da yayındaki tüm hizmetleri görürsünüz.';
+
+/**
+ * Indexable on the clean path only: `?il=` and `?ilce=` are the same shelf
+ * narrowed — a filter result, not a page of its own — and are noindex.
+ */
+export async function generateMetadata({ searchParams }: ShowcaseDirectoryProps): Promise<Metadata> {
+  return publicPageMetadata({
+    route: '/vitrin',
+    params: {},
+    title: 'Vitrin hizmetleri',
+    description: SHELF_INTRO,
+    image: SEO_DEFAULT_IMAGE,
+    searchParams: (await searchParams) ?? {},
+  });
+}
+
 export default async function ShowcaseDirectoryPage({ searchParams }: ShowcaseDirectoryProps) {
   const params = (await searchParams) ?? {};
   const city = readParam(params.il);
@@ -46,10 +67,7 @@ export default async function ShowcaseDirectoryPage({ searchParams }: ShowcaseDi
         <header className="lp-section-head">
           <span className="kicker">Vitrin</span>
           <h1 className="lp-section-title">Vitrin hizmetleri</h1>
-          <p className="lp-section-sub">
-            Kartlar hizmet bölgeleriyle birlikte listelenir. İsterseniz bölgeye göre daraltın;
-            daraltmasanız da yayındaki tüm hizmetleri görürsünüz.
-          </p>
+          <p className="lp-section-sub">{SHELF_INTRO}</p>
         </header>
 
         {/*
