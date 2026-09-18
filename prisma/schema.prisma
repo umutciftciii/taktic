@@ -2017,6 +2017,18 @@ model CustomerNote {
   @@index([createdAt])
 }
 
+/// How an activation link reached the person who consumes it — the one fact
+/// that decides whether consuming it proves control of the mailbox.
+///
+/// EMAIL_DELIVERY: the platform mailed the link to the account's address and
+/// never returned it over HTTP, so following it is proof of that mailbox.
+/// ADMIN_LINK: an operator generated the link on the admin screen and handed
+/// it over by some other means; it proves nothing about the mailbox.
+enum CustomerActivationDelivery {
+  EMAIL_DELIVERY
+  ADMIN_LINK
+}
+
 model CustomerActivationToken {
   id          String    @id @default(cuid())
   customerId  String
@@ -2024,6 +2036,13 @@ model CustomerActivationToken {
   expiresAt   DateTime
   usedAt      DateTime?
   createdById String?
+  /// Written at issue time and never changed (AUTH-EMAIL-001). NULL only on
+  /// rows issued before the column existed: their delivery is unknown, and
+  /// an unknown delivery is treated as no proof — consuming such a token
+  /// sets the password but never stamps `User.emailVerifiedAt`. Nothing is
+  /// backfilled; `createdById` is who issued it, not how it travelled, and
+  /// is deliberately not read for this decision.
+  delivery    CustomerActivationDelivery?
   createdAt   DateTime  @default(now())
 
   customer  User  @relation("CustomerActivationTokenCustomer", fields: [customerId], references: [id], onDelete: Cascade)
