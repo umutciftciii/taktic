@@ -3,6 +3,7 @@ import { Archivo } from 'next/font/google';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { apiFetch, getCurrentUser, type ProviderDashboard } from '../lib/api';
+import { rootMetadata } from '../lib/seo-metadata';
 import { PublicChrome } from './public-chrome';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
@@ -19,11 +20,19 @@ const archivo = Archivo({
   variable: '--font-archivo',
 });
 
-export const metadata: Metadata = {
-  title: 'TakTic — Yerel hizmet teklifleri, adil teklif kredisi',
-  description:
-    'TakTic, yerel hizmet pazaryerinde talebinizi hizmet verenlere ulaştırır; gelen teklifleri karşılaştırarak seçim yaparsınız.',
-};
+/**
+ * The default every page inherits: the site's title and description, and
+ * `noindex, nofollow`. A page that may be indexed says so itself through
+ * `publicPageMetadata` (lib/seo-metadata.ts); everything that does not —
+ * every panel, form, success and error screen — stays out of the index
+ * without having to know it. `metadataBase` is set only when the deployment
+ * has declared a public origin, so no absolute URL is ever built from a
+ * guess. A function rather than a constant because the environment is read
+ * at request time, not at build.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  return rootMetadata();
+}
 
 type RootLayoutProps = {
   children: ReactNode;

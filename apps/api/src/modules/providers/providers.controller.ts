@@ -55,6 +55,17 @@ export class ProvidersController {
     return this.providersService.listProviders({ status, city, categoryId, ownership });
   }
 
+  /**
+   * The approved profiles, by id — what the web's sitemap lists businesses
+   * from. Unauthenticated on purpose: every id it names has a public page,
+   * and it names nothing else (see ProvidersService.listPublicDirectory).
+   * Declared ahead of `:id`, which would otherwise swallow the path.
+   */
+  @Get('public-directory')
+  listPublicDirectory() {
+    return this.providersService.listPublicDirectory();
+  }
+
   @Get('me')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.PROVIDER)

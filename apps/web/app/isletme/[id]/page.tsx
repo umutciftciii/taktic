@@ -2,6 +2,7 @@ import { serviceAreaLabel } from '@taktic/shared';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import {
   ApiError,
   apiFetch,
@@ -10,6 +11,16 @@ import {
   type ProviderProfile,
   type PublicReviewsPage,
 } from '../../../lib/api';
+import { providerLocalBusinessSchema } from '../../../lib/seo-json-ld';
+import {
+  SEO_DEFAULT_IMAGE,
+  SEO_DESCRIPTION_MAX,
+  privatePageMetadata,
+  publicPageMetadata,
+  seoText,
+  structuredDataOrigin,
+} from '../../../lib/seo-metadata';
+import { JsonLd } from '../../json-ld';
 import { RatingSummaryLine, ReviewStars } from '../../review-stars';
 
 type PublicProviderPageProps = {
@@ -27,12 +38,35 @@ type PublicProviderCard = Pick<
   'id' | 'businessName' | 'city' | 'district' | 'description' | 'status' | 'serviceCategories' | 'serviceAreas'
 >;
 
-export async function generateMetadata({ params }: PublicProviderPageProps): Promise<Metadata> {
+/**
+ * Indexable for an approved business on the clean path; `?cursor=` is the
+ * same profile one review page later and is noindex. The description is the
+ * business's own text made safe for a snippet — dropped entirely if it
+ * carries a contact detail — or a plain sentence built from the public card.
+ * The rating is never in here: it is gated on the page and must not be
+ * cached by a crawler.
+ */
+export async function generateMetadata({ params, searchParams }: PublicProviderPageProps): Promise<Metadata> {
   const { id } = await params;
   const provider = await loadPublicProvider(id);
-  return provider
-    ? { title: `${provider.businessName} — TakTick`, robots: { index: true, follow: true } }
-    : { title: 'İşletme bulunamadı — TakTick', robots: { index: false } };
+  if (!provider) {
+    return privatePageMetadata('İşletme bulunamadı');
+  }
+
+  return publicPageMetadata({
+    route: '/isletme/:id',
+    params: { id: provider.id },
+    title: provider.businessName,
+    description: seoText(provider.description, SEO_DESCRIPTION_MAX) ?? providerFallbackDescription(provider),
+    image: SEO_DEFAULT_IMAGE,
+    searchParams: (await searchParams) ?? {},
+  });
+}
+
+function providerFallbackDescription(provider: PublicProviderCard): string {
+  const base = `${provider.city}${provider.district ? `, ${provider.district}` : ''}`;
+  const services = provider.serviceCategories.map((item) => item.category.name).join(', ');
+  return `${provider.businessName} — ${base}.${services ? ` Hizmetler: ${services}.` : ''}`;
 }
 
 /**
@@ -71,9 +105,11 @@ export default async function PublicProviderPage({ params, searchParams }: Publi
   }
 
   const reviews = await loadPublicReviews(id, cursor?.trim() || null);
+  const structuredOrigin = structuredDataOrigin('/isletme/:id', { cursor });
 
   return (
     <main className="lp-section">
+      <JsonLd data={structuredOrigin ? providerLocalBusinessSchema(structuredOrigin, provider) : null} />
       <div className="lp-container">
         <nav className="pdash-crumbs" aria-label="Breadcrumb">
           <Link href="/">Ana sayfa</Link>
@@ -200,9 +236,10 @@ function ReviewsSection({ providerId, reviews }: { providerId: string; reviews: 
 /**
  * The business, or null for anything a visitor may not see. A 404 and a 403
  * from the API are both null here; so is any status other than APPROVED,
- * whatever the caller's own relation to the profile.
+ * whatever the caller's own relation to the profile. Cached per request so
+ * the metadata and the page share one round trip.
  */
-async function loadPublicProvider(id: string): Promise<PublicProviderCard | null> {
+const loadPublicProvider = cache(async (id: string): Promise<PublicProviderCard | null> => {
   try {
     const provider = await apiFetch<ProviderProfile>(`/providers/${encodeURIComponent(id)}`);
     if (provider.status !== 'APPROVED') return null;
@@ -222,7 +259,7 @@ async function loadPublicProvider(id: string): Promise<PublicProviderCard | null
     }
     throw error;
   }
-}
+});
 
 /**
  * The public review list, or null when there is none to show: the API

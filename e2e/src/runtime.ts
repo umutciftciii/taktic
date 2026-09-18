@@ -249,6 +249,27 @@ export const turnstileClosedWebRuntime: Runtime = {
   webUrl: `http://127.0.0.1:${turnstileClosedWebPort}`,
 };
 
+/**
+ * One more web process, for the other direction of the same rule: the primary
+ * runtime's API behind a web server that declares itself `production` and
+ * names a public https origin. It is the only stack in the suite whose pages
+ * may say `index`, print a canonical link, serve a sitemap and carry JSON-LD,
+ * and it is what the SEO spec reads those from. The origin is never resolved
+ * — it is a string the HTML carries — so no request leaves the machine.
+ * Turnstile on this stack is `cloudflare` with no site key, i.e. closed: the
+ * forms cannot be sent here, and nothing in the SEO spec sends one.
+ */
+export const seoProductionWebPort = port(process.env.E2E_SEO_PRODUCTION_WEB_PORT, 3260);
+
+export const SEO_PRODUCTION_ORIGIN = 'https://taktick.example';
+
+export const seoProductionWebRuntime: Runtime = {
+  ...primaryRuntime,
+  name: 'seo-production-web',
+  ports: { ...primaryRuntime.ports, web: seoProductionWebPort },
+  webUrl: `http://127.0.0.1:${seoProductionWebPort}`,
+};
+
 export const runtimes = [
   primaryRuntime,
   phoneGateRuntime,

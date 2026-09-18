@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
   apiFetch,
@@ -9,6 +10,15 @@ import {
   unviewedOfferRefundNotice,
 } from '../lib/api';
 import { landingPublishCopy } from '../lib/request-next-steps';
+import { organizationSchema, webSiteSchema } from '../lib/seo-json-ld';
+import {
+  SEO_DEFAULT_DESCRIPTION,
+  SEO_DEFAULT_IMAGE,
+  SEO_DEFAULT_TITLE,
+  publicPageMetadata,
+  structuredDataOrigin,
+} from '../lib/seo-metadata';
+import { JsonLd } from './json-ld';
 import { LandingHero } from './landing-hero';
 import { ShowcaseShelf } from './showcase-shelf';
 import { LandingFAQ } from './landing-faq';
@@ -26,7 +36,30 @@ import {
 } from './landing-icons';
 import type { IconComponent } from './landing-icons';
 
-export default async function HomePage() {
+type HomePageProps = {
+  /**
+   * Read for the SEO decision only: a campaign parameter never changes what
+   * the page shows. Optional because the unit tests render the page directly.
+   */
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export async function generateMetadata({ searchParams }: HomePageProps): Promise<Metadata> {
+  return publicPageMetadata({
+    route: '/',
+    params: {},
+    title: { absolute: SEO_DEFAULT_TITLE },
+    description: SEO_DEFAULT_DESCRIPTION,
+    image: SEO_DEFAULT_IMAGE,
+    searchParams: (await searchParams) ?? {},
+  });
+}
+
+export default async function HomePage({ searchParams }: HomePageProps) {
+  // The origin the two site-level schemas are written against, or null on a
+  // stack that may not be indexed — which renders no structured data at all.
+  const structuredOrigin = structuredDataOrigin('/', (await searchParams) ?? {});
+
   /*
    * Categories are the API's to answer. There is no stand-in list any more: a
    * fabricated grid would put category names on screen that nothing behind them
@@ -58,6 +91,8 @@ export default async function HomePage() {
 
   return (
     <>
+      <JsonLd data={structuredOrigin ? organizationSchema(structuredOrigin) : null} />
+      <JsonLd data={structuredOrigin ? webSiteSchema(structuredOrigin) : null} />
       <LandingHero
         isCustomer={isCustomer}
         isAuthenticated={isAuthenticated}

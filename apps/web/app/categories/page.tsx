@@ -1,5 +1,7 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { apiFetch, Category } from '../../lib/api';
+import { SEO_DEFAULT_IMAGE, publicPageMetadata } from '../../lib/seo-metadata';
 import { CategorySearch } from '../category-search';
 import { CategoryVisual } from '../category-visual';
 import { IconArrowRight } from '../landing-icons';
@@ -7,6 +9,25 @@ import { IconArrowRight } from '../landing-icons';
 type CategoriesPageProps = {
   searchParams: Promise<{ q?: string }>;
 };
+
+/** The sentence under the heading — also the page's description for a search result. */
+const CATALOGUE_INTRO =
+  'Kategoriyi seç, o kategoriye özel soruları yanıtla. Talebin incelendikten sonra bölgendeki onaylı hizmet verenlere iletilir.';
+
+/**
+ * The catalogue is indexable on its clean path only. `?q=` is the same page
+ * filtered — a search result, not a page of its own — and is noindex.
+ */
+export async function generateMetadata({ searchParams }: CategoriesPageProps): Promise<Metadata> {
+  return publicPageMetadata({
+    route: '/categories',
+    params: {},
+    title: 'Hizmet kategorileri',
+    description: CATALOGUE_INTRO,
+    image: SEO_DEFAULT_IMAGE,
+    searchParams: await searchParams,
+  });
+}
 
 /** Free-text shortcuts; each one really performs the `?q=` search below. */
 const POPULAR_SEARCHES = ['Klima', 'Kombi', 'Elektrikçi', 'Su tesisatı', 'Boya badana', 'Ev temizliği'];

@@ -22,6 +22,11 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'İletişim Bilgisi Paylaşımı Aydınlatma Metni · TakTick',
+  // Reachable by a crawler — it is linked from every request form — but a
+  // legal text rather than a landing surface, so not on the index allow-list
+  // (lib/seo-routes.ts). `follow` rather than the layout's `nofollow`: the
+  // links out of it are the site's own.
+  robots: { index: false, follow: true },
   description:
     'Bir teklifi kabul ettiğinizde hangi iletişim bilgilerinizin, kiminle ve hangi amaçla paylaşıldığı.',
 };

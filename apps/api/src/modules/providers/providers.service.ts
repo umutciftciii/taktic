@@ -66,7 +66,7 @@ import { ProviderClaimService } from '../provider-claim/provider-claim.service';
 import { ProviderReviewsService } from '../provider-reviews/provider-reviews.service';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
-import { isPubliclyVisibleProvider } from './provider-visibility';
+import { PUBLIC_DIRECTORY_STATUSES, isPubliclyVisibleProvider } from './provider-visibility';
 import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -427,6 +427,24 @@ export class ProvidersService {
    * - the owning provider account        -> full record, any status
    * - SUPER_ADMIN                        -> full record, any status
    */
+  /**
+   * Every profile with a public page, as a sitemap needs it: the id, and when
+   * the row last changed. The status filter is the same allow-list the public
+   * profile endpoint applies (PUBLICLY_VISIBLE_STATUSES), so a business listed
+   * here is a business `/isletme/:id` renders. No other column travels — the
+   * page reads the business card itself, under the public projection — and
+   * the order is by id so two crawls of the same data are the same document.
+   */
+  async listPublicDirectory() {
+    const providers = await this.prisma.providerProfile.findMany({
+      where: { status: { in: [...PUBLIC_DIRECTORY_STATUSES] } },
+      select: { id: true, updatedAt: true },
+      orderBy: { id: 'asc' },
+    });
+
+    return { providers };
+  }
+
   async getProviderForViewer(id: string, user: AuthUser | null) {
     const provider = await this.getProvider(id);
     const visibility = resolveProviderVisibility(provider, user);

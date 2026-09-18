@@ -17,6 +17,9 @@ import { ProviderStatus } from '@prisma/client';
  */
 const PUBLICLY_VISIBLE_STATUSES: ReadonlySet<ProviderStatus> = new Set([ProviderStatus.APPROVED]);
 
+/** The same allow-list as a `where: { status: { in } }` argument, for the directory query. */
+export const PUBLIC_DIRECTORY_STATUSES: readonly ProviderStatus[] = [...PUBLICLY_VISIBLE_STATUSES];
+
 export function isPubliclyVisibleProvider(status: ProviderStatus): boolean {
   return PUBLICLY_VISIBLE_STATUSES.has(status);
 }
