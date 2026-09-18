@@ -88,4 +88,4 @@ Staging/prod için önce aynı sorgu çalıştırılıp liste insan tarafından 
 
 ## 6. CI
 
-PR üzerinde; sonuç aşağıya eklenecek.
+PR #90, run 35337022326 @ `1a3c1aac` **3/3 geçti**: `typecheck · lint · test · build` 8m38s, `e2e (chromium)` 15m47s, `e2e (webkit · sign-in and mobile shells)` 12m16s. Bu satırı ekleyen commit docs-only; kod ağacı `1a3c1aac` ile aynıdır.
