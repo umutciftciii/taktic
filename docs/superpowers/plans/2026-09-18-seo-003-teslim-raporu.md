@@ -1,7 +1,7 @@
 # SEO-003 (B2) — İndeks uygunluğu — Teslim Raporu
 
 Tarih: 2026-09-18 · Branch `claude/seo-003-index-eligibility` (taban `origin/main` @ `060207ef`, temiz
-worktree doğrulandı) · PR / head / CI: §8 · Tasarım notu:
+worktree doğrulandı) · PR [#93](https://github.com/umutciftciii/taktic/pull/93) · head/CI §8 · Tasarım notu:
 `docs/superpowers/specs/2026-09-18-seo-003-index-eligibility-design.md`.
 
 Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Search Console: **yapılmadı**. Migration
@@ -56,12 +56,12 @@ harfler korunur. Görsel şartı modelde alan olmadığı için **uydurulmadı**
 | Komut | Sonuç |
 | --- | --- |
 | `pnpm lint` (typecheck dahil, 4 paket) | geçti |
-| `pnpm --filter @taktic/api test` | §8 |
+| `pnpm --filter @taktic/api test` | 132 dosya / 3020 test geçti |
 | `pnpm --filter @taktic/web test` | 36 dosya / 331 test geçti |
 | `pnpm build` | geçti (E2E öncesi) |
 | `pnpm e2e seo-indexing` (chromium) | 10/10 |
-| `pnpm e2e:webkit` | §8 |
-| CI | §8 |
+| `pnpm e2e:webkit` | 110/110 |
+| CI | run `35377002879` 3/3 success (head `fee5ac73`) |
 
 ## 5. Production neden hâlâ kapalı tutulmalı
 
@@ -88,4 +88,8 @@ container'lar. Owner/admin provider projection'ları `seoIndexable` taşımaz.
 
 ## 8. PR / head / CI
 
-(commit sonrası doldurulur)
+| Alan | Değer |
+| --- | --- |
+| PR | [#93](https://github.com/umutciftciii/taktic/pull/93) — `claude/seo-003-index-eligibility` → `main` |
+| Kod commit'i | `fee5ac73` — CI run `35377002879`: **3/3 success** (`typecheck · lint · test · build`, `e2e (chromium)`, `e2e (webkit · sign-in and mobile shells)`) |
+| Son head | bu raporu ekleyen docs commit'i; CI aynı workflow'la yeniden koşar |
