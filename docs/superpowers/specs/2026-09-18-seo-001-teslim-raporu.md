@@ -97,11 +97,7 @@ DRAFT/PENDING/expired yok ve PII yok, POST 404.
 
 ---
 
-## 3. Kalite kapıları
-
-Bölüm 4'teki tabloya bakınız (CI run bağlantısı ve sonuçlar PR'da).
-
-## 4. Sonuçlar
+## 3. Kalite kapıları — sonuçlar (head `14e8b050`)
 
 | Kapı | Sonuç |
 | --- | --- |
@@ -110,6 +106,6 @@ Bölüm 4'teki tabloya bakınız (CI run bağlantısı ve sonuçlar PR'da).
 | web unit (`pnpm --filter @taktic/web test`) | 36 dosya / 330 test geçti |
 | API (`sitemap-entries`, `showcase-feed`, `compose-environment`, `category-visibility`, `http-security`) | geçti |
 | `pnpm build` | geçti; `/robots.txt`, `/sitemap.xml` dinamik (ƒ) |
-| E2E chromium (tam suite) | bkz. PR CI |
-| E2E webkit (tam suite) | bkz. PR CI |
-| CI | 3/3 — PR #91 |
+| E2E chromium (tam suite, yerel) | 278 / 278 geçti (8.0 dk) |
+| E2E webkit (tam suite, yerel) | 110 / 110 geçti (3.7 dk) |
+| CI (PR #91, head `14e8b050`) | 3/3 yeşil — typecheck·lint·test·build, e2e (chromium), e2e (webkit) |
