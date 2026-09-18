@@ -103,4 +103,7 @@ inactivity, para bazlı bütçe, borç/mahsup, Lemon iade çağrısı, kademeli 
 
 ## 8. PR / head / CI
 
-Doldurulacak: PR bağlantısı, head SHA, CI (verify · e2e chromium · e2e webkit) sonucu.
+PR [#94](https://github.com/umutciftciii/taktic/pull/94) · docs head `26dba7a6` · CI **3/3 geçti**
+([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)): typecheck · lint ·
+test · build (13m36s), e2e chromium (15m37s), e2e webkit (12m19s). Bu satırı ekleyen commit yalnız bu
+raporu değiştirir.
