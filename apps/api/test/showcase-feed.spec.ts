@@ -484,3 +484,22 @@ describe('one card’s public page', () => {
     expect(unpublished.body.code).toBe(missing.body.code);
   });
 });
+
+describe('index eligibility on the feed and the card (SEO-003)', () => {
+  it('answers the shelf with one boolean, and each card page with one boolean, and leaks nothing it read', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', { kind: ServiceCategoryKind.LEAF });
+    const thin = await publisher({ categoryId: category.id, cards: 1, label: 'İnce' });
+
+    const shelf = await request(ctx.server).get('/showcase/feed').expect(200);
+    expect(Object.keys(shelf.body).sort()).toEqual(['cards', 'location', 'nextCursor', 'seoIndexable']);
+    expect(shelf.body.seoIndexable).toBe(false);
+    // The shelf's answer is the shelf's; a feed card carries no such key.
+    expect(shelf.body.cards[0]).not.toHaveProperty('seoIndexable');
+
+    const card = await request(ctx.server).get(`/showcase/cards/${thin.cardIds[0]}`).expect(200);
+    expect(card.body.seoIndexable).toBe(false);
+    expect(Object.keys(card.body).filter((key) => /seo|index|eligib|score|reason|threshold/i.test(key))).toEqual(['seoIndexable']);
+    // Nothing the rule read on the business travels with the card.
+    expect(JSON.stringify(card.body)).not.toMatch(/Test işletmesi|"description"|moderasyon|0555/);
+  });
+});

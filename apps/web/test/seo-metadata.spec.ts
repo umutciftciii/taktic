@@ -66,6 +66,9 @@ describe('publicPageMetadata — an indexable page', () => {
     title: 'Klima bakımı',
     description: 'Klima bakımı için teklif alın.',
     image: '/categories/cat-klima.png',
+    // The API's answer for the record behind the page; every case below is
+    // about an eligible one unless it says otherwise.
+    indexEligible: true,
   };
 
   it('in production, on the clean path: index, canonical, and OG/Twitter on the same URL', () => {
@@ -105,9 +108,30 @@ describe('publicPageMetadata — an indexable page', () => {
     expect(metadata.title).toBe(`Klima bakımı · ${SEO_SITE_NAME}`);
   });
 
+  it('for a record the API did not vouch for: noindex, follow, and no canonical, og:url or image URL claim', () => {
+    // A public page whose record is not index-eligible (SEO-003) reads like a
+    // variant: reachable and crawlable, not indexed, and pointing nowhere.
+    const metadata = publicPageMetadata({ ...page, searchParams: {}, indexEligible: false }, OPEN);
+    expect(metadata.robots).toEqual({ index: false, follow: true });
+    expect(metadata.alternates).toBeUndefined();
+    expect(metadata.openGraph).not.toHaveProperty('url');
+    expect(metadata.title).toBe(`Klima bakımı · ${SEO_SITE_NAME}`);
+    // A tracking parameter does not change that, and a functional one cannot open it.
+    expect(publicPageMetadata({ ...page, searchParams: { utm_source: 'x' }, indexEligible: false }, OPEN).robots).toEqual({ index: false, follow: true });
+    expect(publicPageMetadata({ ...page, searchParams: { entry: 'x' }, indexEligible: false }, OPEN).alternates).toBeUndefined();
+    // Only a literal `true` opens the page: an absent or malformed answer is closed.
+    for (const value of [undefined, null, 'true', 1] as unknown[]) {
+      const closed = publicPageMetadata({ ...page, searchParams: {}, indexEligible: value as boolean }, OPEN);
+      expect(closed.robots, String(value)).toEqual({ index: false, follow: true });
+      expect(closed.alternates, String(value)).toBeUndefined();
+    }
+  });
+
   it('on a closed site: noindex, nofollow, no canonical, no absolute URL anywhere', () => {
     const metadata = publicPageMetadata({ ...page, searchParams: {} }, CLOSED);
     expect(metadata.robots).toEqual({ index: false, follow: false });
+    // Eligibility cannot open a closed site either way.
+    expect(publicPageMetadata({ ...page, searchParams: {}, indexEligible: false }, CLOSED).robots).toEqual({ index: false, follow: false });
     expect(metadata.alternates).toBeUndefined();
     expect(JSON.stringify(metadata)).not.toMatch(/https?:\/\//);
     expect(metadata.title).toBe(`Klima bakımı · ${SEO_SITE_NAME}`);
@@ -124,7 +148,7 @@ describe('publicPageMetadata — an indexable page', () => {
 
   it('takes an absolute title for the home page rather than appending the site name', () => {
     const metadata = publicPageMetadata(
-      { route: '/', params: {}, title: { absolute: 'TakTic — ana' }, description: 'd', searchParams: {} },
+      { route: '/', params: {}, title: { absolute: 'TakTic — ana' }, description: 'd', searchParams: {}, indexEligible: true },
       OPEN,
     );
     expect(metadata.title).toBe('TakTic — ana');
@@ -135,7 +159,7 @@ describe('publicPageMetadata — an indexable page', () => {
 
   it('escapes the dynamic segment in the canonical', () => {
     const metadata = publicPageMetadata(
-      { route: '/isletme/:id', params: { id: 'a b' }, title: 't', description: 'd', searchParams: {} },
+      { route: '/isletme/:id', params: { id: 'a b' }, title: 't', description: 'd', searchParams: {}, indexEligible: true },
       OPEN,
     );
     expect(metadata.alternates).toEqual({ canonical: 'https://taktick.example/isletme/a%20b' });
@@ -173,11 +197,14 @@ describe('rootMetadata — the layout default every page inherits', () => {
 });
 
 describe('structuredDataOrigin — where a page may render JSON-LD', () => {
-  it('is the origin only on an open site and a clean path', async () => {
+  it('is the origin only on an open site, a clean path and an index-eligible record', async () => {
     const { structuredDataOrigin } = await import('../lib/seo-metadata');
-    expect(structuredDataOrigin('/categories', {}, OPEN)).toBe('https://taktick.example');
-    expect(structuredDataOrigin('/categories', { utm_source: 'x' }, OPEN)).toBe('https://taktick.example');
-    expect(structuredDataOrigin('/categories', { q: 'x' }, OPEN)).toBeNull();
-    expect(structuredDataOrigin('/categories', {}, CLOSED)).toBeNull();
+    expect(structuredDataOrigin('/categories', {}, true, OPEN)).toBe('https://taktick.example');
+    expect(structuredDataOrigin('/categories', { utm_source: 'x' }, true, OPEN)).toBe('https://taktick.example');
+    expect(structuredDataOrigin('/categories', { q: 'x' }, true, OPEN)).toBeNull();
+    expect(structuredDataOrigin('/categories', {}, true, CLOSED)).toBeNull();
+    // The same third condition the robots meta and the canonical follow.
+    expect(structuredDataOrigin('/isletme/:id', {}, false, OPEN)).toBeNull();
+    expect(structuredDataOrigin('/isletme/:id', {}, undefined as unknown as boolean, OPEN)).toBeNull();
   });
 });

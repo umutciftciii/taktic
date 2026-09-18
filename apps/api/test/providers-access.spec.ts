@@ -3,14 +3,17 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCategory,
+  createDiscoverableProvider,
   createProviderProfile,
   createTestApp,
   createUser,
+  indexEligibleText,
   loginAs,
   providerPayload,
   resetDatabase,
   type TestContext,
 } from './harness';
+import { SEO_INDEX_THRESHOLDS } from '../src/modules/seo/seo-index-eligibility';
 
 let ctx: TestContext;
 
@@ -61,6 +64,27 @@ describe('GET /providers/:id — public projection', () => {
     expect(serialized).not.toContain(provider.email);
     expect(serialized).not.toContain(provider.taxNumber);
     expect(serialized).not.toContain('İç moderasyon notu');
+  });
+
+  it('carries index eligibility as one boolean, and nothing the rule read to decide it', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima');
+    const thin = await createDiscoverableProvider(ctx.prisma, { categoryId: category.id });
+    const eligible = await createDiscoverableProvider(ctx.prisma, {
+      categoryId: category.id,
+      description: indexEligibleText(SEO_INDEX_THRESHOLDS.providerDescriptionMinChars),
+    });
+
+    const thinPage = await request(ctx.server).get(`/providers/${thin.id}`).expect(200);
+    expect(thinPage.body.seoIndexable).toBe(false);
+
+    const eligiblePage = await request(ctx.server).get(`/providers/${eligible.id}`).expect(200);
+    expect(eligiblePage.body.seoIndexable).toBe(true);
+
+    // A boolean and only a boolean: no length, score, reason or threshold.
+    for (const page of [thinPage, eligiblePage]) {
+      expect(typeof page.body.seoIndexable).toBe('boolean');
+      expect(Object.keys(page.body).filter((key) => /seo|index|eligib|score|reason|threshold/i.test(key))).toEqual(['seoIndexable']);
+    }
   });
 
   it('hides the same fields from an unrelated signed-in customer', async () => {
@@ -193,6 +217,8 @@ describe('GET /providers/:id — private projection', () => {
       .expect(200);
 
     expect(response.body.visibility).toBe('owner');
+    // Index eligibility is a public-page fact; the owner's view does not carry it.
+    expect(response.body).not.toHaveProperty('seoIndexable');
     expect(response.body.phone).toBe(provider.phone);
     expect(response.body.email).toBe(provider.email);
     expect(response.body.contactName).toBe(provider.contactName);
@@ -210,6 +236,7 @@ describe('GET /providers/:id — private projection', () => {
       .expect(200);
 
     expect(response.body.visibility).toBe('admin');
+    expect(response.body).not.toHaveProperty('seoIndexable');
     expect(response.body.phone).toBe(provider.phone);
     expect(response.body.taxNumber).toBe(provider.taxNumber);
     expect(response.body.moderationNote).toBe('İç moderasyon notu');

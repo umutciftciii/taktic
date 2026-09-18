@@ -28,6 +28,7 @@ import {
   isRouterCategory,
   providerEnrollmentCategoryWhere,
 } from './category-taxonomy';
+import { isCategoryIndexable } from '../seo/seo-index-eligibility';
 import {
   normalizeCategoryIconKey,
   normalizeCategoryImageUrl,
@@ -444,10 +445,16 @@ export class CategoriesService {
       throw new NotFoundException('Category not found');
     }
 
-    return withoutOperatorColumns({
-      ...category,
-      questions: serializeQuestions(category.questions),
-    });
+    return {
+      ...withoutOperatorColumns({
+        ...category,
+        questions: serializeQuestions(category.questions),
+      }),
+      // Whether the page may be indexed (SEO-003) — false for every category
+      // until the editorial blocks exist (B4). A boolean and nothing about
+      // why: the page reads it, the sitemap applies the same rule.
+      seoIndexable: isCategoryIndexable(category),
+    };
   }
 
   /**

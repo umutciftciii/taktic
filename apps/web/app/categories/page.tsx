@@ -26,6 +26,8 @@ export async function generateMetadata({ searchParams }: CategoriesPageProps): P
     description: CATALOGUE_INTRO,
     image: SEO_DEFAULT_IMAGE,
     searchParams: await searchParams,
+    // The catalogue is the one list of every public category; no record rule applies.
+    indexEligible: true,
   });
 }
 

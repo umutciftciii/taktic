@@ -487,6 +487,8 @@ export async function createProvider(options: {
   categoryId: string;
   location: Location;
   credits: number;
+  /** The public "about" text. The default is too short to be index-eligible (SEO-003). */
+  description?: string;
 }): Promise<SeededProvider> {
   const suffix = uniqueSuffix();
   const email = `e2e-provider-${suffix}@example.test`;
@@ -516,7 +518,7 @@ export async function createProvider(options: {
       email,
       city: options.location.city,
       district: options.location.district,
-      description: 'Uçtan uca test işletmesi',
+      description: options.description ?? 'Uçtan uca test işletmesi',
       status: 'APPROVED',
       serviceCategories: { create: { categoryId: options.categoryId } },
       serviceAreas: {

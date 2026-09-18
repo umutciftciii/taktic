@@ -61,10 +61,12 @@ const loadCategory = cache(async (slug: string): Promise<Category | null> => {
 });
 
 /**
- * Indexable on the clean path only: `?entry=` and `?r=` are a routed flow in
- * progress, the same page mid-conversation, and are noindex. The description
- * is the operator's own text made safe for a snippet, with a plain fallback
- * when there is none.
+ * Indexable on the clean path only, and only when the API says the category
+ * is index-eligible (`seoIndexable`, SEO-003 — no category is until the
+ * editorial blocks exist). `?entry=` and `?r=` are a routed flow in progress,
+ * the same page mid-conversation, and are noindex. The description is the
+ * operator's own text made safe for a snippet, with a plain fallback when
+ * there is none.
  */
 export async function generateMetadata({ params, searchParams }: CategoryPageProps): Promise<Metadata> {
   const { slug } = await params;
@@ -82,13 +84,13 @@ export async function generateMetadata({ params, searchParams }: CategoryPagePro
       `${category.name} için talep oluşturun; bölgenizdeki onaylı hizmet verenlerden teklif alın.`,
     image: category.coverImageUrl ?? category.imageUrl ?? SEO_DEFAULT_IMAGE,
     searchParams: await searchParams,
+    indexEligible: category.seoIndexable === true,
   });
 }
 
 export default async function CategoryPage({ params, searchParams }: CategoryPageProps) {
   const { slug } = await params;
   const { entry, r } = await searchParams;
-  const structuredOrigin = structuredDataOrigin('/categories/:slug', { entry, r });
   // A router that arrives without an entry is itself the entry: it is the first
   // screen of its own flow. The same slug is what the form posts under and what
   // a draft is keyed by — see the hidden `categorySlug` field in the form.
@@ -119,6 +121,9 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
     notFound();
   }
   const category = loaded;
+  // JSON-LD under the same three conditions as the robots meta: open site,
+  // clean path, index-eligible record.
+  const structuredOrigin = structuredDataOrigin('/categories/:slug', { entry, r }, category.seoIndexable === true);
   const questions = category.questions ?? [];
   const showDisclosure = disclosure.enabled && Boolean(disclosure.disclosureUrl);
 

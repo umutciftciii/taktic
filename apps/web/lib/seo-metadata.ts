@@ -14,12 +14,19 @@ import { resolveSeoSite, type SeoSite } from './seo-site';
  *                       (a panel, a form, a success screen, a 404) is out of
  *                       the index whatever it renders.
  *   publicPageMetadata  the six allow-listed routes. Open only on a production
- *                       deployment with a public origin (`resolveSeoSite`) and
- *                       only on the page's clean path: a search, filter,
+ *                       deployment with a public origin (`resolveSeoSite`),
+ *                       only on the page's clean path — a search, filter,
  *                       pagination or flow-state query makes it a variant that
  *                       is `noindex, follow` with no canonical (see
- *                       seo-routes.ts for why not both). A tracking parameter
- *                       does not.
+ *                       seo-routes.ts for why not both); a tracking parameter
+ *                       does not — and only when the record behind the page
+ *                       is index-eligible (SEO-003). Eligibility is decided
+ *                       by the API (`seoIndexable` on the public projection,
+ *                       the same rule the sitemap lists by); this file reads
+ *                       the boolean and knows no threshold. A public page
+ *                       that is not eligible is `noindex, follow`, exactly
+ *                       like a variant: reachable, crawlable, not indexed,
+ *                       and with no canonical, no `og:url` and no JSON-LD.
  *   privatePageMetadata a title for a screen that is out, with the same
  *                       closed robots the layout gives it.
  *
@@ -54,7 +61,19 @@ export type PublicPageInput = {
   /** `https://…` or a site-relative `/path`; anything else is dropped. */
   image?: string | null;
   searchParams: SearchParams;
+  /**
+   * Whether the record behind the page may be indexed — the API's
+   * `seoIndexable`, passed as `=== true` so an absent or malformed value is
+   * closed. The home page and the catalogue, which have no record, pass
+   * `true`: their eligibility is the environment gate alone.
+   */
+  indexEligible: boolean;
 };
+
+/** The two page-level conditions beside the environment: clean path, eligible record. */
+function isIndexablePage(input: Pick<PublicPageInput, 'route' | 'searchParams' | 'indexEligible'>): boolean {
+  return input.indexEligible === true && !hasFunctionalQuery(input.route, input.searchParams);
+}
 
 export function rootMetadata(site: SeoSite = resolveSeoSite()): Metadata {
   return {
@@ -67,14 +86,14 @@ export function rootMetadata(site: SeoSite = resolveSeoSite()): Metadata {
 
 export function publicPageMetadata(input: PublicPageInput, site: SeoSite = resolveSeoSite()): Metadata {
   const title = typeof input.title === 'string' ? `${input.title} · ${SEO_SITE_NAME}` : input.title.absolute;
-  const variant = hasFunctionalQuery(input.route, input.searchParams);
-  const canonical = site.indexable && !variant ? canonicalUrl(site.origin, input.route, input.params) : null;
+  const indexable = isIndexablePage(input);
+  const canonical = site.indexable && indexable ? canonicalUrl(site.origin, input.route, input.params) : null;
   const image = seoImageUrl(input.image, site);
 
   return {
     title,
     description: input.description,
-    robots: site.indexable ? { index: !variant, follow: true } : { index: false, follow: false },
+    robots: site.indexable ? { index: indexable, follow: true } : { index: false, follow: false },
     ...(canonical ? { alternates: { canonical } } : {}),
     openGraph: {
       type: 'website',
@@ -159,13 +178,15 @@ export function seoImageUrl(value: string | null | undefined, site: SeoSite): st
 
 /**
  * The origin a page builds its JSON-LD against, or null when it must render
- * none: a closed site, or a variant of the page (see `hasFunctionalQuery`).
- * The same two conditions that make the robots meta say `index`.
+ * none: a closed site, a variant of the page (see `hasFunctionalQuery`), or a
+ * record that is not index-eligible. The same three conditions that make the
+ * robots meta say `index` and the canonical link appear.
  */
 export function structuredDataOrigin(
   route: IndexableRoute,
   searchParams: SearchParams,
+  indexEligible: boolean,
   site: SeoSite = resolveSeoSite(),
 ): string | null {
-  return site.indexable && !hasFunctionalQuery(route, searchParams) ? site.origin : null;
+  return site.indexable && isIndexablePage({ route, searchParams, indexEligible }) ? site.origin : null;
 }
