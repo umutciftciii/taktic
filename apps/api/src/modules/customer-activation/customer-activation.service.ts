@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
+import { CustomerActivationDelivery, CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { findAccountByPhone } from '../../common/account-identity';
@@ -158,7 +158,14 @@ export class CustomerActivationService {
       throw new ConflictException('Pasif müşteri için aktivasyon linki oluşturulamaz.');
     }
 
-    const issued = await this.issueToken(customer.id, createdById);
+    // Handed to the operator on the screen, never mailed: whoever consumes
+    // it has the operator's link, which says nothing about the inbox. The
+    // token is marked so, and consuming it will not stamp the mailbox proof.
+    const issued = await this.issueToken(
+      customer.id,
+      createdById,
+      CustomerActivationDelivery.ADMIN_LINK,
+    );
 
     return {
       activationUrl: issued.activationUrl,
@@ -286,7 +293,14 @@ export class CustomerActivationService {
     createdById: string | null,
     redirectTo: string | null = null,
   ) {
-    const issued = await this.issueToken(customerId, createdById, redirectTo);
+    // Mailed to the address on file and never returned over HTTP: following
+    // it is proof of that mailbox, and the token is marked so at issue time.
+    const issued = await this.issueToken(
+      customerId,
+      createdById,
+      CustomerActivationDelivery.EMAIL_DELIVERY,
+      redirectTo,
+    );
 
     // Goes through the dispatcher so the send is audited, but the payload and
     // the transport are unchanged: the same NotificationPort adapter receives
@@ -312,10 +326,16 @@ export class CustomerActivationService {
   /**
    * Issues a fresh single-use token and invalidates every other outstanding one
    * for the same customer, so at most one activation link is ever live.
+   *
+   * `delivery` is how the link will reach the person — mailed, or handed over
+   * by an operator — and it is written here, once, because it is the one fact
+   * consumption reads to decide whether the mailbox was proven. It is not
+   * derived from `createdById`: who issued a link is not how it travelled.
    */
   private async issueToken(
     customerId: string,
     createdById: string | null,
+    delivery: CustomerActivationDelivery,
     redirectTo: string | null = null,
   ) {
     const rawToken = generateRawToken();
@@ -342,6 +362,7 @@ export class CustomerActivationService {
           tokenHash,
           expiresAt,
           createdById,
+          delivery,
         },
       });
     });
@@ -390,6 +411,13 @@ export class CustomerActivationService {
           throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
         }
 
+        // Consuming a *mailed* link is proof of mailbox control: it was
+        // delivered to that address, it is single use, and it was never
+        // returned over HTTP. Recording it keeps the separate verification
+        // flow from mailing an account that already proved the same thing.
+        // An operator's link proves nothing of the kind — it was handed over
+        // by hand — and a token from before `delivery` existed is unknown,
+        // which is treated as no proof.
         const customerUpdate = await tx.user.updateMany({
           where: {
             id: lookup.customer.id,
@@ -397,16 +425,21 @@ export class CustomerActivationService {
             passwordHash: null,
             isActive: true,
           },
-          // Consuming this link is itself proof of mailbox control: it was
-          // delivered to that address, it is single use, and it was never
-          // returned over HTTP. Recording it here is what keeps the separate
-          // verification flow from ever mailing an account that has already
-          // proved the same thing a different way.
-          data: { passwordHash, emailVerifiedAt: now },
+          data: { passwordHash },
         });
 
         if (customerUpdate.count === 0) {
           throw new ConflictException('Bu müşteri için aktivasyon yapılamıyor.');
+        }
+
+        // A proof already on file is never rewritten — the earlier instant is
+        // the true one — and the condition is in the statement itself, so a
+        // proof that lands between the lookup and this write survives too.
+        if (lookup.token.delivery === CustomerActivationDelivery.EMAIL_DELIVERY) {
+          await tx.user.updateMany({
+            where: { id: lookup.customer.id, emailVerifiedAt: null },
+            data: { emailVerifiedAt: now },
+          });
         }
 
         return createSessionForUser(tx, lookup.customer.id, meta);
@@ -442,6 +475,7 @@ export class CustomerActivationService {
         id: true,
         expiresAt: true,
         usedAt: true,
+        delivery: true,
         customer: {
           select: {
             id: true,
@@ -482,7 +516,7 @@ export class CustomerActivationService {
     }
 
     return {
-      token: { id: record.id, expiresAt: record.expiresAt },
+      token: { id: record.id, expiresAt: record.expiresAt, delivery: record.delivery },
       customer: record.customer,
     };
   }
