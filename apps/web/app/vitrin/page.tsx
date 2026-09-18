@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { cache } from 'react';
 import Link from 'next/link';
 import { apiFetch, type ShowcaseFeed } from '../../lib/api';
 import { SEO_DEFAULT_IMAGE, publicPageMetadata } from '../../lib/seo-metadata';
@@ -33,17 +34,24 @@ const SHELF_INTRO =
   'Kartlar hizmet bölgeleriyle birlikte listelenir. İsterseniz bölgeye göre daraltın; daraltmasanız da yayındaki tüm hizmetleri görürsünüz.';
 
 /**
- * Indexable on the clean path only: `?il=` and `?ilce=` are the same shelf
- * narrowed — a filter result, not a page of its own — and are noindex.
+ * Indexable on the clean path only, and only while the API says the shelf is
+ * index-eligible (`seoIndexable` on the feed, SEO-003: enough indexable live
+ * cards to be a list). `?il=` and `?ilce=` are the same shelf narrowed — a
+ * filter result, not a page of its own — and are noindex. The feed is read
+ * once per request (`loadFeed` is cached) so the metadata and the page see
+ * the same answer.
  */
 export async function generateMetadata({ searchParams }: ShowcaseDirectoryProps): Promise<Metadata> {
+  const params = (await searchParams) ?? {};
+  const feed = await loadFeed(readParam(params.il), readParam(params.ilce));
   return publicPageMetadata({
     route: '/vitrin',
     params: {},
     title: 'Vitrin hizmetleri',
     description: SHELF_INTRO,
     image: SEO_DEFAULT_IMAGE,
-    searchParams: (await searchParams) ?? {},
+    searchParams: params,
+    indexEligible: feed?.seoIndexable === true,
   });
 }
 
@@ -138,7 +146,7 @@ export default async function ShowcaseDirectoryPage({ searchParams }: ShowcaseDi
  * A province the API refuses — one that is not in the shipped list — is a bad
  * query string rather than an error worth an error screen.
  */
-async function loadFeed(city: string | null, district: string | null): Promise<ShowcaseFeed | null> {
+const loadFeed = cache(async (city: string | null, district: string | null): Promise<ShowcaseFeed | null> => {
   const params = new URLSearchParams();
   if (city) params.set('city', city);
   if (city && district) params.set('district', district);
@@ -149,7 +157,7 @@ async function loadFeed(city: string | null, district: string | null): Promise<S
   } catch {
     return null;
   }
-}
+});
 
 async function loadProvinces(): Promise<ProvinceWithDistricts[]> {
   try {

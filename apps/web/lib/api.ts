@@ -117,6 +117,12 @@ export type Category = {
   questions?: Question[];
   /** When the row last changed; the sitemap's `lastmod`, and nothing else reads it. */
   updatedAt?: string;
+  /**
+   * Whether the category's page may be indexed (SEO-003), decided by the API
+   * — the same rule the sitemap lists it by. Only on the public detail; read
+   * as `=== true`, so absent is closed.
+   */
+  seoIndexable?: boolean;
 };
 
 /** One step of a routed flow, as the customer's browser carries it. */
@@ -342,6 +348,8 @@ export type ProviderProfile = {
    */
   upcomingServiceCategories?: ProviderServiceCategory[];
   serviceAreas: ProviderServiceArea[];
+  /** Public projection only: whether the profile page may be indexed (SEO-003). Read as `=== true`. */
+  seoIndexable?: boolean;
 };
 
 export type ProviderDashboard = {
@@ -1672,6 +1680,8 @@ export type ShowcaseFeedCard = {
   };
   listedServicePriceAmount?: number | null;
   listedServiceCurrency?: string;
+  /** On `GET /showcase/cards/:id` only: whether the card's page may be indexed (SEO-003). Read as `=== true`. */
+  seoIndexable?: boolean;
 };
 
 export type ShowcaseFeedCardArea = {
@@ -1695,6 +1705,12 @@ export type ShowcaseFeed = {
   } | null;
   cards: ShowcaseFeedCard[];
   nextCursor: string | null;
+  /**
+   * Whether the shelf page may be indexed (SEO-003): enough indexable live
+   * cards on the whole shelf, whatever this page or filter shows. Read as
+   * `=== true`.
+   */
+  seoIndexable?: boolean;
 };
 
 /**

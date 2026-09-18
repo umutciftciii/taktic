@@ -13,6 +13,7 @@ import { ShowcaseFeedQueryDto } from './dto/showcase-feed.dto';
 import { SHOWCASE_FEED_DEFAULT_LIMIT, SHOWCASE_FEED_MAX_LIMIT } from './showcase.constants';
 import { showcaseAreaUnknown } from './showcase.errors';
 import { livePlacementPredicate } from './showcase-live-placement';
+import { SeoIndexEligibilityService } from '../seo/seo-index-eligibility.service';
 
 /**
  * The home page's vitrin shelf: which paid cards a visitor in one place sees,
@@ -90,6 +91,7 @@ export class ShowcaseFeedService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
+    @Inject(SeoIndexEligibilityService) private readonly seo: SeoIndexEligibilityService,
   ) {}
 
   async list(query: ShowcaseFeedQueryDto) {
@@ -146,7 +148,13 @@ export class ShowcaseFeedService {
      * can be bought" above, and a rating is the one thing a business would
      * most like to buy a position with.
      */
-    const cards = await this.withReviewSummaries(page.map(toFeedCard));
+    const [cards, seoIndexable] = await Promise.all([
+      this.withReviewSummaries(page.map(toFeedCard)),
+      // The shelf page's own index eligibility (SEO-003): enough indexable
+      // live cards, counted over the whole shelf rather than this page or
+      // this filter, so the answer is the same whatever the visitor asked.
+      this.seo.isShowcaseShelfIndexable(now),
+    ]);
 
     return {
       // Null when the visitor named no place, so a client cannot render a
@@ -161,6 +169,7 @@ export class ShowcaseFeedService {
         : null,
       cards,
       nextCursor,
+      seoIndexable,
     };
   }
 
@@ -183,8 +192,13 @@ export class ShowcaseFeedService {
       return null;
     }
 
-    const [card] = await this.withReviewSummaries([toFeedCard(row)]);
-    return card ?? null;
+    const [[card], seoIndexable] = await Promise.all([
+      this.withReviewSummaries([toFeedCard(row)]),
+      // Whether this card's page may be indexed (SEO-003); the same rule the
+      // sitemap lists it by.
+      this.seo.isShowcaseCardIndexable(cardId, now),
+    ]);
+    return card ? { ...card, seoIndexable } : null;
   }
 
   /**

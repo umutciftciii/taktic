@@ -58,6 +58,9 @@ export async function generateMetadata({ params, searchParams }: CardPageProps):
       `${card.provider.businessName} tarafından sunulan ${card.category.name} hizmeti.`,
     image: card.imageUrl ?? SEO_DEFAULT_IMAGE,
     searchParams: (await searchParams) ?? {},
+    // The API's answer (SEO-003): on the air, an index-eligible business, a
+    // summary and scope of its own. Absent or false is closed.
+    indexEligible: card.seoIndexable === true,
   });
 }
 
@@ -99,7 +102,6 @@ export async function generateMetadata({ params, searchParams }: CardPageProps):
 export default async function ShowcaseCardPublicPage({ params, searchParams }: CardPageProps) {
   const { cardId } = await params;
   const query = (await searchParams) ?? {};
-  const structuredOrigin = structuredDataOrigin('/vitrin/:cardId', query);
   /*
    * No step at all is the scope panel: the decision comes before the form. Any
    * step name opens the form — the older `phone` / `code` / `form` steps were
@@ -124,6 +126,9 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
   };
 
   const card = await loadCard(cardId);
+  // JSON-LD under the same three conditions as the robots meta: open site,
+  // clean path, index-eligible card.
+  const structuredOrigin = card ? structuredDataOrigin('/vitrin/:cardId', query, card.seoIndexable === true) : null;
   if (!card) {
     notFound();
   }

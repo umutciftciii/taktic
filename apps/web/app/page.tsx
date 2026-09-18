@@ -52,13 +52,15 @@ export async function generateMetadata({ searchParams }: HomePageProps): Promise
     description: SEO_DEFAULT_DESCRIPTION,
     image: SEO_DEFAULT_IMAGE,
     searchParams: (await searchParams) ?? {},
+    // No record behind the home page: the environment gate is its whole rule.
+    indexEligible: true,
   });
 }
 
 export default async function HomePage({ searchParams }: HomePageProps) {
   // The origin the two site-level schemas are written against, or null on a
   // stack that may not be indexed — which renders no structured data at all.
-  const structuredOrigin = structuredDataOrigin('/', (await searchParams) ?? {});
+  const structuredOrigin = structuredDataOrigin('/', (await searchParams) ?? {}, true);
 
   /*
    * Categories are the API's to answer. There is no stand-in list any more: a

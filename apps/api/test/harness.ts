@@ -427,6 +427,8 @@ export async function createProviderProfile(
      * shape of every guest application submitted before the claim flag existed. */
     email?: string | null;
     claimedAt?: Date | null;
+    /** The public "about" text; the default is too short to be index-eligible (SEO-003). */
+    description?: string | null;
   } = {},
 ) {
   const suffix = uniqueSuffix();
@@ -443,7 +445,7 @@ export async function createProviderProfile(
       city: 'İstanbul',
       district: 'Kadıköy',
       addressNote: 'Kapı no 5',
-      description: 'Test işletmesi',
+      description: overrides.description === undefined ? 'Test işletmesi' : overrides.description,
       status: overrides.status ?? ProviderStatus.APPROVED,
       moderationNote: 'İç moderasyon notu',
     },
@@ -493,6 +495,7 @@ export async function createDiscoverableProvider(
     city?: string;
     district?: string;
     areas?: Array<{ city: string; district?: string | null; neighborhood?: string | null }>;
+    description?: string | null;
   },
 ) {
   const areas = options.areas ?? [
@@ -501,6 +504,7 @@ export async function createDiscoverableProvider(
   const provider = await createProviderProfile(prisma, {
     userId: options.userId ?? null,
     status: ProviderStatus.APPROVED,
+    description: options.description,
   });
 
   await prisma.providerServiceCategory.create({
@@ -921,6 +925,10 @@ export async function createApprovedShowcaseCard(
     listedServicePriceAmount?: number | null;
     responseSlaUrgentHours?: number;
     responseSlaNormalHours?: number;
+    /** The defaults are deliberately below the index-eligibility thresholds (SEO-003). */
+    summary?: string;
+    scopeIncluded?: string[];
+    scopeExcluded?: string[];
   },
 ) {
   const suffix = uniqueSuffix();
@@ -943,9 +951,9 @@ export async function createApprovedShowcaseCard(
       versionNumber: 1,
       kindSnapshot: kind,
       title: options.title ?? `Vitrin kartı ${suffix}`,
-      summary: `Test vitrin kartı ${suffix} açıklaması.`,
-      scopeIncluded: ['Keşif', 'Montaj'],
-      scopeExcluded: ['Malzeme bedeli'],
+      summary: options.summary ?? `Test vitrin kartı ${suffix} açıklaması.`,
+      scopeIncluded: options.scopeIncluded ?? ['Keşif', 'Montaj'],
+      scopeExcluded: options.scopeExcluded ?? ['Malzeme bedeli'],
       listedServicePriceAmount:
         kind === 'SERVICE' ? (options.listedServicePriceAmount ?? 150_000) : null,
       listedServiceCurrency: 'TRY',
@@ -1234,3 +1242,22 @@ export async function createShowcaseEntitlement(
     }),
   };
 }
+
+/**
+ * Text that clears an index-eligibility threshold (SEO-003) by `chars`
+ * meaningful characters — letters only, so no whitespace or punctuation is
+ * doing the counting. Distinct per call when `salt` is given, for a card whose
+ * summary must not be a sibling's copy.
+ */
+export function indexEligibleText(chars: number, salt = ''): string {
+  const sentence = 'Kadıköy ve çevresinde on yılı aşkın süredir klima bakımı, montajı ve arıza onarımı yapıyoruz. ';
+  let text = salt ? `${salt}. ` : '';
+  while (text.replace(/[^\p{L}\p{N}]/gu, '').length < chars) text += sentence;
+  return text.trim();
+}
+
+/** A scope that clears the card rule: three distinct inclusions and one exclusion. */
+export const INDEX_ELIGIBLE_SCOPE = {
+  scopeIncluded: ['Filtre temizliği', 'Gaz basıncı kontrolü', 'Drenaj hattı kontrolü'],
+  scopeExcluded: ['Gaz dolumu'],
+};

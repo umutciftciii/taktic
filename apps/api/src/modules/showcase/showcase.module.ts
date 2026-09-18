@@ -6,6 +6,7 @@ import { OperationsSettingsModule } from '../operations-settings/operations-sett
 import { PaymentsModule } from '../payments/payments.module';
 import { PhoneVerificationModule } from '../phone-verification/phone-verification.module';
 import { ProviderReviewsModule } from '../provider-reviews/provider-reviews.module';
+import { SeoModule } from '../seo/seo.module';
 import { ShowcaseLifecycleModule } from './showcase-lifecycle.module';
 import { ServiceRequestsModule } from '../service-requests/service-requests.module';
 import { UploadsModule } from '../uploads/uploads.module';
@@ -110,6 +111,9 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
     // The public rating printed on a feed card. That module imports only
     // PrismaModule and AuthModule, so nothing here comes back round.
     ProviderReviewsModule,
+    // Index eligibility for the feed's shelf answer and one card's page.
+    // Imports PrismaModule and two pure files; no way back here.
+    SeoModule,
   ],
   controllers: [
     ProviderShowcaseCardsController,

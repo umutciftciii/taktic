@@ -23,18 +23,50 @@ import {
 } from '../src/showcase-fixtures';
 
 /**
- * SEO-001: what a crawler is told, on three stacks that share one API.
+ * SEO-001 + SEO-003: what a crawler is told, on three stacks that share one API.
  *
  *   seoProductionWebRuntime   APP_ENVIRONMENT=production + a public origin —
  *                             the only stack that may say `index`
  *   turnstileClosedWebRuntime APP_ENVIRONMENT=staging — closed
  *   primaryRuntime            APP_ENVIRONMENT=local — closed
  *
+ * On the open stack a public page is indexed only when the record behind it
+ * is index-eligible (SEO-003): the API's `seoIndexable`, the one rule the
+ * sitemap lists by. Two stages are seeded below — one of everything public
+ * but thin (`seedStage`, what today's real inventory looks like) and one of
+ * everything eligible (`seedEligibleStage`) — and the two are told apart by
+ * their `<head>` and by the sitemap alone. A category is never eligible yet:
+ * the editorial blocks it would need have no column (B4).
+ *
  * Everything asserted here is read from the served HTML and the two text
  * routes: the robots meta, the canonical link, the Open Graph URL, the JSON-LD
  * blocks, `robots.txt` and `sitemap.xml`. No form is filled — the production
  * stack has no Turnstile site key and its forms are closed by design.
  */
+
+/** Meaningful letters only — no whitespace or punctuation doing the counting. */
+function eligibleText(chars: number, salt: string): string {
+  const sentence = 'Kadıköy ve çevresinde on yılı aşkın süredir klima bakımı, montajı ve arıza onarımı yapıyoruz. ';
+  let text = `${salt}. `;
+  while (text.replace(/[^\p{L}\p{N}]/gu, '').length < chars) text += sentence;
+  return text.trim();
+}
+
+const ELIGIBLE_PROVIDER_DESCRIPTION_CHARS = 300;
+const ELIGIBLE_CARD_SUMMARY_CHARS = 200;
+const ELIGIBLE_SHELF_CARDS = 5;
+const ELIGIBLE_SCOPE = {
+  scopeIncluded: ['Filtre temizliği', 'Gaz basıncı kontrolü', 'Drenaj hattı kontrolü'],
+  scopeExcluded: ['Gaz dolumu'],
+};
+
+/** A `noindex, follow` page that names nothing: no canonical, no og:url, no JSON-LD. */
+function expectClosedPublicPage(head: Head, path: string) {
+  expect(head.robots, path).toBe('noindex, follow');
+  expect(head.canonical, path).toBeNull();
+  expect(head.ogUrl, path).toBeNull();
+  expect(head.jsonLd, path).toEqual([]);
+}
 
 const placementsOnAir: string[] = [];
 
@@ -164,8 +196,62 @@ async function seedStage(): Promise<Stage> {
   return { category, provider, cardId: card.id, draftCategory, pendingProvider, expiredCardId: expired.card.id };
 }
 
+type EligibleStage = {
+  category: SeededCategory;
+  provider: SeededProvider;
+  cardIds: string[];
+};
+
+/**
+ * A business that clears the profile rule and enough of its cards clearing
+ * the card rule to make the shelf a list — each with a summary of its own,
+ * because a copied summary is not a page.
+ */
+async function seedEligibleStage(): Promise<EligibleStage> {
+  const location = uniqueLocation();
+  const suffix = uniqueSuffix();
+  // Letters only inside the texts the JSON-LD prints, so a digit run in the
+  // suffix can never look like the listed price the assertions search for.
+  const wordSuffix = suffix.replace(/\d/g, (digit) => 'abcdefghij'[Number(digit)]!);
+  const category = await createCategory(3, {
+    namePrefix: 'E2E SEO Uygun',
+    description: 'Klima bakımı için teklif toplayın.',
+  });
+  const provider = await createProvider({
+    categoryId: category.id,
+    location,
+    credits: 0,
+    description: eligibleText(ELIGIBLE_PROVIDER_DESCRIPTION_CHARS, `İşletme ${wordSuffix}`),
+  });
+
+  const cardIds: string[] = [];
+  for (let index = 0; index < ELIGIBLE_SHELF_CARDS; index += 1) {
+    const { card, version } = await seedApprovedShowcaseCard({
+      providerId: provider.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+      title: `E2E SEO Uygun Kart ${suffix} ${index + 1}`,
+      summary: eligibleText(ELIGIBLE_CARD_SUMMARY_CHARS, `Kart ${wordSuffix} ${'abcde'[index]}`),
+      ...ELIGIBLE_SCOPE,
+    });
+    const { placement } = await seedLiveShowcasePlacement({
+      providerId: provider.id,
+      cardId: card.id,
+      versionId: version.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+    });
+    placementsOnAir.push(placement.id);
+    cardIds.push(card.id);
+  }
+
+  return { category, provider, cardIds };
+}
+
 test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public origin)', () => {
-  test('the six public surfaces are indexable, canonical, and carry only verifiable JSON-LD', async ({ browser }) => {
+  test('today\'s inventory: the home page and the catalogue are indexed; a thin category, business, shelf and card are public but noindex', async ({ browser }) => {
     const stage = await seedStage();
     const visitor = await Actor.open(browser, 'web', seoProductionWebRuntime);
 
@@ -193,19 +279,36 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
       expect(catalogue.ogUrl).toBe(catalogue.canonical);
       expect(catalogue.title).toBe('Hizmet kategorileri · TakTick');
 
+      // Public, rendered, titled and described as before — and not indexed:
+      // one sentence and a form is not a page worth a result.
       const category = await headOf(visitor, `/categories/${stage.category.slug}`);
-      expect(category.robots).toBe('index, follow');
-      expect(category.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/categories/${stage.category.slug}`);
-      expect(category.ogUrl).toBe(category.canonical);
+      expectClosedPublicPage(category, `/categories/${stage.category.slug}`);
       expect(category.title).toBe(`${stage.category.name} · TakTick`);
-      // The description is the operator's text with its markup stripped.
       expect(category.description).toBe('Klima bakımı ve montaj için teklif toplayın.');
-      expect(category.jsonLd.map((block) => (block as { '@type': string })['@type']).sort()).toEqual(['BreadcrumbList', 'Service']);
-      expect(category.jsonLd).toContainEqual(
-        expect.objectContaining({ '@type': 'Service', name: stage.category.name, url: category.canonical }),
-      );
-      expectCleanJsonLd(category.jsonLd);
+      await expect(visitor.page.getByRole('heading', { name: stage.category.name })).toBeVisible();
 
+      // A business with a two-word "about" text.
+      const business = await headOf(visitor, `/isletme/${stage.provider.id}`);
+      expectClosedPublicPage(business, `/isletme/${stage.provider.id}`);
+      expect(business.title).toBe(`${stage.provider.businessName} · TakTick`);
+      await expect(visitor.page.getByTestId('public-provider-name')).toHaveText(stage.provider.businessName);
+
+      // A shelf with too few indexable cards, and a card with a one-line summary.
+      expectClosedPublicPage(await headOf(visitor, '/vitrin'), '/vitrin');
+      const card = await headOf(visitor, `/vitrin/${stage.cardId}`);
+      expectClosedPublicPage(card, `/vitrin/${stage.cardId}`);
+      await expect(visitor.page.getByTestId('showcase-card-provider-link')).toBeVisible();
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  test('an eligible business and enough eligible cards open the business, the shelf and the cards together — and nothing else', async ({ browser, request }) => {
+    const thin = await seedStage();
+    const stage = await seedEligibleStage();
+    const visitor = await Actor.open(browser, 'web', seoProductionWebRuntime);
+
+    try {
       const business = await headOf(visitor, `/isletme/${stage.provider.id}`);
       expect(business.robots).toBe('index, follow');
       expect(business.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/isletme/${stage.provider.id}`);
@@ -227,35 +330,58 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
       expect(shelf.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/vitrin`);
       expect(shelf.ogUrl).toBe(shelf.canonical);
 
-      const card = await headOf(visitor, `/vitrin/${stage.cardId}`);
-      expect(card.robots).toBe('index, follow');
-      expect(card.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/vitrin/${stage.cardId}`);
-      expect(card.ogUrl).toBe(card.canonical);
-      expect(card.jsonLd).toHaveLength(1);
-      expect(card.jsonLd[0]).toMatchObject({ '@type': 'Service', url: card.canonical, provider: { '@type': 'LocalBusiness' } });
-      expectCleanJsonLd(card.jsonLd);
-      // The card's listed price is on the page; it is not in the structured data.
-      expect(JSON.stringify(card.jsonLd)).not.toMatch(/1500|1\.500|150000/);
+      for (const cardId of stage.cardIds) {
+        const card = await headOf(visitor, `/vitrin/${cardId}`);
+        expect(card.robots, cardId).toBe('index, follow');
+        expect(card.canonical, cardId).toBe(`${SEO_PRODUCTION_ORIGIN}/vitrin/${cardId}`);
+        expect(card.ogUrl, cardId).toBe(card.canonical);
+        expect(card.jsonLd, cardId).toHaveLength(1);
+        expect(card.jsonLd[0], cardId).toMatchObject({ '@type': 'Service', url: card.canonical, provider: { '@type': 'LocalBusiness' } });
+        expectCleanJsonLd(card.jsonLd);
+        // The card's listed price is on the page; it is not in the structured
+        // data. The URL is taken out first: a card id is a random string and
+        // may spell those digits by chance.
+        expect(JSON.stringify(card.jsonLd).split(card.canonical!).join(''), cardId).not.toMatch(/1500|1\.500|150000/);
+      }
+
+      // The eligible category is still a category: no editorial blocks, no index.
+      expectClosedPublicPage(await headOf(visitor, `/categories/${stage.category.slug}`), `/categories/${stage.category.slug}`);
+      // The thin stage stays closed beside it — and its card is now on an
+      // indexable shelf, which changes nothing about the card.
+      expectClosedPublicPage(await headOf(visitor, `/isletme/${thin.provider.id}`), `/isletme/${thin.provider.id}`);
+      expectClosedPublicPage(await headOf(visitor, `/vitrin/${thin.cardId}`), `/vitrin/${thin.cardId}`);
+
+      // The sitemap says exactly the same: the eligible business and cards,
+      // the shelf, the two static pages — not the thin ones, not the category.
+      const sitemap = await fetchText(request, seoProductionWebRuntime, '/sitemap.xml');
+      const urls = Array.from(sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)).map((match) => match[1]!);
+      expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/isletme/${stage.provider.id}`);
+      expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin`);
+      for (const cardId of stage.cardIds) expect(urls, cardId).toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${cardId}`);
+      expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/categories/${stage.category.slug}`);
+      expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/isletme/${thin.provider.id}`);
+      expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${thin.cardId}`);
     } finally {
       await visitor.close();
     }
   });
 
   test('one URL form everywhere: canonical = og:url = JSON-LD url = sitemap <loc>, byte for byte', async ({ browser, request }) => {
-    const stage = await seedStage();
+    const stage = await seedEligibleStage();
     const visitor = await Actor.open(browser, 'web', seoProductionWebRuntime);
 
     try {
       const sitemap = await fetchText(request, seoProductionWebRuntime, '/sitemap.xml');
       const locs = Array.from(sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)).map((match) => match[1]!);
 
+      // Every indexable page there is today: the two static pages and the
+      // eligible stage. (No category is indexable yet — see the header.)
       const pages = [
         '/',
         '/categories',
-        `/categories/${stage.category.slug}`,
         `/isletme/${stage.provider.id}`,
         '/vitrin',
-        `/vitrin/${stage.cardId}`,
+        `/vitrin/${stage.cardIds[0]}`,
       ];
       for (const path of pages) {
         const head = await headOf(visitor, path);
@@ -286,13 +412,13 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
   });
 
   test('a tracking parameter keeps the clean canonical; a functional one is noindex with no canonical', async ({ browser }) => {
-    const stage = await seedStage();
+    const stage = await seedEligibleStage();
     const visitor = await Actor.open(browser, 'web', seoProductionWebRuntime);
 
     try {
-      const campaign = await headOf(visitor, `/categories/${stage.category.slug}?utm_source=news&fbclid=abc`);
+      const campaign = await headOf(visitor, `/isletme/${stage.provider.id}?utm_source=news&fbclid=abc`);
       expect(campaign.robots).toBe('index, follow');
-      expect(campaign.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/categories/${stage.category.slug}`);
+      expect(campaign.canonical).toBe(`${SEO_PRODUCTION_ORIGIN}/isletme/${stage.provider.id}`);
 
       const homeCampaign = await headOf(visitor, '/?utm_campaign=x');
       expect(homeCampaign.canonical).toBe(SEO_PRODUCTION_ORIGIN);
@@ -302,7 +428,7 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
         `/categories/${stage.category.slug}?entry=${stage.category.slug}`,
         `/isletme/${stage.provider.id}?cursor=abc`,
         '/vitrin?il=%C4%B0stanbul',
-        `/vitrin/${stage.cardId}?step=form`,
+        `/vitrin/${stage.cardIds[0]}?step=form`,
       ]) {
         const head = await headOf(visitor, path);
         expect(head.robots, path).toBe('noindex, follow');
@@ -371,8 +497,9 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
     expect(robots.body).toContain(`Sitemap: ${SEO_PRODUCTION_ORIGIN}/sitemap.xml`);
   });
 
-  test('sitemap.xml lists exactly the live public records, and every URL in it answers 200', async ({ request }) => {
-    const stage = await seedStage();
+  test('sitemap.xml lists exactly the index-eligible public records, and every URL in it answers 200', async ({ request }) => {
+    const thin = await seedStage();
+    const stage = await seedEligibleStage();
 
     const sitemap = await fetchText(request, seoProductionWebRuntime, '/sitemap.xml');
     expect(sitemap.status).toBe(200);
@@ -383,13 +510,18 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
     expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/`);
     expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/categories`);
     expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin`);
-    expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/categories/${stage.category.slug}`);
     expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/isletme/${stage.provider.id}`);
-    expect(urls).toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${stage.cardId}`);
+    for (const cardId of stage.cardIds) expect(urls, cardId).toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${cardId}`);
 
-    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/categories/${stage.draftCategory.slug}`);
-    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/isletme/${stage.pendingProvider.id}`);
-    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${stage.expiredCardId}`);
+    // Public but thin: rendered, 200, and not listed.
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/categories/${stage.category.slug}`);
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/categories/${thin.category.slug}`);
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/isletme/${thin.provider.id}`);
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${thin.cardId}`);
+    // Not public at all: never listed either.
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/categories/${thin.draftCategory.slug}`);
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/isletme/${thin.pendingProvider.id}`);
+    expect(urls).not.toContain(`${SEO_PRODUCTION_ORIGIN}/vitrin/${thin.expiredCardId}`);
 
     for (const url of urls) {
       expect(url, url).toMatch(new RegExp(`^${SEO_PRODUCTION_ORIGIN.replace('.', '\\.')}(/|$)`));
@@ -397,13 +529,14 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
       expect(url, url).not.toMatch(/\/(providers|requests|account|login|register|api|mesajlar|destek)(\/|$)/);
     }
 
-    // The category's real updatedAt travels; the static rows carry no date.
-    const categoryRow = await prisma().serviceCategory.findUniqueOrThrow({ where: { id: stage.category.id }, select: { updatedAt: true } });
+    // The business's real updatedAt travels; the static rows and the card rows carry no date.
+    const providerRow = await prisma().providerProfile.findUniqueOrThrow({ where: { id: stage.provider.id }, select: { updatedAt: true } });
     const escapedOrigin = SEO_PRODUCTION_ORIGIN.replace(/\./g, '\\.');
     expect(sitemap.body).toMatch(
-      new RegExp(`<loc>${escapedOrigin}/categories/${stage.category.slug}</loc>\\s*<lastmod>${categoryRow.updatedAt.toISOString()}</lastmod>`),
+      new RegExp(`<loc>${escapedOrigin}/isletme/${stage.provider.id}</loc>\\s*<lastmod>${providerRow.updatedAt.toISOString()}</lastmod>`),
     );
     expect(sitemap.body).toMatch(new RegExp(`<loc>${escapedOrigin}</loc>\\s*</url>`));
+    expect(sitemap.body).toMatch(new RegExp(`<loc>${escapedOrigin}/vitrin/${stage.cardIds[0]}</loc>\\s*</url>`));
 
     // The one source the sitemap is built from lists the same records and no
     // other: nothing unreleased, pending or expired leaves the API either.
@@ -416,15 +549,33 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
       showcaseCards: { cardId: string }[];
     };
     expect(Object.keys(entries).sort()).toEqual(['categories', 'providers', 'showcaseCards']);
-    expect(entries.categories.map((row) => row.slug)).toContain(stage.category.slug);
-    expect(entries.categories.map((row) => row.slug)).not.toContain(stage.draftCategory.slug);
+    // No category is eligible yet, whatever its status.
+    expect(entries.categories.map((row) => row.slug)).not.toContain(stage.category.slug);
+    expect(entries.categories.map((row) => row.slug)).not.toContain(thin.category.slug);
+    expect(entries.categories.map((row) => row.slug)).not.toContain(thin.draftCategory.slug);
     expect(entries.providers.map((row) => row.id)).toContain(stage.provider.id);
-    expect(entries.providers.map((row) => row.id)).not.toContain(stage.pendingProvider.id);
-    expect(entries.showcaseCards.map((row) => row.cardId)).toContain(stage.cardId);
-    expect(entries.showcaseCards.map((row) => row.cardId)).not.toContain(stage.expiredCardId);
-    // Identifiers only: no name, city, title, price or contact detail.
+    expect(entries.providers.map((row) => row.id)).not.toContain(thin.provider.id);
+    expect(entries.providers.map((row) => row.id)).not.toContain(thin.pendingProvider.id);
+    for (const cardId of stage.cardIds) expect(entries.showcaseCards.map((row) => row.cardId), cardId).toContain(cardId);
+    expect(entries.showcaseCards.map((row) => row.cardId)).not.toContain(thin.cardId);
+    expect(entries.showcaseCards.map((row) => row.cardId)).not.toContain(thin.expiredCardId);
+    // Identifiers only: no name, city, title, price, contact detail — and
+    // nothing the eligibility rule read (the description, the scope).
     expect(JSON.stringify(entries)).not.toMatch(new RegExp(stage.provider.businessName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    expect(JSON.stringify(entries)).not.toMatch(/example\.test|İşletme|Vitrin|1500|150000/);
+    expect(JSON.stringify(entries)).not.toMatch(/example\.test|İşletme|Vitrin|1500|150000|Filtre|klima bakımı/);
+    // The page and the source agree, record by record.
+    for (const [path, expected] of [
+      [`/providers/${stage.provider.id}`, true],
+      [`/providers/${thin.provider.id}`, false],
+      [`/showcase/cards/${stage.cardIds[0]}`, true],
+      [`/showcase/cards/${thin.cardId}`, false],
+      [`/categories/${stage.category.slug}`, false],
+    ] as const) {
+      const page = await request.get(`${primaryRuntime.apiUrl}${path}`);
+      expect(page.status(), path).toBe(200);
+      expect(((await page.json()) as { seoIndexable?: boolean }).seoIndexable, path).toBe(expected);
+    }
+    expect(((await (await request.get(`${primaryRuntime.apiUrl}/showcase/feed`)).json()) as { seoIndexable?: boolean }).seoIndexable).toBe(true);
     // The sitemap has one row per dynamic record the source names, and no more.
     const dynamicRows = urls.filter((url) => /\/(categories|isletme|vitrin)\/./.test(url));
     expect(dynamicRows).toHaveLength(entries.categories.length + entries.providers.length + entries.showcaseCards.length);

@@ -35,12 +35,14 @@ type PublicProviderPageProps = {
  */
 type PublicProviderCard = Pick<
   ProviderProfile,
-  'id' | 'businessName' | 'city' | 'district' | 'description' | 'status' | 'serviceCategories' | 'serviceAreas'
+  'id' | 'businessName' | 'city' | 'district' | 'description' | 'status' | 'serviceCategories' | 'serviceAreas' | 'seoIndexable'
 >;
 
 /**
- * Indexable for an approved business on the clean path; `?cursor=` is the
- * same profile one review page later and is noindex. The description is the
+ * Indexable for an approved business on the clean path, and only when the
+ * API says the profile is index-eligible (`seoIndexable`, SEO-003 — an
+ * "about" text of its own, a public category, a complete place); `?cursor=`
+ * is the same profile one review page later and is noindex. The description is the
  * business's own text made safe for a snippet — dropped entirely if it
  * carries a contact detail — or a plain sentence built from the public card.
  * The rating is never in here: it is gated on the page and must not be
@@ -60,6 +62,7 @@ export async function generateMetadata({ params, searchParams }: PublicProviderP
     description: seoText(provider.description, SEO_DESCRIPTION_MAX) ?? providerFallbackDescription(provider),
     image: SEO_DEFAULT_IMAGE,
     searchParams: (await searchParams) ?? {},
+    indexEligible: provider.seoIndexable === true,
   });
 }
 
@@ -105,7 +108,7 @@ export default async function PublicProviderPage({ params, searchParams }: Publi
   }
 
   const reviews = await loadPublicReviews(id, cursor?.trim() || null);
-  const structuredOrigin = structuredDataOrigin('/isletme/:id', { cursor });
+  const structuredOrigin = structuredDataOrigin('/isletme/:id', { cursor }, provider.seoIndexable === true);
 
   return (
     <main className="lp-section">
@@ -252,6 +255,7 @@ const loadPublicProvider = cache(async (id: string): Promise<PublicProviderCard 
       status: provider.status,
       serviceCategories: provider.serviceCategories,
       serviceAreas: provider.serviceAreas,
+      seoIndexable: provider.seoIndexable,
     };
   } catch (error) {
     if (error instanceof ApiError && (error.status === 404 || error.status === 403 || error.status === 400)) {

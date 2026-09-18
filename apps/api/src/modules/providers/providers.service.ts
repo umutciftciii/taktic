@@ -67,6 +67,7 @@ import { ProviderReviewsService } from '../provider-reviews/provider-reviews.ser
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { isPubliclyVisibleProvider } from './provider-visibility';
+import { isProviderIndexable } from '../seo/seo-index-eligibility';
 import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CreateProviderDto, ProviderServiceAreaDto } from './dto/create-provider.dto';
@@ -1988,6 +1989,10 @@ function toPublicProvider(
     serviceCategories: visibleServiceCategories(provider.serviceCategories),
     serviceAreas: provider.serviceAreas,
     visibility: 'public' as const,
+    // Whether the public page may be indexed (SEO-003): the rule reads the
+    // full bindings and areas loaded above and answers a boolean; nothing it
+    // read joins the projection.
+    seoIndexable: isProviderIndexable(provider),
   };
 }
 

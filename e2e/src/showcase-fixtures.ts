@@ -24,6 +24,10 @@ export async function seedApprovedShowcaseCard(options: {
   city: string;
   district: string;
   title: string;
+  /** The defaults are deliberately below the index-eligibility thresholds (SEO-003). */
+  summary?: string;
+  scopeIncluded?: string[];
+  scopeExcluded?: string[];
 }) {
   const db = prisma();
   const now = new Date();
@@ -43,9 +47,9 @@ export async function seedApprovedShowcaseCard(options: {
       versionNumber: 1,
       kindSnapshot: 'SERVICE',
       title: options.title,
-      summary: 'Standart kapsamda klima bakımı ve filtre temizliği.',
-      scopeIncluded: ['Filtre temizliği', 'Gaz basıncı kontrolü'],
-      scopeExcluded: ['Gaz dolumu'],
+      summary: options.summary ?? 'Standart kapsamda klima bakımı ve filtre temizliği.',
+      scopeIncluded: options.scopeIncluded ?? ['Filtre temizliği', 'Gaz basıncı kontrolü'],
+      scopeExcluded: options.scopeExcluded ?? ['Gaz dolumu'],
       listedServicePriceAmount: 150_000,
       listedServiceCurrency: 'TRY',
       responseSlaUrgentHours: 3,
