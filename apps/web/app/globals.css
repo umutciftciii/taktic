@@ -4594,6 +4594,131 @@ input[readonly] {
 .cdash-verify-title { margin: 0; font-size: 20px; letter-spacing: -0.02em; overflow-wrap: anywhere; }
 
 /*
+ * The one-time-code row (REQ-UX-012): the send button, the code field and
+ * the verify button are three controls of one height (42px, the form
+ * control's), one type size, one line-height and one vertical padding, so
+ * their text sits on one baseline. `align-items: stretch` keeps the two
+ * halves the same height when the row folds; the halves themselves wrap
+ * at a phone width — the send button on its own line, the code and its
+ * button together — and the code field shrinks instead of overflowing.
+ */
+.otp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.otp-send,
+.otp-verify {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.otp-verify {
+  flex: 1 1 240px;
+}
+
+.otp-control,
+.cdash-btn.otp-control {
+  box-sizing: border-box;
+  min-height: 42px;
+  padding: 9px 14px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.otp-code {
+  flex: 1 1 120px;
+  min-width: 0;
+  max-width: 180px;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: 0;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+}
+
+.otp-code::placeholder {
+  letter-spacing: normal;
+  color: var(--color-neutral-700);
+}
+
+.otp-code:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.otp-code[aria-invalid='true'] {
+  border-color: var(--color-accent);
+}
+
+/*
+ * A field label with a badge at its end (the settings screen's "Doğrulandı"
+ * / "Doğrulanmadı"). The badge is a fact about the value below, so it sits
+ * on the label's line, and folds under it on a narrow field rather than
+ * pushing the label out of its column.
+ */
+.cdash-field-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.cdash-verify-badge {
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+/* The send button may fill a folded line, but never grows past its words on a wide one. */
+.otp-send .otp-control {
+  flex: 0 1 auto;
+}
+
+/*
+ * The narrowest phones. The card sits two paddings deep inside the summary,
+ * which leaves about 190px for the row at 320px: the send button takes a
+ * full line of its own, the code and its button share the next, and the
+ * three keep one height by trading a little side padding and one point of
+ * type size — the same on all three, so the row still reads as one.
+ */
+@media (max-width: 400px) {
+  .cdash-verify-card {
+    padding: var(--space-4);
+  }
+
+  .cdash-verify-card .otp-send,
+  .cdash-verify-card .otp-verify {
+    flex: 1 1 100%;
+  }
+
+  .cdash-verify-card .otp-send .otp-control {
+    flex: 1 1 100%;
+  }
+
+  .cdash-verify-card .otp-control,
+  .cdash-verify-card .cdash-btn.otp-control {
+    padding-left: 10px;
+    padding-right: 10px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .cdash-verify-card .otp-code {
+    flex: 1 1 96px;
+    max-width: none;
+  }
+}
+
+/*
  * A tag whose words may break onto a second line. `.tag` is nowrap by design
  * — a status word never wraps — but a sentence-length badge on a 320px row
  * ("Telefon doğrulaması bekliyor") has to fold rather than widen the page.

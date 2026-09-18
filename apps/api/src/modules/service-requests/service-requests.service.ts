@@ -712,14 +712,18 @@ export class ServiceRequestsService {
   async getCustomerServiceRequest(customerId: string, id: string) {
     const request = await this.prisma.serviceRequest.findFirst({
       where: { id, customerId },
-      include: customerRequestInclude,
+      include: customerRequestDetailInclude,
     });
 
     if (!request) {
       throw new NotFoundException('Service request not found');
     }
 
-    return toCustomerServiceRequest(request);
+    const { answers, ...row } = request;
+    return {
+      ...toCustomerServiceRequest(row),
+      answers: answers.map(toCustomerAnswer),
+    };
   }
 
   async getServiceRequest(id: string) {
@@ -1337,7 +1341,76 @@ type CustomerRequestRow = Prisma.ServiceRequestGetPayload<{
   include: typeof customerRequestInclude;
 }>;
 
-function toCustomerServiceRequest({ showcaseLeadSource, reviews, ...request }: CustomerRequestRow) {
+/**
+ * The single-request read adds what the customer wrote into the form: their
+ * answers, in the order they were given, each with the option's label so the
+ * screen can print "Salon tipi" rather than the key `salon`. The list never
+ * carries them — a row on the board has no use for a dozen answers.
+ */
+const customerRequestDetailInclude = {
+  ...customerRequestInclude,
+  answers: {
+    orderBy: { createdAt: 'asc' },
+    select: {
+      questionKey: true,
+      questionLabel: true,
+      questionType: true,
+      value: true,
+      question: { select: { options: true } },
+    },
+  },
+} satisfies Prisma.ServiceRequestInclude;
+
+type CustomerAnswerRow = Prisma.ServiceRequestGetPayload<{
+  include: typeof customerRequestDetailInclude;
+}>['answers'][number];
+
+function toCustomerAnswer({ question, ...answer }: CustomerAnswerRow) {
+  return {
+    questionKey: answer.questionKey,
+    questionLabel: answer.questionLabel,
+    questionType: answer.questionType,
+    value: answer.value,
+    displayValue: answerDisplayValue(answer.value, question.options),
+  };
+}
+
+/**
+ * The answer as words. A SELECT / MULTI_SELECT answer is an option key (or a
+ * list of them); the label is looked up on the question's current options and
+ * the key itself is the fallback for an option that has since been removed —
+ * the customer did choose it, and a blank would say they chose nothing.
+ */
+function answerDisplayValue(value: unknown, options: unknown): string {
+  const labels = new Map<string, string>(
+    Array.isArray(options)
+      ? (options as QuestionOption[])
+          .filter((option) => option && typeof option.key === 'string')
+          .map((option) => [option.key, typeof option.label === 'string' ? option.label : option.key])
+      : [],
+  );
+  const word = (item: unknown) =>
+    typeof item === 'string' ? (labels.get(item) ?? item) : String(item);
+
+  if (Array.isArray(value)) return value.map(word).join(', ');
+  if (typeof value === 'boolean') return value ? 'Evet' : 'Hayır';
+  if (value === null || value === undefined) return '';
+  return word(value);
+}
+
+/**
+ * The customer's row. Two columns are dropped on the way out: `moderationNote`
+ * is what an operator wrote for other operators, and `qualityScoreBreakdown`
+ * is how the score was arrived at — the customer gets the score, not the
+ * working. Neither screen of theirs ever read them.
+ */
+function toCustomerServiceRequest({
+  showcaseLeadSource,
+  reviews,
+  moderationNote: _moderationNote,
+  qualityScoreBreakdown: _qualityScoreBreakdown,
+  ...request
+}: CustomerRequestRow) {
   return {
     ...withQualityLabel(request),
     offersCount: request._count.offers,

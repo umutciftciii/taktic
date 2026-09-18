@@ -915,6 +915,13 @@ export type CustomerSummary = {
   createdAt: string;
   lastLoginAt: string | null;
   customerOrigin: CustomerOrigin | null;
+  /**
+   * The account's own proofs — `User.emailVerifiedAt` / `User.phoneVerifiedAt`
+   * — and the only source of a verification badge. Optional so an older API
+   * answer reads as "not proven" rather than failing.
+   */
+  emailVerifiedAt?: string | null;
+  phoneVerifiedAt?: string | null;
   requestCount: number;
   offerCount: number;
   acceptedOfferCount: number;
@@ -946,6 +953,9 @@ export type CustomerDetail = {
   lastLoginAt: string | null;
   customerOrigin: CustomerOrigin | null;
   hasPassword: boolean;
+  /** The same two account columns the list carries; see CustomerSummary. */
+  emailVerifiedAt?: string | null;
+  phoneVerifiedAt?: string | null;
 };
 
 export type CustomerMetrics = {

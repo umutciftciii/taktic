@@ -22,6 +22,7 @@ import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
+import { customerVerificationBadges, verificationBadgeClass } from '../../../lib/customer-verification';
 import {
   createCustomerActivationLinkAction,
   createCustomerNoteAction,
@@ -76,6 +77,9 @@ export default async function AdminCustomerDetailPage({
   const notes = notesResponse.items;
 
   const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
+  // From the two account columns alone; a verified request of this customer
+  // is not an account proof (see lib/customer-verification.ts).
+  const [emailProof, phoneProof] = customerVerificationBadges(customer);
   const subtitleParts: string[] = [];
   if (customer.phone) subtitleParts.push(customer.phone);
   if (customer.email) subtitleParts.push(customer.email);
@@ -144,6 +148,7 @@ export default async function AdminCustomerDetailPage({
               ) : (
                 '-'
               )}
+              <VerificationLine channel="phone" proof={phoneProof} />
             </dd>
             <dt>E-posta</dt>
             <dd>
@@ -154,6 +159,7 @@ export default async function AdminCustomerDetailPage({
               ) : (
                 '-'
               )}
+              <VerificationLine channel="email" proof={emailProof} />
             </dd>
             <dt>Durum</dt>
             <dd>
@@ -564,5 +570,32 @@ function CustomerOfferRow({ offer }: { offer: CustomerRecentOffer }) {
         </Link>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Under the phone and the e-mail: "Doğrulandı · 12 Eyl 2026 09:30" as an ink
+ * pill with its moment, or a muted "Doğrulanmadı" with no moment and no red.
+ */
+function VerificationLine({
+  channel,
+  proof,
+}: {
+  channel: 'email' | 'phone';
+  proof: ReturnType<typeof customerVerificationBadges>[number];
+}) {
+  return (
+    <div
+      className="customer-verification-line"
+      data-testid={`customer-${channel}-verification`}
+      data-verified={proof.verified ? 'true' : 'false'}
+    >
+      <span className={verificationBadgeClass(proof)} aria-label={proof.ariaLabel}>
+        {proof.label}
+      </span>
+      {proof.at ? (
+        <span className="muted customer-verification-at">{formatDateTime(proof.at)}</span>
+      ) : null}
+    </div>
   );
 }

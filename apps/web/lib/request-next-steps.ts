@@ -32,6 +32,39 @@ export function requestFormIntroText(autoPublishEnabled: boolean): string {
   return autoPublishEnabled ? INSTANT_INTRO : REVIEW_INTRO;
 }
 
+/*
+ * The home page's two static claims about a review (REQ-UX-011): the trust
+ * card and the hero's floating card. Both answer "who looks at my request?",
+ * so both follow the switch the way the form's note does: with instant
+ * publish on there is no operator to promise, and the page says the request
+ * reaches approved providers and collects offers instead. The review pair is
+ * the original wording, kept word for word for the off / unreadable case.
+ */
+export type LandingPublishCopy = {
+  trustCard: { title: string; desc: string };
+  heroCard: { label: string; value: string };
+};
+
+const REVIEW_LANDING: LandingPublishCopy = {
+  trustCard: {
+    title: 'Admin ön inceleme',
+    desc: 'Talepler yayına alınmadan önce inceleme süreçlerinden geçer.',
+  },
+  heroCard: { label: 'Ön inceleme', value: 'Her talep' },
+};
+
+const INSTANT_LANDING: LandingPublishCopy = {
+  trustCard: {
+    title: 'Onaylı hizmet verenlere iletim',
+    desc: 'Talebin bölgendeki uygun ve onaylı hizmet verenlere iletilir; teklifler onlardan toplanır.',
+  },
+  heroCard: { label: 'Onaylı hizmet verenler', value: 'Her talep' },
+};
+
+export function landingPublishCopy(autoPublishEnabled: boolean): LandingPublishCopy {
+  return autoPublishEnabled ? INSTANT_LANDING : REVIEW_LANDING;
+}
+
 /**
  * Reads `GET /marketplace-publish-policy`'s body as the one boolean it carries.
  *

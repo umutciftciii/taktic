@@ -150,6 +150,8 @@ export type AuthUser = {
    * the session's own user; display only — the API decides what it grants.
    */
   phoneVerifiedAt?: string | null;
+  /** When the account proved its own `email` (User.emailVerifiedAt). Same terms. */
+  emailVerifiedAt?: string | null;
 };
 
 export type CustomerServiceRequest = {
@@ -161,6 +163,18 @@ export type CustomerServiceRequest = {
   customerEmail: string | null;
   city: string;
   district: string;
+  /*
+   * What the customer typed into the form, as they typed it. Each is null when
+   * the form field was left empty — the API never fills one in — and optional
+   * here only so an older answer without the column still reads. The detail
+   * screen shows a row per value and no row for a null.
+   */
+  neighborhood?: string | null;
+  addressNote?: string | null;
+  /** Minor units (kuruş), like every amount the API stores. */
+  budgetMin?: number | null;
+  budgetMax?: number | null;
+  description?: string | null;
   /** The preferred range's two ends as stored instants; the end is null on a legacy single date. */
   preferredDate: string | null;
   preferredDateEnd: string | null;
@@ -206,6 +220,25 @@ export type CustomerServiceRequest = {
    * question is mailed once and never chased.
    */
   showcaseLead?: CustomerRequestShowcaseLead | null;
+};
+
+/**
+ * One answer the customer gave to a category question, from
+ * `GET /service-requests/my/:id`. `displayValue` is the answer in words — the
+ * option's label for a select, the text for a text field — so the screen
+ * never prints an option key.
+ */
+export type CustomerRequestAnswer = {
+  questionKey: string;
+  questionLabel: string;
+  questionType: string;
+  value: unknown;
+  displayValue: string;
+};
+
+/** The single-request read: the list row plus the answers. Owner only. */
+export type CustomerServiceRequestDetail = CustomerServiceRequest & {
+  answers: CustomerRequestAnswer[];
 };
 
 /** The customer's own view of their vitrin lead. Nothing about the placement. */
@@ -1067,6 +1100,13 @@ export type CustomerAccountProfile = {
   city: string | null;
   role: AuthUser['role'];
   hasPassword: boolean;
+  /**
+   * The account's own proofs (User.emailVerifiedAt / User.phoneVerifiedAt),
+   * for the badges on the settings screen. Optional so an older answer reads
+   * as "not proven" rather than failing.
+   */
+  emailVerifiedAt?: string | null;
+  phoneVerifiedAt?: string | null;
 };
 
 export async function getAccountProfile(): Promise<CustomerAccountProfile | null> {

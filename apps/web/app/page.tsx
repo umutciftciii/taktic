@@ -4,9 +4,11 @@ import {
   AuthUser,
   Category,
   getCurrentUser,
+  getMarketplacePublishPolicy,
   getRefundPolicy,
   unviewedOfferRefundNotice,
 } from '../lib/api';
+import { landingPublishCopy } from '../lib/request-next-steps';
 import { LandingHero } from './landing-hero';
 import { ShowcaseShelf } from './showcase-shelf';
 import { LandingFAQ } from './landing-faq';
@@ -45,7 +47,14 @@ export default async function HomePage() {
   // would actually get, read from the platform rather than written into the
   // copy. A marketing page that keeps saying 48 hours after an administrator
   // sets 72 is a page making a promise the worker does not keep.
-  const { unviewedOfferRefundWindowHours: refundWindowHours } = await getRefundPolicy();
+  //
+  // The same goes for who reads a request first. With instant publish on
+  // there is no operator, and a card that still promised an "admin ön
+  // inceleme" would be describing a process the platform no longer runs. The
+  // switch is read exactly as the request form reads it — fail-closed, so an
+  // unreadable answer keeps the review wording (REQ-UX-008/009/011).
+  const [{ unviewedOfferRefundWindowHours: refundWindowHours }, autoPublishEnabled] =
+    await Promise.all([getRefundPolicy(), getMarketplacePublishPolicy()]);
 
   return (
     <>
@@ -54,6 +63,7 @@ export default async function HomePage() {
         isAuthenticated={isAuthenticated}
         user={user}
         refundWindowHours={refundWindowHours}
+        autoPublishEnabled={autoPublishEnabled}
       />
       <MetricStrip categoryCount={categories.length} />
       <PopularCategories categories={categories} />
@@ -70,7 +80,12 @@ export default async function HomePage() {
       <Comparison />
       <ProviderCTABand />
       <LandingFAQ refundWindowHours={refundWindowHours} />
-      <FinalCTA isCustomer={isCustomer} isAuthenticated={isAuthenticated} user={user} />
+      <FinalCTA
+        isCustomer={isCustomer}
+        isAuthenticated={isAuthenticated}
+        user={user}
+        autoPublishEnabled={autoPublishEnabled}
+      />
     </>
   );
 }
@@ -441,11 +456,17 @@ function ProviderCTABand() {
   );
 }
 
-const trustCards: Array<{
+/**
+ * The trust cards, with the second one following the instant-publish switch:
+ * it is the one card that describes who reads a request before providers do.
+ */
+const buildTrustCards = (
+  autoPublishEnabled: boolean,
+): Array<{
   title: string;
   desc: string;
   Icon: IconComponent;
-}> = [
+}> => [
   {
     Icon: IconClipList,
     title: 'Kategorilere özel talep formları',
@@ -453,8 +474,7 @@ const trustCards: Array<{
   },
   {
     Icon: IconShield,
-    title: 'Admin ön inceleme',
-    desc: 'Talepler yayına alınmadan önce inceleme süreçlerinden geçer.',
+    ...landingPublishCopy(autoPublishEnabled).trustCard,
   },
   {
     Icon: IconUsers,
@@ -472,11 +492,15 @@ function FinalCTA({
   isCustomer = false,
   isAuthenticated = false,
   user = null,
+  autoPublishEnabled = false,
 }: {
   isCustomer?: boolean;
   isAuthenticated?: boolean;
   user?: AuthUser | null;
+  /** Read fail-closed by the page; off unless the API said on. */
+  autoPublishEnabled?: boolean;
 }) {
+  const trustCards = buildTrustCards(autoPublishEnabled);
   const heading = isCustomer
     ? 'İhtiyacın olan hizmet için yeni talebini oluştur.'
     : 'İhtiyacın olan hizmet için ilk talebini oluştur.';
@@ -491,7 +515,11 @@ function FinalCTA({
           </div>
         </div>
 
-        <div className="lp-trust-grid">
+        <div
+          className="lp-trust-grid"
+          data-testid="landing-trust-cards"
+          data-auto-publish={autoPublishEnabled ? 'on' : 'off'}
+        >
           {trustCards.map(({ title, desc, Icon: TrustIcon }) => (
             <article className="lp-trust-card" key={title}>
               <span className="lp-trust-icon">

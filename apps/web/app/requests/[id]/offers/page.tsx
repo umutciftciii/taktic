@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import {
   apiFetch,
   type CustomerReviewState,
-  CustomerServiceRequest,
+  CustomerServiceRequestDetail,
   MatchedProviderContact,
   fetchOrNotFound,
   loadMatchedContact,
@@ -20,6 +20,7 @@ import {
   requestSummaryBody,
   requestTimelineSteps,
 } from '../../../../lib/request-lifecycle';
+import { REQUEST_CONTENT_TITLE, requestContentRows } from '../../../../lib/request-content';
 import { CustomerShell } from '../../customer-shell';
 import { IconArrowLeft, IconCheck, IconMail, IconPhone } from '../../../landing-icons';
 import { ReviewStars } from '../../../review-stars';
@@ -47,16 +48,20 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   // An unknown request and somebody else's request are the same 404 here: the
   // API answers 403 for a request that belongs to another customer, and telling
   // this one that it exists would be a disclosure on its own.
-  const [offers, myRequests, matchedContact] = await Promise.all([
+  const [offers, summary, matchedContact] = await Promise.all([
     fetchOrNotFound(() => apiFetch<RequestOfferPreview[]>(`/service-requests/${id}/offers`)),
-    safeFetchMyRequests(),
+    // The owner's own read of the request — the list row plus what they wrote
+    // into the form. The API answers it for the owner alone (404 for anybody
+    // else), and this page has already been told by the offers call that the
+    // request is theirs; a failed read renders the page without the summary
+    // rather than as an error.
+    safeFetchMyRequest(id),
     // Its own request, never part of the offer payload. The result says which
     // kind of "no" came back, because a customer looking at their own matched
     // request is entitled to know why the details are missing.
     loadMatchedContact<MatchedProviderContact>(`/service-requests/${id}/matched-contact`),
   ]);
 
-  const summary = myRequests.find((request) => request.id === id) ?? null;
   // Only a request waiting for the customer's own proof needs to say what
   // that proof leads to — publish or review — and that is the switch's word,
   // read fail-closed exactly as the request form reads it. Display only: the
@@ -81,6 +86,10 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   // Whether this customer has a match at all decides whether an unavailable
   // contact card is worth explaining or simply is not their business.
   const isMatched = summary?.status === 'MATCHED' || summary?.status === 'COMPLETED';
+  // What the customer sent, row by row; an empty field has no row. The
+  // location is the one row every request has, so the block is never empty
+  // while the summary is there.
+  const contentRows = summary ? requestContentRows(summary) : [];
 
   return (
     <CustomerShell user={user} active="offers">
@@ -120,6 +129,27 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           <p className="cdash-summary-body" data-testid="request-summary-body">
             {requestSummaryBody(summary, autoPublishEnabled)}
           </p>
+
+          {contentRows.length > 0 ? (
+            <section
+              className="cdash-request-content"
+              aria-labelledby="request-content-heading"
+              data-testid="request-content"
+              style={{ marginTop: 24 }}
+            >
+              <h3 className="cdash-summary-label" id="request-content-heading" style={{ margin: 0 }}>
+                {REQUEST_CONTENT_TITLE}
+              </h3>
+              <dl className="cdash-info-grid" style={{ marginTop: 8 }}>
+                {contentRows.map((row) => (
+                  <div className="cdash-info-row" key={row.key} data-testid={`request-content-${row.key}`}>
+                    <dt>{row.label}</dt>
+                    <dd style={row.multiline ? { whiteSpace: 'pre-wrap' } : undefined}>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ) : null}
 
           {summary && !summary.phoneVerifiedAt ? (
             <PhoneVerificationCard
@@ -367,10 +397,10 @@ async function safeFetchReviewState(requestId: string): Promise<CustomerReviewSt
   }
 }
 
-async function safeFetchMyRequests(): Promise<CustomerServiceRequest[]> {
+async function safeFetchMyRequest(id: string): Promise<CustomerServiceRequestDetail | null> {
   try {
-    return await apiFetch<CustomerServiceRequest[]>('/service-requests/my');
+    return await apiFetch<CustomerServiceRequestDetail>(`/service-requests/my/${id}`);
   } catch {
-    return [];
+    return null;
   }
 }

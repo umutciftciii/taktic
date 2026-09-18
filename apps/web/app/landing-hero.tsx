@@ -14,6 +14,7 @@ import {
   type HeroDemoSnapshot,
 } from '../lib/hero-demo';
 import { heroHeadlineLines } from '../lib/hero-headline';
+import { landingPublishCopy } from '../lib/request-next-steps';
 import { IconArrowRight, IconCheck, IconSearch } from './landing-icons';
 import { StartChoiceModal } from './start-choice-modal';
 
@@ -40,6 +41,12 @@ type LandingHeroProps = {
   user?: AuthUser | null;
   /** The platform's current refund window, so the card never states its own. */
   refundWindowHours: number;
+  /**
+   * Whether requests go straight to providers, read fail-closed by the page.
+   * Off unless the API said on, so the floating card promises a review only
+   * while one happens (REQ-UX-011).
+   */
+  autoPublishEnabled?: boolean;
 };
 
 export function LandingHero({
@@ -47,7 +54,9 @@ export function LandingHero({
   isAuthenticated = false,
   user = null,
   refundWindowHours,
+  autoPublishEnabled = false,
 }: LandingHeroProps) {
+  const publishCard = landingPublishCopy(autoPublishEnabled).heroCard;
   const primaryCtaLabel = isCustomer ? 'Yeni Talep Oluştur' : 'Teklif Al';
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -321,10 +330,14 @@ export function LandingHero({
             <RequestProcessDemo />
 
             <div className="lp-hero-cards">
-              <div className="lp-floating-card">
+              <div
+                className="lp-floating-card"
+                data-testid="landing-hero-publish-card"
+                data-auto-publish={autoPublishEnabled ? 'on' : 'off'}
+              >
                 <span>
-                  <span className="lp-floating-label">Ön inceleme</span>
-                  <span className="lp-floating-val">Her talep</span>
+                  <span className="lp-floating-label">{publishCard.label}</span>
+                  <span className="lp-floating-val">{publishCard.value}</span>
                 </span>
               </div>
               <div className="lp-floating-card">

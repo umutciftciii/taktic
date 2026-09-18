@@ -1,9 +1,10 @@
-import { UserRole } from '@prisma/client';
+import { ServiceRequestQuestionType, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createApprovedRequest,
   createCategory,
+  createSelectQuestion,
   createTestApp,
   createUser,
   loginAs,
@@ -12,6 +13,7 @@ import {
   serviceRequestPayload,
   type TestContext,
 } from './harness';
+import { listNeighborhoods } from '../src/modules/locations/turkey-locations';
 
 /**
  * `GET /service-requests/my/:id` — one request, read by its owner.
@@ -87,7 +89,172 @@ describe('GET /service-requests/my/:id', () => {
     expect(detail.body.preferredDate).toBe('2026-09-15T00:00:00.000Z');
     expect(detail.body.preferredDateEnd).toBe('2026-09-20T00:00:00.000Z');
     expect(detail.body.showcaseLead).toBeNull();
-    expect(detail.body).toEqual(list.body[0]);
+    // The detail is the list row plus the request's own answers — nothing
+    // else may differ between the two reads.
+    const { answers, ...detailRow } = detail.body;
+    expect(detailRow).toEqual(list.body[0]);
+    expect(answers).toEqual([]);
+    expect(list.body[0]).not.toHaveProperty('answers');
+  });
+
+  /*
+   * What the owner sent, read back in full: the category, the description,
+   * every answered question with the option's own label rather than its key,
+   * the neighbourhood, the address note, the date range, the budget and the
+   * urgency. A field the customer left empty comes back as null — never as an
+   * empty string, a dash or an invented value — and a question they did not
+   * answer has no row at all.
+   */
+  it('carries the request\'s own content for its owner, and nothing operator-only', async () => {
+    const category = await createCategory(ctx.prisma, 'İçerik', { offerCreditCost: 1 });
+    await createSelectQuestion(ctx.prisma, {
+      categoryId: category.id,
+      key: 'klima_tipi',
+      label: 'Klima tipi',
+      options: [
+        { key: 'split', label: 'Split klima' },
+        { key: 'salon', label: 'Salon tipi' },
+      ],
+      sortOrder: 1,
+    });
+    await createSelectQuestion(ctx.prisma, {
+      categoryId: category.id,
+      key: 'ek_hizmet',
+      label: 'Ek hizmetler',
+      options: [
+        { key: 'temizlik', label: 'İç ünite temizliği' },
+        { key: 'gaz', label: 'Gaz dolumu' },
+        { key: 'montaj', label: 'Montaj' },
+      ],
+      multi: true,
+      sortOrder: 2,
+    });
+    await ctx.prisma.serviceRequestQuestion.create({
+      data: {
+        categoryId: category.id,
+        key: 'not',
+        label: 'Ek not',
+        type: ServiceRequestQuestionType.TEXTAREA,
+        isRequired: false,
+        sortOrder: 3,
+        isActive: true,
+      },
+    });
+    // Answered by nobody in this test: it must not appear as an empty row.
+    await createSelectQuestion(ctx.prisma, {
+      categoryId: category.id,
+      key: 'kat',
+      label: 'Kat',
+      options: [{ key: 'zemin', label: 'Zemin' }],
+      sortOrder: 4,
+    });
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const cookie = await loginAs(ctx.prisma, owner.id);
+    // A spelling the location validator knows, from its own dataset.
+    const [neighborhood] = listNeighborhoods('İstanbul', 'Kadıköy');
+
+    const created = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', cookie)
+      .send(
+        serviceRequestPayload(category.slug, {
+          neighborhood,
+          addressNote: 'Kapıcıya haber verin',
+          budgetMin: 150000,
+          budgetMax: 250000,
+          preferredDate: '2026-10-01',
+          preferredDateEnd: '2026-10-05',
+          urgency: 'FLEXIBLE',
+          description: 'Salon kliması soğutmuyor.',
+          answers: [
+            { questionKey: 'klima_tipi', value: 'salon' },
+            { questionKey: 'ek_hizmet', value: ['gaz', 'temizlik'] },
+            { questionKey: 'not', value: 'Hafta içi öğleden sonra uygunum' },
+          ],
+        }),
+      );
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    // Operator-only columns, written as an operator would.
+    await ctx.prisma.serviceRequest.update({
+      where: { id: created.body.id },
+      data: {
+        moderationNote: 'iç not: dikkat',
+        qualityScoreBreakdown: { description: { points: 10, max: 20 } },
+      },
+    });
+
+    const detail = await request(ctx.server)
+      .get(`/service-requests/my/${created.body.id}`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(detail.body.category).toMatchObject({ id: category.id, slug: category.slug });
+    expect(detail.body.description).toBe('Salon kliması soğutmuyor.');
+    expect(detail.body.neighborhood).toBe(neighborhood);
+    expect(detail.body.addressNote).toBe('Kapıcıya haber verin');
+    expect(detail.body.budgetMin).toBe(150000);
+    expect(detail.body.budgetMax).toBe(250000);
+    expect(detail.body.preferredDate).toBe('2026-10-01T00:00:00.000Z');
+    expect(detail.body.preferredDateEnd).toBe('2026-10-05T00:00:00.000Z');
+    expect(detail.body.urgency).toBe('FLEXIBLE');
+    expect(detail.body.answers).toEqual([
+      {
+        questionKey: 'klima_tipi',
+        questionLabel: 'Klima tipi',
+        questionType: 'SELECT',
+        value: 'salon',
+        displayValue: 'Salon tipi',
+      },
+      {
+        questionKey: 'ek_hizmet',
+        questionLabel: 'Ek hizmetler',
+        questionType: 'MULTI_SELECT',
+        value: ['gaz', 'temizlik'],
+        displayValue: 'Gaz dolumu, İç ünite temizliği',
+      },
+      {
+        questionKey: 'not',
+        questionLabel: 'Ek not',
+        questionType: 'TEXTAREA',
+        value: 'Hafta içi öğleden sonra uygunum',
+        displayValue: 'Hafta içi öğleden sonra uygunum',
+      },
+    ]);
+    // Nothing an operator wrote, and nothing about how the score was computed.
+    expect(detail.body).not.toHaveProperty('moderationNote');
+    expect(detail.body).not.toHaveProperty('qualityScoreBreakdown');
+    const list = await request(ctx.server)
+      .get('/service-requests/my')
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(list.body[0]).not.toHaveProperty('moderationNote');
+    expect(list.body[0]).not.toHaveProperty('qualityScoreBreakdown');
+    expect(list.body[0]).not.toHaveProperty('answers');
+  });
+
+  it('leaves an empty optional field null rather than filling it in', async () => {
+    const category = await createCategory(ctx.prisma, 'Boş', { offerCreditCost: 1 });
+    const owner = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const cookie = await loginAs(ctx.prisma, owner.id);
+    const created = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', cookie)
+      .send(serviceRequestPayload(category.slug, { description: null }))
+      .expect(201);
+
+    const detail = await request(ctx.server)
+      .get(`/service-requests/my/${created.body.id}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(detail.body.description).toBeNull();
+    expect(detail.body.neighborhood).toBeNull();
+    expect(detail.body.addressNote).toBeNull();
+    expect(detail.body.budgetMin).toBeNull();
+    expect(detail.body.budgetMax).toBeNull();
+    expect(detail.body.preferredDate).toBeNull();
+    expect(detail.body.preferredDateEnd).toBeNull();
+    expect(detail.body.urgency).toBeNull();
+    expect(detail.body.answers).toEqual([]);
   });
 
   it('answers 404 for another customer\'s request, exactly like an unknown id', async () => {

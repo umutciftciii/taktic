@@ -4416,3 +4416,63 @@ button:disabled {
   font-weight: 800;
   color: var(--text);
 }
+
+/*
+ * The customer list scrolls inside its own box.
+ *
+ * The same workaround the support queue and the vitrin screens carry:
+ * `.table-scroll` only gets its `overflow-x` inside a `.table-card`, and this
+ * table sits in a `.section-card` — so on a 320px phone its twelve columns
+ * widened the document rather than scrolling. Scoped to this screen, like
+ * the others, because where the remaining admin lists overflow is a separate
+ * decision.
+ */
+.customers-page .table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/*
+ * …and its toolbar's fields may shrink on a phone.
+ *
+ * A field is label + control side by side, and a `<input type="date">` is as
+ * wide as the engine draws it — wider on Linux Chromium and WebKit than on a
+ * Mac, which is where the 2–8px the document grew past a 320px screen in CI
+ * came from. The field may wrap its control under its label, and the control
+ * may shrink below its drawn width; `min-width: 0` is what lets a flex item
+ * do that at all. Scoped to this screen for the same reason as the rule above.
+ */
+.customers-page .admin-toolbar-field {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+
+.customers-page .admin-toolbar input,
+.customers-page .admin-toolbar select {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.customers-page .admin-toolbar-search input {
+  width: auto;
+  flex-basis: 220px;
+}
+
+/*
+ * The proof line under a customer's phone and e-mail: the pill and, when
+ * there is one, its moment — on one line while there is room, folded under
+ * the pill on a phone. Nothing here is red: an unproven channel is a fact,
+ * not a fault.
+ */
+.customer-verification-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.customer-verification-at {
+  font-size: 12px;
+  white-space: nowrap;
+}

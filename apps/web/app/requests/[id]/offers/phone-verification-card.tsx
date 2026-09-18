@@ -88,34 +88,43 @@ export function PhoneVerificationCard({
         </p>
       ) : null}
 
-      <div className="verify-row">
-        <form onSubmit={onSend}>
+      {/*
+        One row of three controls — send, the code, verify — sharing one
+        height, one type size and one baseline (`.otp-row`, REQ-UX-012). The
+        row folds at a phone width: the send button takes a line of its own
+        and the code keeps its button beside it, so nothing is ever clipped
+        or pushed past the edge. Two forms because they are two actions.
+      */}
+      <div className="otp-row" data-testid="phone-verification-controls">
+        <form className="otp-send" onSubmit={onSend}>
           <button
-            className="cdash-btn cdash-btn-secondary"
+            className="cdash-btn cdash-btn-secondary otp-control"
             type="submit"
             disabled={sending || turnstile.status === 'unconfigured'}
+            aria-busy={sending || undefined}
           >
             Doğrulama kodu gönder
           </button>
         </form>
 
-        <form action={verifyPhoneCodeAction} className="verify-row">
+        <form action={verifyPhoneCodeAction} className="otp-verify">
           <input type="hidden" name="requestId" value={requestId} />
           <label className="cdash-visually-hidden" htmlFor="phone-code">
             Doğrulama kodu
           </label>
           <input
             id="phone-code"
+            className="otp-control otp-code"
             name="code"
             inputMode="numeric"
             autoComplete="one-time-code"
             maxLength={6}
             pattern="\d{6}"
             placeholder="6 haneli kod"
-            style={{ maxWidth: 160 }}
+            aria-invalid={state === 'invalid' ? true : undefined}
             required
           />
-          <button className="cdash-btn cdash-btn-primary" type="submit">
+          <button className="cdash-btn cdash-btn-primary otp-control" type="submit">
             Doğrula
           </button>
         </form>

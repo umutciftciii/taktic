@@ -183,8 +183,10 @@ export class AuthService {
             name: true,
             role: true,
             isActive: true,
-            // The account's own proof of its number, for its own screens
-            // only — this read answers to the session and nobody else.
+            // The account's own proofs of its address and its number, for
+            // its own screens only — this read answers to the session and
+            // nobody else.
+            emailVerifiedAt: true,
             phoneVerifiedAt: true,
           },
         },

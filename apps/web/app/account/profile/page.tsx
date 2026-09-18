@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { contactVerification } from '@taktic/shared';
 import { apiFetch, getAccountProfile, getCurrentUser } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { CustomerShell } from '../../requests/customer-shell';
@@ -45,6 +46,11 @@ export default async function AccountProfilePage({ searchParams }: AccountProfil
   const city = profile?.city ?? '';
   const role = ROLE_LABELS[user.role] ?? user.role;
   const displayName = name.trim() || email || 'Hesabım';
+  // The two proofs, from the account's own columns and nothing else
+  // (User.emailVerifiedAt / User.phoneVerifiedAt). The profile read carries
+  // them; the session is the fallback, as for the fields above. Display only.
+  const emailProof = contactVerification(profile?.emailVerifiedAt ?? user.emailVerifiedAt);
+  const phoneProof = contactVerification(profile?.phoneVerifiedAt ?? user.phoneVerifiedAt);
 
   return (
     <CustomerShell user={user} active="settings">
@@ -101,7 +107,10 @@ export default async function AccountProfilePage({ searchParams }: AccountProfil
                 </label>
 
                 <label className="field">
-                  <span className="field-label">Telefon *</span>
+                  <span className="field-label cdash-field-label-row">
+                    <span>Telefon *</span>
+                    <VerificationBadge channel="phone" proof={phoneProof} />
+                  </span>
                   <input
                     className="field-control"
                     name="phone"
@@ -148,7 +157,10 @@ export default async function AccountProfilePage({ searchParams }: AccountProfil
                 </label>
 
                 <label className="field">
-                  <span className="field-label">E-posta</span>
+                  <span className="field-label cdash-field-label-row">
+                    <span>E-posta</span>
+                    <VerificationBadge channel="email" proof={emailProof} />
+                  </span>
                   {/*
                     Read-only rather than disabled: a disabled field posts
                     nothing, and the address is shown because it is part of the
@@ -215,6 +227,34 @@ export default async function AccountProfilePage({ searchParams }: AccountProfil
 
 const DEFAULT_ERROR =
   'Bilgileriniz kaydedilemedi. Ad soyad ve telefon alanlarını kontrol edip tekrar deneyin.';
+
+/**
+ * "Doğrulandı" in ink, "Doğrulanmadı" in neutral grey — words first, the
+ * colour only underlining them. The unverified state is a fact, not a
+ * failure, so it carries no red and no cross. There is deliberately no
+ * button beside it: the phone is proven on a request and the address by the
+ * link in the welcome mail, and a button here would promise a flow this
+ * screen does not have.
+ */
+function VerificationBadge({
+  channel,
+  proof,
+}: {
+  channel: 'email' | 'phone';
+  proof: ReturnType<typeof contactVerification>;
+}) {
+  const subject = channel === 'email' ? 'E-posta' : 'Telefon';
+  return (
+    <span
+      className={`tag ${proof.verified ? 'tag-ink' : 'tag-neutral'} cdash-verify-badge`}
+      data-testid={`account-${channel}-verification`}
+      data-verified={proof.verified ? 'true' : 'false'}
+      aria-label={`${subject} ${proof.label.toLocaleLowerCase('tr-TR')}`}
+    >
+      {proof.label}
+    </span>
+  );
+}
 
 /**
  * The province list, or an empty one.
