@@ -7,7 +7,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { runSerializable } from '../src/common/serializable-transaction';
+import { isConcurrentModificationError, runSerializable } from '../src/common/serializable-transaction';
 import {
   CampaignEngineService,
   type EngineInput,
@@ -433,7 +433,16 @@ describe('limits', () => {
 
     const granted = results.filter((result) => result.outcome === 'EVALUATED' && result.granted !== null);
     expect(granted).toHaveLength(1);
+    // Every loser either saw the limit after a replay or ran out of replays;
+    // neither leaves a row behind.
+    for (const result of results) {
+      expect(['EVALUATED', 'CONCURRENT_MODIFICATION']).toContain(result.outcome);
+      if (result.outcome === 'EVALUATED' && result.granted === null) {
+        expect(outcomesByCampaign(result)).toEqual({ [campaign.id]: 'GLOBAL_LIMIT' });
+      }
+    }
     expect(await ctx.prisma.campaignRedemption.count({ where: { campaignId: campaign.id } })).toBe(1);
+    expect(await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).toMatchObject({ redemptionCount: 1 });
     await expectCounterInvariants();
   });
 });
@@ -460,7 +469,18 @@ function barrier(parties: number) {
 const retryWarnings: string[] = [];
 const recordingLogger = { warn: (message: string) => retryWarnings.push(message), error: () => {} };
 
-function evaluateOverlapping(input: EngineInput, arrive: () => Promise<void>): Promise<EngineResult> {
+/**
+ * When the retry budget runs out, `runSerializable` answers 409
+ * CONCURRENT_MODIFICATION — the documented outcome a hooked caller decides
+ * from committed state (CMP-001 §10.3). Here it is one more legal result for a
+ * loser, never for the winner.
+ */
+const CONCURRENT_MODIFICATION = { outcome: 'CONCURRENT_MODIFICATION' } as const;
+
+function evaluateOverlapping(
+  input: EngineInput,
+  arrive: () => Promise<void>,
+): Promise<EngineResult | typeof CONCURRENT_MODIFICATION> {
   return runSerializable(
     ctx.prisma,
     async (tx) => {
@@ -469,7 +489,10 @@ function evaluateOverlapping(input: EngineInput, arrive: () => Promise<void>): P
       return engine.evaluate(tx, input);
     },
     { label: 'test.evaluate.overlapping', logger: recordingLogger },
-  );
+  ).catch((error: unknown) => {
+    if (isConcurrentModificationError(error)) return CONCURRENT_MODIFICATION;
+    throw error;
+  });
 }
 
 describe('concurrency on one event', () => {
@@ -486,8 +509,10 @@ describe('concurrency on one event', () => {
 
     const grants = results.filter((result) => result.outcome === 'EVALUATED' && result.granted !== null);
     expect(grants).toHaveLength(1);
-    const other = results.find((result) => result.outcome === 'EVALUATED' && result.granted === null);
-    expect(other && outcomesByCampaign(other)).toEqual({ [(await ctx.prisma.campaign.findFirstOrThrow()).id]: 'ALREADY_REDEEMED' });
+    const other = results.find((result) => result.outcome !== 'EVALUATED' || result.granted === null)!;
+    // One loser, replayed once alone: it sees the winner's rows on the replay.
+    expect(other.outcome).toBe('EVALUATED');
+    expect(outcomesByCampaign(other as EngineResult)).toEqual({ [(await ctx.prisma.campaign.findFirstOrThrow()).id]: 'ALREADY_REDEEMED' });
     expect(await ctx.prisma.campaignRedemption.count()).toBe(1);
     expect(await ctx.prisma.campaignTriggerEvent.count()).toBe(1);
     expect((await ctx.prisma.campaignTriggerEvent.findFirstOrThrow()).evaluationCount).toBe(2);
