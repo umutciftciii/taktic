@@ -15,6 +15,8 @@ import { isAnyGroup, type CampaignCondition, type CampaignDefinition } from '../
 
 export type ProviderFacts = {
   providerId: string;
+  /** The owning account, when the profile has one. */
+  userId: string | null;
   status: ProviderStatus;
   approvedAt: Date | null;
   /** From the owning account; null when the profile has no account (guest application). */

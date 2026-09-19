@@ -4,7 +4,10 @@ import { AuthModule } from '../auth/auth.module';
 import { AdminCampaignsController } from './admin-campaigns.controller';
 import { CampaignEngineSettingsService } from './campaign-engine-settings.service';
 import { CampaignsService } from './campaigns.service';
+import { CampaignFactReader } from './engine/campaign-fact-reader';
+import { CampaignEngineRepository } from './engine/campaign-engine.repository';
 import { CampaignEngineService } from './engine/campaign-engine.service';
+import { FactSourceRegistry } from './engine/fact-source-registry';
 
 /**
  * Campaign definitions (CMP-002 S0/S1) and the engine boundary (S2A).
@@ -19,6 +22,13 @@ import { CampaignEngineService } from './engine/campaign-engine.service';
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [AdminCampaignsController],
-  providers: [CampaignsService, CampaignEngineSettingsService, CampaignEngineService],
+  providers: [
+    CampaignsService,
+    CampaignEngineSettingsService,
+    CampaignEngineRepository,
+    CampaignFactReader,
+    FactSourceRegistry,
+    CampaignEngineService,
+  ],
 })
 export class CampaignsModule {}

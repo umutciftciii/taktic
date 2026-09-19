@@ -19,6 +19,7 @@ function facts(overrides: Partial<EvaluationFacts> = {}): EvaluationFacts {
     approvalTransition: false,
     provider: {
       providerId: 'prov_1',
+      userId: 'user_1',
       status: 'APPROVED',
       approvedAt: new Date('2026-09-10T00:00:00.000Z'),
       emailVerifiedAt: null,
