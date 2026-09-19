@@ -1,0 +1,270 @@
+# CMP-002 S2A Migration B dry-run — geçici DB taktic_cmp002_s2a_dryrun (gerçek yerel/staging DB'ye komut yok)
+# 2026-09-19T20:44:59Z · branch claude/cmp-002-s2a-infrastructure-d5e8ed · HEAD 59cba021
+
+## prisma migrate deploy (tüm zincir)
+  └─ 20260919150000_add_campaign_drafts/
+    └─ migration.sql
+  └─ 20260919180000_add_campaign_engine_infrastructure/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+
+## prisma migrate diff --from-url <dryrun> --to-schema-datamodel
+No difference detected.
+
+## migration sayısı
+67
+
+## CreditTransactionType (değişmedi)
+ADMIN_GRANT,ADMIN_DEDUCT,PACKAGE_PURCHASE,OFFER_SPEND,OFFER_REFUND,ADJUSTMENT
+
+## Yeni tablolar satır sayısı (seed yok)
+CampaignTriggerEvent=0
+CampaignRedemption=0
+CampaignEvaluationLog=0
+PromoCreditLot=0
+CampaignProviderCounter=0
+CampaignDailyCounter=0
+
+## CHECK kısıtları
+"Campaign" Campaign_counters_nonnegative
+"CampaignDailyCounter" CampaignDailyCounter_redemptionCount_nonnegative
+"CampaignProviderCounter" CampaignProviderCounter_redemptionCount_nonnegative
+"CampaignRedemption" CampaignRedemption_grantedCredits_bounded
+"CampaignRedemption" CampaignRedemption_revocation_complete
+"CampaignRedemption" CampaignRedemption_spentAtRevoke_bounded
+"CampaignTriggerEvent" CampaignTriggerEvent_evaluationCount_nonnegative
+"CampaignTriggerEvent" CampaignTriggerEvent_factSetKey_matches_trigger
+"CampaignTriggerEvent" CampaignTriggerEvent_purchase_matches_trigger
+"CampaignTriggerEvent" CampaignTriggerEvent_settlement_complete
+"PromoCreditLot" PromoCreditLot_credits_bounded
+"PromoCreditLot" PromoCreditLot_exhausted_means_empty
+
+## \d "Campaign"
+                                          Table "public.Campaign"
+        Column         |              Type              | Collation | Nullable |          Default          
+-----------------------+--------------------------------+-----------+----------+---------------------------
+ id                    | text                           |           | not null | 
+ key                   | text                           |           | not null | 
+ name                  | text                           |           | not null | 
+ status                | "CampaignStatus"               |           | not null | 'DRAFT'::"CampaignStatus"
+ currentVersionId      | text                           |           |          | 
+ createdById           | text                           |           | not null | 
+ createdAt             | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+ updatedAt             | timestamp(3) without time zone |           | not null | 
+ activeVersionId       | text                           |           |          | 
+ budgetConsumedCredits | integer                        |           | not null | 0
+ redemptionCount       | integer                        |           | not null | 0
+Indexes:
+    "Campaign_pkey" PRIMARY KEY, btree (id)
+    "Campaign_activeVersionId_key" UNIQUE, btree ("activeVersionId")
+    "Campaign_createdById_idx" btree ("createdById")
+    "Campaign_currentVersionId_key" UNIQUE, btree ("currentVersionId")
+    "Campaign_key_key" UNIQUE, btree (key)
+    "Campaign_status_updatedAt_idx" btree (status, "updatedAt")
+Check constraints:
+    "Campaign_counters_nonnegative" CHECK ("redemptionCount" >= 0 AND "budgetConsumedCredits" >= 0)
+Foreign-key constraints:
+    "Campaign_activeVersionId_fkey" FOREIGN KEY ("activeVersionId") REFERENCES "CampaignVersion"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "Campaign_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "Campaign_currentVersionId_fkey" FOREIGN KEY ("currentVersionId") REFERENCES "CampaignVersion"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+Referenced by:
+    TABLE ""CampaignAuditLog"" CONSTRAINT "CampaignAuditLog_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignDailyCounter"" CONSTRAINT "CampaignDailyCounter_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignEvaluationLog"" CONSTRAINT "CampaignEvaluationLog_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignEvaluationLog"" CONSTRAINT "CampaignEvaluationLog_winnerCampaignId_fkey" FOREIGN KEY ("winnerCampaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignProviderCounter"" CONSTRAINT "CampaignProviderCounter_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignRedemption"" CONSTRAINT "CampaignRedemption_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignTriggerEvent"" CONSTRAINT "CampaignTriggerEvent_settledByCampaignId_fkey" FOREIGN KEY ("settledByCampaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignVersion"" CONSTRAINT "CampaignVersion_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
+## \d "CampaignTriggerEvent"
+                               Table "public.CampaignTriggerEvent"
+       Column        |              Type              | Collation | Nullable |      Default      
+---------------------+--------------------------------+-----------+----------+-------------------
+ id                  | text                           |           | not null | 
+ triggerEventKey     | text                           |           | not null | 
+ trigger             | "CampaignTrigger"              |           | not null | 
+ providerId          | text                           |           | not null | 
+ purchaseId          | text                           |           |          | 
+ factSetKey          | text                           |           |          | 
+ firstSeenAt         | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+ lastSeenAt          | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+ evaluationCount     | integer                        |           | not null | 0
+ settledByCampaignId | text                           |           |          | 
+ settledRedemptionId | text                           |           |          | 
+ settledAt           | timestamp(3) without time zone |           |          | 
+Indexes:
+    "CampaignTriggerEvent_pkey" PRIMARY KEY, btree (id)
+    "CampaignTriggerEvent_providerId_firstSeenAt_idx" btree ("providerId", "firstSeenAt")
+    "CampaignTriggerEvent_purchaseId_idx" btree ("purchaseId")
+    "CampaignTriggerEvent_settledByCampaignId_idx" btree ("settledByCampaignId")
+    "CampaignTriggerEvent_settledRedemptionId_key" UNIQUE, btree ("settledRedemptionId")
+    "CampaignTriggerEvent_triggerEventKey_key" UNIQUE, btree ("triggerEventKey")
+Check constraints:
+    "CampaignTriggerEvent_evaluationCount_nonnegative" CHECK ("evaluationCount" >= 0)
+    "CampaignTriggerEvent_factSetKey_matches_trigger" CHECK ((trigger = 'PROVIDER_ELIGIBILITY_REACHED'::"CampaignTrigger") = ("factSetKey" IS NOT NULL))
+    "CampaignTriggerEvent_purchase_matches_trigger" CHECK ((trigger = 'PACKAGE_PAYMENT_SUCCEEDED'::"CampaignTrigger") = ("purchaseId" IS NOT NULL))
+    "CampaignTriggerEvent_settlement_complete" CHECK (("settledByCampaignId" IS NULL) = ("settledRedemptionId" IS NULL) AND ("settledRedemptionId" IS NULL) = ("settledAt" IS NULL))
+Foreign-key constraints:
+    "CampaignTriggerEvent_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "ProviderProfile"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignTriggerEvent_purchaseId_fkey" FOREIGN KEY ("purchaseId") REFERENCES "PackagePurchase"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignTriggerEvent_settledByCampaignId_fkey" FOREIGN KEY ("settledByCampaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignTriggerEvent_settledRedemptionId_fkey" FOREIGN KEY ("settledRedemptionId") REFERENCES "CampaignRedemption"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+Referenced by:
+    TABLE ""CampaignEvaluationLog"" CONSTRAINT "CampaignEvaluationLog_triggerEventId_fkey" FOREIGN KEY ("triggerEventId") REFERENCES "CampaignTriggerEvent"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""CampaignRedemption"" CONSTRAINT "CampaignRedemption_triggerEventId_fkey" FOREIGN KEY ("triggerEventId") REFERENCES "CampaignTriggerEvent"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
+## \d "CampaignRedemption"
+                                         Table "public.CampaignRedemption"
+       Column       |              Type              | Collation | Nullable |                Default                
+--------------------+--------------------------------+-----------+----------+---------------------------------------
+ id                 | text                           |           | not null | 
+ campaignId         | text                           |           | not null | 
+ campaignVersionId  | text                           |           | not null | 
+ providerId         | text                           |           | not null | 
+ userId             | text                           |           |          | 
+ trigger            | "CampaignTrigger"              |           | not null | 
+ triggerEventId     | text                           |           | not null | 
+ triggerEventKey    | text                           |           | not null | 
+ purchaseId         | text                           |           |          | 
+ status             | "CampaignRedemptionStatus"     |           | not null | 'GRANTED'::"CampaignRedemptionStatus"
+ rulesSnapshot      | jsonb                          |           | not null | 
+ grantedCredits     | integer                        |           | not null | 
+ grantTransactionId | text                           |           |          | 
+ grantedAt          | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+ revokedAt          | timestamp(3) without time zone |           |          | 
+ revokeReason       | "CampaignRevokeReason"         |           |          | 
+ spentAtRevoke      | integer                        |           |          | 
+ revokedById        | text                           |           |          | 
+Indexes:
+    "CampaignRedemption_pkey" PRIMARY KEY, btree (id)
+    "CampaignRedemption_campaignId_providerId_idx" btree ("campaignId", "providerId")
+    "CampaignRedemption_campaignId_triggerEventKey_key" UNIQUE, btree ("campaignId", "triggerEventKey")
+    "CampaignRedemption_campaignVersionId_idx" btree ("campaignVersionId")
+    "CampaignRedemption_grantTransactionId_key" UNIQUE, btree ("grantTransactionId")
+    "CampaignRedemption_providerId_status_idx" btree ("providerId", status)
+    "CampaignRedemption_purchaseId_idx" btree ("purchaseId")
+    "CampaignRedemption_revokedById_idx" btree ("revokedById")
+    "CampaignRedemption_triggerEventId_idx" btree ("triggerEventId")
+    "CampaignRedemption_triggerEventKey_idx" btree ("triggerEventKey")
+    "CampaignRedemption_userId_idx" btree ("userId")
+Check constraints:
+    "CampaignRedemption_grantedCredits_bounded" CHECK ("grantedCredits" >= 1 AND "grantedCredits" <= 1000)
+    "CampaignRedemption_revocation_complete" CHECK ((status = 'REVOKED'::"CampaignRedemptionStatus") = ("revokedAt" IS NOT NULL) AND (status = 'REVOKED'::"CampaignRedemptionStatus") = ("revokeReason" IS NOT NULL))
+    "CampaignRedemption_spentAtRevoke_bounded" CHECK ("spentAtRevoke" IS NULL OR "spentAtRevoke" >= 0 AND "spentAtRevoke" <= "grantedCredits")
+Foreign-key constraints:
+    "CampaignRedemption_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignRedemption_campaignVersionId_fkey" FOREIGN KEY ("campaignVersionId") REFERENCES "CampaignVersion"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignRedemption_grantTransactionId_fkey" FOREIGN KEY ("grantTransactionId") REFERENCES "ProviderCreditTransaction"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignRedemption_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "ProviderProfile"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignRedemption_purchaseId_fkey" FOREIGN KEY ("purchaseId") REFERENCES "PackagePurchase"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignRedemption_revokedById_fkey" FOREIGN KEY ("revokedById") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignRedemption_triggerEventId_fkey" FOREIGN KEY ("triggerEventId") REFERENCES "CampaignTriggerEvent"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignRedemption_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+Referenced by:
+    TABLE ""CampaignTriggerEvent"" CONSTRAINT "CampaignTriggerEvent_settledRedemptionId_fkey" FOREIGN KEY ("settledRedemptionId") REFERENCES "CampaignRedemption"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    TABLE ""PromoCreditLot"" CONSTRAINT "PromoCreditLot_redemptionId_fkey" FOREIGN KEY ("redemptionId") REFERENCES "CampaignRedemption"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
+## \d "CampaignEvaluationLog"
+                             Table "public.CampaignEvaluationLog"
+      Column       |              Type              | Collation | Nullable |      Default      
+-------------------+--------------------------------+-----------+----------+-------------------
+ id                | text                           |           | not null | 
+ triggerEventId    | text                           |           | not null | 
+ campaignId        | text                           |           |          | 
+ campaignVersionId | text                           |           |          | 
+ providerId        | text                           |           | not null | 
+ fact              | "CampaignEligibilityFact"      |           |          | 
+ outcome           | "CampaignEvaluationOutcome"    |           | not null | 
+ reasonCode        | text                           |           |          | 
+ winnerCampaignId  | text                           |           |          | 
+ evaluatedAt       | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+Indexes:
+    "CampaignEvaluationLog_pkey" PRIMARY KEY, btree (id)
+    "CampaignEvaluationLog_campaignId_evaluatedAt_idx" btree ("campaignId", "evaluatedAt")
+    "CampaignEvaluationLog_campaignVersionId_idx" btree ("campaignVersionId")
+    "CampaignEvaluationLog_providerId_evaluatedAt_idx" btree ("providerId", "evaluatedAt")
+    "CampaignEvaluationLog_triggerEventId_evaluatedAt_idx" btree ("triggerEventId", "evaluatedAt")
+    "CampaignEvaluationLog_winnerCampaignId_idx" btree ("winnerCampaignId")
+Foreign-key constraints:
+    "CampaignEvaluationLog_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignEvaluationLog_campaignVersionId_fkey" FOREIGN KEY ("campaignVersionId") REFERENCES "CampaignVersion"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignEvaluationLog_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "ProviderProfile"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignEvaluationLog_triggerEventId_fkey" FOREIGN KEY ("triggerEventId") REFERENCES "CampaignTriggerEvent"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignEvaluationLog_winnerCampaignId_fkey" FOREIGN KEY ("winnerCampaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
+## \d "PromoCreditLot"
+                                         Table "public.PromoCreditLot"
+       Column        |              Type              | Collation | Nullable |             Default              
+---------------------+--------------------------------+-----------+----------+----------------------------------
+ id                  | text                           |           | not null | 
+ providerId          | text                           |           | not null | 
+ redemptionId        | text                           |           | not null | 
+ grantedCredits      | integer                        |           | not null | 
+ remainingCredits    | integer                        |           | not null | 
+ expiresAt           | timestamp(3) without time zone |           | not null | 
+ status              | "PromoCreditLotStatus"         |           | not null | 'ACTIVE'::"PromoCreditLotStatus"
+ expiryTransactionId | text                           |           |          | 
+ revokeTransactionId | text                           |           |          | 
+ createdAt           | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+ updatedAt           | timestamp(3) without time zone |           | not null | 
+Indexes:
+    "PromoCreditLot_pkey" PRIMARY KEY, btree (id)
+    "PromoCreditLot_expiryTransactionId_key" UNIQUE, btree ("expiryTransactionId")
+    "PromoCreditLot_providerId_status_expiresAt_idx" btree ("providerId", status, "expiresAt")
+    "PromoCreditLot_redemptionId_key" UNIQUE, btree ("redemptionId")
+    "PromoCreditLot_revokeTransactionId_key" UNIQUE, btree ("revokeTransactionId")
+    "PromoCreditLot_status_expiresAt_idx" btree (status, "expiresAt")
+Check constraints:
+    "PromoCreditLot_credits_bounded" CHECK ("grantedCredits" >= 1 AND "remainingCredits" >= 0 AND "remainingCredits" <= "grantedCredits")
+    "PromoCreditLot_exhausted_means_empty" CHECK (status <> 'EXHAUSTED'::"PromoCreditLotStatus" OR "remainingCredits" = 0)
+Foreign-key constraints:
+    "PromoCreditLot_expiryTransactionId_fkey" FOREIGN KEY ("expiryTransactionId") REFERENCES "ProviderCreditTransaction"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "PromoCreditLot_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "ProviderProfile"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "PromoCreditLot_redemptionId_fkey" FOREIGN KEY ("redemptionId") REFERENCES "CampaignRedemption"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "PromoCreditLot_revokeTransactionId_fkey" FOREIGN KEY ("revokeTransactionId") REFERENCES "ProviderCreditTransaction"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
+## \d "CampaignProviderCounter"
+                      Table "public.CampaignProviderCounter"
+     Column      |              Type              | Collation | Nullable | Default 
+-----------------+--------------------------------+-----------+----------+---------
+ id              | text                           |           | not null | 
+ campaignId      | text                           |           | not null | 
+ providerId      | text                           |           | not null | 
+ redemptionCount | integer                        |           | not null | 0
+ updatedAt       | timestamp(3) without time zone |           | not null | 
+Indexes:
+    "CampaignProviderCounter_pkey" PRIMARY KEY, btree (id)
+    "CampaignProviderCounter_campaignId_providerId_key" UNIQUE, btree ("campaignId", "providerId")
+    "CampaignProviderCounter_providerId_idx" btree ("providerId")
+Check constraints:
+    "CampaignProviderCounter_redemptionCount_nonnegative" CHECK ("redemptionCount" >= 0)
+Foreign-key constraints:
+    "CampaignProviderCounter_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "CampaignProviderCounter_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "ProviderProfile"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
+## \d "CampaignDailyCounter"
+                        Table "public.CampaignDailyCounter"
+     Column      |              Type              | Collation | Nullable | Default 
+-----------------+--------------------------------+-----------+----------+---------
+ id              | text                           |           | not null | 
+ campaignId      | text                           |           | not null | 
+ day             | date                           |           | not null | 
+ redemptionCount | integer                        |           | not null | 0
+ updatedAt       | timestamp(3) without time zone |           | not null | 
+Indexes:
+    "CampaignDailyCounter_pkey" PRIMARY KEY, btree (id)
+    "CampaignDailyCounter_campaignId_day_key" UNIQUE, btree ("campaignId", day)
+Check constraints:
+    "CampaignDailyCounter_redemptionCount_nonnegative" CHECK ("redemptionCount" >= 0)
+Foreign-key constraints:
+    "CampaignDailyCounter_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
