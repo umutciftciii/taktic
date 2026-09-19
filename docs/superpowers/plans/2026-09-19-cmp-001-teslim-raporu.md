@@ -223,4 +223,5 @@ ile `PER_PROVIDER_LIMIT`, 3 olsaydı grant.
 PR [#94](https://github.com/umutciftciii/taktic/pull/94) · revizyon 1 head `26dba7a6` CI 3/3
 ([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)) · revizyon 2 head
 `5db4a398` CI 3/3 ([run 35440525199](https://github.com/umutciftciii/taktic/actions/runs/35440525199)) ·
-**revizyon 3 nihai head ve CI sonucu: bir sonraki commit'te doldurulur.**
+**revizyon 3 tasarım head `60f6c7c9` CI 3/3** ([run](https://github.com/umutciftciii/taktic/actions/runs/35443255039): typecheck · lint · test · build, e2e chromium,
+e2e webkit). Bu satırı ekleyen rapor commit'i PR'ın nihai head'idir; CI sonucu PR'da.
