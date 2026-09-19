@@ -1,7 +1,7 @@
 # CMP-001 — Kampanya motoru envanteri + çekirdek tasarım — Teslim Raporu
 
 Tarih: 2026-09-19 · Branch `claude/cmp-001-campaign-engine-inventory-1dea0c` (taban `origin/main` @
-`89ba7f22`, temiz worktree doğrulandı) · PR/head/CI §8 · Tasarım notu:
+`89ba7f22`, temiz worktree doğrulandı) · PR/head/CI §13 · Tasarım notu:
 `docs/superpowers/specs/2026-09-19-cmp-001-campaign-engine-design.md`.
 
 Docs-only. Üretim kodu, API, şema/migration, ödeme, kredi, webhook, admin UI, gerçek `.env`, Cloudflare,
@@ -9,8 +9,12 @@ deploy, yerel/staging container veya DB verisi **değişmedi**; salt-okunur ince
 yapılmadı. Merge/deploy/yerel eşitleme yapılmadı.
 
 Ön çalışma belgesi `taktick-kampanya-modulu-on-calismasi.md` repoda, ana checkout'ta, worktree'lerde ve
-Spotlight'ta **bulunamadı**; görev tanımındaki madde listesi bağlayıcı yön olarak alındı (tasarım notu
-başındaki not).
+Spotlight'ta **bulunamadı**; repo dışında olması kararları geçersiz kılmaz — CMP-001 brief'i ve güvenli katalog
+yaklaşımı bağlayıcıdır.
+
+**Revizyon 2 (aynı gün, docs-only):** K1 zamanlama hatası düzeltildi (§8), `AUTH-PROVIDER-CONTACT-001`
+bağımlılığı tanımlandı (§9), limit/bütçe modeli genelleştirildi (§10), dilimler ve release sırası
+güncellendi (§11). Değişen kararlar §12'de.
 
 ---
 
@@ -36,8 +40,10 @@ Akış diyagramı ve altı bağlanma noktası: tasarım notu §1.6.
    `activeVersionId` değişimi + audit; redemption versiyon + `rulesSnapshot` taşır.
 2. Kural DSL: `schemaVersion:1`, kök `all`, en fazla bir seviye `any` (derinlik ≤ 2, boyut sınırlı), 10 allowlist
    koşul türü + sabit argüman şeması, kapalı hata kodu kümesi; serbest expression **yok**, ham JSON alanı UI'da yok.
-3. Tetikleyiciler: `PROVIDER_APPROVED` (gerçek geçişte, aynı tx; tx `runSerializable`'a taşınır) ve
-   `PACKAGE_PAYMENT_SUCCEEDED` (settle'da PAID sonrası, aynı tx). Inactivity/coupon **v1 modelinde yok**.
+3. Tetikleyiciler: olay tetikleyicileri `PROVIDER_APPROVED` (gerçek geçişte, aynı tx; tx `runSerializable`'a
+   taşınır) ve `PACKAGE_PAYMENT_SUCCEEDED` (settle'da PAID sonrası, aynı tx) + **uygunluk geçişi**
+   `PROVIDER_ELIGIBILITY_REACHED` (allowlist olgu kümesi ilk kez birlikte true olduğunda, sıradan bağımsız,
+   ömür boyu bir kez; §8). Inactivity/coupon **v1 modelinde yok**.
 4. Tek fayda: süreli promosyon kredi lotu; paket bonusu aynı lotun tetikleyici varyantı.
 5. Bakiye tanımı değişmez; lotlar bakiyenin içinde; `balance = paid + Σ lot.remaining` değişmezi; harcama en
    erken dolacak lot → ücretli; koşullu `updateMany` + Serializable, ek kilit yok.
@@ -46,22 +52,27 @@ Akış diyagramı ve altı bağlanma noktası: tasarım notu §1.6.
    **yok** (`spentAtRevoke` + mevcut manuel inceleme bayrağı); `NO_PRIOR_REVOCATION` + `FIRST_SUCCESSFUL_PAID_PURCHASE`
    iade-tekrar-al döngüsünü keser; günlük revoke eşiği aşılırsa otomatik PAUSED.
 8. Olay başına tek bonus: `triggerEventKey` global unique; deterministik seçim `priority, activatedAt, id`;
-   `stackPolicy` yalnız `EXCLUSIVE`; `perProvider` sabit 1 (DB unique).
-9. Bütçe **kredi** olarak; koşullu artırım ile atomik; revoke/expiry bütçeye dönmez.
+   `stackPolicy` yalnız `EXCLUSIVE`; limit reddinde sonraki aday denenir.
+9. Limitler versiyonda doğrulanmış konfigürasyon (`maxRedemptionsPerProvider` 1–100 zorunlu,
+   `maxRedemptionsGlobal`, `maxRedemptionsPerDay`, `budgetCredits`), sayaçlar kampanyada kümülatif, tümü
+   koşullu `updateMany` ile aynı tx'te; bütçe **kredi**; revoke/expiry sayaçlara dönmez (§10).
 10. Kill switch `OperationsSettings.campaignEngineEnabled` (varsayılan kapalı) + süpürücü anahtarı; sağlayıcı
     yalnız promo bakiye/son kullanma görür; kural, bütçe, diğer kullanıcılar gizli.
 
 ## 3. Önerilen veri modeli
 
-Enum'lar: `CampaignStatus, CampaignTrigger, CampaignBenefitType, CampaignStackPolicy,
-CampaignRedemptionStatus, CampaignRevokeReason, PromoCreditLotStatus, CampaignAuditAction`;
+Enum'lar: `CampaignStatus, CampaignTrigger, CampaignEligibilityFact, CampaignBenefitType, CampaignStackPolicy,
+CampaignRedemptionStatus, CampaignRevokeReason, PromoCreditLotStatus, CampaignEvaluationOutcome,
+CampaignAuditAction`;
 `CreditTransactionType += CAMPAIGN_GRANT, CAMPAIGN_EXPIRY, CAMPAIGN_REVOKE`.
 
-Modeller: `Campaign`, `CampaignVersion` (unique `[campaignId, versionNumber]`), `CampaignRedemption` (unique
-`triggerEventKey`, `[campaignId, providerId]`, `grantTransactionId`, `promoLotId`), `PromoCreditLot` (unique
-`redemptionId`, CHECK `0 ≤ remaining ≤ granted`), `PromoCreditLotConsumption` (unique `[lotId,
-creditTransactionId]`), `CampaignEvaluationLog` (unique `triggerEventKey`), `CampaignDailyCounter`,
-`CampaignAuditLog`, `OperationsSettings` iki yeni Boolean. Cascade silme yok. Tam tablo: tasarım notu §3.
+Modeller: `Campaign` (kümülatif sayaçlar), `CampaignVersion` (unique `[campaignId, versionNumber]`; limit
+alanları, `eligibilityFacts` + `factSetKey`), `CampaignRedemption` (unique `triggerEventKey`,
+`grantTransactionId`, `promoLotId`), `CampaignProviderCounter` (unique `[campaignId, providerId]`),
+`CampaignDailyCounter` (unique `[campaignId, day]`), `PromoCreditLot` (unique `redemptionId`, CHECK
+`0 ≤ remaining ≤ granted`), `PromoCreditLotConsumption` (unique `[lotId, creditTransactionId]`),
+`CampaignEvaluationLog` (unique **değil**; olgu başına değerlendirme), `CampaignAuditLog`, `OperationsSettings`
+iki yeni Boolean. Cascade silme yok. Tam tablo: tasarım notu §3.
 
 ## 4. En riskli geri alma/harcama kararı
 
@@ -73,37 +84,101 @@ gelen 48s iadesi — aynı tx'te expire ile kapatıldı.
 
 ## 5. CMP-002 dilimleri
 
-| Dilim | Migration | Beta için |
-| --- | --- | --- |
-| S0 kural çekirdeği (saf, unit) | yok | zorunlu |
-| S1 kampanya tanımı + admin API/UI | **A** | zorunlu |
-| S2 hak ediş + lot + harcama + expiry süpürücü + kill switch | **B** | zorunlu |
-| S3 sağlayıcı yüzeyi + grant maili | yok | hemen ardından |
-| S4 reversal/revoke + denetim ekranları + otomatik PAUSE | yok | K2 için zorunlu |
-| S5 E2E + fingerprint + runbook | yok | merge öncesi |
-
-En kısa güvenli beta yolu: S0+S1+S2 (+S4 revoke). **Önkoşul (CMP-002 dışı):** sağlayıcı hesabına e-posta ve
-telefon kanıtı kazandıran akış; bugün yok, K1 bu olmadan hiç hak ettirmez.
+Güncel tablo ve release sırası §11; özet: S0 kural çekirdeği → S1 tanım (**migration A**) → S2 hak ediş/lot/
+sayaç/harcama/expiry (**migration B**) → S3 reversal/revoke + denetim → S4 sağlayıcı yüzeyi → S5 E2E +
+fingerprint; paralelde **AUTH-PROVIDER-CONTACT-001** (CMP-002 dışı).
 
 ## 6. İlk iki beta kampanyası
 
-- **K1** `PROVIDER_APPROVED`: `FIRST_PROVIDER_APPROVAL ∧ EMAIL_VERIFIED ∧ PHONE_VERIFIED ∧ NO_PRIOR_REVOCATION`
-  → 10 kredi / 30 gün; perProvider 1, global 1000, perDay 100.
+- **K1** uygunluk geçişi `PROVIDER_ELIGIBILITY_REACHED{PROVIDER_APPROVED, EMAIL_VERIFIED, PHONE_VERIFIED}` +
+  `NO_PRIOR_REVOCATION` → 10 kredi / 30 gün; `maxRedemptionsPerProvider 1, maxRedemptionsGlobal 1000,
+  maxRedemptionsPerDay 100, budgetCredits 10000`. Release kapısı: AUTH-PROVIDER-CONTACT-001 (§9).
 - **K2** `PACKAGE_PAYMENT_SUCCEEDED`: `OFFER_PACKAGE ∧ ONE_TIME_CREDITS ∧ FIRST_SUCCESSFUL_PAID_PURCHASE ∧
-  MIN_PAID_AMOUNT 50000 kuruş ∧ NO_PRIOR_REVOCATION` → 5 kredi / 60 gün; global 2000; pencere 2026-10-01 →
-  2026-12-31.
+  MIN_PAID_AMOUNT 50000 kuruş ∧ NO_PRIOR_REVOCATION` → 5 kredi / 60 gün; `maxRedemptionsPerProvider 1,
+  maxRedemptionsGlobal 2000, budgetCredits 10000`; pencere 2026-10-01 → 2026-12-31. Kapı: S3 revoke.
 
 JSON'lar: tasarım notu §7.
 
 ## 7. Kapsam dışı
 
 Checkout indirimi, ücretsiz vitrin, referral, müşteri indirimi, yorum/kalite ödülü, coupon, scheduled
-inactivity, para bazlı bütçe, borç/mahsup, Lemon iade çağrısı, kademeli admin rolü, sağlayıcı kanıt akışı
-(ayrı iş), `taxNumber` tekilleştirme, çok-instance scheduler kilidi, expiry/revoke e-postaları.
+inactivity, para bazlı bütçe, borç/mahsup, Lemon iade çağrısı, kademeli admin rolü,
+`maxRedemptionsPerBusiness` (kanonik işletme kimliği yok), `taxNumber` tekilleştirme, çok-instance scheduler
+kilidi, expiry/revoke e-postaları, geriye dönük uygunluk taraması. Sağlayıcı kanıt akışı ayrı iş:
+AUTH-PROVIDER-CONTACT-001 (§9).
 
-## 8. PR / head / CI
+## 8. Düzeltilen K1 zamanlama hatası
 
-PR [#94](https://github.com/umutciftciii/taktic/pull/94) · docs head `26dba7a6` · CI **3/3 geçti**
-([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)): typecheck · lint ·
-test · build (13m36s), e2e chromium (15m37s), e2e webkit (12m19s). Bu satırı ekleyen commit yalnız bu
-raporu değiştirir.
+İlk taslak K1'i `PROVIDER_APPROVED` **olayı** + anlık `EMAIL_VERIFIED ∧ PHONE_VERIFIED` koşulu olarak
+yazmıştı: onay anında kanıt eksikse olay bir daha üretilmez ve kampanya hiç hak edilmez. Düzeltme (tasarım
+notu §8): genel bir **uygunluk geçişi** tetikleyicisi `PROVIDER_ELIGIBILITY_REACHED` + allowlist
+`CampaignEligibilityFact {PROVIDER_APPROVED, EMAIL_VERIFIED, PHONE_VERIFIED}` + `FactSourceRegistry` (olgu →
+kanonik `read` + kayıtlı yazıcılar). Her olgu yazıcısı kendi tx'inin son adımında `onProviderFact` çağırır;
+motor tüm olguları kanonik kaynaktan yeniden okur; hepsi true ise
+`triggerEventKey = PROVIDER_ELIGIBILITY_REACHED:<factSetKey>:<providerId>` (zaman damgasız → ömür boyu
+bir kez) ile `CampaignRedemption` unique'ine yazar. Aynı kanıtın tekrar yazımı (guard'lı `updateMany`),
+askı→yeniden onay, admin retry, webhook tekrarı → P2002 → `ALREADY_REDEEMED`, tetikleyici tx commit eder.
+Onay kanıta bağlı **değildir**; eksiklik yalnız uygunluğu (`ELIGIBILITY_INCOMPLETE`) engeller. Geriye dönük
+tarama yok. Validator `PROVIDER_APPROVED` + `EMAIL/PHONE_VERIFIED` bileşimini `USE_ELIGIBILITY_TRIGGER` ile
+reddeder. K1 JSON'u buna göre güncellendi (§6).
+
+## 9. `AUTH-PROVIDER-CONTACT-001` bağımlılığı
+
+Bağımsız iş; CMP-002'nin parçası değil. Kaynak yalnız `User.emailVerifiedAt` / `User.phoneVerifiedAt` (ikinci
+alan yok). Bugünkü CUSTOMER-only noktalar: `auth.controller.ts:98/107` (yalnız register-customer doğrulama
+başlatır), `auth/email-verification.controller.ts:32-36` → `email-verification.service.ts:165`
+(`role !== CUSTOMER` → sessiz return), yazıcı `:132-133`, `customer-activation.service.ts:440-441`,
+`phone-verification.service.ts:210-218` (CUSTOMER + kendi talebi), `account.controller.ts:40-42` +
+`account.service.ts:121` (numara değişiminde atomik sıfırlama, CUSTOMER), `providers.service.ts:1624,1629`
+(profil iletişimi; `User`'a dokunmaz). Sözleşme (tasarım notu §9.2): sağlayıcı kendi e-postasını gerçek
+teslimle, telefonunu SMS OTP ile (mevcut `PhoneVerification` kuralları, talebe bağlı olmayan yeni amaç)
+doğrular; admin link/token/claim/invite/onay kanıt yaratmaz; `User.email/phone` değişince ilgili kanıt aynı
+statement'ta `NULL`; CUSTOMER akışları ve telefon gate'i gerilemez; kanıtsız sağlayıcı hesabı tam
+kullanılır, yalnız K1 uygun olmaz. **Release kapısı mekaniktir:** `activate`, olguların her biri için
+`FactSourceRegistry`'de `role=PROVIDER` yazıcısı yoksa `FACT_SOURCE_UNAVAILABLE` ile reddeder; K1 bu iş
+main'e girip yazıcılarını kaydedene kadar ACTIVE edilemez. Altyapı (S0–S5) bundan bağımsız kurulur.
+
+## 10. Genelleştirilmiş limit/bütçe sözleşmesi
+
+`perProvider=1` sabiti kaldırıldı. `CampaignVersion`: `maxRedemptionsPerProvider` (1–100, zorunlu),
+`maxRedemptionsGlobal?` (≤1M), `maxRedemptionsPerDay?` (≤100k), `budgetCredits?` (≤10M);
+`maxRedemptionsPerBusiness` v1'de yok (kanonik işletme kimliği yok). Sayaçlar kampanya düzeyinde kümülatif
+(`Campaign.redemptionCount/budgetConsumedCredits`, `CampaignProviderCounter`, `CampaignDailyCounter`);
+versiyon değişimi sayaç sıfırlamaz. Tüketim sırası, hepsi tetikleyici tx'inde koşullu `updateMany`:
+per-provider → günlük → global+bütçe → grant; tx dışı ön kontrol yok. Yarışta Serializable retry + koşullu
+`WHERE`; limit reddi HTTP hatası değil `EvaluationLog` sonucu (`PER_PROVIDER_LIMIT/DAILY_LIMIT/GLOBAL_LIMIT/
+BUDGET_EXHAUSTED`), sonraki aday denenir; çağırana `CONCURRENT_MODIFICATION` yalnız mevcut yolların
+davrandığı gibi. PAUSED/ENDED aday değildir, sayaç değişmez. Muhasebe: `budgetConsumedCredits =
+Σ redemption.grantedCredits` (her durumda); `grantedCredits` grant anındaki versiyonun `benefitCredits`'i,
+redemption `campaignVersionId + rulesSnapshot` ile değişmez; lot `remaining` bütçeyi etkilemez. Düşük limitli
+yeni versiyon `LIMIT_BELOW_CONSUMED` uyarısıyla kabul edilir (yeni grant üretmez).
+
+## 11. Güncel CMP-002 dilimleri ve release sırası
+
+| Dilim | Migration | Kapı |
+| --- | --- | --- |
+| S0 kural çekirdeği + `FactSourceRegistry` arayüzü | yok | — |
+| S1 tanım tabloları + admin API/UI (activate kapıları) | **A** | — |
+| S2 hak ediş + sayaçlar + lot + harcama + expiry süpürücü + kill switch | **B** | — |
+| S3 reversal/revoke + denetim ekranları + otomatik PAUSE | yok | **K2 ≥ S3** |
+| S4 sağlayıcı yüzeyi + grant maili | yok | — |
+| S5 E2E + fingerprint + runbook | yok | merge öncesi |
+| AUTH-PROVIDER-CONTACT-001 (paralel, CMP-002 dışı) | yok | **K1 ≥ S3 + bu iş** |
+
+## 12. Bu revizyonda değişen kararlar
+
+1. Üçüncü tetikleyici sınıfı `PROVIDER_ELIGIBILITY_REACHED` + `CampaignEligibilityFact` + `FactSourceRegistry`;
+   `PROVIDER_APPROVED` + kanıt koşulu bileşimi validasyonda reddedilir.
+2. `AUTH-PROVIDER-CONTACT-001` tanımlandı; K1 için mekanik release kapısı (`FACT_SOURCE_UNAVAILABLE`).
+3. `perProvider` sabiti → dört doğrulanmış limit + kümülatif sayaçlar; `CampaignRedemption
+   @@unique([campaignId, providerId])` kaldırıldı, yerine `CampaignProviderCounter` koşullu artırım.
+4. `CampaignEvaluationLog.triggerEventKey` artık unique değil (olgu başına değerlendirme).
+5. Limit reddinde sonraki aday kampanya denenir (önce: değerlendirme biterdi).
+6. Dilim sırası: reversal (S3) sağlayıcı yüzeyinden (S4) önce; K2 kapısı S3.
+7. K1 JSON'u uygunluk geçişi modeline uyarlandı; `FIRST_PROVIDER_APPROVAL` K1'den çıktı (anahtar zaten tekil).
+
+## 13. PR / head / CI
+
+PR [#94](https://github.com/umutciftciii/taktic/pull/94) · revizyon 1 head `26dba7a6` CI 3/3
+([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)) · **revizyon 2 nihai
+head ve CI sonucu: bir sonraki commit'te doldurulur.**
