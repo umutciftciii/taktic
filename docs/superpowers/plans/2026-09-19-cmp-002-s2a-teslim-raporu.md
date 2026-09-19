@@ -4,7 +4,7 @@ Tarih: 2026-09-19 · Branch: `claude/cmp-002-s2a-infrastructure-d5e8ed` · Taban
 Tasarım notu: `docs/superpowers/specs/2026-09-19-cmp-002-s2a-engine-infrastructure-design.md` · Dry-run kaydı:
 `docs/superpowers/plans/2026-09-19-cmp-002-s2a-migration-dryrun.txt` · Bağlayıcı sözleşme: CMP-001 (rev. 3).
 
-PR: __PR_URL__ · head `__HEAD__` · CI: __CI__.
+PR: https://github.com/umutciftciii/taktic/pull/97 · head `81c0018c` (+ bu rapor commit'i) · CI run 35470354140 **3/3 yeşil** (typecheck·lint·test·build ✅, e2e chromium ✅, e2e webkit ✅).
 
 Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Lemon veya gerçek veri işlemi **yapılmadı**.
 Geçici DB'ler (`taktic_cmp002_s2a_shadow`, `taktic_cmp002_s2a_dryrun`, `taktic_cmp002s2a_e2e`) yalnız bu iş için
@@ -129,7 +129,12 @@ Ledger tür kümesi her satırda eski 6 tür; `campaignEngineEnabled` false; 6 k
 | E2E WebKit (`pnpm e2e:webkit`) | ✅ **116 passed, 0 failed** (3.8 dk) |
 | Migration dry-run | ✅ 67 migration, diff boş (§2) |
 
-Flaky/ilgisiz gözlemler: yerel koşuda flaky/ilgisiz başarısızlık görülmedi; CI sonucu aşağıda ayrıca raporlanır.
+Flaky/ilgisiz gözlemler: yerelde yok. **İlk CI koşusu** (run 35469454765, head `20770301`): iki E2E job'ı ✅, test
+job'ında yalnız **kendi yazdığım** `campaign-engine.spec.ts › the last slot under concurrency` düştü — dört gerçekten
+çakışan Serializable tx'te kaybedenler yeniden denemede birbirleriyle tekrar çakışıp `runSerializable` bütçesini (3)
+tüketti → 409 `CONCURRENT_MODIFICATION`. Bu motor hatası değil, CMP-001 §10.3'ün belgelediği çağıran-tarafı sonucu; test
+`81c0018c` ile bunu kaybeden için yasal sonuç sayar (kazanan tek, redemption 1, değişmezler korunur). İkinci koşu 3/3 ✅.
+Mevcut suite'lerde flaky gözlenmedi.
 
 ## 7. "Mevcut kredi davranışı değişmedi" kanıtı
 
