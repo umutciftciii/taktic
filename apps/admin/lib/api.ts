@@ -2957,3 +2957,111 @@ export function showcaseLeadBadgeClass(status: ShowcaseLeadStatus): string {
       return 'badge badge-muted';
   }
 }
+
+// ────────────────────────────── Campaigns (CMP-002 S1) ──────────────────────────────
+
+export type CampaignStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'ENDED';
+
+export type CampaignActor = { id: string; name: string | null };
+
+export type Campaign = {
+  id: string;
+  key: string;
+  name: string;
+  status: CampaignStatus;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: CampaignActor;
+};
+
+export type CampaignVersionSummary = {
+  id: string;
+  versionNumber: number;
+  trigger: string;
+  eligibilityFacts: string[];
+  factSetKey: string | null;
+  benefitType: string;
+  benefitCredits: number;
+  benefitExpiresInDays: number;
+  maxRedemptionsPerProvider: number;
+  maxRedemptionsGlobal: number | null;
+  maxRedemptionsPerDay: number | null;
+  budgetCredits: number | null;
+  windowStartAt: string | null;
+  windowEndAt: string | null;
+  stackPolicy: string;
+  priority: number;
+  createdAt: string;
+  createdBy: CampaignActor;
+};
+
+export type CampaignVersion = CampaignVersionSummary & { definition: unknown };
+
+export type CampaignAuditEntry = {
+  id: string;
+  action: 'CREATED' | 'VERSION_CREATED';
+  campaignVersionId: string | null;
+  actor: CampaignActor;
+  summary: {
+    versionNumber?: number;
+    trigger?: string;
+    benefitCredits?: number;
+    benefitExpiresInDays?: number;
+    maxRedemptionsPerProvider?: number;
+    changedFields?: string[];
+  } | null;
+  createdAt: string;
+};
+
+export type CampaignListResponse = {
+  /** Read from OperationsSettings, fail-closed; no screen in this slice can turn it on. */
+  engineEnabled: boolean;
+  items: Array<Campaign & { currentVersion: CampaignVersionSummary | null }>;
+  nextCursor: string | null;
+};
+
+export type CampaignDetailResponse = {
+  engineEnabled: boolean;
+  campaign: Campaign;
+  currentVersion: CampaignVersion | null;
+  versions: CampaignVersion[];
+  audit: CampaignAuditEntry[];
+};
+
+export type CampaignRuleError = { path: string; code: string; message: string };
+
+export type CampaignValidationResponse = {
+  valid: boolean;
+  errors: CampaignRuleError[];
+  summary: {
+    trigger: string;
+    factSetKey: string | null;
+    eligibilityFacts: string[];
+    conditionCount: number;
+    benefitCredits: number;
+    benefitExpiresInDays: number;
+  } | null;
+};
+
+export function campaignStatusLabel(status: CampaignStatus | string): string {
+  const labels: Record<string, string> = {
+    DRAFT: 'Taslak',
+    ACTIVE: 'Etkin',
+    PAUSED: 'Duraklatıldı',
+    ENDED: 'Sona erdi',
+  };
+  return labels[status] ?? status;
+}
+
+export function campaignStatusBadgeClass(status: CampaignStatus | string): string {
+  switch (status) {
+    case 'ACTIVE':
+      return 'badge badge-good';
+    case 'PAUSED':
+      return 'badge badge-warn';
+    case 'ENDED':
+      return 'badge badge-muted';
+    default:
+      return 'badge badge-info';
+  }
+}

@@ -4476,3 +4476,329 @@ button:disabled {
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* ───────────────────────── Campaign drafts (CMP-002 S1) ───────────────────────── */
+
+.campaign-form {
+  max-width: none;
+}
+
+.campaign-engine-notice {
+  margin: 0;
+}
+
+.campaign-fieldset {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.campaign-fieldset > legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.campaign-fieldset .field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.campaign-fieldset .field > span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.campaign-revise-heading {
+  margin: 0;
+  color: #475569;
+  font-size: 13.5px;
+}
+
+.campaign-radio-list {
+  display: grid;
+  gap: 8px;
+}
+
+.campaign-radio {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.campaign-radio.is-selected {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.campaign-radio input {
+  width: auto;
+  min-height: 0;
+  margin: 4px 0 0;
+  flex: 0 0 auto;
+}
+
+.campaign-radio span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.campaign-radio small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.campaign-empty-rows {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.campaign-condition-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campaign-condition {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: #fcfcfd;
+}
+
+.campaign-condition-head {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 180px) auto;
+  align-items: end;
+}
+
+.campaign-condition-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.campaign-condition-type,
+.campaign-condition-group {
+  min-width: 0;
+}
+
+.campaign-condition-type select,
+.campaign-condition-group select {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .campaign-condition-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .campaign-condition-group,
+  .campaign-condition-head > .btn {
+    grid-column: 2;
+  }
+}
+
+.campaign-condition-args {
+  padding-top: 4px;
+}
+
+.campaign-field-errors {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/*
+ * Text-like inputs take the column they are given and no more; radios and
+ * checkboxes keep their own size.
+ */
+.campaign-form input:not([type='radio']):not([type='checkbox']),
+.campaign-form select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/*
+ * WebKit renders a `<select>`'s menu text at the widest option's width
+ * ("Paket slug’ı şunlardan biri") inside a box that is already `width: 100%`,
+ * and that inner overflow — invisible, and not an element the page can
+ * query — counts towards the document's scrollable width. On a 320px phone
+ * (Linux WebKit in CI; 260px on macOS WebKit) it made the page 9px wider
+ * than the viewport with nothing visibly past the edge. Clipping at the
+ * select keeps the page the width it was given; the ellipsis is what the
+ * clipped text shows. The datetime-local rule below guards the same class
+ * of widget the same way. Each nested grid level is also told its minimum
+ * is zero, so the row shrinks with its column in every engine.
+ */
+.campaign-form select,
+.campaign-form input[type='datetime-local'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.campaign-condition-list,
+.campaign-condition,
+.campaign-condition-head,
+.campaign-condition-args,
+.campaign-condition-head > .field,
+.campaign-fieldset > * {
+  min-width: 0;
+}
+
+/*
+ * Linux WebKit (CI) draws the menulist natively and ignores `overflow` on
+ * the select itself, so the clip has to sit one level up: every field in the
+ * form is a clipping box. The 3px of padding pulled back by the margin keeps
+ * the focus ring and the invalid-state shadow visible inside the clip.
+ */
+.campaign-fieldset .field {
+  overflow: hidden;
+  padding: 3px;
+  margin: -3px;
+}
+
+.campaign-form input[aria-invalid='true'],
+.campaign-form select[aria-invalid='true'] {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px #fee2e2;
+}
+
+.campaign-error-summary {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.campaign-error-summary code {
+  font-size: 11.5px;
+}
+
+.campaign-summary {
+  display: grid;
+  gap: 6px 14px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 10px 0 0;
+  font-size: 13.5px;
+}
+
+.campaign-summary dt {
+  color: #475569;
+  font-weight: 700;
+}
+
+.campaign-summary dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .campaign-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.campaign-condition-summary {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campaign-audit {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campaign-audit-entry {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.campaign-audit-entry:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.campaign-audit-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.campaign-audit-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.campaign-audit-meta {
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * `.table-scroll` gets its `overflow-x` from `.table-card`; the version
+ * history sits in a `.section-card`, so on a 320px phone its eleven columns
+ * would widen the document rather than scroll. Scoped to the campaign
+ * screens for the reason the category release card gives above.
+ */
+.campaigns-page .section-card .table-scroll {
+  overflow-x: auto;
+}
+
+/*
+ * The cards are grid items of `.admin-main-column`, whose automatic minimum
+ * size is their content's min-content width — an eleven-column table would
+ * make the card, not the scroll wrapper, 900px wide. Zero lets the wrapper
+ * above do the scrolling.
+ */
+.campaigns-page .admin-main-column > .section-card,
+.campaigns-page .admin-side-column > .section-card {
+  min-width: 0;
+}
