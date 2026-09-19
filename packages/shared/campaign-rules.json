@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "triggers": ["PROVIDER_APPROVED", "PACKAGE_PAYMENT_SUCCEEDED", "PROVIDER_ELIGIBILITY_REACHED"],
+  "eligibilityTrigger": "PROVIDER_ELIGIBILITY_REACHED",
+  "facts": ["PROVIDER_APPROVED", "EMAIL_VERIFIED", "PHONE_VERIFIED"],
+  "factSet": { "min": 2, "max": 3 },
+  "groups": { "maxAll": 16, "maxAny": 8 },
+  "conditions": {
+    "FIRST_PROVIDER_APPROVAL": {
+      "triggers": ["PROVIDER_APPROVED"],
+      "args": {}
+    },
+    "EMAIL_VERIFIED": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED", "PROVIDER_ELIGIBILITY_REACHED"],
+      "useEligibilityTriggerFor": ["PROVIDER_APPROVED"],
+      "fact": "EMAIL_VERIFIED",
+      "args": {}
+    },
+    "PHONE_VERIFIED": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED", "PROVIDER_ELIGIBILITY_REACHED"],
+      "useEligibilityTriggerFor": ["PROVIDER_APPROVED"],
+      "fact": "PHONE_VERIFIED",
+      "args": {}
+    },
+    "FIRST_SUCCESSFUL_PAID_PURCHASE": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED"],
+      "args": {}
+    },
+    "PACKAGE_SLUG_IN": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED"],
+      "args": {
+        "slugs": { "kind": "slugList", "min": 1, "max": 20 }
+      }
+    },
+    "PACKAGE_TYPE_IN": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED"],
+      "args": {
+        "types": {
+          "kind": "enumList",
+          "values": ["ONE_TIME_CREDITS", "MONTHLY_QUOTA", "CATEGORY_UNLIMITED"],
+          "min": 1,
+          "max": 3
+        }
+      }
+    },
+    "PURCHASE_KIND_IN": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED"],
+      "args": {
+        "kinds": { "kind": "enumList", "values": ["OFFER_PACKAGE"], "min": 1, "max": 1 }
+      }
+    },
+    "MIN_PAID_AMOUNT": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED"],
+      "args": {
+        "minor": { "kind": "integer", "min": 100, "max": 100000000 },
+        "currency": { "kind": "enum", "values": ["TRY"] }
+      }
+    },
+    "NO_PRIOR_REVOCATION": {
+      "triggers": ["PROVIDER_APPROVED", "PACKAGE_PAYMENT_SUCCEEDED", "PROVIDER_ELIGIBILITY_REACHED"],
+      "args": {}
+    },
+    "PROVIDER_APPROVED_WITHIN_DAYS": {
+      "triggers": ["PACKAGE_PAYMENT_SUCCEEDED", "PROVIDER_ELIGIBILITY_REACHED"],
+      "args": {
+        "days": { "kind": "integer", "min": 1, "max": 365 }
+      }
+    }
+  },
+  "benefit": {
+    "types": ["PROMO_CREDITS"],
+    "credits": { "min": 1, "max": 1000 },
+    "expiresInDays": { "min": 1, "max": 365 }
+  },
+  "limits": {
+    "maxRedemptionsPerProvider": { "min": 1, "max": 100, "required": true },
+    "maxRedemptionsGlobal": { "min": 1, "max": 1000000, "required": false },
+    "maxRedemptionsPerDay": { "min": 1, "max": 100000, "required": false },
+    "budgetCredits": { "min": 1, "max": 10000000, "required": false }
+  },
+  "stackPolicies": ["EXCLUSIVE_CREDIT_BONUS"],
+  "priority": { "min": 1, "max": 1000, "default": 100 },
+  "errorCodes": [
+    "SCHEMA_INVALID",
+    "UNSUPPORTED_SCHEMA_VERSION",
+    "UNKNOWN_FIELD",
+    "UNKNOWN_TRIGGER",
+    "UNKNOWN_CONDITION",
+    "CONDITION_TRIGGER_MISMATCH",
+    "USE_ELIGIBILITY_TRIGGER",
+    "ELIGIBILITY_REQUIRED",
+    "ELIGIBILITY_NOT_ALLOWED",
+    "UNKNOWN_FACT",
+    "DUPLICATE_FACT",
+    "FACT_SET_SIZE",
+    "GROUP_DEPTH_EXCEEDED",
+    "GROUP_SIZE_EXCEEDED",
+    "GROUP_EMPTY",
+    "ARGUMENT_INVALID",
+    "UNKNOWN_ARGUMENT",
+    "UNKNOWN_PACKAGE_SLUG",
+    "DUPLICATE_CONDITION",
+    "BENEFIT_INVALID",
+    "LIMIT_INVALID",
+    "WINDOW_INVALID",
+    "STACK_POLICY_INVALID",
+    "PRIORITY_INVALID"
+  ]
+}
