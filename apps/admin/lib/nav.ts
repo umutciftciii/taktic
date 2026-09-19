@@ -80,6 +80,11 @@ export const navGroups: NavGroup[] = [
       { href: '/users', label: 'Admin Kullanıcıları' },
       { href: '/company-settings', label: 'Şirket ve E-posta' },
       { href: '/operations-settings', label: 'Operasyon Ayarları' },
+      // Campaign drafts (CMP-002 S1). Under Yönetim beside the operations
+      // switches rather than under Finans: in this slice a campaign is a
+      // definition an operator drafts, not money that moves — the engine
+      // that would move it is off and has no switch here.
+      { href: '/campaigns', label: 'Kampanyalar' },
       { href: '/notifications', label: 'Bildirim Geçmişi' },
     ],
   },
