@@ -180,5 +180,6 @@ yeni versiyon `LIMIT_BELOW_CONSUMED` uyarısıyla kabul edilir (yeni grant üret
 ## 13. PR / head / CI
 
 PR [#94](https://github.com/umutciftciii/taktic/pull/94) · revizyon 1 head `26dba7a6` CI 3/3
-([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)) · **revizyon 2 nihai
-head ve CI sonucu: bir sonraki commit'te doldurulur.**
+([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)) · **revizyon 2 tasarım
+head `5db4a398` CI 3/3** ([run](https://github.com/umutciftciii/taktic/actions/runs/35440525199): typecheck · lint · test · build, e2e chromium, e2e webkit). Bu satırı
+ekleyen rapor commit'i PR'ın nihai head'idir; CI sonucu PR'da.
