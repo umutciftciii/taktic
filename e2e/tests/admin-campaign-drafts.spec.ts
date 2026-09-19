@@ -33,7 +33,24 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
         const rect = el.getBoundingClientRect();
         return `${el.tagName.toLowerCase()}.${Array.from(el.classList).join('.')} right=${Math.round(rect.right)}`;
       });
-    return { overflow: document.documentElement.scrollWidth - limit, culprits };
+    const overflow = document.documentElement.scrollWidth - limit;
+    if (overflow > 0 && culprits.length === 0) {
+      // Nothing visibly past the edge — WebKit counts some widgets' inner
+      // overflow (select menus, date editors) that the page cannot query.
+      // Bisect: hide each block in turn and name the ones that remove it.
+      const blocks = Array.from(document.querySelectorAll('main section, main fieldset, main .notice, main header, main dl, main ol, main .table-scroll, main label'));
+      for (const block of blocks) {
+        const el = block as HTMLElement;
+        const before = el.style.display;
+        el.style.display = 'none';
+        const now = document.documentElement.scrollWidth - limit;
+        el.style.display = before;
+        if (now <= 0) {
+          culprits.push(`HIDING FIXES: ${el.tagName.toLowerCase()}.${Array.from(el.classList).join('.')} text=${(el.textContent ?? '').slice(0, 40)}`);
+        }
+      }
+    }
+    return { overflow, culprits };
   });
   expect(
     overflow,

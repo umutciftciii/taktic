@@ -4645,11 +4645,8 @@ button:disabled {
 }
 
 /*
- * Text-like inputs take the column they are given and no more. WebKit's
- * `datetime-local` widget has an intrinsic width wider than a 320px phone's
- * form column, and an input's automatic minimum size is that intrinsic
- * width — so without this the window pane, not the input, grew (CI, Linux
- * WebKit: 9px). Radios and checkboxes keep their own size.
+ * Text-like inputs take the column they are given and no more; radios and
+ * checkboxes keep their own size.
  */
 .campaign-form input:not([type='radio']):not([type='checkbox']),
 .campaign-form select {
@@ -4657,6 +4654,33 @@ button:disabled {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+/*
+ * WebKit renders a `<select>`'s menu text at the widest option's width
+ * ("Paket slug’ı şunlardan biri") inside a box that is already `width: 100%`,
+ * and that inner overflow — invisible, and not an element the page can
+ * query — counts towards the document's scrollable width. On a 320px phone
+ * (Linux WebKit in CI; 260px on macOS WebKit) it made the page 9px wider
+ * than the viewport with nothing visibly past the edge. Clipping at the
+ * select keeps the page the width it was given; the ellipsis is what the
+ * clipped text shows. The datetime-local rule below guards the same class
+ * of widget the same way. Each nested grid level is also told its minimum
+ * is zero, so the row shrinks with its column in every engine.
+ */
+.campaign-form select,
+.campaign-form input[type='datetime-local'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.campaign-condition-list,
+.campaign-condition,
+.campaign-condition-head,
+.campaign-condition-args,
+.campaign-condition-head > .field,
+.campaign-fieldset > * {
+  min-width: 0;
 }
 
 .campaign-form input[aria-invalid='true'],
