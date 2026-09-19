@@ -29,6 +29,7 @@ import { RequestDraftsModule } from './modules/request-drafts/request-drafts.mod
 import { RequestLifecycleModule } from './modules/request-lifecycle/request-lifecycle.module';
 import { CreditsModule } from './modules/credits/credits.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
@@ -48,6 +49,7 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
     HealthModule,
     PrismaModule,
     TurnstileModule,
+    CampaignsModule,
     NotificationsModule,
     AuthModule,
     AccountModule,

@@ -215,6 +215,12 @@ export function resetAuthThrottle(app: INestApplication): void {
 
 const TRUNCATED_TABLES = [
   'CompanySettings',
+  // Campaign drafts (CMP-002 S1): the audit rows and the campaign point at
+  // versions, the versions point back at the campaign. CASCADE handles the
+  // cycle; listing them keeps the reset explicit.
+  'CampaignAuditLog',
+  'CampaignVersion',
+  'Campaign',
   // Provider reviews, children first: the moderation log and the reports
   // reference the review, which references the request, offer, provider and
   // customer further down. TRUNCATE … CASCADE would reach them through those

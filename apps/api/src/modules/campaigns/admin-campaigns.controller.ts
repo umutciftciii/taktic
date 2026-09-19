@@ -1,0 +1,83 @@
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AuthGuard } from '../auth/auth.guard';
+import { AuthUser } from '../auth/auth.types';
+import { RolesGuard } from '../auth/roles.guard';
+import { CampaignsService } from './campaigns.service';
+import { CampaignDefinitionDto } from './dto/campaign-definition.dto';
+import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { ListCampaignsDto } from './dto/list-campaigns.dto';
+
+/**
+ * Campaign drafts, for the super admin and nobody else (CMP-002 S1).
+ *
+ * Five routes: list, detail, create, revise, validate. Note what is not here.
+ * No activate, pause, resume or end — the lifecycle beyond DRAFT belongs to
+ * the slice that ships the engine. No PATCH or DELETE on a version — a
+ * version is written once. No provider, customer or public route reads a
+ * campaign, and no route accepts an actor: the actor is the session.
+ *
+ * AuthGuard turns an anonymous call into 401, RolesGuard turns a customer's
+ * or a provider's into 403, and the `validate` route is declared before the
+ * `:id` routes so the two cannot be confused.
+ */
+@Controller('admin/campaigns')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
+export class AdminCampaignsController {
+  constructor(@Inject(CampaignsService) private readonly campaigns: CampaignsService) {}
+
+  @Get()
+  list(@Query() query: ListCampaignsDto) {
+    return this.campaigns.list(query);
+  }
+
+  /** Judges a definition and writes nothing; the builder screen's live check. */
+  @Post('validate')
+  validate(@Body() dto: CampaignDefinitionDto) {
+    return this.campaigns.validateForAdmin(dto.definition);
+  }
+
+  @Post()
+  create(@Body() dto: CreateCampaignDto, @CurrentUser() user: AuthUser) {
+    return this.campaigns.create(dto, requireActor(user));
+  }
+
+  @Get(':id')
+  detail(@Param('id') id: string) {
+    return this.campaigns.getForAdmin(id);
+  }
+
+  @Post(':id/versions')
+  addVersion(
+    @Param('id') id: string,
+    @Body() dto: CampaignDefinitionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.campaigns.addVersion(id, dto.definition, requireActor(user));
+  }
+}
+
+/**
+ * Every audit row and every version row names its actor NOT NULL, so an
+ * anonymous write is refused here rather than failing inside the transaction.
+ * AuthGuard already makes this unreachable; the check stays because the audit
+ * trail's value rests on it.
+ */
+function requireActor(user: AuthUser | null): string {
+  if (!user?.id) {
+    throw new ForbiddenException('Kampanya yalnızca oturum açmış bir yönetici tarafından değiştirilebilir');
+  }
+  return user.id;
+}
