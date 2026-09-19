@@ -1,7 +1,8 @@
 # CMP-001 — Yapılandırılabilir Kampanya Motoru: Envanter + Çekirdek Tasarım
 
 Tarih: 2026-09-19 · Taban: `origin/main` @ `89ba7f22` (SEO-003 merge, temiz worktree doğrulandı) · Docs-only ·
-Revizyon 2 (aynı gün): K1 zamanlama düzeltmesi (§8), AUTH-PROVIDER-CONTACT-001 (§9), genelleştirilmiş limit/bütçe (§10), güncel dilimler (§11).
+Revizyon 2 (aynı gün): K1 zamanlama düzeltmesi (§8), AUTH-PROVIDER-CONTACT-001 (§9), genelleştirilmiş limit/bütçe (§10), güncel dilimler (§11) ·
+Revizyon 3 (aynı gün): olay kimliği ↔ redemption tekilliği ayrımı, `EXCLUSIVE_CREDIT_BONUS` stack/conflict sözleşmesi (§12).
 
 Bu belge CMP-002'nin uygulayacağı sözleşmedir. Üretim kodu, API davranışı, şema/migration, ödeme, kredi,
 webhook, admin UI, gerçek `.env`, Cloudflare, deploy, yerel/staging container veya DB verisi **değişmedi**;
@@ -192,7 +193,8 @@ DB'ye yalnız ayrıştırıcıdan geçen JSON yazılır.
     "budgetCredits": 10000 | null        // 1–10_000_000, global promosyon kredi bütçesi
   },
   "window": { "startAt": "2026-10-01T00:00:00Z" | null, "endAt": null },
-  "stackPolicy": "EXCLUSIVE"
+  "stackPolicy": "EXCLUSIVE_CREDIT_BONUS",   // v1 tek değer (§12.3)
+  "priority": 100                            // 1–1000, aynı olayda eşit kredide küçük kazanır
 }
 ```
 
@@ -244,7 +246,7 @@ HTTP 400, kodlar kapalı küme: `UNSUPPORTED_SCHEMA_VERSION, UNKNOWN_TRIGGER, UN
 CONDITION_TRIGGER_MISMATCH, USE_ELIGIBILITY_TRIGGER, ELIGIBILITY_REQUIRED, ELIGIBILITY_NOT_ALLOWED,
 UNKNOWN_FACT, FACT_SET_SIZE, FACT_SOURCE_UNAVAILABLE, GROUP_DEPTH_EXCEEDED, GROUP_SIZE_EXCEEDED,
 ARGUMENT_INVALID, UNKNOWN_PACKAGE_SLUG, BENEFIT_INVALID, LIMIT_INVALID, LIMIT_BELOW_CONSUMED, WINDOW_INVALID,
-STACK_POLICY_INVALID, DUPLICATE_CONDITION`. Slug'lar validasyonda katalogda **var olmalı** (pasif olabilir);
+STACK_POLICY_INVALID, PRIORITY_INVALID, DUPLICATE_CONDITION`. Slug'lar validasyonda katalogda **var olmalı** (pasif olabilir);
 referans slug'la tutulur, id ile değil, böylece katalog satırı yeniden oluşturulsa bile kural okunabilir
 kalır. `FACT_SOURCE_UNAVAILABLE` versiyon **oluşturmada** uyarı, **aktive etmede** hatadır (§8.4);
 `LIMIT_BELOW_CONSUMED` her ikisinde uyarıdır, bloklamaz (§10.4).
@@ -346,19 +348,28 @@ etkilenmez), mevcut lotlar harcanmaya ve süresi dolmaya devam eder (kazanılmı
 `campaign-lot-expiry` ayrı scheduler anahtarı (`SCHEDULER_JOB_KEYS`'e eklenir, varsayılan kapalı, cron env
 `CAMPAIGN_LOT_EXPIRY_CRON` fallback `30 * * * *`).
 
-### 2.7 Olay başına tek bonus, deterministik seçim
+### 2.7 Olay kimliği, redemption tekilliği ve stack/conflict (tam sözleşme §12)
 
-- `CampaignRedemption.triggerEventKey` **global unique** (`PACKAGE_PAYMENT_SUCCEEDED:<purchaseId>`,
-  `PROVIDER_APPROVED:<providerId>`, `PROVIDER_ELIGIBILITY_REACHED:<factSetKey>:<providerId>`). Bir olay → en
-  fazla bir redemption, kampanyadan bağımsız.
-- Aday sıralaması: `ACTIVE` kampanyalar, aktif versiyonu bu tetikleyiciyi (ve uygunluk geçişinde **aynı olgu
-  kümesini**) taşıyan, `window` içinde, koşulları sağlayan; sıra `priority asc, activatedAt asc, id asc`;
-  **ilk** aday kazanır; limit tüketimi kazanan aday için yapılır, limit reddedilirse **sonraki aday denenir**
-  (§10.3). `stackPolicy` v1'de yalnız `EXCLUSIVE` (enum tek değer; başka değer reddedilir).
-- `CampaignRedemption` yalnız GRANTED/REVOKED/EXPIRED satırı taşır; kaybeden adaylar için satır yazılmaz.
-  Her değerlendirme tetikleyici olayı başına **bir** `CampaignEvaluationLog` satırı yazar (`triggerEventKey`
-  + `evaluatedAt`; uygunluk geçişinde aynı anahtar için birden çok değerlendirme olağandır — her olgu
-  yazımı bir değerlendirmedir — bu yüzden anahtar unique **değildir**, redemption'daki unique'tir).
+- **Olay kimliği kampanyadan bağımsız ve global idempotenttir:** `triggerEventKey` =
+  `PACKAGE_PAYMENT_SUCCEEDED:<purchaseId>` · `PROVIDER_APPROVED:<providerId>` ·
+  `PROVIDER_ELIGIBILITY_REACHED:<factSetKey>:<providerId>`. Bir olay **birden çok** aktif kampanyanın adayı
+  olabilir; bu yüzden anahtar `CampaignRedemption` üzerinde **global unique değildir**. Olay, immutable
+  `CampaignTriggerEvent` kaydında tutulur (`triggerEventKey` orada global unique) ve her değerlendirme ona
+  bağlanır.
+- **Redemption tekilliği:** `CampaignRedemption @@unique([campaignId, triggerEventKey])` — bir kampanya aynı
+  olaya iki kez hak ediş yaratamaz; versiyon değişimi aynı campaign+event için ikinci redemption üretmez
+  (redemption `campaignVersionId` + `rulesSnapshot` + `grantedCredits` snapshot'ını taşır). Aynı sağlayıcının
+  **farklı** olaylarda aynı kampanyaya hak edişi, `maxRedemptionsPerProvider` izin veriyorsa mümkündür.
+  K1'in ömür boyu tek hak edişi = uygunluk olayının sağlayıcı başına tekil anahtarı + campaign+event unique +
+  `maxRedemptionsPerProvider=1` birlikte.
+- **Stack/conflict:** v1'de tek politika `EXCLUSIVE_CREDIT_BONUS` — bir olay en fazla **bir** kampanyadan
+  bonus üretir. Aynı olayın adayları arasında sıra: en yüksek `benefit.credits`, eşitlikte küçük `priority`
+  (versiyonda açık integer), sonra `campaignId` sabit sırası. Kazanan seçilir; kaybedenler
+  `CampaignEvaluationLog{STACK_CONFLICT}` alır ve **hiçbir sayaç/bütçeleri değişmez**. Kazanan bir limitte
+  reddedilirse (savepoint'e geri alınır) sıradaki aday denenir. Farklı olaylardaki kampanyalar (K1 uygunluk
+  olayı, K2 ödeme olayı) birbirini **engellemez**.
+- `CampaignEvaluationLog`: her değerlendirmede (olay, aday) başına bir satır; olay anahtarı unique değildir
+  (uygunluk geçişinde her olgu yazımı bir değerlendirmedir).
 
 ### 2.8 Limitler ve bütçe (genelleştirilmiş; tam sözleşme §10)
 
@@ -394,12 +405,13 @@ enum CampaignStatus        { DRAFT ACTIVE PAUSED ENDED }
 enum CampaignTrigger       { PROVIDER_APPROVED PACKAGE_PAYMENT_SUCCEEDED PROVIDER_ELIGIBILITY_REACHED }
 enum CampaignEligibilityFact { PROVIDER_APPROVED EMAIL_VERIFIED PHONE_VERIFIED }
 enum CampaignBenefitType   { PROMO_CREDIT_LOT }
-enum CampaignStackPolicy   { EXCLUSIVE }
+enum CampaignStackPolicy   { EXCLUSIVE_CREDIT_BONUS }
 enum CampaignRedemptionStatus { GRANTED REVOKED EXPIRED }
 enum CampaignRevokeReason  { PAYMENT_REVERSED ADMIN_REVOKED }
 enum PromoCreditLotStatus  { ACTIVE EXHAUSTED EXPIRED REVOKED }
-enum CampaignEvaluationOutcome { GRANTED NO_CANDIDATE CONDITIONS_FAILED ELIGIBILITY_INCOMPLETE
-                             ALREADY_REDEEMED PER_PROVIDER_LIMIT GLOBAL_LIMIT DAILY_LIMIT BUDGET_EXHAUSTED
+enum CampaignEvaluationOutcome { GRANTED NO_CANDIDATE CONDITIONS_FAILED WINDOW_CLOSED ELIGIBILITY_INCOMPLETE
+                             STACK_CONFLICT EVENT_ALREADY_SETTLED ALREADY_REDEEMED CAMPAIGN_PAUSED
+                             PER_PROVIDER_LIMIT GLOBAL_LIMIT DAILY_LIMIT BUDGET_EXHAUSTED
                              ENGINE_DISABLED ENGINE_ERROR }
 enum CampaignAuditAction   { CREATED VERSION_CREATED VERSION_ACTIVATED ACTIVATED PAUSED RESUMED ENDED
                              AUTO_PAUSED_REVOCATIONS REDEMPTION_REVOKED_BY_ADMIN }
@@ -410,34 +422,36 @@ enum CreditTransactionType += CAMPAIGN_GRANT CAMPAIGN_EXPIRY CAMPAIGN_REVOKE
 
 | Model | Alanlar (özet) | Unique / index / FK |
 | --- | --- | --- |
-| `Campaign` | `id, key (slug), name, status, activeVersionId?, redemptionCount=0, budgetConsumedCredits=0, revokeAlertThreshold=3, priority=100, createdById, activatedAt?, pausedAt?, endedAt?, createdAt, updatedAt` | `@@unique([key])`; `activeVersionId` → `CampaignVersion` (Restrict); `@@index([status, priority])`; CHECK `redemptionCount >= 0 AND budgetConsumedCredits >= 0` (üst sınır versiyonda yaşar, sayaç kümülatiftir — §10.2) |
-| `CampaignVersion` | `id, campaignId, versionNumber, trigger, eligibilityFacts CampaignEligibilityFact[]` (yalnız uygunluk geçişinde, sıralı, boş değil), `factSetKey String?`, `rules Json, benefitType, benefitCredits, benefitValidityDays, maxRedemptionsPerProvider, maxRedemptionsGlobal?, maxRedemptionsPerDay?, budgetCredits?, windowStartAt?, windowEndAt?, stackPolicy, createdById, createdAt` (güncelleme yok) | `@@unique([campaignId, versionNumber])`; `@@index([trigger, factSetKey])`; CHECK `benefitCredits BETWEEN 1 AND 1000`, `benefitValidityDays BETWEEN 1 AND 365`, `maxRedemptionsPerProvider BETWEEN 1 AND 100`, `maxRedemptionsGlobal IS NULL OR BETWEEN 1 AND 1000000`, `maxRedemptionsPerDay IS NULL OR BETWEEN 1 AND 100000`, `budgetCredits IS NULL OR BETWEEN 1 AND 10000000`, `(trigger = 'PROVIDER_ELIGIBILITY_REACHED') = (factSetKey IS NOT NULL)` |
-| `CampaignRedemption` | `id, campaignId, campaignVersionId, providerId, userId?, trigger, triggerEventKey, purchaseId?, status, rulesSnapshot Json, grantedCredits, grantTransactionId, promoLotId, grantedAt, revokedAt?, revokeReason?, spentAtRevoke?, revokedById?` | `@@unique([triggerEventKey])` (olay başına tek bonus, kampanyadan bağımsız); `@@unique([grantTransactionId])`; `@@unique([promoLotId])`; `purchaseId` → `PackagePurchase` (Restrict), `@@index([purchaseId])`, `@@index([campaignId, providerId])`, `@@index([providerId, status])`, `@@index([campaignVersionId])` |
+| `Campaign` | `id, key (slug), name, status, activeVersionId?, redemptionCount=0, budgetConsumedCredits=0, revokeAlertThreshold=3, createdById, activatedAt?, pausedAt?, endedAt?, createdAt, updatedAt` | `@@unique([key])`; `activeVersionId` → `CampaignVersion` (Restrict); `@@index([status])`; CHECK `redemptionCount >= 0 AND budgetConsumedCredits >= 0` (üst sınır versiyonda yaşar, sayaç kümülatiftir — §10.2) |
+| `CampaignVersion` | `id, campaignId, versionNumber, trigger, eligibilityFacts CampaignEligibilityFact[]` (yalnız uygunluk geçişinde, sıralı, boş değil), `factSetKey String?`, `rules Json, benefitType, benefitCredits, benefitValidityDays, maxRedemptionsPerProvider, maxRedemptionsGlobal?, maxRedemptionsPerDay?, budgetCredits?, windowStartAt?, windowEndAt?, stackPolicy, priority=100, createdById, createdAt` (güncelleme yok) | `@@unique([campaignId, versionNumber])`; `@@index([trigger, factSetKey])`; CHECK `benefitCredits BETWEEN 1 AND 1000`, `benefitValidityDays BETWEEN 1 AND 365`, `maxRedemptionsPerProvider BETWEEN 1 AND 100`, `maxRedemptionsGlobal IS NULL OR BETWEEN 1 AND 1000000`, `maxRedemptionsPerDay IS NULL OR BETWEEN 1 AND 100000`, `budgetCredits IS NULL OR BETWEEN 1 AND 10000000`, `priority BETWEEN 1 AND 1000`, `(trigger = 'PROVIDER_ELIGIBILITY_REACHED') = (factSetKey IS NOT NULL)` |
+| `CampaignTriggerEvent` | `id, triggerEventKey, trigger, providerId, purchaseId?, factSetKey?, firstSeenAt, lastSeenAt, evaluationCount, settledByCampaignId?, settledRedemptionId?, settledAt?` | `@@unique([triggerEventKey])` (**olay** kimliği, global); `@@unique([settledRedemptionId])`; `@@index([providerId, firstSeenAt])`; immutable (yalnız `lastSeenAt/evaluationCount` ve bir kez `settled*`) |
+| `CampaignRedemption` | `id, campaignId, campaignVersionId, providerId, userId?, trigger, triggerEventId, triggerEventKey, purchaseId?, status, rulesSnapshot Json, grantedCredits, grantTransactionId, promoLotId, grantedAt, revokedAt?, revokeReason?, spentAtRevoke?, revokedById?` | `@@unique([campaignId, triggerEventKey])` (bir kampanya aynı olaya bir kez; versiyon değişimi ikinci satır üretmez); `triggerEventId` → `CampaignTriggerEvent` (Restrict); `@@index([triggerEventKey])`; `@@unique([grantTransactionId])`; `@@unique([promoLotId])`; `purchaseId` → `PackagePurchase` (Restrict), `@@index([purchaseId])`, `@@index([campaignId, providerId])`, `@@index([providerId, status])`, `@@index([campaignVersionId])` |
 | `CampaignProviderCounter` | `campaignId, providerId, redemptionCount` | `@@unique([campaignId, providerId])`; CHECK `redemptionCount >= 0`; koşullu artırım `maxRedemptionsPerProvider`'ın DB yarısı (§10.3) |
 | `CampaignDailyCounter` | `campaignId, day (date, Europe/Istanbul), redemptionCount` | `@@unique([campaignId, day])` |
 | `PromoCreditLot` | `id, providerId, redemptionId, grantedCredits, remainingCredits, expiresAt, status, expiryTransactionId?, revokeTransactionId?, createdAt, updatedAt` | `@@unique([redemptionId])`; `@@unique([expiryTransactionId])`; `@@unique([revokeTransactionId])`; `@@index([providerId, status, expiresAt])`; `@@index([status, expiresAt])` (süpürücü); CHECK `0 <= remainingCredits <= grantedCredits` |
 | `PromoCreditLotConsumption` | `id, lotId, creditTransactionId, amount, createdAt` | `@@unique([lotId, creditTransactionId])`; `creditTransactionId` → `ProviderCreditTransaction` (Restrict); CHECK `amount > 0` |
-| `CampaignEvaluationLog` | `id, triggerEventKey, trigger, providerId, fact?` (uygunluk geçişinde tetikleyen olgu), `outcome CampaignEvaluationOutcome, reasonCode?, winnerCampaignId?, evaluatedAt` | `@@index([triggerEventKey, evaluatedAt])` (**unique değil**, §2.7); `@@index([providerId, evaluatedAt])` |
+| `CampaignEvaluationLog` | `id, triggerEventId, campaignId?, campaignVersionId?, providerId, fact?` (uygunluk geçişinde tetikleyen olgu), `outcome CampaignEvaluationOutcome, reasonCode?, winnerCampaignId?, evaluatedAt` | `@@index([triggerEventId, evaluatedAt])`, `@@index([campaignId, evaluatedAt])`, `@@index([providerId, evaluatedAt])` (**unique yok**, olay×aday×değerlendirme) |
 | `CampaignAuditLog` | `id, campaignId, action, campaignVersionId?, redemptionId?, actorId?, detail String?` (kısa kod/not, payload değil), `createdAt` | `@@index([campaignId, createdAt])`, `actorId` → `User` |
 | `OperationsSettings` | `+ campaignEngineEnabled Boolean @default(false)`, `+ campaignLotExpirySchedulerEnabled Boolean @default(false)` | mevcut singleton |
 
 Silme yok: hiçbir kampanya modeli `onDelete: Cascade` taşımaz; kampanya "silinmez", `ENDED` olur.
 `(campaignId, providerId)` unique'i **kaldırıldı** (perProvider artık konfigürasyon); DB teminatı
-`CampaignProviderCounter` koşullu artırımı + `triggerEventKey` unique'idir.
+`CampaignProviderCounter` koşullu artırımı + `(campaignId, triggerEventKey)` unique'idir. `triggerEventKey`
+**yalnız** `CampaignTriggerEvent` üzerinde global unique'tir (§12).
 
 ### 3.3 Admin API sözleşmesi (SUPER_ADMIN)
 
 | Uç | Amaç |
 | --- | --- |
 | `GET /admin/campaigns` | liste + özet sayaçlar |
-| `POST /admin/campaigns` | `{key, name, budgetCredits?, priority?}` → DRAFT |
+| `POST /admin/campaigns` | `{key, name}` → DRAFT (limit/priority/stack versiyonda) |
 | `GET /admin/campaigns/:id` | detay + versiyonlar + audit |
 | `POST /admin/campaigns/:id/versions` | kural JSON'u doğrula + immutable versiyon yaz (`201 {version}` / `400 {errors[]}`) |
 | `POST /admin/campaigns/:id/versions/validate` | yalnız doğrula (kurucu ekranı canlı hata için) |
 | `POST /admin/campaigns/:id/versions/:v/activate` | `activeVersionId` değiştir (+ DRAFT ise ACTIVE); `FACT_SOURCE_UNAVAILABLE` kapısı (§8.4), `LIMIT_BELOW_CONSUMED` uyarısı (§10.4) |
 | `POST /admin/campaigns/:id/pause|resume|end` | durum geçişleri, gerekçe zorunlu |
 | `GET /admin/campaigns/:id/redemptions` | filtreli liste |
-| `GET /admin/campaign-evaluations?providerId=` | "neden hak etmedi" |
+| `GET /admin/campaign-evaluations?providerId=&campaignId=&triggerEventKey=` | "neden hak etmedi" — olay × aday satırları, `STACK_CONFLICT`/limit sonuçları |
 | `POST /admin/campaign-redemptions/:id/revoke` | harcanmamış kısmı geri al, gerekçe zorunlu, audit |
 | `GET/PATCH /operations-settings` | `campaignEngineEnabled`, `campaignLotExpirySchedulerEnabled` (mevcut ekran) |
 
@@ -454,7 +468,7 @@ kurucu = form → JSON önizleme → validate → kaydet; tetikleyici seçince k
 
 ```
 webhook tx:  HMAC → PROCESSED? → settle: PAID → PACKAGE_PURCHASE ledger → [evaluate(PACKAGE_PAYMENT_SUCCEEDED, purchase)]
-             → limit sayaçları (koşullu) → CAMPAIGN_GRANT ledger + lot + redemption → recordAttempt(PROCESSED) → commit → receipt mail
+             → olay kaydı → aday sıralama → (savepoint) sayaçlar → CAMPAIGN_GRANT ledger + lot + redemption + settledBy → recordAttempt(PROCESSED) → commit → receipt mail
 approve tx:  status/approvedAt → claim/vitrin yan etkileri → [evaluate(PROVIDER_APPROVED)] → [onProviderFact(PROVIDER_APPROVED)] → commit → mail
 proof tx:    emailVerifiedAt / phoneVerifiedAt yazımı (guard'lı updateMany, count=1 ise) → [onProviderFact(EMAIL_VERIFIED | PHONE_VERIFIED)] → commit
 offer tx:    rules → resolve → offer.create → consume: lots(en erken dolacak) → OFFER_SPEND → consumptions → commit
@@ -476,10 +490,12 @@ yeniden girer (kabul edilebilir: `runSerializable` önce 3 kez dener).
 
 1. Webhook: `PaymentWebhookEvent.status=PROCESSED` kısa devresi (`payments-webhook.service.ts:265`) →
    settle çalışmaz → değerlendirme çalışmaz.
-2. `CampaignRedemption.triggerEventKey` unique → aynı purchase / aynı sağlayıcı onayı / aynı olgu kümesi
-   ikinci kez hak edemez, hangi yoldan gelirse gelsin (yeniden yargılanan `MISMATCHED` olay, askı sonrası
-   ikinci onay geçişi, admin retry, aynı kanıtın tekrar yazılması). P2002 motor içinde
-   `ALREADY_REDEEMED` sonucuna çevrilir; tetikleyici tx **commit** eder.
+2. `CampaignRedemption @@unique([campaignId, triggerEventKey])` → bir kampanya aynı purchase / aynı sağlayıcı
+   onayı / aynı olgu kümesi olayına ikinci kez hak edemez, hangi yoldan gelirse gelsin (yeniden yargılanan
+   `MISMATCHED` olay, askı sonrası ikinci onay geçişi, admin retry, aynı kanıtın tekrar yazılması). Birincil
+   yol Serializable altında **okuma** (`ALREADY_REDEEMED`); P2002 savepoint'li backstop'tur ve yalnız aynı
+   campaign+event için `ALREADY_REDEEMED` üretir. `EXCLUSIVE_CREDIT_BONUS` altında olay zaten başka kampanya
+   tarafından settle edilmişse sonuç `EVENT_ALREADY_SETTLED`'dır (§12.4). Tetikleyici tx **commit** eder.
 3. Kanıt yazıcıları zaten `WHERE … VerifiedAt IS NULL` guard'lıdır (`email-verification.service.ts:132`,
    `phone-verification.service.ts:215`) → aynı kanıt ikinci kez yazılmaz; yazılsa bile (2) tutar.
 4. `CampaignProviderCounter` koşullu artırım → `maxRedemptionsPerProvider` DB'de aşılmaz.
@@ -496,7 +512,7 @@ yeniden girer (kabul edilebilir: `runSerializable` önce 3 kez dener).
 | İade sonrası yeniden satın alma | `REFUNDED` yazılmaz, purchase `PAID` kalır | `FIRST_SUCCESSFUL_PAID_PURCHASE` iade edileni sayar → ikinci alım "ilk" değil; `NO_PRIOR_REVOCATION` | Yok (bonus tekrar üretilemez) |
 | Promo ile teklif → iade → kalıcı kredi | 48s iade lot bilmez | §2.6: lot'a geri; süresi dolmuşsa aynı tx'te expire | Yok |
 | Süre dolmadan hızlı harcama + paket iadesi | Bonus harcanmış | Harcanan kısım geri alınmaz; admin görür; `NO_PRIOR_REVOCATION` gelecek bonusu keser; otomatik PAUSE eşiği | Sınırlı, tek seferlik |
-| Admin tekrar denemesi / çift tık | — | `triggerEventKey` unique + `CampaignProviderCounter` koşullu artırım; pause/resume idempotent | Yok |
+| Admin tekrar denemesi / çift tık | — | `(campaignId, triggerEventKey)` unique + `CampaignTriggerEvent.settledBy` + `CampaignProviderCounter` koşullu artırım; pause/resume idempotent | Yok |
 | Askı → yeniden onay (ikinci "geçiş") | `approvedAt` üzerine yazılır, geçmiş yok | `triggerEventKey` sabit (`PROVIDER_APPROVED:<providerId>` / `PROVIDER_ELIGIBILITY_REACHED:<set>:<providerId>`), `FIRST_PROVIDER_APPROVAL` redemption varlığına bakar | Yok |
 | Kanıt sıfırlanıp yeniden kazanılması (numara değişimi) | kanıt `NULL`→tekrar set | uygunluk anahtarı zaman damgasız → ikinci hak ediş yok (§8.3) | Yok |
 | Onay + kanıt farklı sırada tamamlanır | ilk taslakta olay kaçıyordu | uygunluk geçişi: son olgu yazımında hak ediş (§8) | Yok |
@@ -511,7 +527,7 @@ yeniden girer (kabul edilebilir: `runSerializable` önce 3 kez dener).
 | --- | --- | --- | --- |
 | **S0** Kural çekirdeği | `apps/api/src/modules/campaigns/rules/`: şema tipleri, ayrıştırıcı, validator (hata modeli), saf `evaluate(rules, facts)`, `FactSourceRegistry` iskeleti; unit testler; wiring yok | Yok | — |
 | **S1** Kampanya tanımı | Enum'lar + `Campaign, CampaignVersion, CampaignAuditLog`; admin CRUD/validate/activate/pause API; admin UI liste+kurucu (limit alanları, uygunluk olgu seçici); motor **kapalı** (redemption yok); activate'te `FACT_SOURCE_UNAVAILABLE` kapısı, `LIMIT_BELOW_CONSUMED` uyarısı | **A** (tanım tabloları) | S0 |
-| **S2** Hak ediş + lot + harcama | `CreditTransactionType` genişletme, `CampaignRedemption, CampaignProviderCounter, CampaignDailyCounter, PromoCreditLot, PromoCreditLotConsumption, CampaignEvaluationLog`, `OperationsSettings` anahtarları; `updateProviderStatus`→`runSerializable` + `evaluate(PROVIDER_APPROVED)` + `onProviderFact(PROVIDER_APPROVED)`; webhook/mock settle hook'u; **mevcut CUSTOMER kanıt yazıcılarına `onProviderFact` bağlanmaz** (CUSTOMER'ın provider profili yok — hook `role=PROVIDER` için anlamlıdır ve AUTH-PROVIDER-CONTACT-001 yazıcılarıyla gelir); resolver lot tüketimi; iade lot geri yazımı; expiry süpürücü + scheduler anahtarı | **B** (ledger enum + lot/sayaç tabloları + settings) | S1 |
+| **S2** Hak ediş + lot + harcama | `CreditTransactionType` genişletme, `CampaignTriggerEvent, CampaignRedemption, CampaignProviderCounter, CampaignDailyCounter, PromoCreditLot, PromoCreditLotConsumption, CampaignEvaluationLog`, `OperationsSettings` anahtarları; `updateProviderStatus`→`runSerializable` + `evaluate(PROVIDER_APPROVED)` + `onProviderFact(PROVIDER_APPROVED)`; webhook/mock settle hook'u; **mevcut CUSTOMER kanıt yazıcılarına `onProviderFact` bağlanmaz** (CUSTOMER'ın provider profili yok — hook `role=PROVIDER` için anlamlıdır ve AUTH-PROVIDER-CONTACT-001 yazıcılarıyla gelir); resolver lot tüketimi; iade lot geri yazımı; expiry süpürücü + scheduler anahtarı | **B** (ledger enum + lot/sayaç tabloları + settings) | S1 |
 | **S3** Reversal + denetim | `order_refunded` → revoke; admin revoke ucu; otomatik PAUSE eşiği; redemption/evaluation ekranları | Yok (kolonlar B'de) | S2 |
 | **S4** Sağlayıcı yüzeyi + bildirim | credits sayfası promo satırı/etiketler; grant maili + dedupe; admin ledger etiketleri | Yok | S2 |
 | **S5** E2E + fingerprint + runbook | Playwright akışları; migration A/B dry-run fingerprint; docs | Yok | S1–S4 |
@@ -535,6 +551,7 @@ promo ayrımını görür). K1 yolu: aynı + AUTH-PROVIDER-CONTACT-001.
 | Webhook | `order_created` tekrar teslim → tek redemption; `MISMATCHED→PROCESSED` yeniden yargılama → tek grant; `order_refunded` → revoke harcanmamış, `spentAtRevoke` doğru; kısmi iade aynı davranış |
 | Concurrency | iki teklif aynı sağlayıcı, 1 promo kredi: biri promo biri ücretli/402; grant vs spend yarışı: bakiye eşitliği (`balance = paid + Σremaining`) her senaryoda; bütçe son kredi için iki webhook |
 | Uygunluk geçişi (S2 + AUTH-PROVIDER-CONTACT-001) | üç olgunun 6 permütasyonunda tam olarak **bir** redemption; son olgu yazımı tx'inde grant; eksik olguda `ELIGIBILITY_INCOMPLETE`; askı→yeniden onay, kanıt tekrar yazımı, admin retry → `ALREADY_REDEEMED`; iki olgu eşzamanlı → biri retry, tek grant; kampanya sonradan aktive → geriye dönük grant **yok**; onay kanıt eksikken de başarılı (bloklanmaz) |
+| Olay/stack (S2) | aynı olayda iki kampanya: kredi→priority→campaignId sırası, kaybeden `STACK_CONFLICT` ve sayaçları değişmez; kazanan limitte reddedilince (savepoint geri) sıradaki kazanır; olay settle sonrası tekrar → kazanan `ALREADY_REDEEMED`, diğeri `EVENT_ALREADY_SETTLED`; farklı olaylarda K1+K2 her ikisi grant; aynı kampanya farklı olay + perProvider>1 → ikinci grant; versiyon değişimi aynı campaign+event → ikinci redemption yok; `CampaignTriggerEvent.evaluationCount` artar, `settledRedemptionId` unique |
 | Limitler (S2) | `maxRedemptionsPerProvider=2` ile 3 olay → 2 grant + `PER_PROVIDER_LIMIT`; global/günlük/bütçe için son slot iki eşzamanlı olay → tek grant; limit reddinde sonraki aday kampanya kazanır; yeni versiyonla limit düşürme → `LIMIT_BELOW_CONSUMED` (activate) ve düşük limitte yeni grant yok; sayaç değişmezi `Campaign.redemptionCount = count(redemption)`, `budgetConsumedCredits = Σ grantedCredits`; PAUSED/ENDED'de sayaç ve redemption değişmez |
 | Kanıt regresyonu (AUTH-PROVIDER-CONTACT-001) | CUSTOMER e-posta/OTP akışları ve talep telefon gate'i birebir korunur (mevcut spec'ler yeşil); admin/link/ekran token'ı `emailVerifiedAt` yazmaz; sağlayıcı `User.email`/`phone` değişiminde ilgili kanıt aynı statement'ta sıfırlanır |
 | Expiration | süpürücü: dolan lot → `CAMPAIGN_EXPIRY`, tekrar çalıştırma no-op; süpürücü kapalıyken harcanabilir bakiye doğru; expiry sonrası teklif iadesi net sıfır |
@@ -571,14 +588,16 @@ kapsamaz ama K1 ona kapılıdır.
   "benefit": { "type": "PROMO_CREDIT_LOT", "credits": 10, "validityDays": 30 },
   "limits": { "maxRedemptionsPerProvider": 1, "maxRedemptionsGlobal": 1000, "maxRedemptionsPerDay": 100, "budgetCredits": 10000 },
   "window": { "startAt": null, "endAt": null },
-  "stackPolicy": "EXCLUSIVE"
+  "stackPolicy": "EXCLUSIVE_CREDIT_BONUS",
+  "priority": 10
 }
 ```
 
 Okunuşu: sağlayıcı APPROVED, hesabının e-postası ve telefonu kanıtlı — **hangi sırayla olursa olsun** —
 ilk kez birlikte sağlandığında, ömür boyu bir kez, 10 kredi / 30 gün. `FIRST_PROVIDER_APPROVAL` koşuluna
-gerek yok: `triggerEventKey = PROVIDER_ELIGIBILITY_REACHED:EMAIL_VERIFIED+PHONE_VERIFIED+PROVIDER_APPROVED:<providerId>`
-zaten tekildir. Kanıt olmadan onaylanan sağlayıcı onayını kaybetmez; kanıt sonradan gelince kampanya o anda
+gerek yok: olay anahtarı `PROVIDER_ELIGIBILITY_REACHED:EMAIL_VERIFIED+PHONE_VERIFIED+PROVIDER_APPROVED:<providerId>`
+sağlayıcı başına tektir; `(campaignId, triggerEventKey)` unique + `maxRedemptionsPerProvider=1` ömür boyu tek
+hak edişi verir (§12.2). Kanıt olmadan onaylanan sağlayıcı onayını kaybetmez; kanıt sonradan gelince kampanya o anda
 hak edilir.
 
 **K2 — İlk paket bonusu** (S3 revoke şart)
@@ -597,14 +616,14 @@ hak edilir.
   "benefit": { "type": "PROMO_CREDIT_LOT", "credits": 5, "validityDays": 60 },
   "limits": { "maxRedemptionsPerProvider": 1, "maxRedemptionsGlobal": 2000, "maxRedemptionsPerDay": null, "budgetCredits": 10000 },
   "window": { "startAt": "2026-10-01T00:00:00Z", "endAt": "2026-12-31T23:59:59Z" },
-  "stackPolicy": "EXCLUSIVE"
+  "stackPolicy": "EXCLUSIVE_CREDIT_BONUS",
+  "priority": 20
 }
 ```
 
-`Campaign.priority`: K1=10, K2=20 (farklı tetikleyiciler; sıralama gelecekteki çakışmalar için
-deterministiktir). Yerel envanter: tek seferlik paket fiyatı 100000 kuruş
-(`project_vit_notify_003_local_sync` notu) → K2 `MIN_PAID_AMOUNT` 50000 yerelde sağlanır; prod katalog fiyatı
-bilinmiyor, kurucu ekranı slug listesini katalogdan doğrular.
+`priority` K1=10, K2=20 (farklı olaylar; birbirini engellemez — §12.6). Yerel envanter: tek seferlik paket
+fiyatı 100000 kuruş (`project_vit_notify_003_local_sync` notu) → K2 `MIN_PAID_AMOUNT` 50000 yerelde
+sağlanır; prod katalog fiyatı bilinmiyor, kurucu ekranı slug listesini katalogdan doğrular.
 
 ---
 
@@ -650,13 +669,16 @@ zorlamaz).
    Zaman damgası yok → aynı küme aynı sağlayıcı için **ömür boyu bir kez**. Kanıt sıfırlanıp (telefon
    değişimi) yeniden kazanılsa da ikinci hak ediş yoktur (suistimal freni; ürün isterse sonraki sürüm
    anahtara `epoch` ekler — bilinçli olarak v1'de yok).
-4. **Unique ve yarış:** `CampaignRedemption.triggerEventKey` unique. İki olgu eşzamanlı yazılırsa
-   (e-posta ve telefon aynı saniye) iki Serializable tx de "hepsi true" görebilir → ikisi de insert dener →
-   biri P2002 alır → `ALREADY_REDEEMED`, kendi olgu yazımı **commit** eder. Serializable çakışması olursa
-   `runSerializable` yeniden dener; grant yazımı (sayaç + ledger + lot + redemption) tek tx'tedir, kısmi
-   grant yoktur.
+4. **Unique ve yarış:** olay `CampaignTriggerEvent.triggerEventKey` (global unique), hak ediş
+   `CampaignRedemption (campaignId, triggerEventKey)` unique (§12.2). İki olgu eşzamanlı yazılırsa (e-posta
+   ve telefon aynı saniye) iki Serializable tx de "hepsi true" görebilir → biri P2034 alır, `runSerializable`
+   yeniden dener, tekrar okuma redemption'ı görür → `ALREADY_REDEEMED`; backstop P2002 savepoint'te yakalanır,
+   kendi olgu yazımı **commit** eder. Grant yazımı (sayaç + ledger + lot + redemption + settledBy) tek
+   tx'tedir, kısmi grant yoktur. Aynı olayın adayı olan **başka** kampanyalar §12.3 sırasıyla yarışır; olay
+   settle olduktan sonra onların sonucu `EVENT_ALREADY_SETTLED`'dır.
 5. **Tekrarlar:** aynı kanıtın tekrar yazılması (guard'lı `updateMany`, §3.6), admin'in profili tekrar
-   onaylaması (askı→APPROVED: olgu yeniden true olur, hook çağrılır, anahtar aynı → `ALREADY_REDEEMED`),
+   onaylaması (askı→APPROVED: olgu yeniden true olur, hook çağrılır, anahtar aynı → kazanan için
+   `ALREADY_REDEEMED`, diğer adaylar için `EVENT_ALREADY_SETTLED`),
    webhook tekrarı (uygunluk geçişiyle ilgisiz; PROCESSED kısa devresi), kampanyanın PAUSE→RESUME edilmesi
    (olay üretmez) — hiçbiri ikinci redemption yaratmaz.
 6. **Onay bloklanmaz:** `updateProviderStatus` hiçbir kampanya sonucuna bakmaz; hook yalnız `APPROVED`
@@ -752,7 +774,8 @@ sayaçları sıfırlamaz; limit tanımı versiyona, tüketim kampanyaya aittir. 
 
 ### 10.3 Tüketim sırası, atomiklik, yarış
 
-Tümü tetikleyici tx'inin içinde, kazanan aday için, şu sırayla ve her biri **koşullu `updateMany`** ile:
+Tümü tetikleyici tx'inin içinde, **yalnız o anda denenen aday** için, savepoint altında, şu sırayla ve her
+biri **koşullu `updateMany`** ile (tam akış §12.4):
 
 1. `CampaignProviderCounter` upsert + `WHERE redemptionCount < maxRedemptionsPerProvider → +1`
    (`count!==1` → `PER_PROVIDER_LIMIT`)
@@ -760,14 +783,18 @@ Tümü tetikleyici tx'inin içinde, kazanan aday için, şu sırayla ve her biri
 3. `Campaign WHERE (maxRedemptionsGlobal IS NULL OR redemptionCount < max) AND (budgetCredits IS NULL OR
    budgetConsumedCredits + benefitCredits <= budgetCredits) → redemptionCount+1, budgetConsumedCredits+benefitCredits`
    (`GLOBAL_LIMIT` / `BUDGET_EXHAUSTED` — hangisinin reddettiği önce ayrı SELECT ile teşhis edilir, log için)
-4. `CAMPAIGN_GRANT` ledger + `PromoCreditLot` + `CampaignRedemption`.
+4. `CAMPAIGN_GRANT` ledger + `PromoCreditLot` + `CampaignRedemption` + `CampaignTriggerEvent.settledBy*`.
+
+Herhangi bir adımda ret → `ROLLBACK TO SAVEPOINT` (adayın kısmi sayaç artışı geri alınır), log yazılır,
+**sıradaki aday** denenir. Sayaç ve bütçe yalnız kazanan grant ile aynı Serializable tx'te değişir; kaybeden,
+limit aşan veya PAUSED kaynaklı değerlendirmeler yalnız log satırıdır.
 
 Sınır değerleri versiyondan **tx içinde** okunur (aktif versiyon o anda ne diyorsa). Limit reddi bir hata
-değil, `EvaluationLog` sonucudur; tetikleyici tx **commit** eder ve motor **sonraki aday kampanyayı** dener
-(§2.7). Yarışta: Serializable çakışması → `runSerializable` yeniden dener (webhook/onay/kanıt tx'leri zaten
-bu sarmalayıcıdadır); koşullu `WHERE` son slotu iki tx'in de almasını DB'de engeller. Çağırana (admin, webhook,
-kullanıcı) limit nedeniyle **hiçbir zaman** HTTP hatası dönmez; `CONCURRENT_MODIFICATION` yalnız retry
-bütçesi tükenirse ve mevcut yollar nasıl davranıyorsa öyle (webhook: committed-state'ten karar, §1.3).
+değil, `EvaluationLog` sonucudur; tetikleyici tx **commit** eder. Yarışta: Serializable çakışması →
+`runSerializable` yeniden dener (webhook/onay/kanıt tx'leri zaten bu sarmalayıcıdadır); koşullu `WHERE` son
+slotu iki tx'in de almasını DB'de engeller. Çağırana (admin, webhook, kullanıcı) limit nedeniyle **hiçbir
+zaman** HTTP hatası dönmez; `CONCURRENT_MODIFICATION` yalnız retry bütçesi tükenirse ve mevcut yollar nasıl
+davranıyorsa öyle (webhook: committed-state'ten karar, §1.3).
 
 Ön kontrol (tx dışı) **yoktur**: "önce say sonra yaz" yarışa açıktır; tek doğru yer koşullu güncellemedir.
 Kurucu ekranı yalnız bilgilendirme amaçlı güncel sayaçları gösterir.
@@ -788,12 +815,11 @@ Kurucu ekranı yalnız bilgilendirme amaçlı güncel sayaçları gösterir.
 
 ### 10.5 PAUSED / ENDED
 
-`PAUSED`/`ENDED` kampanya aday kümesine girmez → değerlendirme yapılmaz, sayaç değişmez, olay başka
-kampanyaya gidebilir (aynı `triggerEventKey`, başka kampanya → serbest; unique kampanya bağımsız olduğundan
-olay yine tek redemption üretir). `PAUSED`→`RESUME` sayaçları korur. `ENDED` terminaldir; ENDED'ten sonra
-gelen olaylar o kampanya için hiç değerlendirilmez; mevcut lotlar çalışmaya devam eder.
-
----
+`PAUSED`/`ENDED` kampanya aday kümesine girmez → sayaç değişmez; olay başka kampanyaya gidebilir (aynı
+`triggerEventKey`, başka kampanya → serbest; `EXCLUSIVE_CREDIT_BONUS` olay başına yine tek bonus üretir).
+Tetikleyiciyi eşleyen PAUSED kampanya için bilgi amaçlı `EvaluationLog{CAMPAIGN_PAUSED}` yazılır; ENDED için
+yazılmaz. `PAUSED`→`RESUME` sayaçları korur. `ENDED` terminaldir; ENDED'ten sonra gelen olaylar o kampanya
+için hiç değerlendirilmez; mevcut lotlar çalışmaya devam eder.
 
 ## 11. Güncel CMP-002 dilimleri ve release sırası
 
@@ -803,4 +829,96 @@ gelen olaylar o kampanya için hiç değerlendirilmez; mevcut lotlar çalışmay
 + `FactSourceRegistry` (§8); (2) AUTH-PROVIDER-CONTACT-001 bağımlılığı ve sözleşmesi (§9); (3)
 `perProvider=1` sabiti kaldırıldı, dört limit + sayaç modeli (§10); (4) `(campaignId, providerId)` unique
 yerine `CampaignProviderCounter`; `CampaignEvaluationLog.triggerEventKey` unique değil; S3/S4 sırası
-(reversal önce, sağlayıcı yüzeyi sonra); K1 JSON'u güncellendi (§7).
+(reversal önce, sağlayıcı yüzeyi sonra); K1 JSON'u güncellendi (§7). Revizyon 3 (§12): `triggerEventKey`
+global unique yalnız `CampaignTriggerEvent`'te; redemption `(campaignId, triggerEventKey)`;
+`EXCLUSIVE_CREDIT_BONUS` + versiyon `priority`; savepoint'li aday döngüsü.
+
+---
+
+## 12. Revizyon 3 — olay kimliği, redemption tekilliği ve stack/conflict
+
+### 12.1 Düzeltilen hata
+
+Revizyon 2 `CampaignRedemption.triggerEventKey`'i **global unique** tanımlamıştı. Anahtar bir **olayı**
+temsil eder (`PROVIDER_ELIGIBILITY_REACHED:<factSetKey>:<providerId>` gibi) ve aynı olay birden çok aktif
+kampanyanın adayı olabilir; global unique, ilk değerlendirilen kampanyanın diğerlerini sıralamaya bakmadan
+engellemesi ve "başka kampanyanın redemption'ı" ile "bu kampanyanın tekrarı"nın aynı P2002'ye düşmesi
+demekti. Olay kimliği ile redemption tekilliği ayrılır.
+
+### 12.2 Kimlikler
+
+| Kavram | Kayıt | Tekillik |
+| --- | --- | --- |
+| Olay | `CampaignTriggerEvent{ id, triggerEventKey, trigger, providerId, purchaseId?, factSetKey?, firstSeenAt, lastSeenAt, evaluationCount, settledByCampaignId?, settledRedemptionId?, settledAt? }` | `@@unique([triggerEventKey])` — global, kampanyadan bağımsız, idempotent; satır immutable (yalnız `lastSeenAt/evaluationCount` ve bir kez `settled*` yazılır) |
+| Hak ediş | `CampaignRedemption{ …, campaignId, campaignVersionId, triggerEventId, triggerEventKey, rulesSnapshot, grantedCredits, … }` | `@@unique([campaignId, triggerEventKey])`; `triggerEventId → CampaignTriggerEvent` (Restrict); `@@index([triggerEventKey])` |
+| Değerlendirme | `CampaignEvaluationLog{ triggerEventId, campaignId?, campaignVersionId?, fact?, outcome, reasonCode?, winnerCampaignId?, evaluatedAt }` | unique yok; `@@index([triggerEventId, evaluatedAt])`, `@@index([campaignId, evaluatedAt])` |
+
+Redemption `campaignVersionId` + `rulesSnapshot` + `grantedCredits` snapshot'ını taşır; aktif versiyon
+değişse de aynı campaign+event için ikinci satır **yazılamaz** (unique). Aynı sağlayıcı, aynı kampanya,
+**farklı** olay (ör. K2'de ikinci satın alma) → `maxRedemptionsPerProvider` izin veriyorsa yeni redemption.
+K1 ömür boyu tek: uygunluk anahtarı sağlayıcı başına tek olay + campaign+event unique +
+`maxRedemptionsPerProvider=1`.
+
+### 12.3 Stack/conflict politikası (`CampaignVersion.stackPolicy`, `CampaignVersion.priority`)
+
+- v1'de tek değer: `EXCLUSIVE_CREDIT_BONUS` — bir olay en fazla **bir** promosyon kredi bonusu üretir,
+  kampanyadan bağımsız. `CampaignTriggerEvent.settledByCampaignId` bunun kaydıdır.
+- Deterministik seçim (aynı olayın adayları arasında): (1) en yüksek `benefit.credits`; (2) eşitlikte en
+  küçük `priority` (versiyonda açık integer, 1–1000, varsayılan 100); (3) eşitlikte `campaignId` artan
+  (cuid, sabit). Serbest öncelik ifadesi **yok**.
+- Kaybedenler `EvaluationLog{STACK_CONFLICT, winnerCampaignId}`; sayaç/bütçeleri **değişmez**.
+- Kazanan bir limitte reddedilirse (`PER_PROVIDER_LIMIT/DAILY_LIMIT/GLOBAL_LIMIT/BUDGET_EXHAUSTED`) o aday
+  log'lanır ve **sıradaki** aday kazanır; grant yazılınca kalan adaylar `STACK_CONFLICT` alır.
+- Farklı olaylar bağımsızdır: K1 (uygunluk olayı) ve K2 (ödeme olayı) aynı sağlayıcıya ayrı ayrı grant yazar.
+- Validator: `stackPolicy ∈ {EXCLUSIVE_CREDIT_BONUS}` (`STACK_POLICY_INVALID`), `priority` tam sayı 1–1000
+  (`PRIORITY_INVALID`); alanlar zorunlu.
+- **Stack (ADDITIVE) v1'de yok.** Gelecekte açılırsa gerekenler: olay başına en fazla N kampanya, olay başına
+  toplam `grantedCredits` üst sınırı, aynı sıralama ile ardışık değerlendirme, her aday için ayrı savepoint +
+  sayaç tüketimi, `CampaignTriggerEvent.settled*`'ın listeye dönmesi. Beta için gereksiz; ertelendi.
+
+### 12.4 Transaction sınırı (tek Serializable tetikleyici tx'i)
+
+```
+tetikleyici tx (runSerializable):
+  0. tetikleyicinin kendi yazımı (PAID / APPROVED / *VerifiedAt)
+  1. olay: CampaignTriggerEvent oku; yoksa SAVEPOINT altında insert (P2002 → yeniden oku); evaluationCount+1
+  2. engine kapalı → log ENGINE_DISABLED, dön
+  3. olay settled ise → kazanan kampanya için ALREADY_REDEEMED, diğer adaylar için EVENT_ALREADY_SETTLED; dön
+  4. adaylar: ACTIVE + aktif versiyon tetikleyiciyi (ve factSetKey'i) eşliyor + window + koşullar (kanonik okuma)
+     eşlemeyen/koşul kaçıran: CONDITIONS_FAILED / WINDOW_CLOSED / ELIGIBILITY_INCOMPLETE; PAUSED: CAMPAIGN_PAUSED
+  5. sıralama: credits desc, priority asc, campaignId asc
+  6. her aday için:
+       SAVEPOINT cmp_candidate
+       redemption(campaignId, triggerEventKey) var mı? → ALREADY_REDEEMED, sonraki
+       sayaçlar (10.3 §1–3) → ret → ROLLBACK TO SAVEPOINT, log, sonraki
+       CAMPAIGN_GRANT + lot + redemption (SAVEPOINT altında; P2002 → ROLLBACK TO SAVEPOINT → ALREADY_REDEEMED)
+       event.settledBy* yaz; RELEASE SAVEPOINT; log GRANTED; kalanlara STACK_CONFLICT; break
+  7. commit — sayaç/bütçe/lot/redemption yalnız kazanan için ve yalnız bu tx'te değişmiştir
+```
+
+Savepoint: Prisma interactive transaction tek bağlantı üzerinde çalışır; `SAVEPOINT`/`ROLLBACK TO SAVEPOINT`
+`$executeRaw` ile geçerlidir ve tetikleyici tx'ini bir unique ihlalinde abort olmaktan korur. Birincil
+idempotency yolu **okuma**dır (Serializable altında iki tx aynı boşluğu görürse biri P2034 alır ve
+`runSerializable` yeniden dener; tekrar okuma satırı görür); P2002 yalnız backstop'tur ve **yalnız aynı
+campaign+event** tekrarında `ALREADY_REDEEMED` üretir — başka kampanyanın redemption'ı P2002 üretmez
+(anahtar campaign'e bağlı), onun sonucu adım 3'teki `EVENT_ALREADY_SETTLED`'dır.
+
+### 12.5 Korunanlar
+
+`PROVIDER_ELIGIBILITY_REACHED` zamanlama düzeltmesi (§8) ve AUTH-PROVIDER-CONTACT-001 release kapısı (§8.4,
+§9) aynen geçerli. `Campaign.priority` kaldırıldı (versiyona taşındı); `GET /admin/campaigns` sıralaması
+`status, key`.
+
+### 12.6 Örnekler
+
+**Aynı olay, iki kampanya.** K1 (10 kredi, priority 10) ve varsayımsal K3 "onaylı+kanıtlı sağlayıcıya 5
+kredi" (aynı olgu kümesi, priority 5) ACTIVE. Sağlayıcı P son olguyu tamamlar → tek olay
+`PROVIDER_ELIGIBILITY_REACHED:EMAIL_VERIFIED+PHONE_VERIFIED+PROVIDER_APPROVED:P`. Sıra: K1 (10) > K3 (5).
+K1 sayaçları geçerse: K1 GRANTED, K3 STACK_CONFLICT, olay `settledBy=K1`. K1 `budgetCredits` doluysa: K1
+BUDGET_EXHAUSTED (savepoint geri), K3 GRANTED, olay `settledBy=K3`. Olay daha sonra yeniden değerlendirilirse
+(ör. askı→yeniden onay): kazanan ALREADY_REDEEMED, diğeri EVENT_ALREADY_SETTLED; hiçbir sayaç değişmez.
+
+**Farklı olaylar, K1 + K2.** Aynı sağlayıcı önce paket alır (K2 olayı `PACKAGE_PAYMENT_SUCCEEDED:<purchase>` →
+K2 GRANTED 5 kredi), sonra telefonunu doğrular (K1 olayı → K1 GRANTED 10 kredi). İki olay bağımsız, iki
+redemption, iki lot; K2 `maxRedemptionsPerProvider=1` olduğundan ikinci satın alma K2'de PER_PROVIDER_LIMIT
+alır; K2 3 olsaydı ikinci ve üçüncü satın alma da (farklı olay anahtarları) grant alırdı.

@@ -1,7 +1,7 @@
 # CMP-001 — Kampanya motoru envanteri + çekirdek tasarım — Teslim Raporu
 
 Tarih: 2026-09-19 · Branch `claude/cmp-001-campaign-engine-inventory-1dea0c` (taban `origin/main` @
-`89ba7f22`, temiz worktree doğrulandı) · PR/head/CI §13 · Tasarım notu:
+`89ba7f22`, temiz worktree doğrulandı) · PR/head/CI §14 · Tasarım notu:
 `docs/superpowers/specs/2026-09-19-cmp-001-campaign-engine-design.md`.
 
 Docs-only. Üretim kodu, API, şema/migration, ödeme, kredi, webhook, admin UI, gerçek `.env`, Cloudflare,
@@ -14,7 +14,8 @@ yaklaşımı bağlayıcıdır.
 
 **Revizyon 2 (aynı gün, docs-only):** K1 zamanlama hatası düzeltildi (§8), `AUTH-PROVIDER-CONTACT-001`
 bağımlılığı tanımlandı (§9), limit/bütçe modeli genelleştirildi (§10), dilimler ve release sırası
-güncellendi (§11). Değişen kararlar §12'de.
+güncellendi (§11). Değişen kararlar §12'de. **Revizyon 3 (aynı gün, docs-only):** olay kimliği ↔ redemption
+tekilliği ayrımı ve `EXCLUSIVE_CREDIT_BONUS` stack/conflict sözleşmesi (§13).
 
 ---
 
@@ -51,8 +52,10 @@ Akış diyagramı ve altı bağlanma noktası: tasarım notu §1.6.
 7. `order_refunded` → bonus lotun **harcanmamış** kısmı otomatik revoke; harcanmış kısım için borç/mahsup
    **yok** (`spentAtRevoke` + mevcut manuel inceleme bayrağı); `NO_PRIOR_REVOCATION` + `FIRST_SUCCESSFUL_PAID_PURCHASE`
    iade-tekrar-al döngüsünü keser; günlük revoke eşiği aşılırsa otomatik PAUSED.
-8. Olay başına tek bonus: `triggerEventKey` global unique; deterministik seçim `priority, activatedAt, id`;
-   `stackPolicy` yalnız `EXCLUSIVE`; limit reddinde sonraki aday denenir.
+8. Olay kimliği `triggerEventKey` kampanyadan bağımsız ve yalnız `CampaignTriggerEvent`'te global unique;
+   redemption tekilliği `(campaignId, triggerEventKey)`; `EXCLUSIVE_CREDIT_BONUS` (v1 tek politika): aynı
+   olayda en yüksek kredi → küçük `priority` → `campaignId`; kaybeden `STACK_CONFLICT`, sayaçları değişmez;
+   limit reddinde (savepoint geri) sıradaki aday; farklı olaylar birbirini engellemez (§13).
 9. Limitler versiyonda doğrulanmış konfigürasyon (`maxRedemptionsPerProvider` 1–100 zorunlu,
    `maxRedemptionsGlobal`, `maxRedemptionsPerDay`, `budgetCredits`), sayaçlar kampanyada kümülatif, tümü
    koşullu `updateMany` ile aynı tx'te; bütçe **kredi**; revoke/expiry sayaçlara dönmez (§10).
@@ -67,11 +70,11 @@ CampaignAuditAction`;
 `CreditTransactionType += CAMPAIGN_GRANT, CAMPAIGN_EXPIRY, CAMPAIGN_REVOKE`.
 
 Modeller: `Campaign` (kümülatif sayaçlar), `CampaignVersion` (unique `[campaignId, versionNumber]`; limit
-alanları, `eligibilityFacts` + `factSetKey`), `CampaignRedemption` (unique `triggerEventKey`,
-`grantTransactionId`, `promoLotId`), `CampaignProviderCounter` (unique `[campaignId, providerId]`),
+alanları, `eligibilityFacts` + `factSetKey`), `CampaignTriggerEvent` (unique `triggerEventKey`, immutable olay kaydı, `settledBy*`),
+`CampaignRedemption` (unique `[campaignId, triggerEventKey]`, `grantTransactionId`, `promoLotId`; `triggerEventId` FK), `CampaignProviderCounter` (unique `[campaignId, providerId]`),
 `CampaignDailyCounter` (unique `[campaignId, day]`), `PromoCreditLot` (unique `redemptionId`, CHECK
 `0 ≤ remaining ≤ granted`), `PromoCreditLotConsumption` (unique `[lotId, creditTransactionId]`),
-`CampaignEvaluationLog` (unique **değil**; olgu başına değerlendirme), `CampaignAuditLog`, `OperationsSettings`
+`CampaignEvaluationLog` (unique **değil**; olay × aday × değerlendirme), `CampaignAuditLog`, `OperationsSettings`
 iki yeni Boolean. Cascade silme yok. Tam tablo: tasarım notu §3.
 
 ## 4. En riskli geri alma/harcama kararı
@@ -92,10 +95,12 @@ fingerprint; paralelde **AUTH-PROVIDER-CONTACT-001** (CMP-002 dışı).
 
 - **K1** uygunluk geçişi `PROVIDER_ELIGIBILITY_REACHED{PROVIDER_APPROVED, EMAIL_VERIFIED, PHONE_VERIFIED}` +
   `NO_PRIOR_REVOCATION` → 10 kredi / 30 gün; `maxRedemptionsPerProvider 1, maxRedemptionsGlobal 1000,
-  maxRedemptionsPerDay 100, budgetCredits 10000`. Release kapısı: AUTH-PROVIDER-CONTACT-001 (§9).
+  maxRedemptionsPerDay 100, budgetCredits 10000`; `stackPolicy EXCLUSIVE_CREDIT_BONUS, priority 10`. Release
+  kapısı: AUTH-PROVIDER-CONTACT-001 (§9).
 - **K2** `PACKAGE_PAYMENT_SUCCEEDED`: `OFFER_PACKAGE ∧ ONE_TIME_CREDITS ∧ FIRST_SUCCESSFUL_PAID_PURCHASE ∧
   MIN_PAID_AMOUNT 50000 kuruş ∧ NO_PRIOR_REVOCATION` → 5 kredi / 60 gün; `maxRedemptionsPerProvider 1,
-  maxRedemptionsGlobal 2000, budgetCredits 10000`; pencere 2026-10-01 → 2026-12-31. Kapı: S3 revoke.
+  maxRedemptionsGlobal 2000, budgetCredits 10000`; `stackPolicy EXCLUSIVE_CREDIT_BONUS, priority 20`; pencere
+  2026-10-01 → 2026-12-31. Kapı: S3 revoke.
 
 JSON'lar: tasarım notu §7.
 
@@ -117,7 +122,8 @@ kanonik `read` + kayıtlı yazıcılar). Her olgu yazıcısı kendi tx'inin son 
 motor tüm olguları kanonik kaynaktan yeniden okur; hepsi true ise
 `triggerEventKey = PROVIDER_ELIGIBILITY_REACHED:<factSetKey>:<providerId>` (zaman damgasız → ömür boyu
 bir kez) ile `CampaignRedemption` unique'ine yazar. Aynı kanıtın tekrar yazımı (guard'lı `updateMany`),
-askı→yeniden onay, admin retry, webhook tekrarı → P2002 → `ALREADY_REDEEMED`, tetikleyici tx commit eder.
+askı→yeniden onay, admin retry, webhook tekrarı → aynı campaign+event için `ALREADY_REDEEMED` (okuma; P2002
+savepoint'li backstop), tetikleyici tx commit eder (§13).
 Onay kanıta bağlı **değildir**; eksiklik yalnız uygunluğu (`ELIGIBILITY_INCOMPLETE`) engeller. Geriye dönük
 tarama yok. Validator `PROVIDER_APPROVED` + `EMAIL/PHONE_VERIFIED` bileşimini `USE_ELIGIBILITY_TRIGGER` ile
 reddeder. K1 JSON'u buna göre güncellendi (§6).
@@ -177,9 +183,44 @@ yeni versiyon `LIMIT_BELOW_CONSUMED` uyarısıyla kabul edilir (yeni grant üret
 6. Dilim sırası: reversal (S3) sağlayıcı yüzeyinden (S4) önce; K2 kapısı S3.
 7. K1 JSON'u uygunluk geçişi modeline uyarlandı; `FIRST_PROVIDER_APPROVAL` K1'den çıktı (anahtar zaten tekil).
 
-## 13. PR / head / CI
+## 13. Revizyon 3 — olay kimliği, redemption tekilliği, stack/conflict
+
+**Hata:** revizyon 2 `CampaignRedemption.triggerEventKey`'i global unique yapmıştı; anahtar bir olaydır ve
+aynı olay birden çok kampanyanın adayı olabilir — ilk değerlendirilen kampanya diğerlerini sıralamaya bakmadan
+engellerdi.
+
+**Kimlikler (tasarım notu §12.2):** olay = immutable `CampaignTriggerEvent{triggerEventKey @unique, trigger,
+providerId, purchaseId?, factSetKey?, firstSeenAt, lastSeenAt, evaluationCount, settledByCampaignId?,
+settledRedemptionId? @unique, settledAt?}`; anahtar kampanyadan bağımsız, global idempotent
+(`PROVIDER_ELIGIBILITY_REACHED:<factSetKey>:<providerId>` vb.). Hak ediş = `CampaignRedemption
+@@unique([campaignId, triggerEventKey])` + `triggerEventId` FK + `campaignVersionId/rulesSnapshot/grantedCredits`
+snapshot; versiyon değişimi aynı campaign+event için ikinci satır üretmez. K1 ömür boyu tek = sağlayıcı
+başına tek uygunluk olayı + campaign+event unique + `maxRedemptionsPerProvider=1`. Aynı sağlayıcı, farklı
+olay, aynı kampanya → per-provider limit izin verirse yeni redemption.
+
+**Stack/conflict (§12.3):** `CampaignVersion.stackPolicy = EXCLUSIVE_CREDIT_BONUS` (v1 tek değer) +
+`CampaignVersion.priority` (int 1–1000; validator `STACK_POLICY_INVALID`, `PRIORITY_INVALID`; serbest ifade
+yok). Aynı olayın adayları: en yüksek `benefit.credits` → küçük `priority` → `campaignId`. Kaybedenler
+`EvaluationLog{STACK_CONFLICT, winnerCampaignId}`, sayaç/bütçeleri değişmez. Kazanan limitte reddedilirse
+sıradaki aday kazanır. Farklı olaylar bağımsız. ADDITIVE stack v1'de yok (gerekenler listelendi, ertelendi).
+
+**Transaction (§12.4):** tek Serializable tetikleyici tx'i: olay kaydı (oku/insert) → engine anahtarı → olay
+settled mi (kazanan `ALREADY_REDEEMED`, diğerleri `EVENT_ALREADY_SETTLED`) → adaylar + koşullar (kanonik
+okuma) → sıralama → aday başına `SAVEPOINT`: redemption var mı → sayaçlar (per-provider → günlük →
+global+bütçe, koşullu) → grant + lot + redemption + `settledBy` → kalanlara `STACK_CONFLICT`. Ret →
+`ROLLBACK TO SAVEPOINT`, sıradaki aday. Sayaç/bütçe/lot yalnız kazanan için ve yalnız bu tx'te değişir;
+kaybeden/limit/paused değerlendirmeleri yalnız log. Birincil idempotency okuma; P2002 savepoint'li backstop
+ve **yalnız aynı campaign+event** için `ALREADY_REDEEMED`. `PROVIDER_ELIGIBILITY_REACHED` düzeltmesi ve
+AUTH-PROVIDER-CONTACT-001 kapısı aynen.
+
+**Örnekler (§12.6):** aynı olayda K1 (10 kredi) ve K3 (5 kredi, aynı olgu kümesi) → K1 kazanır, K3
+`STACK_CONFLICT`; K1 bütçesi doluysa K1 `BUDGET_EXHAUSTED` (savepoint geri) → K3 kazanır. Farklı olaylarda
+K1 (uygunluk) + K2 (ödeme) aynı sağlayıcıya iki ayrı grant; K2 ikinci satın alma `maxRedemptionsPerProvider=1`
+ile `PER_PROVIDER_LIMIT`, 3 olsaydı grant.
+
+## 14. PR / head / CI
 
 PR [#94](https://github.com/umutciftciii/taktic/pull/94) · revizyon 1 head `26dba7a6` CI 3/3
-([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)) · **revizyon 2 tasarım
-head `5db4a398` CI 3/3** ([run](https://github.com/umutciftciii/taktic/actions/runs/35440525199): typecheck · lint · test · build, e2e chromium, e2e webkit). Bu satırı
-ekleyen rapor commit'i PR'ın nihai head'idir; CI sonucu PR'da.
+([run 35398916651](https://github.com/umutciftciii/taktic/actions/runs/35398916651)) · revizyon 2 head
+`5db4a398` CI 3/3 ([run 35440525199](https://github.com/umutciftciii/taktic/actions/runs/35440525199)) ·
+**revizyon 3 nihai head ve CI sonucu: bir sonraki commit'te doldurulur.**
