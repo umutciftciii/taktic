@@ -3,7 +3,7 @@
 Tarih: 2026-09-19 · Branch: `claude/cmp-002-s0-s1-drafts-53cc8b` · Taban: `origin/main` @ `a972c6b7` ·
 Tasarım notu: `2026-09-19-cmp-002-s0-s1-campaign-drafts-design.md` · Bağlayıcı sözleşme: CMP-001 (rev. 3).
 
-PR / head / CI: bu dosyanın sonundaki "Teslim kaydı" bölümünde (PR açıldıktan sonra doldurulur).
+PR: https://github.com/umutciftciii/taktic/pull/96 · head `7d4a4c64` · CI **3/3 yeşil** (run 35463355666: typecheck·lint·test·build ✅, e2e chromium ✅, e2e webkit ✅).
 
 ---
 
@@ -100,4 +100,7 @@ süpürücü, `FACT_SOURCE_UNAVAILABLE`/`LIMIT_BELOW_CONSUMED`, engine anahtarı
 
 ## 9. Teslim kaydı
 
-(PR açılınca doldurulur.)
+- PR #96 açıldı (`481eca59`); ilk CI: typecheck/test/build ✅, chromium ✅, **webkit ✗** — Linux WebKit'te detay sayfası 320px'te 9px taşma, görünür suçlu eleman yok.
+- `1e9e92e8`: form girdilerine `width:100%/min-width:0` (yetmedi). `50356d86`: yerelde macOS WebKit 260px'te aynı "suçlusuz" taşma üretildi; bisect teşhisi (blokları gizleyerek) koşul türü `<select>`'ini gösterdi → select kırpma + iç içe grid `min-width:0` (macOS ✅, Linux ✗: native menulist select üzerindeki `overflow`'u yok sayıyor). `7d4a4c64`: kırpma bir üst seviyeye, `.campaign-fieldset .field`'e alındı (3px padding/−3px margin ile odak halkası korunur) → **CI 3/3 ✅**.
+- Aynı koşuda `showcase-screens-viewport` WebKit'te bir kez "WebKit encountered an internal error" ile düşüp retry'da geçti; bu PR'la ilgisiz, mevcut flake.
+- Merge/deploy/yerel-staging eşitlemesi yapılmadı; branch açık bırakıldı.
