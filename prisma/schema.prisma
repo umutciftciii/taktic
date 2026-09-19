@@ -446,6 +446,8 @@ model User {
   createdCampaigns                Campaign[]                         @relation("CampaignCreatedBy")
   createdCampaignVersions         CampaignVersion[]                  @relation("CampaignVersionCreatedBy")
   campaignAuditEntries            CampaignAuditLog[]                 @relation("CampaignAuditActor")
+  campaignRedemptions             CampaignRedemption[]               @relation("CampaignRedemptionUser")
+  revokedCampaignRedemptions      CampaignRedemption[]               @relation("CampaignRedemptionRevokedBy")
 
   @@index([role])
   @@index([isActive])
@@ -1270,6 +1272,11 @@ model ProviderProfile {
   requestReports                  ServiceRequestReport[]
   reviews                         ProviderReview[]
   reviewReports                   ProviderReviewReport[]
+  campaignTriggerEvents           CampaignTriggerEvent[]
+  campaignRedemptions             CampaignRedemption[]
+  campaignEvaluationLogs          CampaignEvaluationLog[]
+  promoCreditLots                 PromoCreditLot[]
+  campaignProviderCounters        CampaignProviderCounter[]
 
   @@index([status])
   @@index([city])
@@ -1727,6 +1734,11 @@ model PackagePurchase {
   /// The renewal attempt this purchase settled, when it was a renewal rather
   /// than a first purchase.
   renewalAttempt                 PackageRenewalAttempt?
+  /// CMP-002: the payment event this purchase raised, and the redemptions it
+  /// produced. Restrict on the other side; a settled purchase is part of the
+  /// record of why a promotion was granted.
+  campaignTriggerEvents          CampaignTriggerEvent[]
+  campaignRedemptions            CampaignRedemption[]
 
   @@index([providerId])
   @@index([packageId])
@@ -1963,6 +1975,11 @@ model ProviderCreditTransaction {
   provider          ProviderProfile         @relation(fields: [providerId], references: [id])
   createdBy         User?                   @relation(fields: [createdById], references: [id])
   manualRefundAudit ManualOfferRefundAudit?
+  /// CMP-002 S2A opens these links and writes none of them: the campaign
+  /// engine does not touch this table until S2B adds the CAMPAIGN_* types.
+  campaignGrantOf   CampaignRedemption?     @relation("CampaignRedemptionGrantTransaction")
+  promoLotExpiryOf  PromoCreditLot?         @relation("PromoCreditLotExpiryTransaction")
+  promoLotRevokeOf  PromoCreditLot?         @relation("PromoCreditLotRevokeTransaction")
 
   // A PostgreSQL partial unique index —
   // "ProviderCreditTransaction_one_refund_per_offer", UNIQUE ("referenceId")
@@ -3789,20 +3806,38 @@ enum CampaignAuditAction {
 /// row an earlier save produced is never touched again. Restrict rather than
 /// Cascade everywhere: a campaign is never deleted, it is ENDED (S2).
 model Campaign {
-  id               String         @id @default(cuid())
+  id                    String         @id @default(cuid())
   /// Stable operator-facing identifier (slug). Unique; never reused.
-  key              String         @unique
-  name             String
-  status           CampaignStatus @default(DRAFT)
-  currentVersionId String?        @unique
-  createdById      String
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  key                   String         @unique
+  name                  String
+  status                CampaignStatus @default(DRAFT)
+  currentVersionId      String?        @unique
+  /// The version the engine evaluates while the campaign is ACTIVE (CMP-001
+  /// §2.1). Opened in S2A with no writer: the activation endpoint is S2B, so
+  /// no row can carry a value yet and the engine's candidate set is empty by
+  /// construction. Restrict, like every other campaign reference.
+  activeVersionId       String?        @unique
+  /// Cumulative across versions and never decremented (CMP-001 §10.2): a new
+  /// version does not reset consumption, and a revoked or expired grant still
+  /// counts against the budget. Moved only by the engine's conditional
+  /// update, inside the same Serializable transaction as the grant.
+  redemptionCount       Int            @default(0)
+  budgetConsumedCredits Int            @default(0)
+  createdById           String
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
-  currentVersion CampaignVersion?   @relation("CampaignCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
-  createdBy      User               @relation("CampaignCreatedBy", fields: [createdById], references: [id])
-  versions       CampaignVersion[]  @relation("CampaignVersions")
-  auditEntries   CampaignAuditLog[]
+  currentVersion   CampaignVersion?          @relation("CampaignCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
+  activeVersion    CampaignVersion?          @relation("CampaignActiveVersion", fields: [activeVersionId], references: [id], onDelete: Restrict)
+  createdBy        User                      @relation("CampaignCreatedBy", fields: [createdById], references: [id])
+  versions         CampaignVersion[]         @relation("CampaignVersions")
+  auditEntries     CampaignAuditLog[]
+  redemptions      CampaignRedemption[]
+  evaluationLogs   CampaignEvaluationLog[]   @relation("CampaignEvaluationLogCampaign")
+  wonEvaluations   CampaignEvaluationLog[]   @relation("CampaignEvaluationLogWinner")
+  settledEvents    CampaignTriggerEvent[]
+  providerCounters CampaignProviderCounter[]
+  dailyCounters    CampaignDailyCounter[]
 
   @@index([status, updatedAt])
   @@index([createdById])
@@ -3843,9 +3878,12 @@ model CampaignVersion {
   createdById               String
   createdAt                 DateTime                  @default(now())
 
-  campaign  Campaign  @relation("CampaignVersions", fields: [campaignId], references: [id], onDelete: Restrict)
-  createdBy User      @relation("CampaignVersionCreatedBy", fields: [createdById], references: [id])
-  currentOf Campaign? @relation("CampaignCurrentVersion")
+  campaign       Campaign                @relation("CampaignVersions", fields: [campaignId], references: [id], onDelete: Restrict)
+  createdBy      User                    @relation("CampaignVersionCreatedBy", fields: [createdById], references: [id])
+  currentOf      Campaign?               @relation("CampaignCurrentVersion")
+  activeOf       Campaign?               @relation("CampaignActiveVersion")
+  redemptions    CampaignRedemption[]
+  evaluationLogs CampaignEvaluationLog[]
 
   @@unique([campaignId, versionNumber])
   @@index([trigger, factSetKey])
@@ -3872,4 +3910,233 @@ model CampaignAuditLog {
 
   @@index([campaignId, createdAt])
   @@index([actorId])
+}
+
+// ───────────────────── Campaign engine infrastructure (CMP-002 S2A) ─────────────────────
+//
+// Everything below is written only by the campaign engine, and the engine is
+// reachable only from tests in this slice: no approval, proof, payment or
+// offer path calls it, and `OperationsSettings.campaignEngineEnabled` is false
+// by default with no endpoint that sets it. The credit ledger is not touched —
+// `CreditTransactionType` is unchanged and the three `*TransactionId` columns
+// below stay NULL until S2B adds the CAMPAIGN_* types.
+
+enum CampaignRedemptionStatus {
+  GRANTED
+  REVOKED
+  EXPIRED
+}
+
+enum CampaignRevokeReason {
+  PAYMENT_REVERSED
+  ADMIN_REVOKED
+}
+
+enum PromoCreditLotStatus {
+  ACTIVE
+  EXHAUSTED
+  EXPIRED
+  REVOKED
+}
+
+/// Why an (event, candidate) evaluation ended the way it did. Closed set;
+/// `ENGINE_DISABLED` exists for a future observation mode and is never written
+/// in S2A, where a disabled engine writes nothing at all.
+enum CampaignEvaluationOutcome {
+  GRANTED
+  NO_CANDIDATE
+  CONDITIONS_FAILED
+  WINDOW_CLOSED
+  ELIGIBILITY_INCOMPLETE
+  STACK_CONFLICT
+  EVENT_ALREADY_SETTLED
+  ALREADY_REDEEMED
+  CAMPAIGN_PAUSED
+  PER_PROVIDER_LIMIT
+  GLOBAL_LIMIT
+  DAILY_LIMIT
+  BUDGET_EXHAUSTED
+  ENGINE_DISABLED
+  ENGINE_ERROR
+}
+
+/// One business event the engine has seen, independent of any campaign.
+///
+/// `triggerEventKey` is the global identity of the event (CMP-001 §12.2):
+/// `PROVIDER_APPROVED:<providerId>`, `PACKAGE_PAYMENT_SUCCEEDED:<purchaseId>`,
+/// `PROVIDER_ELIGIBILITY_REACHED:<factSetKey>:<providerId>`. One event may be
+/// the candidate of several campaigns; under EXCLUSIVE_CREDIT_BONUS exactly
+/// one of them settles it, and the three `settled*` columns record which. The
+/// row is otherwise immutable — only `lastSeenAt` and `evaluationCount` move.
+model CampaignTriggerEvent {
+  id                  String          @id @default(cuid())
+  triggerEventKey     String          @unique
+  trigger             CampaignTrigger
+  providerId          String
+  purchaseId          String?
+  factSetKey          String?
+  firstSeenAt         DateTime        @default(now())
+  lastSeenAt          DateTime        @default(now())
+  evaluationCount     Int             @default(0)
+  settledByCampaignId String?
+  settledRedemptionId String?         @unique
+  settledAt           DateTime?
+
+  provider          ProviderProfile         @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  purchase          PackagePurchase?        @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  settledByCampaign Campaign?               @relation(fields: [settledByCampaignId], references: [id], onDelete: Restrict)
+  settledRedemption CampaignRedemption?     @relation("CampaignTriggerEventSettledBy", fields: [settledRedemptionId], references: [id], onDelete: Restrict)
+  redemptions       CampaignRedemption[]    @relation("CampaignRedemptionEvent")
+  evaluationLogs    CampaignEvaluationLog[]
+
+  @@index([providerId, firstSeenAt])
+  @@index([purchaseId])
+  @@index([settledByCampaignId])
+}
+
+/// One campaign granting one promotion for one event.
+///
+/// Unique on (campaignId, triggerEventKey): a campaign cannot redeem the same
+/// event twice, whatever path re-raises it, and a version change does not
+/// produce a second row. The version and the full definition are frozen here
+/// (`campaignVersionId`, `rulesSnapshot`, `grantedCredits`) so a later version
+/// changes nothing about what was granted. `grantTransactionId` is the
+/// CAMPAIGN_GRANT ledger row — NULL throughout S2A, which writes no ledger.
+model CampaignRedemption {
+  id                 String                   @id @default(cuid())
+  campaignId         String
+  campaignVersionId  String
+  providerId         String
+  userId             String?
+  trigger            CampaignTrigger
+  triggerEventId     String
+  triggerEventKey    String
+  purchaseId         String?
+  status             CampaignRedemptionStatus @default(GRANTED)
+  rulesSnapshot      Json
+  grantedCredits     Int
+  grantTransactionId String?                  @unique
+  grantedAt          DateTime                 @default(now())
+  revokedAt          DateTime?
+  revokeReason       CampaignRevokeReason?
+  /// How much of the lot had been spent when it was revoked; there is no
+  /// debt model, so this is a record for an operator, not a balance (CMP-001 §2.6).
+  spentAtRevoke      Int?
+  revokedById        String?
+
+  campaign         Campaign                   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  campaignVersion  CampaignVersion            @relation(fields: [campaignVersionId], references: [id], onDelete: Restrict)
+  provider         ProviderProfile            @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  user             User?                      @relation("CampaignRedemptionUser", fields: [userId], references: [id], onDelete: Restrict)
+  triggerEvent     CampaignTriggerEvent       @relation("CampaignRedemptionEvent", fields: [triggerEventId], references: [id], onDelete: Restrict)
+  purchase         PackagePurchase?           @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  grantTransaction ProviderCreditTransaction? @relation("CampaignRedemptionGrantTransaction", fields: [grantTransactionId], references: [id], onDelete: Restrict)
+  revokedBy        User?                      @relation("CampaignRedemptionRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+  settledEvent     CampaignTriggerEvent?      @relation("CampaignTriggerEventSettledBy")
+  promoLot         PromoCreditLot?
+
+  @@unique([campaignId, triggerEventKey])
+  @@index([triggerEventKey])
+  @@index([triggerEventId])
+  @@index([campaignId, providerId])
+  @@index([providerId, status])
+  @@index([campaignVersionId])
+  @@index([purchaseId])
+  @@index([userId])
+  @@index([revokedById])
+}
+
+/// Append-only: one row per (event, candidate) evaluation, and one per event
+/// when there was no candidate. No unique constraint — the same event and the
+/// same campaign are legitimately evaluated again when the event is re-raised
+/// (an approval after suspension, a webhook re-judged), and each evaluation is
+/// its own line. `winnerCampaignId` is set on STACK_CONFLICT and
+/// EVENT_ALREADY_SETTLED so "why not this one?" is answerable from one row.
+model CampaignEvaluationLog {
+  id                String                    @id @default(cuid())
+  triggerEventId    String
+  campaignId        String?
+  campaignVersionId String?
+  providerId        String
+  /// The fact whose write raised this evaluation, on the eligibility transition.
+  fact              CampaignEligibilityFact?
+  outcome           CampaignEvaluationOutcome
+  /// A short closed code — the condition type that failed, the limit that
+  /// refused — never free text.
+  reasonCode        String?
+  winnerCampaignId  String?
+  evaluatedAt       DateTime                  @default(now())
+
+  triggerEvent    CampaignTriggerEvent @relation(fields: [triggerEventId], references: [id], onDelete: Restrict)
+  campaign        Campaign?            @relation("CampaignEvaluationLogCampaign", fields: [campaignId], references: [id], onDelete: Restrict)
+  campaignVersion CampaignVersion?     @relation(fields: [campaignVersionId], references: [id], onDelete: Restrict)
+  provider        ProviderProfile      @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  winnerCampaign  Campaign?            @relation("CampaignEvaluationLogWinner", fields: [winnerCampaignId], references: [id], onDelete: Restrict)
+
+  @@index([triggerEventId, evaluatedAt])
+  @@index([campaignId, evaluatedAt])
+  @@index([providerId, evaluatedAt])
+  @@index([campaignVersionId])
+  @@index([winnerCampaignId])
+}
+
+/// A timed promotional credit lot — the one benefit type in v1.
+///
+/// `grantedCredits` never changes; `remainingCredits` moves with spending
+/// and refunds (S2B) and is bounded to [0, grantedCredits] by CHECK. Spending
+/// against a lot, the earliest-expiring-first order, expiry and revocation are
+/// all S2B+: in this slice a lot is created with `remaining = granted` and
+/// nothing reads it.
+model PromoCreditLot {
+  id                  String               @id @default(cuid())
+  providerId          String
+  redemptionId        String               @unique
+  grantedCredits      Int
+  remainingCredits    Int
+  expiresAt           DateTime
+  status              PromoCreditLotStatus @default(ACTIVE)
+  expiryTransactionId String?              @unique
+  revokeTransactionId String?              @unique
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  provider          ProviderProfile            @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  redemption        CampaignRedemption         @relation(fields: [redemptionId], references: [id], onDelete: Restrict)
+  expiryTransaction ProviderCreditTransaction? @relation("PromoCreditLotExpiryTransaction", fields: [expiryTransactionId], references: [id], onDelete: Restrict)
+  revokeTransaction ProviderCreditTransaction? @relation("PromoCreditLotRevokeTransaction", fields: [revokeTransactionId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, status, expiresAt])
+  @@index([status, expiresAt])
+}
+
+/// The database half of `maxRedemptionsPerProvider` (CMP-001 §10.3): the
+/// engine upserts the row and increments it with `WHERE redemptionCount <
+/// limit`, so two transactions cannot both take the last slot.
+model CampaignProviderCounter {
+  id              String   @id @default(cuid())
+  campaignId      String
+  providerId      String
+  redemptionCount Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  campaign Campaign        @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignId, providerId])
+  @@index([providerId])
+}
+
+/// The database half of `maxRedemptionsPerDay`. `day` is a calendar date in
+/// Europe/Istanbul, computed by the engine — the column carries no time zone
+/// and the database's own zone plays no part.
+model CampaignDailyCounter {
+  id              String   @id @default(cuid())
+  campaignId      String
+  day             DateTime @db.Date
+  redemptionCount Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignId, day])
 }

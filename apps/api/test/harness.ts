@@ -215,6 +215,14 @@ export function resetAuthThrottle(app: INestApplication): void {
 
 const TRUNCATED_TABLES = [
   'CompanySettings',
+  // Campaign engine infrastructure (CMP-002 S2A), children first: lots point
+  // at redemptions, redemptions and logs at events, everything at the campaign.
+  'PromoCreditLot',
+  'CampaignEvaluationLog',
+  'CampaignRedemption',
+  'CampaignTriggerEvent',
+  'CampaignProviderCounter',
+  'CampaignDailyCounter',
   // Campaign drafts (CMP-002 S1): the audit rows and the campaign point at
   // versions, the versions point back at the campaign. CASCADE handles the
   // cycle; listing them keeps the reset explicit.
