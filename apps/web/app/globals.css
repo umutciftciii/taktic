@@ -4719,6 +4719,76 @@ input[readonly] {
 }
 
 /*
+ * The provider's "Hesap iletişimi" card (AUTH-PROVIDER-CONTACT-001): the
+ * customer badge and the request screen's one-time-code row, on the
+ * provider panel's own info grid. Each row's `dt` carries the label and the
+ * badge on one line, folding under it at a narrow width; the `dd` stacks the
+ * value, a one-line status and the action beneath it. The row rules are the
+ * `.cdash-verify-card` ones with the provider button family in place of the
+ * customer's, so the three controls keep one height on both panels.
+ */
+.pdash-contact-intro { margin: 0 0 var(--space-3); }
+
+.pdash-contact-row dt { flex-basis: 100%; }
+
+@media (min-width: 640px) {
+  .pdash-contact-row dt { flex-basis: 150px; }
+}
+
+.pdash-contact-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pdash-contact-value { font-weight: 500; }
+
+.pdash-contact-meta {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
+.pdash-contact-error { color: var(--color-accent); }
+
+.pdash-contact-actions { margin-top: var(--space-2); }
+
+.pdash-contact-card .otp-row { margin-top: var(--space-2); }
+
+.pdash-btn.otp-control {
+  box-sizing: border-box;
+  min-height: 42px;
+  padding: 9px 14px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+@media (max-width: 400px) {
+  .pdash-contact-card .otp-send,
+  .pdash-contact-card .otp-verify {
+    flex: 1 1 100%;
+  }
+
+  .pdash-contact-card .otp-send .otp-control {
+    flex: 1 1 100%;
+  }
+
+  .pdash-contact-card .otp-control,
+  .pdash-contact-card .pdash-btn.otp-control {
+    padding-left: 10px;
+    padding-right: 10px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .pdash-contact-card .otp-code {
+    flex: 1 1 96px;
+    max-width: none;
+  }
+}
+
+/*
  * A tag whose words may break onto a second line. `.tag` is nowrap by design
  * — a status word never wraps — but a sentence-length badge on a 320px row
  * ("Telefon doğrulaması bekliyor") has to fold rather than widen the page.

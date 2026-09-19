@@ -54,6 +54,7 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     expiryMinutes: '30',
   },
   'email-verification': { fullName: 'Deniz Yılmaz', expiryDays: '7' },
+  'provider-email-verification': { fullName: 'Murat Şahin', expiryDays: '7' },
   'provider-application-received': {
     fullName: 'Murat Şahin',
     businessName: 'Şahin Isı Sistemleri',
@@ -501,6 +502,7 @@ const URGENCY_CODES = Object.keys(URGENCY_LABELS) as UrgencyCode[];
 const TOKEN_TEMPLATES: TransactionalEmailTemplate[] = [
   'password-reset',
   'email-verification',
+  'provider-email-verification',
   'customer-activation',
   'provider-claim',
 ];
@@ -549,8 +551,9 @@ describe('transactional e-mail rendering', () => {
     // The literal count is the point of this line: a template added without a
     // payload here would still render, silently, with every field missing.
     // Twenty-eight before vitrin's four, then the seven of the run's life,
-    // then the two of a request report, then the four of a provider review.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(45);
+    // then the two of a request report, then the four of a provider review,
+    // then the provider's mailbox proof (AUTH-PROVIDER-CONTACT-001).
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(46);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -763,6 +766,7 @@ describe('transactional e-mail rendering', () => {
     expect(subjects).toEqual({
       'password-reset': 'TakTick şifrenizi sıfırlayın',
       'email-verification': "TakTick'e hoş geldiniz — e-postanızı doğrulayın",
+      'provider-email-verification': 'Hesap e-postanızı doğrulayın — TakTick hizmet veren paneli',
       'provider-application-received': 'Başvurunuzu aldık — TakTick hizmet veren kaydı',
       'provider-application-approved': 'Başvurunuz onaylandı — teklif vermeye başlayabilirsiniz',
       'request-received': 'Talebiniz alındı — inceleniyor',

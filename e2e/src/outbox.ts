@@ -229,6 +229,11 @@ export function waitForLatestEmailVerificationUrl(email: string): Promise<string
   return waitForLatestActionUrl(email, 'email-verification');
 }
 
+/** The provider's own mailbox-proof link (AUTH-PROVIDER-CONTACT-001). */
+export function waitForLatestProviderEmailVerificationUrl(email: string): Promise<string> {
+  return waitForLatestActionUrl(email, 'provider-email-verification');
+}
+
 /** How many messages of a template this address has received so far. */
 export function emailCountFor(email: string, template: string): number {
   return emailEntriesFor(email).filter((entry) => entry.template === template).length;

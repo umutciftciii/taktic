@@ -10,16 +10,19 @@ import {
   type ReviewSummary,
   statusLabel,
 } from '../../../lib/api';
+import { readTurnstileWebConfig } from '../../../lib/turnstile';
 import { ReviewSummaryCard } from '../../review-summary-card';
 import { ProviderShell } from '../provider-shell';
 import { readCreditBalance } from '../provider-data';
 import { providerStatusBadgeClass } from '../provider-ui';
+import { AccountContactCard } from './account-contact-card';
 
 type ProviderPreviewPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function ProviderPreviewPage({ params }: ProviderPreviewPageProps) {
+export default async function ProviderPreviewPage({ params, searchParams }: ProviderPreviewPageProps) {
   const { id } = await params;
   const user = await getCurrentUser();
   if (!user) {
@@ -52,6 +55,12 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
   const totalOffers = offers.length;
   const wonOffers = offers.filter((offer) => offer.status === 'ACCEPTED').length;
   const winRate = totalOffers > 0 ? Math.round((wonOffers / totalOffers) * 100) : null;
+
+  // The account contact card is about the *session's* account, so it is shown
+  // only when that account is the provider whose panel this is — an operator
+  // looking at the same route has no proof of their own to collect here.
+  const query = await searchParams;
+  const showAccountContact = user.role === 'PROVIDER';
 
   return (
     <ProviderShell
@@ -121,6 +130,19 @@ export default async function ProviderPreviewPage({ params }: ProviderPreviewPag
               </div>
             </dl>
           </section>
+
+          {showAccountContact ? (
+            <AccountContactCard
+              providerId={provider.id}
+              email={user.email}
+              phone={user.phone}
+              emailVerifiedAt={user.emailVerifiedAt ?? null}
+              phoneVerifiedAt={user.phoneVerifiedAt ?? null}
+              emailState={readParam(query, 'email')}
+              phoneState={readParam(query, 'phone')}
+              turnstile={readTurnstileWebConfig()}
+            />
+          ) : null}
 
           <section className="pdash-detail-card">
             <h2>Hizmet kapsamı</h2>
@@ -279,6 +301,12 @@ async function safeOffers(providerId: string): Promise<ProviderOffer[]> {
   } catch {
     return [];
   }
+}
+
+function readParam(params: Record<string, string | string[] | undefined>, key: string): string | null {
+  const value = params[key];
+  const single = Array.isArray(value) ? value[0] : value;
+  return single ? single : null;
 }
 
 function getInitials(value: string): string {

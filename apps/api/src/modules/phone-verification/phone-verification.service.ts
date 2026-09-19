@@ -215,6 +215,9 @@ export class PhoneVerificationService {
               where: { id: user.id, phone: account.phone, phoneVerifiedAt: null },
               data: { phoneVerifiedAt: now },
             });
+            // No CMP-002 fact callback here: this branch is CUSTOMER-only, and
+            // a customer has no provider profile for a campaign fact to attach
+            // to. The PROVIDER writer is `verifyAccountCode` below.
           }
         }
 
@@ -245,6 +248,237 @@ export class PhoneVerificationService {
 
     void meta;
     return { status: 'verified' as const, phoneVerifiedAt: outcome.verifiedAt };
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // The account's own number (AUTH-PROVIDER-CONTACT-001)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Issues a code against the signed-in provider's own `User.phone`.
+   *
+   * The third kind of row this table holds: no request behind it and an
+   * account in front of it (`userId` set, `requestId` null). It shares the
+   * hash, the attempt budget, the lock and both send budgets with the other
+   * two kinds, and nothing else — the lead path cannot retire it and cannot
+   * redeem it (see `sendStandaloneCode` and `findRedeemableVerification`).
+   *
+   * The number is the account's as stored *now*, read fresh rather than from
+   * the session, so a code is never issued for a number the row no longer
+   * carries. The account is named by the session alone: no id travels in the
+   * request, so there is nothing to probe.
+   */
+  async sendAccountCode(user: AuthUser, meta: VerificationRequestMeta) {
+    const account = await this.getAccountForProof(user);
+    if (!account.normalizedPhone) {
+      throw accountPhoneMissingException();
+    }
+
+    const normalizedPhone = account.normalizedPhone;
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - OTP_RATE_WINDOW_MINUTES * 60 * 1000);
+
+    const [phoneSends, ipSends] = await Promise.all([
+      this.prisma.phoneVerification.count({
+        where: { normalizedPhone, createdAt: { gte: windowStart } },
+      }),
+      meta.ipAddress
+        ? this.prisma.phoneVerification.count({
+            where: { ipAddress: meta.ipAddress, createdAt: { gte: windowStart } },
+          })
+        : Promise.resolve(0),
+    ]);
+
+    if (
+      phoneSends >= OTP_MAX_SENDS_PER_PHONE_PER_HOUR ||
+      ipSends >= OTP_MAX_SENDS_PER_IP_PER_HOUR
+    ) {
+      throw new HttpException(
+        'Çok fazla doğrulama kodu istendi. Lütfen bir süre sonra tekrar deneyin.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const code = generateCode();
+    const codeHash = await bcrypt.hash(code, BCRYPT_ROUNDS);
+    const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
+
+    await this.prisma.$transaction(async (tx) => {
+      // One live code per account, exactly as per request and per lead number.
+      await tx.phoneVerification.updateMany({
+        where: { userId: user.id, consumedAt: null },
+        data: { consumedAt: now },
+      });
+
+      await tx.phoneVerification.create({
+        data: {
+          normalizedPhone,
+          codeHash,
+          expiresAt,
+          resendCount: phoneSends,
+          lastSentAt: now,
+          requestId: null,
+          userId: user.id,
+          ipAddress: meta.ipAddress,
+          userAgent: meta.userAgent,
+        },
+      });
+    });
+
+    const outcome = await this.notifications.sendSms(
+      {
+        template: 'phone-verification-code',
+        to: normalizedPhone,
+        code,
+        expiresInMinutes: OTP_TTL_MINUTES,
+      },
+      { userId: user.id },
+    );
+
+    return {
+      status: 'sent' as const,
+      delivery: outcome.status,
+      maskedPhone: maskPhone(normalizedPhone),
+      expiresAt,
+      // The code itself is never returned, in any environment.
+    };
+  }
+
+  /**
+   * Checks a code against the account's live code and, if it is right, writes
+   * the account's proof — and nothing else. No request is published, no lead
+   * is bound, no outbox is woken.
+   *
+   * The code proves the number it was sent to. If the account's number is not
+   * that number any more (no provider path changes it today; the check is
+   * what keeps the proof honest whatever path appears), the code lands
+   * nowhere. The write is guarded on the exact stored spelling of the number
+   * and on the column being NULL, so a replay or a race cannot move a proof
+   * already on file.
+   */
+  async verifyAccountCode(user: AuthUser, rawCode: string, meta: VerificationRequestMeta) {
+    const code = normalizeCode(rawCode);
+    const account = await this.getAccountForProof(user, { requirePhone: false });
+
+    const outcome = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const now = new Date();
+        const candidate = await tx.phoneVerification.findFirst({
+          where: { userId: user.id, requestId: null, consumedAt: null },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!candidate || candidate.expiresAt <= now) {
+          return { ok: false as const, reason: 'invalid' as const };
+        }
+
+        if (candidate.lockedUntil && candidate.lockedUntil > now) {
+          return { ok: false as const, reason: 'invalid' as const };
+        }
+
+        // The number the code was sent to must still be the account's number.
+        if (!account.normalizedPhone || candidate.normalizedPhone !== account.normalizedPhone) {
+          return { ok: false as const, reason: 'invalid' as const };
+        }
+
+        const accepted = await acceptedCode(code, candidate.codeHash, candidate.normalizedPhone, now);
+
+        if (!accepted) {
+          const attemptCount = candidate.attemptCount + 1;
+          // Committed by this transaction; the caller throws afterwards — the
+          // same reasoning as the two paths above.
+          await tx.phoneVerification.update({
+            where: { id: candidate.id },
+            data: {
+              attemptCount,
+              ...(attemptCount >= OTP_MAX_ATTEMPTS
+                ? { lockedUntil: new Date(now.getTime() + OTP_LOCK_MINUTES * 60 * 1000) }
+                : {}),
+            },
+          });
+
+          return { ok: false as const, reason: 'invalid' as const };
+        }
+
+        await tx.phoneVerification.update({
+          where: { id: candidate.id },
+          data: { consumedAt: now, verifiedByTestBypass: accepted === 'test-bypass' },
+        });
+
+        const proven = await tx.user.updateMany({
+          where: { id: user.id, phone: account.phone, phoneVerifiedAt: null },
+          data: { phoneVerifiedAt: now },
+        });
+
+        if (proven.count !== 1) {
+          // Somebody — a parallel verify — got there first, or the number
+          // moved between the read and the write. The code is spent; the
+          // proof on file is left where it is.
+          return { ok: false as const, reason: 'already' as const };
+        }
+
+        // CMP-002 fact callback: PHONE_VERIFIED — the PROVIDER writer of this
+        // proof. `proven.count === 1` is the moment the fact first became true
+        // for this account, inside the transaction that made it durable. The
+        // campaign engine (CMP-001 §8.3) will call `onProviderFact(tx,
+        // user.id, 'PHONE_VERIFIED')` here; nothing is granted in this PR.
+
+        return { ok: true as const, verifiedAt: now };
+      },
+      { label: 'phoneVerification.verifyAccountCode' },
+    );
+
+    if (!outcome.ok) {
+      throw outcome.reason === 'already' ? accountAlreadyVerifiedException() : invalidCodeException();
+    }
+
+    void meta;
+    return { status: 'verified' as const, phoneVerifiedAt: outcome.verifiedAt };
+  }
+
+  /**
+   * The account as it stands, or the refusal that says why no code can be
+   * issued for it. Both refusals are about the caller's own account and name
+   * nothing else, so neither can be used to learn about another number.
+   */
+  private async getAccountForProof(
+    user: AuthUser,
+    options: { requirePhone?: boolean } = {},
+  ): Promise<{ phone: string | null; normalizedPhone: string | null }> {
+    if (user.role !== UserRole.PROVIDER) {
+      // The guard already refused everybody else; this is the service's own
+      // word on it, so a future caller cannot route around the guard.
+      throw new ForbiddenException('Yalnızca hizmet veren hesapları için.');
+    }
+
+    const account = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { phone: true, phoneVerifiedAt: true, isActive: true },
+    });
+
+    if (!account || !account.isActive) {
+      throw new ForbiddenException('User is inactive');
+    }
+
+    if (account.phoneVerifiedAt) {
+      throw accountAlreadyVerifiedException();
+    }
+
+    let normalizedPhone: string | null = null;
+    if (account.phone) {
+      try {
+        normalizedPhone = normalizePhoneNumber(account.phone);
+      } catch {
+        normalizedPhone = null;
+      }
+    }
+
+    if (options.requirePhone !== false && !normalizedPhone) {
+      throw accountPhoneMissingException();
+    }
+
+    return { phone: account.phone, normalizedPhone };
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -316,8 +550,10 @@ export class PhoneVerificationService {
       // issuing a new one retires whatever was outstanding, so an old SMS
       // cannot be replayed. Scoped to `requestId: null` so it can never retire
       // a code somebody is in the middle of using on one of their requests.
+      // …and scoped to `userId: null` so it never retires a provider's own
+      // account code for the same number (AUTH-PROVIDER-CONTACT-001).
       await tx.phoneVerification.updateMany({
-        where: { requestId: null, normalizedPhone, consumedAt: null },
+        where: { requestId: null, userId: null, normalizedPhone, consumedAt: null },
         data: { consumedAt: now },
       });
 
@@ -329,6 +565,7 @@ export class PhoneVerificationService {
           resendCount: phoneSends,
           lastSentAt: now,
           requestId: null,
+          userId: null,
           ipAddress: meta.ipAddress,
           userAgent: meta.userAgent,
         },
@@ -370,7 +607,7 @@ export class PhoneVerificationService {
       async (tx) => {
         const now = new Date();
         const candidate = await tx.phoneVerification.findFirst({
-          where: { requestId: null, normalizedPhone, consumedAt: null },
+          where: { requestId: null, userId: null, normalizedPhone, consumedAt: null },
           orderBy: { createdAt: 'desc' },
         });
 
@@ -452,6 +689,9 @@ export class PhoneVerificationService {
     return tx.phoneVerification.findFirst({
       where: {
         requestId: null,
+        // Never an account's own proof: a provider who verified their account
+        // number a minute ago has not proven anybody's lead.
+        userId: null,
         normalizedPhone,
         consumedAt: { not: null, gte: since },
       },
@@ -509,6 +749,26 @@ function invalidCodeException() {
     error: 'Bad Request',
     code: 'PHONE_VERIFICATION_INVALID',
     message: 'Doğrulama kodu geçersiz veya süresi dolmuş. Yeni bir kod isteyebilirsiniz.',
+  });
+}
+
+/** No number on the account, so no code can be sent — the screen shows no button for this. */
+function accountPhoneMissingException() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: 'ACCOUNT_PHONE_MISSING',
+    message: 'Hesabınızda kayıtlı bir telefon numarası yok.',
+  });
+}
+
+/** The account's number is already proven; there is nothing left to do. */
+function accountAlreadyVerifiedException() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: 'ACCOUNT_PHONE_ALREADY_VERIFIED',
+    message: 'Hesap telefonunuz zaten doğrulanmış.',
   });
 }
 

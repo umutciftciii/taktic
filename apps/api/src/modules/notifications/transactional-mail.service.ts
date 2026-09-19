@@ -165,9 +165,11 @@ export class TransactionalMailService {
     fullName: string | null;
     verifyUrl: string;
     expiryDays: number;
+    /** Which copy goes out: the customer welcome, or the provider's panel note. */
+    accountKind: 'CUSTOMER' | 'PROVIDER';
   }) {
     return this.send(
-      'email-verification',
+      input.accountKind === 'PROVIDER' ? 'provider-email-verification' : 'email-verification',
       input.email,
       {
         fullName: input.fullName,
