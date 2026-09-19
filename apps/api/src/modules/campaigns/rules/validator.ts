@@ -18,11 +18,12 @@ import {
   type CampaignRuleError,
   type CampaignRuleErrorCode,
 } from './errors';
-import type {
-  CampaignAnyGroup,
-  CampaignCondition,
-  CampaignDefinition,
-  CampaignDefinitionSummary,
+import {
+  isAnyGroup,
+  type CampaignAnyGroup,
+  type CampaignCondition,
+  type CampaignDefinition,
+  type CampaignDefinitionSummary,
 } from './types';
 
 /**
@@ -178,7 +179,7 @@ export function validateCampaignDefinition(
     factSetKey: isEligibility ? sortedFacts.join('+') : null,
     eligibilityFacts: sortedFacts,
     conditionCount: conditions.reduce(
-      (count, entry) => count + ('any' in entry ? entry.any.length : 1),
+      (count, entry) => count + (isAnyGroup(entry) ? entry.any.length : 1),
       0,
     ),
     benefitCredits: benefit.credits,

@@ -4730,3 +4730,24 @@ button:disabled {
   color: #475569;
   overflow-wrap: anywhere;
 }
+
+/*
+ * `.table-scroll` gets its `overflow-x` from `.table-card`; the version
+ * history sits in a `.section-card`, so on a 320px phone its eleven columns
+ * would widen the document rather than scroll. Scoped to the campaign
+ * screens for the reason the category release card gives above.
+ */
+.campaigns-page .section-card .table-scroll {
+  overflow-x: auto;
+}
+
+/*
+ * The cards are grid items of `.admin-main-column`, whose automatic minimum
+ * size is their content's min-content width — an eleven-column table would
+ * make the card, not the scroll wrapper, 900px wide. Zero lets the wrapper
+ * above do the scrolling.
+ */
+.campaigns-page .admin-main-column > .section-card,
+.campaigns-page .admin-side-column > .section-card {
+  min-width: 0;
+}
