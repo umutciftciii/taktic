@@ -10,6 +10,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
 import { LEMON_SQUEEZY_SIGNATURE_HEADER } from '../src/modules/payments/lemon-squeezy.webhook';
+import { createCampaignFixture, engineWriteSnapshot } from './campaign-fixtures';
 import {
   createApprovedRequest,
   createCategory,
@@ -29,15 +30,19 @@ import {
 } from './harness';
 
 /**
- * CMP-002 S0/S1 ships definitions and drafts, and nothing that acts on them.
+ * CMP-002 S0/S1 ships definitions and drafts; S2A ships the engine's tables
+ * and the engine itself — and still nothing that calls it from a flow.
  *
- * This file drives every flow the future engine will hook — a provider being
+ * This file drives every flow the engine will one day hook — a provider being
  * approved, an account proving its e-mail and its telephone, a package
  * settling through the real webhook and through the mock path, an offer
- * spending credit — with a draft campaign sitting in the database, and
- * asserts that the campaign tables gained nothing, the ledger carries only
+ * spending credit — with a draft campaign for every trigger *and* an ACTIVE
+ * campaign for every trigger sitting in the database, and asserts that no
+ * campaign table gained a row (definitions, events, redemptions, logs, lots,
+ * counters), the campaign counters stayed at zero, the ledger carries only
  * the six pre-existing transaction types, and no balance moved except where
- * the flow itself always moved it.
+ * the flow itself always moved it. The ACTIVE rows are written straight
+ * through Prisma, because no endpoint can produce one.
  */
 
 const PLACEHOLDER_API_KEY = `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.${'placeholderNotARealCredential'}`;
@@ -126,6 +131,15 @@ async function seedDrafts() {
       .send({ key: `taslak-${uniqueSuffix()}`, name: 'Taslak', definition })
       .expect(201);
   }
+  // S2A: an ACTIVE campaign per trigger as well, with no conditions, so that
+  // "the engine had a candidate and still wrote nothing" is what is asserted.
+  await createCampaignFixture(ctx.prisma, { trigger: 'PROVIDER_APPROVED', createdById: admin.id });
+  await createCampaignFixture(ctx.prisma, { trigger: 'PACKAGE_PAYMENT_SUCCEEDED', createdById: admin.id });
+  await createCampaignFixture(ctx.prisma, {
+    trigger: 'PROVIDER_ELIGIBILITY_REACHED',
+    facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED', 'PHONE_VERIFIED'],
+    createdById: admin.id,
+  });
   return { admin, cookie, snapshot: await campaignSnapshot() };
 }
 
@@ -135,6 +149,7 @@ async function campaignSnapshot() {
     versions: await ctx.prisma.campaignVersion.count(),
     audit: await ctx.prisma.campaignAuditLog.count(),
     engineEnabled: (await ctx.prisma.operationsSettings.findUnique({ where: { id: 'singleton' } }))?.campaignEngineEnabled ?? false,
+    engine: await engineWriteSnapshot(ctx.prisma),
   };
 }
 
@@ -144,8 +159,16 @@ async function ledgerTypes() {
 }
 
 async function expectNothingCampaignRelated(snapshot: Awaited<ReturnType<typeof campaignSnapshot>>) {
-  expect(await campaignSnapshot()).toEqual(snapshot);
+  const after = await campaignSnapshot();
+  // The ledger legitimately moves in the flows that always moved it; every
+  // campaign-side count and counter must not.
+  expect({ ...after, engine: { ...after.engine, ledgerRows: 0 } }).toEqual({ ...snapshot, engine: { ...snapshot.engine, ledgerRows: 0 } });
   expect(snapshot.engineEnabled).toBe(false);
+  expect(after.engine).toMatchObject({ triggerEvents: 0, redemptions: 0, evaluationLogs: 0, lots: 0, providerCounters: 0, dailyCounters: 0 });
+  expect(after.engine.campaignCounters.length).toBe(6);
+  for (const campaign of after.engine.campaignCounters) {
+    expect(campaign).toMatchObject({ redemptionCount: 0, budgetConsumedCredits: 0 });
+  }
   for (const type of await ledgerTypes()) {
     expect(LEDGER_TYPES_BEFORE_CMP002).toContain(type);
   }
@@ -161,7 +184,7 @@ function deliver(payload: unknown) {
     .send(body);
 }
 
-describe('with draft campaigns in the database', () => {
+describe('with draft and ACTIVE campaigns in the database', () => {
   it('a provider approval writes the profile status and nothing else', async () => {
     const { cookie, snapshot } = await seedDrafts();
     const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
