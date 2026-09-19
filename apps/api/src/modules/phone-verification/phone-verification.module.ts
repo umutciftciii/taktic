@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { OperationsSettingsModule } from '../operations-settings/operations-settings.module';
 import { ServiceRequestsModule } from '../service-requests/service-requests.module';
 import { PhoneVerificationController } from './phone-verification.controller';
+import { ProviderPhoneVerificationController } from './provider-phone-verification.controller';
 import { PhoneVerificationService } from './phone-verification.service';
 
 /**
@@ -16,7 +17,7 @@ import { PhoneVerificationService } from './phone-verification.service';
  */
 @Module({
   imports: [PrismaModule, AuthModule, OperationsSettingsModule, ServiceRequestsModule],
-  controllers: [PhoneVerificationController],
+  controllers: [PhoneVerificationController, ProviderPhoneVerificationController],
   providers: [PhoneVerificationService],
   exports: [PhoneVerificationService],
 })

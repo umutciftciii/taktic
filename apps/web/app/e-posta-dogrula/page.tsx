@@ -7,7 +7,7 @@ type VerifyEmailPageProps = {
 };
 
 type ConfirmResult =
-  | { kind: 'ok'; alreadyVerified: boolean }
+  | { kind: 'ok'; alreadyVerified: boolean; accountKind: 'CUSTOMER' | 'PROVIDER' }
   | { kind: 'error'; message: string };
 
 /**
@@ -32,8 +32,18 @@ async function confirmVerification(token: string): Promise<ConfirmResult> {
       return { kind: 'error', message: message ?? 'Bağlantı geçersiz veya süresi dolmuş.' };
     }
 
-    const payload = (await response.json()) as { alreadyVerified?: boolean };
-    return { kind: 'ok', alreadyVerified: payload.alreadyVerified === true };
+    const payload = (await response.json()) as {
+      alreadyVerified?: boolean;
+      accountKind?: string;
+    };
+    return {
+      kind: 'ok',
+      alreadyVerified: payload.alreadyVerified === true,
+      // Which panel to send the reader on to. A provider's mailbox is proven
+      // by the same link as a customer's (AUTH-PROVIDER-CONTACT-001); only
+      // where they go next differs.
+      accountKind: payload.accountKind === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER',
+    };
   } catch {
     return { kind: 'error', message: 'Doğrulama tamamlanamadı. Lütfen tekrar deneyin.' };
   }
@@ -72,9 +82,15 @@ export default async function VerifyEmailPage({ searchParams }: VerifyEmailPageP
             ? 'Bu adres için doğrulama kaydı zaten vardı. Yapmanız gereken başka bir şey yok.'
             : 'Teşekkür ederiz. Hesabınızı kullanmaya devam edebilirsiniz.'}
         </p>
-        <Link className="auth-screen-submit" href="/requests/my" style={{ textAlign: 'center' }}>
-          Taleplerime Git
-        </Link>
+        {result.accountKind === 'PROVIDER' ? (
+          <Link className="auth-screen-submit" href="/providers/me" style={{ textAlign: 'center' }}>
+            Panelime Git
+          </Link>
+        ) : (
+          <Link className="auth-screen-submit" href="/requests/my" style={{ textAlign: 'center' }}>
+            Taleplerime Git
+          </Link>
+        )}
       </div>
     </AuthFrame>
   );

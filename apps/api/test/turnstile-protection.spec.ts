@@ -30,7 +30,7 @@ import {
 } from './harness';
 
 /**
- * The Turnstile guard on the six customer-originated write routes, driven
+ * The Turnstile guard on the seven protected write routes, driven
  * through real HTTP against the real Cloudflare verifier — with Cloudflare
  * itself stood in for by a fetch stub that answers according to the token it
  * is shown. Every refusal is asserted twice: on the status and code the
@@ -230,6 +230,22 @@ const ROUTES: Route[] = [
           request(ctx.server).post(`/service-requests/${serviceRequest.id}/phone-verification`).set('Cookie', cookie),
           token,
         );
+    },
+    expectDone: async (before) => {
+      expect(ctx.sms.sent.length).toBe(before.smsSent + 1);
+    },
+  },
+  {
+    name: 'POST /providers/me/phone-verification',
+    action: TURNSTILE_ACTIONS.phoneCodeSend,
+    okStatus: 201,
+    prepare: async () => {
+      // The provider's own account number (AUTH-PROVIDER-CONTACT-001): the
+      // same gate as the request send, ahead of the session.
+      const provider = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+      const cookie = await loginAs(ctx.prisma, provider.id);
+      return (token) =>
+        withToken(request(ctx.server).post('/providers/me/phone-verification').set('Cookie', cookie), token);
     },
     expectDone: async (before) => {
       expect(ctx.sms.sent.length).toBe(before.smsSent + 1);

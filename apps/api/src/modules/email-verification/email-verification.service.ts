@@ -37,7 +37,18 @@ import {
  * behaviour of any existing flow — deciding what verification should unlock is
  * a product question, and inventing an answer here would silently lock out
  * every account registered before the column existed.
+ *
+ * A provider account proves its address here too (AUTH-PROVIDER-CONTACT-001):
+ * the same token, the same cooldown, the same single writer below, and only
+ * the mail's wording differs. The proof is about the account, so a provider
+ * with no business profile yet can collect it just the same.
  */
+
+/** The two kinds of account that own a mailbox this flow can prove. */
+const VERIFIABLE_ROLES: ReadonlySet<UserRole> = new Set([UserRole.CUSTOMER, UserRole.PROVIDER]);
+
+export type VerifiedAccountKind = 'CUSTOMER' | 'PROVIDER';
+
 @Injectable()
 export class EmailVerificationService {
   private readonly logger = new Logger(EmailVerificationService.name);
@@ -48,12 +59,13 @@ export class EmailVerificationService {
   ) {}
 
   /**
-   * Called by registration, right after the account exists.
+   * Called by registration, right after the account exists — customer or
+   * provider; the role on the row decides which mail goes out.
    *
    * Best-effort: the account is committed and the person is signed in, so a
    * mail problem must not turn a completed registration into an error.
    */
-  async issueForNewCustomer(userId: string): Promise<void> {
+  async issueForNewAccount(userId: string): Promise<void> {
     try {
       await this.issue(userId);
     } catch (error) {
@@ -108,10 +120,17 @@ export class EmailVerificationService {
    * the caller wanted recorded is recorded — but the token is still consumed,
    * so it cannot be replayed.
    */
-  async confirm(rawToken: string): Promise<{ success: true; alreadyVerified: boolean }> {
+  async confirm(
+    rawToken: string,
+  ): Promise<{ success: true; alreadyVerified: boolean; accountKind: VerifiedAccountKind }> {
     const record = await this.lookupActiveToken(rawToken);
     const now = new Date();
     const alreadyVerified = record.user.emailVerifiedAt !== null;
+    // Which panel the confirmation page sends the reader back to. The token
+    // holder is the account's owner, so naming the kind of account tells them
+    // nothing they did not already know.
+    const accountKind: VerifiedAccountKind =
+      record.user.role === UserRole.PROVIDER ? 'PROVIDER' : 'CUSTOMER';
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -128,10 +147,18 @@ export class EmailVerificationService {
         // to. A link that went to an address the account has since left must
         // not verify the new one — the same rule the claim flow applies, for
         // the same reason.
-        await tx.user.updateMany({
+        const proven = await tx.user.updateMany({
           where: { id: record.userId, email: record.emailSnapshot, emailVerifiedAt: null },
           data: { emailVerifiedAt: now },
         });
+
+        // CMP-002 fact callback: EMAIL_VERIFIED — the one writer of this
+        // proof for every kind of account. `proven.count === 1` is the moment
+        // the fact first became true for this user, inside the transaction
+        // that made it durable; a replay (count 0) is not a new fact. The
+        // campaign engine (CMP-001 §8.3) will call `onProviderFact(tx, userId,
+        // 'EMAIL_VERIFIED')` here, and nowhere else, for a PROVIDER user.
+        void proven;
 
         await tx.emailVerificationToken.updateMany({
           where: { userId: record.userId, usedAt: null },
@@ -146,7 +173,7 @@ export class EmailVerificationService {
       throw error;
     }
 
-    return { success: true, alreadyVerified };
+    return { success: true, alreadyVerified, accountKind };
   }
 
   private async issue(userId: string): Promise<void> {
@@ -162,7 +189,9 @@ export class EmailVerificationService {
       },
     });
 
-    if (!user?.email || !user.isActive || user.role !== UserRole.CUSTOMER) {
+    if (!user?.email || !user.isActive || !VERIFIABLE_ROLES.has(user.role)) {
+      // An operator has no mailbox to prove here. Silent, like every other
+      // reason not to send: the response says nothing about why.
       return;
     }
 
@@ -212,6 +241,7 @@ export class EmailVerificationService {
       fullName: user.name,
       verifyUrl: emailVerificationUrl(rawToken),
       expiryDays: EMAIL_VERIFICATION_TOKEN_TTL_DAYS,
+      accountKind: user.role === UserRole.PROVIDER ? 'PROVIDER' : 'CUSTOMER',
     });
   }
 
@@ -229,7 +259,7 @@ export class EmailVerificationService {
         emailSnapshot: true,
         expiresAt: true,
         usedAt: true,
-        user: { select: { email: true, isActive: true, emailVerifiedAt: true } },
+        user: { select: { email: true, isActive: true, emailVerifiedAt: true, role: true } },
       },
     });
 

@@ -147,6 +147,8 @@ export type SeededProvider = {
   email: string;
   password: string;
   businessName: string;
+  /** The account's own number (also the profile's); the panel shows and proves it. */
+  phone: string;
 };
 
 export type SeededCategory = {
@@ -538,7 +540,7 @@ export async function createProvider(options: {
     await grantCredits(provider.id, options.credits);
   }
 
-  return { id: provider.id, userId: user.id, email, password: FIXTURE_PASSWORD, businessName };
+  return { id: provider.id, userId: user.id, email, password: FIXTURE_PASSWORD, businessName, phone };
 }
 
 /**

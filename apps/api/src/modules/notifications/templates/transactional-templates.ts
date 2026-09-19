@@ -123,6 +123,13 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'support-ticket-provider-new-for-support',
   'support-ticket-provider-reply',
   'support-ticket-provider-admin-reply',
+  // The provider's mailbox proof (AUTH-PROVIDER-CONTACT-001). A separate
+  // template from `email-verification` for the reason the support pairs are
+  // separate: the customer's mail welcomes them to their first request, the
+  // provider's points at the panel they already have, and a template that
+  // chose between the two at render time would be one edit away from sending
+  // a business the customer's copy.
+  'provider-email-verification',
   'support-ticket-provider-status-changed',
   // Vitrin, phase two. Four messages, and each one belongs to exactly one
   // person for exactly one reason:
@@ -225,6 +232,8 @@ export function transactionalSubject(
       return 'TakTick şifrenizi sıfırlayın';
     case 'email-verification':
       return "TakTick'e hoş geldiniz — e-postanızı doğrulayın";
+    case 'provider-email-verification':
+      return 'Hesap e-postanızı doğrulayın — TakTick hizmet veren paneli';
     case 'provider-application-received':
       return 'Başvurunuzu aldık — TakTick hizmet veren kaydı';
     case 'provider-application-approved':
@@ -389,6 +398,8 @@ export function buildDocument(
       return passwordReset(subject, fullName, data, message.actionUrl);
     case 'email-verification':
       return emailVerification(subject, fullName, data, message.actionUrl);
+    case 'provider-email-verification':
+      return providerEmailVerification(subject, fullName, data, message.actionUrl);
     case 'provider-application-received':
       return providerApplicationReceived(subject, fullName, data);
     case 'provider-application-approved':
@@ -1134,6 +1145,52 @@ function providerClaim(
         'Bu bağlantı yalnızca başvurunun sahipliğini doğrular; başvurunun değerlendirme sonucu ' +
           'hakkında bir anlam taşımaz. Böyle bir başvuru yaptırmadıysanız bu e-postayı yok ' +
           'sayabilirsiniz.',
+      ),
+    ]),
+  };
+}
+
+// ─────────────────── provider.email_verification (AUTH-PROVIDER-CONTACT-001) ──
+
+/**
+ * The provider's twin of `emailVerification`: same link, same expiry, same
+ * single use — worded for somebody who already has a panel rather than for a
+ * customer about to open a first request. Nothing is gated on it, and the copy
+ * says so: the account keeps working, the proof is a fact about the mailbox.
+ */
+function providerEmailVerification(
+  subject: string,
+  fullName: string,
+  data: Data,
+  actionUrl: string | undefined,
+): EmailDocument {
+  const days = int(data.expiryDays);
+
+  return {
+    subject,
+    preheader: 'Hizmet veren hesabınızın e-posta adresini doğrulayın.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Hesap doğrulama',
+    heading: 'Hesap e-postanızı doğrulayın',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph(
+        'Bu adres TakTick hizmet veren hesabınıza kayıtlı. Adresin size ait olduğunu ' +
+          'doğrulamak için aşağıdaki butonu kullanın.',
+      ),
+      spacer(6),
+      cta('E-postamı doğrula', actionUrl, 'primary'),
+      spacer(24),
+      note(
+        'Doğrulama hesabınızın kullanımını değiştirmez: teklif verme, profil ve başvuru akışları ' +
+          'doğrulama olmadan da çalışır. Panelinizdeki "Hesap iletişimi" kartında durumu görebilirsiniz.',
+      ),
+      spacer(12),
+      note(
+        days === null
+          ? 'Bu isteği siz yapmadıysanız e-postayı yok sayın.'
+          : `Doğrulama bağlantısı ${days} gün geçerlidir. Bu isteği siz yapmadıysanız e-postayı yok sayın.`,
       ),
     ]),
   };

@@ -95,7 +95,7 @@ export class AuthController {
     // call swallows its own failures for the same reason the guest activation
     // link does: a mail problem must not turn a completed registration into an
     // error the visitor sees.
-    await this.emailVerification.issueForNewCustomer(result.user.id);
+    await this.emailVerification.issueForNewAccount(result.user.id);
 
     response.setHeader(
       'Set-Cookie',
@@ -116,6 +116,11 @@ export class AuthController {
       userAgent: request.headers?.['user-agent'] ?? null,
       currentSessionId: getSessionIdFromRequest(request),
     });
+
+    // The same best-effort mailbox proof the customer registration starts
+    // (AUTH-PROVIDER-CONTACT-001); the provider's mail is worded for the
+    // panel they are about to set up.
+    await this.emailVerification.issueForNewAccount(result.user.id);
 
     response.setHeader(
       'Set-Cookie',

@@ -408,6 +408,7 @@ model User {
 
   serviceRequests               ServiceRequest[]
   providerProfile               ProviderProfile?
+  accountPhoneVerifications     PhoneVerification[]                @relation("PhoneVerificationUser")
   creditTransactions            ProviderCreditTransaction[]
   sessions                      Session[]
   customerNotes                 CustomerNote[]                     @relation("CustomerNoteCustomer")
@@ -1053,6 +1054,13 @@ model PhoneVerification {
   resendCount     Int       @default(0)
   lastSentAt      DateTime  @default(now())
   requestId       String?
+  /// The account whose own `User.phone` this code proves (AUTH-PROVIDER-CONTACT-001).
+  /// Three kinds of row share this table and are told apart by two columns:
+  /// a request code has `requestId`; a vitrin lead code has neither; an
+  /// account code has `userId` and no `requestId`. Nullable and never
+  /// backfilled — every row written before the column existed was one of the
+  /// first two kinds, and reads as such.
+  userId          String?
   ipAddress       String?
   userAgent       String?
   /// True when the row was consumed with the local/staging test code rather
@@ -1064,12 +1072,15 @@ model PhoneVerification {
   createdAt       DateTime  @default(now())
 
   request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user    User?           @relation("PhoneVerificationUser", fields: [userId], references: [id], onDelete: Cascade)
 
   /// Per-phone send budget and "find the active code" lookups.
   @@index([normalizedPhone, createdAt])
   /// Per-IP send budget.
   @@index([ipAddress, createdAt])
   @@index([requestId])
+  /// "Find the account's live code" lookups.
+  @@index([userId, createdAt])
   /// Cleanup of expired rows.
   @@index([expiresAt])
 }

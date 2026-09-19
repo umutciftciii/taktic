@@ -1012,6 +1012,12 @@ export class ProvidersService {
           ShowcasePlacementSuspendReason.PROVIDER_NOT_APPROVED,
           now,
         );
+
+        // CMP-002 fact callback: PROVIDER_APPROVED — a genuine transition into
+        // APPROVED, inside the transaction that records it and after every
+        // other effect of the approval. The campaign engine (CMP-001 §8.3)
+        // will call `onProviderFact(tx, id, 'PROVIDER_APPROVED')` here; the
+        // approval never waits on, or fails over, what it decides.
       }
 
       return updated;

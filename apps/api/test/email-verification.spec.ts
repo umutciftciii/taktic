@@ -90,19 +90,25 @@ describe('e-mail verification — issuing', () => {
     expect(stored.emailVerifiedAt).toBeNull();
   });
 
-  it('does not mail a provider registration', async () => {
+  it('mails a provider registration its own template, never the customer welcome', async () => {
+    // Since AUTH-PROVIDER-CONTACT-001 a provider proves its mailbox too; the
+    // customer copy ("your first request") is still never sent to one.
     const suffix = uniqueSuffix();
+    const email = `veren-${suffix}@example.test`;
     await request(ctx.server)
       .post('/auth/register-provider')
       .send({
         name: 'Murat Şahin',
-        email: `veren-${suffix}@example.test`,
+        email,
         phone: `0555888${suffix.padStart(4, '0')}`,
         password: PASSWORD,
       })
       .expect(201);
 
     expect(ctx.notifications.ofTemplate('email-verification')).toHaveLength(0);
+    const provider = ctx.notifications.ofTemplate('provider-email-verification');
+    expect(provider).toHaveLength(1);
+    expect(provider[0]!.to).toBe(email);
   });
 
   it('treats an immediate re-send as the same request rather than a second link', async () => {
@@ -183,7 +189,7 @@ describe('e-mail verification — consuming', () => {
       .post('/auth/email-verification/confirm')
       .send({ token })
       .expect(201);
-    expect(first.body).toEqual({ success: true, alreadyVerified: false });
+    expect(first.body).toEqual({ success: true, alreadyVerified: false, accountKind: 'CUSTOMER' });
 
     const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     expect(stored.emailVerifiedAt).not.toBeNull();
