@@ -406,43 +406,46 @@ model User {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  serviceRequests               ServiceRequest[]
-  providerProfile               ProviderProfile?
-  accountPhoneVerifications     PhoneVerification[]                @relation("PhoneVerificationUser")
-  creditTransactions            ProviderCreditTransaction[]
-  sessions                      Session[]
-  customerNotes                 CustomerNote[]                     @relation("CustomerNoteCustomer")
-  createdCustomerNotes          CustomerNote[]                     @relation("CustomerNoteCreatedBy")
-  activationTokens              CustomerActivationToken[]          @relation("CustomerActivationTokenCustomer")
-  requestDraftsExpected         RequestDraft[]                     @relation("RequestDraftExpectedUser")
-  requestDrafts                 RequestDraft[]                     @relation("RequestDraftUser")
-  createdActivationTokens       CustomerActivationToken[]          @relation("CustomerActivationTokenCreatedBy")
-  adminInviteTokens             AdminInviteToken[]                 @relation("AdminInviteTokenUser")
-  passwordResetTokens           PasswordResetToken[]
-  emailVerificationTokens       EmailVerificationToken[]
-  createdAdminInviteTokens      AdminInviteToken[]                 @relation("AdminInviteTokenCreatedBy")
-  notificationLogs              NotificationLog[]
-  contactRevealEvents           ContactRevealEvent[]
-  createdProviderClaimTokens    ProviderClaimToken[]               @relation("ProviderClaimTokenCreatedBy")
-  createdProviderInvites        ProviderInviteToken[]              @relation("ProviderInviteTokenCreatedBy")
-  companySettingsUpdates        CompanySettings[]                  @relation("CompanySettingsUpdatedBy")
-  operationsSettingsUpdates     OperationsSettings[]               @relation("OperationsSettingsUpdatedBy")
-  operationsSettingsChanges     OperationsSettingsChange[]         @relation("OperationsSettingsChangedBy")
-  customerMessageThreads        MessageThread[]                    @relation("MessageThreadCustomer")
-  manualOfferRefunds            ManualOfferRefundAudit[]           @relation("ManualOfferRefundPerformedBy")
-  providerMessageThreads        MessageThread[]                    @relation("MessageThreadProviderUser")
-  sentMessages                  Message[]                          @relation("MessageSender")
-  supportTickets                SupportTicket[]                    @relation("SupportTicketRequester")
-  supportTicketMessages         SupportTicketMessage[]             @relation("SupportTicketMessageAuthor")
-  supportTicketStatusChanges    SupportTicketStatusChange[]        @relation("SupportTicketStatusChangedBy")
-  showcaseCardReviews           ShowcaseCardReview[]               @relation("ShowcaseCardReviewedBy")
-  showcasePlacementSuspensions  ShowcasePlacementSuspension[]      @relation("ShowcasePlacementSuspendedBy")
-  showcasePriceTermsAcceptances ShowcaseCardPriceTermsAcceptance[]
-  showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[] @relation("ShowcasePackageTermsAcceptedBy")
-  resolvedRequestReports        ServiceRequestReport[]             @relation("ServiceRequestReportResolvedBy")
-  providerReviews               ProviderReview[]                   @relation("ProviderReviewCustomer")
-  resolvedReviewReports         ProviderReviewReport[]             @relation("ProviderReviewReportResolvedBy")
-  reviewModerations             ProviderReviewModeration[]         @relation("ProviderReviewModerationPerformedBy")
+  serviceRequests                 ServiceRequest[]
+  providerProfile                 ProviderProfile?
+  accountPhoneVerifications       PhoneVerification[]                @relation("PhoneVerificationUser")
+  creditTransactions              ProviderCreditTransaction[]
+  sessions                        Session[]
+  customerNotes                   CustomerNote[]                     @relation("CustomerNoteCustomer")
+  createdCustomerNotes            CustomerNote[]                     @relation("CustomerNoteCreatedBy")
+  activationTokens                CustomerActivationToken[]          @relation("CustomerActivationTokenCustomer")
+  requestDraftsExpected           RequestDraft[]                     @relation("RequestDraftExpectedUser")
+  requestDrafts                   RequestDraft[]                     @relation("RequestDraftUser")
+  createdActivationTokens         CustomerActivationToken[]          @relation("CustomerActivationTokenCreatedBy")
+  adminInviteTokens               AdminInviteToken[]                 @relation("AdminInviteTokenUser")
+  passwordResetTokens             PasswordResetToken[]
+  emailVerificationTokens         EmailVerificationToken[]
+  createdAdminInviteTokens        AdminInviteToken[]                 @relation("AdminInviteTokenCreatedBy")
+  notificationLogs                NotificationLog[]
+  contactRevealEvents             ContactRevealEvent[]
+  createdProviderClaimTokens      ProviderClaimToken[]               @relation("ProviderClaimTokenCreatedBy")
+  createdProviderInvites          ProviderInviteToken[]              @relation("ProviderInviteTokenCreatedBy")
+  companySettingsUpdates          CompanySettings[]                  @relation("CompanySettingsUpdatedBy")
+  operationsSettingsUpdates       OperationsSettings[]               @relation("OperationsSettingsUpdatedBy")
+  operationsSettingsChanges       OperationsSettingsChange[]         @relation("OperationsSettingsChangedBy")
+  customerMessageThreads          MessageThread[]                    @relation("MessageThreadCustomer")
+  manualOfferRefunds              ManualOfferRefundAudit[]           @relation("ManualOfferRefundPerformedBy")
+  providerMessageThreads          MessageThread[]                    @relation("MessageThreadProviderUser")
+  sentMessages                    Message[]                          @relation("MessageSender")
+  supportTickets                  SupportTicket[]                    @relation("SupportTicketRequester")
+  supportTicketMessages           SupportTicketMessage[]             @relation("SupportTicketMessageAuthor")
+  supportTicketStatusChanges      SupportTicketStatusChange[]        @relation("SupportTicketStatusChangedBy")
+  showcaseCardReviews             ShowcaseCardReview[]               @relation("ShowcaseCardReviewedBy")
+  showcasePlacementSuspensions    ShowcasePlacementSuspension[]      @relation("ShowcasePlacementSuspendedBy")
+  showcasePriceTermsAcceptances   ShowcaseCardPriceTermsAcceptance[]
+  showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]   @relation("ShowcasePackageTermsAcceptedBy")
+  resolvedRequestReports          ServiceRequestReport[]             @relation("ServiceRequestReportResolvedBy")
+  providerReviews                 ProviderReview[]                   @relation("ProviderReviewCustomer")
+  resolvedReviewReports           ProviderReviewReport[]             @relation("ProviderReviewReportResolvedBy")
+  reviewModerations               ProviderReviewModeration[]         @relation("ProviderReviewModerationPerformedBy")
+  createdCampaigns                Campaign[]                         @relation("CampaignCreatedBy")
+  createdCampaignVersions         CampaignVersion[]                  @relation("CampaignVersionCreatedBy")
+  campaignAuditEntries            CampaignAuditLog[]                 @relation("CampaignAuditActor")
 
   @@index([role])
   @@index([isActive])
@@ -560,6 +563,13 @@ model OperationsSettings {
   /// on by a person on the operations screen and never by a migration or an
   /// environment variable.
   providerReviewsEnabled                  Boolean  @default(false)
+  /// Whether the campaign engine may grant anything (CMP-002).
+  ///
+  /// Same contract as the switches above: false by default, fail-closed on a
+  /// missing or unreadable row. In the S0/S1 slice nothing reads this except
+  /// the admin campaign screens, which show it as "engine off"; there is no
+  /// endpoint that turns it on, and no code path that grants credits from it.
+  campaignEngineEnabled                   Boolean  @default(false)
   createdAt                               DateTime @default(now())
   updatedAt                               DateTime @updatedAt
   /// Who last saved this. Nullable and SetNull for the same reason
@@ -1041,35 +1051,35 @@ model ContactRevealEvent {
 /// codeHash — six digits collide often, and a unique index would leak that a
 /// code is already in flight elsewhere.
 model PhoneVerification {
-  id              String    @id @default(cuid())
+  id                   String    @id @default(cuid())
   /// Digits-and-plus normalisation of the request's customerPhone.
-  normalizedPhone String
-  codeHash        String
-  expiresAt       DateTime
-  consumedAt      DateTime?
+  normalizedPhone      String
+  codeHash             String
+  expiresAt            DateTime
+  consumedAt           DateTime?
   /// Wrong codes entered against this row. At the limit the row locks.
-  attemptCount    Int       @default(0)
-  lockedUntil     DateTime?
+  attemptCount         Int       @default(0)
+  lockedUntil          DateTime?
   /// How many codes have been issued in this request/phone conversation.
-  resendCount     Int       @default(0)
-  lastSentAt      DateTime  @default(now())
-  requestId       String?
+  resendCount          Int       @default(0)
+  lastSentAt           DateTime  @default(now())
+  requestId            String?
   /// The account whose own `User.phone` this code proves (AUTH-PROVIDER-CONTACT-001).
   /// Three kinds of row share this table and are told apart by two columns:
   /// a request code has `requestId`; a vitrin lead code has neither; an
   /// account code has `userId` and no `requestId`. Nullable and never
   /// backfilled — every row written before the column existed was one of the
   /// first two kinds, and reads as such.
-  userId          String?
-  ipAddress       String?
-  userAgent       String?
+  userId               String?
+  ipAddress            String?
+  userAgent            String?
   /// True when the row was consumed with the local/staging test code rather
   /// than the code that was sent (see phone-verification-test-bypass.config.ts).
   /// The audit distinction and nothing more: no code, no list, no reason.
   /// Additive, defaulting to false, so every row written before it existed
   /// reads as a real verification — which is what it was.
-  verifiedByTestBypass Boolean @default(false)
-  createdAt       DateTime  @default(now())
+  verifiedByTestBypass Boolean   @default(false)
+  createdAt            DateTime  @default(now())
 
   request ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
   user    User?           @relation("PhoneVerificationUser", fields: [userId], references: [id], onDelete: Cascade)
@@ -1236,30 +1246,30 @@ model ProviderProfile {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user                          User?                              @relation(fields: [userId], references: [id])
-  serviceCategories             ProviderServiceCategory[]
-  serviceAreas                  ProviderServiceArea[]
-  offers                        Offer[]
-  creditTransactions            ProviderCreditTransaction[]
-  manualOfferRefunds            ManualOfferRefundAudit[]
-  packagePurchases              PackagePurchase[]
-  contactRevealEvents           ContactRevealEvent[]
-  claimTokens                   ProviderClaimToken[]
-  notificationLogs              NotificationLog[]
-  messageThreads                MessageThread[]
-  packageEntitlements           ProviderPackageEntitlement[]
-  showcaseCards                 ShowcaseCard[]
-  showcaseAutoPublish           ShowcaseCardAutoPublishAudit[]
-  showcaseWithdrawals           ShowcaseSubmissionWithdrawal[]
-  showcasePlacements            ShowcasePlacement[]
-  showcaseLeads                 ShowcaseLead[]
-  showcasePriceTermsAcceptances ShowcaseCardPriceTermsAcceptance[]
+  user                            User?                              @relation(fields: [userId], references: [id])
+  serviceCategories               ProviderServiceCategory[]
+  serviceAreas                    ProviderServiceArea[]
+  offers                          Offer[]
+  creditTransactions              ProviderCreditTransaction[]
+  manualOfferRefunds              ManualOfferRefundAudit[]
+  packagePurchases                PackagePurchase[]
+  contactRevealEvents             ContactRevealEvent[]
+  claimTokens                     ProviderClaimToken[]
+  notificationLogs                NotificationLog[]
+  messageThreads                  MessageThread[]
+  packageEntitlements             ProviderPackageEntitlement[]
+  showcaseCards                   ShowcaseCard[]
+  showcaseAutoPublish             ShowcaseCardAutoPublishAudit[]
+  showcaseWithdrawals             ShowcaseSubmissionWithdrawal[]
+  showcasePlacements              ShowcasePlacement[]
+  showcaseLeads                   ShowcaseLead[]
+  showcasePriceTermsAcceptances   ShowcaseCardPriceTermsAcceptance[]
   showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]
-  showcaseEntitlements          ShowcaseEntitlement[]
-  directShowcaseRequests        ServiceRequest[]                   @relation("ServiceRequestDirectShowcaseProvider")
-  requestReports                ServiceRequestReport[]
-  reviews                       ProviderReview[]
-  reviewReports                 ProviderReviewReport[]
+  showcaseEntitlements            ShowcaseEntitlement[]
+  directShowcaseRequests          ServiceRequest[]                   @relation("ServiceRequestDirectShowcaseProvider")
+  requestReports                  ServiceRequestReport[]
+  reviews                         ProviderReview[]
+  reviewReports                   ProviderReviewReport[]
 
   @@index([status])
   @@index([city])
@@ -1612,17 +1622,17 @@ model OfferPackageScopeCategory {
 /// carry a credit amount or a ledger row, so a settlement path that forgot to
 /// branch fails on a constraint rather than silently handing out offer credit.
 model PackagePurchase {
-  id                             String                @id @default(cuid())
-  purchaseNumber                 String?               @unique
-  providerId                     String
+  id                               String                @id @default(cuid())
+  purchaseNumber                   String?               @unique
+  providerId                       String
   /// The offer package this purchase bought. NULL exactly on a
   /// SHOWCASE_PACKAGE row, and NOT NULL on every OFFER_PACKAGE one — including
   /// every row that predates the discriminator, which is why dropping the NOT
   /// NULL changed nothing about what an existing purchase means.
-  packageId                      String?
+  packageId                        String?
   /// What was bought. Defaults to OFFER_PACKAGE, which is what this table held
   /// before vitrin existed, so the default *is* the backfill.
-  kind                           PackagePurchaseKind   @default(OFFER_PACKAGE)
+  kind                             PackagePurchaseKind   @default(OFFER_PACKAGE)
   /// The vitrin catalogue row, and the card and version this placement was
   /// bought for. All four are NULL on an OFFER_PACKAGE row and all four are
   /// required on a SHOWCASE_PACKAGE one.
@@ -1631,10 +1641,10 @@ model PackagePurchase {
   /// opened. The placement pins its own version at settlement and may be
   /// re-pinned later; this column is the record of what the provider was
   /// looking at when they paid, and it never moves.
-  showcasePackageId              String?
-  showcaseCardId                 String?
-  showcaseCardVersionId          String?
-  durationDaysSnapshot           Int?
+  showcasePackageId                String?
+  showcaseCardId                   String?
+  showcaseCardVersionId            String?
+  durationDaysSnapshot             Int?
   /// The price-responsibility acceptance that was in force when this checkout
   /// was opened. NULL on an OFFER_PACKAGE row and required on a
   /// SHOWCASE_PACKAGE one, which the extended
@@ -1649,74 +1659,74 @@ model PackagePurchase {
   /// It names the acceptance rather than copying its version string, because
   /// the acceptance row carries the text as well as the version — and the text
   /// is what a customer is eventually shown.
-  showcasePriceTermsAcceptanceId String?
+  showcasePriceTermsAcceptanceId   String?
   /// The provider-level acceptance a package-first vitrin purchase was opened
   /// against. Exactly one of this and `showcasePriceTermsAcceptanceId` is set on
   /// a SHOWCASE_PACKAGE row — the legacy card-bound shape or the package-first
   /// one — and the CHECK `PackagePurchase_showcase_card_matches_kind` says so.
   showcasePackageTermsAcceptanceId String?
-  status                         PackagePurchaseStatus @default(PENDING)
-  creditAmountSnapshot           Int
-  priceAmountSnapshot            Int
-  currencySnapshot               String                @default("TRY")
-  packageNameSnapshot            String
-  providerNote                   String?
-  adminNote                      String?
-  mockPaymentReference           String?
-  mockPaymentFailureReason       String?
+  status                           PackagePurchaseStatus @default(PENDING)
+  creditAmountSnapshot             Int
+  priceAmountSnapshot              Int
+  currencySnapshot                 String                @default("TRY")
+  packageNameSnapshot              String
+  providerNote                     String?
+  adminNote                        String?
+  mockPaymentReference             String?
+  mockPaymentFailureReason         String?
   // Which PaymentProviderPort adapter opened this purchase's checkout. Only
   // ever a kind from the allow-list in payments/payment-provider.config.ts.
-  paymentProvider                String?
+  paymentProvider                  String?
   // This application's own opaque correlation token, handed to the provider as
   // checkout metadata and matched back on the webhook. Unique so one token can
   // never stand for two purchases.
-  paymentReference               String?               @unique
+  paymentReference                 String?               @unique
   // Opaque provider-side identifiers. Never a payload, never a customer detail.
-  providerCheckoutId             String?
-  providerCheckoutUrl            String?
-  providerCheckoutExpiresAt      DateTime?
+  providerCheckoutId               String?
+  providerCheckoutUrl              String?
+  providerCheckoutExpiresAt        DateTime?
   // The provider's order id, unique across the table: the database-level half of
   // the guarantee that one paid order loads credits exactly once.
-  providerOrderId                String?               @unique
+  providerOrderId                  String?               @unique
   // Why opening a checkout failed, as one of a closed set of short codes. Never
   // a provider response body.
-  paymentFailureCode             String?
+  paymentFailureCode               String?
   // Set by refund/chargeback webhooks, which never move money or credits on
   // their own in this phase. It is a flag for a human, nothing else.
-  manualReviewReason             String?
-  manualReviewAt                 DateTime?
-  paidAt                         DateTime?
-  failedAt                       DateTime?
-  cancelledAt                    DateTime?
-  expiredAt                      DateTime?
-  refundedAt                     DateTime?
-  creditTransactionId            String?
-  createdAt                      DateTime              @default(now())
-  updatedAt                      DateTime              @updatedAt
+  manualReviewReason               String?
+  manualReviewAt                   DateTime?
+  paidAt                           DateTime?
+  failedAt                         DateTime?
+  cancelledAt                      DateTime?
+  expiredAt                        DateTime?
+  refundedAt                       DateTime?
+  creditTransactionId              String?
+  createdAt                        DateTime              @default(now())
+  updatedAt                        DateTime              @updatedAt
 
-  provider                     ProviderProfile                   @relation(fields: [providerId], references: [id])
-  package                      OfferCreditPackage?               @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  provider                       ProviderProfile                   @relation(fields: [providerId], references: [id])
+  package                        OfferCreditPackage?               @relation(fields: [packageId], references: [id], onDelete: Restrict)
   /// Restrict on all three: a catalogue row, a card or a version that a
   /// settled payment points at is part of the record of what was sold, and a
   /// cascade here would erase the answer to "what did this provider pay for".
-  showcasePackage              ShowcasePackage?                  @relation(fields: [showcasePackageId], references: [id], onDelete: Restrict)
-  showcaseCard                 ShowcaseCard?                     @relation(fields: [showcaseCardId], references: [id], onDelete: Restrict)
-  showcaseCardVersion          ShowcaseCardVersion?              @relation(fields: [showcaseCardVersionId], references: [id], onDelete: Restrict)
+  showcasePackage                ShowcasePackage?                  @relation(fields: [showcasePackageId], references: [id], onDelete: Restrict)
+  showcaseCard                   ShowcaseCard?                     @relation(fields: [showcaseCardId], references: [id], onDelete: Restrict)
+  showcaseCardVersion            ShowcaseCardVersion?              @relation(fields: [showcaseCardVersionId], references: [id], onDelete: Restrict)
   /// Restrict for the same reason as the three above: it is part of the record
   /// of what was sold and on what terms.
-  showcasePriceTermsAcceptance ShowcaseCardPriceTermsAcceptance? @relation(fields: [showcasePriceTermsAcceptanceId], references: [id], onDelete: Restrict)
-  showcasePackageTermsAcceptance ShowcasePackageTermsAcceptance? @relation(fields: [showcasePackageTermsAcceptanceId], references: [id], onDelete: Restrict)
+  showcasePriceTermsAcceptance   ShowcaseCardPriceTermsAcceptance? @relation(fields: [showcasePriceTermsAcceptanceId], references: [id], onDelete: Restrict)
+  showcasePackageTermsAcceptance ShowcasePackageTermsAcceptance?   @relation(fields: [showcasePackageTermsAcceptanceId], references: [id], onDelete: Restrict)
   /// The publication right this purchase produced, when it was package-first.
-  showcaseEntitlement          ShowcaseEntitlement?
+  showcaseEntitlement            ShowcaseEntitlement?
   /// The period this purchase paid for, when it paid for one. A ONE_TIME_CREDITS
   /// purchase has none.
-  entitlement                  ProviderPackageEntitlement?       @relation("PackagePurchaseEntitlement")
+  entitlement                    ProviderPackageEntitlement?       @relation("PackagePurchaseEntitlement")
   /// The placement this purchase paid for, when it was a vitrin purchase.
   /// Unique on the placement side: one payment, one placement.
-  showcasePlacement            ShowcasePlacement?
+  showcasePlacement              ShowcasePlacement?
   /// The renewal attempt this purchase settled, when it was a renewal rather
   /// than a first purchase.
-  renewalAttempt               PackageRenewalAttempt?
+  renewalAttempt                 PackageRenewalAttempt?
 
   @@index([providerId])
   @@index([packageId])
@@ -2041,9 +2051,9 @@ enum CustomerActivationDelivery {
 }
 
 model CustomerActivationToken {
-  id          String    @id @default(cuid())
+  id          String                      @id @default(cuid())
   customerId  String
-  tokenHash   String    @unique
+  tokenHash   String                      @unique
   expiresAt   DateTime
   usedAt      DateTime?
   createdById String?
@@ -2054,7 +2064,7 @@ model CustomerActivationToken {
   /// backfilled; `createdById` is who issued it, not how it travelled, and
   /// is deliberately not read for this decision.
   delivery    CustomerActivationDelivery?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime                    @default(now())
 
   customer  User  @relation("CustomerActivationTokenCustomer", fields: [customerId], references: [id], onDelete: Cascade)
   createdBy User? @relation("CustomerActivationTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -3274,8 +3284,8 @@ model ShowcasePackageTermsAcceptance {
   acceptedByUserId  String
   acceptedAt        DateTime @default(now())
 
-  provider       ProviderProfile @relation(fields: [providerId], references: [id])
-  acceptedByUser User            @relation("ShowcasePackageTermsAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+  provider       ProviderProfile   @relation(fields: [providerId], references: [id])
+  acceptedByUser User              @relation("ShowcasePackageTermsAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
   purchases      PackagePurchase[]
 
   @@unique([providerId, termsVersion])
@@ -3292,11 +3302,11 @@ model ShowcasePackageTermsAcceptance {
 /// What was sold is snapshotted here (package name, duration, price, terms) and
 /// copied onto the placement at consumption; the catalogue is never re-read.
 model ShowcaseEntitlement {
-  id                String                    @id @default(cuid())
+  id                String @id @default(cuid())
   providerId        String
   /// One settled payment, one right. Unique: a redelivered settlement cannot
   /// grant twice.
-  purchaseId        String                    @unique
+  purchaseId        String @unique
   showcasePackageId String
 
   packageNameSnapshot       String
@@ -3314,10 +3324,10 @@ model ShowcaseEntitlement {
   /// card spent under review (see ShowcaseEntitlementReviewPause).
   expiresAt DateTime
 
-  cardId      String?
-  reservedAt  DateTime?
-  consumedAt  DateTime?
-  placementId String?   @unique
+  cardId             String?
+  reservedAt         DateTime?
+  consumedAt         DateTime?
+  placementId        String?   @unique
   /// Non-NULL while the reserved card is with an operator: the clock is stopped.
   reviewPausedAt     DateTime?
   /// Sum of every closed review pause, in whole seconds. Seconds rather than
@@ -3327,11 +3337,11 @@ model ShowcaseEntitlement {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  provider  ProviderProfile    @relation(fields: [providerId], references: [id])
-  purchase  PackagePurchase    @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
-  package   ShowcasePackage    @relation(fields: [showcasePackageId], references: [id], onDelete: Restrict)
-  card      ShowcaseCard?      @relation(fields: [cardId], references: [id], onDelete: Restrict)
-  placement ShowcasePlacement? @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  provider     ProviderProfile                  @relation(fields: [providerId], references: [id])
+  purchase     PackagePurchase                  @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  package      ShowcasePackage                  @relation(fields: [showcasePackageId], references: [id], onDelete: Restrict)
+  card         ShowcaseCard?                    @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  placement    ShowcasePlacement?               @relation(fields: [placementId], references: [id], onDelete: Restrict)
   reviewPauses ShowcaseEntitlementReviewPause[]
 
   // A partial unique index — "ShowcaseEntitlement_one_reserved_per_card",
@@ -3351,15 +3361,15 @@ model ShowcaseEntitlement {
 /// leaves. `expiresAtBefore/After` record the move, exactly as
 /// ShowcasePlacementSuspension records `endAtBefore/After`.
 model ShowcaseEntitlementReviewPause {
-  id             String                       @id @default(cuid())
-  entitlementId  String
-  cardVersionId  String
-  startedAt      DateTime                     @default(now())
-  endedAt        DateTime?
+  id              String                       @id @default(cuid())
+  entitlementId   String
+  cardVersionId   String
+  startedAt       DateTime                     @default(now())
+  endedAt         DateTime?
   expiresAtBefore DateTime
   expiresAtAfter  DateTime?
-  endReason      ShowcaseEntitlementPauseEnd?
-  createdAt      DateTime                     @default(now())
+  endReason       ShowcaseEntitlementPauseEnd?
+  createdAt       DateTime                     @default(now())
 
   entitlement ShowcaseEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Restrict)
   version     ShowcaseCardVersion @relation(fields: [cardVersionId], references: [id], onDelete: Restrict)
@@ -3732,4 +3742,134 @@ model RequestDraft {
   @@index([expiresAt])
   @@index([expectedUserId])
   @@index([userId])
+}
+
+// ─────────────────────────────── Campaigns (CMP-002) ───────────────────────────────
+
+/// Where a campaign stands. This slice (S0/S1) only ever writes DRAFT: there is
+/// no activation endpoint, and the engine that would act on ACTIVE does not
+/// exist yet. The other three values are declared now so the lifecycle
+/// CMP-001 §2.1 fixes needs no enum migration when S2 arrives.
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum CampaignTrigger {
+  PROVIDER_APPROVED
+  PACKAGE_PAYMENT_SUCCEEDED
+  PROVIDER_ELIGIBILITY_REACHED
+}
+
+enum CampaignEligibilityFact {
+  PROVIDER_APPROVED
+  EMAIL_VERIFIED
+  PHONE_VERIFIED
+}
+
+enum CampaignBenefitType {
+  PROMO_CREDITS
+}
+
+enum CampaignStackPolicy {
+  EXCLUSIVE_CREDIT_BONUS
+}
+
+enum CampaignAuditAction {
+  CREATED
+  VERSION_CREATED
+}
+
+/// A campaign's identity and lifecycle. What it *does* lives in its versions.
+///
+/// `currentVersionId` is the draft an operator is editing: every save writes a
+/// new CampaignVersion and moves this pointer in the same transaction, so the
+/// row an earlier save produced is never touched again. Restrict rather than
+/// Cascade everywhere: a campaign is never deleted, it is ENDED (S2).
+model Campaign {
+  id               String         @id @default(cuid())
+  /// Stable operator-facing identifier (slug). Unique; never reused.
+  key              String         @unique
+  name             String
+  status           CampaignStatus @default(DRAFT)
+  currentVersionId String?        @unique
+  createdById      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  currentVersion CampaignVersion?   @relation("CampaignCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
+  createdBy      User               @relation("CampaignCreatedBy", fields: [createdById], references: [id])
+  versions       CampaignVersion[]  @relation("CampaignVersions")
+  auditEntries   CampaignAuditLog[]
+
+  @@index([status, updatedAt])
+  @@index([createdById])
+}
+
+/// One immutable snapshot of a campaign's rules.
+///
+/// Written once, never updated: no service method takes a version id and a
+/// patch, and the migration adds no UPDATE path. A change is a new row with
+/// the next `versionNumber`, and the campaign's `currentVersionId` moves. The
+/// full validated definition is stored as JSON and re-parsed on every read;
+/// the columns beside it denormalise what the panel lists and what a database
+/// CHECK can bound, so a row whose JSON disagrees with its columns cannot be
+/// written by this code and would be visible if it were written by anything
+/// else.
+model CampaignVersion {
+  id                        String                    @id @default(cuid())
+  campaignId                String
+  versionNumber             Int
+  trigger                   CampaignTrigger
+  /// Canonical (sorted) fact set; empty unless the trigger is the eligibility transition.
+  eligibilityFacts          CampaignEligibilityFact[]
+  /// `EMAIL_VERIFIED+PHONE_VERIFIED+PROVIDER_APPROVED` — set exactly when the trigger is the eligibility transition.
+  factSetKey                String?
+  /// The validated, normalised schemaVersion-1 definition (CMP-002 S0).
+  definition                Json
+  benefitType               CampaignBenefitType
+  benefitCredits            Int
+  benefitExpiresInDays      Int
+  maxRedemptionsPerProvider Int
+  maxRedemptionsGlobal      Int?
+  maxRedemptionsPerDay      Int?
+  budgetCredits             Int?
+  windowStartAt             DateTime?
+  windowEndAt               DateTime?
+  stackPolicy               CampaignStackPolicy
+  priority                  Int
+  createdById               String
+  createdAt                 DateTime                  @default(now())
+
+  campaign  Campaign  @relation("CampaignVersions", fields: [campaignId], references: [id], onDelete: Restrict)
+  createdBy User      @relation("CampaignVersionCreatedBy", fields: [createdById], references: [id])
+  currentOf Campaign? @relation("CampaignCurrentVersion")
+
+  @@unique([campaignId, versionNumber])
+  @@index([trigger, factSetKey])
+  @@index([createdById])
+}
+
+/// Who did what to a campaign, and when.
+///
+/// `summary` is a small structural record — version number, trigger, credit
+/// amount, the names of the top-level fields a revision changed — never the
+/// operator's input, a token, a secret or anything about a provider. The
+/// definition itself is on the version row the entry points at.
+model CampaignAuditLog {
+  id                String              @id @default(cuid())
+  campaignId        String
+  action            CampaignAuditAction
+  campaignVersionId String?
+  actorId           String
+  summary           Json?
+  createdAt         DateTime            @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  actor    User     @relation("CampaignAuditActor", fields: [actorId], references: [id])
+
+  @@index([campaignId, createdAt])
+  @@index([actorId])
 }
