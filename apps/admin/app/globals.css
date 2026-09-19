@@ -4644,6 +4644,21 @@ button:disabled {
   font-weight: 600;
 }
 
+/*
+ * Text-like inputs take the column they are given and no more. WebKit's
+ * `datetime-local` widget has an intrinsic width wider than a 320px phone's
+ * form column, and an input's automatic minimum size is that intrinsic
+ * width — so without this the window pane, not the input, grew (CI, Linux
+ * WebKit: 9px). Radios and checkboxes keep their own size.
+ */
+.campaign-form input:not([type='radio']):not([type='checkbox']),
+.campaign-form select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .campaign-form input[aria-invalid='true'],
 .campaign-form select[aria-invalid='true'] {
   border-color: #dc2626;

@@ -22,8 +22,12 @@ const SCREENSHOT_DIR = resolve(artifactsDir, 'admin-campaign-drafts');
 async function expectNoHorizontalOverflow(page: Page, label: string) {
   const { overflow, culprits } = await page.evaluate(() => {
     const limit = window.innerWidth;
+    // Elements inside a horizontal scroll container are clipped by it and
+    // cannot widen the document; the rest, widest first, are the suspects.
     const culprits = Array.from(document.querySelectorAll('body *'))
       .filter((el) => el.getBoundingClientRect().right > limit + 1)
+      .filter((el) => !el.parentElement?.closest('.table-scroll'))
+      .sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)
       .slice(0, 8)
       .map((el) => {
         const rect = el.getBoundingClientRect();
