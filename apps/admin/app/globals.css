@@ -4683,6 +4683,18 @@ button:disabled {
   min-width: 0;
 }
 
+/*
+ * Linux WebKit (CI) draws the menulist natively and ignores `overflow` on
+ * the select itself, so the clip has to sit one level up: every field in the
+ * form is a clipping box. The 3px of padding pulled back by the margin keeps
+ * the focus ring and the invalid-state shadow visible inside the clip.
+ */
+.campaign-fieldset .field {
+  overflow: hidden;
+  padding: 3px;
+  margin: -3px;
+}
+
 .campaign-form input[aria-invalid='true'],
 .campaign-form select[aria-invalid='true'] {
   border-color: #dc2626;
