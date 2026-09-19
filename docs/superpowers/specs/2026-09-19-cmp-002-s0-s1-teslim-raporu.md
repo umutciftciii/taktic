@@ -71,7 +71,7 @@ maxRedemptionsPerProvider, changedFields[] }` (jsonb anahtar sırasından bağı
 | `campaign-rules-validator.spec.ts` (unit, 31) | ✅ kabul matrisi (K1/K2/ilk onay, boş kök, tek seviye any, slug), red matrisi — her kod ≥1, derinlik/boyut/boş grup, uyumsuzluk, `USE_ELIGIBILITY_TRIGGER`, duplicate/çelişki, tür/argüman, fayda/limit/pencere/stack/priority, determinizm |
 | `admin-campaigns.spec.ts` (integration, 13) | ✅ RBAC 401/403; create → 1 sürüm + 2 audit; geçersiz → 0 satır; slug DB denetimi; key 409 / DTO 400; validate DB yazmaz; revizyon (eski sürüm `toEqual` bit-bit, pointer, audit `changedFields`); geçersiz revizyon 0 satır + 404 sızdırmaz; DRAFT dışı 409; **8 paralel save → boşluksuz monoton, 409 yalnız `CONCURRENT_MODIFICATION`**; liste/cursor/limit sınırı/detay; engine satır yok/false/true |
 | `campaign-engine-isolation.spec.ts` (5) | ✅ §4 |
-| API tam suite | bkz. teslim kaydı |
+| API tam suite | ✅ 136 dosya, 3113 test (yerel, worktree) |
 | `apps/admin` unit (64, +9 yeni) | ✅ katalog projeksiyonu, tetikleyiciye göre daralan seçenekler, hata cümlesi kapsamı, form→tanım (any grubu, tipli argüman, açık null), onarmama, round-trip, path→alan eşlemesi, nav |
 | `packages/shared` (168) | ✅ |
 | E2E `admin-campaign-drafts` Chromium | ✅ 2/2 — liste+ibare → kurucu (textarea yok, katalog dışı seçenek yok) → Doğrula: `BENEFIT_INVALID` alan yanında, DB 0 → düzelt → geçerli, DB 0 → kaydet v1 → revizyon v2, v1 DB'de `toEqual` → liste → 320/768/1024/1440 taşma yok (liste/detay/kurucu ekran görüntüleri `e2e/.artifacts/admin-campaign-drafts/`); sağlayıcı oturumu → `/login` |
