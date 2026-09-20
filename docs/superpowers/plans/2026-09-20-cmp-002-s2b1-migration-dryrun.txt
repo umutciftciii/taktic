@@ -1,0 +1,93 @@
+# CMP-002 S2B1 Migration C dry-run — geçici DB taktic_cmp002_s2b1_dryrun (gerçek yerel/staging DB'ye komut yok)
+# 2026-09-20T18:55:27Z · branch claude/cmp-002-s2b1-promo-credits-7c88bd · HEAD 2fdc8c7c
+
+## prisma migrate deploy (tüm zincir)
+  └─ 20260919150000_add_campaign_drafts/
+    └─ migration.sql
+  └─ 20260919180000_add_campaign_engine_infrastructure/
+    └─ migration.sql
+  └─ 20260920090000_add_promo_credit_consumption/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+
+## prisma migrate diff --from-url <dryrun> --to-schema-datamodel
+
+No difference detected.
+
+
+## migration sayısı
+68
+
+## CreditTransactionType (sıralı; altı eski + üç yeni)
+ADMIN_GRANT,ADMIN_DEDUCT,PACKAGE_PURCHASE,OFFER_SPEND,OFFER_REFUND,ADJUSTMENT,CAMPAIGN_GRANT,CAMPAIGN_EXPIRE,CAMPAIGN_REVOKE
+
+## PromoCreditLotConsumptionStatus
+CONSUMED,REFUNDED,FORFEITED
+
+## Yeni tablo satır sayısı (seed yok)
+PromoCreditLotConsumption=0
+
+## Migration C'nin SQL ifade türleri (DML/DROP/ALTER COLUMN yok)
+  10 ALTER TABLE "PromoCreditLotConsumption" ADD CONSTRAINT
+   3 ALTER TYPE
+   3 CREATE INDEX
+   1 CREATE TABLE
+   1 CREATE TYPE
+   2 CREATE UNIQUE INDEX
+
+## CHECK kısıtları (PromoCreditLotConsumption)
+PromoCreditLotConsumption_consumed_untouched: CHECK (((status <> 'CONSUMED'::"PromoCreditLotConsumptionStatus") OR (("refundedCredits" = 0) AND ("forfeitedCredits" = 0))))
+PromoCreditLotConsumption_credits_bounded: CHECK ((("consumedCredits" >= 1) AND ("refundedCredits" >= 0) AND ("forfeitedCredits" >= 0) AND (("refundedCredits" + "forfeitedCredits") <= "consumedCredits")))
+PromoCreditLotConsumption_forfeit_row_matches_status: CHECK (((status = 'FORFEITED'::"PromoCreditLotConsumptionStatus") = ("forfeitTransactionId" IS NOT NULL)))
+PromoCreditLotConsumption_forfeited_whole: CHECK (((status <> 'FORFEITED'::"PromoCreditLotConsumptionStatus") OR (("forfeitedCredits" = "consumedCredits") AND ("refundedCredits" = 0))))
+PromoCreditLotConsumption_refunded_whole: CHECK (((status <> 'REFUNDED'::"PromoCreditLotConsumptionStatus") OR (("refundedCredits" = "consumedCredits") AND ("forfeitedCredits" = 0))))
+PromoCreditLotConsumption_settlement_complete: CHECK ((((status = 'CONSUMED'::"PromoCreditLotConsumptionStatus") = ("settledAt" IS NULL)) AND ((status = 'CONSUMED'::"PromoCreditLotConsumptionStatus") = ("refundTransactionId" IS NULL))))
+
+## \d PromoCreditLotConsumption
+                                            Table "public.PromoCreditLotConsumption"
+        Column        |               Type                | Collation | Nullable |                    Default                    
+----------------------+-----------------------------------+-----------+----------+-----------------------------------------------
+ id                   | text                              |           | not null | 
+ lotId                | text                              |           | not null | 
+ creditTransactionId  | text                              |           | not null | 
+ consumedCredits      | integer                           |           | not null | 
+ refundedCredits      | integer                           |           | not null | 0
+ forfeitedCredits     | integer                           |           | not null | 0
+ status               | "PromoCreditLotConsumptionStatus" |           | not null | 'CONSUMED'::"PromoCreditLotConsumptionStatus"
+ refundTransactionId  | text                              |           |          | 
+ forfeitTransactionId | text                              |           |          | 
+ consumedAt           | timestamp(3) without time zone    |           | not null | CURRENT_TIMESTAMP
+ settledAt            | timestamp(3) without time zone    |           |          | 
+Indexes:
+    "PromoCreditLotConsumption_pkey" PRIMARY KEY, btree (id)
+    "PromoCreditLotConsumption_creditTransactionId_idx" btree ("creditTransactionId")
+    "PromoCreditLotConsumption_forfeitTransactionId_key" UNIQUE, btree ("forfeitTransactionId")
+    "PromoCreditLotConsumption_lotId_creditTransactionId_key" UNIQUE, btree ("lotId", "creditTransactionId")
+    "PromoCreditLotConsumption_lotId_idx" btree ("lotId")
+    "PromoCreditLotConsumption_refundTransactionId_idx" btree ("refundTransactionId")
+Check constraints:
+    "PromoCreditLotConsumption_consumed_untouched" CHECK (status <> 'CONSUMED'::"PromoCreditLotConsumptionStatus" OR "refundedCredits" = 0 AND "forfeitedCredits" = 0)
+    "PromoCreditLotConsumption_credits_bounded" CHECK ("consumedCredits" >= 1 AND "refundedCredits" >= 0 AND "forfeitedCredits" >= 0 AND ("refundedCredits" + "forfeitedCredits") <= "consumedCredits")
+    "PromoCreditLotConsumption_forfeit_row_matches_status" CHECK ((status = 'FORFEITED'::"PromoCreditLotConsumptionStatus") = ("forfeitTransactionId" IS NOT NULL))
+    "PromoCreditLotConsumption_forfeited_whole" CHECK (status <> 'FORFEITED'::"PromoCreditLotConsumptionStatus" OR "forfeitedCredits" = "consumedCredits" AND "refundedCredits" = 0)
+    "PromoCreditLotConsumption_refunded_whole" CHECK (status <> 'REFUNDED'::"PromoCreditLotConsumptionStatus" OR "refundedCredits" = "consumedCredits" AND "forfeitedCredits" = 0)
+    "PromoCreditLotConsumption_settlement_complete" CHECK ((status = 'CONSUMED'::"PromoCreditLotConsumptionStatus") = ("settledAt" IS NULL) AND (status = 'CONSUMED'::"PromoCreditLotConsumptionStatus") = ("refundTransactionId" IS NULL))
+Foreign-key constraints:
+    "PromoCreditLotConsumption_creditTransactionId_fkey" FOREIGN KEY ("creditTransactionId") REFERENCES "ProviderCreditTransaction"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "PromoCreditLotConsumption_forfeitTransactionId_fkey" FOREIGN KEY ("forfeitTransactionId") REFERENCES "ProviderCreditTransaction"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "PromoCreditLotConsumption_lotId_fkey" FOREIGN KEY ("lotId") REFERENCES "PromoCreditLot"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "PromoCreditLotConsumption_refundTransactionId_fkey" FOREIGN KEY ("refundTransactionId") REFERENCES "ProviderCreditTransaction"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+
+## Mevcut ledger tablosu değişmedi (\d ProviderCreditTransaction kolonları)
+id text
+providerId text
+type USER-DEFINED
+amount integer
+balanceAfter integer
+reason text
+referenceType text
+referenceId text
+createdById text
+createdAt timestamp without time zone
