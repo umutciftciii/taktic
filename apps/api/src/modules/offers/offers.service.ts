@@ -21,6 +21,7 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { restorePromoConsumptionsForRefund } from '../credits/promo-credit-ledger';
 import {
   contactDisclosureRequiredException,
   contactDisclosureSupersededException,
@@ -259,7 +260,7 @@ export class OffersService {
           throw new ConflictException('Offer credit already refunded');
         }
 
-        const { refundTransaction } = await refundOfferCreditInTransaction(
+        const { refundTransaction, balanceAfter } = await refundOfferCreditInTransaction(
           tx,
           offer,
           manualRefundStoredReason(reasonCode),
@@ -287,7 +288,7 @@ export class OffersService {
 
         return {
           offer: withRefundEligibility(updatedOffer),
-          balance: refundTransaction.balanceAfter,
+          balance: balanceAfter,
           refundTransaction,
         };
       },
@@ -896,11 +897,19 @@ export async function refundOfferCreditInTransaction(
     id: string;
     providerId: string;
     creditCost: number;
+    /**
+     * The OFFER_SPEND row this offer was charged with — the same column the
+     * conditional UPDATE below already requires to be set. It is what a
+     * refund reads its promo-lot shares through (CMP-002 S2B1); a caller
+     * passes the committed value and never guesses one.
+     */
+    creditSpentTransactionId: string | null;
   },
   storedReason: string,
   options: { enforceUnviewedPolicy?: boolean; createdById?: string | null } = {},
 ) {
   const enforceUnviewedPolicy = options.enforceUnviewedPolicy ?? true;
+  const now = new Date();
   const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
   const refundTransaction = await createRefundLedgerRow(tx, {
     providerId: offer.providerId,
@@ -950,7 +959,31 @@ export async function refundOfferCreditInTransaction(
     throw new ConflictException('Offer credit is no longer eligible for refund');
   }
 
-  return { refundTransaction };
+  /*
+   * Where the credit lands (CMP-002 S2B1). The refund row above is the whole
+   * `creditCost`, exactly as before; what a promo lot paid of that cost goes
+   * back into the lot if the lot is still valid, and is taken out of the
+   * wallet again through a CAMPAIGN_EXPIRE / CAMPAIGN_REVOKE row if it is
+   * not, so an expired or revoked promotion cannot come back as paid credit.
+   * An offer that no lot paid for — every offer while the campaign engine is
+   * off — has no share here, and this is one empty read.
+   */
+  const promo = offer.creditSpentTransactionId
+    ? await restorePromoConsumptionsForRefund(tx, {
+        providerId: offer.providerId,
+        spendTransactionId: offer.creditSpentTransactionId,
+        refundTransactionId: refundTransaction.id,
+        now,
+        createdById: options.createdById ?? null,
+      })
+    : null;
+
+  return {
+    refundTransaction,
+    /** The wallet after everything this refund wrote — the figure a caller reports. */
+    balanceAfter: promo?.balanceAfter ?? refundTransaction.balanceAfter,
+    promo,
+  };
 }
 
 async function createRefundLedgerRow(

@@ -603,6 +603,11 @@ function createEmptyCreditTotals(): Record<CreditTransactionType, number> {
     [CreditTransactionType.OFFER_SPEND]: 0,
     [CreditTransactionType.OFFER_REFUND]: 0,
     [CreditTransactionType.ADJUSTMENT]: 0,
+    // CMP-002 S2B1: carried so the record stays total; no report reads them
+    // yet (the admin ledger surface for campaigns is S4).
+    [CreditTransactionType.CAMPAIGN_GRANT]: 0,
+    [CreditTransactionType.CAMPAIGN_EXPIRE]: 0,
+    [CreditTransactionType.CAMPAIGN_REVOKE]: 0,
   };
 }
 
@@ -820,6 +825,11 @@ function toCreditTotals(
     [CreditTransactionType.OFFER_SPEND]: 0,
     [CreditTransactionType.OFFER_REFUND]: 0,
     [CreditTransactionType.ADJUSTMENT]: 0,
+    // CMP-002 S2B1: carried so the record stays total; no report reads them
+    // yet (the admin ledger surface for campaigns is S4).
+    [CreditTransactionType.CAMPAIGN_GRANT]: 0,
+    [CreditTransactionType.CAMPAIGN_EXPIRE]: 0,
+    [CreditTransactionType.CAMPAIGN_REVOKE]: 0,
   };
 
   for (const group of groups) {

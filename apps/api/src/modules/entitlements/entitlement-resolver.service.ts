@@ -7,6 +7,10 @@ import {
   ProviderEntitlementStatus,
 } from '@prisma/client';
 import { CreditsService } from '../credits/credits.service';
+import {
+  consumePromoCreditsForSpend,
+  readUnsweptExpiredPromoCredits,
+} from '../credits/promo-credit-ledger';
 import { istanbulDayStart } from './entitlement-period';
 
 /** The 402 the offer flow has always answered with when nothing could pay. */
@@ -152,7 +156,13 @@ export class EntitlementResolverService {
     }
 
     const balanceBefore = await readCreditBalance(tx, input.providerId);
-    if (balanceBefore < input.creditCost) {
+    // Promo credit whose lot has passed its expiry but which the sweep has
+    // not yet taken out of the wallet still sits inside `balanceBefore`. It
+    // cannot pay (CMP-002 S2B1): a late sweeper must never let a dead lot buy
+    // an offer. Zero for every provider without such a lot — which, while
+    // the campaign engine is off, is every provider.
+    const unsweptExpired = await readUnsweptExpiredPromoCredits(tx, input.providerId, input.now);
+    if (balanceBefore - unsweptExpired < input.creditCost) {
       throw new HttpException(INSUFFICIENT_CREDIT_MESSAGE, HttpStatus.PAYMENT_REQUIRED);
     }
 
@@ -224,6 +234,19 @@ export class EntitlementResolverService {
       reason: context.reason,
       referenceType: 'Offer',
       referenceId: context.offerId,
+    });
+
+    // Which part of that debit a promo lot paid (CMP-002 S2B1): the
+    // earliest-expiring valid lot first, then the next, and whatever is
+    // left is the paid balance. Runs after the debit on purpose — the row
+    // above is the charge exactly as it has always been, and a debit that
+    // throws never reaches here, so no lot share can exist without it. With
+    // no lot to draw from this is one empty read and nothing else.
+    await consumePromoCreditsForSpend(tx, {
+      providerId: context.providerId,
+      spendTransactionId: transaction.id,
+      creditCost: decision.creditCost,
+      now: context.now,
     });
 
     return { creditTransactionId: transaction.id };
