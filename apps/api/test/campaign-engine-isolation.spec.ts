@@ -39,10 +39,15 @@ import {
  * spending credit — with a draft campaign for every trigger *and* an ACTIVE
  * campaign for every trigger sitting in the database, and asserts that no
  * campaign table gained a row (definitions, events, redemptions, logs, lots,
- * counters), the campaign counters stayed at zero, the ledger carries only
- * the six pre-existing transaction types, and no balance moved except where
- * the flow itself always moved it. The ACTIVE rows are written straight
- * through Prisma, because no endpoint can produce one.
+ * lot consumptions, counters), the campaign counters stayed at zero, the
+ * ledger carries only the six pre-existing transaction types — never the
+ * three CAMPAIGN_* types S2B1 added — and no balance moved except where the
+ * flow itself always moved it. The ACTIVE rows are written straight through
+ * Prisma, because no endpoint can produce one.
+ *
+ * S2B1 makes the offer spend and refund paths promo-aware; the last two
+ * cases prove that, with no lot in existence, a spend and a refund still
+ * write exactly what they wrote before.
  */
 
 const PLACEHOLDER_API_KEY = `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.${'placeholderNotARealCredential'}`;
@@ -164,7 +169,7 @@ async function expectNothingCampaignRelated(snapshot: Awaited<ReturnType<typeof 
   // campaign-side count and counter must not.
   expect({ ...after, engine: { ...after.engine, ledgerRows: 0 } }).toEqual({ ...snapshot, engine: { ...snapshot.engine, ledgerRows: 0 } });
   expect(snapshot.engineEnabled).toBe(false);
-  expect(after.engine).toMatchObject({ triggerEvents: 0, redemptions: 0, evaluationLogs: 0, lots: 0, providerCounters: 0, dailyCounters: 0 });
+  expect(after.engine).toMatchObject({ triggerEvents: 0, redemptions: 0, evaluationLogs: 0, lots: 0, consumptions: 0, providerCounters: 0, dailyCounters: 0 });
   expect(after.engine.campaignCounters.length).toBe(6);
   for (const campaign of after.engine.campaignCounters) {
     expect(campaign).toMatchObject({ redemptionCount: 0, budgetConsumedCredits: 0 });
@@ -316,6 +321,33 @@ describe('with draft and ACTIVE campaigns in the database', () => {
 
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(8);
     expect(await ledgerTypes()).toEqual([CreditTransactionType.ADMIN_GRANT, CreditTransactionType.OFFER_SPEND]);
+    await expectNothingCampaignRelated(snapshot);
+  });
+
+  it('an offer refund returns the category price to the paid balance and nothing else', async () => {
+    const { cookie: adminCookie, snapshot } = await seedDrafts();
+    const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: 2 });
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const serviceRequest = await createApprovedRequest(ctx.prisma, { categoryId: category.id, customerId: customer.id });
+    const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, { userId: owner.id, categoryId: category.id });
+    const cookie = await loginAs(ctx.prisma, owner.id);
+    await grantCredits(ctx.prisma, provider.id, 10);
+    const offer = await request(ctx.server)
+      .post(`/providers/${provider.id}/requests/${serviceRequest.id}/offers`)
+      .set('Cookie', cookie)
+      .send(offerPayload())
+      .expect(201);
+
+    const refund = await request(ctx.server)
+      .post(`/offers/${offer.body.id as string}/refund-credit`)
+      .set('Cookie', adminCookie)
+      .send({ reasonCode: 'INVALID_REQUEST' })
+      .expect(201);
+
+    expect(refund.body.balance).toBe(10);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(10);
+    expect(await ledgerTypes()).toEqual([CreditTransactionType.ADMIN_GRANT, CreditTransactionType.OFFER_REFUND, CreditTransactionType.OFFER_SPEND]);
     await expectNothingCampaignRelated(snapshot);
   });
 });
