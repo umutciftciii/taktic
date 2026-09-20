@@ -4,8 +4,8 @@ Tarih: 2026-09-20 · Branch: `claude/cmp-002-s2b1-promo-credits-7c88bd` · Taban
 Tasarım notu: `docs/superpowers/specs/2026-09-20-cmp-002-s2b1-promo-credit-accounting-design.md` · Dry-run kaydı:
 `docs/superpowers/plans/2026-09-20-cmp-002-s2b1-migration-dryrun.txt` · Bağlayıcı sözleşme: CMP-001 (rev. 3) §2.4–2.6.
 
-PR: https://github.com/umutciftciii/taktic/pull/98 · head `0f024d3e` (+ bu rapor commit'i) · CI: bkz. §6 (bu rapor yazılırken
-run 35531142550 üç job'da `in_progress`; nihai durum PR'da).
+PR: https://github.com/umutciftciii/taktic/pull/98 · head `5922278f` (+ bu rapor güncellemesi) · CI run 35531946012 **3/3 yeşil**
+(typecheck·lint·test·build ✅, e2e chromium ✅, e2e webkit ✅).
 
 Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Lemon veya gerçek veri işlemi **yapılmadı**.
 Geçici DB'ler (`taktic_cmp002_s2b1_shadow`, `taktic_cmp002_s2b1_dryrun`, `taktic_cmp002s2b1_e2e`) yalnız bu iş için
@@ -114,7 +114,7 @@ ikinci grant P2034, tek lot), expiry (bir kez; ikinci çağrı no-op; EXHAUSTED 
 | E2E Chromium (`pnpm e2e`, izole `taktic_cmp002s2b1_e2e`) | ✅ **285 passed, 0 failed** (8.7 dk) |
 | E2E WebKit (`pnpm e2e:webkit`) | ✅ **116 passed, 0 failed** (4.1 dk) |
 | Migration dry-run | ✅ 68 migration, diff boş (§2) |
-| CI (run 35531142550, head `0f024d3e`) | typecheck·lint·test·build / e2e chromium / e2e webkit — rapor anında `in_progress`; nihai durum PR'da |
+| CI (run 35531946012, head `5922278f`) | ✅ 3/3: typecheck·lint·test·build, e2e chromium, e2e webkit (önceki run 35531142550 docs push'uyla iptal edildi; iki E2E job'ı orada da ✅) |
 
 ## 7. "Mevcut kredi davranışı değişmedi" kanıtı
 
