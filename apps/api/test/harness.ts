@@ -217,6 +217,9 @@ const TRUNCATED_TABLES = [
   'CompanySettings',
   // Campaign engine infrastructure (CMP-002 S2A), children first: lots point
   // at redemptions, redemptions and logs at events, everything at the campaign.
+  // S2B1: a consumption row references a lot and three ledger rows, so it
+  // goes before both.
+  'PromoCreditLotConsumption',
   'PromoCreditLot',
   'CampaignEvaluationLog',
   'CampaignRedemption',
