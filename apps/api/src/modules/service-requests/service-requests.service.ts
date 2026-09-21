@@ -1006,7 +1006,12 @@ export class ServiceRequestsService {
       // Throws on any guard failure, which rolls the whole removal back.
       await refundOfferCreditInTransaction(
         tx,
-        { id: offer.id, providerId: offer.providerId, creditCost: offer.creditCost },
+        {
+          id: offer.id,
+          providerId: offer.providerId,
+          creditCost: offer.creditCost,
+          creditSpentTransactionId: offer.creditSpentTransactionId,
+        },
         REQUEST_REMOVED_REFUND_REASON,
         { enforceUnviewedPolicy: false, createdById: input.actorUserId },
       );

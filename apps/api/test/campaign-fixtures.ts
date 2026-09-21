@@ -6,6 +6,7 @@ import {
   type PrismaClient,
   UserRole,
 } from '@prisma/client';
+import { grantPromoCreditLot } from '../src/modules/credits/promo-credit-ledger';
 import { createUser, uniqueSuffix } from './harness';
 
 /**
@@ -119,6 +120,7 @@ export async function engineWriteSnapshot(prisma: PrismaClient) {
     redemptions: await prisma.campaignRedemption.count(),
     evaluationLogs: await prisma.campaignEvaluationLog.count(),
     lots: await prisma.promoCreditLot.count(),
+    consumptions: await prisma.promoCreditLotConsumption.count(),
     providerCounters: await prisma.campaignProviderCounter.count(),
     dailyCounters: await prisma.campaignDailyCounter.count(),
     ledgerRows: await prisma.providerCreditTransaction.count(),
@@ -132,4 +134,74 @@ export async function setEngineEnabled(prisma: PrismaClient, enabled: boolean) {
     create: { id: 'singleton', unviewedOfferRefundWindowHours: 48, campaignEngineEnabled: enabled },
     update: { campaignEngineEnabled: enabled },
   });
+}
+
+export type PromoLotFixtureOptions = {
+  credits?: number;
+  /** Absolute expiry; defaults to 30 days from now. */
+  expiresAt?: Date;
+  /** Reuse a campaign (and thereby test a second redemption of the same campaign by another event). */
+  campaign?: { campaign: { id: string }; version: { id: string } };
+  createdById?: string;
+};
+
+/**
+ * A granted promo lot for a provider, written the way S2B2's engine will
+ * write it: an ACTIVE campaign, a trigger event, a GRANTED redemption, and
+ * then the S2B1 grant primitive (CAMPAIGN_GRANT row + lot + link) inside one
+ * Serializable transaction. No production path can produce this in S2B1;
+ * every accounting spec starts from here.
+ */
+export async function createPromoLotFixture(prisma: PrismaClient, providerId: string, options: PromoLotFixtureOptions = {}) {
+  const credits = options.credits ?? 10;
+  const expiresAt = options.expiresAt ?? new Date(Date.now() + 30 * 86_400_000);
+  const { campaign, version } =
+    options.campaign ?? (await createCampaignFixture(prisma, { credits, createdById: options.createdById }));
+  const suffix = uniqueSuffix();
+  const event = await prisma.campaignTriggerEvent.create({
+    data: {
+      triggerEventKey: `PROVIDER_APPROVED:${providerId}:${suffix}`,
+      trigger: 'PROVIDER_APPROVED',
+      providerId,
+    },
+  });
+  const redemption = await prisma.campaignRedemption.create({
+    data: {
+      campaignId: campaign.id,
+      campaignVersionId: version.id,
+      providerId,
+      trigger: 'PROVIDER_APPROVED',
+      triggerEventId: event.id,
+      triggerEventKey: event.triggerEventKey,
+      rulesSnapshot: {},
+      grantedCredits: credits,
+    },
+  });
+  const granted = await prisma.$transaction(
+    (tx) => grantPromoCreditLot(tx, { providerId, redemptionId: redemption.id, credits, expiresAt, now: new Date() }),
+    { isolationLevel: 'Serializable' },
+  );
+  const lot = await prisma.promoCreditLot.findUniqueOrThrow({ where: { id: granted.lotId } });
+  return { campaign, version, event, redemption, lot, grantTransactionId: granted.transactionId };
+}
+
+/**
+ * The wallet invariant of the S2B1 design note §5, checked from the rows
+ * alone: the ledger sums to the newest balance, and that balance equals the
+ * paid share plus every lot remainder still inside the wallet.
+ */
+export async function walletInvariant(prisma: PrismaClient, providerId: string) {
+  const rows = await prisma.providerCreditTransaction.findMany({
+    where: { providerId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { type: true, amount: true, balanceAfter: true },
+  });
+  const balance = rows.at(-1)?.balanceAfter ?? 0;
+  const sumOfAmounts = rows.reduce((total, row) => total + row.amount, 0);
+  const lots = await prisma.promoCreditLot.findMany({
+    where: { providerId, status: { in: ['ACTIVE', 'EXHAUSTED'] } },
+    select: { remainingCredits: true },
+  });
+  const promoInWallet = lots.reduce((total, lot) => total + lot.remainingCredits, 0);
+  return { balance, sumOfAmounts, promoInWallet, paid: balance - promoInWallet, rows };
 }

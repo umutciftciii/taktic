@@ -326,7 +326,7 @@ describe('CampaignEvaluationLog', () => {
 });
 
 describe('the credit ledger', () => {
-  it('still knows exactly the six pre-CMP-002 transaction types', async () => {
+  it('keeps the six pre-CMP-002 transaction types first and in their original order, followed by the three S2B1 types', async () => {
     const rows = await ctx.prisma.$queryRaw<{ enumlabel: string }[]>`
       SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
       WHERE t.typname = 'CreditTransactionType' ORDER BY e.enumsortorder`;
@@ -337,6 +337,9 @@ describe('the credit ledger', () => {
       'OFFER_SPEND',
       'OFFER_REFUND',
       'ADJUSTMENT',
+      'CAMPAIGN_GRANT',
+      'CAMPAIGN_EXPIRE',
+      'CAMPAIGN_REVOKE',
     ]);
   });
 });

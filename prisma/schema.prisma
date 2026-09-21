@@ -247,6 +247,21 @@ enum CreditTransactionType {
   OFFER_SPEND
   OFFER_REFUND
   ADJUSTMENT
+  /// CMP-002 S2B1. The three campaign movements, appended after the six
+  /// original values whose meaning does not change:
+  ///  - CAMPAIGN_GRANT  (+) a promo lot opened for a redemption
+  ///                        (CampaignRedemption.grantTransactionId);
+  ///  - CAMPAIGN_EXPIRE (−) promo credit leaving the wallet because the lot's
+  ///                        validity ended — the sweeper's write of a lot's
+  ///                        remainder (PromoCreditLot.expiryTransactionId), or
+  ///                        the refund-time forfeit of a share that had been
+  ///                        spent from a lot that has since expired
+  ///                        (PromoCreditLotConsumption.forfeitTransactionId);
+  ///  - CAMPAIGN_REVOKE (−) the same two cases for a revoked lot
+  ///                        (PromoCreditLot.revokeTransactionId / forfeitTransactionId).
+  CAMPAIGN_GRANT
+  CAMPAIGN_EXPIRE
+  CAMPAIGN_REVOKE
 }
 
 enum PackagePurchaseStatus {
@@ -1972,14 +1987,21 @@ model ProviderCreditTransaction {
   createdById   String?
   createdAt     DateTime              @default(now())
 
-  provider          ProviderProfile         @relation(fields: [providerId], references: [id])
-  createdBy         User?                   @relation(fields: [createdById], references: [id])
-  manualRefundAudit ManualOfferRefundAudit?
-  /// CMP-002 S2A opens these links and writes none of them: the campaign
-  /// engine does not touch this table until S2B adds the CAMPAIGN_* types.
-  campaignGrantOf   CampaignRedemption?     @relation("CampaignRedemptionGrantTransaction")
-  promoLotExpiryOf  PromoCreditLot?         @relation("PromoCreditLotExpiryTransaction")
-  promoLotRevokeOf  PromoCreditLot?         @relation("PromoCreditLotRevokeTransaction")
+  provider                  ProviderProfile             @relation(fields: [providerId], references: [id])
+  createdBy                 User?                       @relation(fields: [createdById], references: [id])
+  manualRefundAudit         ManualOfferRefundAudit?
+  /// CMP-002 S2A opened these links; S2B1 writes them from the promo-credit
+  /// ledger primitives (grant / expiry / revoke). The engine itself still
+  /// writes none of them until S2B2 calls those primitives.
+  campaignGrantOf           CampaignRedemption?         @relation("CampaignRedemptionGrantTransaction")
+  promoLotExpiryOf          PromoCreditLot?             @relation("PromoCreditLotExpiryTransaction")
+  promoLotRevokeOf          PromoCreditLot?             @relation("PromoCreditLotRevokeTransaction")
+  /// CMP-002 S2B1. Which promo-lot shares this row moved: as the OFFER_SPEND
+  /// debit they were taken for, as the OFFER_REFUND that settled them, or as
+  /// the CAMPAIGN_EXPIRE / CAMPAIGN_REVOKE row that forfeited exactly one.
+  promoConsumptionsAsSpend  PromoCreditLotConsumption[] @relation("PromoCreditLotConsumptionSpend")
+  promoConsumptionsAsRefund PromoCreditLotConsumption[] @relation("PromoCreditLotConsumptionRefund")
+  promoForfeitOf            PromoCreditLotConsumption?  @relation("PromoCreditLotConsumptionForfeit")
 
   // A PostgreSQL partial unique index —
   // "ProviderCreditTransaction_one_refund_per_offer", UNIQUE ("referenceId")
@@ -3939,6 +3961,16 @@ enum PromoCreditLotStatus {
   REVOKED
 }
 
+/// What became of one lot's share of one offer spend (CMP-002 S2B1).
+/// CONSUMED until the offer is refunded; then REFUNDED (the share went back
+/// into the lot) or FORFEITED (the lot was expired or revoked, so the share
+/// left the wallet again through a CAMPAIGN_EXPIRE / CAMPAIGN_REVOKE row).
+enum PromoCreditLotConsumptionStatus {
+  CONSUMED
+  REFUNDED
+  FORFEITED
+}
+
 /// Why an (event, candidate) evaluation ended the way it did. Closed set;
 /// `ENGINE_DISABLED` exists for a future observation mode and is never written
 /// in S2A, where a disabled engine writes nothing at all.
@@ -4083,10 +4115,13 @@ model CampaignEvaluationLog {
 /// A timed promotional credit lot — the one benefit type in v1.
 ///
 /// `grantedCredits` never changes; `remainingCredits` moves with spending
-/// and refunds (S2B) and is bounded to [0, grantedCredits] by CHECK. Spending
-/// against a lot, the earliest-expiring-first order, expiry and revocation are
-/// all S2B+: in this slice a lot is created with `remaining = granted` and
-/// nothing reads it.
+/// and refunds and is bounded to [0, grantedCredits] by CHECK. S2B1 is where
+/// it is read and moved: an offer spend takes from the earliest-expiring
+/// ACTIVE lot first (`consumptions` records each share against the
+/// OFFER_SPEND row), a refund puts a share back only while the lot is still
+/// valid, and the expiry sweep zeroes a due lot through one CAMPAIGN_EXPIRE
+/// row. The wallet invariant every writer keeps:
+/// `balance = paid + Σ remainingCredits (status ∈ {ACTIVE, EXHAUSTED})`.
 model PromoCreditLot {
   id                  String               @id @default(cuid())
   providerId          String
@@ -4100,13 +4135,54 @@ model PromoCreditLot {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
-  provider          ProviderProfile            @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  redemption        CampaignRedemption         @relation(fields: [redemptionId], references: [id], onDelete: Restrict)
-  expiryTransaction ProviderCreditTransaction? @relation("PromoCreditLotExpiryTransaction", fields: [expiryTransactionId], references: [id], onDelete: Restrict)
-  revokeTransaction ProviderCreditTransaction? @relation("PromoCreditLotRevokeTransaction", fields: [revokeTransactionId], references: [id], onDelete: Restrict)
+  provider          ProviderProfile             @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  redemption        CampaignRedemption          @relation(fields: [redemptionId], references: [id], onDelete: Restrict)
+  expiryTransaction ProviderCreditTransaction?  @relation("PromoCreditLotExpiryTransaction", fields: [expiryTransactionId], references: [id], onDelete: Restrict)
+  revokeTransaction ProviderCreditTransaction?  @relation("PromoCreditLotRevokeTransaction", fields: [revokeTransactionId], references: [id], onDelete: Restrict)
+  consumptions      PromoCreditLotConsumption[]
 
   @@index([providerId, status, expiresAt])
   @@index([status, expiresAt])
+}
+
+/// One lot's share of one offer spend (CMP-002 S2B1).
+///
+/// Written in the same transaction as the OFFER_SPEND row it points at, one
+/// row per lot the spend drew from; the paid remainder of the cost is not a
+/// row here, because it is already what `balanceAfter` says. A refund reads
+/// these rows through `Offer.creditSpentTransactionId` — the same column the
+/// refund's own guard already requires — and settles each one exactly once:
+/// REFUNDED back into a lot that is still valid, or FORFEITED through a
+/// negative ledger row when the lot has expired or been revoked, so that a
+/// promo credit can never come back as a paid one. Bounded by CHECK so that a
+/// settled row always accounts for its whole share and an unsettled one for
+/// none of it.
+model PromoCreditLotConsumption {
+  id                   String                          @id @default(cuid())
+  lotId                String
+  /// The OFFER_SPEND row this share was taken for.
+  creditTransactionId  String
+  consumedCredits      Int
+  refundedCredits      Int                             @default(0)
+  forfeitedCredits     Int                             @default(0)
+  status               PromoCreditLotConsumptionStatus @default(CONSUMED)
+  /// The OFFER_REFUND row that settled this share. Not unique: one refund
+  /// settles every share of its spend.
+  refundTransactionId  String?
+  /// The CAMPAIGN_EXPIRE / CAMPAIGN_REVOKE row that forfeited this share.
+  forfeitTransactionId String?                         @unique
+  consumedAt           DateTime                        @default(now())
+  settledAt            DateTime?
+
+  lot                PromoCreditLot             @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  creditTransaction  ProviderCreditTransaction  @relation("PromoCreditLotConsumptionSpend", fields: [creditTransactionId], references: [id], onDelete: Restrict)
+  refundTransaction  ProviderCreditTransaction? @relation("PromoCreditLotConsumptionRefund", fields: [refundTransactionId], references: [id], onDelete: Restrict)
+  forfeitTransaction ProviderCreditTransaction? @relation("PromoCreditLotConsumptionForfeit", fields: [forfeitTransactionId], references: [id], onDelete: Restrict)
+
+  @@unique([lotId, creditTransactionId])
+  @@index([creditTransactionId])
+  @@index([lotId])
+  @@index([refundTransactionId])
 }
 
 /// The database half of `maxRedemptionsPerProvider` (CMP-001 §10.3): the
