@@ -1,4 +1,4 @@
-import { CampaignAuditAction, CampaignStatus, UserRole } from '@prisma/client';
+import { CampaignAuditAction, CampaignStatus, type Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { OPERATIONS_SETTINGS_ID } from '../src/modules/operations-settings/operations-settings.service';
@@ -47,7 +47,7 @@ const K2 = {
     ],
   },
   benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
-  limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000 },
+  limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000, maxRevokesPerDay: null },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
   priority: 100,
@@ -59,7 +59,7 @@ const K1 = {
   eligibility: { facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED', 'PHONE_VERIFIED'] },
   conditions: { all: [{ type: 'NO_PRIOR_REVOCATION' }] },
   benefit: { type: 'PROMO_CREDITS', credits: 5, expiresInDays: 14 },
-  limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null },
+  limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: null },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
   priority: 100,
@@ -305,6 +305,39 @@ describe('revising a draft', () => {
     });
     // The audit summary is structural: nothing the operator typed is in it.
     expect(JSON.stringify(audit.map((entry) => entry.summary))).not.toContain('Rev');
+  });
+
+  it('stores the daily revoke threshold on the version, and a revision from a version saved before the field existed does not report limits as changed (CMP-003 S3)', async () => {
+    const { cookie } = await adminCookie();
+    const created = await createCampaign(cookie, { key: 'revoke-limit', name: 'Eşik', definition: K2 }).expect(201);
+    const campaignId = created.body.campaign.id as string;
+    expect(created.body.currentVersion.maxRevokesPerDay).toBeNull();
+    // A version stored before this slice: the key is absent from its JSON.
+    await ctx.prisma.campaignVersion.update({
+      where: { id: created.body.currentVersion.id as string },
+      data: { definition: K2 as unknown as Prisma.InputJsonValue },
+    });
+
+    const untouched = await request(ctx.server)
+      .post(`/admin/campaigns/${campaignId}/versions`)
+      .set('Cookie', cookie)
+      .send({ definition: { ...K2, priority: 50 } })
+      .expect(201);
+    expect(untouched.body.currentVersion.maxRevokesPerDay).toBeNull();
+    const audit = await ctx.prisma.campaignAuditLog.findMany({ where: { campaignId }, orderBy: { createdAt: 'asc' } });
+    expect(audit.at(-1)?.summary).toMatchObject({ versionNumber: 2, changedFields: ['priority'] });
+
+    const withThreshold = await request(ctx.server)
+      .post(`/admin/campaigns/${campaignId}/versions`)
+      .set('Cookie', cookie)
+      .send({ definition: { ...K2, limits: { ...K2.limits, maxRevokesPerDay: 3 } } })
+      .expect(201);
+    expect(withThreshold.body.currentVersion.maxRevokesPerDay).toBe(3);
+    expect(withThreshold.body.currentVersion.definition.limits.maxRevokesPerDay).toBe(3);
+    const row = await ctx.prisma.campaignVersion.findUniqueOrThrow({ where: { id: withThreshold.body.currentVersion.id as string } });
+    expect(row.maxRevokesPerDay).toBe(3);
+    const last = await ctx.prisma.campaignAuditLog.findFirst({ where: { campaignId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    expect(last?.summary).toMatchObject({ versionNumber: 3, changedFields: ['limits', 'priority'] });
   });
 
   it('writes nothing for an invalid revision, and 404s an unknown campaign without a body that leaks', async () => {

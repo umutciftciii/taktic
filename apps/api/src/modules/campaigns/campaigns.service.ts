@@ -120,6 +120,8 @@ export type CampaignVersionSummaryView = {
   maxRedemptionsGlobal: number | null;
   maxRedemptionsPerDay: number | null;
   budgetCredits: number | null;
+  /** CMP-003 S3: revokes per UTC day before an automatic pause; null = no threshold. */
+  maxRevokesPerDay: number | null;
   windowStartAt: Date | null;
   windowEndAt: Date | null;
   stackPolicy: CampaignStackPolicy;
@@ -175,6 +177,7 @@ const versionSelect = {
   maxRedemptionsGlobal: true,
   maxRedemptionsPerDay: true,
   budgetCredits: true,
+  maxRevokesPerDay: true,
   windowStartAt: true,
   windowEndAt: true,
   stackPolicy: true,
@@ -377,6 +380,7 @@ export class CampaignsService {
         maxRedemptionsGlobal: definition.limits.maxRedemptionsGlobal,
         maxRedemptionsPerDay: definition.limits.maxRedemptionsPerDay,
         budgetCredits: definition.limits.budgetCredits,
+        maxRevokesPerDay: definition.limits.maxRevokesPerDay,
         windowStartAt: definition.window.startAt ? new Date(definition.window.startAt) : null,
         windowEndAt: definition.window.endAt ? new Date(definition.window.endAt) : null,
         stackPolicy: definition.stackPolicy as CampaignStackPolicy,
@@ -833,7 +837,12 @@ function changedFields(previous: Prisma.JsonValue | null, next: CampaignDefiniti
   if (previous === null || typeof previous !== 'object' || Array.isArray(previous)) {
     return [];
   }
-  const before = previous as Record<string, unknown>;
+  // The stored JSON is normalised through today's validator before the
+  // comparison, so an optional field the catalogue gained since that version
+  // was saved (absent there, explicit null in `next`) does not report a change
+  // the operator did not make.
+  const parsed = validateCampaignDefinition(previous);
+  const before = (parsed.ok ? parsed.definition : previous) as Record<string, unknown>;
   return DEFINITION_FIELDS.filter(
     (field) => stableStringify(before[field] ?? null) !== stableStringify(next[field] ?? null),
   );

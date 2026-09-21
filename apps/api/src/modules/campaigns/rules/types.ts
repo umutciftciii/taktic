@@ -25,6 +25,8 @@ export type CampaignDefinition = {
     maxRedemptionsGlobal: number | null;
     maxRedemptionsPerDay: number | null;
     budgetCredits: number | null;
+    /** CMP-003 S3: revokes per UTC day before the campaign pauses itself; null = no threshold. */
+    maxRevokesPerDay: number | null;
   };
   window: { startAt: string | null; endAt: string | null };
   stackPolicy: string;

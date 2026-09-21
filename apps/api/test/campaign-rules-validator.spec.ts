@@ -34,6 +34,7 @@ const K2_PACKAGE_BONUS = {
     maxRedemptionsGlobal: 1000,
     maxRedemptionsPerDay: null,
     budgetCredits: 10000,
+    maxRevokesPerDay: null,
   },
   window: { startAt: '2026-10-01T00:00:00Z', endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -138,6 +139,7 @@ describe('accepted definitions', () => {
       maxRedemptionsGlobal: null,
       maxRedemptionsPerDay: null,
       budgetCredits: null,
+      maxRevokesPerDay: null,
     });
     expect(result.definition.window).toEqual({ startAt: null, endAt: null });
     expect(result.definition.eligibility).toBeUndefined();
@@ -496,6 +498,15 @@ describe('limits, window, stack policy and priority', () => {
     expectCode({ ...K2_PACKAGE_BONUS, limits: { maxRedemptionsPerProvider: 1, budgetCredits: '100' } }, 'LIMIT_INVALID', 'limits.budgetCredits');
     expectCode({ ...K2_PACKAGE_BONUS, limits: { maxRedemptionsPerProvider: 1, maxRedemptionsPerBusiness: 1 } }, 'UNKNOWN_FIELD', 'limits.maxRedemptionsPerBusiness');
     expectCode({ ...K2_PACKAGE_BONUS, limits: null }, 'LIMIT_INVALID', 'limits');
+  });
+
+  it('accepts an optional daily revoke threshold between 1 and 1000 (CMP-003 S3)', () => {
+    const accepted = validateCampaignDefinition({ ...K2_PACKAGE_BONUS, limits: { ...K2_PACKAGE_BONUS.limits, maxRevokesPerDay: 3 } });
+    expect(accepted.ok).toBe(true);
+    if (accepted.ok) expect(accepted.definition.limits.maxRevokesPerDay).toBe(3);
+    expectCode({ ...K2_PACKAGE_BONUS, limits: { maxRedemptionsPerProvider: 1, maxRevokesPerDay: 0 } }, 'LIMIT_INVALID', 'limits.maxRevokesPerDay');
+    expectCode({ ...K2_PACKAGE_BONUS, limits: { maxRedemptionsPerProvider: 1, maxRevokesPerDay: 1001 } }, 'LIMIT_INVALID', 'limits.maxRevokesPerDay');
+    expectCode({ ...K2_PACKAGE_BONUS, limits: { maxRedemptionsPerProvider: 1, maxRevokesPerDay: '3' } }, 'LIMIT_INVALID', 'limits.maxRevokesPerDay');
   });
 
   it('rejects a budget that cannot pay for a single lot', () => {
