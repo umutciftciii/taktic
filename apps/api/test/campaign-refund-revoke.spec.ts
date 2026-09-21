@@ -1,9 +1,11 @@
 import { CampaignAuditAction, CampaignStatus, CreditTransactionType, PaymentWebhookEventStatus, type Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CONCURRENT_MODIFICATION_CODE, PRISMA_WRITE_CONFLICT_ERROR_CODE } from '../src/common/serializable-transaction';
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
 import { MANUAL_REVIEW_REASON } from '../src/modules/payments/payments-webhook.service';
 import { CampaignEvaluationWorker } from '../src/modules/campaigns/engine/campaign-evaluation.worker';
+import { CampaignRevokeService } from '../src/modules/campaigns/engine/campaign-revoke.service';
 import { createCampaignFixture, engineWriteSnapshot, setEngineEnabled, walletInvariant } from './campaign-fixtures';
 import {
   createApprovedRequest,
@@ -395,7 +397,7 @@ describe('the daily revoke threshold pauses the campaign by itself', () => {
     expect(await currentCreditBalance(ctx.prisma, fourth.provider.id)).toBe(PACKAGE_CREDITS);
   });
 
-  it('counts concurrent revokes exactly and writes exactly one AUTO_PAUSED row', async () => {
+  it('counts concurrent revokes exactly and writes exactly one AUTO_PAUSED row, with a 409 loser completed by its redelivery', async () => {
     const { category, creditPackage, campaign } = await scenario({ maxRevokesPerDay: 2 });
     const fixtures = [];
     for (let index = 0; index < 4; index += 1) {
@@ -404,19 +406,93 @@ describe('the daily revoke threshold pauses the campaign by itself', () => {
       fixtures.push(fixture);
     }
 
-    const responses = await Promise.all(fixtures.map((fixture) => refund(fixture)));
-    for (const response of responses) {
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'manual_review_required' });
+    // Four deliveries contend on one campaign's counter row under Serializable
+    // isolation. The contract (CMP-001 §10.3, `runSerializable`) is that a
+    // delivery whose retry budget runs out is answered 409
+    // CONCURRENT_MODIFICATION with nothing committed, and that Lemon Squeezy
+    // then redelivers it. So the first round is allowed two answers — 200 or
+    // that 409 — and the test's claim is about the state after redelivery.
+    //
+    // Whether real contention produces a 409 depends on timing, and a test
+    // that only tolerates the 409 proves nothing on the runs where it never
+    // happens. One delivery is therefore made to lose deterministically: its
+    // revoke raises the write conflict PostgreSQL raises under Serializable
+    // contention (P2034) on every attempt of the first round, so the budget
+    // runs out the same way it does in CI. Only that throw is stubbed — the
+    // retry loop, the rollback, the 409 mapping, the committed-state check and
+    // the redelivery are the production code.
+    const revokes = ctx.app.get(CampaignRevokeService);
+    const forcedLoser = fixtures[0]!;
+    const realRevoke = revokes.revokeForRefundedPurchase.bind(revokes);
+    let firstRound = true;
+    const conflict = vi.spyOn(revokes, 'revokeForRefundedPurchase').mockImplementation(async (tx, input) => {
+      if (firstRound && input.purchaseId === forcedLoser.purchase.id) {
+        throw Object.assign(new Error('could not serialize access due to concurrent update'), { code: PRISMA_WRITE_CONFLICT_ERROR_CODE });
+      }
+      return realRevoke(tx, input);
+    });
+    const responses = await Promise.all(fixtures.map((fixture) => refund(fixture))).finally(() => {
+      firstRound = false;
+      conflict.mockRestore();
+    });
+
+    const lost: typeof fixtures = [];
+    fixtures.forEach((fixture, index) => {
+      const response = responses[index]!;
+      if (response.status === 200) {
+        expect(response.body).toEqual({ status: 'manual_review_required' });
+        return;
+      }
+      // The only other legal first answer. Anything else is a real failure.
+      expect(response.status).toBe(409);
+      expect(response.body).toMatchObject({ code: CONCURRENT_MODIFICATION_CODE });
+      lost.push(fixture);
+    });
+    expect(lost).toContain(forcedLoser);
+
+    // A 409 committed nothing for its delivery: no flag, no event row, the
+    // lot still granted. This is what makes the redelivery safe.
+    for (const fixture of lost) {
+      const purchase = await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: fixture.purchase.id } });
+      expect(purchase.manualReviewAt).toBeNull();
+      expect(await ctx.prisma.paymentWebhookEvent.count({ where: { purchaseId: fixture.purchase.id, status: PaymentWebhookEventStatus.MANUAL_REVIEW_REQUIRED } })).toBe(0);
+      const redemption = await ctx.prisma.campaignRedemption.findFirstOrThrow({ where: { purchaseId: fixture.purchase.id } });
+      expect(redemption.status).toBe('GRANTED');
     }
 
+    // Lemon Squeezy redelivers a non-2xx: same payload, same event identity,
+    // one at a time. Not `duplicate` — the lost delivery left nothing behind,
+    // so this is the delivery that flags the reversal and revokes the lot.
+    for (const fixture of lost) {
+      const redelivered = await refund(fixture).expect(200);
+      expect(redelivered.body).toEqual({ status: 'manual_review_required' });
+    }
+
+    // Final state, whatever the first round looked like.
     expect(await revokeCounter(campaign.id)).toBe(4);
     expect(await ctx.prisma.campaignRedemption.count({ where: { campaignId: campaign.id, status: 'REVOKED' } })).toBe(4);
+    expect(await ctx.prisma.promoCreditLot.count({ where: { status: 'REVOKED' } })).toBe(4);
     expect(await ctx.prisma.providerCreditTransaction.count({ where: { type: 'CAMPAIGN_REVOKE' } })).toBe(4);
+    expect(await ctx.prisma.paymentWebhookEvent.count({ where: { status: PaymentWebhookEventStatus.MANUAL_REVIEW_REQUIRED } })).toBe(4);
     expect((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe(CampaignStatus.PAUSED);
     expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.AUTO_PAUSED } })).toBe(1);
     for (const fixture of fixtures) {
+      const rows = await ledger(fixture.provider.id);
+      expect(rows.filter((row) => row.type === CreditTransactionType.CAMPAIGN_REVOKE).map((row) => row.amount)).toEqual([-PROMO_CREDITS]);
+      expect(await currentCreditBalance(ctx.prisma, fixture.provider.id)).toBe(PACKAGE_CREDITS);
       await expectInvariant(fixture.provider.id);
+    }
+
+    // A second copy of every delivery, after the fact, changes nothing.
+    for (const fixture of fixtures) {
+      const again = await refund(fixture).expect(200);
+      expect(again.body).toEqual({ status: 'duplicate' });
+    }
+    expect(await revokeCounter(campaign.id)).toBe(4);
+    expect(await ctx.prisma.providerCreditTransaction.count({ where: { type: 'CAMPAIGN_REVOKE' } })).toBe(4);
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(1);
+    for (const fixture of fixtures) {
+      expect(await currentCreditBalance(ctx.prisma, fixture.provider.id)).toBe(PACKAGE_CREDITS);
     }
   });
 
