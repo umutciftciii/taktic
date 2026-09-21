@@ -4,8 +4,8 @@ Tarih: 2026-09-21 · Branch: `claude/cmp-002-s2b2-lifecycle-hooks-3f7a2c` · Tab
 doğrulandı) · Tasarım notu: `docs/superpowers/specs/2026-09-21-cmp-002-s2b2-lifecycle-hooks-design.md` · Dry-run kaydı:
 `docs/superpowers/plans/2026-09-21-cmp-002-s2b2-migration-dryrun.txt` · Bağlayıcı sözleşme: CMP-001 (rev. 3).
 
-PR: https://github.com/umutciftciii/taktic/pull/99 (açık; merge yok) · head `07aed2ac` (+ bu rapor) · CI run 35587030296:
-sonuç tablosu §6.
+PR: https://github.com/umutciftciii/taktic/pull/99 (açık; merge yok) · head `e00b87c9` (+ bu rapor güncellemesi) · CI run 35588381023
+**3/3 yeşil** (typecheck·lint·test·build 12m27s, e2e chromium 13m53s, e2e webkit 10m44s).
 
 Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Lemon ayarı veya gerçek veri işlemi **yapılmadı**. Geçici DB'ler
 (`taktic_cmp002_s2b2_dryrun`, `taktic_cmp002s2b2_e2e`) yalnız bu iş için oluşturuldu ve düşürüldü; yerel `taktic` DB'sine komut yok.
@@ -97,7 +97,7 @@ varken, `campaignEngineEnabled=false`: sağlayıcı onayı, PROVIDER e-posta + t
 | E2E Chromium (izole `taktic_cmp002s2b2_e2e`) | ✅ **286 passed** (9.3 dk) — `admin-campaign-lifecycle` dahil |
 | E2E WebKit | ✅ **117 passed** (3.7 dk) |
 | Migration dry-run | ✅ 69 migration, diff boş, yalnız 5 `ALTER TYPE` |
-| CI (run 35587030296, head `07aed2ac`) | e2e webkit ✅ (10m21s); typecheck·lint·test·build ve e2e chromium: rapor yazıldığında **pending** — nihai durum PR'da |
+| CI (run 35588381023, head `e00b87c9`) | ✅ 3/3: typecheck·lint·test·build (12m27s), e2e chromium (13m53s), e2e webkit (10m44s); önceki run 35587030296 rapor push'uyla iptal edildi (webkit orada da ✅) |
 
 ## 7. Motor açmak S4'e kadar teknik olarak mümkün değil
 
