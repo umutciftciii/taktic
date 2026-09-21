@@ -13,7 +13,7 @@ import {
   type EngineInput,
   type EngineResult,
 } from '../src/modules/campaigns/engine/campaign-engine.service';
-import { createCampaignFixture, engineWriteSnapshot, setEngineEnabled } from './campaign-fixtures';
+import { createCampaignFixture, engineWriteSnapshot, setEngineEnabled, walletInvariant } from './campaign-fixtures';
 import {
   createOfferPackage,
   createProviderProfile,
@@ -24,14 +24,17 @@ import {
 } from './harness';
 
 /**
- * The engine with its switch on — reachable only from here in S2A.
+ * The engine with its switch on, called directly (the hooked business paths
+ * are `campaign-engine-hooks.spec.ts`).
  *
  * What is proven: one event, one settlement (CMP-001 §12); the deterministic
  * order among candidates and the STACK_CONFLICT the losers get; the limit
  * counters consumed by conditional update under a savepoint, so a refused
  * candidate leaves no trace and the next one wins; the eligibility transition
- * granting exactly once whatever the order of the three facts; and, in every
- * scenario, **no ledger row** — the credit ledger is S2B's.
+ * granting exactly once whatever the order of the three facts; and, since
+ * S2B2, in every scenario **exactly one CAMPAIGN_GRANT ledger row per
+ * redemption**, linked through `grantTransactionId`, with the wallet
+ * invariant `balance = paid + Σ lot.remaining` holding.
  */
 
 let ctx: TestContext;
@@ -132,18 +135,37 @@ async function expectCounterInvariants() {
     expect(perProvider._sum.redemptionCount ?? 0).toBe(campaign.redemptionCount);
     expect(perDay._sum.redemptionCount ?? 0).toBe(campaign.redemptionCount);
   }
-  // Every lot belongs to exactly one GRANTED redemption and mirrors its credits.
+  // Every lot belongs to exactly one GRANTED redemption and mirrors its credits,
+  // and every redemption is linked to exactly one CAMPAIGN_GRANT row of the
+  // same amount — the S2B1 primitive's shape, unchanged by the engine.
   const lots = await ctx.prisma.promoCreditLot.findMany({ include: { redemption: true } });
   for (const lot of lots) {
     expect(lot.grantedCredits).toBe(lot.redemption.grantedCredits);
     expect(lot.remainingCredits).toBe(lot.grantedCredits);
     expect(lot.status).toBe('ACTIVE');
+    expect(lot.redemption.grantTransactionId).not.toBeNull();
+    const row = await ctx.prisma.providerCreditTransaction.findUniqueOrThrow({ where: { id: lot.redemption.grantTransactionId! } });
+    expect(row).toMatchObject({
+      type: 'CAMPAIGN_GRANT',
+      amount: lot.grantedCredits,
+      providerId: lot.providerId,
+      referenceType: 'CampaignRedemption',
+      referenceId: lot.redemptionId,
+    });
   }
-  expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
+  const redemptions = await ctx.prisma.campaignRedemption.count();
+  expect(await ctx.prisma.promoCreditLot.count()).toBe(redemptions);
+  expect(await ctx.prisma.providerCreditTransaction.count({ where: { type: 'CAMPAIGN_GRANT' } })).toBe(redemptions);
+  expect(await ctx.prisma.providerCreditTransaction.count({ where: { type: { not: 'CAMPAIGN_GRANT' } } })).toBe(0);
+  for (const providerId of new Set(lots.map((lot) => lot.providerId))) {
+    const wallet = await walletInvariant(ctx.prisma, providerId);
+    expect(wallet.sumOfAmounts).toBe(wallet.balance);
+    expect(wallet.paid).toBe(0);
+  }
 }
 
 describe('one event, one campaign', () => {
-  it('grants once: event, redemption, lot, counters and a GRANTED log — and no ledger row', async () => {
+  it('grants once: event, redemption, CAMPAIGN_GRANT row, lot, counters and a GRANTED log', async () => {
     const { campaign, version } = await createCampaignFixture(ctx.prisma, { credits: 10, expiresInDays: 30 });
     const { provider, owner } = await providerWithAccount();
     const before = Date.now();
@@ -152,6 +174,7 @@ describe('one event, one campaign', () => {
 
     expect(result.granted).toMatchObject({ campaignId: campaign.id, campaignVersionId: version.id, grantedCredits: 10 });
     expect(result.triggerEventKey).toBe(`PROVIDER_APPROVED:${provider.id}`);
+    expect(result.granted!.grantTransactionId).toEqual(expect.any(String));
 
     const event = await ctx.prisma.campaignTriggerEvent.findUniqueOrThrow({ where: { triggerEventKey: result.triggerEventKey } });
     expect(event).toMatchObject({ trigger: 'PROVIDER_APPROVED', providerId: provider.id, purchaseId: null, factSetKey: null, evaluationCount: 1, settledByCampaignId: campaign.id });
@@ -169,12 +192,17 @@ describe('one event, one campaign', () => {
       triggerEventKey: event.triggerEventKey,
       status: 'GRANTED',
       grantedCredits: 10,
-      grantTransactionId: null,
+      grantTransactionId: result.granted!.grantTransactionId,
     });
     expect(redemption.rulesSnapshot).toEqual(version.definition);
 
+    // The one ledger row: +10 CAMPAIGN_GRANT, balance 0 → 10, referencing the redemption.
+    expect(await ctx.prisma.providerCreditTransaction.findMany({ where: { providerId: provider.id } })).toMatchObject([
+      { id: result.granted!.grantTransactionId, type: 'CAMPAIGN_GRANT', amount: 10, balanceAfter: 10, referenceType: 'CampaignRedemption', referenceId: redemption.id },
+    ]);
+
     const lot = await ctx.prisma.promoCreditLot.findUniqueOrThrow({ where: { redemptionId: redemption.id } });
-    expect(lot).toMatchObject({ providerId: provider.id, grantedCredits: 10, remainingCredits: 10, status: 'ACTIVE' });
+    expect(lot).toMatchObject({ id: result.granted!.lotId, providerId: provider.id, grantedCredits: 10, remainingCredits: 10, status: 'ACTIVE' });
     const thirtyDays = 30 * 86_400_000;
     expect(lot.expiresAt.getTime()).toBeGreaterThanOrEqual(before + thirtyDays - 5_000);
     expect(lot.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + thirtyDays + 5_000);

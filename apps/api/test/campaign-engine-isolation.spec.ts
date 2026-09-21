@@ -8,6 +8,7 @@ import {
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { FactSourceRegistry } from '../src/modules/campaigns/engine/fact-source-registry';
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
 import { LEMON_SQUEEZY_SIGNATURE_HEADER } from '../src/modules/payments/lemon-squeezy.webhook';
 import { createCampaignFixture, engineWriteSnapshot } from './campaign-fixtures';
@@ -30,24 +31,26 @@ import {
 } from './harness';
 
 /**
- * CMP-002 S0/S1 ships definitions and drafts; S2A ships the engine's tables
- * and the engine itself — and still nothing that calls it from a flow.
+ * The closed-engine zero-effect matrix (CMP-002 S2A §5, re-proven in S2B2
+ * with the hooks wired).
  *
- * This file drives every flow the engine will one day hook — a provider being
- * approved, an account proving its e-mail and its telephone, a package
- * settling through the real webhook and through the mock path, an offer
- * spending credit — with a draft campaign for every trigger *and* an ACTIVE
- * campaign for every trigger sitting in the database, and asserts that no
- * campaign table gained a row (definitions, events, redemptions, logs, lots,
- * lot consumptions, counters), the campaign counters stayed at zero, the
- * ledger carries only the six pre-existing transaction types — never the
- * three CAMPAIGN_* types S2B1 added — and no balance moved except where the
- * flow itself always moved it. The ACTIVE rows are written straight through
- * Prisma, because no endpoint can produce one.
+ * Since S2B2 every flow here *does* call the campaign engine, inside its own
+ * transaction: a provider being approved, an account proving its e-mail and
+ * its telephone, a package settling through the real webhook and through the
+ * mock path. This file drives each of them — plus an offer spending credit
+ * and an offer refund — with a draft campaign for every trigger *and* an
+ * ACTIVE campaign for every trigger sitting in the database and the switch
+ * off, and asserts that no campaign table gained a row (definitions, events,
+ * redemptions, logs, lots, lot consumptions, counters), the campaign counters
+ * stayed at zero, the ledger carries only the six pre-existing transaction
+ * types — never the three CAMPAIGN_* types — and no balance moved except
+ * where the flow itself always moved it. The first case proves the hooks are
+ * really wired (every writer is registered), so "nothing happened" is the
+ * engine's kill switch at work and not an absent call.
  *
- * S2B1 makes the offer spend and refund paths promo-aware; the last two
- * cases prove that, with no lot in existence, a spend and a refund still
- * write exactly what they wrote before.
+ * S2B1 made the offer spend and refund paths promo-aware; the last two cases
+ * prove that, with no lot in existence, a spend and a refund still write
+ * exactly what they wrote before.
  */
 
 const PLACEHOLDER_API_KEY = `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.${'placeholderNotARealCredential'}`;
@@ -190,6 +193,13 @@ function deliver(payload: unknown) {
 }
 
 describe('with draft and ACTIVE campaigns in the database', () => {
+  it('the hooks are wired: every fact source has a booted PROVIDER writer, so the cases below exercise the switch and not an absent call', () => {
+    const registry = ctx.app.get(FactSourceRegistry);
+    for (const source of ['PROVIDER_APPROVED', 'EMAIL_VERIFIED', 'PHONE_VERIFIED', 'PACKAGE_PAYMENT_SUCCEEDED'] as const) {
+      expect(registry.hasProviderWriter(source)).toBe(true);
+    }
+  });
+
   it('a provider approval writes the profile status and nothing else', async () => {
     const { cookie, snapshot } = await seedDrafts();
     const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
