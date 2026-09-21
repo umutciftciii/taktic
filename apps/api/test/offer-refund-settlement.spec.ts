@@ -161,6 +161,13 @@ describe('refund settlement through the real refund path', () => {
     expect(response.body.settlement).toEqual(expected);
     expect(await readSettlement(expected.refundTransactionId)).toEqual(expected);
     await expectInvariant(fixture.provider.id);
+
+    // The e-mail carries the figures it always carried, and nothing about promotions.
+    const [message] = ctx.notifications.ofTemplate('credit-refunded');
+    expect(message?.data).toMatchObject({ refundedCredits: '3', previousBalance: '7', currentBalance: '10' });
+    expect(message?.data?.promoForfeitedCredits).toBeNull();
+    expect(message?.data?.promoRestoredCredits).toBeNull();
+    expect(message?.data?.netCredits).toBeNull();
   });
 
   it('a share that goes back into a valid lot is restored, not forfeited: net stays gross', async () => {
@@ -204,6 +211,18 @@ describe('refund settlement through the real refund path', () => {
     });
     expect(response.body.balance).toBe(2);
     expect(await readSettlement(settlement.refundTransactionId)).toEqual(settlement);
+    // The e-mail is driven by the settlement: the balance it reports is the
+    // wallet after the forfeit, not after the refund row alone.
+    const [message] = ctx.notifications.ofTemplate('credit-refunded');
+    expect(message?.data).toMatchObject({
+      refundedCredits: '5',
+      promoForfeitedCredits: '3',
+      promoForfeitedExpiredCredits: '3',
+      promoForfeitedRevokedCredits: null,
+      netCredits: '2',
+      previousBalance: '0',
+      currentBalance: '2',
+    });
     // The dead lot did not come back to life, and no paid credit was invented.
     const state = await expectInvariant(fixture.provider.id);
     expect(state).toMatchObject({ balance: 2, paid: 2, promoInWallet: 0 });

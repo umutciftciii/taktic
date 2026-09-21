@@ -255,8 +255,18 @@ export function transactionalSubject(
       return withSuffix('Teklifiniz kabul edildi', text(data.requestNumber));
     case 'offer-not-selected':
       return withSuffix('Teklifiniz bu kez seçilmedi', text(data.requestNumber));
-    case 'credit-refunded':
-      return withSuffix('Krediniz iade edildi', formatCredits(int(data.refundedCredits)));
+    case 'credit-refunded': {
+      // With a forfeited promotion share the honest headline figure is the
+      // net; without one the net is the gross and the subject is unchanged.
+      const net = int(data.netCredits);
+      const forfeited = int(data.promoForfeitedCredits);
+      return withSuffix(
+        'Krediniz iade edildi',
+        forfeited !== null && forfeited > 0 && net !== null
+          ? `net ${signedCredits(net)}`
+          : formatCredits(int(data.refundedCredits)),
+      );
+    }
     // The three subjects below are the strings their call sites have always
     // passed, restated here so the switch stays exhaustive. They are the older
     // "TakTic" spelling on purpose: re-skinning these messages was the job, and
@@ -1010,6 +1020,13 @@ function creditRefunded(subject: string, fullName: string, data: Data): EmailDoc
   const refunded = int(data.refundedCredits);
   const requestNumber = text(data.requestNumber);
   const reason = text(data.refundReason);
+  // CMP-004 S4: the promotion figures, present only when a promo lot paid
+  // part of the offer. Without them every block below is what it always was.
+  const forfeited = int(data.promoForfeitedCredits) ?? 0;
+  const forfeitedExpired = int(data.promoForfeitedExpiredCredits) ?? 0;
+  const forfeitedRevoked = int(data.promoForfeitedRevokedCredits) ?? 0;
+  const restored = int(data.promoRestoredCredits) ?? 0;
+  const net = int(data.netCredits);
 
   return {
     subject,
@@ -1039,15 +1056,48 @@ function creditRefunded(subject: string, fullName: string, data: Data): EmailDoc
         // stored reason string, which carries an admin's free-text note.
         row('İade nedeni', reason),
         row('İade edilen', formatCredits(refunded)),
+        // Only when a promotion share was taken back: the figure the wallet
+        // lost again, and the net the provider actually gained. No row for a
+        // zero, and never a negative net — a forfeit is bounded by the share.
+        forfeited > 0 ? row('Geri alınan promosyon kredisi', `−${formatCredits(forfeited)}`) : null,
+        forfeited > 0 && net !== null ? row('Net değişim', signedCredits(net)) : null,
         row('Önceki bakiye', formatCredits(int(data.previousBalance))),
         row('Güncel bakiye', formatCredits(int(data.currentBalance))),
       ]),
+      forfeited > 0 ? spacer(12) : null,
+      forfeited > 0 ? note(promoForfeitNotice(forfeited, forfeitedExpired, forfeitedRevoked)) : null,
+      restored > 0 ? spacer(12) : null,
+      restored > 0
+        ? note(`Bunun ${restored} kredisi promosyon kredisi olarak geri döndü; son kullanma tarihi değişmedi.`)
+        : null,
       spacer(24),
       cta('Bakiyemi gör', text(data.creditsUrl), 'ghost'),
       spacer(20),
       note('İade işlemleri kredi geçmişinizde iade kaydı olarak listelenir.'),
     ]),
   };
+}
+
+/** `+2 kredi` / `0 kredi`: a net figure with its sign, for the subject and the net row. */
+function signedCredits(value: number): string {
+  const formatted = formatCredits(Math.abs(value)) ?? `${Math.abs(value)} kredi`;
+  return value > 0 ? `+${formatted}` : value < 0 ? `−${formatted}` : formatted;
+}
+
+/**
+ * Why part of the refund did not come back, in the provider's terms: the
+ * promotion that paid it had died. Says explicitly that nothing was taken
+ * from paid credit and that no debt exists — the two things a "−3" beside a
+ * refund would otherwise suggest.
+ */
+function promoForfeitNotice(total: number, expired: number, revoked: number): string {
+  const cause =
+    expired > 0 && revoked > 0
+      ? 'ait olduğu kampanyanın süresi dolduğu ya da promosyon geri alındığı için'
+      : revoked > 0
+        ? 'ait olduğu promosyon geri alındığı için'
+        : 'ait olduğu kampanyanın süresi dolduğu için';
+  return `${formatCredits(total)} promosyon kredisi, ${cause} bakiyenize dönmedi. Ücretli bakiyenizden hiçbir şey düşülmedi ve eksi bakiye oluşmadı.`;
 }
 
 // ────────────────────── 13 · customer.activation_requested ───────────────────

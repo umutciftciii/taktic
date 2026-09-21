@@ -1227,6 +1227,64 @@ describe('transactional e-mail rendering', () => {
     });
   });
 
+  describe('credit-refunded (CMP-004 S4: the net of a refund)', () => {
+    it('without a promotion says exactly what it always said, and nothing about promotions', () => {
+      const { html, text } = render(messageFor('credit-refunded'));
+
+      expect(transactionalSubject('credit-refunded', FULL_DATA['credit-refunded'])).toBe('Krediniz iade edildi — 2 kredi');
+      expect(html).toContain('2 kredi iade edildi');
+      expect(html).toContain('İade edilen');
+      expect(html).toContain('Önceki bakiye');
+      expect(html).toContain('Güncel bakiye');
+      expect(html).not.toMatch(/promosyon/i);
+      expect(html).not.toContain('Net değişim');
+      expect(text).not.toMatch(/promosyon/i);
+    });
+
+    it('states gross, the forfeited promotion and the net when a dead lot paid part of the offer', () => {
+      const data = {
+        refundedCredits: '5',
+        promoForfeitedCredits: '3',
+        promoForfeitedExpiredCredits: '3',
+        promoForfeitedRevokedCredits: null,
+        netCredits: '2',
+        previousBalance: '0',
+        currentBalance: '2',
+      };
+      const { html, text } = render(messageFor('credit-refunded', data));
+
+      expect(transactionalSubject('credit-refunded', { ...FULL_DATA['credit-refunded'], ...data })).toBe(
+        'Krediniz iade edildi — net +2 kredi',
+      );
+      expect(html).toContain('5 kredi iade edildi');
+      expect(html).toContain('Geri alınan promosyon kredisi');
+      expect(html).toContain('−3 kredi');
+      expect(html).toContain('Net değişim');
+      expect(html).toContain('+2 kredi');
+      expect(html).toContain('süresi dolduğu için');
+      expect(html).not.toMatch(/borç/i);
+      expect(text).toContain('Net değişim: +2 kredi');
+    });
+
+    it('explains a revoked lot as a revocation, and a restored share as promotion that came back', () => {
+      const revoked = render(
+        messageFor('credit-refunded', {
+          refundedCredits: '5',
+          promoForfeitedCredits: '3',
+          promoForfeitedExpiredCredits: null,
+          promoForfeitedRevokedCredits: '3',
+          netCredits: '2',
+        }),
+      ).html;
+      expect(revoked).toContain('geri alındığı için');
+      expect(revoked).not.toContain('süresi dolduğu için');
+
+      const restored = render(messageFor('credit-refunded', { promoRestoredCredits: '2' })).html;
+      expect(restored).toContain('2 kredisi promosyon kredisi olarak geri döndü');
+      expect(restored).not.toContain('Net değişim');
+    });
+  });
+
   describe('package-purchase-confirmation', () => {
     it('states what was bought, what it cost and what the balance gained', () => {
       const { html, text } = render(messageFor('package-purchase-confirmation'));
