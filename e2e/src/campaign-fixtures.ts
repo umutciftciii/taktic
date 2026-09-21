@@ -12,6 +12,7 @@ import { prisma } from './fixtures';
  */
 
 const OPERATIONS_SETTINGS_ID = 'singleton';
+let lotSequence = 0;
 
 export async function setEngine(enabled: boolean) {
   await prisma().operationsSettings.upsert({
@@ -78,8 +79,11 @@ export async function seedGrantedLot(
   spent = 0,
   options: { expiresAt?: Date } = {},
 ) {
+  // One event per seeded lot: the key is unique, and a provider may be
+  // seeded with several lots (the provider promo spec does).
+  lotSequence += 1;
   const event = await prisma().campaignTriggerEvent.create({
-    data: { triggerEventKey: `PROVIDER_APPROVED:${providerId}`, trigger: 'PROVIDER_APPROVED', providerId },
+    data: { triggerEventKey: `PROVIDER_APPROVED:${providerId}:${lotSequence}`, trigger: 'PROVIDER_APPROVED', providerId },
   });
   const redemption = await prisma().campaignRedemption.create({
     data: {
