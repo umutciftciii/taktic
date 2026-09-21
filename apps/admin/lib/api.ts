@@ -2992,6 +2992,8 @@ export type CampaignVersionSummary = {
   maxRedemptionsGlobal: number | null;
   maxRedemptionsPerDay: number | null;
   budgetCredits: number | null;
+  /** CMP-003 S3: revokes per UTC day before the campaign pauses itself; null = no threshold. */
+  maxRevokesPerDay: number | null;
   windowStartAt: string | null;
   windowEndAt: string | null;
   stackPolicy: string;
@@ -3009,7 +3011,10 @@ export type CampaignAuditAction =
   | 'VERSION_ACTIVATED'
   | 'PAUSED'
   | 'RESUMED'
-  | 'ENDED';
+  | 'ENDED'
+  | 'AUTO_PAUSED'
+  | 'REDEMPTION_REVOKED'
+  | 'EVENT_RETRY_REQUESTED';
 
 export type CampaignAuditEntry = {
   id: string;
@@ -3025,9 +3030,99 @@ export type CampaignAuditEntry = {
     maxRedemptionsPerProvider?: number;
     changedFields?: string[];
     reason?: string;
+    /** AUTO_PAUSED (CMP-003 S3): SYSTEM when a payment reversal crossed the threshold; the actor is then nominal. */
+    actorKind?: 'SYSTEM' | 'ADMIN';
+    source?: string;
+    revokeCount?: number;
+    maxRevokesPerDay?: number;
+    redemptionId?: string;
+    revokedCredits?: number;
+    spentAtRevoke?: number;
+    triggerEventKey?: string;
+    previousStatus?: string;
+    attemptCount?: number;
   } | null;
   createdAt: string;
 };
+
+// ───────────────────────── operations desk (CMP-003 S3) ─────────────────────────
+
+export type CampaignRedemptionStatus = 'GRANTED' | 'REVOKED' | 'EXPIRED';
+export type PromoCreditLotStatus = 'ACTIVE' | 'EXHAUSTED' | 'EXPIRED' | 'REVOKED';
+
+export type CampaignRedemption = {
+  id: string;
+  status: CampaignRedemptionStatus;
+  versionNumber: number;
+  trigger: string;
+  triggerEventKey: string;
+  provider: { id: string; businessName: string };
+  purchaseId: string | null;
+  grantedCredits: number;
+  grantedAt: string;
+  grantTransactionId: string | null;
+  lot: { id: string; status: PromoCreditLotStatus; remainingCredits: number; expiresAt: string } | null;
+  revokedAt: string | null;
+  revokeReason: 'PAYMENT_REVERSED' | 'ADMIN_REVOKED' | null;
+  spentAtRevoke: number | null;
+  revokedCredits: number | null;
+  revokedBy: CampaignActor | null;
+  revokeNote: string | null;
+  revokedByWebhookEventId: string | null;
+};
+
+export type CampaignTriggerEventStatus = 'PENDING' | 'PROCESSING' | 'EVALUATED' | 'SETTLED' | 'RETRY_WAIT';
+
+export type CampaignEvaluationEvent = {
+  id: string;
+  triggerEventKey: string;
+  trigger: string;
+  providerId: string;
+  purchaseId: string | null;
+  status: CampaignTriggerEventStatus;
+  attemptCount: number;
+  evaluationCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  nextAttemptAt: string;
+  leaseUntil: string | null;
+  lastErrorCode: string | null;
+  lastErrorAt: string | null;
+  settledByCampaignId: string | null;
+  settledAt: string | null;
+  lastOutcome: { outcome: string; reasonCode: string | null; evaluatedAt: string } | null;
+  retryable: boolean;
+};
+
+export type CampaignRedemptionPage = { items: CampaignRedemption[]; nextCursor: string | null };
+export type CampaignEvaluationEventPage = { items: CampaignEvaluationEvent[]; nextCursor: string | null };
+
+export function campaignRedemptionStatusLabel(status: CampaignRedemptionStatus | string): string {
+  const labels: Record<string, string> = { GRANTED: 'Verildi', REVOKED: 'Geri alındı', EXPIRED: 'Süresi doldu' };
+  return labels[status] ?? status;
+}
+
+export function promoLotStatusLabel(status: PromoCreditLotStatus | string): string {
+  const labels: Record<string, string> = { ACTIVE: 'Aktif', EXHAUSTED: 'Tükendi', EXPIRED: 'Süresi doldu', REVOKED: 'Geri alındı' };
+  return labels[status] ?? status;
+}
+
+export function campaignEventStatusLabel(status: CampaignTriggerEventStatus | string): string {
+  const labels: Record<string, string> = {
+    PENDING: 'Bekliyor',
+    PROCESSING: 'İşleniyor',
+    EVALUATED: 'Değerlendirildi',
+    SETTLED: 'Hak ediş verildi',
+    RETRY_WAIT: 'Yeniden deneme bekliyor',
+  };
+  return labels[status] ?? status;
+}
+
+export function campaignRevokeReasonLabel(reason: string | null): string {
+  if (reason === 'PAYMENT_REVERSED') return 'Ödeme iadesi';
+  if (reason === 'ADMIN_REVOKED') return 'Yönetici kararı';
+  return reason ?? '—';
+}
 
 /** Read-only view of the evaluation queue (S2B2 rev. 2); no screen acts on it. */
 export type CampaignEvaluationQueue = {

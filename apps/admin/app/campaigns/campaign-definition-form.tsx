@@ -332,6 +332,15 @@ export function CampaignDefinitionForm({
             errors={fieldError('budgetCredits')}
             help="Boş = sınırsız"
           />
+          <NumberField
+            className="field field-3"
+            label="Günlük geri alma eşiği"
+            name="maxRevokesPerDay"
+            value={form.maxRevokesPerDay}
+            onChange={(value) => update('maxRevokesPerDay', value)}
+            errors={fieldError('maxRevokesPerDay')}
+            help={`Boş = kapalı; ${CATALOG.limits.maxRevokesPerDay.min}–${CATALOG.limits.maxRevokesPerDay.max}. Aşılınca kampanya kendini duraklatır (UTC günü).`}
+          />
         </div>
       </fieldset>
 
@@ -610,6 +619,7 @@ const FIELD_TITLES: Record<string, string> = {
   maxRedemptionsGlobal: 'toplam limit',
   maxRedemptionsPerDay: 'günlük limit',
   budgetCredits: 'kredi bütçesi',
+  maxRevokesPerDay: 'günlük geri alma eşiği',
   windowStartAt: 'başlangıç',
   windowEndAt: 'bitiş',
 };

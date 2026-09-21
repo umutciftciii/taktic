@@ -1,12 +1,19 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  campaignEventStatusLabel,
+  campaignRedemptionStatusLabel,
+  campaignRevokeReasonLabel,
   campaignStatusBadgeClass,
   campaignStatusLabel,
   fetchOrNotFound,
   formatDateTime,
+  promoLotStatusLabel,
   requireAdmin,
+  type CampaignAuditEntry,
   type CampaignDetailResponse,
+  type CampaignEvaluationEventPage,
+  type CampaignRedemptionPage,
   type CampaignVersion,
 } from '../../../lib/api';
 import {
@@ -26,6 +33,7 @@ import { SectionCard } from '../../../components/section-card';
 import { CampaignDefinitionForm } from '../campaign-definition-form';
 import { CampaignEngineNotice } from '../engine-notice';
 import { CampaignLifecyclePanel } from '../lifecycle-panel';
+import { RetryEventButton, RevokeRedemptionForm } from '../operations-panels';
 
 /**
  * One campaign: the version the engine runs (if any), the latest stored
@@ -38,14 +46,23 @@ import { CampaignLifecyclePanel } from '../lifecycle-panel';
  * The revision form at the bottom is pre-filled from the latest version and
  * produces the next one; it never touches a stored version, and it never
  * changes what runs — only activation moves `activeVersionId`.
+ *
+ * Below the versions sits the operations desk (CMP-003 S3): the campaign's
+ * redemptions with their lot and revoke state, and the events its rule is a
+ * candidate for with their queue state. Each is one page at a time
+ * (`rcursor` / `ecursor`). A GRANTED redemption can be revoked with a
+ * reason; a parked event can be put back in the worker's queue. Nothing on
+ * this screen grants, deducts an arbitrary balance, or turns the engine on.
  */
 
 export const dynamic = 'force-dynamic';
 
 type CampaignDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ ok?: string; v?: string }>;
+  searchParams: Promise<{ ok?: string; v?: string; rcursor?: string; ecursor?: string }>;
 };
+
+const OPS_PAGE = 20;
 
 const OK_MESSAGES: Record<string, string> = {
   created: 'Taslak oluşturuldu (sürüm 1). Etkinleştirilene kadar hiçbir olay değerlendirilmez.',
@@ -54,18 +71,32 @@ const OK_MESSAGES: Record<string, string> = {
   pause: 'Kampanya duraklatıldı. Yeni hak ediş üretilmez; mevcut promosyon lotları çalışmaya devam eder.',
   resume: 'Kampanya devam ettirildi.',
   end: 'Kampanya sonlandırıldı. Bu durum kalıcıdır.',
+  revoke: 'Hak ediş geri alındı: kullanılmamış promosyon kredisi cüzdandan düşüldü, harcanan kısım kayda geçti; borç oluşmaz.',
+  retry: 'Olay kuyruğa alındı. Değerlendirme işçisi bir sonraki turda sahiplenir; bu ekran kendisi değerlendirme yapmaz.',
 };
 
 export default async function CampaignDetailPage({ params, searchParams }: CampaignDetailPageProps) {
   await requireAdmin();
   const { id } = await params;
   const query = await searchParams;
-  const data = await fetchOrNotFound(() =>
-    apiFetch<CampaignDetailResponse>(`/admin/campaigns/${encodeURIComponent(id)}`),
-  );
+  const base = `/admin/campaigns/${encodeURIComponent(id)}`;
+  const pageQuery = (cursor: string | undefined) => `?limit=${OPS_PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+  const [data, redemptions, events] = await Promise.all([
+    fetchOrNotFound(() => apiFetch<CampaignDetailResponse>(base)),
+    fetchOrNotFound(() => apiFetch<CampaignRedemptionPage>(`${base}/redemptions${pageQuery(query.rcursor)}`)),
+    fetchOrNotFound(() => apiFetch<CampaignEvaluationEventPage>(`${base}/evaluation-events${pageQuery(query.ecursor)}`)),
+  ]);
   const okMessage = query.ok ? (OK_MESSAGES[query.ok] ?? null) : null;
   const { campaign, currentVersion, activeVersion } = data;
   const canRevise = campaign.status !== 'ENDED';
+  const detailHref = (params: Record<string, string | undefined>) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries({ rcursor: query.rcursor, ecursor: query.ecursor, ...params })) {
+      if (value) search.set(key, value);
+    }
+    const encoded = search.toString();
+    return `/campaigns/${campaign.id}${encoded ? `?${encoded}` : ''}`;
+  };
 
   return (
     <main className="campaigns-page">
@@ -131,6 +162,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                     <th className="col-num">Toplam</th>
                     <th className="col-num">Günlük</th>
                     <th className="col-num">Bütçe</th>
+                    <th className="col-num">Geri alma/gün</th>
                     <th className="col-num">Öncelik</th>
                     <th>Oluşturan</th>
                     <th>Tarih</th>
@@ -151,6 +183,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                       <td className="col-num">{version.maxRedemptionsGlobal ?? '—'}</td>
                       <td className="col-num">{version.maxRedemptionsPerDay ?? '—'}</td>
                       <td className="col-num">{version.budgetCredits ?? '—'}</td>
+                      <td className="col-num">{version.maxRevokesPerDay ?? '—'}</td>
                       <td className="col-num">{version.priority}</td>
                       <td>{version.createdBy.name ?? '—'}</td>
                       <td>{formatDateTime(version.createdAt)}</td>
@@ -174,6 +207,165 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
               ) : null}
             </SectionCard>
           ) : null}
+
+          <SectionCard
+            title="Hak edişler"
+            subtitle="Bu kampanyanın verdiği promosyon lotları; en yeni üstte. Geri alma yalnız verilmiş bir hak edişi hedefler ve kullanılmamış krediyi düşer."
+          >
+            {redemptions.items.length === 0 ? (
+              <p data-testid="campaign-redemptions-empty">Henüz hak ediş yok.</p>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table" data-testid="campaign-redemptions">
+                  <thead>
+                    <tr>
+                      <th>Durum</th>
+                      <th>Hizmet veren</th>
+                      <th className="col-num">Sürüm</th>
+                      <th className="col-num">Kredi</th>
+                      <th>Lot</th>
+                      <th>Verildi</th>
+                      <th>Geri alma</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {redemptions.items.map((row) => (
+                      <tr key={row.id} data-testid="campaign-redemption-row" data-redemption={row.id} data-status={row.status}>
+                        <td>
+                          <span className={redemptionBadgeClass(row.status)}>{campaignRedemptionStatusLabel(row.status)}</span>
+                        </td>
+                        <td>
+                          <Link href={`/providers/${row.provider.id}`}>{row.provider.businessName}</Link>
+                          <span className="campaign-ops-meta">{TRIGGER_LABELS[row.trigger as CampaignTrigger] ?? row.trigger}</span>
+                        </td>
+                        <td className="col-num">v{row.versionNumber}</td>
+                        <td className="col-num">{row.grantedCredits}</td>
+                        <td>
+                          {row.lot ? (
+                            <>
+                              {promoLotStatusLabel(row.lot.status)} · kalan {row.lot.remainingCredits}
+                              <span className="campaign-ops-meta">son kullanma {formatDateTime(row.lot.expiresAt)}</span>
+                            </>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>{formatDateTime(row.grantedAt)}</td>
+                        <td>
+                          {row.status === 'REVOKED' ? (
+                            <>
+                              {campaignRevokeReasonLabel(row.revokeReason)} · düşülen {row.revokedCredits ?? 0} · harcanan {row.spentAtRevoke ?? 0}
+                              <span className="campaign-ops-meta">
+                                {row.revokedAt ? formatDateTime(row.revokedAt) : ''}
+                                {row.revokedBy ? ` · ${row.revokedBy.name ?? '—'}` : row.revokedByWebhookEventId ? ' · ödeme sağlayıcısı' : ''}
+                                {row.revokeNote ? ` · ${row.revokeNote}` : ''}
+                              </span>
+                            </>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>{row.status === 'GRANTED' ? <RevokeRedemptionForm campaignId={campaign.id} redemptionId={row.id} /> : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <Pager
+              testId="campaign-redemptions-pager"
+              first={query.rcursor ? detailHref({ rcursor: undefined }) : null}
+              next={redemptions.nextCursor ? detailHref({ rcursor: redemptions.nextCursor }) : null}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="Değerlendirme kuyruğu"
+            subtitle="Bu kampanyanın kuralına aday olan olaylar ve işçi kuyruğundaki durumları. “Kuyruğa al” yalnız bekleyen denemeyi öne çeker; değerlendirme işçide, ayrı bir işlemde yapılır."
+          >
+            {events.items.length === 0 ? (
+              <p data-testid="campaign-events-empty">Bu kurala aday olay yok.</p>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table" data-testid="campaign-events">
+                  <thead>
+                    <tr>
+                      <th>Durum</th>
+                      <th>Olay</th>
+                      <th className="col-num">Deneme</th>
+                      <th>Sonraki deneme</th>
+                      <th>Son hata</th>
+                      <th>Bu kampanya için</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.items.map((row) => (
+                      <tr key={row.id} data-testid="campaign-event-row" data-event={row.id} data-status={row.status} data-retryable={row.retryable ? 'true' : 'false'}>
+                        <td>
+                          <span className={eventBadgeClass(row.status)}>{campaignEventStatusLabel(row.status)}</span>
+                          {row.status === 'PROCESSING' && row.leaseUntil ? (
+                            <span className="campaign-ops-meta">sahiplik {formatDateTime(row.leaseUntil)}{row.retryable ? ' (düştü)' : ''}</span>
+                          ) : null}
+                        </td>
+                        <td>
+                          <code>{row.triggerEventKey}</code>
+                          <span className="campaign-ops-meta">
+                            ilk {formatDateTime(row.firstSeenAt)} · son {formatDateTime(row.lastSeenAt)}
+                          </span>
+                        </td>
+                        <td className="col-num">
+                          {row.attemptCount}
+                          <span className="campaign-ops-meta">değerlendirme {row.evaluationCount}</span>
+                        </td>
+                        <td>{row.status === 'PENDING' || row.status === 'RETRY_WAIT' ? formatDateTime(row.nextAttemptAt) : '—'}</td>
+                        <td>
+                          {row.lastErrorCode ? (
+                            <>
+                              <code>{row.lastErrorCode}</code>
+                              {row.lastErrorAt ? <span className="campaign-ops-meta">{formatDateTime(row.lastErrorAt)}</span> : null}
+                            </>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {row.settledByCampaignId === campaign.id ? (
+                            <span className="badge badge-good">hak ediş verildi</span>
+                          ) : row.lastOutcome ? (
+                            <>
+                              <code>{row.lastOutcome.outcome}</code>
+                              {row.lastOutcome.reasonCode ? ` (${row.lastOutcome.reasonCode})` : ''}
+                              <span className="campaign-ops-meta">{formatDateTime(row.lastOutcome.evaluatedAt)}</span>
+                            </>
+                          ) : row.settledByCampaignId ? (
+                            <span className="badge badge-muted">başka kampanya kazandı</span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {row.retryable && data.engineEnabled ? (
+                            <RetryEventButton campaignId={campaign.id} eventId={row.id} />
+                          ) : row.retryable ? (
+                            <span className="campaign-ops-meta">motor kapalı — kuyruğa alınamaz</span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <Pager
+              testId="campaign-events-pager"
+              first={query.ecursor ? detailHref({ ecursor: undefined }) : null}
+              next={events.nextCursor ? detailHref({ ecursor: events.nextCursor }) : null}
+            />
+          </SectionCard>
         </div>
 
         <aside className="admin-side-column">
@@ -193,13 +385,21 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                     <span>{formatDateTime(entry.createdAt)}</span>
                   </div>
                   <div className="campaign-audit-meta">
-                    {entry.actor.name ?? '—'}
+                    {auditActorLabel(entry)}
                     {entry.summary?.versionNumber ? ` · sürüm ${entry.summary.versionNumber}` : ''}
                     {entry.summary?.previousActiveVersionNumber ? ` (önceki: sürüm ${entry.summary.previousActiveVersionNumber})` : ''}
                     {entry.summary?.changedFields && entry.summary.changedFields.length > 0
                       ? ` · değişen: ${entry.summary.changedFields.join(', ')}`
                       : ''}
-                    {entry.summary?.reason ? ` · gerekçe: ${entry.summary.reason}` : ''}
+                    {entry.action === 'AUTO_PAUSED'
+                      ? ` · bugün ${entry.summary?.revokeCount ?? '?'} geri alma, eşik ${entry.summary?.maxRevokesPerDay ?? '?'}`
+                      : entry.summary?.reason
+                        ? ` · gerekçe: ${entry.summary.reason}`
+                        : ''}
+                    {entry.action === 'REDEMPTION_REVOKED' && entry.summary
+                      ? ` · düşülen ${entry.summary.revokedCredits ?? 0}, harcanan ${entry.summary.spentAtRevoke ?? 0}`
+                      : ''}
+                    {entry.action === 'EVENT_RETRY_REQUESTED' && entry.summary?.triggerEventKey ? ` · ${entry.summary.triggerEventKey}` : ''}
                   </div>
                 </li>
               ))}
@@ -208,8 +408,8 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
           <div className="admin-action-panel">
             <h3>Bu sürümde yok</h3>
             <p>
-              Hak ediş listesi, değerlendirme kayıtları ve geri alma (S3) ile hizmet veren promosyon yüzeyi (S4) sonraki
-              dilimlerde gelir. Motor anahtarı bu ekrandan değiştirilemez.
+              Hizmet veren panelinde promosyon görünürlüğü, iade e-postasında net tutar ve ledger etiketleri (S4) sonraki
+              dilimde gelir. Motor anahtarı bu ekrandan değiştirilemez; hak edişler yalnız motor tarafından üretilir.
             </p>
             <Link className="btn btn-secondary btn-sm" href="/campaigns">
               Listeye dön
@@ -223,6 +423,12 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
 
 function auditActionLabel(action: string): string {
   switch (action) {
+    case 'AUTO_PAUSED':
+      return 'Kampanya kendini duraklattı (geri alma eşiği)';
+    case 'REDEMPTION_REVOKED':
+      return 'Hak ediş geri alındı';
+    case 'EVENT_RETRY_REQUESTED':
+      return 'Olay kuyruğa alındı';
     case 'CREATED':
       return 'Kampanya oluşturuldu';
     case 'VERSION_CREATED':
@@ -240,6 +446,49 @@ function auditActionLabel(action: string): string {
     default:
       return action;
   }
+}
+
+/** The actor line of an audit row: the person, or "system" when a payment reversal crossed the threshold (the stored actor is then nominal). */
+function auditActorLabel(entry: CampaignAuditEntry): string {
+  if (entry.action === 'AUTO_PAUSED' && entry.summary?.actorKind === 'SYSTEM') {
+    return 'Sistem (ödeme iadesi)';
+  }
+  return entry.actor.name ?? '—';
+}
+
+function redemptionBadgeClass(status: string): string {
+  return status === 'GRANTED' ? 'badge badge-good' : status === 'REVOKED' ? 'badge badge-warn' : 'badge badge-muted';
+}
+
+function eventBadgeClass(status: string): string {
+  switch (status) {
+    case 'SETTLED':
+      return 'badge badge-good';
+    case 'RETRY_WAIT':
+      return 'badge badge-warn';
+    case 'PROCESSING':
+      return 'badge badge-info';
+    default:
+      return 'badge badge-muted';
+  }
+}
+
+function Pager({ testId, first, next }: { testId: string; first: string | null; next: string | null }) {
+  if (!first && !next) return null;
+  return (
+    <div className="campaign-ops-pager" data-testid={testId}>
+      {first ? (
+        <Link className="btn btn-secondary btn-sm" href={first}>
+          İlk sayfa
+        </Link>
+      ) : null}
+      {next ? (
+        <Link className="btn btn-secondary btn-sm" href={next}>
+          Sonraki sayfa
+        </Link>
+      ) : null}
+    </div>
+  );
 }
 
 /** A stored definition, read for a human — the same catalogue labels the builder uses. */
@@ -280,7 +529,8 @@ function VersionDefinition({ version }: { version: CampaignVersion }) {
       <dt>Limitler</dt>
       <dd>
         hizmet veren başına {version.maxRedemptionsPerProvider} · toplam {version.maxRedemptionsGlobal ?? 'sınırsız'} ·
-        günlük {version.maxRedemptionsPerDay ?? 'sınırsız'} · bütçe {version.budgetCredits ?? 'sınırsız'} kredi
+        günlük {version.maxRedemptionsPerDay ?? 'sınırsız'} · bütçe {version.budgetCredits ?? 'sınırsız'} kredi ·
+        günlük geri alma eşiği {version.maxRevokesPerDay ?? 'kapalı'}
       </dd>
       <dt>Pencere</dt>
       <dd>

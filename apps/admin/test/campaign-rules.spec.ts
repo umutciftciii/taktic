@@ -99,7 +99,7 @@ describe('form → definition', () => {
         ],
       },
       benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
-      limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000 },
+      limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000, maxRevokesPerDay: null },
       window: { startAt: '2026-10-01T00:00:00Z', endAt: null },
       stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
       priority: 100,
@@ -116,6 +116,14 @@ describe('form → definition', () => {
     const definition = buildDefinition({ ...emptyForm(), credits: 'on', priority: '' });
     expect(definition.benefit.credits).toBe('on');
     expect(definition.priority).toBeNull();
+  });
+
+  it('carries the daily revoke threshold (CMP-003 S3) as a limit, round-tripped and addressable by error path', () => {
+    const form: CampaignForm = { ...packageBonusForm(), maxRevokesPerDay: '3' };
+    expect(buildDefinition(form).limits.maxRevokesPerDay).toBe(3);
+    expect(formFromDefinition(buildDefinition(form)).maxRevokesPerDay).toBe('3');
+    expect(formFromDefinition({ ...buildDefinition(form), limits: { maxRedemptionsPerProvider: 1 } }).maxRevokesPerDay).toBe('');
+    expect(errorFieldOf('limits.maxRevokesPerDay', form)).toEqual({ field: 'maxRevokesPerDay' });
   });
 
   it('round-trips a stored definition back into a form', () => {
