@@ -1,14 +1,16 @@
-# CMP-002 S2B2 — Teslim raporu
+# CMP-002 S2B2 — Teslim raporu (rev. 2: hata-izolasyonu düzeltmesi dâhil)
 
 Tarih: 2026-09-21 · Branch: `claude/cmp-002-s2b2-lifecycle-hooks-3f7a2c` · Taban: `origin/main` @ `1cc6c6ca` (temiz worktree
-doğrulandı) · Tasarım notu: `docs/superpowers/specs/2026-09-21-cmp-002-s2b2-lifecycle-hooks-design.md` · Dry-run kaydı:
-`docs/superpowers/plans/2026-09-21-cmp-002-s2b2-migration-dryrun.txt` · Bağlayıcı sözleşme: CMP-001 (rev. 3).
+doğrulandı) · Tasarım notu: `docs/superpowers/specs/2026-09-21-cmp-002-s2b2-lifecycle-hooks-design.md` (rev. 2) · Dry-run kayıtları:
+`…-s2b2-migration-dryrun.txt` (Migration D), `…-s2b2-migration-e-dryrun.txt` (Migration E) · Bağlayıcı sözleşme: CMP-001 (rev. 3).
 
-PR: https://github.com/umutciftciii/taktic/pull/99 (açık; merge yok) · head `e00b87c9` (+ bu rapor güncellemesi) · CI run 35588381023
-**3/3 yeşil** (typecheck·lint·test·build 12m27s, e2e chromium 13m53s, e2e webkit 10m44s).
+PR: https://github.com/umutciftciii/taktic/pull/99 (açık; **merge önerilmez** — nihai head CI'ı §6'da) · rev. 1 head `e00b87c9`
+(CI 35588381023 3/3) · **rev. 2 head: §6** · Rev. 1'in "ENGINE_ERROR → 409 `CAMPAIGN_ENGINE_FAILED` → ana transaction rollback"
+davranışı **kaldırıldı**; aynı PR'a yeni commit olarak iki aşamalı akış geldi.
 
 Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Lemon ayarı veya gerçek veri işlemi **yapılmadı**. Geçici DB'ler
-(`taktic_cmp002_s2b2_dryrun`, `taktic_cmp002s2b2_e2e`) yalnız bu iş için oluşturuldu ve düşürüldü; yerel `taktic` DB'sine komut yok.
+(`taktic_cmp002_s2b2_dryrun`, `taktic_cmp002_s2b2r2_dryrun`, `taktic_cmp002s2b2_e2e`) yalnız bu iş için oluşturuldu ve düşürüldü; yerel
+`taktic` DB'sine komut yok.
 
 ---
 
@@ -16,104 +18,124 @@ Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Lemon ayar
 
 | Katman | Dosya | İçerik |
 | --- | --- | --- |
-| Migration D | `prisma/migrations/20260921120000_add_campaign_lifecycle_audit_actions/` (+ `schema.prisma`) | `CampaignAuditAction += ACTIVATED, VERSION_ACTIVATED, PAUSED, RESUMED, ENDED`. **Yalnız 5 `ALTER TYPE … ADD VALUE`**; tablo/kolon/DML yok. Dry-run: 69 migration, `migrate diff` boş, kolon listeleri değişmedi |
-| Motor modülü | `campaigns/engine/campaign-engine.module.ts` (yeni), `campaign-engine.hooks.ts` (yeni), `campaigns.module.ts` | `CampaignEngineModule` yalnız Prisma import eder, `CampaignEngineHooks` + `FactSourceRegistry` export eder; `CampaignEngineService`/repository export edilmez. `CampaignsModule` artık admin API + settings okuyucu |
-| Grant | `engine/campaign-engine.service.ts`, `engine/campaign-engine.repository.ts` | `createRedemptionAndLot` → `createRedemption` + S2B1 `grantPromoCreditLot`; `GrantView.grantTransactionId`; sıra: sayaçlar → redemption → CAMPAIGN_GRANT → lot → link → settled → log |
-| Registry | `engine/fact-source-registry.ts` | dinamik yazıcı kaydı (`register`, `hasProviderWriter`, `writersOf`), kaynak = 3 olgu + `PACKAGE_PAYMENT_SUCCEEDED` |
-| Hook'lar | `providers/providers.service.ts` (+module), `email-verification/email-verification.service.ts` (+module), `phone-verification/phone-verification.service.ts` (+module), `payments/payments-webhook.service.ts` (+module), `package-purchases/package-purchases.service.ts` (+module) | §2 matrisi; `updateProviderStatus` ve e-posta `confirm` `runSerializable`'a taşındı; her yazıcı `onModuleInit`'te kaydolur |
-| Yaşam döngüsü | `campaigns/campaigns.service.ts`, `admin-campaigns.controller.ts`, `dto/campaign-transition.dto.ts`, `rules/errors.ts`, `rules/catalog.ts`, `packages/shared/campaign-rules.json` | `activateVersion/pause/resume/end`; kapı: engine anahtarı, DSL, pencere, `FACT_SOURCE_UNAVAILABLE`, `LIMIT_BELOW_CONSUMED`; `CAMPAIGN_ENGINE_DISABLED / CAMPAIGN_INVALID_TRANSITION / CAMPAIGN_ENDED / CAMPAIGN_VERSION_NOT_FOUND / CAMPAIGN_ACTIVATION_REFUSED{errors[]}`; görünümlere `activeVersion`, `activeVersionId`, `redemptionCount`, `budgetConsumedCredits` |
-| Admin UI | `apps/admin/app/campaigns/lifecycle-panel.tsx` (yeni), `lifecycle-state.ts` (yeni), `actions.ts`, `[id]/page.tsx`, `page.tsx`, `engine-notice.tsx`, `campaign-definition-form.tsx`, `lib/api.ts`, `lib/campaign-rules.ts`, `globals.css` | yaşam döngüsü paneli; motor kapalıyken "**Kampanya motoru kapalı — etkinleştirme yapılamaz**" + devre dışı etkinleştir/devam ettir; çalışan kural kartı; sürüm tablosunda `(çalışan)/(son)`; audit etiketleri + gerekçe; liste kolonları. **Motoru açan düğme yok** |
-| Testler | `test/campaign-engine-hooks.spec.ts` (21, yeni), `test/admin-campaign-lifecycle.spec.ts` (12, yeni), `campaign-engine.spec.ts` (30, ledger'lı), `campaign-engine-isolation.spec.ts` (7), `admin-campaigns.spec.ts`, `admin/test/campaign-rules.spec.ts`, `e2e/tests/admin-campaign-lifecycle.spec.ts` (yeni, Chromium + WebKit testMatch), `admin-campaign-drafts.spec.ts` (etiket güncellemesi) | §4–5 |
+| Migration D | `prisma/migrations/20260921120000_add_campaign_lifecycle_audit_actions/` | `CampaignAuditAction += ACTIVATED, VERSION_ACTIVATED, PAUSED, RESUMED, ENDED` — yalnız 5 `ALTER TYPE … ADD VALUE` |
+| **Migration E (rev. 2)** | `prisma/migrations/20260921150000_add_campaign_event_evaluation_state/` (+ `schema.prisma`) | `CampaignTriggerEventStatus {PENDING, PROCESSING, EVALUATED, SETTLED, RETRY_WAIT}`; `CampaignTriggerEvent += status (default PENDING), attemptCount (0), lastAttemptAt?, nextAttemptAt (default now), leaseUntil?, claimedAt?, lastErrorCode?, lastErrorAt?`; index `(status, nextAttemptAt)`; CHECK `attemptCount >= 0`, `(status='SETTLED') = (settledRedemptionId IS NOT NULL)`. **Yalnız additive:** DML/backfill/DROP/ALTER COLUMN yok; `triggerEventKey` global unique ve settled alanlar değişmedi |
+| Motor modülü | `campaigns/engine/campaign-engine.module.ts`, `campaign-engine.hooks.ts`, **`campaign-evaluation.worker.ts` (rev. 2)**, `campaigns.module.ts` | `CampaignEngineModule` yalnız Prisma import eder; export: `CampaignEngineHooks` (stage A), `FactSourceRegistry` (aktivasyon kapısı), `CampaignEvaluationWorker` (stage B; admin API kuyruğu salt-okunur okur). `CampaignEngineService`/repository export edilmez, public uç yok |
+| Stage A hook'ları | `campaign-engine.hooks.ts` + `providers.service.ts`, `email-verification.service.ts`, `phone-verification.service.ts`, `payments-webhook.service.ts`, `package-purchases.service.ts` (+ modüller) | İş tx'inin son adımında, motor açıksa yalnız `ensurePendingEvent`; değerlendirme yok. Kampanya kaynaklı JS hatası contained (`HOOK_ERROR`, iş commit); DB hatası → `503 CAMPAIGN_EVENT_NOT_DURABLE` (iş rollback); P2034 → replay. `updateProviderStatus` ve e-posta `confirm` `runSerializable`'a taşındı |
+| Stage B worker | `campaign-evaluation.worker.ts`, `common/scheduler-cron.ts` (`CAMPAIGN_EVALUATION_RETRY_CRON`, varsayılan `*/1 * * * *`), `.env.example`, `docker-compose.yml`, `test/setup-env.ts` (testte yılda bir dakika) | `@Cron` tick → `runOnce`: anahtar kapalı → claim yok; `claimDueEvent` (`UPDATE … WHERE id=(SELECT … FOR UPDATE SKIP LOCKED) → PROCESSING, lease 5 dk, attemptCount+1`) → kendi `runSerializable` tx'inde `engine.evaluate` → SETTLED/EVALUATED/RETRY_WAIT; lease token guard'lı `finishClaim`; backoff `min(60 s × 2^(n−1), 6 saat)` |
+| Grant (rev. 1) | `campaign-engine.service.ts`, `campaign-engine.repository.ts` | `createRedemption` + S2B1 `grantPromoCreditLot` (CAMPAIGN_GRANT ledger → lot → `grantTransactionId`); `settleEvent` artık `status=SETTLED`'ı settled kolonlarıyla aynı statement'ta yazar |
+| Registry | `fact-source-registry.ts` | dinamik yazıcı kaydı (`onModuleInit`), kaynak = 3 olgu + `PACKAGE_PAYMENT_SUCCEEDED` |
+| Yaşam döngüsü | `campaigns.service.ts`, `admin-campaigns.controller.ts`, `dto/campaign-transition.dto.ts`, `rules/errors.ts`, `rules/catalog.ts`, `packages/shared/campaign-rules.json` | `activateVersion/pause/resume/end`; kapı: engine anahtarı (`CAMPAIGN_ENGINE_DISABLED`), DSL, pencere, `FACT_SOURCE_UNAVAILABLE`, `LIMIT_BELOW_CONSUMED`; `evaluationQueue` (rev. 2, salt-okunur) liste + detay yanıtlarında |
+| Admin UI | `apps/admin/app/campaigns/*`, `lib/api.ts`, `lib/campaign-rules.ts`, `globals.css` | yaşam döngüsü paneli; motor kapalıyken "**Kampanya motoru kapalı — etkinleştirme yapılamaz**"; rev. 2: motor rozetinde salt-okunur kuyruk satırı (bekleyen/işlenen/yeniden deneme + son hata kodu). **Motoru açan düğme, manuel retry yok** |
+| Testler | `test/campaign-engine-hooks.spec.ts` (29, rev. 2 yeniden yazıldı), `test/admin-campaign-lifecycle.spec.ts` (12), `campaign-engine.spec.ts` (30), `campaign-engine-schema.spec.ts` (+1 rev. 2), `campaign-engine-isolation.spec.ts` (7), `admin-campaigns.spec.ts`, `admin/test/campaign-rules.spec.ts`, `e2e/tests/admin-campaign-lifecycle.spec.ts` | §4–5 |
 
 **Değiştirilmeyen sözleşmeler (git diff kanıtı):** `credits/promo-credit-ledger.ts` (grant/consume/refund/expiry/revoke primitive'leri),
-`PromoCreditLotConsumption`, `CampaignRedemption.grantTransactionId` şeması, `entitlement-resolver`, `offers` refund yolu,
-`operations-settings` (PATCH DTO'sunda `campaignEngineEnabled` yok), CUSTOMER telefon yolu (`verifyCode`), scheduler'lar, `.env`/compose.
+`PromoCreditLotConsumption`, `CampaignRedemption.grantTransactionId` ve `@@unique([campaignId, triggerEventKey])`, `entitlement-resolver`,
+`offers` refund yolu, `operations-settings` (PATCH DTO'sunda `campaignEngineEnabled` yok; `SCHEDULER_JOB_KEYS` değişmedi), CUSTOMER telefon
+yolu (`verifyCode`), mevcut scheduler'lar, gerçek `.env`/compose değerleri (compose'a yalnız `CAMPAIGN_EVALUATION_RETRY_CRON` default'u eklendi).
 
-## 2. Değişen hook'lar (fact-writer matrisi)
+## 2. İki aşamalı akış ve değişen hook'lar
 
-| Kaynak | Yazıcı → hook | Ne zaman | Tx |
+```
+Stage A — iş tx'i (runSerializable), guard'lı yazım count===1 sonrası, son adım
+  motor kapalı → settings SELECT'i dışında hiçbir şey (event bile yok)
+  motor açık   → ensurePendingEvent(<deterministic key>) : yeni → PENDING insert (savepoint; P2002 → re-read)
+                                                            EVALUATED → PENDING (yeniden değerlendir) · SETTLED/PROCESSING/RETRY_WAIT → yalnız lastSeenAt
+  hata: JS → savepoint geri, log, iş commit (HOOK_ERROR) · DB → 503 CAMPAIGN_EVENT_NOT_DURABLE, iş rollback · P2034 → replay
+Stage B — CampaignEvaluationWorker (cron tick; testte runOnce)
+  motor kapalı → skipped ENGINE_DISABLED, claim yok
+  claim (SKIP LOCKED + lease) → tx: lease bizde mi? → eligibility olgularını yeniden oku → engine.evaluate
+    granted → SETTLED (settleEvent) · değil → EVALUATED · ENGINE_ERROR → log{ENGINE_ERROR}, RETRY_WAIT(backoff, lastErrorCode)
+    catch: P2034 tükendi → RETRY_WAIT{CONCURRENT_MODIFICATION} · diğer → RETRY_WAIT{WORKER_ERROR} · lease kaybı → LEASE_LOST (hiç yazı yok)
+```
+
+| Kaynak | Yazıcı → hook (stage A) | Ne zaman | Tx |
 | --- | --- | --- | --- |
-| `PROVIDER_APPROVED` | `ProvidersService.updateProviderStatus` → `hooks.providerApproved(tx, id)` (= `evaluate(PROVIDER_APPROVED, transition)` + `onProviderFact`) | yalnız `existing.status !== APPROVED` geçişinde, vitrin yerleşimleri geri alındıktan sonra | `runSerializable` (**yeni**; düz `$transaction` idi) |
-| `EMAIL_VERIFIED` | `EmailVerificationService.confirm` → `hooks.accountFactProven(tx, userId, EMAIL_VERIFIED)` | `proven.count === 1 && role === PROVIDER`, token kapatma sonrası, tx'in son adımı | `runSerializable` (**yeni**) |
-| `PHONE_VERIFIED` | `PhoneVerificationService.verifyAccountCode` → `accountFactProven(…, PHONE_VERIFIED)` | `proven.count === 1` sonrası, son adım | `runSerializable` (mevcut) |
-| `PACKAGE_PAYMENT_SUCCEEDED` | `PaymentsWebhookService.settle` → `hooks.packagePaymentSucceeded(tx, providerId, purchaseId)` | tüm doğrulamalar + PAID sonrası, `recordAttempt(PROCESSED)` **öncesi**; her iki kind | `runSerializable` (mevcut) |
-| `PACKAGE_PAYMENT_SUCCEEDED` | `PackagePurchasesService.mockPayProviderPurchase` → aynı hook | PAID sonrası, her iki kind (yalnız `PAYMENT_PROVIDER=mock`) | `runSerializable` (mevcut) |
+| `PROVIDER_APPROVED` | `updateProviderStatus` → `providerApproved` → PENDING `PROVIDER_APPROVED:<p>` + tamamlanan fact-set'ler için PENDING eligibility | yalnız gerçek geçişte, vitrin yerleşimleri sonrası | `runSerializable` (**yeni**) |
+| `EMAIL_VERIFIED` | `EmailVerificationService.confirm` → `accountFactProven` | `proven.count===1 && role===PROVIDER`, token kapatma sonrası | `runSerializable` (**yeni**) |
+| `PHONE_VERIFIED` | `verifyAccountCode` → `accountFactProven` | `proven.count===1` sonrası | `runSerializable` (mevcut) |
+| `PACKAGE_PAYMENT_SUCCEEDED` | webhook `settle` → `packagePaymentSucceeded` | PAID sonrası, `recordAttempt(PROCESSED)` **öncesi**; her iki kind | `runSerializable` (mevcut) |
+| `PACKAGE_PAYMENT_SUCCEEDED` | mock settle → aynı hook | PAID sonrası (yalnız `PAYMENT_PROVIDER=mock`) | `runSerializable` (mevcut) |
 
-Hata semantiği: iş sonucu → log, tx commit; P2034 → tetikleyici tx yeniden oynatılır; bütçe biterse 409 `CONCURRENT_MODIFICATION`
-(webhook committed-state'e bakar, PROCESSED yoksa 409 → Lemon yeniden teslim eder); `ENGINE_ERROR` → hook **fırlatır**
-(`409 CAMPAIGN_ENGINE_FAILED`), tetikleyici tx geri alınır (CMP-001 §3.5'ten bilinçli sapma; tasarım notu D2).
+**Event state tablosu:** `PENDING` (raise edildi) → `PROCESSING` (lease'li claim) → `SETTLED` (grant; terminal, re-raise dokunmaz) |
+`EVALUATED` (grant yok; re-raise → PENDING) | `RETRY_WAIT` (`nextAttemptAt`, `lastErrorCode` ∈ {ENGINE_ERROR, CONCURRENT_MODIFICATION,
+WORKER_ERROR}; süresi gelince yeniden claim; asla terminal-unutulmuş olmaz; lease süresi dolan PROCESSING yeniden claim edilir).
 
-## 3. Yaşam döngüsü tablosu
+## 3. Webhook garantisi ve yaşam döngüsü
 
-Tasarım notu §2 ile aynı; test kanıtı `admin-campaign-lifecycle.spec.ts`: motor kapalı → activate/resume 409 `CAMPAIGN_ENGINE_DISABLED`
-ve **snapshot eşit** (Campaign/Version/Audit/motor tabloları), pause/end çalışır; DRAFT→ACTIVE (`VERSION_ACTIVATED`+`ACTIVATED`, motor
-tabloları değişmez); ACTIVE⇄PAUSED→ENDED audit dizisi ve gerekçeler; ENDED'de pause/resume/end/activate 409, revizyon `CAMPAIGN_ENDED`;
-DRAFT'ta pause/resume/end 409; ACTIVE'de resume 409; PAUSED'da pause 409; reason < 3 → 400; ACTIVE'de revizyon → `currentVersion` 2,
-`activeVersion` 1, activate(2) → değişim (`previousActiveVersionNumber: 1`), PAUSED'da activate → değişim + `RESUMED`;
-`FACT_SOURCE_UNAVAILABLE` (olgu ve tetikleyici; resume de kapıdan geçer); `LIMIT_BELOW_CONSUMED` (global/bütçe/provider; eşit kabul);
-pencere kapanmış → `WINDOW_INVALID`; katalogdan silinmiş slug → `UNKNOWN_PACKAGE_SLUG`; 4 eşzamanlı activate → tek `ACTIVATED`.
+Webhook **2xx** ⇔ ödeme (PAID + ledger) ve **PENDING event aynı transaction'da** commit'lendi; `PROCESSED` işareti değerlendirme hatasıyla
+asla geri alınmaz (event RETRY_WAIT kalır, worker retry eder). Duplicate teslim PROCESSED kısa devresine takılır; aynı `triggerEventKey`
+iki kez üretilemez. DB hatasıyla event yazılamazsa 503 → PAID/PROCESSED yok → Lemon yeniden teslim eder.
 
-## 4. Gerçek engine test kanıtı (`campaign-engine-hooks.spec.ts`, anahtar test DB'de true, yalnız gerçek uçlar)
+Yaşam döngüsü tablosu ve kapı (tasarım notu §2) rev. 1 ile aynı; kanıt `admin-campaign-lifecycle.spec.ts` (12 test, değişmedi).
+
+## 4. Hata-izolasyonu ve gerçek engine kanıtı (`campaign-engine-hooks.spec.ts`, 29 test; anahtar yalnız test DB'de true)
 
 | Senaryo | Sonuç |
 | --- | --- |
-| K1: onay (PATCH status) / e-posta (resend+confirm) / telefon (OTP) — **6 permütasyon** | ilk iki olguda 0 satır; üçüncüde tek redemption + tek lot + tek `CAMPAIGN_GRANT +5` (`grantTransactionId` bağlı), bakiye 5, olay anahtarı `PROVIDER_ELIGIBILITY_REACHED:EMAIL_VERIFIED+PHONE_VERIFIED+PROVIDER_APPROVED:<id>`, `GRANTED` log'unda `fact` = son olgu; kanıt kolonları ve profil durumu yerinde |
-| Askı → yeniden onay + zaten onaylıyı yeniden kaydetme | ikinci grant yok; ikinci geçiş `ALREADY_REDEEMED` log'u; ledger 1 satır |
-| Onay kanıt olmadan | profil APPROVED, olay yalnız `PROVIDER_APPROVED` (`NO_CANDIDATE`), uygunluk olayı yok |
-| CUSTOMER e-posta kanıtı (K1 aktifken) | `emailVerifiedAt` yazıldı, motor snapshot'ı **eşit** |
-| K2 Lemon webhook (imza/store/tutar/variant doğrulanmış) | 200 processed; ledger `[PACKAGE_PURCHASE +25, CAMPAIGN_GRANT +10]`, bakiye 35, `PaymentWebhookEvent PROCESSED`; **redelivery** → duplicate, snapshot eşit, attemptCount 2; aynı purchase'ı adlayan ikinci order → mismatched, sıfır ek yazı |
-| K2 mock settle | tek grant; aynı purchase'a ikinci mock-pay 409; ikinci satın alma `CONDITIONS_FAILED:FIRST_SUCCESSFUL_PAID_PURCHASE` |
-| Koşul kaçıran settle | paket kredisi yüklendi, grant yok, PROCESSED yazıldı |
-| **Webhook retry:** bozuk tanım (ENGINE_ERROR) | teslim 409 `CAMPAIGN_ENGINE_FAILED`; purchase **PENDING**, ledger 0, PROCESSED 0, motor snapshot eşit → kampanya pause → yeniden teslim 200 processed, bakiye 25, `CAMPAIGN_PAUSED` log, grant yok |
-| Onay retry: bozuk tanım | 409; profil PENDING_REVIEW, onay maili yok, sıfır yazı → kampanya end → onay 200, `NO_CANDIDATE` |
-| Telefon kanıtı retry: bozuk tanım | 409; `phoneVerifiedAt` null, sıfır yazı → tanım düzeltilince aynı OTP akışı kanıt + grant |
-| Stack: iki ACTIVE onay kampanyası (5/prio 1 vs 10/prio 100) | 10 kazanır; kaybeden `STACK_CONFLICT{winner}`, sayaçları 0 |
-| Bütçesi dolu zengin aday | `BUDGET_EXHAUSTED` (savepoint geri; sayaçları değişmedi) → ikinci aday `GRANTED` |
-| **4 eşzamanlı onay** (aynı sağlayıcı) | tek grant/lot/redemption; yanıtlar 200 veya 409 `CONCURRENT_MODIFICATION`; her commit'lenen onay için bir log (`GRANTED` ×1, kalanlar `ALREADY_REDEEMED`), `evaluationCount` = commit sayısı — sessiz kayıp yok |
-| **4 eşzamanlı webhook teslimi** | 1 processed + grant; kalanlar duplicate/409; tek `PaymentWebhookEvent` PROCESSED |
-| K1 + K2 aynı sağlayıcı | 2 redemption, 2 lot, ledger `[+25, +10, +5]`, `balance 40 = paid 25 + promo 15` |
-| PAUSED/DRAFT/ENDED | yalnız `CAMPAIGN_PAUSED` log'u, grant/ledger yok |
+| K1 — onay/e-posta/telefon **6 permütasyon** | ilk iki olguda K1 event'i yok; üçüncüde yalnız PENDING event(ler) — redemption/lot/log/CAMPAIGN_* ledger/counter 0; `runOnce` → SETTLED, tek redemption + lot + `CAMPAIGN_GRANT +5`, bakiye 5; ikinci `runOnce` claim 0 |
+| Askı → yeniden onay + tekrar kaydetme | motor snapshot'ı **eşit** (yeni satır yok), K1 event'i SETTLED kaldı; worker sonrası hâlâ 1 redemption/lot/ledger |
+| Onay kanıt olmadan | profil APPROVED; yalnız `PROVIDER_APPROVED` event'i → worker EVALUATED, `NO_CANDIDATE` |
+| CUSTOMER e-posta kanıtı | `emailVerifiedAt` yazıldı, snapshot eşit (event yok) |
+| **Webhook** | 200 processed; PAID + PROCESSED + PENDING event birlikte; grant öncesi redelivery → duplicate, event 1; worker SETTLED, ledger `[+25, +10]`; grant sonrası redelivery → duplicate, snapshot eşit; ikinci order → mismatched |
+| Mock settle | PENDING → worker tek grant; aynı purchase'a ikinci mock-pay 409; ikinci satın alma EVALUATED `CONDITIONS_FAILED` |
+| **"Ödeme işlendi ama olay kayboldu" imkânsız** | `ensurePendingEvent` DB hatası (P2003 simülasyonu) → 503 `CAMPAIGN_EVENT_NOT_DURABLE`, purchase PENDING, ledger 0, PROCESSED 0, event 0 → yeniden teslim 200 + PENDING event |
+| Stage A JS hatası | `readAll` TypeError → onay 200 commit, event fabrike edilmedi, log |
+| **Onay + evaluator hatası** | profil APPROVED, onay maili gitti; worker → `ENGINE_ERROR`, event RETRY_WAIT{attempt 1, ENGINE_ERROR}, `nextAttemptAt` > +30 s, EvaluationLog `{ENGINE_ERROR, reasonCode ENGINE_ERROR}`; grant/lot/ledger/counter 0; vadesi gelmeden claim 0; 2. deneme yine ENGINE_ERROR (attempt 2); tanım düzeltilince 3. deneme SETTLED, tam grant, loglar `[ENGINE_ERROR, ENGINE_ERROR, GRANTED]` |
+| **E-posta + telefon kanıtı + evaluator hatası** | kanıtlar yerinde, event RETRY_WAIT; düzeltme sonrası SETTLED |
+| **Webhook + mock + evaluator hatası** | PAID/PROCESSED yerinde, bakiye 25, event RETRY_WAIT; duplicate teslim → duplicate, event 1, grant 0; retry SETTLED tek grant; mock aynı |
+| Bir adaydaki hata diğer adaya kazandırmaz | zengin aday bozuk → ENGINE_ERROR, fakir adayın sayaçları 0; düzeltilince zengin kazanır, fakir `STACK_CONFLICT` |
+| Worker'da P2034 tükenmesi / düz hata | RETRY_WAIT{CONCURRENT_MODIFICATION} / {WORKER_ERROR}, log 0, grant 0; sonra SETTLED |
+| **4 eşzamanlı worker** (4 ayrı instance) | toplam claim 1, tek SETTLED, attemptCount 1 |
+| **4 eşzamanlı onay** | tek PENDING event, profil APPROVED, 200/409 `CONCURRENT_MODIFICATION`; worker tek grant |
+| **4 eşzamanlı webhook** | 1 processed, 1 `PaymentWebhookEvent`, 1 event, 1 grant |
+| Lease | canlı lease atlanır (claim 0); dolan lease yeniden claim (attempt 2) ve SETTLED |
+| Lease devralınırsa | `LEASE_LOST`, hiçbir yazı yok |
+| **Restart** | PENDING + RETRY_WAIT event'ler ikinci uygulama instance'ında `runOnce` ile 2 SETTLED |
+| Stack / bütçe reddi / K1+K2 bağımsız / PAUSED | rev. 1 ile aynı sonuçlar, worker üzerinden |
+| **Anahtar kapalı** | önceki açık dönemden kalan PENDING event varken: onay + kanıtlar + mock settle → event yok, `runOnce` = `{skipped: ENGINE_DISABLED, claimed 0}`, snapshot yalnız PACKAGE_PURCHASE ledger satırı kadar değişti, eski event PENDING/attempt 0 kaldı |
 
-`campaign-engine.spec.ts` (motor doğrudan, anahtar true): her senaryoda redemption sayısı = lot sayısı = `CAMPAIGN_GRANT` sayısı, başka
-ledger türü 0, cüzdan değişmezi (`Σamount = balance`, `paid = 0`); önceki 30 senaryo (stack sırası, limitler, savepoint geri, settled
-event, eşzamanlı aynı olay, 6 permütasyon, containment) aynen geçti.
+`campaign-engine.spec.ts` (motor doğrudan, 30): grant sonrası event SETTLED; ledger/lot/redemption eşitlikleri; önceki senaryolar aynen.
+`campaign-engine-schema.spec.ts` (+1): yeni CHECK'ler (`settled_status_matches` iki yönlü, `attemptCount_nonnegative`), varsayılanlar.
 
-## 5. Kapalı-motor sıfır-etki sonucu (`campaign-engine-isolation.spec.ts`, hook'lar bağlı)
+## 5. Kapalı-motor sıfır-etki matrisi (`campaign-engine-isolation.spec.ts`, hook'lar bağlı)
 
-İlk test registry'de dört kaynağın PROVIDER yazıcısını doğrular (hook'lar gerçekten bağlı). Ardından DRAFT + ACTIVE kampanyalar
-varken, `campaignEngineEnabled=false`: sağlayıcı onayı, PROVIDER e-posta + telefon kanıtı, Lemon webhook settle (ONE_TIME), mock settle
-(dönem), teklif harcaması, teklif iadesi → `CampaignTriggerEvent/Redemption/EvaluationLog/PromoCreditLot/Consumption/Counter` 0,
-`Campaign.redemptionCount/budgetConsumedCredits` 0, ledger yalnız altı eski tür; iş etkileri (PAID, +25, entitlement, −2/+2) bire bir.
-`admin-campaign-lifecycle.spec.ts`: activate/resume 409 ile Campaign/Audit dâhil sıfır yazı; pause/end yalnız status + audit.
+| Gerçek yol | Yazılan | Kampanya/event/log/lot/sayaç/CAMPAIGN_* ledger |
+| --- | --- | --- |
+| Sağlayıcı onayı | profil | 0 |
+| PROVIDER e-posta + telefon kanıtı | `User.*VerifiedAt` | 0 |
+| Lemon webhook settle (ONE_TIME) | PAID + PACKAGE_PURCHASE + PROCESSED | 0 |
+| Mock settle (dönem) | entitlement | 0 |
+| Teklif harcaması / iadesi | OFFER_SPEND / OFFER_REFUND | 0 |
+| activate / resume | — (409) | 0 |
+| pause / end | Campaign.status + Audit | 0 |
+| Worker tick (kalan PENDING event varken bile) | — (`ENGINE_DISABLED`) | 0 |
 
 ## 6. Test ve derleme sonuçları
 
 | Adım | Sonuç |
 | --- | --- |
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm test` | ✅ api **145 dosya / 3247 test**, admin 5/64, shared 6/168 |
-| `pnpm build` | ✅ |
-| E2E Chromium (izole `taktic_cmp002s2b2_e2e`) | ✅ **286 passed** (9.3 dk) — `admin-campaign-lifecycle` dahil |
-| E2E WebKit | ✅ **117 passed** (3.7 dk) |
-| Migration dry-run | ✅ 69 migration, diff boş, yalnız 5 `ALTER TYPE` |
-| CI (run 35588381023, head `e00b87c9`) | ✅ 3/3: typecheck·lint·test·build (12m27s), e2e chromium (13m53s), e2e webkit (10m44s); önceki run 35587030296 rapor push'uyla iptal edildi (webkit orada da ✅) |
+| `pnpm typecheck` / `pnpm lint` / `pnpm build` | ✅ |
+| `pnpm test` | ✅ api **145 dosya / 3256 test**, admin 5/64, shared 6/168 |
+| E2E Chromium (izole `taktic_cmp002s2b2_e2e`) | ✅ **286 passed** (8.3 dk) — `admin-campaign-lifecycle` dahil |
+| E2E WebKit | ✅ **117 passed** (3.6 dk) |
+| Migration D dry-run | ✅ 69 migration, diff boş, yalnız 5 `ALTER TYPE` |
+| **Migration E dry-run** | ✅ 70 migration, diff boş; `CampaignTriggerEvent` eski 12 kolon tür/default aynı + 8 yeni kolon; ifade türleri: 1 CREATE TYPE, 3 ALTER TABLE (8 ADD COLUMN, 2 CHECK), 1 CREATE INDEX — DML/DROP/ALTER COLUMN 0 |
+| CI (nihai head) | rapor push'undan sonra başlayan run; sonuç PR'da (bu satır nihai run ile güncellenir) |
 
-## 7. Motor açmak S4'e kadar teknik olarak mümkün değil
+## 7. Motor açmak S4'e kadar teknik olarak mümkün değil (değişmedi)
 
-- `campaignEngineEnabled` yazıcısı yok: `grep -rn campaignEngineEnabled apps/api/src` → yalnız üç okuyucu
-  (`campaign-engine-settings.service.ts`, `campaign-engine.service.ts`, `campaigns.service.ts`); `operations-settings` PATCH DTO'sunda
-  alan yok; seed yok; admin UI'da düğme yok (`engine-notice.tsx`, `lifecycle-panel.tsx` yalnız okur). Tek yazıcı test fixture'larıdır.
-- Anahtar kapalıyken hiçbir kampanya ACTIVE'e geçemez (§3) ve hiçbir hook satır yazmaz (§5); üretimde `activeVersionId` dolu kampanya
-  yoktur (S2A D2; bu dilim onu yalnız motor açıkken yazar) → anahtar elle açılsa bile aday kümesi boştur.
-- S4 ön koşulu (promo içeren iadenin net tutarını bildirim/arayüzde göstermek) bu PR'da yok; `project_cmp_002_s2b1…` notundaki karar
-  geçerli: **anahtar S4 tamamlanmadan açılmayacak.**
+`campaignEngineEnabled` yazıcısı yok (`grep -rn campaignEngineEnabled apps/api/src` → yalnız okuyucular: settings servisi, motor, hooks,
+worker, campaigns servisi); `operations-settings` PATCH DTO'sunda alan yok; seed yok; admin UI'da düğme yok. Anahtar kapalıyken kampanya
+ACTIVE olamaz, hook event bile yazmaz, worker claim yapmaz; üretimde `activeVersionId` dolu kampanya yok. Karar: **anahtar S4 tamamlanmadan
+açılmayacak.**
 
 ## 8. S3/S4 sınırları ve açık noktalar
 
-- S3: `order_refunded` → `revokePromoCreditLot`, admin revoke ucu, otomatik PAUSE eşiği, redemption/evaluation ekranları (`ELIGIBILITY_INCOMPLETE`
-  gözlem log'u hâlâ olaysız → yazılmıyor, S2A kararı).
+- S3: `order_refunded` → `revokePromoCreditLot`, admin revoke ucu, otomatik PAUSE eşiği, redemption/evaluation ekranları; kuyruk için
+  manuel retry ucu (bu PR'da yok, yalnız salt-okunur sayaç).
 - S4: refund mailinde net tutar, admin ledger `CAMPAIGN_*` etiketleri, sağlayıcı promo satırı, grant maili; ardından toggle ucu (ayrı karar).
-- Scheduler: `PromoCreditLotExpiryService.expireDueLots` cron/anahtar olmadan durur (S2B1 gibi).
-- Not: bozuk tanım/kod hatası (ENGINE_ERROR) artık ilgili akışları (onay/kanıt/settle) sorumlu kampanya duraklatılana kadar
-  409 ile durdurur — brief'in "sessiz kayıp yok" gereğinin bedeli; operasyon notu tasarım D2.
+- Lot expiry süpürücüsü (`PromoCreditLotExpiryService`) hâlâ cron/anahtar olmadan durur (S2B1 gibi); bu PR'daki worker yalnız kampanya
+  değerlendirme retry'ıdır.
+- Hak ediş gecikmesi ≤ bir worker tick'i (varsayılan 1 dk); commit sonrası anlık "kick" bilinçli olarak yok (determinist test, çok-instance).
+- `ELIGIBILITY_INCOMPLETE` artık worker'da (olay varken) loglanabilir; stage A'da eksik küme için olay üretilmez (S2A kararı korunur).
