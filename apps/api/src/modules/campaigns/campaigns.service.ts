@@ -8,12 +8,17 @@ import {
 } from '@nestjs/common';
 import {
   CampaignAuditAction,
+  type CampaignRedemptionStatus,
+  type CampaignRevokeReason,
   CampaignStatus,
+  CampaignTriggerEventStatus,
   Prisma,
   type CampaignBenefitType,
   type CampaignEligibilityFact,
+  type CampaignEvaluationOutcome,
   type CampaignStackPolicy,
   type CampaignTrigger,
+  type PromoCreditLotStatus,
 } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -21,6 +26,7 @@ import { OPERATIONS_SETTINGS_ID } from '../operations-settings/operations-settin
 import { CampaignEngineSettingsService } from './campaign-engine-settings.service';
 import { CAMPAIGN_LIST_DEFAULT_LIMIT } from './dto/list-campaigns.dto';
 import { istanbulDay } from './engine/campaign-engine.repository';
+import { CampaignRevokeService } from './engine/campaign-revoke.service';
 import { type CampaignFactSource, FactSourceRegistry } from './engine/fact-source-registry';
 import {
   CAMPAIGN_ACTIVATION_ERROR_MESSAGES,
@@ -59,6 +65,11 @@ import { collectPackageSlugs, validateCampaignDefinition } from './rules/validat
  * 4. Nothing here grants anything. Activation writes `Campaign` and
  *    `CampaignAuditLog` and no other table; the engine switch is read, never
  *    written, through this module.
+ * 5. The operations desk (CMP-003 S3) reads a campaign's redemptions and the
+ *    events its running rule is a candidate for; it revokes one named
+ *    redemption through `CampaignRevokeService` — the path a payment
+ *    reversal takes — and it can put a parked event back in the worker's
+ *    queue. Neither write evaluates a rule or grants a credit.
  */
 
 export const CAMPAIGN_DEFINITION_INVALID = 'CAMPAIGN_DEFINITION_INVALID';
@@ -69,6 +80,10 @@ export const CAMPAIGN_ENDED = 'CAMPAIGN_ENDED';
 export const CAMPAIGN_INVALID_TRANSITION = 'CAMPAIGN_INVALID_TRANSITION';
 export const CAMPAIGN_ENGINE_DISABLED = 'CAMPAIGN_ENGINE_DISABLED';
 export const CAMPAIGN_ACTIVATION_REFUSED = 'CAMPAIGN_ACTIVATION_REFUSED';
+export const CAMPAIGN_REDEMPTION_NOT_FOUND = 'CAMPAIGN_REDEMPTION_NOT_FOUND';
+export const CAMPAIGN_REDEMPTION_NOT_REVOCABLE = 'CAMPAIGN_REDEMPTION_NOT_REVOCABLE';
+export const CAMPAIGN_EVENT_NOT_FOUND = 'CAMPAIGN_EVENT_NOT_FOUND';
+export const CAMPAIGN_EVENT_NOT_RETRYABLE = 'CAMPAIGN_EVENT_NOT_RETRYABLE';
 
 /** The condition types whose truth depends on a registered fact writer. */
 const CONDITION_FACT_SOURCES: Readonly<Record<string, CampaignFactSource>> = {
@@ -161,6 +176,58 @@ export type CampaignValidationView = {
   summary: CampaignDefinitionSummary | null;
 };
 
+/**
+ * One redemption as the operations desk sees it (CMP-003 S3): ids, the
+ * frozen version number, amounts, the lot's state and the revoke record.
+ * The provider is named by its business identity only — no contact detail,
+ * no account, no token, no rules snapshot.
+ */
+export type CampaignRedemptionView = {
+  id: string;
+  status: CampaignRedemptionStatus;
+  versionNumber: number;
+  trigger: CampaignTrigger;
+  triggerEventKey: string;
+  provider: { id: string; businessName: string };
+  purchaseId: string | null;
+  grantedCredits: number;
+  grantedAt: Date;
+  grantTransactionId: string | null;
+  lot: { id: string; status: PromoCreditLotStatus; remainingCredits: number; expiresAt: Date } | null;
+  revokedAt: Date | null;
+  revokeReason: CampaignRevokeReason | null;
+  spentAtRevoke: number | null;
+  /** grantedCredits − spentAtRevoke on a revoked row; null otherwise. */
+  revokedCredits: number | null;
+  revokedBy: ActorView | null;
+  revokeNote: string | null;
+  revokedByWebhookEventId: string | null;
+};
+
+/** One event the campaign's running rule is a candidate for, with its queue state. */
+export type CampaignEvaluationEventView = {
+  id: string;
+  triggerEventKey: string;
+  trigger: CampaignTrigger;
+  providerId: string;
+  purchaseId: string | null;
+  status: CampaignTriggerEventStatus;
+  attemptCount: number;
+  evaluationCount: number;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  nextAttemptAt: Date;
+  leaseUntil: Date | null;
+  lastErrorCode: string | null;
+  lastErrorAt: Date | null;
+  settledByCampaignId: string | null;
+  settledAt: Date | null;
+  /** The newest evaluation log row of this event for this campaign. */
+  lastOutcome: { outcome: CampaignEvaluationOutcome; reasonCode: string | null; evaluatedAt: Date } | null;
+  /** RETRY_WAIT, or PROCESSING under a lease that has lapsed: what the retry route accepts. */
+  retryable: boolean;
+};
+
 const actorSelect = { select: { id: true, name: true } } as const;
 
 const versionSelect = {
@@ -212,6 +279,7 @@ export class CampaignsService {
     @Inject(CampaignEngineSettingsService)
     private readonly engineSettings: CampaignEngineSettingsService,
     @Inject(FactSourceRegistry) private readonly factSources: FactSourceRegistry,
+    @Inject(CampaignRevokeService) private readonly revokes: CampaignRevokeService,
   ) {}
 
   // ───────────────────────────── validation ─────────────────────────────
@@ -648,6 +716,7 @@ export class CampaignsService {
           redemptionCount: true,
           budgetConsumedCredits: true,
           activeVersion: { select: { ...versionSelect, definition: true } },
+          currentVersion: { select: { trigger: true, factSetKey: true } },
         },
       })
       .catch((error: unknown) => {
@@ -758,6 +827,188 @@ export class CampaignsService {
       throw activationRefused(errors);
     }
   }
+
+  // ───────────────────── operations desk (CMP-003 S3) ─────────────────────
+
+  async listRedemptions(campaignId: string, query: { limit?: number; cursor?: string }) {
+    await this.requireCampaign(campaignId);
+    const take = query.limit ?? CAMPAIGN_LIST_DEFAULT_LIMIT;
+    const rows = await this.prisma.campaignRedemption.findMany({
+      where: { campaignId },
+      orderBy: [{ grantedAt: 'desc' }, { id: 'desc' }],
+      take: take + 1,
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      select: redemptionSelect,
+    });
+    const page = rows.slice(0, take);
+    return {
+      items: page.map(redemptionView),
+      nextCursor: rows.length > take ? page[page.length - 1]!.id : null,
+    };
+  }
+
+  /**
+   * The events this campaign's rule answers: same trigger and, on the
+   * eligibility transition, the same fact set. The rule is the running
+   * version, or the latest stored one while nothing runs yet. The queue
+   * itself is global; this is the slice of it an operator looking at one
+   * campaign can act on.
+   */
+  async listEvaluationEvents(campaignId: string, query: { limit?: number; cursor?: string }) {
+    const campaign = await this.requireCampaign(campaignId);
+    const rule = campaign.activeVersion ?? campaign.currentVersion;
+    if (!rule) {
+      return { items: [] as CampaignEvaluationEventView[], nextCursor: null };
+    }
+    const take = query.limit ?? CAMPAIGN_LIST_DEFAULT_LIMIT;
+    const now = new Date();
+    const rows = await this.prisma.campaignTriggerEvent.findMany({
+      where: { trigger: rule.trigger, factSetKey: rule.factSetKey },
+      orderBy: [{ lastSeenAt: 'desc' }, { id: 'desc' }],
+      take: take + 1,
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      select: eventSelect,
+    });
+    const page = rows.slice(0, take);
+    const logs = await this.prisma.campaignEvaluationLog.findMany({
+      where: { campaignId, triggerEventId: { in: page.map((row) => row.id) } },
+      orderBy: [{ evaluatedAt: 'desc' }, { id: 'desc' }],
+      select: { triggerEventId: true, outcome: true, reasonCode: true, evaluatedAt: true },
+    });
+    const lastOutcome = new Map<string, CampaignEvaluationEventView['lastOutcome']>();
+    for (const log of logs) {
+      if (!lastOutcome.has(log.triggerEventId)) {
+        lastOutcome.set(log.triggerEventId, { outcome: log.outcome, reasonCode: log.reasonCode, evaluatedAt: log.evaluatedAt });
+      }
+    }
+    return {
+      items: page.map((row) => eventView(row, lastOutcome.get(row.id) ?? null, now)),
+      nextCursor: rows.length > take ? page[page.length - 1]!.id : null,
+    };
+  }
+
+  /**
+   * Revokes one GRANTED redemption of this campaign with the operator's
+   * reason — through `CampaignRevokeService`, so the ledger row, the lot,
+   * the redemption, the daily counter and the threshold behave exactly as
+   * they do for a payment reversal — and records REDEMPTION_REVOKED. A
+   * redemption that is not this campaign's is 404; one that is not GRANTED
+   * (already revoked, or expired) is 409, and nothing is written.
+   */
+  async revokeRedemption(campaignId: string, redemptionId: string, reason: string, actorId: string) {
+    const note = reason.trim();
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const campaign = await this.lockCampaign(tx, campaignId);
+        const redemption = await tx.campaignRedemption.findUnique({
+          where: { id: redemptionId },
+          select: { id: true, campaignId: true, status: true, campaignVersion: { select: { id: true, versionNumber: true } } },
+        });
+        if (!redemption || redemption.campaignId !== campaign.id) {
+          throw redemptionNotFound();
+        }
+        if (redemption.status !== 'GRANTED') {
+          throw redemptionNotRevocable(redemption.status);
+        }
+        const now = new Date();
+        const outcome = await this.revokes.revokeRedemption(tx, { redemptionId, actorId, note, now });
+        if (!outcome) {
+          throw redemptionNotRevocable(redemption.status);
+        }
+        await tx.campaignAuditLog.create({
+          data: {
+            campaignId,
+            action: CampaignAuditAction.REDEMPTION_REVOKED,
+            campaignVersionId: redemption.campaignVersion.id,
+            actorId,
+            summary: {
+              redemptionId,
+              versionNumber: redemption.campaignVersion.versionNumber,
+              revokedCredits: outcome.revokedCredits,
+              spentAtRevoke: outcome.spentAtRevoke,
+              revokeCountToday: outcome.revokeCountToday,
+              autoPaused: outcome.autoPaused,
+              reason: note,
+            },
+          },
+        });
+      },
+      { label: 'campaigns.revokeRedemption' },
+    );
+    return this.getForAdmin(campaignId);
+  }
+
+  /**
+   * Puts a parked event back at the front of the worker's queue: RETRY_WAIT,
+   * or PROCESSING under a lease that has lapsed, becomes RETRY_WAIT due now
+   * with no lease. Nothing is evaluated and nothing is granted here — the
+   * worker claims the event on its next tick, which is also why the route is
+   * refused while the engine is off (the worker would never come). A
+   * SETTLED, EVALUATED, PENDING or live-leased event is refused untouched;
+   * `lastErrorCode` is kept so the operator still sees why it was parked.
+   */
+  async retryEvaluationEvent(campaignId: string, eventId: string, actorId: string): Promise<CampaignEvaluationEventView> {
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        await this.requireEngineEnabled(tx);
+        const campaign = await this.lockCampaign(tx, campaignId);
+        const rule = campaign.activeVersion ?? campaign.currentVersion;
+        const event = await tx.campaignTriggerEvent.findUnique({ where: { id: eventId }, select: eventSelect });
+        if (!event || !rule || event.trigger !== rule.trigger || event.factSetKey !== rule.factSetKey) {
+          throw eventNotFound();
+        }
+        const now = new Date();
+        const released = await tx.campaignTriggerEvent.updateMany({
+          where: {
+            id: eventId,
+            OR: [
+              { status: CampaignTriggerEventStatus.RETRY_WAIT },
+              { status: CampaignTriggerEventStatus.PROCESSING, leaseUntil: { lt: now } },
+            ],
+          },
+          data: { status: CampaignTriggerEventStatus.RETRY_WAIT, nextAttemptAt: now, leaseUntil: null },
+        });
+        if (released.count !== 1) {
+          throw eventNotRetryable(event.status);
+        }
+        await tx.campaignAuditLog.create({
+          data: {
+            campaignId,
+            action: CampaignAuditAction.EVENT_RETRY_REQUESTED,
+            campaignVersionId: campaign.activeVersionId,
+            actorId,
+            summary: {
+              triggerEventId: event.id,
+              triggerEventKey: event.triggerEventKey,
+              previousStatus: event.status,
+              attemptCount: event.attemptCount,
+              lastErrorCode: event.lastErrorCode,
+            },
+          },
+        });
+        const updated = await tx.campaignTriggerEvent.findUniqueOrThrow({ where: { id: eventId }, select: eventSelect });
+        return eventView(updated, null, now);
+      },
+      { label: 'campaigns.retryEvaluationEvent' },
+    );
+  }
+
+  private async requireCampaign(campaignId: string) {
+    const row = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: {
+        id: true,
+        activeVersion: { select: { trigger: true, factSetKey: true } },
+        currentVersion: { select: { trigger: true, factSetKey: true } },
+      },
+    });
+    if (!row) {
+      throw campaignNotFound();
+    }
+    return row;
+  }
 }
 
 /** Allowed lifecycle moves (CMP-001 §2.1). Absent status → no move. */
@@ -800,6 +1051,85 @@ function requiredFactSources(definition: CampaignDefinition): Array<{ path: stri
 }
 
 // ────────────────────────────── helpers ───────────────────────────────
+
+const redemptionSelect = {
+  id: true,
+  status: true,
+  trigger: true,
+  triggerEventKey: true,
+  purchaseId: true,
+  grantedCredits: true,
+  grantedAt: true,
+  grantTransactionId: true,
+  revokedAt: true,
+  revokeReason: true,
+  spentAtRevoke: true,
+  revokeNote: true,
+  revokedByWebhookEventId: true,
+  campaignVersion: { select: { versionNumber: true } },
+  provider: { select: { id: true, businessName: true } },
+  promoLot: { select: { id: true, status: true, remainingCredits: true, expiresAt: true } },
+  revokedBy: actorSelect,
+} satisfies Prisma.CampaignRedemptionSelect;
+
+type RedemptionRow = Prisma.CampaignRedemptionGetPayload<{ select: typeof redemptionSelect }>;
+
+function redemptionView(row: RedemptionRow): CampaignRedemptionView {
+  return {
+    id: row.id,
+    status: row.status,
+    versionNumber: row.campaignVersion.versionNumber,
+    trigger: row.trigger,
+    triggerEventKey: row.triggerEventKey,
+    provider: row.provider,
+    purchaseId: row.purchaseId,
+    grantedCredits: row.grantedCredits,
+    grantedAt: row.grantedAt,
+    grantTransactionId: row.grantTransactionId,
+    lot: row.promoLot,
+    revokedAt: row.revokedAt,
+    revokeReason: row.revokeReason,
+    spentAtRevoke: row.spentAtRevoke,
+    revokedCredits: row.spentAtRevoke === null ? null : row.grantedCredits - row.spentAtRevoke,
+    revokedBy: row.revokedBy,
+    revokeNote: row.revokeNote,
+    revokedByWebhookEventId: row.revokedByWebhookEventId,
+  };
+}
+
+const eventSelect = {
+  id: true,
+  triggerEventKey: true,
+  trigger: true,
+  factSetKey: true,
+  providerId: true,
+  purchaseId: true,
+  status: true,
+  attemptCount: true,
+  evaluationCount: true,
+  firstSeenAt: true,
+  lastSeenAt: true,
+  nextAttemptAt: true,
+  leaseUntil: true,
+  lastErrorCode: true,
+  lastErrorAt: true,
+  settledByCampaignId: true,
+  settledAt: true,
+} satisfies Prisma.CampaignTriggerEventSelect;
+
+type EventRow = Prisma.CampaignTriggerEventGetPayload<{ select: typeof eventSelect }>;
+
+function isRetryable(row: Pick<EventRow, 'status' | 'leaseUntil'>, now: Date): boolean {
+  return (
+    row.status === CampaignTriggerEventStatus.RETRY_WAIT ||
+    (row.status === CampaignTriggerEventStatus.PROCESSING && row.leaseUntil !== null && row.leaseUntil < now)
+  );
+}
+
+function eventView(row: EventRow, lastOutcome: CampaignEvaluationEventView['lastOutcome'], now: Date): CampaignEvaluationEventView {
+  const { factSetKey: _factSetKey, ...rest } = row;
+  return { ...rest, lastOutcome, retryable: isRetryable(row, now) };
+}
 
 function campaignView(row: CampaignRow): CampaignView {
   return {
@@ -926,6 +1256,44 @@ function activationRefused(errors: CampaignActivationError[]) {
     code: CAMPAIGN_ACTIVATION_REFUSED,
     message: 'Sürüm etkinleştirilemedi.',
     errors,
+  });
+}
+
+function redemptionNotFound() {
+  return new NotFoundException({
+    statusCode: HttpStatus.NOT_FOUND,
+    error: 'Not Found',
+    code: CAMPAIGN_REDEMPTION_NOT_FOUND,
+    message: 'Bu kampanyaya ait böyle bir hak ediş yok.',
+  });
+}
+
+function redemptionNotRevocable(status: CampaignRedemptionStatus) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: CAMPAIGN_REDEMPTION_NOT_REVOCABLE,
+    message: `Hak ediş ${status} durumunda; yalnızca GRANTED durumundaki hak ediş geri alınabilir.`,
+    status,
+  });
+}
+
+function eventNotFound() {
+  return new NotFoundException({
+    statusCode: HttpStatus.NOT_FOUND,
+    error: 'Not Found',
+    code: CAMPAIGN_EVENT_NOT_FOUND,
+    message: 'Bu kampanyanın kuralına aday olan böyle bir olay yok.',
+  });
+}
+
+function eventNotRetryable(status: CampaignTriggerEventStatus) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: CAMPAIGN_EVENT_NOT_RETRYABLE,
+    message: `Olay ${status} durumunda; yalnızca yeniden deneme bekleyen ya da sahipliği düşmüş olaylar kuyruğa alınabilir.`,
+    status,
   });
 }
 
