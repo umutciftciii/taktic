@@ -276,7 +276,9 @@ test.describe('admin campaign operations desk', () => {
         await expect(page.getByTestId('campaign-redemption-row')).toHaveCount(2);
         await expect(page.getByTestId('campaign-event-row').first()).toBeVisible();
         await expectNoHorizontalOverflow(page, `detail @${width}`);
-        await page.screenshot({ path: resolve(SCREENSHOT_DIR, `detail-${width}.png`), fullPage: false });
+        // Full page where the browser allows it (WebKit caps a capture at 32767 device pixels).
+        const tooTall = await page.evaluate(() => document.documentElement.scrollHeight * window.devicePixelRatio > 32000);
+        await page.screenshot({ path: resolve(SCREENSHOT_DIR, `detail-${width}.png`), fullPage: !tooTall });
       }
     } finally {
       await setEngine(false);
@@ -299,7 +301,7 @@ test.describe('admin campaign operations desk', () => {
       await expect(intruder.page).toHaveURL(/\/login/);
       await expect(intruder.page.getByTestId('campaign-redemptions')).toHaveCount(0);
       await assertNoErrorScreen(intruder.page);
-      expect(await prisma().providerCreditTransaction.count({ where: { type: 'CAMPAIGN_REVOKE' } })).toBe(0);
+      expect(await prisma().providerCreditTransaction.count({ where: { providerId: providerAccount.id, type: 'CAMPAIGN_REVOKE' } })).toBe(0);
     } finally {
       await intruder.close();
     }

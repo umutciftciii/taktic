@@ -216,7 +216,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
               <p data-testid="campaign-redemptions-empty">Henüz hak ediş yok.</p>
             ) : (
               <div className="table-scroll">
-                <table className="data-table" data-testid="campaign-redemptions">
+                <table className="data-table campaign-ops-table" data-testid="campaign-redemptions">
                   <thead>
                     <tr>
                       <th>Durum</th>
@@ -235,7 +235,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                         <td>
                           <span className={redemptionBadgeClass(row.status)}>{campaignRedemptionStatusLabel(row.status)}</span>
                         </td>
-                        <td>
+                        <td className="campaign-ops-wrap">
                           <Link href={`/providers/${row.provider.id}`}>{row.provider.businessName}</Link>
                           <span className="campaign-ops-meta">{TRIGGER_LABELS[row.trigger as CampaignTrigger] ?? row.trigger}</span>
                         </td>
@@ -252,7 +252,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                           )}
                         </td>
                         <td>{formatDateTime(row.grantedAt)}</td>
-                        <td>
+                        <td className="campaign-ops-wrap">
                           {row.status === 'REVOKED' ? (
                             <>
                               {campaignRevokeReasonLabel(row.revokeReason)} · düşülen {row.revokedCredits ?? 0} · harcanan {row.spentAtRevoke ?? 0}
@@ -288,7 +288,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
               <p data-testid="campaign-events-empty">Bu kurala aday olay yok.</p>
             ) : (
               <div className="table-scroll">
-                <table className="data-table" data-testid="campaign-events">
+                <table className="data-table campaign-ops-table" data-testid="campaign-events">
                   <thead>
                     <tr>
                       <th>Durum</th>
@@ -309,7 +309,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                             <span className="campaign-ops-meta">sahiplik {formatDateTime(row.leaseUntil)}{row.retryable ? ' (düştü)' : ''}</span>
                           ) : null}
                         </td>
-                        <td>
+                        <td className="campaign-ops-wrap">
                           <code>{row.triggerEventKey}</code>
                           <span className="campaign-ops-meta">
                             ilk {formatDateTime(row.firstSeenAt)} · son {formatDateTime(row.lastSeenAt)}
@@ -330,7 +330,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                             '—'
                           )}
                         </td>
-                        <td>
+                        <td className="campaign-ops-wrap">
                           {row.settledByCampaignId === campaign.id ? (
                             <span className="badge badge-good">hak ediş verildi</span>
                           ) : row.lastOutcome ? (

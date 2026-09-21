@@ -4828,3 +4828,67 @@ button:disabled {
   padding-left: 18px;
   font-size: 12.5px;
 }
+
+/* ───────────── campaign operations desk (CMP-003 S3) ───────────── */
+
+/*
+ * The two operations tables read as rows, not as wrapped paragraphs: cells
+ * keep their natural width and the `.table-scroll` wrapper (which the
+ * campaigns page already gives `overflow-x`) scrolls sideways on a narrow
+ * screen. Only the free-text columns — the revoke record with its note, the
+ * event key — may wrap, within a bounded width.
+ */
+.campaign-ops-table td,
+.campaign-ops-table th {
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.campaign-ops-table td.campaign-ops-wrap {
+  white-space: normal;
+  min-width: 220px;
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.campaign-ops-table code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.campaign-ops-meta {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: normal;
+}
+
+.campaign-op-form {
+  display: grid;
+  gap: 6px;
+  min-width: 200px;
+}
+
+.campaign-op-form .campaign-op-reason {
+  width: 100%;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.campaign-op-form .campaign-op-error {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  white-space: normal;
+  max-width: 320px;
+}
+
+.campaign-ops-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 13px;
+}
