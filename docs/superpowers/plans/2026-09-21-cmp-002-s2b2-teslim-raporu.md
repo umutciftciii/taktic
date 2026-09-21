@@ -5,7 +5,7 @@ doğrulandı) · Tasarım notu: `docs/superpowers/specs/2026-09-21-cmp-002-s2b2-
 `…-s2b2-migration-dryrun.txt` (Migration D), `…-s2b2-migration-e-dryrun.txt` (Migration E) · Bağlayıcı sözleşme: CMP-001 (rev. 3).
 
 PR: https://github.com/umutciftciii/taktic/pull/99 (açık; **merge önerilmez** — nihai head CI'ı §6'da) · rev. 1 head `e00b87c9`
-(CI 35588381023 3/3) · **rev. 2 head: §6** · Rev. 1'in "ENGINE_ERROR → 409 `CAMPAIGN_ENGINE_FAILED` → ana transaction rollback"
+(CI 35588381023 3/3) · **rev. 2 kod head'i `5c21fd31`, CI run 35597614424 3/3** (+ bu rapor güncellemesi) · Rev. 1'in "ENGINE_ERROR → 409 `CAMPAIGN_ENGINE_FAILED` → ana transaction rollback"
 davranışı **kaldırıldı**; aynı PR'a yeni commit olarak iki aşamalı akış geldi.
 
 Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Lemon ayarı veya gerçek veri işlemi **yapılmadı**. Geçici DB'ler
@@ -121,7 +121,7 @@ Yaşam döngüsü tablosu ve kapı (tasarım notu §2) rev. 1 ile aynı; kanıt 
 | E2E WebKit | ✅ **117 passed** (3.6 dk) |
 | Migration D dry-run | ✅ 69 migration, diff boş, yalnız 5 `ALTER TYPE` |
 | **Migration E dry-run** | ✅ 70 migration, diff boş; `CampaignTriggerEvent` eski 12 kolon tür/default aynı + 8 yeni kolon; ifade türleri: 1 CREATE TYPE, 3 ALTER TABLE (8 ADD COLUMN, 2 CHECK), 1 CREATE INDEX — DML/DROP/ALTER COLUMN 0 |
-| CI (nihai head) | rapor push'undan sonra başlayan run; sonuç PR'da (bu satır nihai run ile güncellenir) |
+| CI (rev. 2 kod head'i `5c21fd31`, run 35597614424) | ✅ 3/3: typecheck·lint·test·build (16m21s), e2e chromium (16m9s), e2e webkit (10m44s). Bu rapor güncellemesi yalnız docs commit'idir; CI'ı yeniden koşar |
 
 ## 7. Motor açmak S4'e kadar teknik olarak mümkün değil (değişmedi)
 
