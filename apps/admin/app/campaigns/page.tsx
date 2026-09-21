@@ -13,13 +13,12 @@ import { PageHeader } from '../../components/page-header';
 import { CampaignEngineNotice } from './engine-notice';
 
 /**
- * Campaign drafts (CMP-002 S1): what has been defined, and the fact that none
- * of it runs yet.
+ * Campaigns (CMP-002 S1, S2B2): what has been defined, which version of it
+ * runs, and what it has granted so far.
  *
- * Every row is DRAFT in this slice. The status column is rendered from the
- * API's value rather than hard-coded, so the day a campaign can be activated
- * the list already tells the truth — and until then the engine notice above
- * the table says, in as many words, that nothing here grants anything.
+ * Status, the running version and the cumulative counters come from the API
+ * row; the engine notice above the table says whether anything can run at
+ * all. Nothing on this screen changes a campaign or the engine switch.
  */
 
 export const dynamic = 'force-dynamic';
@@ -41,7 +40,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
       <PageHeader
         breadcrumbs={[{ label: 'Yönetim' }, { label: 'Kampanyalar' }]}
         title="Kampanyalar"
-        subtitle="Tetikleyici, koşul, fayda ve limitten oluşan kampanya taslakları."
+        subtitle="Tetikleyici, koşul, fayda ve limitten oluşan kampanyalar; durum ve çalışan sürüm."
         actions={
           <Link className="btn btn-primary btn-sm" href="/campaigns/new" data-testid="campaign-new-link">
             Yeni taslak
@@ -56,8 +55,8 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
       <div className="table-card">
         <div className="table-header">
           <div className="table-header-text">
-            <h2>Taslak listesi</h2>
-            <p className="table-header-sub">Ayrıntı ve sürüm geçmişi için kampanya adına tıklayın.</p>
+            <h2>Kampanya listesi</h2>
+            <p className="table-header-sub">Ayrıntı, sürüm geçmişi ve yaşam döngüsü için kampanya adına tıklayın.</p>
           </div>
           <span className="admin-toolbar-summary">{data.items.length} kayıt</span>
         </div>
@@ -66,8 +65,8 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
           <div style={{ padding: 18 }}>
             <EmptyState
               className="campaigns-empty"
-              title="Henüz kampanya taslağı yok"
-              description="İlk taslağı oluşturun. Motor kapalı olduğu sürece taslaklar yalnızca saklanır."
+              title="Henüz kampanya yok"
+              description="İlk taslağı oluşturun. Bir kampanya ancak motor açıkken etkinleştirilebilir."
               action={
                 <Link className="btn btn-primary btn-sm" href="/campaigns/new">
                   Yeni taslak oluştur
@@ -85,12 +84,17 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
                   <th>Tetikleyici</th>
                   <th className="col-num">Kredi</th>
                   <th className="col-num">Gün</th>
-                  <th className="col-num">Sürüm</th>
+                  <th className="col-num">Çalışan</th>
+                  <th className="col-num">Son</th>
+                  <th className="col-num">Hak ediş</th>
                   <th>Güncellenme</th>
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((item) => (
+                {data.items.map((item) => {
+                  // The running version describes an ACTIVE/PAUSED campaign; the latest stored one describes a draft.
+                  const shown = item.activeVersion ?? item.currentVersion;
+                  return (
                   <tr key={item.id} data-testid="campaign-row" data-campaign-key={item.key}>
                     <td>
                       <Link href={`/campaigns/${item.id}`} >
@@ -101,19 +105,22 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
                       </div>
                     </td>
                     <td>
-                      <span className={campaignStatusBadgeClass(item.status)}>{campaignStatusLabel(item.status)}</span>
+                      <span className={campaignStatusBadgeClass(item.status)} data-testid="campaign-row-status">{campaignStatusLabel(item.status)}</span>
                     </td>
                     <td>
-                      {item.currentVersion
-                        ? (TRIGGER_LABELS[item.currentVersion.trigger as CampaignTrigger] ?? item.currentVersion.trigger)
+                      {shown
+                        ? (TRIGGER_LABELS[shown.trigger as CampaignTrigger] ?? shown.trigger)
                         : '—'}
                     </td>
-                    <td className="col-num">{item.currentVersion?.benefitCredits ?? '—'}</td>
-                    <td className="col-num">{item.currentVersion?.benefitExpiresInDays ?? '—'}</td>
+                    <td className="col-num">{shown?.benefitCredits ?? '—'}</td>
+                    <td className="col-num">{shown?.benefitExpiresInDays ?? '—'}</td>
+                    <td className="col-num">{item.activeVersion ? `v${item.activeVersion.versionNumber}` : '—'}</td>
                     <td className="col-num">{item.currentVersion ? `v${item.currentVersion.versionNumber}` : '—'}</td>
+                    <td className="col-num">{item.redemptionCount}</td>
                     <td>{formatDateTime(item.updatedAt)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

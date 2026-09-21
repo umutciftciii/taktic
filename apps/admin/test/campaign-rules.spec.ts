@@ -73,8 +73,9 @@ describe('the catalogue projection', () => {
   });
 
   it('has a sentence for every catalogue error code', () => {
-    for (const code of catalog.errorCodes) {
+    for (const code of [...catalog.errorCodes, ...catalog.activationErrorCodes]) {
       expect(ruleErrorMessage(code, undefined).length).toBeGreaterThan(0);
+      expect(ruleErrorMessage(code, undefined)).not.toBe(code);
     }
     expect(ruleErrorMessage('BENEFIT_INVALID', 'API cümlesi')).toBe('API cümlesi');
   });

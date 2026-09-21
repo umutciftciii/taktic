@@ -86,7 +86,7 @@ test.describe('admin campaign drafts', () => {
       await expect(page).toHaveURL(/\/campaigns\/new/);
       await assertNoErrorScreen(page);
       await expectEngineOff(page);
-      await expect(page.getByTestId('campaign-engine-notice')).toContainText('henüz devrede değil');
+      await expect(page.getByTestId('campaign-engine-notice')).toContainText('Kaydetmek etkinleştirmez');
 
       // ---- the builder: no JSON editor, catalogue options only --------------
       await expect(page.locator('textarea')).toHaveCount(0);
@@ -154,7 +154,7 @@ test.describe('admin campaign drafts', () => {
       await assertNoErrorScreen(page);
       await expectEngineOff(page);
       await expect(page.getByTestId('campaign-version-row')).toHaveCount(2);
-      await expect(page.getByTestId('campaign-version-row').nth(0)).toContainText('v2 (güncel)');
+      await expect(page.getByTestId('campaign-version-row').nth(0)).toContainText('v2 (son)');
       await expect(page.getByTestId('campaign-version-row').nth(0)).toContainText('15');
       await expect(page.getByTestId('campaign-version-row').nth(1)).toContainText('v1');
       await expect(page.getByTestId('campaign-audit')).toContainText('değişen: benefit');

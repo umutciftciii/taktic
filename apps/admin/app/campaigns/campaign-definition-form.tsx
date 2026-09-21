@@ -125,8 +125,9 @@ export function CampaignDefinitionForm({
       {campaignId ? <input type="hidden" name="campaignId" value={campaignId} /> : null}
 
       <div className="notice notice-warning campaign-engine-notice" role="note" data-testid="campaign-engine-notice">
-        <strong>Kampanya motoru henüz devrede değil.</strong> Bu ekranda yalnızca taslak tanımlanır ve
-        saklanır; hiçbir hizmet verene kredi verilmez, hiçbir olay değerlendirilmez.
+        <strong>Kaydetmek etkinleştirmez.</strong> Bu form yalnızca değiştirilemez bir sürüm kaydeder; çalışan kural
+        ancak kampanya ayrıntısındaki yaşam döngüsü panelinden, motor açıkken etkinleştirilir. Kaydetme hiçbir olay
+        değerlendirmez, hiçbir hizmet verene kredi vermez.
       </div>
 
       {mode === 'create' ? (

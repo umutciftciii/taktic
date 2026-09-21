@@ -976,6 +976,14 @@ button:disabled {
   padding: 14px 16px;
 }
 
+.notice-info {
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1e40af;
+  padding: 14px 16px;
+}
+
 .divider {
   height: 1px;
   background: var(--border);
@@ -4801,4 +4809,22 @@ button:disabled {
 .campaigns-page .admin-main-column > .section-card,
 .campaigns-page .admin-side-column > .section-card {
   min-width: 0;
+}
+
+/* Campaign lifecycle panel (CMP-002 S2B2) */
+.campaign-lifecycle-form {
+  display: grid;
+  gap: 8px;
+}
+
+.campaign-lifecycle-form textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+}
+
+.campaign-lifecycle-refusal {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
 }
