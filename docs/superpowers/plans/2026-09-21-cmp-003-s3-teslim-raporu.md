@@ -4,7 +4,7 @@ Tarih: 2026-09-21 · Branch: `claude/s3-campaign-refund-revoke-cbccd4` · Taban:
 worktree doğrulandı) · Tasarım notu: `docs/superpowers/specs/2026-09-21-cmp-003-s3-refund-revoke-design.md` · Dry-run kaydı:
 `docs/superpowers/plans/2026-09-21-cmp-003-s3-migration-f-dryrun.txt` · Bağlayıcı sözleşme: CMP-001 (rev. 3) §2.6, §10, §12.
 
-PR: __PR_URL__ (açık; **merge edilmedi**) · CI: __CI__.
+PR: https://github.com/umutciftciii/taktic/pull/100 (açık; **merge edilmedi**) · CI run 35643971015 (head `9061cb1b`): **3/3 yeşil** (typecheck·lint·test·build, e2e chromium, e2e webkit).
 
 Merge, deploy, yerel/staging eşitlemesi, gerçek `.env`, Cloudflare, Lemon ayarı veya gerçek veri işlemi **yapılmadı**. Geçici DB
 `taktic_cmp003_s3_dryrun` yalnız dry-run için oluşturuldu ve düşürüldü; yerel `taktic` DB'sine ve `docker` container'larına komut
@@ -85,7 +85,17 @@ kampanya tablolarına hiçbir satır yazmaz (#5 `engineWriteSnapshot` eşit, `Ca
 
 ## 6. Kalite kapıları
 
-__QUALITY__
+| Kapı | Sonuç |
+| --- | --- |
+| `pnpm typecheck` | 5/5 ✓ |
+| `pnpm lint` | 4/4 ✓ |
+| `pnpm build` | 3/3 ✓ |
+| API `vitest run` (tam) | 147 dosya / **3288** test ✓ (yeni 27 test; RED → GREEN her dilimde önce kırmızı görüldü: şema 4, validator 2, admin-campaigns 1, refund-revoke 8/11 — 3'ü mevcut davranışı koruma bekçisi, operations 10, admin lib 2) |
+| web / admin / shared | 338 / 65 / 168 ✓ |
+| E2E Chromium `admin-campaign-operations` | 2/2 ✓ (320/768/1024/1440 taşma yok; ekran görüntüleri `e2e/.artifacts/admin-campaign-operations/`) |
+| E2E WebKit `--project=webkit` (drafts, lifecycle, operations) | 5/5 ✓ (taze DB; not: Chromium+WebKit'i aynı DB'de art arda koşmak eski spec'lerin global `CAMPAIGN_*` sayımlarını kirletir — CI iki ayrı iş) |
+| Migration F dry-run | geçici `taktic_cmp003_s3_dryrun`: `migrate deploy` 71 ✓, `migrate diff` "No difference detected", enum sırası ve CHECK/FK tanımları kayıtta; DB düşürüldü |
+| CI (GitHub Actions run 35643971015, head `9061cb1b`) | 3/3 ✓ — typecheck·lint·test·build, e2e (chromium), e2e (webkit) |
 
 ## 7. Kapsam dışı / S4'e kalanlar
 
