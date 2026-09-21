@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 // Types only: `lib/api` reaches for next/headers and cannot be bundled here.
 import type { ProviderOffer } from '../../../../lib/api';
-import { formatDateTime, formatPrice } from '../../../../lib/formatters';
+import { formatDateTime, formatPrice, refundSettlementSummary } from '../../../../lib/formatters';
 import {
   canOpenRequestDetail,
   canWithdrawOffer,
@@ -140,9 +140,7 @@ export function OffersTable({ providerId, offers }: OffersTableProps) {
                     <td data-label="Kredi">
                       −{offer.creditCost}
                       {offer.creditRefundedAt ? (
-                        <div className="pdash-card-sub">
-                          +{offer.creditCost} iade · {formatDateTime(offer.creditRefundedAt)}
-                        </div>
+                        <RefundLine offer={offer} />
                       ) : null}
                     </td>
                     <td data-label="İade politikası">
@@ -214,5 +212,21 @@ export function OffersTable({ providerId, offers }: OffersTableProps) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The refund line under the credit cost (CMP-004 S4). Without a forfeited
+ * promotion share it reads exactly as before; with one it states the gross,
+ * the promotion taken back and the net, so the "+" is never more than the
+ * balance actually gained.
+ */
+function RefundLine({ offer }: { offer: ProviderOffer }) {
+  const summary = refundSettlementSummary(offer.creditRefundSettlement, offer.creditCost);
+  return (
+    <div className="pdash-card-sub" data-testid="offer-refund-line">
+      {summary.headline} · {formatDateTime(offer.creditRefundedAt!)}
+      {summary.detail ? <div className="pdash-card-sub">{summary.detail}</div> : null}
+    </div>
   );
 }

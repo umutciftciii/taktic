@@ -7,6 +7,7 @@ import type { PublicReviewSummary, ReviewSummary } from './reviews';
 import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   unviewedOfferRefundNotice,
+  type OfferRefundSettlement,
 } from './formatters';
 // Re-exported by the `export *` above; imported by name as well because a
 // re-export does not put the name in this module's own scope.
@@ -507,6 +508,8 @@ export type ProviderOffer = {
   creditSpentTransactionId: string | null;
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
+  /** The net of the refund (CMP-004 S4); null until the offer is refunded. */
+  creditRefundSettlement: OfferRefundSettlement | null;
   refundEligibility: RefundEligibility;
   /** See ExistingOfferSummary.closureNotice. */
   closureNotice: string | null;
@@ -729,7 +732,10 @@ export type CreditTransactionType =
   | 'PACKAGE_PURCHASE'
   | 'OFFER_SPEND'
   | 'OFFER_REFUND'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  | 'CAMPAIGN_GRANT'
+  | 'CAMPAIGN_EXPIRE'
+  | 'CAMPAIGN_REVOKE';
 
 export type OfferCreditPackage = {
   id: string;

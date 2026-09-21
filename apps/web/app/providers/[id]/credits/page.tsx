@@ -9,6 +9,7 @@ import {
   ProviderCredits,
   getRefundPolicy,
   creditTxnTypeLabel,
+  creditReasonLabel,
   formatPrice,
   formatDateTime,
 } from '../../../../lib/api';
@@ -313,7 +314,7 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
                   <tr key={transaction.id}>
                     <td>{formatDateTime(transaction.createdAt)}</td>
                     <td>{creditTxnTypeLabel(transaction.type)}</td>
-                    <td className="muted">{transaction.reason ?? '-'}</td>
+                    <td className="muted">{creditReasonLabel(transaction.reason)}</td>
                     <td>
                       <span className={transaction.amount >= 0 ? 'tag tag-ink' : 'tag tag-neutral'}>
                         {transaction.amount > 0 ? `+${transaction.amount}` : transaction.amount}
