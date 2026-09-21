@@ -1,8 +1,8 @@
 import { HttpStatus, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { type CampaignEligibilityFact, type CampaignTriggerEventStatus, Prisma, UserRole } from '@prisma/client';
+import { type CampaignEligibilityFact, type CampaignTriggerEventStatus, type Prisma, UserRole } from '@prisma/client';
 import { isWriteConflictError } from '../../../common/serializable-transaction';
 import { OPERATIONS_SETTINGS_ID } from '../../operations-settings/operations-settings.service';
-import { CampaignEngineRepository, SAVEPOINT } from './campaign-engine.repository';
+import { CampaignEngineRepository } from './campaign-engine.repository';
 import { type CampaignFactSource, FactSourceRegistry, type FactWriter } from './fact-source-registry';
 import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from './trigger-event-key';
 
@@ -37,15 +37,21 @@ import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from
  * While the engine switch is off a hook reads one settings row and returns:
  * no event, no log, no row of any kind (the S2A zero-effect contract).
  *
- * Failure rule inside stage A: a *campaign-side* runtime fault (a bug in
- * fact-set lookup, say) is contained under a savepoint and logged, and the
- * business transaction commits — the trigger's own write is worth more than
- * an evaluation that is not due yet. A *database* fault, though — the event
- * row could not be made durable — is not contained: "the payment settled but
- * the campaign event is certainly lost" is the one outcome ruled out, so the
- * caller's transaction fails with a retryable 503 and the provider redelivers
- * or the operator tries again. A serialization conflict is rethrown as
- * always, for the caller's `runSerializable` to replay.
+ * Durability rule (rev. 3): with the engine on, the business transaction may
+ * commit **only** with its PENDING event(s) durably ensured in the same
+ * transaction. Until `ensurePendingEvent` has returned for every key the
+ * raise produces, *any* error — a bug in the fact-set lookup, a validation
+ * slip, a database fault — propagates and rolls the caller's transaction
+ * back with a retryable 503 (`CAMPAIGN_EVENT_NOT_DURABLE`); the provider
+ * redelivers, the operator or the owner tries again, and the retry raises
+ * the same key. There is no savepoint and no catch here that could let a
+ * business write commit over a missing event: "the payment settled but the
+ * campaign event is certainly lost" is the one outcome ruled out. A
+ * serialization conflict is rethrown as always, for the caller's
+ * `runSerializable` to replay. Nothing campaign-rule-shaped runs in this
+ * stage — no definition is parsed, no candidate is loaded — so a fault in a
+ * campaign's configuration cannot reach it; those faults belong to stage B,
+ * where they park the event for a retry and touch nothing else.
  *
  * Writers register themselves here at boot (`registerFactWriter`), which is
  * what the activation gate reads: a version that depends on a source no
@@ -62,8 +68,6 @@ export type HookResult =
   | { outcome: 'CAMPAIGN_ENGINE_DISABLED' }
   /** The account is not a PROVIDER's, or has no profile: a customer's or an operator's proof is no campaign fact. */
   | { outcome: 'NOT_A_PROVIDER_FACT' }
-  /** A campaign-side runtime fault, contained; the business write stands. */
-  | { outcome: 'HOOK_ERROR'; error: string }
   | { outcome: 'RAISED'; events: RaisedEvent[]; incompleteFactSetKeys: string[] };
 
 @Injectable()
@@ -89,7 +93,7 @@ export class CampaignEngineHooks {
     if (!(await this.isEnabled(tx))) {
       return { outcome: 'CAMPAIGN_ENGINE_DISABLED' };
     }
-    return this.contained(tx, async (now) => {
+    return this.durable(async (now) => {
       const events: RaisedEvent[] = [];
       events.push(await this.raise(tx, { trigger: 'PROVIDER_APPROVED', providerId }, now));
       const eligibility = await this.raiseEligibility(tx, providerId, 'PROVIDER_APPROVED', now);
@@ -114,7 +118,7 @@ export class CampaignEngineHooks {
     if (!profile || profile.user?.role !== UserRole.PROVIDER) {
       return { outcome: 'NOT_A_PROVIDER_FACT' };
     }
-    return this.contained(tx, async (now) => {
+    return this.durable(async (now) => {
       const eligibility = await this.raiseEligibility(tx, profile.id, fact, now);
       return { outcome: 'RAISED', ...eligibility } as const;
     });
@@ -125,7 +129,7 @@ export class CampaignEngineHooks {
     if (!(await this.isEnabled(tx))) {
       return { outcome: 'CAMPAIGN_ENGINE_DISABLED' };
     }
-    return this.contained(tx, async (now) => ({
+    return this.durable(async (now) => ({
       outcome: 'RAISED' as const,
       events: [await this.raise(tx, { trigger: 'PACKAGE_PAYMENT_SUCCEEDED', providerId, purchaseId }, now)],
       incompleteFactSetKeys: [],
@@ -177,29 +181,23 @@ export class CampaignEngineHooks {
   }
 
   /**
-   * The failure rule of the file comment, mechanically: a database fault or a
-   * write conflict propagates; anything else is rolled back to the savepoint,
-   * logged without the payload, and reported as HOOK_ERROR while the caller's
-   * transaction goes on to commit.
+   * The durability rule of the file comment, mechanically. The only thing
+   * this boundary does with an error is name it: a write conflict keeps its
+   * P2034 for the caller's replay, everything else becomes the retryable
+   * 503 — and in both cases the caller's transaction rolls back, event and
+   * business write together. No savepoint, no fallback, no partial commit.
    */
-  private async contained(tx: Prisma.TransactionClient, work: (now: Date) => Promise<HookResult>): Promise<HookResult> {
-    await this.repository.savepoint(tx, SAVEPOINT.fact);
+  private async durable(work: (now: Date) => Promise<HookResult>): Promise<HookResult> {
     try {
-      const value = await work(new Date());
-      await this.repository.release(tx, SAVEPOINT.fact);
-      return value;
+      return await work(new Date());
     } catch (error) {
       if (isWriteConflictError(error)) {
         throw error;
       }
-      if (isDatabaseFault(error)) {
-        this.logger.error(`Campaign event could not be made durable; the business transaction is not committed: ${describe(error)}`);
-        throw campaignEventNotDurable();
-      }
-      await this.repository.rollbackTo(tx, SAVEPOINT.fact);
-      const message = describe(error);
-      this.logger.error(`Campaign hook failed and was contained (business write stands): ${message}`);
-      return { outcome: 'HOOK_ERROR', error: message };
+      this.logger.error(
+        `Campaign event could not be made durable; the business transaction is not committed: ${describe(error)}`,
+      );
+      throw campaignEventNotDurable();
     }
   }
 
@@ -213,35 +211,16 @@ export class CampaignEngineHooks {
   }
 }
 
-/**
- * A Prisma request error of any kind (known, unknown, Rust panic,
- * initialization) — or one that crossed a module boundary and kept only its
- * shape. After such an error the transaction may be unusable anyway; what
- * matters is that the event insert did not happen.
- */
-function isDatabaseFault(error: unknown): boolean {
-  if (
-    error instanceof Prisma.PrismaClientKnownRequestError ||
-    error instanceof Prisma.PrismaClientUnknownRequestError ||
-    error instanceof Prisma.PrismaClientRustPanicError ||
-    error instanceof Prisma.PrismaClientInitializationError
-  ) {
-    return true;
-  }
-  const name = (error as { name?: unknown } | null)?.name;
-  const code = (error as { code?: unknown } | null)?.code;
-  return (typeof name === 'string' && name.startsWith('PrismaClient')) || (typeof code === 'string' && /^P\d{4}$/.test(code));
-}
-
 function describe(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
 /**
  * The retryable refusal a hooked flow answers with when the pending event
- * could not be written. 503: nothing partial exists, the business write did
- * not happen, and the same request later is the right response — a payment
- * provider retries any non-2xx, an operator presses the button again.
+ * could not be written, whatever stopped it. 503: nothing partial exists,
+ * the business write did not happen, and the same request later is the
+ * right response — a payment provider retries any non-2xx, an operator
+ * presses the button again, the owner enters the code again.
  */
 export function campaignEventNotDurable() {
   return new ServiceUnavailableException({

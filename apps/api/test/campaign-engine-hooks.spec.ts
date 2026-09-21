@@ -130,18 +130,31 @@ const activeCampaign = (options: Parameters<typeof createCampaignFixture>[1] = {
 const approve = (adminCookie: string, providerId: string, status: ProviderStatus = ProviderStatus.APPROVED) =>
   request(ctx.server).patch(`/providers/${providerId}/status`).set('Cookie', adminCookie).send({ status, ...(status === ProviderStatus.REJECTED ? { rejectionReason: 'test' } : {}) });
 
-/** Requests the link and follows it; returns the confirm response (status asserted by the caller). */
-async function proveEmail(cookie: string, expectedStatus: number) {
+async function requestEmailToken(cookie: string) {
   await request(ctx.server).post('/auth/email-verification/resend').set('Cookie', cookie).expect(201);
   const mail = ctx.notifications.ofTemplate('provider-email-verification').at(-1)!;
-  const token = new URL(mail.actionUrl!).searchParams.get('token')!;
-  return request(ctx.server).post('/auth/email-verification/confirm').send({ token }).expect(expectedStatus);
+  return new URL(mail.actionUrl!).searchParams.get('token')!;
 }
+
+const confirmEmail = (token: string, expectedStatus: number) =>
+  request(ctx.server).post('/auth/email-verification/confirm').send({ token }).expect(expectedStatus);
+
+/** Requests the link and follows it; returns the confirm response (status asserted by the caller). */
+async function proveEmail(cookie: string, expectedStatus: number) {
+  return confirmEmail(await requestEmailToken(cookie), expectedStatus);
+}
+
+async function requestPhoneCode(cookie: string) {
+  await request(ctx.server).post('/providers/me/phone-verification').set('Cookie', cookie).expect(201);
+  return ctx.sms.lastCode();
+}
+
+const verifyPhone = (cookie: string, code: string, expectedStatus: number) =>
+  request(ctx.server).post('/providers/me/phone-verification/verify').set('Cookie', cookie).send({ code }).expect(expectedStatus);
 
 /** Requests the code and enters it; returns the verify response (status asserted by the caller). */
 async function provePhone(cookie: string, expectedStatus: number) {
-  await request(ctx.server).post('/providers/me/phone-verification').set('Cookie', cookie).expect(201);
-  return request(ctx.server).post('/providers/me/phone-verification/verify').set('Cookie', cookie).send({ code: ctx.sms.lastCode() }).expect(expectedStatus);
+  return verifyPhone(cookie, await requestPhoneCode(cookie), expectedStatus);
 }
 
 async function writeFact(fact: Fact, actors: { adminCookie: string; providerId: string; cookie: string }) {
@@ -440,14 +453,217 @@ describe('stage A — every real path commits its write together with a PENDING 
       ['CONDITIONS_FAILED', 'FIRST_SUCCESSFUL_PAID_PURCHASE'],
     ]);
   });
+});
 
-  it('a database fault while writing the event fails the business transaction: the payment is not settled, PROCESSED is not written, the provider redelivers', async () => {
+// ──────────── durability — class 1: nothing durable yet ⇒ the business write does not commit ────────────
+
+/**
+ * The commit/rollback matrix of the durability rule. Class 1: an error of any
+ * kind — here a plain TypeError, the kind a savepoint fallback used to
+ * swallow — raised before or while the PENDING event is written. The
+ * business write (approval, proof, settlement) rolls back with it and the
+ * caller gets a retryable 503; nothing campaign-related exists; the retry
+ * with the same proof raises exactly one PENDING event, which the worker
+ * turns into exactly one grant. Class 2 (the event committed, then the
+ * evaluator fails) is the next describe: the business write stands.
+ */
+describe('durability — class 1: an error before the PENDING event is durable rolls the business write back', () => {
+  type Path = {
+    name: string;
+    /** Prepares the actors and returns the attempt (expects `status`) plus the checks. */
+    setUp: () => Promise<{
+      campaignId: string;
+      providerId: string;
+      credits: number;
+      attempt: (status: number) => Promise<unknown>;
+      businessWriteAbsent: () => Promise<void>;
+      businessWritePresent: () => Promise<void>;
+      extraLedger: Array<{ type: CreditTransactionType; amount: number }>;
+      expectedKeys: (providerId: string) => string[];
+    }>;
+  };
+
+  const paths: Path[] = [
+    {
+      name: 'provider approval',
+      setUp: async () => {
+        const { campaign } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
+        const { cookie: adminCookie } = await admin();
+        const { provider } = await newProvider();
+        return {
+          campaignId: campaign.id,
+          providerId: provider.id,
+          credits: 10,
+          attempt: (status) => approve(adminCookie, provider.id).expect(status),
+          businessWriteAbsent: async () => {
+            expect((await ctx.prisma.providerProfile.findUniqueOrThrow({ where: { id: provider.id } })).status).toBe(ProviderStatus.PENDING_REVIEW);
+            expect(ctx.notifications.ofTemplate('provider-application-approved')).toHaveLength(0);
+          },
+          businessWritePresent: async () => {
+            expect((await ctx.prisma.providerProfile.findUniqueOrThrow({ where: { id: provider.id } })).status).toBe(ProviderStatus.APPROVED);
+          },
+          extraLedger: [],
+          expectedKeys: (id) => [`PROVIDER_APPROVED:${id}`],
+        };
+      },
+    },
+    {
+      name: 'provider e-mail proof',
+      setUp: async () => {
+        const { campaign } = await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED'], credits: 4 });
+        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+        const token = await requestEmailToken(cookie);
+        return {
+          campaignId: campaign.id,
+          providerId: provider.id,
+          credits: 4,
+          attempt: (status) => confirmEmail(token, status),
+          businessWriteAbsent: async () => {
+            expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: provider.userId! } })).emailVerifiedAt).toBeNull();
+            // The link was not consumed either: the same proof can be retried.
+            expect(await ctx.prisma.emailVerificationToken.count({ where: { userId: provider.userId!, usedAt: null } })).toBe(1);
+          },
+          businessWritePresent: async () => {
+            expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: provider.userId! } })).emailVerifiedAt).not.toBeNull();
+          },
+          extraLedger: [],
+          expectedKeys: (id) => [`PROVIDER_ELIGIBILITY_REACHED:EMAIL_VERIFIED+PROVIDER_APPROVED:${id}`],
+        };
+      },
+    },
+    {
+      name: 'provider telephone proof',
+      setUp: async () => {
+        const { campaign } = await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'PHONE_VERIFIED'], credits: 3 });
+        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+        const code = await requestPhoneCode(cookie);
+        return {
+          campaignId: campaign.id,
+          providerId: provider.id,
+          credits: 3,
+          attempt: (status) => verifyPhone(cookie, code, status),
+          businessWriteAbsent: async () => {
+            expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: provider.userId! } })).phoneVerifiedAt).toBeNull();
+            // The code was not consumed either.
+            expect(await ctx.prisma.phoneVerification.count({ where: { userId: provider.userId!, consumedAt: null } })).toBe(1);
+          },
+          businessWritePresent: async () => {
+            expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: provider.userId! } })).phoneVerifiedAt).not.toBeNull();
+          },
+          extraLedger: [],
+          expectedKeys: (id) => [`PROVIDER_ELIGIBILITY_REACHED:PHONE_VERIFIED+PROVIDER_APPROVED:${id}`],
+        };
+      },
+    },
+    {
+      name: 'Lemon Squeezy webhook settlement',
+      setUp: async () => {
+        const { campaign } = await activeCampaign({ trigger: 'PACKAGE_PAYMENT_SUCCEEDED', credits: 10 });
+        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+        const { purchase } = await openLemonCheckout(provider.id, cookie);
+        return {
+          campaignId: campaign.id,
+          providerId: provider.id,
+          credits: 10,
+          attempt: (status) => deliver(paidOrder(purchase.paymentReference!, 'order-1')).expect(status),
+          businessWriteAbsent: async () => {
+            expect((await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: purchase.id } })).status).toBe(PackagePurchaseStatus.PENDING);
+            expect(await ctx.prisma.paymentWebhookEvent.count({ where: { status: PaymentWebhookEventStatus.PROCESSED } })).toBe(0);
+            expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
+          },
+          businessWritePresent: async () => {
+            expect((await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: purchase.id } })).status).toBe(PackagePurchaseStatus.PAID);
+            expect((await ctx.prisma.paymentWebhookEvent.findFirstOrThrow()).status).toBe(PaymentWebhookEventStatus.PROCESSED);
+          },
+          extraLedger: [{ type: CreditTransactionType.PACKAGE_PURCHASE, amount: PACKAGE_CREDITS }],
+          expectedKeys: () => [`PACKAGE_PAYMENT_SUCCEEDED:${purchase.id}`],
+        };
+      },
+    },
+    {
+      name: 'mock settlement',
+      setUp: async () => {
+        process.env.PAYMENT_PROVIDER = 'mock';
+        const { campaign } = await activeCampaign({ trigger: 'PACKAGE_PAYMENT_SUCCEEDED', credits: 10 });
+        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+        const pkg = await createOfferPackage(ctx.prisma, { type: OfferPackageType.ONE_TIME_CREDITS, creditAmount: PACKAGE_CREDITS, priceAmount: PRICE });
+        const created = await request(ctx.server).post(`/providers/${provider.id}/package-purchases`).set('Cookie', cookie).send({ packageId: pkg.id }).expect(201);
+        const purchaseId = created.body.id as string;
+        return {
+          campaignId: campaign.id,
+          providerId: provider.id,
+          credits: 10,
+          attempt: (status) =>
+            request(ctx.server).post(`/providers/${provider.id}/package-purchases/${purchaseId}/mock-pay`).set('Cookie', cookie).send(MOCK_CARD).expect(status),
+          businessWriteAbsent: async () => {
+            expect((await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: purchaseId } })).status).toBe(PackagePurchaseStatus.PENDING);
+            expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
+          },
+          businessWritePresent: async () => {
+            expect((await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: purchaseId } })).status).toBe(PackagePurchaseStatus.PAID);
+          },
+          extraLedger: [{ type: CreditTransactionType.PACKAGE_PURCHASE, amount: PACKAGE_CREDITS }],
+          expectedKeys: () => [`PACKAGE_PAYMENT_SUCCEEDED:${purchaseId}`],
+        };
+      },
+    },
+  ];
+
+  it.each(paths.map((path) => [path.name, path]))(
+    '%s: a plain JS error while ensuring the event → 503, business write rolled back, zero rows; the retry raises one PENDING event and the worker grants once',
+    async (_name, path) => {
+      const scenario = await path.setUp();
+      const repository = ctx.app.get(CampaignEngineRepository);
+      const spy = vi.spyOn(repository, 'ensurePendingEvent').mockRejectedValueOnce(new TypeError('simulated bug while ensuring the event'));
+
+      const refused = (await scenario.attempt(503)) as { body: { code: string } };
+      expect(refused.body.code).toBe('CAMPAIGN_EVENT_NOT_DURABLE');
+      await scenario.businessWriteAbsent();
+      expect(await ctx.prisma.campaignTriggerEvent.count()).toBe(0);
+      expect(await ctx.prisma.campaignEvaluationLog.count()).toBe(0);
+      expect(await ctx.prisma.campaignRedemption.count()).toBe(0);
+      expect(await ctx.prisma.promoCreditLot.count()).toBe(0);
+      expect(await ctx.prisma.providerCreditTransaction.count({ where: { type: CreditTransactionType.CAMPAIGN_GRANT } })).toBe(0);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // The same request again (the provider redelivers, the operator presses
+      // again, the owner re-enters the same code): one PENDING event, one grant.
+      await scenario.attempt(path.name.includes('approval') ? 200 : path.name.includes('webhook') ? 200 : 201);
+      await scenario.businessWritePresent();
+      await expectOnlyPending(scenario.expectedKeys(scenario.providerId));
+      expect(spy).toHaveBeenCalledTimes(2);
+
+      const run = await worker.runOnce();
+      expect(run.outcomes.map((entry) => entry.outcome)).toEqual(['SETTLED']);
+      await expectSingleGrant(scenario.providerId, scenario.campaignId, scenario.credits, scenario.extraLedger);
+      expect(await ctx.prisma.campaignTriggerEvent.count()).toBe(1);
+    },
+  );
+
+  it('an error before the event is even computed (the fact re-read) rolls the proof back the same way', async () => {
+    await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'PHONE_VERIFIED'], credits: 3 });
+    const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+    const code = await requestPhoneCode(cookie);
+    const registry = ctx.app.get(FactSourceRegistry);
+    vi.spyOn(registry, 'readAll').mockRejectedValueOnce(new TypeError('simulated bug in the fact read'));
+
+    expect((await verifyPhone(cookie, code, 503)).body.code).toBe('CAMPAIGN_EVENT_NOT_DURABLE');
+    expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: provider.userId! } })).phoneVerifiedAt).toBeNull();
+    expect(await ctx.prisma.campaignTriggerEvent.count()).toBe(0);
+
+    await verifyPhone(cookie, code, 201);
+    await expectOnlyPending([`PROVIDER_ELIGIBILITY_REACHED:PHONE_VERIFIED+PROVIDER_APPROVED:${provider.id}`]);
+    await worker.runOnce();
+    expect(await ctx.prisma.campaignRedemption.count()).toBe(1);
+  });
+
+  it('a database fault while writing the event is the same class: 503, purchase PENDING, PROCESSED 0, event 0; the redelivery settles both', async () => {
     await activeCampaign({ trigger: 'PACKAGE_PAYMENT_SUCCEEDED', credits: 10 });
     const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
     const { purchase } = await openLemonCheckout(provider.id, cookie);
     const repository = ctx.app.get(CampaignEngineRepository);
     const fault = Object.assign(new Error('simulated integrity failure'), { name: 'PrismaClientKnownRequestError', code: 'P2003' });
-    const spy = vi.spyOn(repository, 'ensurePendingEvent').mockRejectedValue(fault);
+    vi.spyOn(repository, 'ensurePendingEvent').mockRejectedValueOnce(fault);
 
     const refused = await deliver(paidOrder(purchase.paymentReference!, 'order-1')).expect(503);
     expect(refused.body.code).toBe('CAMPAIGN_EVENT_NOT_DURABLE');
@@ -456,30 +672,15 @@ describe('stage A — every real path commits its write together with a PENDING 
     expect(await ctx.prisma.paymentWebhookEvent.count({ where: { status: PaymentWebhookEventStatus.PROCESSED } })).toBe(0);
     expect(await ctx.prisma.campaignTriggerEvent.count()).toBe(0);
 
-    // "The payment settled but the event is lost" cannot happen: the redelivery settles both.
-    spy.mockRestore();
     expect((await deliver(paidOrder(purchase.paymentReference!, 'order-1')).expect(200)).body).toEqual({ status: 'processed' });
     expect((await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: purchase.id } })).status).toBe(PackagePurchaseStatus.PAID);
     await expectOnlyPending([`PACKAGE_PAYMENT_SUCCEEDED:${purchase.id}`]);
   });
-
-  it('a campaign-side runtime fault in stage A is contained: the approval commits, the fault is logged, no event is fabricated', async () => {
-    await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED'] });
-    const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
-    await ctx.prisma.user.update({ where: { id: provider.userId! }, data: { emailVerifiedAt: new Date() } });
-    vi.spyOn(ctx.app.get(FactSourceRegistry), 'readAll').mockRejectedValue(new TypeError('simulated bug'));
-
-    await approve(adminCookie, provider.id).expect(200);
-    expect((await ctx.prisma.providerProfile.findUniqueOrThrow({ where: { id: provider.id } })).status).toBe(ProviderStatus.APPROVED);
-    expect(await ctx.prisma.campaignTriggerEvent.count()).toBe(0);
-    expect(await ctx.prisma.campaignRedemption.count()).toBe(0);
-  });
 });
 
-// ─────────────────── stage B: fault isolation, retry, lease ───────────────────
+// ─────────────────── stage B (class 2): the event is durable ⇒ an evaluator fault never touches the business write ───────────────────
 
-describe('stage B — an evaluator fault never touches the business write, and the event is retried', () => {
+describe('durability — class 2: the PENDING event committed, then the evaluator fails: the business write stands, the event is retried', () => {
   it('approval: the profile stays APPROVED, the event goes RETRY_WAIT with ENGINE_ERROR and a log; the next due attempt grants after the fix', async () => {
     const { campaign, version } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
     const good = await corrupt(version.id);
