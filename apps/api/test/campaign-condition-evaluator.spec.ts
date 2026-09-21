@@ -50,7 +50,7 @@ function definition(all: CampaignDefinition['conditions']['all'], trigger = 'PAC
     trigger,
     conditions: { all },
     benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
-    limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null },
+    limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: null },
     window: { startAt: null, endAt: null },
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
     priority: 100,

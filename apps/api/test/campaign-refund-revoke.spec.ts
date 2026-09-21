@@ -1,4 +1,4 @@
-import { CampaignAuditAction, CampaignStatus, CreditTransactionType, PaymentWebhookEventStatus, UserRole } from '@prisma/client';
+import { CampaignAuditAction, CampaignStatus, CreditTransactionType, PaymentWebhookEventStatus, type Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
@@ -140,7 +140,7 @@ async function revokeCounter(campaignId: string) {
   return rows.reduce((total, row) => total + row.revokeCount, 0);
 }
 
-async function scenario(options: { maxRevokesPerDay?: number | null; conditions?: Record<string, unknown>[]; credits?: number } = {}) {
+async function scenario(options: { maxRevokesPerDay?: number | null; conditions?: Prisma.InputJsonValue[]; credits?: number } = {}) {
   await setEngineEnabled(ctx.prisma, true);
   const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: 4 });
   const creditPackage = await packageFixture();
