@@ -869,9 +869,19 @@ export type ProviderCreditTransaction = {
   createdAt: string;
 };
 
+/** One promotion lot the provider can still spend from (CMP-004 S4). */
+export type ProviderPromoLot = {
+  id: string;
+  remainingCredits: number;
+  expiresAt: string;
+  campaignName: string;
+};
+
 export type ProviderCredits = {
   providerId: string;
   balance: number;
+  /** The provider's own spendable promotion: total and the live lots, soonest expiry first. */
+  promo: { spendableCredits: number; lots: ProviderPromoLot[] };
   transactions: ProviderCreditTransaction[];
 };
 

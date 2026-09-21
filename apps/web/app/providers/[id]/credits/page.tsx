@@ -11,6 +11,7 @@ import {
   creditTxnTypeLabel,
   creditReasonLabel,
   formatPrice,
+  formatDate,
   formatDateTime,
 } from '../../../../lib/api';
 import { IconArrowRight } from '../../../landing-icons';
@@ -139,6 +140,42 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
             </a>
           </div>
         </div>
+
+        {/*
+          The provider's own promotion (CMP-004 S4), only when there is one:
+          the credit that can still pay for an offer and the lots it sits in,
+          soonest expiry first. A lot that has expired or been taken back is
+          not a "usable" credit and is not listed — the ledger below tells that
+          story. The figure is the API's sum, not one computed here.
+        */}
+        {credits.promo.lots.length > 0 ? (
+          <div className="credit-promo" data-testid="promo-credits">
+            <div className="credit-promo-head">
+              <span className="metric-label" style={{ textAlign: 'left' }}>
+                Kullanılabilir promosyon kredisi
+              </span>
+              <span className="credit-promo-total" data-testid="promo-credits-total">
+                {credits.promo.spendableCredits}
+                <small>kredi</small>
+              </span>
+            </div>
+            <ul className="credit-promo-lots">
+              {credits.promo.lots.map((lot) => (
+                <li key={lot.id} className="credit-promo-lot" data-testid="promo-lot" data-lot={lot.id}>
+                  <span className="credit-promo-lot-amount">{lot.remainingCredits} kredi</span>
+                  <span className="credit-promo-lot-meta">
+                    <span>{lot.campaignName}</span>
+                    <span>Son kullanma: {formatDate(lot.expiresAt)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="pdash-credit-note" style={{ margin: 0 }}>
+              Promosyon kredisi teklif gönderirken önce kullanılır; süresi dolan kredi bakiyeden düşer.
+              Promosyon kredisi bakiyenizin içindedir.
+            </p>
+          </div>
+        ) : null}
 
         <div className="credit-panel-foot">
           <div className="metric-cell">
