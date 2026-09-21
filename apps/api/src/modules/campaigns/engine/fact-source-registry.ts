@@ -1,37 +1,33 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { CampaignEligibilityFact, type Prisma, ProviderStatus, UserRole } from '@prisma/client';
 
 /**
  * The allow-list of status facts an eligibility transition may name, each
- * with its one canonical read (CMP-001 §8.2).
+ * with its one canonical read (CMP-001 §8.2), plus the register of the code
+ * points that write them.
  *
- * `read` never trusts the caller: when a writer reports "EMAIL_VERIFIED just
- * became true", the engine re-reads every fact of every set that names it,
- * from the columns that *are* the fact — `ProviderProfile.status`,
+ * `readAll` never trusts the caller: when a writer reports "EMAIL_VERIFIED
+ * just became true", the engine re-reads every fact of every set that names
+ * it, from the columns that *are* the fact — `ProviderProfile.status`,
  * `User.emailVerifiedAt`, `User.phoneVerifiedAt` through `ProviderProfile.userId`
  * (a guest application has no account, so its account facts read false).
  *
- * `writers` is the register of code points that write a fact and call
- * `onProviderFact`. It is empty in S2A: the PROVIDER-role writers exist
- * (AUTH-PROVIDER-CONTACT-001 left `// CMP-002 fact callback` marks at
- * `providers.service.ts`, `email-verification.service.ts` and
- * `phone-verification.service.ts`) but are not wired, and a version whose
- * fact has no PROVIDER writer cannot be activated (§8.4) — which is the
- * mechanical gate that keeps K1 closed until S2B registers them.
+ * The writer register is filled at boot by the services that own the writes
+ * (CMP-002 S2B2): `ProvidersService` for PROVIDER_APPROVED,
+ * `EmailVerificationService` for EMAIL_VERIFIED, `PhoneVerificationService`
+ * for PHONE_VERIFIED, and the two settlement paths — the Lemon Squeezy
+ * webhook and the mock adapter — for PACKAGE_PAYMENT_SUCCEEDED. Each of them
+ * calls `CampaignEngineHooks` from inside the transaction that persists the
+ * write, and registers itself in `onModuleInit`, so an entry here means "a
+ * booted module is calling the hook", not "somebody once wrote a comment".
+ * A version that names a source with no PROVIDER-role writer cannot be
+ * activated (§8.4, `FACT_SOURCE_UNAVAILABLE`); that gate is mechanical.
  */
 
+/** Everything a version may depend on that some writer has to raise. */
+export type CampaignFactSource = CampaignEligibilityFact | 'PACKAGE_PAYMENT_SUCCEEDED';
+
 export type FactWriter = { module: string; role: UserRole };
-
-export type FactSource = {
-  fact: CampaignEligibilityFact;
-  writers: readonly FactWriter[];
-};
-
-const SOURCES: Readonly<Record<CampaignEligibilityFact, FactSource>> = {
-  PROVIDER_APPROVED: { fact: 'PROVIDER_APPROVED', writers: [] },
-  EMAIL_VERIFIED: { fact: 'EMAIL_VERIFIED', writers: [] },
-  PHONE_VERIFIED: { fact: 'PHONE_VERIFIED', writers: [] },
-};
 
 const factSelect = {
   status: true,
@@ -42,11 +38,30 @@ type FactRow = Prisma.ProviderProfileGetPayload<{ select: typeof factSelect }>;
 
 @Injectable()
 export class FactSourceRegistry {
+  private readonly logger = new Logger(FactSourceRegistry.name);
+
   readonly facts: readonly CampaignEligibilityFact[] = Object.values(CampaignEligibilityFact);
 
-  /** True when a PROVIDER-role writer of this fact is registered. False for every fact in S2A. */
-  hasProviderWriter(fact: CampaignEligibilityFact): boolean {
-    return SOURCES[fact].writers.some((writer) => writer.role === UserRole.PROVIDER);
+  private readonly writers = new Map<CampaignFactSource, FactWriter[]>();
+
+  /** Records that `writer` raises `source` through the engine hooks. Idempotent per (source, module, role). */
+  register(source: CampaignFactSource, writer: FactWriter): void {
+    const list = this.writers.get(source) ?? [];
+    if (!list.some((entry) => entry.module === writer.module && entry.role === writer.role)) {
+      list.push(writer);
+      this.writers.set(source, list);
+      this.logger.log(`Campaign fact source ${source} has writer ${writer.module} (${writer.role})`);
+    }
+  }
+
+  /** True when a PROVIDER-role writer of this source is registered. */
+  hasProviderWriter(source: CampaignFactSource): boolean {
+    return (this.writers.get(source) ?? []).some((writer) => writer.role === UserRole.PROVIDER);
+  }
+
+  /** The register, read-only, for the activation gate's error detail and for tests. */
+  writersOf(source: CampaignFactSource): readonly FactWriter[] {
+    return this.writers.get(source) ?? [];
   }
 
   /**

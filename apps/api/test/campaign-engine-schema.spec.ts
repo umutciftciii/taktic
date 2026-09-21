@@ -167,16 +167,41 @@ describe('CampaignRedemption', () => {
 
     await ctx.prisma.campaignTriggerEvent.update({
       where: { id: event.id },
-      data: { settledByCampaignId: a.campaign.id, settledRedemptionId: first.id, settledAt: new Date() },
+      data: { settledByCampaignId: a.campaign.id, settledRedemptionId: first.id, settledAt: new Date(), status: 'SETTLED' },
     });
     // The other event cannot claim a redemption that already settled one.
     await expect(
       ctx.prisma.campaignTriggerEvent.update({
         where: { id: other.id },
-        data: { settledByCampaignId: b.campaign.id, settledRedemptionId: first.id, settledAt: new Date() },
+        data: { settledByCampaignId: b.campaign.id, settledRedemptionId: first.id, settledAt: new Date(), status: 'SETTLED' },
       }),
     ).rejects.toSatisfy(isUniqueViolation);
     expect(second.id).not.toBe(first.id);
+  });
+
+  it('is SETTLED exactly when a redemption settled it (S2B2 rev. 2), and starts PENDING with no lease', async () => {
+    const p = await provider();
+    const { campaign, version } = await createCampaignFixture(ctx.prisma);
+    const event = await approvalEvent(p.id);
+    expect(event).toMatchObject({ status: 'PENDING', attemptCount: 0, leaseUntil: null, claimedAt: null, lastErrorCode: null });
+    expect(event.nextAttemptAt).toBeInstanceOf(Date);
+    const first = await redemption({ campaignId: campaign.id, campaignVersionId: version.id, providerId: p.id, eventId: event.id, eventKey: event.triggerEventKey });
+    // Status without settlement, and settlement without status, are both unstorable.
+    await expectCheckViolation(
+      ctx.prisma.campaignTriggerEvent.update({ where: { id: event.id }, data: { status: 'SETTLED' } }),
+      'CampaignTriggerEvent_settled_status_matches',
+    );
+    await expectCheckViolation(
+      ctx.prisma.campaignTriggerEvent.update({
+        where: { id: event.id },
+        data: { settledByCampaignId: campaign.id, settledRedemptionId: first.id, settledAt: new Date() },
+      }),
+      'CampaignTriggerEvent_settled_status_matches',
+    );
+    await expectCheckViolation(
+      ctx.prisma.campaignTriggerEvent.update({ where: { id: event.id }, data: { attemptCount: -1 } }),
+      'CampaignTriggerEvent_attemptCount_nonnegative',
+    );
   });
 
   it('carries no ledger reference in this slice and bounds grantedCredits', async () => {

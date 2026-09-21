@@ -331,19 +331,34 @@ describe('revising a draft', () => {
     await request(ctx.server).get('/admin/campaigns/clzzzzzzzzzzzzzzzzzzzzzzz').set('Cookie', cookie).expect(404);
   });
 
-  it('refuses a revision on a campaign that is no longer a draft', async () => {
+  it('refuses a revision on an ENDED campaign and accepts one on ACTIVE and PAUSED without touching the active version', async () => {
     const { cookie } = await adminCookie();
     const created = await createCampaign(cookie, { key: 'ended', name: 'x', definition: K2 }).expect(201);
-    // No endpoint moves a campaign out of DRAFT in this slice; the gate is
-    // exercised by writing the column directly.
-    await ctx.prisma.campaign.update({ where: { id: created.body.campaign.id }, data: { status: CampaignStatus.ENDED } });
+    const campaignId = created.body.campaign.id as string;
+    const versionId = created.body.currentVersion.id as string;
+
+    // ACTIVE and PAUSED: a revision is stored, the running version is not moved.
+    for (const status of [CampaignStatus.ACTIVE, CampaignStatus.PAUSED]) {
+      await ctx.prisma.campaign.update({ where: { id: campaignId }, data: { status, activeVersionId: versionId } });
+      const revised = await request(ctx.server)
+        .post(`/admin/campaigns/${campaignId}/versions`)
+        .set('Cookie', cookie)
+        .send({ definition: { ...K2, priority: status === CampaignStatus.ACTIVE ? 11 : 12 } })
+        .expect(201);
+      expect(revised.body.campaign.activeVersionId).toBe(versionId);
+      expect(revised.body.activeVersion.id).toBe(versionId);
+      expect(revised.body.currentVersion.id).not.toBe(versionId);
+    }
+
+    // ENDED is terminal: nothing more may be stored on it.
+    await ctx.prisma.campaign.update({ where: { id: campaignId }, data: { status: CampaignStatus.ENDED } });
     const refused = await request(ctx.server)
-      .post(`/admin/campaigns/${created.body.campaign.id}/versions`)
+      .post(`/admin/campaigns/${campaignId}/versions`)
       .set('Cookie', cookie)
       .send({ definition: K2 })
       .expect(409);
-    expect(refused.body.code).toBe('CAMPAIGN_NOT_DRAFT');
-    expect(await ctx.prisma.campaignVersion.count()).toBe(1);
+    expect(refused.body.code).toBe('CAMPAIGN_ENDED');
+    expect(await ctx.prisma.campaignVersion.count()).toBe(3);
   });
 
   it('numbers concurrent saves monotonically with no gap and no collision', async () => {

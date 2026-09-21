@@ -10,6 +10,7 @@ import {
   type CampaignValidationResponse,
 } from '../../lib/api';
 import type { CampaignFormState } from './form-state';
+import type { CampaignLifecycleState } from './lifecycle-state';
 
 /**
  * The builder's two verbs: check, and save.
@@ -151,4 +152,75 @@ function isRedirectError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const digest = (error as { digest?: unknown }).digest;
   return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
+}
+
+// ───────────────────────────── lifecycle (S2B2) ─────────────────────────────
+
+const LIFECYCLE_INTENTS = new Set(['activate', 'pause', 'resume', 'end']);
+
+/**
+ * Activate a version, pause, resume or end — each one POST to the matching
+ * SUPER_ADMIN route, nothing decided here. A refusal comes back as the
+ * action's state so the panel can show the API's sentence (and, for an
+ * activation, the field-level reasons) beside the buttons; success redirects
+ * to the detail with a one-word marker for the confirmation notice.
+ *
+ * The engine switch is not writable from any admin screen; while it is off
+ * the API answers activate/resume with CAMPAIGN_ENGINE_DISABLED and that is
+ * exactly what the panel shows.
+ */
+export async function campaignLifecycleAction(
+  _previous: CampaignLifecycleState,
+  formData: FormData,
+): Promise<CampaignLifecycleState> {
+  const intent = readString(formData, 'intent');
+  const campaignId = readString(formData, 'campaignId').trim();
+  if (!LIFECYCLE_INTENTS.has(intent) || campaignId === '') {
+    return { status: 'error', message: 'Bilinmeyen işlem.', errors: [] };
+  }
+  const reason = readString(formData, 'reason').trim();
+  if (intent !== 'activate' && reason.length < 3) {
+    return { status: 'error', message: 'Gerekçe en az 3 karakter olmalı.', errors: [] };
+  }
+
+  let failure: CampaignLifecycleState | null = null;
+  try {
+    const base = `/admin/campaigns/${encodeURIComponent(campaignId)}`;
+    if (intent === 'activate') {
+      const versionNumber = Number.parseInt(readString(formData, 'versionNumber'), 10);
+      if (!Number.isInteger(versionNumber) || versionNumber < 1) {
+        return { status: 'error', message: 'Sürüm numarası okunamadı.', errors: [] };
+      }
+      await apiFetch(`${base}/versions/${versionNumber}/activate`, { method: 'POST', body: JSON.stringify({}) });
+    } else {
+      await apiFetch(`${base}/${intent}`, { method: 'POST', body: JSON.stringify({ reason }) });
+    }
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    failure = lifecycleFailure(error);
+  }
+
+  if (failure) {
+    return failure;
+  }
+
+  revalidatePath('/campaigns');
+  revalidatePath(`/campaigns/${campaignId}`);
+  redirect(`/campaigns/${campaignId}?ok=${intent}`);
+}
+
+function lifecycleFailure(error: unknown): CampaignLifecycleState {
+  if (error instanceof ApiError) {
+    try {
+      const body = JSON.parse(error.body) as { code?: string; message?: string | string[]; errors?: CampaignRuleError[] };
+      const message = Array.isArray(body.message) ? body.message.join(' · ') : body.message;
+      if (body.code === 'CAMPAIGN_ACTIVATION_REFUSED' && Array.isArray(body.errors)) {
+        return { status: 'error', message: message || 'Sürüm etkinleştirilemedi.', errors: body.errors };
+      }
+      return { status: 'error', message: message || 'İşlem başarısız.', errors: [] };
+    } catch {
+      return { status: 'error', message: error.body || 'İşlem başarısız.', errors: [] };
+    }
+  }
+  return { status: 'error', message: 'Beklenmeyen hata.', errors: [] };
 }

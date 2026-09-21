@@ -122,6 +122,9 @@ const RULE_ERROR_FALLBACKS: Record<string, string> = {
   WINDOW_INVALID: 'Zaman penceresi geçersiz.',
   STACK_POLICY_INVALID: 'Desteklenmeyen stack politikası.',
   PRIORITY_INVALID: 'Öncelik 1–1000 arası tam sayı olmalı.',
+  // Activation-only refusals (CMP-002 S2B2); the API's own sentence is preferred.
+  FACT_SOURCE_UNAVAILABLE: 'Bu olgunun hizmet veren yazıcısı kayıtlı değil; sürüm etkinleştirilemez.',
+  LIMIT_BELOW_CONSUMED: 'Limit, kampanyanın zaten tükettiği değerin altında.',
 };
 
 /** The API's sentence when it sent one; the catalogue fallback otherwise. */

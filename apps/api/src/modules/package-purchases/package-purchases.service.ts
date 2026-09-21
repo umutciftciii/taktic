@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
 import {
   CreditTransactionType,
@@ -12,6 +13,7 @@ import {
   PackagePurchaseKind,
   PackagePurchaseStatus,
   Prisma,
+  UserRole,
 } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -20,6 +22,7 @@ import {
   grantEntitlementForPurchase,
 } from '../entitlements/entitlement-grant';
 import { resolvePaymentProviderKind } from '../payments/payment-provider.config';
+import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
@@ -36,7 +39,7 @@ type AdminPurchaseFilters = {
 };
 
 @Injectable()
-export class PackagePurchasesService {
+export class PackagePurchasesService implements OnModuleInit {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CreditsService) private readonly creditsService: CreditsService,
@@ -45,7 +48,16 @@ export class PackagePurchasesService {
     @Inject(ShowcasePlacementService) private readonly placements: ShowcasePlacementService,
     @Inject(ShowcaseEntitlementService)
     private readonly entitlements: ShowcaseEntitlementService,
+    @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
   ) {}
+
+  /** The mock settlement path mirrors the webhook's and raises the same campaign event (CMP-002 S2B2). */
+  onModuleInit() {
+    this.campaignHooks.registerFactWriter('PACKAGE_PAYMENT_SUCCEEDED', {
+      module: 'package-purchases-mock',
+      role: UserRole.PROVIDER,
+    });
+  }
 
   /**
    * Opens a PENDING purchase against an active credit package.
@@ -272,7 +284,7 @@ export class PackagePurchasesService {
             );
           }
 
-          return tx.packagePurchase.update({
+          const paidShowcase = await tx.packagePurchase.update({
             where: { id: purchase.id },
             data: {
               status: PackagePurchaseStatus.PAID,
@@ -282,6 +294,8 @@ export class PackagePurchasesService {
             include: packagePurchaseInclude,
             omit: packagePurchaseOmit,
           });
+          await this.campaignHooks.packagePaymentSucceeded(tx, purchase.providerId, purchase.id);
+          return paidShowcase;
         }
 
         const isOneTime = purchase.package?.type === OfferPackageType.ONE_TIME_CREDITS;
@@ -318,7 +332,7 @@ export class PackagePurchasesService {
           });
         }
 
-        return tx.packagePurchase.update({
+        const paid = await tx.packagePurchase.update({
           where: { id: purchase.id },
           data: {
             status: PackagePurchaseStatus.PAID,
@@ -329,6 +343,16 @@ export class PackagePurchasesService {
           include: packagePurchaseInclude,
           omit: packagePurchaseOmit,
         });
+
+        // CMP-002 S2B2: the same campaign event the webhook raises, at the
+        // same point — the purchase is PAID and whatever it bought exists —
+        // and inside the same transaction. The mock form is the developer's
+        // stand-in for a verified settlement (PAYMENT_PROVIDER=mock only), so
+        // it must produce the same campaign outcome the real one would: a
+        // durable PENDING event, evaluated later by the worker.
+        await this.campaignHooks.packagePaymentSucceeded(tx, purchase.providerId, purchase.id);
+
+        return paid;
       },
       { label: 'packagePurchases.mockPayProviderPurchase' },
     );

@@ -1,0 +1,55 @@
+# CMP-002 S2B2 rev. 2 Migration E dry-run — geçici DB taktic_cmp002_s2b2r2_dryrun (gerçek yerel/staging DB'ye komut yok)
+# 2026-09-21T11:43:57Z · branch claude/cmp-002-s2b2-lifecycle-hooks-3f7a2c · HEAD 2b268426 (+ çalışma ağacı)
+
+## prisma migrate deploy (tüm zincir)
+  └─ 20260920090000_add_promo_credit_consumption/
+    └─ migration.sql
+  └─ 20260921120000_add_campaign_lifecycle_audit_actions/
+    └─ migration.sql
+  └─ 20260921150000_add_campaign_event_evaluation_state/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+
+## prisma migrate diff --from-url <dryrun> --to-schema-datamodel
+No difference detected.
+
+## migration sayısı
+70
+
+## CampaignTriggerEventStatus
+PENDING,PROCESSING,EVALUATED,SETTLED,RETRY_WAIT
+
+## CampaignTriggerEvent kolonları (eski 12 + yeni 8; tür/default değişimi yok)
+id text  NO
+triggerEventKey text  NO
+trigger USER-DEFINED  NO
+providerId text  NO
+purchaseId text  YES
+factSetKey text  YES
+firstSeenAt timestamp without time zone default CURRENT_TIMESTAMP NO
+lastSeenAt timestamp without time zone default CURRENT_TIMESTAMP NO
+evaluationCount integer default 0 NO
+settledByCampaignId text  YES
+settledRedemptionId text  YES
+settledAt timestamp without time zone  YES
+status USER-DEFINED default 'PENDING'::"CampaignTriggerEventStatus" NO
+attemptCount integer default 0 NO
+lastAttemptAt timestamp without time zone  YES
+nextAttemptAt timestamp without time zone default CURRENT_TIMESTAMP NO
+leaseUntil timestamp without time zone  YES
+claimedAt timestamp without time zone  YES
+lastErrorCode text  YES
+lastErrorAt timestamp without time zone  YES
+
+## Yeni CHECK ve index
+CampaignTriggerEvent_attemptCount_nonnegative: CHECK (("attemptCount" >= 0))
+CampaignTriggerEvent_settled_status_matches: CHECK (((status = 'SETTLED'::"CampaignTriggerEventStatus") = ("settledRedemptionId" IS NOT NULL)))
+CREATE INDEX "CampaignTriggerEvent_status_nextAttemptAt_idx" ON public."CampaignTriggerEvent" USING btree (status, "nextAttemptAt")
+
+## Migration E'nin SQL ifade türleri (DML/DROP/ALTER COLUMN yok)
+   8   ADD COLUMN
+   2   CHECK
+   3 ALTER TABLE
+   1 CREATE INDEX
+   1 CREATE TYPE

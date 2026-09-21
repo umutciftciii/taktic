@@ -2969,6 +2969,11 @@ export type Campaign = {
   key: string;
   name: string;
   status: CampaignStatus;
+  /** The version the engine evaluates while ACTIVE/PAUSED; null until the first activation (S2B2). */
+  activeVersionId: string | null;
+  /** Cumulative across versions, never decremented. */
+  redemptionCount: number;
+  budgetConsumedCredits: number;
   createdAt: string;
   updatedAt: string;
   createdBy: CampaignActor;
@@ -2997,33 +3002,56 @@ export type CampaignVersionSummary = {
 
 export type CampaignVersion = CampaignVersionSummary & { definition: unknown };
 
+export type CampaignAuditAction =
+  | 'CREATED'
+  | 'VERSION_CREATED'
+  | 'ACTIVATED'
+  | 'VERSION_ACTIVATED'
+  | 'PAUSED'
+  | 'RESUMED'
+  | 'ENDED';
+
 export type CampaignAuditEntry = {
   id: string;
-  action: 'CREATED' | 'VERSION_CREATED';
+  action: CampaignAuditAction;
   campaignVersionId: string | null;
   actor: CampaignActor;
   summary: {
-    versionNumber?: number;
+    versionNumber?: number | null;
+    previousActiveVersionNumber?: number | null;
     trigger?: string;
     benefitCredits?: number;
     benefitExpiresInDays?: number;
     maxRedemptionsPerProvider?: number;
     changedFields?: string[];
+    reason?: string;
   } | null;
   createdAt: string;
 };
 
+/** Read-only view of the evaluation queue (S2B2 rev. 2); no screen acts on it. */
+export type CampaignEvaluationQueue = {
+  pending: number;
+  processing: number;
+  retryWait: number;
+  lastErrorCode: string | null;
+  lastErrorAt: string | null;
+};
+
 export type CampaignListResponse = {
-  /** Read from OperationsSettings, fail-closed; no screen in this slice can turn it on. */
+  /** Read from OperationsSettings, fail-closed; no admin screen writes it. */
   engineEnabled: boolean;
-  items: Array<Campaign & { currentVersion: CampaignVersionSummary | null }>;
+  evaluationQueue: CampaignEvaluationQueue;
+  items: Array<Campaign & { currentVersion: CampaignVersionSummary | null; activeVersion: CampaignVersionSummary | null }>;
   nextCursor: string | null;
 };
 
 export type CampaignDetailResponse = {
   engineEnabled: boolean;
+  evaluationQueue: CampaignEvaluationQueue;
   campaign: Campaign;
   currentVersion: CampaignVersion | null;
+  activeVersion: CampaignVersion | null;
   versions: CampaignVersion[];
   audit: CampaignAuditEntry[];
 };

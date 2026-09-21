@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { CampaignEngineModule } from '../campaigns/engine/campaign-engine.module';
 import { CreditsModule } from '../credits/credits.module';
 import { PackagePurchasesModule } from '../package-purchases/package-purchases.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -44,6 +45,9 @@ import { PaymentsWebhookService } from './payments-webhook.service';
     // module's own provider port — importing the whole thing would make the
     // two mutually dependent for no gain.
     ShowcaseLifecycleModule,
+    // The settlement raises the PACKAGE_PAYMENT_SUCCEEDED campaign event in
+    // its own transaction (CMP-002 S2B2). Prisma-only module, no cycle.
+    CampaignEngineModule,
   ],
   controllers: [PaymentsController, LemonSqueezyWebhookController],
   providers: [

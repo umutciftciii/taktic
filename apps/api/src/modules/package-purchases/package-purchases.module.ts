@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { CampaignEngineModule } from '../campaigns/engine/campaign-engine.module';
 import { CreditsModule } from '../credits/credits.module';
 import { NumberingModule } from '../numbering/numbering.module';
 import { PrismaModule } from '../../prisma/prisma.module';
@@ -20,6 +21,9 @@ import { PackagePurchasesService } from './package-purchases.service';
     // a placement rather than nothing. Two settlement paths with one branching
     // rule between them would be one deploy away from disagreeing.
     ShowcaseLifecycleModule,
+    // The mock settlement raises the PACKAGE_PAYMENT_SUCCEEDED campaign event
+    // exactly where the webhook does (CMP-002 S2B2). Prisma-only, no cycle.
+    CampaignEngineModule,
   ],
   controllers: [PackagePurchasesController],
   providers: [PackagePurchasesService],

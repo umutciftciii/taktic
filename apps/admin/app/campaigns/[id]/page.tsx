@@ -25,15 +25,19 @@ import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { CampaignDefinitionForm } from '../campaign-definition-form';
 import { CampaignEngineNotice } from '../engine-notice';
+import { CampaignLifecyclePanel } from '../lifecycle-panel';
 
 /**
- * One campaign: its current draft, every version that came before it, and
- * who did what.
+ * One campaign: the version the engine runs (if any), the latest stored
+ * version, every version that came before, who did what, and the lifecycle
+ * desk.
  *
  * The version history is the audit trail of the definition itself — each
- * row is a snapshot that was never edited — and the audit list below it is
- * the trail of *actions*. The revision form at the bottom is pre-filled from
- * the current version and produces the next one; it never touches this one.
+ * row is a snapshot that was never edited — and the audit list beside it is
+ * the trail of *actions*: creation, revision, activation, pause, resume, end.
+ * The revision form at the bottom is pre-filled from the latest version and
+ * produces the next one; it never touches a stored version, and it never
+ * changes what runs — only activation moves `activeVersionId`.
  */
 
 export const dynamic = 'force-dynamic';
@@ -44,8 +48,12 @@ type CampaignDetailPageProps = {
 };
 
 const OK_MESSAGES: Record<string, string> = {
-  created: 'Taslak oluşturuldu (sürüm 1). Motor kapalı: bu kayıt kredi vermez.',
-  revised: 'Yeni sürüm kaydedildi. Önceki sürüm değiştirilmedi; motor kapalı olduğundan hiçbir şey çalışmaz.',
+  created: 'Taslak oluşturuldu (sürüm 1). Etkinleştirilene kadar hiçbir olay değerlendirilmez.',
+  revised: 'Yeni sürüm kaydedildi. Önceki sürümler değiştirilmedi; çalışan kural yalnız etkinleştirmeyle değişir.',
+  activate: 'Sürüm etkinleştirildi. Kampanya bu sürümün kuralıyla değerlendiriliyor.',
+  pause: 'Kampanya duraklatıldı. Yeni hak ediş üretilmez; mevcut promosyon lotları çalışmaya devam eder.',
+  resume: 'Kampanya devam ettirildi.',
+  end: 'Kampanya sonlandırıldı. Bu durum kalıcıdır.',
 };
 
 export default async function CampaignDetailPage({ params, searchParams }: CampaignDetailPageProps) {
@@ -56,7 +64,8 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
     apiFetch<CampaignDetailResponse>(`/admin/campaigns/${encodeURIComponent(id)}`),
   );
   const okMessage = query.ok ? (OK_MESSAGES[query.ok] ?? null) : null;
-  const { campaign, currentVersion } = data;
+  const { campaign, currentVersion, activeVersion } = data;
+  const canRevise = campaign.status !== 'ENDED';
 
   return (
     <main className="campaigns-page">
@@ -69,7 +78,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
           </>
         }
         actions={
-          <span className={campaignStatusBadgeClass(campaign.status)} data-testid="campaign-status">
+          <span className={campaignStatusBadgeClass(campaign.status)} data-testid="campaign-status" data-status={campaign.status}>
             {campaignStatusLabel(campaign.status)}
           </span>
         }
@@ -82,14 +91,29 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
       ) : null}
 
       <div style={{ marginBottom: 12 }}>
-        <CampaignEngineNotice engineEnabled={data.engineEnabled} />
+        <CampaignEngineNotice engineEnabled={data.engineEnabled} queue={data.evaluationQueue} />
       </div>
 
       <div className="admin-module-layout">
         <div className="admin-main-column">
+          {activeVersion ? (
+            <SectionCard
+              title={`Çalışan kural — sürüm ${activeVersion.versionNumber}`}
+              subtitle={`Motor bu sürümü değerlendirir. Hak ediş: ${campaign.redemptionCount} · verilen kredi: ${campaign.budgetConsumedCredits}${activeVersion.budgetCredits ? ` / ${activeVersion.budgetCredits}` : ''}.`}
+            >
+              <div data-testid="campaign-active-definition">
+                <VersionDefinition version={activeVersion} />
+              </div>
+            </SectionCard>
+          ) : null}
+
           <SectionCard
-            title={currentVersion ? `Güncel taslak — sürüm ${currentVersion.versionNumber}` : 'Güncel taslak'}
-            subtitle="Kaydedilmiş tanım; değiştirmek için aşağıda yeni revizyon oluşturun."
+            title={currentVersion ? `${activeVersion && currentVersion.id !== activeVersion.id ? 'Bekleyen revizyon' : 'Son kayıtlı tanım'} — sürüm ${currentVersion.versionNumber}` : 'Son kayıtlı tanım'}
+            subtitle={
+              activeVersion && currentVersion && currentVersion.id !== activeVersion.id
+                ? 'Kaydedildi ama çalışmıyor; çalışan kuralı değiştirmek için sağdaki panelden etkinleştirin.'
+                : 'Kaydedilmiş tanım; değiştirmek için aşağıda yeni revizyon oluşturun.'
+            }
           >
             {currentVersion ? <VersionDefinition version={currentVersion} /> : <p>Sürüm yok.</p>}
           </SectionCard>
@@ -114,10 +138,11 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                 </thead>
                 <tbody>
                   {data.versions.map((version) => (
-                    <tr key={version.id} data-testid="campaign-version-row" data-version={version.versionNumber}>
+                    <tr key={version.id} data-testid="campaign-version-row" data-version={version.versionNumber} data-active={activeVersion?.id === version.id ? 'true' : 'false'}>
                       <td className="col-num">
                         v{version.versionNumber}
-                        {currentVersion?.id === version.id ? ' (güncel)' : ''}
+                        {activeVersion?.id === version.id ? ' (çalışan)' : ''}
+                        {currentVersion?.id === version.id ? ' (son)' : ''}
                       </td>
                       <td>{TRIGGER_LABELS[version.trigger as CampaignTrigger] ?? version.trigger}</td>
                       <td className="col-num">{version.benefitCredits}</td>
@@ -136,20 +161,29 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
             </div>
           </SectionCard>
 
-          <SectionCard title="Yeni revizyon" subtitle="Güncel sürümden başlar; kaydetmek yeni bir sürüm numarası üretir.">
-            {currentVersion ? (
-              <CampaignDefinitionForm
-                mode="revise"
-                campaignId={campaign.id}
-                campaignName={campaign.name}
-                revisingVersionNumber={currentVersion.versionNumber}
-                initialForm={formFromDefinition(currentVersion.definition)}
-              />
-            ) : null}
-          </SectionCard>
+          {canRevise ? (
+            <SectionCard title="Yeni revizyon" subtitle="Son sürümden başlar; kaydetmek yeni bir sürüm numarası üretir, çalışan kuralı değiştirmez.">
+              {currentVersion ? (
+                <CampaignDefinitionForm
+                  mode="revise"
+                  campaignId={campaign.id}
+                  campaignName={campaign.name}
+                  revisingVersionNumber={currentVersion.versionNumber}
+                  initialForm={formFromDefinition(currentVersion.definition)}
+                />
+              ) : null}
+            </SectionCard>
+          ) : null}
         </div>
 
         <aside className="admin-side-column">
+          <CampaignLifecyclePanel
+            campaign={campaign}
+            engineEnabled={data.engineEnabled}
+            activeVersion={activeVersion}
+            currentVersion={currentVersion}
+          />
+
           <SectionCard title="Denetim izi" subtitle="Kim, ne zaman, hangi sürümü.">
             <ol className="campaign-audit" data-testid="campaign-audit">
               {data.audit.map((entry) => (
@@ -161,9 +195,11 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                   <div className="campaign-audit-meta">
                     {entry.actor.name ?? '—'}
                     {entry.summary?.versionNumber ? ` · sürüm ${entry.summary.versionNumber}` : ''}
+                    {entry.summary?.previousActiveVersionNumber ? ` (önceki: sürüm ${entry.summary.previousActiveVersionNumber})` : ''}
                     {entry.summary?.changedFields && entry.summary.changedFields.length > 0
                       ? ` · değişen: ${entry.summary.changedFields.join(', ')}`
                       : ''}
+                    {entry.summary?.reason ? ` · gerekçe: ${entry.summary.reason}` : ''}
                   </div>
                 </li>
               ))}
@@ -172,8 +208,8 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
           <div className="admin-action-panel">
             <h3>Bu sürümde yok</h3>
             <p>
-              Etkinleştirme, duraklatma, sonlandırma ve hak ediş kayıtları kampanya motoruyla birlikte gelir. Bu
-              ekran yalnızca taslak tanımlar.
+              Hak ediş listesi, değerlendirme kayıtları ve geri alma (S3) ile hizmet veren promosyon yüzeyi (S4) sonraki
+              dilimlerde gelir. Motor anahtarı bu ekrandan değiştirilemez.
             </p>
             <Link className="btn btn-secondary btn-sm" href="/campaigns">
               Listeye dön
@@ -191,6 +227,16 @@ function auditActionLabel(action: string): string {
       return 'Kampanya oluşturuldu';
     case 'VERSION_CREATED':
       return 'Sürüm kaydedildi';
+    case 'VERSION_ACTIVATED':
+      return 'Sürüm etkinleştirildi';
+    case 'ACTIVATED':
+      return 'Kampanya etkinleştirildi';
+    case 'PAUSED':
+      return 'Kampanya duraklatıldı';
+    case 'RESUMED':
+      return 'Kampanya devam ettirildi';
+    case 'ENDED':
+      return 'Kampanya sonlandırıldı';
     default:
       return action;
   }

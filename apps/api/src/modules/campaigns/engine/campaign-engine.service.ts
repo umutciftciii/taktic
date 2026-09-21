@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CampaignStatus, type CampaignEligibilityFact, type CampaignEvaluationOutcome, type Prisma } from '@prisma/client';
 import { isWriteConflictError } from '../../../common/serializable-transaction';
+import { grantPromoCreditLot } from '../../credits/promo-credit-ledger';
 import { OPERATIONS_SETTINGS_ID } from '../../operations-settings/operations-settings.service';
 import type { CampaignDefinition } from '../rules/types';
 import { validateCampaignDefinition } from '../rules/validator';
@@ -18,12 +19,15 @@ import { FactSourceRegistry } from './fact-source-registry';
 import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from './trigger-event-key';
 
 /**
- * The campaign engine's boundary (CMP-002 S2A; contract CMP-001 §12.4).
+ * The campaign engine's boundary (CMP-002 S2A, granted in S2B2; contract
+ * CMP-001 §12.4).
  *
- * Both entry points run inside the *caller's* transaction — the approval, the
- * webhook settlement, the proof write — and neither is called by any of them
- * in this slice: no hook exists yet, and `CampaignsModule` does not export
- * this service. The only caller today is the test suite.
+ * Both entry points run inside the *caller's* transaction. Since S2B2 rev. 2
+ * that caller is `CampaignEvaluationWorker` (stage B), which evaluates a
+ * durable PENDING event in a transaction of its own, after the business
+ * write that raised it has committed; the business flows themselves only
+ * raise events (stage A, `CampaignEngineHooks`). This service is not
+ * exported from `CampaignEngineModule` and no route calls it.
  *
  * Step zero of both is the kill switch, read inside the same transaction:
  * `OperationsSettings.campaignEngineEnabled` false, or no row at all, means
@@ -34,18 +38,19 @@ import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from
  * With the switch on, `evaluate` is the pipeline of §12.4: the event row
  * (global identity, idempotent), the settled short-circuit, the candidate set
  * with its window and conditions, the deterministic order, and one savepoint
- * per candidate inside which the four counters are consumed conditionally and
- * the redemption and lot are written — or rolled back to the savepoint,
- * logged, and the next candidate tried. Exactly one candidate settles an
- * event. **No ledger row is written** (design note D3): S2B adds
- * CAMPAIGN_GRANT beside the redemption when `CreditTransactionType` grows.
+ * per candidate inside which the four counters are consumed conditionally,
+ * the redemption is written, and the S2B1 grant primitive appends the
+ * CAMPAIGN_GRANT ledger row, creates the lot and links the redemption to its
+ * ledger row — or everything is rolled back to the savepoint, logged, and the
+ * next candidate tried. Exactly one candidate settles an event.
  *
  * Business outcomes are log rows and return values, never exceptions. An
- * unexpected error is contained: everything the engine wrote is rolled back
- * to the outer savepoint and the caller gets ENGINE_ERROR with its own
- * transaction intact — a campaign fault must not undo a payment, an approval
- * or a proof. Serialization conflicts are the one thing rethrown, because
- * the caller's `runSerializable` is the right place to replay them.
+ * unexpected error is contained at this boundary: everything the engine
+ * wrote is rolled back to the outer savepoint and the caller gets
+ * ENGINE_ERROR with its transaction still usable — the worker records the
+ * code and parks the event for a retry. Serialization conflicts are the one
+ * thing rethrown here, because the caller's `runSerializable` is the right
+ * place to replay them.
  */
 
 export type EngineInput = CampaignTriggerInput & {
@@ -70,6 +75,8 @@ export type GrantView = {
   campaignVersionId: string;
   redemptionId: string;
   lotId: string;
+  /** The CAMPAIGN_GRANT ledger row, also stored as `CampaignRedemption.grantTransactionId`. */
+  grantTransactionId: string;
   grantedCredits: number;
   expiresAt: Date;
 };
@@ -275,6 +282,7 @@ export class CampaignEngineService {
         campaignVersionId: candidate.activeVersion.id,
         redemptionId: attempt.redemptionId,
         lotId: attempt.lotId,
+        grantTransactionId: attempt.grantTransactionId,
         grantedCredits: candidate.activeVersion.benefitCredits,
         expiresAt: attempt.expiresAt,
       });
@@ -283,9 +291,11 @@ export class CampaignEngineService {
   }
 
   /**
-   * Counters, redemption, lot and settlement for one candidate, all under
-   * `cmp_candidate`. A refused limit or a same-campaign P2002 rolls back to
-   * the savepoint, so a candidate that did not win left nothing behind.
+   * Counters, redemption, ledger row, lot, link and settlement for one
+   * candidate, all under `cmp_candidate` and in that order (CMP-001 §10.3,
+   * §12.4). A refused limit or a same-campaign P2002 rolls back to the
+   * savepoint, so a candidate that did not win left nothing behind — no
+   * counter, no redemption, no ledger row, no lot.
    */
   private async attemptGrant(
     tx: Prisma.TransactionClient,
@@ -296,7 +306,7 @@ export class CampaignEngineService {
     day: Date,
     now: Date,
   ): Promise<
-    | { kind: 'granted'; redemptionId: string; lotId: string; expiresAt: Date }
+    | { kind: 'granted'; redemptionId: string; lotId: string; grantTransactionId: string; expiresAt: Date }
     | { kind: 'refused'; outcome: CampaignEvaluationOutcome }
   > {
     await this.repository.savepoint(tx, SAVEPOINT.candidate);
@@ -306,10 +316,22 @@ export class CampaignEngineService {
         await this.repository.rollbackTo(tx, SAVEPOINT.candidate);
         return { kind: 'refused', outcome: refusal };
       }
-      const grant = await this.repository.createRedemptionAndLot(tx, { candidate, event, providerId, userId, now });
-      await this.repository.settleEvent(tx, event.id, candidate.id, grant.redemptionId);
+      const { redemptionId } = await this.repository.createRedemption(tx, { candidate, event, providerId, userId, now });
+      // CAMPAIGN_GRANT ledger row → PromoCreditLot → redemption.grantTransactionId,
+      // through the S2B1 primitive and nothing else. The lot expires
+      // `benefitExpiresInDays` after this grant.
+      const version = candidate.activeVersion;
+      const expiresAt = new Date(now.getTime() + version.benefitExpiresInDays * 86_400_000);
+      const grant = await grantPromoCreditLot(tx, {
+        providerId,
+        redemptionId,
+        credits: version.benefitCredits,
+        expiresAt,
+        now,
+      });
+      await this.repository.settleEvent(tx, event.id, candidate.id, redemptionId);
       await this.repository.release(tx, SAVEPOINT.candidate);
-      return { kind: 'granted', ...grant };
+      return { kind: 'granted', redemptionId, lotId: grant.lotId, grantTransactionId: grant.transactionId, expiresAt };
     } catch (error) {
       if (isUniqueViolation(error)) {
         // The (campaignId, triggerEventKey) backstop: the primary read missed

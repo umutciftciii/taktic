@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { CampaignEngineModule } from '../campaigns/engine/campaign-engine.module';
 import { EntitlementsModule } from '../entitlements/entitlements.module';
 import { NumberingModule } from '../numbering/numbering.module';
 import { OperationsSettingsModule } from '../operations-settings/operations-settings.module';
@@ -27,6 +28,10 @@ import { ProvidersService } from './providers.service';
     // imports only PrismaModule and AuthModule — its one reference to this
     // module is a pure function import — so there is no cycle.
     ProviderReviewsModule,
+    // The approval writes the PROVIDER_APPROVED campaign fact and evaluates it
+    // in the same transaction (CMP-002 S2B2). Engine module only — it imports
+    // nothing but Prisma, so there is no cycle.
+    CampaignEngineModule,
   ],
   controllers: [ProvidersController],
   providers: [ProvidersService],

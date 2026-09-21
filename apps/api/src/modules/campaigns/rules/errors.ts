@@ -1,4 +1,4 @@
-import { CAMPAIGN_RULE_ERROR_CODE_LIST } from './catalog';
+import { CAMPAIGN_ACTIVATION_ERROR_CODE_LIST, CAMPAIGN_RULE_ERROR_CODE_LIST } from './catalog';
 
 /**
  * The closed set of reasons a campaign definition is refused.
@@ -38,10 +38,28 @@ export type CampaignRuleErrorCode =
 export const CAMPAIGN_RULE_ERROR_CODES =
   CAMPAIGN_RULE_ERROR_CODE_LIST as readonly CampaignRuleErrorCode[];
 
+/**
+ * The two refusals that exist only at activation (CMP-002 S2B2). A stored
+ * version is a valid definition by construction; what activation adds is the
+ * state of the world — which writers are booted, what the campaign already
+ * consumed — and these name the two ways that state can say no.
+ */
+export type CampaignActivationErrorCode = 'FACT_SOURCE_UNAVAILABLE' | 'LIMIT_BELOW_CONSUMED';
+
+export const CAMPAIGN_ACTIVATION_ERROR_CODES =
+  CAMPAIGN_ACTIVATION_ERROR_CODE_LIST as readonly CampaignActivationErrorCode[];
+
 export type CampaignRuleError = {
   /** JSON-pointer-like path into the definition: `conditions.all[2].slugs[1]`. Empty for the root. */
   path: string;
   code: CampaignRuleErrorCode;
+  message: string;
+};
+
+/** An activation refusal: a definition error, or one of the two activation-only codes, same shape. */
+export type CampaignActivationError = {
+  path: string;
+  code: CampaignRuleErrorCode | CampaignActivationErrorCode;
   message: string;
 };
 
@@ -76,4 +94,10 @@ export const CAMPAIGN_RULE_ERROR_MESSAGES: Readonly<Record<CampaignRuleErrorCode
   WINDOW_INVALID: 'Zaman penceresi geçersiz.',
   STACK_POLICY_INVALID: 'Yalnızca EXCLUSIVE_CREDIT_BONUS politikası desteklenir.',
   PRIORITY_INVALID: 'Öncelik 1–1000 arası tam sayı olmalıdır.',
+};
+
+export const CAMPAIGN_ACTIVATION_ERROR_MESSAGES: Readonly<Record<CampaignActivationErrorCode, string>> = {
+  FACT_SOURCE_UNAVAILABLE:
+    'Bu olgunun/tetikleyicinin hizmet veren hesapları için kayıtlı bir yazıcısı yok; sürüm etkinleştirilemez.',
+  LIMIT_BELOW_CONSUMED: 'Limit, kampanyanın halihazırda tükettiği değerin altında; önce daha yüksek bir limitle sürüm oluşturun.',
 };

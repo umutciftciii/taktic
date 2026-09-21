@@ -5,6 +5,7 @@ import {
   Get,
   Inject,
   Param,
+  ParseIntPipe,
   Post,
   Query,
   UseGuards,
@@ -16,17 +17,22 @@ import { AuthUser } from '../auth/auth.types';
 import { RolesGuard } from '../auth/roles.guard';
 import { CampaignsService } from './campaigns.service';
 import { CampaignDefinitionDto } from './dto/campaign-definition.dto';
+import { CampaignTransitionDto } from './dto/campaign-transition.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { ListCampaignsDto } from './dto/list-campaigns.dto';
 
 /**
- * Campaign drafts, for the super admin and nobody else (CMP-002 S1).
+ * Campaigns, for the super admin and nobody else (CMP-002 S1 + S2B2).
  *
- * Five routes: list, detail, create, revise, validate. Note what is not here.
- * No activate, pause, resume or end — the lifecycle beyond DRAFT belongs to
- * the slice that ships the engine. No PATCH or DELETE on a version — a
- * version is written once. No provider, customer or public route reads a
- * campaign, and no route accepts an actor: the actor is the session.
+ * Nine routes: list, detail, create, revise, validate, and the lifecycle —
+ * activate a version, pause, resume, end. Note what is not here. No PATCH or
+ * DELETE on a version — a version is written once. No engine switch: nothing
+ * in this module writes `campaignEngineEnabled`, and while it is off the
+ * activate and resume routes answer 409 CAMPAIGN_ENGINE_DISABLED. No grant,
+ * revoke or evaluation route: grants come only from the engine, inside the
+ * business transactions that raise events. No provider, customer or public
+ * route reads a campaign, and no route accepts an actor: the actor is the
+ * session.
  *
  * AuthGuard turns an anonymous call into 401, RolesGuard turns a customer's
  * or a provider's into 403, and the `validate` route is declared before the
@@ -66,6 +72,31 @@ export class AdminCampaignsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.campaigns.addVersion(id, dto.definition, requireActor(user));
+  }
+
+  /** DRAFT → ACTIVE on first use; afterwards swaps the running version. Refused while the engine is off. */
+  @Post(':id/versions/:versionNumber/activate')
+  activateVersion(
+    @Param('id') id: string,
+    @Param('versionNumber', ParseIntPipe) versionNumber: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.campaigns.activateVersion(id, versionNumber, requireActor(user));
+  }
+
+  @Post(':id/pause')
+  pause(@Param('id') id: string, @Body() dto: CampaignTransitionDto, @CurrentUser() user: AuthUser) {
+    return this.campaigns.pause(id, dto.reason, requireActor(user));
+  }
+
+  @Post(':id/resume')
+  resume(@Param('id') id: string, @Body() dto: CampaignTransitionDto, @CurrentUser() user: AuthUser) {
+    return this.campaigns.resume(id, dto.reason, requireActor(user));
+  }
+
+  @Post(':id/end')
+  end(@Param('id') id: string, @Body() dto: CampaignTransitionDto, @CurrentUser() user: AuthUser) {
+    return this.campaigns.end(id, dto.reason, requireActor(user));
   }
 }
 

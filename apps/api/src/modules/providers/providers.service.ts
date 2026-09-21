@@ -8,6 +8,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
 import {
   CreditTransactionType,
@@ -43,6 +44,7 @@ import { EntitlementResolverService } from '../entitlements/entitlement-resolver
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import {
   canBeAssignedByAdmin,
   canBeSelectedByProviders,
@@ -180,7 +182,7 @@ export const PROVIDER_EMAIL_REQUIRED_CODE = 'PROVIDER_EMAIL_REQUIRED';
 export const PROVIDER_EMAIL_IMMUTABLE_CODE = 'PROVIDER_EMAIL_IMMUTABLE';
 
 @Injectable()
-export class ProvidersService {
+export class ProvidersService implements OnModuleInit {
   private readonly logger = new Logger(ProvidersService.name);
 
   constructor(
@@ -197,7 +199,17 @@ export class ProvidersService {
     @Inject(ShowcasePlacementService)
     private readonly showcasePlacements: ShowcasePlacementService,
     @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
+    @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
   ) {}
+
+  /**
+   * This service is the canonical writer of the PROVIDER_APPROVED campaign
+   * fact (`updateProviderStatus`), and says so at boot: the register is what
+   * lets a version that depends on it be activated (CMP-001 §8.4).
+   */
+  onModuleInit() {
+    this.campaignHooks.registerFactWriter('PROVIDER_APPROVED', { module: 'providers', role: UserRole.PROVIDER });
+  }
 
   async createProvider(
     dto: CreateProviderDto,
@@ -955,73 +967,85 @@ export class ProvidersService {
 
     const now = new Date();
 
-    const provider = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.providerProfile.update({
-        where: { id },
-        data: {
-          status: dto.status,
-          moderationNote,
-          rejectionReason: dto.status === ProviderStatus.REJECTED ? rejectionReason : null,
-          ...(dto.status === ProviderStatus.APPROVED ? { approvedAt: now } : {}),
-          ...(dto.status === ProviderStatus.REJECTED ? { rejectedAt: now } : {}),
-          ...(dto.status === ProviderStatus.SUSPENDED ? { suspendedAt: now } : {}),
-        },
-        include: providerInclude,
-      });
-
-      // A link mailed while the application was under review must not outlive
-      // its rejection or suspension. Same transaction as the status change, so
-      // there is no window in which the new status is live and an old link
-      // still is. An application moving *into* a claimable status keeps its
-      // links — nothing about them became untrue.
-      if (!isClaimableProviderStatus(dto.status)) {
-        await this.providerClaim.invalidateActiveTokens(tx, id);
-      }
-
-      /*
-       * A business that is not approved does not advertise.
-       *
-       * In the same transaction as the status change, so there is no window in
-       * which a suspended provider's card is still on the home page. Both
-       * directions are handled: leaving APPROVED takes their placements off the
-       * air, and coming back puts them on again.
-       *
-       * The paid clock keeps running while they are off. A suspension is a
-       * sanction, and banking the remaining days would reward being sanctioned;
-       * `suspensionExtendsClock` says so and a CHECK constraint makes the other
-       * outcome unstorable. Where a suspension turns out to have been a
-       * mistake, an operator has `ADMIN_ACTION` — which does stop the clock —
-       * and the compensation leaves a record.
-       */
-      if (dto.status !== ProviderStatus.APPROVED && existing.status === ProviderStatus.APPROVED) {
-        await this.showcasePlacements.suspendLiveFor(
-          tx,
-          { providerId: id },
-          {
-            reason: ShowcasePlacementSuspendReason.PROVIDER_NOT_APPROVED,
-            actorUserId: null,
-            now,
+    // Serializable, and replayed on a write conflict, since S2B2: the campaign
+    // engine runs inside this transaction on a transition into APPROVED and
+    // its counters are conditional updates that may collide with a concurrent
+    // grant. The business rule of the status change is unchanged.
+    const provider = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const updated = await tx.providerProfile.update({
+          where: { id },
+          data: {
+            status: dto.status,
+            moderationNote,
+            rejectionReason: dto.status === ProviderStatus.REJECTED ? rejectionReason : null,
+            ...(dto.status === ProviderStatus.APPROVED ? { approvedAt: now } : {}),
+            ...(dto.status === ProviderStatus.REJECTED ? { rejectedAt: now } : {}),
+            ...(dto.status === ProviderStatus.SUSPENDED ? { suspendedAt: now } : {}),
           },
-        );
-      }
+          include: providerInclude,
+        });
 
-      if (dto.status === ProviderStatus.APPROVED && existing.status !== ProviderStatus.APPROVED) {
-        await this.showcasePlacements.resumeSuspendedFor(
-          tx,
-          { providerId: id },
-          ShowcasePlacementSuspendReason.PROVIDER_NOT_APPROVED,
-          now,
-        );
+        // A link mailed while the application was under review must not outlive
+        // its rejection or suspension. Same transaction as the status change, so
+        // there is no window in which the new status is live and an old link
+        // still is. An application moving *into* a claimable status keeps its
+        // links — nothing about them became untrue.
+        if (!isClaimableProviderStatus(dto.status)) {
+          await this.providerClaim.invalidateActiveTokens(tx, id);
+        }
 
-        // CMP-002 fact callback: PROVIDER_APPROVED — a genuine transition into
-        // APPROVED, inside the transaction that records it and after every
-        // other effect of the approval. The campaign engine (CMP-001 §8.3)
-        // will call `onProviderFact(tx, id, 'PROVIDER_APPROVED')` here; the
-        // approval never waits on, or fails over, what it decides.
-      }
+        /*
+         * A business that is not approved does not advertise.
+         *
+         * In the same transaction as the status change, so there is no window in
+         * which a suspended provider's card is still on the home page. Both
+         * directions are handled: leaving APPROVED takes their placements off the
+         * air, and coming back puts them on again.
+         *
+         * The paid clock keeps running while they are off. A suspension is a
+         * sanction, and banking the remaining days would reward being sanctioned;
+         * `suspensionExtendsClock` says so and a CHECK constraint makes the other
+         * outcome unstorable. Where a suspension turns out to have been a
+         * mistake, an operator has `ADMIN_ACTION` — which does stop the clock —
+         * and the compensation leaves a record.
+         */
+        if (dto.status !== ProviderStatus.APPROVED && existing.status === ProviderStatus.APPROVED) {
+          await this.showcasePlacements.suspendLiveFor(
+            tx,
+            { providerId: id },
+            {
+              reason: ShowcasePlacementSuspendReason.PROVIDER_NOT_APPROVED,
+              actorUserId: null,
+              now,
+            },
+          );
+        }
 
-      return updated;
-    });
+        if (dto.status === ProviderStatus.APPROVED && existing.status !== ProviderStatus.APPROVED) {
+          await this.showcasePlacements.resumeSuspendedFor(
+            tx,
+            { providerId: id },
+            ShowcasePlacementSuspendReason.PROVIDER_NOT_APPROVED,
+            now,
+          );
+
+          // CMP-002 fact callback: PROVIDER_APPROVED — a genuine transition into
+          // APPROVED, inside the transaction that records it and after every
+          // other effect of the approval. The hook only makes the campaign
+          // events durable (PENDING rows for the approval event and for every
+          // eligibility set the fact completes); the evaluation itself runs
+          // later, in the worker's own transaction, and can never undo this
+          // approval. Only a database fault that leaves the event unwritten
+          // fails this transaction (CMP-001 §8.3; S2B2 rev. 2).
+          await this.campaignHooks.providerApproved(tx, id);
+        }
+
+        return updated;
+      },
+      { label: 'providers.updateProviderStatus' },
+    );
 
     // Only a genuine transition into APPROVED. Re-saving an already-approved
     // application from the moderation screen rewrites `approvedAt` and tells
@@ -1542,50 +1566,50 @@ export class ProvidersService {
     return runSerializable(
       this.prisma,
       async (tx) => {
-        const offer = await tx.offer.findFirst({
-          where: { id: offerId, providerId },
-          select: { id: true, requestId: true },
-        });
+          const offer = await tx.offer.findFirst({
+            where: { id: offerId, providerId },
+            select: { id: true, requestId: true },
+          });
 
-        // Somebody else's offer is indistinguishable from a missing one, so a
-        // provider cannot probe for offer ids it does not own.
-        if (!offer) {
-          throw new NotFoundException('Offer not found');
-        }
+          // Somebody else's offer is indistinguishable from a missing one, so a
+          // provider cannot probe for offer ids it does not own.
+          if (!offer) {
+            throw new NotFoundException('Offer not found');
+          }
 
-        const request = await tx.serviceRequest.findUnique({
-          where: { id: offer.requestId },
-          select: { status: true },
-        });
+          const request = await tx.serviceRequest.findUnique({
+            where: { id: offer.requestId },
+            select: { status: true },
+          });
 
-        // A matched, completed, cancelled or expired request is settled. Its
-        // offers stay exactly as that lifecycle left them.
-        if (!request || request.status !== ServiceRequestStatus.APPROVED) {
-          throw offerNotWithdrawableException();
-        }
+          // A matched, completed, cancelled or expired request is settled. Its
+          // offers stay exactly as that lifecycle left them.
+          if (!request || request.status !== ServiceRequestStatus.APPROVED) {
+            throw offerNotWithdrawableException();
+          }
 
-        const withdrawn = await tx.offer.updateMany({
-          where: {
-            id: offerId,
-            providerId,
-            status: { in: [...WITHDRAWABLE_OFFER_STATUSES] },
-          },
-          data: {
-            status: OfferStatus.WITHDRAWN,
-            withdrawnAt: now,
-          },
-        });
+          const withdrawn = await tx.offer.updateMany({
+            where: {
+              id: offerId,
+              providerId,
+              status: { in: [...WITHDRAWABLE_OFFER_STATUSES] },
+            },
+            data: {
+              status: OfferStatus.WITHDRAWN,
+              withdrawnAt: now,
+            },
+          });
 
-        if (withdrawn.count !== 1) {
-          throw offerNotWithdrawableException();
-        }
+          if (withdrawn.count !== 1) {
+            throw offerNotWithdrawableException();
+          }
 
-        const updated = await tx.offer.findUniqueOrThrow({
-          where: { id: offerId },
-          include: providerOfferInclude,
-        });
+          const updated = await tx.offer.findUniqueOrThrow({
+            where: { id: offerId },
+            include: providerOfferInclude,
+          });
 
-        return withRefundEligibility(updated);
+          return withRefundEligibility(updated);
       },
       { label: 'providers.withdrawProviderOffer' },
     );
