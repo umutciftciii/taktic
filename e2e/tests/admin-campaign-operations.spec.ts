@@ -243,7 +243,7 @@ test.describe('admin campaign operations desk', () => {
 
       // ---- a revoked row offers no second revoke; exactly two CAMPAIGN_REVOKE rows exist ----
       await expect(page.getByTestId('campaign-revoke-form')).toHaveCount(0);
-      expect(await prisma().providerCreditTransaction.count({ where: { type: 'CAMPAIGN_REVOKE' } })).toBe(2);
+      expect(await prisma().providerCreditTransaction.count({ where: { type: 'CAMPAIGN_REVOKE', providerId: { in: [first.id, second.id] } } })).toBe(2);
 
       // ---- re-queue the parked event: nothing evaluated here, the audit says who asked ----
       const eventRow = page.locator(`[data-testid="campaign-event-row"][data-event="${parked.id}"]`);
