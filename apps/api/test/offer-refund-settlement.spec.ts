@@ -271,3 +271,34 @@ describe('refund settlement through the real refund path', () => {
     expect(map.size).toBe(0);
   });
 });
+
+describe('the provider sees the same settlement on their offer history', () => {
+  it('a refunded offer carries the settlement; an unrefunded one carries null; the customer view carries neither', async () => {
+    // 3 promo + 2 paid for the first offer, 5 paid for the second.
+    const fixture = await providerFixture({ categoryCost: 5, paid: 7 });
+    const granted = await createPromoLotFixture(ctx.prisma, fixture.provider.id, { credits: 3, expiresAt: new Date(Date.now() + 5_000) });
+    const refunded = await submitOffer(fixture);
+    const kept = await submitOffer(fixture);
+    await ctx.prisma.promoCreditLot.update({ where: { id: granted.lot.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    await ctx.app.get(PromoCreditLotExpiryService).expireDueLots(new Date());
+    const expected = (await manualRefund(refunded.offerId)).body.settlement as OfferRefundSettlement;
+
+    const list = await request(ctx.server).get(`/providers/${fixture.provider.id}/offers`).set('Cookie', fixture.cookie).expect(200);
+    const byId = new Map((list.body as Array<{ id: string; creditRefundSettlement: unknown }>).map((offer) => [offer.id, offer]));
+    expect(byId.get(refunded.offerId)?.creditRefundSettlement).toEqual(expected);
+    expect(byId.get(kept.offerId)?.creditRefundSettlement).toBeNull();
+
+    const detail = await request(ctx.server)
+      .get(`/providers/${fixture.provider.id}/offers/${refunded.offerId}`)
+      .set('Cookie', fixture.cookie)
+      .expect(200);
+    expect(detail.body.creditRefundSettlement).toEqual(expected);
+
+    // The customer is told an offer was refunded (as before) and nothing about the provider's promotions.
+    const customerView = await request(ctx.server).get(`/service-requests/${refunded.serviceRequest.id}/offers`).expect(200);
+    const customerOffer = (customerView.body as Array<Record<string, unknown>>).find((offer) => offer.id === refunded.offerId);
+    expect(customerOffer).toBeDefined();
+    expect(customerOffer).not.toHaveProperty('creditRefundSettlement');
+    expect(JSON.stringify(customerView.body)).not.toMatch(/promo/i);
+  });
+});
