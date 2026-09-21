@@ -548,6 +548,7 @@ function validateLimits(
     maxRedemptionsGlobal: result.maxRedemptionsGlobal ?? null,
     maxRedemptionsPerDay: result.maxRedemptionsPerDay ?? null,
     budgetCredits: result.budgetCredits ?? null,
+    maxRevokesPerDay: result.maxRevokesPerDay ?? null,
   };
 }
 

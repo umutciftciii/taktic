@@ -22,6 +22,7 @@ import {
 } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
+import { CampaignRevokeService } from '../campaigns/engine/campaign-revoke.service';
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
@@ -162,6 +163,7 @@ export class PaymentsWebhookService implements OnModuleInit {
     @Inject(ShowcasePlacementService) private readonly placements: ShowcasePlacementService,
     @Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService,
     @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
+    @Inject(CampaignRevokeService) private readonly campaignRevokes: CampaignRevokeService,
   ) {}
 
   /** `settle` below raises PACKAGE_PAYMENT_SUCCEEDED for every purchase it writes PAID (CMP-002 S2B2). */
@@ -197,7 +199,7 @@ export class PaymentsWebhookService implements OnModuleInit {
     }
 
     if (LEMON_SQUEEZY_REVERSAL_EVENTS.has(event.eventName)) {
-      return this.flagForManualReview(event);
+      return this.flagForManualReview(event, config.storeId);
     }
 
     if (!LEMON_SQUEEZY_PAYMENT_EVENTS.has(event.eventName)) {
@@ -679,12 +681,25 @@ export class PaymentsWebhookService implements OnModuleInit {
   /**
    * Refunds and chargebacks.
    *
-   * They set a flag and nothing else. Deducting credits automatically would
-   * mean taking back capacity a provider may already have spent on offers that
-   * were sent and answered, and this phase deliberately leaves that decision to
-   * a person looking at the audit trail.
+   * For the *paid* credit they set a flag and nothing else. Deducting it
+   * automatically would mean taking back capacity a provider may already have
+   * spent on offers that were sent and answered, and that decision is
+   * deliberately left to a person looking at the audit trail.
+   *
+   * For the *promotional* credit the refunded purchase earned (CMP-003 S3)
+   * the answer is different and automatic: a campaign lot granted for a
+   * payment that was reversed is revoked in this same transaction —
+   * whatever is still unspent leaves the wallet through one CAMPAIGN_REVOKE
+   * row, what was spent is recorded and not clawed back, and the campaign's
+   * daily revoke counter moves (see `CampaignRevokeService`). The revoke is
+   * withheld, and only the flag written, unless the delivery is *relevant*
+   * by the same tests the settlement path applies: a sandbox event, from the
+   * configured store, naming the very order that settled this purchase. A
+   * purchase that earned no promotion leaves this transaction exactly as it
+   * did before this slice. The engine switch is not consulted: reversing an
+   * existing lot is accounting, not entitlement.
    */
-  private async flagForManualReview(event: LemonSqueezyEvent): Promise<WebhookOutcome> {
+  private async flagForManualReview(event: LemonSqueezyEvent, expectedStoreId: string): Promise<WebhookOutcome> {
     let redelivered: RedeliveredEvent = null;
     let outcome: WebhookOutcome;
 
@@ -717,7 +732,7 @@ export class PaymentsWebhookService implements OnModuleInit {
             });
           }
 
-          await recordAttempt(
+          const recorded = await recordAttempt(
             tx,
             event,
             existing,
@@ -728,6 +743,19 @@ export class PaymentsWebhookService implements OnModuleInit {
             },
             now,
           );
+
+          if (purchase && isRelevantReversal(event, purchase, expectedStoreId)) {
+            const revoked = await this.campaignRevokes.revokeForRefundedPurchase(tx, {
+              purchaseId: purchase.id,
+              webhookEventId: recorded.id,
+              now,
+            });
+            if (revoked.length > 0) {
+              this.logger.log(
+                `webhook ${event.eventName} revoked ${revoked.length} campaign promotion(s) of the refunded purchase`,
+              );
+            }
+          }
 
           return { status: 'manual_review_required' } as const;
         },
@@ -994,6 +1022,26 @@ function recordAttempt(
       ...resolved,
     },
   });
+}
+
+/**
+ * Whether a reversal names a settled purchase closely enough to move
+ * promotional credit: the tests the settlement path applies (sandbox event,
+ * configured store), plus the one only a reversal can make — the order it
+ * refers to is the order that settled this purchase.
+ */
+function isRelevantReversal(
+  event: LemonSqueezyEvent,
+  purchase: { status: PackagePurchaseStatus; providerOrderId: string | null },
+  expectedStoreId: string,
+): boolean {
+  return (
+    event.testMode &&
+    event.storeId === expectedStoreId &&
+    purchase.status === PackagePurchaseStatus.PAID &&
+    purchase.providerOrderId !== null &&
+    purchase.providerOrderId === event.objectId
+  );
 }
 
 function isUniqueViolation(error: unknown): boolean {

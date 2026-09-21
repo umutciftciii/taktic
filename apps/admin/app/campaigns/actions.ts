@@ -224,3 +224,49 @@ function lifecycleFailure(error: unknown): CampaignLifecycleState {
   }
   return { status: 'error', message: 'Beklenmeyen hata.', errors: [] };
 }
+
+// ───────────────────────── operations desk (CMP-003 S3) ─────────────────────────
+
+/**
+ * Revoke one redemption with a reason, or put one parked event back in the
+ * worker's queue — each one POST to the matching SUPER_ADMIN route, nothing
+ * decided here. The API's refusal (already revoked, not retryable, engine
+ * off, …) comes back as the action's state beside the row; success reloads
+ * the detail with a one-word marker for the confirmation notice.
+ */
+export async function campaignOperationAction(
+  _previous: CampaignLifecycleState,
+  formData: FormData,
+): Promise<CampaignLifecycleState> {
+  const intent = readString(formData, 'intent');
+  const campaignId = readString(formData, 'campaignId').trim();
+  const targetId = readString(formData, 'targetId').trim();
+  if ((intent !== 'revoke' && intent !== 'retry') || campaignId === '' || targetId === '') {
+    return { status: 'error', message: 'Bilinmeyen işlem.', errors: [] };
+  }
+  const reason = readString(formData, 'reason').trim();
+  if (intent === 'revoke' && reason.length < 3) {
+    return { status: 'error', message: 'Gerekçe en az 3 karakter olmalı.', errors: [] };
+  }
+
+  let failure: CampaignLifecycleState | null = null;
+  try {
+    const base = `/admin/campaigns/${encodeURIComponent(campaignId)}`;
+    if (intent === 'revoke') {
+      await apiFetch(`${base}/redemptions/${encodeURIComponent(targetId)}/revoke`, { method: 'POST', body: JSON.stringify({ reason }) });
+    } else {
+      await apiFetch(`${base}/evaluation-events/${encodeURIComponent(targetId)}/retry`, { method: 'POST', body: JSON.stringify({}) });
+    }
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    failure = lifecycleFailure(error);
+  }
+
+  if (failure) {
+    return failure;
+  }
+
+  revalidatePath('/campaigns');
+  revalidatePath(`/campaigns/${campaignId}`);
+  redirect(`/campaigns/${campaignId}?ok=${intent}`);
+}

@@ -1958,6 +1958,9 @@ model PaymentWebhookEvent {
   /// When this event settled. Null while it never has.
   resolvedAt       DateTime?
 
+  /// CMP-003 S3: the campaign redemptions this event's reversal revoked.
+  revokedRedemptions CampaignRedemption[] @relation("CampaignRedemptionRevokedByWebhookEvent")
+
   @@unique([provider, eventKey])
   @@index([status])
   @@index([purchaseId])
@@ -3837,6 +3840,15 @@ enum CampaignAuditAction {
   PAUSED
   RESUMED
   ENDED
+  /// CMP-003 S3. AUTO_PAUSED: the daily revoke threshold of the running
+  /// version was exceeded and the campaign went ACTIVE → PAUSED on its own
+  /// (nominal actor: the campaign's creator, `summary.actorKind = SYSTEM`,
+  /// when the revoke came from a payment reversal). REDEMPTION_REVOKED: a
+  /// SUPER_ADMIN revoked one redemption with a reason. EVENT_RETRY_REQUESTED:
+  /// a SUPER_ADMIN put a parked evaluation event back in the worker's queue.
+  AUTO_PAUSED
+  REDEMPTION_REVOKED
+  EVENT_RETRY_REQUESTED
 }
 
 /// A campaign's identity and lifecycle. What it *does* lives in its versions.
@@ -3878,6 +3890,7 @@ model Campaign {
   settledEvents    CampaignTriggerEvent[]
   providerCounters CampaignProviderCounter[]
   dailyCounters    CampaignDailyCounter[]
+  revokeCounters   CampaignRevokeDailyCounter[]
 
   @@index([status, updatedAt])
   @@index([createdById])
@@ -3911,6 +3924,10 @@ model CampaignVersion {
   maxRedemptionsGlobal      Int?
   maxRedemptionsPerDay      Int?
   budgetCredits             Int?
+  /// CMP-003 S3: revokes (payment reversal or admin) per UTC day this campaign
+  /// tolerates before it pauses itself. NULL = no threshold. Bounded 1–1000 by
+  /// CHECK; read from the *running* version at revoke time.
+  maxRevokesPerDay          Int?
   windowStartAt             DateTime?
   windowEndAt               DateTime?
   stackPolicy               CampaignStackPolicy
@@ -4094,6 +4111,12 @@ model CampaignRedemption {
   /// debt model, so this is a record for an operator, not a balance (CMP-001 §2.6).
   spentAtRevoke      Int?
   revokedById        String?
+  /// CMP-003 S3. The operator's reason on an admin revoke (1–500 chars by
+  /// CHECK; never shown outside the admin panel), and the verified payment
+  /// webhook event whose reversal revoked this redemption. Exactly one of the
+  /// two is set on a revoked row; both stay NULL on a granted or expired one.
+  revokeNote              String?
+  revokedByWebhookEventId String?
 
   campaign         Campaign                   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
   campaignVersion  CampaignVersion            @relation(fields: [campaignVersionId], references: [id], onDelete: Restrict)
@@ -4103,6 +4126,7 @@ model CampaignRedemption {
   purchase         PackagePurchase?           @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
   grantTransaction ProviderCreditTransaction? @relation("CampaignRedemptionGrantTransaction", fields: [grantTransactionId], references: [id], onDelete: Restrict)
   revokedBy        User?                      @relation("CampaignRedemptionRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+  revokedByWebhookEvent PaymentWebhookEvent?  @relation("CampaignRedemptionRevokedByWebhookEvent", fields: [revokedByWebhookEventId], references: [id], onDelete: Restrict)
   settledEvent     CampaignTriggerEvent?      @relation("CampaignTriggerEventSettledBy")
   promoLot         PromoCreditLot?
 
@@ -4115,6 +4139,7 @@ model CampaignRedemption {
   @@index([purchaseId])
   @@index([userId])
   @@index([revokedById])
+  @@index([revokedByWebhookEventId])
 }
 
 /// Append-only: one row per (event, candidate) evaluation, and one per event
@@ -4250,6 +4275,23 @@ model CampaignDailyCounter {
   day             DateTime @db.Date
   redemptionCount Int      @default(0)
   updatedAt       DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignId, day])
+}
+
+/// The database half of `maxRevokesPerDay` (CMP-003 S3). `day` is a UTC
+/// calendar date (the task's rule for this counter; the redemption counter
+/// above uses the Istanbul day — two counters, two meanings). Moved only by
+/// `CampaignRevokeService`, inside the same Serializable transaction as the
+/// CAMPAIGN_REVOKE row, once per redemption actually revoked.
+model CampaignRevokeDailyCounter {
+  id          String   @id @default(cuid())
+  campaignId  String
+  day         DateTime @db.Date
+  revokeCount Int      @default(0)
+  updatedAt   DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
 

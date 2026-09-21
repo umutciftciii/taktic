@@ -1,0 +1,41 @@
+== migrate deploy ==
+  └─ 20260921120000_add_campaign_lifecycle_audit_actions/
+    └─ migration.sql
+  └─ 20260921150000_add_campaign_event_evaluation_state/
+    └─ migration.sql
+  └─ 20260921200000_add_campaign_revoke_operations/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+== migrate diff (should be empty) ==
+warn The configuration property `package.json#prisma` is deprecated and will be removed in Prisma 7. Please migrate to a Prisma config file (e.g., `prisma.config.ts`).
+For more information, see: https://pris.ly/prisma-config
+
+No difference detected.
+
+diff exit: 0
+== enum order ==
+CREATED,VERSION_CREATED,ACTIVATED,VERSION_ACTIVATED,PAUSED,RESUMED,ENDED,AUTO_PAUSED,REDEMPTION_REVOKED,EVENT_RETRY_REQUESTED
+== new objects ==
+                   Table "public.CampaignRevokeDailyCounter"
+   Column    |              Type              | Collation | Nullable | Default 
+-------------+--------------------------------+-----------+----------+---------
+ id          | text                           |           | not null | 
+ campaignId  | text                           |           | not null | 
+ day         | date                           |           | not null | 
+ revokeCount | integer                        |           | not null | 0
+ updatedAt   | timestamp(3) without time zone |           | not null | 
+Indexes:
+    "CampaignRevokeDailyCounter_pkey" PRIMARY KEY, btree (id)
+    "CampaignRevokeDailyCounter_campaignId_day_key" UNIQUE, btree ("campaignId", day)
+Check constraints:
+    "CampaignRevokeDailyCounter_revokeCount_nonnegative" CHECK ("revokeCount" >= 0)
+Foreign-key constraints:
+    "CampaignRevokeDailyCounter_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+CampaignVersion_maxRevokesPerDay_bounded|CHECK ((("maxRevokesPerDay" IS NULL) OR (("maxRevokesPerDay" >= 1) AND ("maxRevokesPerDay" <= 1000))))
+CampaignRedemption_revokeNote_bounded|CHECK ((("revokeNote" IS NULL) OR ((char_length("revokeNote") >= 1) AND (char_length("revokeNote") <= 500))))
+CampaignRedemption_revokedByWebhookEventId_fkey|FOREIGN KEY ("revokedByWebhookEventId") REFERENCES "PaymentWebhookEvent"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+CampaignRevokeDailyCounter_revokeCount_nonnegative|CHECK (("revokeCount" >= 0))
+== migration count ==
+71

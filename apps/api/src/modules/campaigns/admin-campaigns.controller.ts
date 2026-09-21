@@ -22,17 +22,22 @@ import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { ListCampaignsDto } from './dto/list-campaigns.dto';
 
 /**
- * Campaigns, for the super admin and nobody else (CMP-002 S1 + S2B2).
+ * Campaigns, for the super admin and nobody else (CMP-002 S1 + S2B2, CMP-003 S3).
  *
- * Nine routes: list, detail, create, revise, validate, and the lifecycle —
- * activate a version, pause, resume, end. Note what is not here. No PATCH or
+ * Thirteen routes: list, detail, create, revise, validate, the lifecycle —
+ * activate a version, pause, resume, end — and, since S3, the operations
+ * desk: a campaign's redemptions and candidate events (read-only pages), a
+ * revoke of one redemption with a reason, and a retry that puts a parked
+ * event back in the worker's queue. Note what is not here. No PATCH or
  * DELETE on a version — a version is written once. No engine switch: nothing
  * in this module writes `campaignEngineEnabled`, and while it is off the
- * activate and resume routes answer 409 CAMPAIGN_ENGINE_DISABLED. No grant,
- * revoke or evaluation route: grants come only from the engine, inside the
- * business transactions that raise events. No provider, customer or public
- * route reads a campaign, and no route accepts an actor: the actor is the
- * session.
+ * activate, resume and retry routes answer 409 CAMPAIGN_ENGINE_DISABLED. No
+ * grant or evaluation route: grants come only from the engine, in the
+ * worker's own transactions; the retry route evaluates nothing itself. No
+ * route deducts an arbitrary balance: the revoke names a redemption and goes
+ * through the same `CampaignRevokeService` a payment reversal does. No
+ * provider, customer or public route reads a campaign, and no route accepts
+ * an actor: the actor is the session.
  *
  * AuthGuard turns an anonymous call into 401, RolesGuard turns a customer's
  * or a provider's into 403, and the `validate` route is declared before the
@@ -97,6 +102,35 @@ export class AdminCampaignsController {
   @Post(':id/end')
   end(@Param('id') id: string, @Body() dto: CampaignTransitionDto, @CurrentUser() user: AuthUser) {
     return this.campaigns.end(id, dto.reason, requireActor(user));
+  }
+
+  // ───────────────────────── operations desk (CMP-003 S3) ─────────────────────────
+
+  @Get(':id/redemptions')
+  redemptions(@Param('id') id: string, @Query() query: ListCampaignsDto) {
+    return this.campaigns.listRedemptions(id, query);
+  }
+
+  @Get(':id/evaluation-events')
+  evaluationEvents(@Param('id') id: string, @Query() query: ListCampaignsDto) {
+    return this.campaigns.listEvaluationEvents(id, query);
+  }
+
+  /** Revokes one GRANTED redemption of this campaign with a reason; the same path a payment reversal takes. */
+  @Post(':id/redemptions/:redemptionId/revoke')
+  revokeRedemption(
+    @Param('id') id: string,
+    @Param('redemptionId') redemptionId: string,
+    @Body() dto: CampaignTransitionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.campaigns.revokeRedemption(id, redemptionId, dto.reason, requireActor(user));
+  }
+
+  /** Puts a parked event back in the worker's queue. Evaluates nothing here. */
+  @Post(':id/evaluation-events/:eventId/retry')
+  retryEvaluationEvent(@Param('id') id: string, @Param('eventId') eventId: string, @CurrentUser() user: AuthUser) {
+    return this.campaigns.retryEvaluationEvent(id, eventId, requireActor(user));
   }
 }
 

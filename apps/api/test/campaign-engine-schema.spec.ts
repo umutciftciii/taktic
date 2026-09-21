@@ -368,3 +368,77 @@ describe('the credit ledger', () => {
     ]);
   });
 });
+
+describe('Migration F (CMP-003 S3): revoke operations', () => {
+  it('appends the three S3 audit actions after the S2B2 ones', async () => {
+    const rows = await ctx.prisma.$queryRaw<{ enumlabel: string }[]>`
+      SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'CampaignAuditAction' ORDER BY e.enumsortorder`;
+    expect(rows.map((row) => row.enumlabel)).toEqual([
+      'CREATED',
+      'VERSION_CREATED',
+      'ACTIVATED',
+      'VERSION_ACTIVATED',
+      'PAUSED',
+      'RESUMED',
+      'ENDED',
+      'AUTO_PAUSED',
+      'REDEMPTION_REVOKED',
+      'EVENT_RETRY_REQUESTED',
+    ]);
+  });
+
+  it('CampaignVersion.maxRevokesPerDay is optional and bounded to 1–1000', async () => {
+    const { version } = await createCampaignFixture(ctx.prisma);
+    expect(version.maxRevokesPerDay).toBeNull();
+    await ctx.prisma.campaignVersion.update({ where: { id: version.id }, data: { maxRevokesPerDay: 1000 } });
+    await expectCheckViolation(
+      ctx.prisma.campaignVersion.update({ where: { id: version.id }, data: { maxRevokesPerDay: 0 } }),
+      'CampaignVersion_maxRevokesPerDay_bounded',
+    );
+    await expectCheckViolation(
+      ctx.prisma.campaignVersion.update({ where: { id: version.id }, data: { maxRevokesPerDay: 1001 } }),
+      'CampaignVersion_maxRevokesPerDay_bounded',
+    );
+  });
+
+  it('CampaignRedemption carries a bounded revoke note and the webhook event that revoked it', async () => {
+    const p = await provider();
+    const { campaign, version } = await createCampaignFixture(ctx.prisma);
+    const event = await approvalEvent(p.id);
+    const row = await redemption({ campaignId: campaign.id, campaignVersionId: version.id, providerId: p.id, eventId: event.id, eventKey: event.triggerEventKey });
+    expect(row.revokeNote).toBeNull();
+    expect(row.revokedByWebhookEventId).toBeNull();
+    await expectCheckViolation(
+      ctx.prisma.campaignRedemption.update({ where: { id: row.id }, data: { revokeNote: '' } }),
+      'CampaignRedemption_revokeNote_bounded',
+    );
+    await expectCheckViolation(
+      ctx.prisma.campaignRedemption.update({ where: { id: row.id }, data: { revokeNote: 'x'.repeat(501) } }),
+      'CampaignRedemption_revokeNote_bounded',
+    );
+    const webhookEvent = await ctx.prisma.paymentWebhookEvent.create({
+      data: { provider: 'lemon-squeezy-test', eventKey: `order_refunded:orders:${event.id}`, eventName: 'order_refunded', status: 'MANUAL_REVIEW_REQUIRED' },
+    });
+    await ctx.prisma.campaignRedemption.update({
+      where: { id: row.id },
+      data: { status: 'REVOKED', revokedAt: new Date(), revokeReason: 'PAYMENT_REVERSED', spentAtRevoke: 0, revokedByWebhookEventId: webhookEvent.id, revokeNote: 'g'.repeat(500) },
+    });
+    // Restrict: the webhook event that revoked a redemption cannot disappear.
+    await expect(ctx.prisma.paymentWebhookEvent.delete({ where: { id: webhookEvent.id } })).rejects.toThrow();
+  });
+
+  it('CampaignRevokeDailyCounter is unique per campaign and UTC day and never negative', async () => {
+    const { campaign } = await createCampaignFixture(ctx.prisma);
+    const day = new Date('2026-09-21T00:00:00.000Z');
+    const row = await ctx.prisma.campaignRevokeDailyCounter.create({ data: { campaignId: campaign.id, day } });
+    expect(row.revokeCount).toBe(0);
+    await expect(
+      ctx.prisma.campaignRevokeDailyCounter.create({ data: { campaignId: campaign.id, day } }),
+    ).rejects.toSatisfy(isUniqueViolation);
+    await expectCheckViolation(
+      ctx.prisma.campaignRevokeDailyCounter.update({ where: { id: row.id }, data: { revokeCount: -1 } }),
+      'CampaignRevokeDailyCounter_revokeCount_nonnegative',
+    );
+  });
+});

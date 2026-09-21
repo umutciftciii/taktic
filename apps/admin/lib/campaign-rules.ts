@@ -178,6 +178,8 @@ export type CampaignForm = {
   maxRedemptionsGlobal: string;
   maxRedemptionsPerDay: string;
   budgetCredits: string;
+  /** CMP-003 S3: revokes per UTC day before the campaign pauses itself; empty = no threshold. */
+  maxRevokesPerDay: string;
   /** `datetime-local` values, read as UTC wall time — the inputs are labelled "(UTC)". */
   windowStartAt: string;
   windowEndAt: string;
@@ -195,6 +197,7 @@ export function emptyForm(): CampaignForm {
     maxRedemptionsGlobal: '',
     maxRedemptionsPerDay: '',
     budgetCredits: '',
+    maxRevokesPerDay: '',
     windowStartAt: '',
     windowEndAt: '',
     priority: String(catalog.priority.default),
@@ -306,6 +309,7 @@ export function buildDefinition(form: CampaignForm): CampaignDefinitionDraft {
       maxRedemptionsGlobal: numberOrRaw(form.maxRedemptionsGlobal),
       maxRedemptionsPerDay: numberOrRaw(form.maxRedemptionsPerDay),
       budgetCredits: numberOrRaw(form.budgetCredits),
+      maxRevokesPerDay: numberOrRaw(form.maxRevokesPerDay),
     },
     window: { startAt: instantOrRaw(form.windowStartAt), endAt: instantOrRaw(form.windowEndAt) },
     stackPolicy: catalog.stackPolicies[0]!,
@@ -372,6 +376,7 @@ export function formFromDefinition(definition: unknown): CampaignForm {
   form.maxRedemptionsGlobal = stringOf(limits.maxRedemptionsGlobal);
   form.maxRedemptionsPerDay = stringOf(limits.maxRedemptionsPerDay);
   form.budgetCredits = stringOf(limits.budgetCredits);
+  form.maxRevokesPerDay = stringOf(limits.maxRevokesPerDay);
   const window = (record.window ?? {}) as Record<string, unknown>;
   form.windowStartAt = instantToLocalInput(window.startAt);
   form.windowEndAt = instantToLocalInput(window.endAt);
@@ -384,7 +389,7 @@ export function formFromDefinition(definition: unknown): CampaignForm {
 export type ErrorTarget =
   | { field: 'form' }
   | { field: 'trigger' | 'facts' | 'conditions' | 'credits' | 'expiresInDays' | 'priority' }
-  | { field: 'maxRedemptionsPerProvider' | 'maxRedemptionsGlobal' | 'maxRedemptionsPerDay' | 'budgetCredits' }
+  | { field: 'maxRedemptionsPerProvider' | 'maxRedemptionsGlobal' | 'maxRedemptionsPerDay' | 'budgetCredits' | 'maxRevokesPerDay' }
   | { field: 'windowStartAt' | 'windowEndAt' }
   | { field: 'condition'; conditionId: string; argument: string | null };
 
@@ -399,7 +404,7 @@ export function errorFieldOf(path: string, form: CampaignForm): ErrorTarget {
   if (path === 'benefit.credits') return { field: 'credits' };
   if (path === 'benefit.expiresInDays') return { field: 'expiresInDays' };
   if (path === 'priority') return { field: 'priority' };
-  const limit = /^limits\.(maxRedemptionsPerProvider|maxRedemptionsGlobal|maxRedemptionsPerDay|budgetCredits)$/.exec(path);
+  const limit = /^limits\.(maxRedemptionsPerProvider|maxRedemptionsGlobal|maxRedemptionsPerDay|budgetCredits|maxRevokesPerDay)$/.exec(path);
   if (limit) return { field: limit[1] as 'maxRedemptionsPerProvider' };
   if (path === 'window.startAt') return { field: 'windowStartAt' };
   if (path === 'window.endAt') return { field: 'windowEndAt' };
