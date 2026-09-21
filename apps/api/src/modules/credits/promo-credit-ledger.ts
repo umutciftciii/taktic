@@ -148,6 +148,36 @@ export async function readPromoCreditSummary(tx: Tx, providerId: string, now: Da
   return { inWallet, spendable, unsweptExpired: inWallet - spendable };
 }
 
+/**
+ * What a provider may be shown of their own promotion (CMP-004 S4): the
+ * lots that can still pay — the spend predicate, in the spend order — each
+ * with its remainder, its expiry and the campaign's name, and nothing
+ * else about the campaign. Read-only; the total is the sum of the rows.
+ */
+export async function readSpendablePromoLots(
+  db: Tx | { promoCreditLot: Tx['promoCreditLot'] },
+  providerId: string,
+  now: Date,
+): Promise<{ spendableCredits: number; lots: Array<{ id: string; remainingCredits: number; expiresAt: Date; campaignName: string }> }> {
+  const rows = await db.promoCreditLot.findMany({
+    where: { providerId, status: PromoCreditLotStatus.ACTIVE, remainingCredits: { gt: 0 }, expiresAt: { gt: now } },
+    orderBy: [...PROMO_SPENDABLE_LOT_ORDER],
+    select: {
+      id: true,
+      remainingCredits: true,
+      expiresAt: true,
+      redemption: { select: { campaign: { select: { name: true } } } },
+    },
+  });
+  const lots = rows.map((row) => ({
+    id: row.id,
+    remainingCredits: row.remainingCredits,
+    expiresAt: row.expiresAt,
+    campaignName: row.redemption.campaign.name,
+  }));
+  return { spendableCredits: lots.reduce((total, lot) => total + lot.remainingCredits, 0), lots };
+}
+
 // ───────────────────────────── spend ─────────────────────────────
 
 /**

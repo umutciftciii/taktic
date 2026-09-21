@@ -12,6 +12,7 @@ import {
   ServiceCategoryStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { readSpendablePromoLots } from './promo-credit-ledger';
 import { PACKAGE_PERIOD_DAYS } from '../entitlements/entitlement-period';
 import { CreateCreditPackageDto } from './dto/create-credit-package.dto';
 import { ManualCreditTransactionDto } from './dto/manual-credit-transaction.dto';
@@ -240,8 +241,11 @@ export class CreditsService {
 
   async getProviderCredits(providerId: string, options: { includeActor?: boolean } = {}) {
     await this.ensureProviderExists(providerId);
-    const [balance, transactions] = await Promise.all([
+    const [balance, promo, transactions] = await Promise.all([
       this.getProviderCreditBalance(providerId),
+      // CMP-004 S4: the provider's own spendable promotion, beside the
+      // balance it is part of. Same guard as the balance (ProviderAccessGuard).
+      readSpendablePromoLots(this.prisma, providerId, new Date()),
       this.prisma.providerCreditTransaction.findMany({
         where: { providerId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -255,6 +259,7 @@ export class CreditsService {
     return {
       providerId,
       balance,
+      promo,
       transactions,
     };
   }
