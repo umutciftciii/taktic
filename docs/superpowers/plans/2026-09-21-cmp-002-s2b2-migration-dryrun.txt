@@ -1,0 +1,32 @@
+# CMP-002 S2B2 Migration D dry-run — geçici DB taktic_cmp002_s2b2_dryrun (gerçek yerel/staging DB'ye komut yok)
+# 2026-09-21T09:54:44Z · branch claude/cmp-002-s2b2-lifecycle-hooks-3f7a2c · HEAD 1cc6c6ca (+ çalışma ağacı)
+
+## prisma migrate deploy (tüm zincir)
+  └─ 20260919180000_add_campaign_engine_infrastructure/
+    └─ migration.sql
+  └─ 20260920090000_add_promo_credit_consumption/
+    └─ migration.sql
+  └─ 20260921120000_add_campaign_lifecycle_audit_actions/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+
+## prisma migrate diff --from-url <dryrun> --to-schema-datamodel
+warn The configuration property `package.json#prisma` is deprecated and will be removed in Prisma 7. Please migrate to a Prisma config file (e.g., `prisma.config.ts`).
+For more information, see: https://pris.ly/prisma-config
+
+No difference detected.
+
+
+## migration sayısı
+69
+
+## CampaignAuditAction (sıralı; iki eski + beş yeni)
+CREATED,VERSION_CREATED,ACTIVATED,VERSION_ACTIVATED,PAUSED,RESUMED,ENDED
+
+## Migration D'nin SQL ifade türleri (DML/DROP/ALTER COLUMN/CREATE TABLE yok)
+   5 ALTER TYPE
+
+## Kampanya tablolarının kolonları (Campaign / CampaignAuditLog) — S2A/S1 ile aynı
+Campaign: id,key,name,status,currentVersionId,createdById,createdAt,updatedAt,activeVersionId,budgetConsumedCredits,redemptionCount
+CampaignAuditLog: id,campaignId,action,campaignVersionId,actorId,summary,createdAt
