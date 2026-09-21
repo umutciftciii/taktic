@@ -1,6 +1,7 @@
 'use client';
 
 import { formatDateTime } from '@taktic/shared';
+import { formatLedgerReason } from '../../../../lib/finance-format';
 import { useMemo, useState } from 'react';
 
 type CreditTransactionType =
@@ -9,7 +10,10 @@ type CreditTransactionType =
   | 'PACKAGE_PURCHASE'
   | 'OFFER_SPEND'
   | 'OFFER_REFUND'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  | 'CAMPAIGN_GRANT'
+  | 'CAMPAIGN_EXPIRE'
+  | 'CAMPAIGN_REVOKE';
 
 type CreditTransaction = {
   id: string;
@@ -32,7 +36,7 @@ type TransactionsPanelProps = {
   transactions: CreditTransaction[];
 };
 
-type FilterValue = 'ALL' | 'ADMIN' | 'PACKAGE' | 'OFFER' | 'REFUND';
+type FilterValue = 'ALL' | 'ADMIN' | 'PACKAGE' | 'OFFER' | 'REFUND' | 'CAMPAIGN';
 
 const TYPE_LABELS: Record<CreditTransactionType, string> = {
   ADMIN_GRANT: 'Yönetici eklemesi',
@@ -41,6 +45,9 @@ const TYPE_LABELS: Record<CreditTransactionType, string> = {
   OFFER_SPEND: 'Teklif harcaması',
   OFFER_REFUND: 'Teklif iadesi',
   ADJUSTMENT: 'Düzeltme',
+  CAMPAIGN_GRANT: 'Promosyon kredisi',
+  CAMPAIGN_EXPIRE: 'Promosyon süresi doldu',
+  CAMPAIGN_REVOKE: 'Promosyon geri alındı',
 };
 
 const TYPE_BADGE_CLASS: Record<CreditTransactionType, string> = {
@@ -50,6 +57,9 @@ const TYPE_BADGE_CLASS: Record<CreditTransactionType, string> = {
   OFFER_SPEND: 'transaction-type-badge tone-spend',
   OFFER_REFUND: 'transaction-type-badge tone-refund',
   ADJUSTMENT: 'transaction-type-badge tone-adjustment',
+  CAMPAIGN_GRANT: 'transaction-type-badge tone-grant',
+  CAMPAIGN_EXPIRE: 'transaction-type-badge tone-adjustment',
+  CAMPAIGN_REVOKE: 'transaction-type-badge tone-deduct',
 };
 
 const FILTERS: { value: FilterValue; label: string; matches: (t: CreditTransaction) => boolean }[] = [
@@ -62,6 +72,7 @@ const FILTERS: { value: FilterValue; label: string; matches: (t: CreditTransacti
   { value: 'PACKAGE', label: 'Paket', matches: (t) => t.type === 'PACKAGE_PURCHASE' },
   { value: 'OFFER', label: 'Teklif', matches: (t) => t.type === 'OFFER_SPEND' },
   { value: 'REFUND', label: 'İade', matches: (t) => t.type === 'OFFER_REFUND' },
+  { value: 'CAMPAIGN', label: 'Promosyon', matches: (t) => t.type.startsWith('CAMPAIGN_') },
 ];
 
 // Pinned zone and locale, from the one shared implementation. This file used
@@ -88,6 +99,9 @@ const SOURCE_LABELS: Partial<Record<CreditTransactionType, string>> = {
   OFFER_SPEND: 'Teklif harcaması',
   OFFER_REFUND: 'Teklif iadesi',
   ADJUSTMENT: 'Düzeltme',
+  CAMPAIGN_GRANT: 'Kampanya hak edişi',
+  CAMPAIGN_EXPIRE: 'Promosyon lotu',
+  CAMPAIGN_REVOKE: 'Promosyon lotu',
 };
 
 type SourceInfo = {
@@ -198,6 +212,7 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
             <tbody>
               {filteredTransactions.map((transaction) => {
                 const previousBalance = transaction.balanceAfter - transaction.amount;
+                const reason = formatLedgerReason(transaction.reason);
                 const source = sourceInfo(transaction);
                 const isPositive = transaction.amount >= 0;
                 const isManualType =
@@ -224,8 +239,15 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
                       <strong>{transaction.balanceAfter}</strong>
                     </td>
                     <td>
-                      {transaction.reason ? (
-                        transaction.reason
+                      {reason ? (
+                        <div className="cell-stack">
+                          <span>{reason.label}</span>
+                          {reason.note ? (
+                            <span className="cell-muted" style={{ fontSize: 12 }}>
+                              Not: {reason.note}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : (
                         <span className="cell-muted">—</span>
                       )}

@@ -659,7 +659,10 @@ export type CreditTransactionType =
   | 'PACKAGE_PURCHASE'
   | 'OFFER_SPEND'
   | 'OFFER_REFUND'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  | 'CAMPAIGN_GRANT'
+  | 'CAMPAIGN_EXPIRE'
+  | 'CAMPAIGN_REVOKE';
 
 export type OfferCreditPackage = {
   id: string;
@@ -1250,6 +1253,9 @@ export const CREDIT_TRANSACTION_TYPES: CreditTransactionType[] = [
   'ADMIN_GRANT',
   'ADMIN_DEDUCT',
   'ADJUSTMENT',
+  'CAMPAIGN_GRANT',
+  'CAMPAIGN_EXPIRE',
+  'CAMPAIGN_REVOKE',
 ];
 
 export type CreditLedgerProvider = {
@@ -1270,6 +1276,8 @@ export type CreditLedgerEntry = {
   referenceType: string | null;
   referenceId: string | null;
   sourceNumber: string | null;
+  /** The campaign behind a CAMPAIGN_* row (CMP-004 S4); null on every other row. */
+  campaign: { id: string; name: string; versionNumber: number } | null;
   provider: CreditLedgerProvider;
   createdBy: {
     id: string;
@@ -1852,6 +1860,9 @@ export function creditTxnTypeLabel(type: string) {
     OFFER_SPEND: 'Teklif harcaması',
     OFFER_REFUND: 'Teklif iadesi',
     ADJUSTMENT: 'Düzeltme',
+    CAMPAIGN_GRANT: 'Promosyon kredisi',
+    CAMPAIGN_EXPIRE: 'Promosyon süresi doldu',
+    CAMPAIGN_REVOKE: 'Promosyon geri alındı',
   };
 
   return labels[type] ?? type;

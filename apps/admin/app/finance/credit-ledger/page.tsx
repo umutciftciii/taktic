@@ -36,6 +36,12 @@ const TYPE_LABELS: Record<CreditTransactionType, string> = {
   ADMIN_GRANT: 'Manuel Kredi Ekleme',
   ADMIN_DEDUCT: 'Manuel Kredi Düşme',
   ADJUSTMENT: 'Sistem Düzeltmesi',
+  // CMP-004 S4: the three campaign movements — a grant is credit in (green),
+  // an expiry is credit leaving by the calendar (neutral), a revoke is credit
+  // taken back (red).
+  CAMPAIGN_GRANT: 'Promosyon Kredisi',
+  CAMPAIGN_EXPIRE: 'Promosyon Süresi Doldu',
+  CAMPAIGN_REVOKE: 'Promosyon Geri Alındı',
 };
 
 const TYPE_BADGE_CLASS: Record<CreditTransactionType, string> = {
@@ -45,6 +51,9 @@ const TYPE_BADGE_CLASS: Record<CreditTransactionType, string> = {
   ADMIN_GRANT: 'badge badge-good',
   ADMIN_DEDUCT: 'badge badge-bad',
   ADJUSTMENT: 'badge badge-muted',
+  CAMPAIGN_GRANT: 'badge badge-good',
+  CAMPAIGN_EXPIRE: 'badge badge-muted',
+  CAMPAIGN_REVOKE: 'badge badge-bad',
 };
 
 function normalizeType(value: string | undefined): CreditTransactionType | '' {
@@ -301,6 +310,7 @@ function LedgerRow({ entry }: { entry: CreditLedgerEntry }) {
     entry.referenceType,
     entry.referenceId,
     entry.sourceNumber,
+    entry.campaign,
   );
 
   return (

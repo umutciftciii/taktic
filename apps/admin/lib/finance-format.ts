@@ -26,6 +26,22 @@ const REASON_LABELS: Record<string, string> = {
   MANUAL_ADJUSTMENT: 'Manuel düzeltme',
   ADMIN_REFUND: 'Yönetici iadesi',
   AUTO_REFUND: 'Otomatik iade',
+  // CMP-004 S4: the campaign ledger codes (`promo-credit-ledger.ts`
+  // PROMO_LEDGER_REASON). The two with a tail are handled below, because
+  // their tail is the meaning, not an operator's note.
+  CAMPAIGN_GRANT: 'Kampanya promosyon kredisi',
+  PROMO_LOT_EXPIRED: 'Promosyon süresi doldu',
+};
+
+/**
+ * The campaign codes whose `:` tail names a cause, folded into the label so
+ * the screen never prints "Not: PAYMENT_REVERSED" under a promotion row.
+ */
+const TAILED_CAMPAIGN_REASONS: Record<string, (tail: string) => string> = {
+  PROMO_LOT_REVOKED: (tail) =>
+    `Promosyon geri alındı (${tail === 'PAYMENT_REVERSED' ? 'ödeme iadesi' : tail === 'ADMIN_REVOKED' ? 'yönetici' : tail.toLowerCase()})`,
+  PROMO_FORFEIT_ON_REFUND: (tail) =>
+    `Teklif iadesinde promosyon payı düştü (${tail === 'REVOKED' ? 'geri alınmış lot' : tail === 'EXPIRED' ? 'süresi dolmuş lot' : tail.toLowerCase()})`,
 };
 
 export type LedgerReason = {
@@ -42,6 +58,10 @@ export function formatLedgerReason(raw: string | null | undefined): LedgerReason
   const head = separatorIndex >= 0 ? trimmed.slice(0, separatorIndex).trim() : trimmed;
   const tail = separatorIndex >= 0 ? trimmed.slice(separatorIndex + 1).trim() : '';
 
+  const tailed = TAILED_CAMPAIGN_REASONS[head];
+  if (tailed) {
+    return { label: tailed(tail), note: null };
+  }
   const mapped = REASON_LABELS[head];
   if (mapped) {
     return { label: mapped, note: tail || null };
@@ -52,7 +72,13 @@ export function formatLedgerReason(raw: string | null | undefined): LedgerReason
 const REFERENCE_TYPE_LABELS: Record<string, string> = {
   Offer: 'Teklif kaydı',
   PackagePurchase: 'Paket satın alma',
+  CampaignRedemption: 'Kampanya hak edişi',
+  PromoCreditLot: 'Promosyon lotu',
+  PromoCreditLotConsumption: 'Promosyon payı',
 };
+
+/** The campaign the API resolved behind a CAMPAIGN_* row (CMP-004 S4). */
+export type LedgerCampaignRef = { id: string; name: string; versionNumber: number };
 
 export type LedgerSource = {
   label: string;
@@ -73,7 +99,20 @@ export function formatLedgerSource(
   referenceType: string | null | undefined,
   referenceId: string | null | undefined,
   sourceNumber?: string | null,
+  campaign?: LedgerCampaignRef | null,
 ): LedgerSource {
+  // A campaign row links to the campaign itself, by name and rule version —
+  // the reference the row carries (redemption, lot, share) is an accounting
+  // key with no screen of its own.
+  if (campaign) {
+    return {
+      label: 'Kampanya',
+      displayNumber: `${campaign.name} · sürüm ${campaign.versionNumber}`,
+      shortId: null,
+      href: `/campaigns/${campaign.id}`,
+      isSystem: false,
+    };
+  }
   if (!referenceType) {
     return {
       label: SYSTEM_SOURCE_LABEL,
