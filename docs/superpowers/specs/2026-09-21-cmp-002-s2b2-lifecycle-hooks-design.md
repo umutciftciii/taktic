@@ -5,7 +5,8 @@ Branch: `claude/cmp-002-s2b2-lifecycle-hooks-3f7a2c` · Bağlayıcı sözleşme:
 Önceki dilimler: S0/S1 (`2026-09-19-cmp-002-s0-s1-campaign-drafts-design.md`), S2A (`…-s2a-engine-infrastructure-design.md`),
 S2B1 (`2026-09-20-cmp-002-s2b1-promo-credit-accounting-design.md`) ·
 **Revizyon 2 (aynı gün, aynı PR):** hata-izolasyonu düzeltmesi — ilk revizyonun "ENGINE_ERROR → 409 → ana transaction rollback"
-kararı (eski D2) **kaldırıldı**; hook'lar iki aşamaya ayrıldı (§1a, §4a–4c), Migration E (§4b).
+kararı (eski D2) **kaldırıldı**; hook'lar iki aşamaya ayrıldı (§1a, §4a–4c), Migration E (§4b). **Revizyon 3 (aynı PR):** faz-A
+dayanıklılık kuralı düzeltildi — rev. 2'nin "JS hatası → savepoint geri + iş commit" fallback'i **kaldırıldı** (D2a, §4a, §4d).
 
 Bu dilim motoru **gerçek olaylara bağlar** ve kampanyaya **yaşam döngüsü** verir. Motor anahtarını (`campaignEngineEnabled`)
 açan hiçbir uç, UI ya da seed **yoktur**; anahtar kapalıyken (bugün her gerçek ortam) hiçbir gerçek yol kampanya/hak ediş/lot/
@@ -20,7 +21,7 @@ mümkün olmadığı §8'de gösterilir.
 | --- | --- | --- |
 | D1 | **Modül ayrımı:** motor `CampaignEngineModule` (yalnız `PrismaModule` import eder; `CampaignEngineHooks` + `FactSourceRegistry` export eder), admin API `CampaignsModule` (AuthModule + CampaignEngineModule). Domain modülleri (providers, email-verification, phone-verification, payments, package-purchases) **yalnız** `CampaignEngineModule` import eder. | `AuthModule → EmailVerificationModule` bağı var; `CampaignsModule` AuthModule'e bağımlı olduğundan e-posta modülü onu import etseydi döngü oluşurdu. Dar facade "kampanya modülünü yalnız gerekli internal servislerin kullanabileceği biçimde dışa aç" gereğini yapısal kılar: `CampaignEngineService`/repository export edilmez, public uç yok. |
 | D2 (rev. 2) | **İki aşamalı hook; motor hatası ana işlemi asla geri almaz.** Stage A (iş tx'i içinde): motor açıksa yalnız deterministik `CampaignTriggerEvent`'i **PENDING** olarak ensure et — kural, bütçe, stack, grant değerlendirilmez. Stage B (`CampaignEvaluationWorker`, cron tick, kendi Serializable tx'i): lease'li claim → `engine.evaluate` → SETTLED / EVALUATED / RETRY_WAIT. ENGINE_ERROR: EvaluationLog `{ENGINE_ERROR, reasonCode}` (PII'siz), `lastErrorCode`, backoff; onay/kanıt/ödeme çoktan commit'lenmiştir. Rev. 1'in `409 CAMPAIGN_ENGINE_FAILED` + rollback kararı kaldırıldı. | Görev tanımı (rev. 2): "değerlendirme hatası hiçbir zaman onay/kanıt/ödeme/mock settle'ı 409 ile geri almayacak; hak ediş olayı da kaybolmayacak". Dayanıklı PENDING satırı ikisini birden sağlar. |
-| D2a | **Stage A hata kuralı:** kampanya kaynaklı runtime hata (JS) savepoint'e geri alınır, loglanır, iş tx'i commit eder (`HOOK_ERROR`); **DB hatası** (Prisma error / `P****`) yayılır → iş tx'i geri alınır, `503 CAMPAIGN_EVENT_NOT_DURABLE` (webhook non-2xx → yeniden teslim; operatör tekrar dener). P2034 yayılır → `runSerializable` yeniden oynatır. | "İş işlendi ama olay kesin kayıp kabul edilmez"; JS hatası pratikte yalnız kod hatasıdır ve olay üretilmez (fabrikasyon yok). |
+| D2a (rev. 3) | **Stage A dayanıklılık kuralı:** motor açıkken iş tx'i **yalnız** deterministik PENDING event aynı tx'te ensure edilmişse commit edebilir. PENDING event durable olmadan oluşan **her** hata — JS/TypeError, doğrulama, serialization, DB — ayrım yapılmadan yayılır → iş tx'i geri alınır, `503 CAMPAIGN_EVENT_NOT_DURABLE` (webhook non-2xx → yeniden teslim; onay/kanıt tekrar denenir, aynı token/kod geçerli kalır). P2034 yayılır → `runSerializable` yeniden oynatır. Savepoint fallback'i, genel `catch`, `HOOK_ERROR` sonucu **yok**. Motor kapalıyken önceki sıfır-etki (event bile yok). | Rev. 2'deki "JS hatası → iş commit" yolu, hata event yazılmadan oluşursa "iş işlendi ama hak ediş olayı kesin kayıp" demekti (worker'ın alacağı satır yok) — sessiz-kayıp yasağını ihlal ediyordu. Faz A kampanya kuralı/stack/limit/bütçe/grant çalıştırmadığından kampanya tanımı kaynaklı hata faz A'ya taşınamaz; faz A'daki tek hata sınıfı "event yazılamadı"dır ve doğru yanıt rollback + retry'dır. |
 | D3 | **Çakışma/retry (stage A):** `CampaignEngineWriteConflict` (P2034) hook'tan geçer, çağıranın `runSerializable`'ı iş tx'ini yeniden oynatır; bütçe biterse 409 `CONCURRENT_MODIFICATION`. `updateProviderStatus` ve `EmailVerificationService.confirm` bu yüzden `runSerializable`'a taşındı. Webhook committed-state'ten karar verir. **Stage B:** P2034 tükenirse event `RETRY_WAIT{CONCURRENT_MODIFICATION}`; başka hata `RETRY_WAIT{WORKER_ERROR}`; hiçbir hata event'i terminal-unutulmuş yapmaz. | CMP-001 §2.3, §10.3; rev. 2 "transient conflict retryable, event kalıcı kaybolmaz". |
 | D4 | **Grant sırası** (aday savepoint'i altında): sayaçlar (provider/gün/global+bütçe, koşullu `updateMany`) → `CampaignRedemption` → S2B1 `grantPromoCreditLot` (CAMPAIGN_GRANT ledger → `PromoCreditLot` → `grantTransactionId`) → `CampaignTriggerEvent.settled*` → log satırları. `createRedemptionAndLot` kaldırıldı, `createRedemption` + primitive; `grantPromoCreditLot` sözleşmesi **değişmedi**. | Görev tanımı sırası; tek ledger yazıcısı S2B1 primitive'i. |
 | D5 | **FactSourceRegistry dinamik kayıt:** yazıcı servisler `onModuleInit`'te `hooks.registerFactWriter(source, {module, role: PROVIDER})` çağırır. Kaynak kümesi olgular + `PACKAGE_PAYMENT_SUCCEEDED`. Aktivasyon kapısı `hasProviderWriter` okur. | "Kayıtlı yazıcı" = boot etmiş ve hook'u çağıran modül; statik liste bir yorumdan farksız olurdu. Tetikleyici de kapıdan geçer ("kullanılan trigger/fact koşullarının yazıcıları kayıtlı"). |
@@ -88,11 +89,10 @@ teslim 200 + PENDING event ("ödeme işlendi ama olay kayboldu" imkânsız); (c)
 ```
 Stage A (iş tx'i, runSerializable; her kanonik yazıcının son adımı, guard'lı updateMany count===1 sonrası)
   isEnabled(tx)? hayır → dön (sıfır yazı)
-  SAVEPOINT cmp_fact
-    PROVIDER_APPROVED  : ensurePendingEvent(PROVIDER_APPROVED:<p>) + her ACTIVE fact-set için olguları yeniden oku → tamamsa ensurePendingEvent(ELIGIBILITY:<set>:<p>)
-    EMAIL/PHONE_VERIFIED: profil PROVIDER değilse NOT_A_PROVIDER_FACT; fact-set'ler → tamamsa ensurePendingEvent
-    PACKAGE_PAYMENT    : ensurePendingEvent(PACKAGE_PAYMENT_SUCCEEDED:<purchase>)
-  RELEASE | JS hatası → ROLLBACK TO cmp_fact, HOOK_ERROR (iş commit) | DB hatası → 503, iş rollback | P2034 → replay
+  PROVIDER_APPROVED  : ensurePendingEvent(PROVIDER_APPROVED:<p>) + her ACTIVE fact-set için olguları yeniden oku → tamamsa ensurePendingEvent(ELIGIBILITY:<set>:<p>)
+  EMAIL/PHONE_VERIFIED: profil PROVIDER değilse NOT_A_PROVIDER_FACT; fact-set'ler → tamamsa ensurePendingEvent
+  PACKAGE_PAYMENT    : ensurePendingEvent(PACKAGE_PAYMENT_SUCCEEDED:<purchase>)
+  herhangi bir hata (JS/DB/doğrulama) → 503 CAMPAIGN_EVENT_NOT_DURABLE, iş tx'i rollback | P2034 → replay   (savepoint/fallback yok)
 Stage B (CampaignEvaluationWorker.runOnce, cron)
   isEnabled()? hayır → skipped ENGINE_DISABLED (claim yok)
   döngü: claimDueEvent (UPDATE … WHERE id=(SELECT … FOR UPDATE SKIP LOCKED) → PROCESSING, leaseUntil=now+5dk, attemptCount+1)
@@ -116,6 +116,17 @@ Stage B (CampaignEvaluationWorker.runOnce, cron)
 Kolonlar: `status`, `attemptCount`, `lastAttemptAt`, `nextAttemptAt` (default now), `leaseUntil`, `claimedAt`, `lastErrorCode`, `lastErrorAt`;
 index `(status, nextAttemptAt)`; CHECK `attemptCount >= 0`, `(status='SETTLED') = (settledRedemptionId IS NOT NULL)`.
 `triggerEventKey` global unique, `CampaignRedemption @@unique([campaignId, triggerEventKey])`, settled alanlar değişmedi. DML/backfill/DROP/ALTER COLUMN yok.
+
+### 4d. Faz-A hata tablosu — commit/rollback matrisi (rev. 3)
+
+| Sınıf | Ne zaman | Örnek | İş yazımı (onay/kanıt/PAID+PROCESSED) | Event | Yanıt | Sonraki adım |
+| --- | --- | --- | --- | --- | --- | --- |
+| Motor kapalı | her zaman | — | **commit** | yok (sıfır etki) | normal | — |
+| **1 — event durable değil** | ensure öncesi/sırası: fact-set okuma, olgu okuma, anahtar üretimi, insert | TypeError, Prisma P2003, doğrulama | **rollback** | 0 | `503 CAMPAIGN_EVENT_NOT_DURABLE` (webhook non-2xx) | aynı istek tekrar: yeniden teslim / tekrar onay / aynı token-kod → tek PENDING event → worker tek grant |
+| 1' — serialization | ensure sırasında P2034 | eşzamanlı aynı key | replay (`runSerializable`) | — | replay sonrası normal / 409 `CONCURRENT_MODIFICATION` | replay aynı key'i okur/yazar |
+| **2 — event durable** | PENDING commit'lendikten sonra: worker/evaluator/config/stack/bütçe/grant | bozuk tanım, P2034 tükenmesi, worker hatası | **commit (dokunulmaz)** | `RETRY_WAIT{ENGINE_ERROR / CONCURRENT_MODIFICATION / WORKER_ERROR}` + PII'siz log | (iş yanıtı çoktan verildi) | lease/backoff ile sonraki denemede aynı event; hata kalkınca tek grant |
+
+Faz A'da kampanya kuralı, stack, limit, bütçe ya da grant **çalışmaz**; dolayısıyla kampanya tanımı kaynaklı hiçbir hata sınıf 1'e düşemez.
 
 ### 4c. Retry/lease algoritması
 
