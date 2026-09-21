@@ -3958,12 +3958,20 @@ model CampaignAuditLog {
   campaignId        String
   action            CampaignAuditAction
   campaignVersionId String?
-  actorId           String
+  /// The person who acted, or NULL for the system's own acts (CMP-004 S4,
+  /// Migration G): a payment reversal's revoke and the auto-pause it can
+  /// trigger. A NULL here is legal only with `summary.actorKind = 'SYSTEM'`
+  /// — CHECK `CampaignAuditLog_system_actor_marked` — so an actor-less row
+  /// always says so, and an admin route (which always passes the session's
+  /// user) cannot produce one.
+  actorId           String?
   summary           Json?
   createdAt         DateTime            @default(now())
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
-  actor    User     @relation("CampaignAuditActor", fields: [actorId], references: [id])
+  // Restrict, stated: an optional relation would default to SetNull, and an
+  // audit row must never lose its actor because the account was deleted.
+  actor    User?    @relation("CampaignAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
 
   @@index([campaignId, createdAt])
   @@index([actorId])

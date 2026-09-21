@@ -73,12 +73,12 @@ const redemptionSelect = {
   providerId: true,
   status: true,
   grantedCredits: true,
+  campaignVersion: { select: { versionNumber: true } },
   promoLot: { select: { id: true, status: true, remainingCredits: true } },
   campaign: {
     select: {
       id: true,
       status: true,
-      createdById: true,
       activeVersionId: true,
       activeVersion: { select: { id: true, versionNumber: true, maxRevokesPerDay: true } },
     },
@@ -112,6 +112,27 @@ export class CampaignRevokeService {
     for (const row of rows) {
       const outcome = await this.revoke(tx, row, { kind: 'PAYMENT_REVERSED', webhookEventId: input.webhookEventId }, input.now);
       if (outcome) {
+        // The record of the system's own act (CMP-004 S4): no person, the
+        // SYSTEM marker the database requires, and the same figures the
+        // admin route records — never the webhook's payload or the buyer.
+        await tx.campaignAuditLog.create({
+          data: {
+            campaignId: row.campaignId,
+            action: CampaignAuditAction.REDEMPTION_REVOKED,
+            campaignVersionId: row.campaignVersionId,
+            actorId: null,
+            summary: {
+              actorKind: 'SYSTEM',
+              source: 'PAYMENT_REVERSED',
+              redemptionId: row.id,
+              versionNumber: row.campaignVersion.versionNumber,
+              revokedCredits: outcome.revokedCredits,
+              spentAtRevoke: outcome.spentAtRevoke,
+              revokeCountToday: outcome.revokeCountToday,
+              autoPaused: outcome.autoPaused,
+            },
+          },
+        });
         outcomes.push(outcome);
       }
     }
@@ -230,10 +251,11 @@ export class CampaignRevokeService {
     if (paused.count !== 1) {
       return false;
     }
-    // CampaignAuditLog.actorId is NOT NULL and this slice adds no column to
-    // relax it: a reversal has no human actor, so the campaign's creator is
-    // the nominal one and the summary says who really did it.
-    const actorId = source.kind === 'ADMIN_REVOKED' ? source.actorId : row.campaign.createdById;
+    // The operator whose revoke crossed the line, or nobody: a reversal is
+    // the system's own act and is recorded as such (CMP-004 S4, Migration G
+    // — the SYSTEM marker in the summary is what the CHECK requires of a
+    // NULL actor).
+    const actorId = source.kind === 'ADMIN_REVOKED' ? source.actorId : null;
     await tx.campaignAuditLog.create({
       data: {
         campaignId: row.campaignId,

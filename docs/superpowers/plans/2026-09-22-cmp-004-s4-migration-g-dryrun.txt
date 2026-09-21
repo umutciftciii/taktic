@@ -1,0 +1,42 @@
+# CMP-004 S4 — Migration G dry-run (2026-09-22)
+# Geçici DB: taktic_cmp004_s4_dryrun (yalnız bu dry-run için; sonunda düşürüldü). Yerel 'taktic' ve staging DB'ye dokunulmadı.
+# Not: ilk denemede migrate diff FK'yi 'Restrict → SetNull' olarak işaretledi (opsiyonel ilişkinin Prisma varsayılanı); şemaya onDelete: Restrict açıkça yazıldı, DB değişmedi.
+
+## 1. CREATE DATABASE
+CREATE DATABASE
+
+## 2. prisma migrate deploy
+  └─ 20260921150000_add_campaign_event_evaluation_state/
+    └─ migration.sql
+  └─ 20260921200000_add_campaign_revoke_operations/
+    └─ migration.sql
+  └─ 20260922120000_campaign_audit_system_actor/
+    └─ migration.sql
+      
+All migrations have been successfully applied.
+
+## 3. prisma migrate diff (DB → schema.prisma)
+
+No difference detected.
+
+
+## 4. Migration sayısı
+72
+
+## 5. CampaignAuditLog.actorId ve CHECK
+ column_name | is_nullable 
+-------------+-------------
+ actorId     | YES
+(1 row)
+
+               conname                |                                            pg_get_constraintdef                                             
+--------------------------------------+-------------------------------------------------------------------------------------------------------------
+ CampaignAuditLog_actorId_fkey        | FOREIGN KEY ("actorId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+ CampaignAuditLog_campaignId_fkey     | FOREIGN KEY ("campaignId") REFERENCES "Campaign"(id) ON UPDATE CASCADE ON DELETE RESTRICT
+ CampaignAuditLog_pkey                | PRIMARY KEY (id)
+ CampaignAuditLog_system_actor_marked | CHECK ((("actorId" IS NOT NULL) OR (COALESCE((summary ->> 'actorKind'::text), ''::text) = 'SYSTEM'::text)))
+(4 rows)
+
+
+## 6. DROP DATABASE
+DROP DATABASE

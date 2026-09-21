@@ -442,3 +442,36 @@ describe('Migration F (CMP-003 S3): revoke operations', () => {
     );
   });
 });
+
+describe('Migration G (CMP-004 S4): the system actor', () => {
+  it('accepts an audit row with no actor only when the summary marks it SYSTEM', async () => {
+    const { campaign, version } = await createCampaignFixture(ctx.prisma);
+    const system = await ctx.prisma.campaignAuditLog.create({
+      data: {
+        campaignId: campaign.id,
+        action: 'AUTO_PAUSED',
+        campaignVersionId: version.id,
+        actorId: null,
+        summary: { actorKind: 'SYSTEM', source: 'PAYMENT_REVERSED' },
+      },
+    });
+    expect(system.actorId).toBeNull();
+
+    // An unmarked NULL actor is a row nobody wrote: refused by the database itself.
+    await expectCheckViolation(
+      ctx.prisma.campaignAuditLog.create({
+        data: { campaignId: campaign.id, action: 'PAUSED', actorId: null, summary: { reason: 'x' } },
+      }),
+      'CampaignAuditLog_system_actor_marked',
+    );
+    await expectCheckViolation(
+      ctx.prisma.campaignAuditLog.create({ data: { campaignId: campaign.id, action: 'PAUSED', actorId: null } }),
+      'CampaignAuditLog_system_actor_marked',
+    );
+    // Marking a row SYSTEM does not require the actor to be absent (an admin-sourced auto-pause keeps its admin).
+    const admin = await ctx.prisma.campaignAuditLog.create({
+      data: { campaignId: campaign.id, action: 'AUTO_PAUSED', actorId: campaign.createdById, summary: { actorKind: 'ADMIN' } },
+    });
+    expect(admin.actorId).toBe(campaign.createdById);
+  });
+});

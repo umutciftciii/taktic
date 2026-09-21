@@ -448,10 +448,14 @@ function auditActionLabel(action: string): string {
   }
 }
 
-/** The actor line of an audit row: the person, or "system" when a payment reversal crossed the threshold (the stored actor is then nominal). */
+/**
+ * The actor line of an audit row: the person, or "Sistem" for the system's
+ * own acts. Since CMP-004 S4 those rows carry no actor at all; the summary's
+ * SYSTEM marker still decides for the rows S3 wrote against a nominal person.
+ */
 function auditActorLabel(entry: CampaignAuditEntry): string {
-  if (entry.action === 'AUTO_PAUSED' && entry.summary?.actorKind === 'SYSTEM') {
-    return 'Sistem (ödeme iadesi)';
+  if (entry.actor === null || entry.summary?.actorKind === 'SYSTEM') {
+    return entry.summary?.source === 'PAYMENT_REVERSED' ? 'Sistem (ödeme iadesi)' : 'Sistem';
   }
   return entry.actor.name ?? '—';
 }

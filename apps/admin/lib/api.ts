@@ -3031,7 +3031,8 @@ export type CampaignAuditEntry = {
   id: string;
   action: CampaignAuditAction;
   campaignVersionId: string | null;
-  actor: CampaignActor;
+  /** The person, or null for the system's own acts (CMP-004 S4: a payment reversal's revoke or auto-pause). */
+  actor: CampaignActor | null;
   summary: {
     versionNumber?: number | null;
     previousActiveVersionNumber?: number | null;
@@ -3041,7 +3042,7 @@ export type CampaignAuditEntry = {
     maxRedemptionsPerProvider?: number;
     changedFields?: string[];
     reason?: string;
-    /** AUTO_PAUSED (CMP-003 S3): SYSTEM when a payment reversal crossed the threshold; the actor is then nominal. */
+    /** SYSTEM on a payment reversal's revoke / auto-pause (actor null since CMP-004 S4; nominal on older rows), ADMIN otherwise. */
     actorKind?: 'SYSTEM' | 'ADMIN';
     source?: string;
     revokeCount?: number;
