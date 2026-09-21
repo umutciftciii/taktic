@@ -7,6 +7,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
@@ -14,6 +15,7 @@ import { randomInt } from 'node:crypto';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { maskPhone } from '../notifications/mask';
 import { NotificationDispatcher } from '../notifications/notification-dispatcher.service';
 import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
@@ -39,7 +41,7 @@ export type VerificationRequestMeta = {
 const BCRYPT_ROUNDS = 10;
 
 @Injectable()
-export class PhoneVerificationService {
+export class PhoneVerificationService implements OnModuleInit {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(NotificationDispatcher) private readonly notifications: NotificationDispatcher,
@@ -47,7 +49,13 @@ export class PhoneVerificationService {
     private readonly publishSettings: MarketplacePublishSettingsService,
     @Inject(ServiceRequestsService) private readonly requests: ServiceRequestsService,
     @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
+    @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
   ) {}
+
+  /** `verifyAccountCode` below is the PROVIDER writer of PHONE_VERIFIED; the request flow's CUSTOMER write is not a campaign fact. */
+  onModuleInit() {
+    this.campaignHooks.registerFactWriter('PHONE_VERIFIED', { module: 'phone-verification', role: UserRole.PROVIDER });
+  }
 
   async sendCode(requestId: string, user: AuthUser, meta: VerificationRequestMeta) {
     const serviceRequest = await this.getOwnedRequest(requestId, user);
@@ -420,9 +428,10 @@ export class PhoneVerificationService {
 
         // CMP-002 fact callback: PHONE_VERIFIED — the PROVIDER writer of this
         // proof. `proven.count === 1` is the moment the fact first became true
-        // for this account, inside the transaction that made it durable. The
-        // campaign engine (CMP-001 §8.3) will call `onProviderFact(tx,
-        // user.id, 'PHONE_VERIFIED')` here; nothing is granted in this PR.
+        // for this account, inside the transaction that made it durable, and
+        // this is that transaction's last step. A business outcome never
+        // fails the proof; an engine fault rolls it back with a retryable 409.
+        await this.campaignHooks.accountFactProven(tx, user.id, 'PHONE_VERIFIED');
 
         return { ok: true as const, verifiedAt: now };
       },

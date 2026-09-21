@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  type OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
@@ -13,12 +14,14 @@ import {
   PackagePurchaseStatus,
   PaymentWebhookEventStatus,
   Prisma,
+  UserRole,
 } from '@prisma/client';
 import {
   isConcurrentModificationError,
   runSerializable,
 } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
@@ -149,7 +152,7 @@ type ExistingEvent = {
 };
 
 @Injectable()
-export class PaymentsWebhookService {
+export class PaymentsWebhookService implements OnModuleInit {
   private readonly logger = new Logger('PaymentsWebhook');
 
   constructor(
@@ -158,7 +161,16 @@ export class PaymentsWebhookService {
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
     @Inject(ShowcasePlacementService) private readonly placements: ShowcasePlacementService,
     @Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService,
+    @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
   ) {}
+
+  /** `settle` below raises PACKAGE_PAYMENT_SUCCEEDED for every purchase it writes PAID (CMP-002 S2B2). */
+  onModuleInit() {
+    this.campaignHooks.registerFactWriter('PACKAGE_PAYMENT_SUCCEEDED', {
+      module: 'payments-webhook',
+      role: UserRole.PROVIDER,
+    });
+  }
 
   async handleLemonSqueezyDelivery(
     rawBody: Buffer | undefined,
@@ -545,6 +557,8 @@ export class PaymentsWebhookService {
         },
       });
 
+      await this.campaignHooks.packagePaymentSucceeded(tx, purchase.providerId, purchase.id);
+
       return { mismatch: null, purchaseId: purchase.id };
     }
 
@@ -587,6 +601,19 @@ export class PaymentsWebhookService {
         ...(creditTransaction ? { creditTransactionId: creditTransaction.id } : {}),
       },
     });
+
+    /*
+     * CMP-002 S2B2: the PACKAGE_PAYMENT_SUCCEEDED campaign event, raised only
+     * here — after every check above passed and the purchase is PAID in this
+     * transaction — and in the mock adapter's mirror of this path. It runs
+     * *before* the attempt record is written PROCESSED (in loadCredits), so
+     * the event's terminal mark can never exist without a committed
+     * evaluation beside it. A business outcome (no candidate, a limit, a
+     * failed condition) changes nothing here; a write conflict replays the
+     * whole delivery; an engine fault rolls the settlement back and answers
+     * non-2xx, which the provider treats as "deliver again".
+     */
+    await this.campaignHooks.packagePaymentSucceeded(tx, purchase.providerId, purchase.id);
 
     return { mismatch: null, purchaseId: purchase.id };
   }

@@ -1,8 +1,10 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
+import { runSerializable } from '../../common/serializable-transaction';
 import { emailVerificationUrl } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import {
   EMAIL_VERIFICATION_MAX_PER_WINDOW,
@@ -50,13 +52,19 @@ const VERIFIABLE_ROLES: ReadonlySet<UserRole> = new Set([UserRole.CUSTOMER, User
 export type VerifiedAccountKind = 'CUSTOMER' | 'PROVIDER';
 
 @Injectable()
-export class EmailVerificationService {
+export class EmailVerificationService implements OnModuleInit {
   private readonly logger = new Logger(EmailVerificationService.name);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
   ) {}
+
+  /** `confirm` below is the one writer of EMAIL_VERIFIED for every kind of account; registered for PROVIDER accounts. */
+  onModuleInit() {
+    this.campaignHooks.registerFactWriter('EMAIL_VERIFIED', { module: 'email-verification', role: UserRole.PROVIDER });
+  }
 
   /**
    * Called by registration, right after the account exists — customer or
@@ -133,38 +141,48 @@ export class EmailVerificationService {
       record.user.role === UserRole.PROVIDER ? 'PROVIDER' : 'CUSTOMER';
 
     try {
-      await this.prisma.$transaction(async (tx) => {
-        const claimed = await tx.emailVerificationToken.updateMany({
-          where: { id: record.id, usedAt: null, expiresAt: { gt: now } },
-          data: { usedAt: now },
-        });
+      // Serializable and replayed on a write conflict (S2B2): for a PROVIDER
+      // account the campaign engine runs in this transaction once the proof
+      // is written, and its conditional counters may collide with a
+      // concurrent grant. The token and proof writes are unchanged.
+      await runSerializable(
+        this.prisma,
+        async (tx) => {
+          const claimed = await tx.emailVerificationToken.updateMany({
+            where: { id: record.id, usedAt: null, expiresAt: { gt: now } },
+            data: { usedAt: now },
+          });
 
-        if (claimed.count === 0) {
-          throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
-        }
+          if (claimed.count === 0) {
+            throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
+          }
 
-        // Conditional on the address still being the one the link was mailed
-        // to. A link that went to an address the account has since left must
-        // not verify the new one — the same rule the claim flow applies, for
-        // the same reason.
-        const proven = await tx.user.updateMany({
-          where: { id: record.userId, email: record.emailSnapshot, emailVerifiedAt: null },
-          data: { emailVerifiedAt: now },
-        });
+          // Conditional on the address still being the one the link was mailed
+          // to. A link that went to an address the account has since left must
+          // not verify the new one — the same rule the claim flow applies, for
+          // the same reason.
+          const proven = await tx.user.updateMany({
+            where: { id: record.userId, email: record.emailSnapshot, emailVerifiedAt: null },
+            data: { emailVerifiedAt: now },
+          });
 
-        // CMP-002 fact callback: EMAIL_VERIFIED — the one writer of this
-        // proof for every kind of account. `proven.count === 1` is the moment
-        // the fact first became true for this user, inside the transaction
-        // that made it durable; a replay (count 0) is not a new fact. The
-        // campaign engine (CMP-001 §8.3) will call `onProviderFact(tx, userId,
-        // 'EMAIL_VERIFIED')` here, and nowhere else, for a PROVIDER user.
-        void proven;
+          await tx.emailVerificationToken.updateMany({
+            where: { userId: record.userId, usedAt: null },
+            data: { usedAt: now },
+          });
 
-        await tx.emailVerificationToken.updateMany({
-          where: { userId: record.userId, usedAt: null },
-          data: { usedAt: now },
-        });
-      });
+          // CMP-002 fact callback: EMAIL_VERIFIED — the one writer of this
+          // proof for every kind of account. `proven.count === 1` is the moment
+          // the fact first became true for this user, inside the transaction
+          // that made it durable; a replay (count 0) is not a new fact. The
+          // hook resolves the PROVIDER profile itself and does nothing for a
+          // customer's or an operator's proof. Last step of the transaction.
+          if (proven.count === 1 && record.user.role === UserRole.PROVIDER) {
+            await this.campaignHooks.accountFactProven(tx, record.userId, 'EMAIL_VERIFIED');
+          }
+        },
+        { label: 'emailVerification.confirm' },
+      );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');

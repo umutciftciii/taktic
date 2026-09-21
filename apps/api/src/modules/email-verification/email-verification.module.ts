@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { CampaignEngineModule } from '../campaigns/engine/campaign-engine.module';
 import { EmailVerificationService } from './email-verification.service';
 
 /**
@@ -14,7 +15,9 @@ import { EmailVerificationService } from './email-verification.service';
  * arrangement CustomerActivationModule uses.
  */
 @Module({
-  imports: [PrismaModule],
+  // CampaignEngineModule imports only Prisma, so the no-AuthModule rule above
+  // still holds: the proof write raises the EMAIL_VERIFIED fact (CMP-002 S2B2).
+  imports: [PrismaModule, CampaignEngineModule],
   providers: [EmailVerificationService],
   exports: [EmailVerificationService],
 })

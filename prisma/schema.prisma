@@ -3819,6 +3819,15 @@ enum CampaignStackPolicy {
 enum CampaignAuditAction {
   CREATED
   VERSION_CREATED
+  /// Lifecycle (CMP-002 S2B2). ACTIVATED is DRAFT → ACTIVE; VERSION_ACTIVATED
+  /// records which immutable version became `activeVersionId` (written on
+  /// every activation, including the first); PAUSED / RESUMED / ENDED are the
+  /// remaining transitions. ENDED is terminal.
+  ACTIVATED
+  VERSION_ACTIVATED
+  PAUSED
+  RESUMED
+  ENDED
 }
 
 /// A campaign's identity and lifecycle. What it *does* lives in its versions.

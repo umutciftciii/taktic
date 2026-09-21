@@ -11,9 +11,10 @@ import { PRISMA_WRITE_CONFLICT_ERROR_CODE } from '../../../common/serializable-t
 /**
  * Every row the campaign engine writes, and the few it reads to decide
  * (CMP-001 §12.4). One method per step, all on the caller's transaction
- * client, none of them reaching the credit ledger: `ProviderCreditTransaction`
- * is not named in this file, and S2B adds the CAMPAIGN_GRANT write beside
- * `createRedemptionAndLot` when the enum grows.
+ * client. The credit ledger and the promo lot are *not* written here: the
+ * engine service calls the S2B1 grant primitive (`grantPromoCreditLot`) right
+ * after `createRedemption`, so CAMPAIGN_GRANT, the lot and the redemption's
+ * `grantTransactionId` come from the one writer that owns that accounting.
  *
  * Savepoints are plain SQL on the transaction's own connection (a Prisma
  * interactive transaction holds exactly one). They are what let a unique
@@ -306,12 +307,13 @@ export class CampaignEngineRepository {
   // ─────────────────────────────── grant ────────────────────────────────
 
   /**
-   * The redemption and its lot. No ledger row: `grantTransactionId` stays
-   * NULL in S2A (design note D3). A P2002 here is the same-campaign-same-event
-   * backstop; the caller rolls back to the candidate savepoint and records
-   * ALREADY_REDEEMED.
+   * The redemption row, and only that. The ledger row, the lot and the link
+   * between them follow in the service through `grantPromoCreditLot`, whose
+   * contract (S2B1) this slice does not change. A P2002 here is the
+   * same-campaign-same-event backstop; the caller rolls back to the candidate
+   * savepoint and records ALREADY_REDEEMED.
    */
-  async createRedemptionAndLot(
+  async createRedemption(
     tx: Prisma.TransactionClient,
     args: {
       candidate: CandidateRow;
@@ -320,7 +322,7 @@ export class CampaignEngineRepository {
       userId: string | null;
       now: Date;
     },
-  ) {
+  ): Promise<{ redemptionId: string }> {
     const version = args.candidate.activeVersion;
     const redemption = await tx.campaignRedemption.create({
       data: {
@@ -338,17 +340,7 @@ export class CampaignEngineRepository {
       },
       select: { id: true },
     });
-    const lot = await tx.promoCreditLot.create({
-      data: {
-        providerId: args.providerId,
-        redemptionId: redemption.id,
-        grantedCredits: version.benefitCredits,
-        remainingCredits: version.benefitCredits,
-        expiresAt: new Date(args.now.getTime() + version.benefitExpiresInDays * 86_400_000),
-      },
-      select: { id: true, expiresAt: true },
-    });
-    return { redemptionId: redemption.id, lotId: lot.id, expiresAt: lot.expiresAt };
+    return { redemptionId: redemption.id };
   }
 
   // ──────────────────────────────── log ─────────────────────────────────

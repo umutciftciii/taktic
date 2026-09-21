@@ -48,6 +48,8 @@ export const CAMPAIGN_LIMITS: Readonly<Record<string, Bounds & { required: boole
 export const CAMPAIGN_STACK_POLICIES: readonly string[] = catalog.stackPolicies;
 export const CAMPAIGN_PRIORITY: Bounds & { default: number } = catalog.priority;
 export const CAMPAIGN_RULE_ERROR_CODE_LIST: readonly string[] = catalog.errorCodes;
+/** Refusals only activation can produce (CMP-001 §8.4, §10.4): the pure validator never emits them. */
+export const CAMPAIGN_ACTIVATION_ERROR_CODE_LIST: readonly string[] = catalog.activationErrorCodes;
 
 export type CampaignTriggerCode = (typeof catalog.triggers)[number];
 export type CampaignFactCode = (typeof catalog.facts)[number];
