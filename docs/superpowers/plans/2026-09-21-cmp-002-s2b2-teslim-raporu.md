@@ -133,7 +133,7 @@ Yaşam döngüsü tablosu ve kapı (tasarım notu §2) rev. 1 ile aynı; kanıt 
 | Migration D dry-run | ✅ 69 migration, diff boş, yalnız 5 `ALTER TYPE` |
 | **Migration E dry-run** | ✅ 70 migration, diff boş; `CampaignTriggerEvent` eski 12 kolon tür/default aynı + 8 yeni kolon; ifade türleri: 1 CREATE TYPE, 3 ALTER TABLE (8 ADD COLUMN, 2 CHECK), 1 CREATE INDEX — DML/DROP/ALTER COLUMN 0 |
 | CI (rev. 2 kod head'i `5c21fd31`, run 35597614424) | ✅ 3/3 |
-| CI (rev. 3 kod head'i `232146c0`) | rapor push'undan sonra başlayan run; nihai sonuç PR'da ve bu satırda güncellenir |
+| CI (rev. 3 head `15dc62f5` = kod `232146c0` + rapor, run 35624765477) | ✅ 3/3: typecheck·lint·test·build (12m44s), e2e chromium (16m40s), e2e webkit (12m51s) |
 
 ## 7. Motor açmak S4'e kadar teknik olarak mümkün değil (değişmedi)
 
