@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  CampaignEngineSettings,
   formatDateTime,
   MarketplacePublishSettings,
   OPERATIONS_SETTING_LABELS,
@@ -14,6 +15,7 @@ import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { saveOperationsSettingsAction } from './actions';
 import { AutoPublishToggle } from './auto-publish-toggle';
+import { CampaignEngineToggle } from './campaign-engine-toggle';
 import { ProviderReviewsToggle } from './provider-reviews-toggle';
 import { SchedulerToggle } from './scheduler-toggle';
 
@@ -61,6 +63,10 @@ const OK_MESSAGES: Record<string, string> = {
     'Hizmet veren değerlendirmeleri açıldı. Bundan sonra tamamlanan işlerde müşteriye değerlendirme daveti gider; mevcut değerlendirmeler public profil ve teklif kartlarında görünür.',
   'provider-reviews-off':
     'Hizmet veren değerlendirmeleri kapatıldı. Müşteri değerlendirme yazamaz, davet gönderilmez; mevcut değerlendirmeler silinmez, yalnız gizlenir.',
+  'campaign-engine-on':
+    'Kampanya motoru açıldı. Bundan sonraki gerçek olaylar (onay, kanıt, ödeme) kaydedilir ve aktif kampanyalar promosyon kredisi verebilir; geçmiş olaylar için hak ediş üretilmez.',
+  'campaign-engine-off':
+    'Kampanya motoru kapatıldı. Yeni olay kaydedilmez ve değerlendirilmez; verilmiş promosyonların iadesi ve geri alınması aynen sürer.',
 };
 
 const RUN_OUTCOME_LABELS: Record<string, string> = {
@@ -78,11 +84,12 @@ export default async function OperationsSettingsPage({
   const errorMessage = (params.error ?? '').trim();
   const okMessage = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
 
-  const [settings, schedulers, publish, reviews] = await Promise.all([
+  const [settings, schedulers, publish, reviews, engine] = await Promise.all([
     apiFetch<OperationsSettings>('/operations-settings'),
     apiFetch<SchedulerSettings>('/operations-settings/schedulers'),
     apiFetch<MarketplacePublishSettings>('/operations-settings/marketplace-publish'),
     apiFetch<ProviderReviewSettings>('/operations-settings/provider-reviews'),
+    apiFetch<CampaignEngineSettings>('/operations-settings/campaign-engine'),
   ]);
 
   // A rejected save carries the operator's own value back in the query, so the
@@ -319,6 +326,74 @@ export default async function OperationsSettingsPage({
                   </thead>
                   <tbody>
                     {reviews.recentChanges.map((change) => (
+                      <tr key={change.id}>
+                        <td>
+                          {change.previousValue === null ? (
+                            <span className="muted">varsayılan (kapalı)</span>
+                          ) : (
+                            schedulerStateLabel(change.previousValue)
+                          )}
+                        </td>
+                        <td>{schedulerStateLabel(change.newValue)}</td>
+                        <td>{change.changedBy?.name ?? '-'}</td>
+                        <td>{formatDateTime(change.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+
+          {/*
+            The campaign engine (CMP-004 S4). Off by default and read
+            fail-closed by every engine path; this is its only writer. Unlike
+            the switches above it asks for an explicit confirmation, because it
+            is the one that starts promotional credit being granted.
+          */}
+          <SectionCard
+            id="kampanya-motoru"
+            title="Kampanya motoru"
+            subtitle="Açıkken aktif kampanyalar gerçek olaylarda (onay, kanıt, ödeme) promosyon kredisi verir; kapalıyken hiçbir olay kaydedilmez ve değerlendirilmez."
+          >
+            <div className="scheduler-item-head" data-testid="campaign-engine">
+              <div className="scheduler-item-text">
+                <p className="scheduler-item-impact">
+                  <strong>Açmak</strong> yalnız bundan sonraki olayları etkiler: motor kapalıyken
+                  olmuş bir onay, kanıt ya da ödeme için geriye dönük hak ediş üretilmez. Aktif
+                  kampanya yoksa motor açık olsa da kimseye kredi verilmez.{' '}
+                  <strong>Kapatmak</strong> yeni olay kaydını ve değerlendirmeyi durdurur; verilmiş
+                  promosyonların teklif iadesi ve ödeme iadesinde geri alınması aynen sürer.
+                  Kampanyalar <Link href="/campaigns">Kampanyalar</Link> ekranından yönetilir.
+                </p>
+              </div>
+              <span
+                className={engine.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
+                data-testid="campaign-engine-state"
+              >
+                {engine.enabled ? 'Açık' : 'Kapalı'}
+              </span>
+            </div>
+            <CampaignEngineToggle enabled={engine.enabled} />
+
+            <h3 className="operations-subheading">Son değişiklikler</h3>
+            {engine.recentChanges.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }} data-testid="campaign-engine-audit-empty">
+                Henüz bir değişiklik kaydı yok; motor varsayılan (kapalı) durumda.
+              </p>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table" data-testid="campaign-engine-audit">
+                  <thead>
+                    <tr>
+                      <th>Eski</th>
+                      <th>Yeni</th>
+                      <th>Yönetici</th>
+                      <th>Zaman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {engine.recentChanges.map((change) => (
                       <tr key={change.id}>
                         <td>
                           {change.previousValue === null ? (

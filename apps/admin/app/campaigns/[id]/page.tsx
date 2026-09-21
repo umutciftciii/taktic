@@ -406,10 +406,12 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
             </ol>
           </SectionCard>
           <div className="admin-action-panel">
-            <h3>Bu sürümde yok</h3>
+            <h3>Bu ekranda yapılamayanlar</h3>
             <p>
-              Hizmet veren panelinde promosyon görünürlüğü, iade e-postasında net tutar ve ledger etiketleri (S4) sonraki
-              dilimde gelir. Motor anahtarı bu ekrandan değiştirilemez; hak edişler yalnız motor tarafından üretilir.
+              Motor anahtarı bu ekrandan değiştirilemez; yalnız{' '}
+              <Link href="/operations-settings#kampanya-motoru">Operasyon Ayarları</Link> ekranından, açık onayla açılıp
+              kapatılır. Hak edişler yalnız motor tarafından üretilir; promosyon satırları{' '}
+              <Link href="/finance/credit-ledger?type=CAMPAIGN_GRANT">kredi hareketlerinde</Link> kampanya adıyla görünür.
             </p>
             <Link className="btn btn-secondary btn-sm" href="/campaigns">
               Listeye dön

@@ -2123,6 +2123,17 @@ export type MarketplacePublishSettings = {
 };
 
 /**
+ * The campaign engine's switch (CMP-004 S4): the same shape as the
+ * auto-publish one, on `/operations-settings/campaign-engine`. Off by
+ * default and read fail-closed by every engine path; only a SUPER_ADMIN
+ * reads or writes it, and the screen asks for an explicit confirmation.
+ */
+export type CampaignEngineSettings = {
+  enabled: boolean;
+  recentChanges: OperationsSettingsChange[];
+};
+
+/**
  * The provider-review switch: the same shape as the auto-publish one, on
  * its own endpoint (`/operations-settings/provider-reviews`). Off by
  * default and fail-closed on the API side; only a SUPER_ADMIN reads or
