@@ -605,13 +605,14 @@ export class PaymentsWebhookService implements OnModuleInit {
     /*
      * CMP-002 S2B2: the PACKAGE_PAYMENT_SUCCEEDED campaign event, raised only
      * here — after every check above passed and the purchase is PAID in this
-     * transaction — and in the mock adapter's mirror of this path. It runs
-     * *before* the attempt record is written PROCESSED (in loadCredits), so
-     * the event's terminal mark can never exist without a committed
-     * evaluation beside it. A business outcome (no candidate, a limit, a
-     * failed condition) changes nothing here; a write conflict replays the
-     * whole delivery; an engine fault rolls the settlement back and answers
-     * non-2xx, which the provider treats as "deliver again".
+     * transaction — and in the mock adapter's mirror of this path. The hook
+     * writes the durable PENDING event and nothing else; it runs *before*
+     * the attempt record is written PROCESSED (in loadCredits), so PROCESSED
+     * and the pending event commit together — the evaluation happens later,
+     * in the worker, and cannot roll a settled payment back. A write conflict
+     * replays the whole delivery; a database fault that leaves the event
+     * unwritten answers non-2xx, which the provider treats as "deliver
+     * again", and a redelivery of a PROCESSED event never reaches here.
      */
     await this.campaignHooks.packagePaymentSucceeded(tx, purchase.providerId, purchase.id);
 

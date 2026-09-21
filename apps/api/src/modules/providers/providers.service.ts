@@ -1033,11 +1033,12 @@ export class ProvidersService implements OnModuleInit {
 
           // CMP-002 fact callback: PROVIDER_APPROVED — a genuine transition into
           // APPROVED, inside the transaction that records it and after every
-          // other effect of the approval. The engine evaluates the approval
-          // event and offers the fact to every eligibility set (CMP-001 §8.3).
-          // A business outcome never fails the approval; an engine fault or an
-          // exhausted retry budget rolls the approval back with a retryable 409
-          // rather than committing an approval whose evaluation was lost.
+          // other effect of the approval. The hook only makes the campaign
+          // events durable (PENDING rows for the approval event and for every
+          // eligibility set the fact completes); the evaluation itself runs
+          // later, in the worker's own transaction, and can never undo this
+          // approval. Only a database fault that leaves the event unwritten
+          // fails this transaction (CMP-001 §8.3; S2B2 rev. 2).
           await this.campaignHooks.providerApproved(tx, id);
         }
 

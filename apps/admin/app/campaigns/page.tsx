@@ -49,7 +49,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
       />
 
       <div style={{ marginBottom: 12 }}>
-        <CampaignEngineNotice engineEnabled={data.engineEnabled} />
+        <CampaignEngineNotice engineEnabled={data.engineEnabled} queue={data.evaluationQueue} />
       </div>
 
       <div className="table-card">

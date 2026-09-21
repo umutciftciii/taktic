@@ -4,6 +4,7 @@ import {
   type CampaignEvaluationOutcome,
   CampaignStatus,
   type CampaignTrigger,
+  CampaignTriggerEventStatus,
   Prisma,
 } from '@prisma/client';
 import { PRISMA_WRITE_CONFLICT_ERROR_CODE } from '../../../common/serializable-transaction';
@@ -87,7 +88,16 @@ const eventSelect = {
   evaluationCount: true,
   settledByCampaignId: true,
   settledRedemptionId: true,
+  status: true,
+  attemptCount: true,
+  leaseUntil: true,
+  claimedAt: true,
+  nextAttemptAt: true,
+  lastErrorCode: true,
 } satisfies Prisma.CampaignTriggerEventSelect;
+
+/** How long a worker's claim on an event lasts before another worker may take it over. */
+export const EVENT_LEASE_MS = 5 * 60_000;
 
 export type LimitRefusal = 'PER_PROVIDER_LIMIT' | 'DAILY_LIMIT' | 'GLOBAL_LIMIT' | 'BUDGET_EXHAUSTED';
 
@@ -156,11 +166,144 @@ export class CampaignEngineRepository {
     });
   }
 
+  /** Settlement and the SETTLED status in one statement (the CHECK ties them together). */
   async settleEvent(tx: Prisma.TransactionClient, eventId: string, campaignId: string, redemptionId: string) {
     await tx.campaignTriggerEvent.update({
       where: { id: eventId },
-      data: { settledByCampaignId: campaignId, settledRedemptionId: redemptionId, settledAt: new Date() },
+      data: {
+        settledByCampaignId: campaignId,
+        settledRedemptionId: redemptionId,
+        settledAt: new Date(),
+        status: CampaignTriggerEventStatus.SETTLED,
+        leaseUntil: null,
+        lastErrorCode: null,
+      },
     });
+  }
+
+  // ─────────────────────── durable pending events (S2B2 rev. 2) ───────────────────────
+
+  /**
+   * Stage A of a hook: the event row for this key exists, PENDING, when the
+   * business transaction commits — and nothing else is written. A key seen
+   * before is bumped (`lastSeenAt`); one that had been evaluated without a
+   * grant goes back to PENDING so the new raise is evaluated again; a SETTLED
+   * event stays settled (a grant exists, the key is lifetime-unique); a
+   * PROCESSING or RETRY_WAIT event is left to its worker. The insert runs
+   * under a savepoint: a P2002 means a concurrent transaction created it —
+   * re-read if visible, otherwise replay the business transaction (P2034).
+   */
+  async ensurePendingEvent(
+    tx: Prisma.TransactionClient,
+    input: {
+      triggerEventKey: string;
+      trigger: CampaignTrigger;
+      providerId: string;
+      purchaseId: string | null;
+      factSetKey: string | null;
+    },
+    now: Date,
+  ): Promise<{ id: string; status: CampaignTriggerEventStatus; created: boolean }> {
+    const existing = await tx.campaignTriggerEvent.findUnique({
+      where: { triggerEventKey: input.triggerEventKey },
+      select: { id: true, status: true },
+    });
+    if (existing) {
+      const reopen = existing.status === CampaignTriggerEventStatus.EVALUATED;
+      const updated = await tx.campaignTriggerEvent.update({
+        where: { id: existing.id },
+        data: {
+          lastSeenAt: now,
+          ...(reopen ? { status: CampaignTriggerEventStatus.PENDING, nextAttemptAt: now, lastErrorCode: null } : {}),
+        },
+        select: { id: true, status: true },
+      });
+      return { ...updated, created: false };
+    }
+    await this.savepoint(tx, SAVEPOINT.event);
+    try {
+      const created = await tx.campaignTriggerEvent.create({
+        data: { ...input, status: CampaignTriggerEventStatus.PENDING, nextAttemptAt: now, firstSeenAt: now, lastSeenAt: now },
+        select: { id: true, status: true },
+      });
+      await this.release(tx, SAVEPOINT.event);
+      return { ...created, created: true };
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+      await this.rollbackTo(tx, SAVEPOINT.event);
+      const raced = await tx.campaignTriggerEvent.findUnique({
+        where: { triggerEventKey: input.triggerEventKey },
+        select: { id: true, status: true },
+      });
+      if (!raced) {
+        throw new CampaignEngineWriteConflict(`CampaignTriggerEvent ${input.triggerEventKey}`);
+      }
+      return { ...raced, created: false };
+    }
+  }
+
+  /**
+   * Stage B's claim: one due event, taken with `FOR UPDATE SKIP LOCKED` so
+   * two workers — two instances, two ticks, a tick and a restart — never
+   * hold the same event, and moved to PROCESSING with a lease in the same
+   * statement. Due means PENDING or RETRY_WAIT with `nextAttemptAt` reached,
+   * or PROCESSING with a lease that expired (a worker that died mid-flight).
+   * Returns the claimed row, whose `leaseUntil` is the claim token.
+   */
+  async claimDueEvent(db: Prisma.TransactionClient | { $queryRaw: Prisma.TransactionClient['$queryRaw'] }, now: Date): Promise<TriggerEventRow | null> {
+    const leaseUntil = new Date(now.getTime() + EVENT_LEASE_MS);
+    const rows = await db.$queryRaw<Array<Record<string, unknown>>>`
+      UPDATE "CampaignTriggerEvent"
+      SET "status" = 'PROCESSING',
+          "leaseUntil" = ${leaseUntil},
+          "claimedAt" = ${now},
+          "lastAttemptAt" = ${now},
+          "attemptCount" = "attemptCount" + 1
+      WHERE "id" = (
+        SELECT "id" FROM "CampaignTriggerEvent"
+        WHERE ("status" IN ('PENDING', 'RETRY_WAIT') AND "nextAttemptAt" <= ${now})
+           OR ("status" = 'PROCESSING' AND "leaseUntil" < ${now})
+        ORDER BY "nextAttemptAt" ASC, "id" ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      RETURNING "id", "triggerEventKey", "trigger", "providerId", "purchaseId", "factSetKey", "evaluationCount",
+                "settledByCampaignId", "settledRedemptionId", "status", "attemptCount", "leaseUntil", "claimedAt",
+                "nextAttemptAt", "lastErrorCode"
+    `;
+    const row = rows[0];
+    return row ? (row as unknown as TriggerEventRow) : null;
+  }
+
+  /**
+   * The end of a claim, guarded by the claim token: only the worker that
+   * holds this lease may write the outcome. Zero rows means the lease expired
+   * and another worker took the event over — the caller must not commit its
+   * evaluation over theirs.
+   */
+  async finishClaim(
+    tx: Prisma.TransactionClient,
+    event: { id: string; leaseUntil: Date | null },
+    outcome:
+      | { status: 'EVALUATED' | 'PENDING' }
+      | { status: 'RETRY_WAIT'; nextAttemptAt: Date; lastErrorCode: string; now: Date },
+  ): Promise<boolean> {
+    const result = await tx.campaignTriggerEvent.updateMany({
+      where: { id: event.id, status: CampaignTriggerEventStatus.PROCESSING, leaseUntil: event.leaseUntil },
+      data:
+        outcome.status === 'RETRY_WAIT'
+          ? {
+              status: CampaignTriggerEventStatus.RETRY_WAIT,
+              leaseUntil: null,
+              nextAttemptAt: outcome.nextAttemptAt,
+              lastErrorCode: outcome.lastErrorCode,
+              lastErrorAt: outcome.now,
+            }
+          : { status: outcome.status, leaseUntil: null, lastErrorCode: null },
+    });
+    return result.count === 1;
   }
 
   // ───────────────────────────── candidates ─────────────────────────────

@@ -91,7 +91,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
       ) : null}
 
       <div style={{ marginBottom: 12 }}>
-        <CampaignEngineNotice engineEnabled={data.engineEnabled} />
+        <CampaignEngineNotice engineEnabled={data.engineEnabled} queue={data.evaluationQueue} />
       </div>
 
       <div className="admin-module-layout">

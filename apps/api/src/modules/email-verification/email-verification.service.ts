@@ -176,7 +176,9 @@ export class EmailVerificationService implements OnModuleInit {
           // the fact first became true for this user, inside the transaction
           // that made it durable; a replay (count 0) is not a new fact. The
           // hook resolves the PROVIDER profile itself and does nothing for a
-          // customer's or an operator's proof. Last step of the transaction.
+          // customer's or an operator's proof. It only makes the eligibility
+          // event durable — the evaluation runs later in the worker and can
+          // never undo this proof. Last step of the transaction.
           if (proven.count === 1 && record.user.role === UserRole.PROVIDER) {
             await this.campaignHooks.accountFactProven(tx, record.userId, 'EMAIL_VERIFIED');
           }

@@ -49,6 +49,19 @@ export const SCHEDULER_CRON_CONFIG = {
   },
 } as const satisfies Record<SchedulerJobKey, CronConfig>;
 
+/**
+ * The campaign evaluation worker's tick (CMP-002 S2B2 rev. 2). Not in
+ * SCHEDULER_JOB_KEYS on purpose: it has no operations switch of its own —
+ * whether it does anything is the campaign engine switch, read on every
+ * tick, and the worker is a no-op while that is off. Every minute by default,
+ * because a due event is a provider waiting for a promotion they earned.
+ */
+export const CAMPAIGN_EVALUATION_RETRY_CRON = { variable: 'CAMPAIGN_EVALUATION_RETRY_CRON', fallback: '*/1 * * * *' } as const;
+
+export function readCampaignEvaluationCron(): string {
+  return readCron(CAMPAIGN_EVALUATION_RETRY_CRON.variable, CAMPAIGN_EVALUATION_RETRY_CRON.fallback);
+}
+
 export function readSchedulerCron(job: SchedulerJobKey): string {
   const { variable, fallback } = SCHEDULER_CRON_CONFIG[job];
   return readCron(variable, fallback);
@@ -71,7 +84,7 @@ export function readSchedulerCrons(): Record<SchedulerJobKey, string> {
  * operator needs, and quoting whatever was actually in it is how a pasted
  * secret ends up in a log line.
  */
-function readCron(variable: string, fallback: string): string {
+export function readCron(variable: string, fallback: string): string {
   const raw = process.env[variable]?.trim();
   if (raw === undefined || raw === '') {
     return fallback;

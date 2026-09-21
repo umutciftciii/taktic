@@ -22,6 +22,10 @@ process.env.ENTITLEMENT_RENEWAL_CRON = '0 0 1 1 *';
 process.env.UNVIEWED_OFFER_REFUND_CRON = '0 0 1 1 *';
 process.env.REQUEST_EXPIRY_SCHEDULER_CRON = '0 0 1 1 *';
 process.env.REQUEST_REMINDER_SCHEDULER_CRON = '0 0 1 1 *';
+// The campaign evaluation worker (CMP-002 S2B2) too: the specs drive
+// `runOnce` themselves, and a tick landing between "the event is PENDING" and
+// "the worker grants it" would make those assertions race.
+process.env.CAMPAIGN_EVALUATION_RETRY_CRON = '0 0 1 1 *';
 // The flags that used to decide this are gone from the application. Dropped
 // rather than pinned, so a developer's exported value cannot make the boot log
 // of every spec file carry a deprecation warning.

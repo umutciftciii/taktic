@@ -429,8 +429,9 @@ export class PhoneVerificationService implements OnModuleInit {
         // CMP-002 fact callback: PHONE_VERIFIED — the PROVIDER writer of this
         // proof. `proven.count === 1` is the moment the fact first became true
         // for this account, inside the transaction that made it durable, and
-        // this is that transaction's last step. A business outcome never
-        // fails the proof; an engine fault rolls it back with a retryable 409.
+        // this is that transaction's last step. The hook only makes the
+        // eligibility event durable; the evaluation runs later in the worker
+        // and can never undo this proof.
         await this.campaignHooks.accountFactProven(tx, user.id, 'PHONE_VERIFIED');
 
         return { ok: true as const, verifiedAt: now };

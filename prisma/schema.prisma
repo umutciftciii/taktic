@@ -3816,6 +3816,15 @@ enum CampaignStackPolicy {
   EXCLUSIVE_CREDIT_BONUS
 }
 
+/// See CampaignTriggerEvent.status.
+enum CampaignTriggerEventStatus {
+  PENDING
+  PROCESSING
+  EVALUATED
+  SETTLED
+  RETRY_WAIT
+}
+
 enum CampaignAuditAction {
   CREATED
   VERSION_CREATED
@@ -4022,6 +4031,26 @@ model CampaignTriggerEvent {
   settledByCampaignId String?
   settledRedemptionId String?         @unique
   settledAt           DateTime?
+  /// Durable evaluation state (CMP-002 S2B2 rev. 2). The business
+  /// transaction that raises an event writes it PENDING and commits; a worker
+  /// claims it (PROCESSING, with a lease), evaluates it in its own
+  /// Serializable transaction and leaves it SETTLED (a grant exists — the
+  /// engine's settlement sets this together with the settled* columns),
+  /// EVALUATED (no grant this time; a re-raise of the key returns it to
+  /// PENDING) or RETRY_WAIT (the evaluation failed; `nextAttemptAt` says
+  /// when it is due again). Nothing is ever terminal-forgotten: a failed
+  /// event stays visible and claimable.
+  status              CampaignTriggerEventStatus @default(PENDING)
+  /// Worker claims, cumulative. `evaluationCount` counts engine evaluations.
+  attemptCount        Int             @default(0)
+  lastAttemptAt       DateTime?
+  nextAttemptAt       DateTime        @default(now())
+  /// Set while PROCESSING; an expired lease makes the event claimable again.
+  leaseUntil          DateTime?
+  claimedAt           DateTime?
+  /// A closed code (ENGINE_ERROR, CONCURRENT_MODIFICATION, WORKER_ERROR) — never a message, never PII.
+  lastErrorCode       String?
+  lastErrorAt         DateTime?
 
   provider          ProviderProfile         @relation(fields: [providerId], references: [id], onDelete: Restrict)
   purchase          PackagePurchase?        @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
@@ -4033,6 +4062,7 @@ model CampaignTriggerEvent {
   @@index([providerId, firstSeenAt])
   @@index([purchaseId])
   @@index([settledByCampaignId])
+  @@index([status, nextAttemptAt])
 }
 
 /// One campaign granting one promotion for one event.

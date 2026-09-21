@@ -22,10 +22,12 @@ import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from
  * The campaign engine's boundary (CMP-002 S2A, granted in S2B2; contract
  * CMP-001 §12.4).
  *
- * Both entry points run inside the *caller's* transaction — the approval, the
- * webhook settlement, the mock settlement, the proof write. They are reached
- * only through `CampaignEngineHooks`, the one export of `CampaignEngineModule`;
- * this service itself is not exported and no route calls it.
+ * Both entry points run inside the *caller's* transaction. Since S2B2 rev. 2
+ * that caller is `CampaignEvaluationWorker` (stage B), which evaluates a
+ * durable PENDING event in a transaction of its own, after the business
+ * write that raised it has committed; the business flows themselves only
+ * raise events (stage A, `CampaignEngineHooks`). This service is not
+ * exported from `CampaignEngineModule` and no route calls it.
  *
  * Step zero of both is the kill switch, read inside the same transaction:
  * `OperationsSettings.campaignEngineEnabled` false, or no row at all, means
@@ -45,11 +47,10 @@ import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from
  * Business outcomes are log rows and return values, never exceptions. An
  * unexpected error is contained at this boundary: everything the engine
  * wrote is rolled back to the outer savepoint and the caller gets
- * ENGINE_ERROR with its transaction still usable. What the caller does with
- * that answer is the hooks' decision (S2B2): a hooked business write does not
- * commit over a lost evaluation, it fails retryably. Serialization conflicts
- * are the one thing rethrown here, because the caller's `runSerializable` is
- * the right place to replay them.
+ * ENGINE_ERROR with its transaction still usable — the worker records the
+ * code and parks the event for a retry. Serialization conflicts are the one
+ * thing rethrown here, because the caller's `runSerializable` is the right
+ * place to replay them.
  */
 
 export type EngineInput = CampaignTriggerInput & {

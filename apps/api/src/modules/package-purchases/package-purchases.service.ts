@@ -348,7 +348,8 @@ export class PackagePurchasesService implements OnModuleInit {
         // same point — the purchase is PAID and whatever it bought exists —
         // and inside the same transaction. The mock form is the developer's
         // stand-in for a verified settlement (PAYMENT_PROVIDER=mock only), so
-        // it must produce the same campaign outcome the real one would.
+        // it must produce the same campaign outcome the real one would: a
+        // durable PENDING event, evaluated later by the worker.
         await this.campaignHooks.packagePaymentSucceeded(tx, purchase.providerId, purchase.id);
 
         return paid;

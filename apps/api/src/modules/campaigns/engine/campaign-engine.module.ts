@@ -4,6 +4,7 @@ import { CampaignFactReader } from './campaign-fact-reader';
 import { CampaignEngineHooks } from './campaign-engine.hooks';
 import { CampaignEngineRepository } from './campaign-engine.repository';
 import { CampaignEngineService } from './campaign-engine.service';
+import { CampaignEvaluationWorker } from './campaign-evaluation.worker';
 import { FactSourceRegistry } from './fact-source-registry';
 
 /**
@@ -14,15 +15,24 @@ import { FactSourceRegistry } from './fact-source-registry';
  * (`CampaignsModule` needs `AuthModule`, and `AuthModule` needs the e-mail
  * proof module, which is why the engine and the admin API are two modules).
  *
- * Exports `CampaignEngineHooks`, through which the writers of the three facts
- * and the two settlement paths call the engine from inside their own
- * transactions, and `FactSourceRegistry`, which the admin API's activation
- * gate reads. `CampaignEngineService` and the repository stay internal: no
- * route, scheduler or other service can evaluate or grant directly.
+ * Exports `CampaignEngineHooks` (stage A: the writers of the three facts and
+ * the two settlement paths make the event durable inside their own
+ * transactions), `FactSourceRegistry` (the admin API's activation gate) and
+ * `CampaignEvaluationWorker` (stage B: the one caller of the engine, on a
+ * cron tick; exported so the admin API can read its queue, read-only).
+ * `CampaignEngineService` and the repository stay internal: no route or other
+ * service can evaluate or grant directly.
  */
 @Module({
   imports: [PrismaModule],
-  providers: [CampaignEngineRepository, CampaignFactReader, FactSourceRegistry, CampaignEngineService, CampaignEngineHooks],
-  exports: [CampaignEngineHooks, FactSourceRegistry],
+  providers: [
+    CampaignEngineRepository,
+    CampaignFactReader,
+    FactSourceRegistry,
+    CampaignEngineService,
+    CampaignEngineHooks,
+    CampaignEvaluationWorker,
+  ],
+  exports: [CampaignEngineHooks, FactSourceRegistry, CampaignEvaluationWorker],
 })
 export class CampaignEngineModule {}

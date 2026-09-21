@@ -139,6 +139,20 @@ export type CampaignAuditView = {
   createdAt: Date;
 };
 
+/**
+ * The evaluation queue, read-only (S2B2 rev. 2): how many raised events are
+ * waiting, being worked, or parked after a failure, and the last closed
+ * error code. Global, not per campaign — an event is a candidate of every
+ * ACTIVE campaign that answers its trigger. No route acts on it.
+ */
+export type CampaignEvaluationQueueView = {
+  pending: number;
+  processing: number;
+  retryWait: number;
+  lastErrorCode: string | null;
+  lastErrorAt: Date | null;
+};
+
 export type CampaignValidationView = {
   valid: boolean;
   errors: CampaignRuleError[];
@@ -400,8 +414,9 @@ export class CampaignsService {
 
   async list(query: { limit?: number; cursor?: string }) {
     const take = query.limit ?? CAMPAIGN_LIST_DEFAULT_LIMIT;
-    const [engineEnabled, rows] = await Promise.all([
+    const [engineEnabled, evaluationQueue, rows] = await Promise.all([
       this.engineSettings.isEngineEnabled(),
+      this.evaluationQueue(),
       this.prisma.campaign.findMany({
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         take: take + 1,
@@ -413,6 +428,7 @@ export class CampaignsService {
     const page = rows.slice(0, take);
     return {
       engineEnabled,
+      evaluationQueue,
       items: page.map((row) => ({
         ...campaignView(row),
         currentVersion: row.currentVersion ? versionSummaryView(row.currentVersion) : null,
@@ -423,8 +439,9 @@ export class CampaignsService {
   }
 
   async getForAdmin(campaignId: string) {
-    const [engineEnabled, row] = await Promise.all([
+    const [engineEnabled, evaluationQueue, row] = await Promise.all([
       this.engineSettings.isEngineEnabled(),
+      this.evaluationQueue(),
       this.prisma.campaign.findUnique({ where: { id: campaignId }, select: campaignSelect }),
     ]);
     if (!row) {
@@ -454,11 +471,35 @@ export class CampaignsService {
 
     return {
       engineEnabled,
+      evaluationQueue,
       campaign: campaignView(row),
       currentVersion: row.currentVersion ? versionView(row.currentVersion) : null,
       activeVersion: row.activeVersion ? versionView(row.activeVersion) : null,
       versions: versions.map(versionView),
       audit: audit satisfies CampaignAuditView[],
+    };
+  }
+
+  private async evaluationQueue(): Promise<CampaignEvaluationQueueView> {
+    const [counts, lastError] = await Promise.all([
+      this.prisma.campaignTriggerEvent.groupBy({
+        by: ['status'],
+        where: { status: { in: ['PENDING', 'PROCESSING', 'RETRY_WAIT'] } },
+        _count: { _all: true },
+      }),
+      this.prisma.campaignTriggerEvent.findFirst({
+        where: { lastErrorCode: { not: null } },
+        orderBy: [{ lastErrorAt: 'desc' }, { id: 'desc' }],
+        select: { lastErrorCode: true, lastErrorAt: true },
+      }),
+    ]);
+    const count = (status: string) => counts.find((entry) => entry.status === status)?._count._all ?? 0;
+    return {
+      pending: count('PENDING'),
+      processing: count('PROCESSING'),
+      retryWait: count('RETRY_WAIT'),
+      lastErrorCode: lastError?.lastErrorCode ?? null,
+      lastErrorAt: lastError?.lastErrorAt ?? null,
     };
   }
 
