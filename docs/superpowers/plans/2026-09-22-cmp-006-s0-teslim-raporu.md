@@ -97,8 +97,12 @@ bağlanırsa, okuma izni verilen bir role sessizce yıkıcı aksiyon açılır. 
 
 ## 8. CI
 
-PR [#103](https://github.com/umutciftciii/taktic/pull/103) · run
-[35734636478](https://github.com/umutciftciii/taktic/actions/runs/35734636478) · **3/3 geçti**.
+PR [#103](https://github.com/umutciftciii/taktic/pull/103). Her koşuda 3/3.
+
+| Commit | Run | Sonuç |
+| --- | --- | --- |
+| `450b53e3` tasarım + rapor | [35734636478](https://github.com/umutciftciii/taktic/actions/runs/35734636478) | 3/3 |
+| `6a04d704` D8a / D12a-b / D27a-b / RG-7 düzeltmeleri | [35740417403](https://github.com/umutciftciii/taktic/actions/runs/35740417403) | 3/3 |
 
 | Job | Sonuç |
 | --- | --- |
