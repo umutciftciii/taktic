@@ -81,7 +81,7 @@ async function approvedProvider(overrides: { userId?: string | null } = {}) {
 /** The approved-provider figure exactly as the readiness panel reads it. */
 async function readinessCount(adminCookie: string, slug: string): Promise<number> {
   const response = await request(ctx.server)
-    .get('/categories?includeInactive=true')
+    .get('/admin/categories')
     .set('Cookie', adminCookie)
     .expect(200);
 

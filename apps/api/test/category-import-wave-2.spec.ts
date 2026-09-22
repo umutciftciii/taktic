@@ -209,7 +209,7 @@ async function catalogueCounts() {
 
 async function operatorListing(): Promise<ListedCategory[]> {
   const response = await request(ctx.server)
-    .get('/categories?includeInactive=true')
+    .get('/admin/categories')
     .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN))
     .expect(200);
 
@@ -530,9 +530,9 @@ describe('none of the seventeen reaches a caller who is not an operator', () => 
 
     for (const [who, cookie] of callers) {
       for (const path of [
-        '/categories?includeInactive=true',
-        '/categories/beslenme-danismanligi?includeInactive=true',
-        '/categories/mobil-uygulama-gelistirme?includeInactive=true',
+        '/admin/categories',
+        '/admin/categories/beslenme-danismanligi',
+        '/admin/categories/mobil-uygulama-gelistirme',
       ]) {
         const call = request(ctx.server).get(path);
         const response = await (cookie ? call.set('Cookie', cookie) : call).expect(403);
@@ -587,7 +587,7 @@ describe('none of the seventeen reaches a caller who is not an operator', () => 
       await request(ctx.server).get('/categories').expect(200),
       await operatorListing().then((body) => ({ body })),
       await request(ctx.server)
-        .get('/categories/beslenme-danismanligi?includeInactive=true')
+        .get('/admin/categories/beslenme-danismanligi')
         .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN))
         .expect(200),
     ];
@@ -634,7 +634,7 @@ describe('the operator’s view of the seventeen', () => {
 
   it('serves the question set of a draft service to a SUPER_ADMIN and to nobody else', async () => {
     const detail = await request(ctx.server)
-      .get('/categories/isg-danismanligi?includeInactive=true')
+      .get('/admin/categories/isg-danismanligi')
       .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN))
       .expect(200);
 

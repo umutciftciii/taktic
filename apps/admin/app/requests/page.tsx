@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import {
   apiFetch,
-  Category,
   formatBudgetRange,
   formatDateTime,
+  listCatalogueForFilter,
   qualityBadgeClass,
-  QualityLabel,
   qualityLabel,
+  QualityLabel,
   requestStatusLabel,
   requireAdmin,
   ServiceRequest,
@@ -135,7 +135,7 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
 
   const [requests, categories] = await Promise.all([
     apiFetch<ServiceRequest[]>('/service-requests'),
-    apiFetch<Category[]>('/categories?includeInactive=true').catch(() => [] as Category[]),
+    listCatalogueForFilter(),
   ]);
 
   const normalizedQuery = toLower(query);

@@ -10,14 +10,14 @@ Girdi: [rota eşleme tablosu](2026-09-22-pr0-route-permission-map.md)
 
 | Ölçüm | Değer |
 | --- | --- |
-| `AdminPermission` katalog değeri | **76** — enum, tablo değil |
-| İzne bağlanan rota | **120** (119 mevcut + `PATCH /providers/:id`) |
+| `AdminPermission` katalog değeri | **77** — enum, tablo değil |
+| İzne bağlanan rota | **122** (119 mevcut + `PATCH /providers/:id` + iki admin katalog rotası) |
 | Kök kalan rota | **2** (`POST /users`, `POST /users/:id/invite-link`) + 8 rol yönetim rotası |
 | Dokunulmayan karma rollü rota | **27** |
 | Dokunulmayan `ProviderAccessGuard` rotası | **21** |
 | `@Roles(UserRole.SUPER_ADMIN)` kalan kullanım | **2** (72 idi) |
-| Migration | **H** — 73. migration, DML yok, `ALTER COLUMN` yok |
-| Yeni API testi | **23** (7 sözleşme + 16 davranış) |
+| Migration | **H** + **I** — 73. ve 74., ikisi de yalnız ekleme, DML yok |
+| Yeni API testi | **37** (7 sözleşme + 19 davranış + 11 katalog görünürlüğü) |
 | Yeni E2E testi | **2** |
 | İzin kapısı eklenen admin sayfası | **46** |
 
@@ -74,18 +74,48 @@ vardı). Şimdi izinsiz bir sayfaya giren personel sonsuz giriş döngüsüne d�
 | `pnpm typecheck` (5 paket) | geçti |
 | `pnpm build` (3 paket) | geçti |
 | Yeni RBAC testleri | **23/23** |
-| Tam API paketi | **153 dosya / 3345 test, hepsi geçti** (taban 151/3322 — fark tam olarak eklenen 23 test) |
+| Tam API paketi | **154 dosya / 3359 test** (taban 151/3322; fark tam olarak eklenen 37 test). Tek kırmızı `account-email-role-conflict` — bilinen, bu dilimden önce de var olan yarış flake'i; tek başına 20/20 geçiyor |
 
 **Gerçek `taktic` DB'sine dokunulmadı**; tüm migration doğrulaması `pr0_migration_dryrun` izole veritabanında.
 
-## 6. Sıradaki iş
+## 6. Katalog görünürlüğü düzeltmesi (merge öncesi)
+
+İlk hâlde DRAFT/INACTIVE kategori görünümü **panel erişimine** bağlıydı: rolü ne olursa olsun her personel
+hesabı yayımlanmamış katalogu görebiliyordu. Bunu merge öncesi bir düzeltme olarak kapattım.
+
+| Değişiklik | Ayrıntı |
+| --- | --- |
+| Yeni izin | **`CATALOG_READ`** (Migration I) — katalog 76 → 77 |
+| Yeni rota | `GET /admin/categories`, `GET /admin/categories/:slug` |
+| Public uçlar | `includeInactive` diye bir parametre **yok**; spoof edilecek bir şey yok çünkü geçirilecek bir şey yok |
+| `routing/resolve` | Yalnız public katalogda yürüyor — yayımlanmamış katalogun ikinci kapısıydı |
+| `elevated-query.ts` | **Silindi**; tek tüketicisi buydu |
+| Yazma | `CATEGORIES_WRITE/STATUS/DELETE` ayrı kaldı; okuma yazma vermiyor |
+
+**Mevcut testler taşındı.** Dokuz spec dosyası eski sözleşmeyi kodluyordu. Yedisinde 17 çağrı mekanik
+olarak `/admin/categories`'e taşındı; `category-visibility.spec.ts` **yeniden yazıldı** (konusu tam olarak
+bu sınırdı, 15 vaka); `sitemap-entries.spec.ts`'e dokunulmadı (farklı rotanın kendi parametresi).
+`wave-1-release-readiness.spec.ts`'te bir bekleyiş 403 → 401/403 olarak ayrıldı: kimlik sunmayan çağıran
+artık `AuthGuard`'dan 401 alıyor, müşteri/sağlayıcı 403. Eski yardımcı ikisine de 403 veriyordu; yeni
+ayrım birine "giriş yap", diğerine "yetkin yok" diyor.
+
+**Filtre listeleri kasıtlı olarak düşüyor.** Teklif/talep/sağlayıcı ekranları kategori adlarını filtre için
+okuyor; bunları `CATALOG_READ`'e bağlamak yanlış bağ olurdu. `listCatalogueForFilter()` izin yoksa boş liste
+döndürüyor — yönlendirme değil, çünkü bir yönlendirmeyi yutmak başka yerdeki gerçek bir reddedişin kazara
+yutulma yoludur.
+
+**Kasıtlı tek istisna:** `GET /categories/provider-enrollment` yayına girmemiş kategorileri adlandırmaya
+devam ediyor (sıradaki dalganın başvuru yapabilmesi için) — ama kendi dar projeksiyonuyla; testi `status`,
+`isActive`, `questions`, `children` alanlarının olmadığını doğruluyor.
+
+## 7. Sıradaki iş
 
 CMP-006 **PR-A** (paket iade politikası + checkout kanıtı). Bu PR'ın kataloğuna eklenecek izinler PR-A/B/C
 ile birlikte gelir; hiçbiri şimdiden eklenmedi, çünkü karşılık gelen rota olmadan bir izin panelde
 işaretlenebilen ama hiçbir şey açmayan bir kutudur (D11) — ve rota haritası testi bunu zaten kırmızıya
 çevirirdi.
 
-## 7. CI
+## 8. CI
 
 PR [#105](https://github.com/umutciftciii/taktic/pull/105) · kod commit'i `609a94ad` · run
 [35761161875](https://github.com/umutciftciii/taktic/actions/runs/35761161875) · **3/3 geçti**.

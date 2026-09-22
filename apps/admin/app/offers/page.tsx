@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import {
   apiFetch,
-  Category,
   formatDateTime,
   formatPrice,
+  listCatalogueForFilter,
   Offer,
   OfferStatus,
   refundActionBadgeClass,
@@ -118,7 +118,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
 
   const [offers, categories] = await Promise.all([
     apiFetch<Offer[]>(offersPath),
-    apiFetch<Category[]>('/categories?includeInactive=true').catch(() => [] as Category[]),
+    listCatalogueForFilter(),
   ]);
 
   const filtered =

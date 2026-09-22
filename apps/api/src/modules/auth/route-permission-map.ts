@@ -35,6 +35,8 @@ export type AdminRoutePermission = {
 
 export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/admin/campaigns', permission: AdminPermission.CAMPAIGNS_READ },
+  { method: 'GET', path: '/admin/categories', permission: AdminPermission.CATALOG_READ },
+  { method: 'GET', path: '/admin/categories/:slug', permission: AdminPermission.CATALOG_READ },
   { method: 'POST', path: '/admin/campaigns', permission: AdminPermission.CAMPAIGNS_WRITE },
   { method: 'GET', path: '/admin/campaigns/:id', permission: AdminPermission.CAMPAIGNS_READ },
   { method: 'POST', path: '/admin/campaigns/:id/end', permission: AdminPermission.CAMPAIGNS_LIFECYCLE },

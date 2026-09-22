@@ -216,6 +216,14 @@ describe('PR-0 route/permission map', () => {
       (ALL_ADMIN_PERMISSIONS as string[]).includes(name),
     );
     expect(present).toEqual([]);
-    expect(Object.keys(AdminPermission)).toHaveLength(76);
+    /*
+     * A deliberately hard-coded count.
+     *
+     * Adding a permission is a decision about who may do what, and this line is
+     * where that decision has to be typed out a second time. It is the reason
+     * `CATALOG_READ` could not be added quietly: the number had to move, and
+     * moving it meant naming the capability in a commit message.
+     */
+    expect(Object.keys(AdminPermission)).toHaveLength(77);
   });
 });

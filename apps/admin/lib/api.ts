@@ -2071,6 +2071,40 @@ export async function readAdminAccess(): Promise<{
   }
 }
 
+/**
+ * The operator's catalogue for a *filter* — draft categories included, and an
+ * empty list rather than a refusal when this session may not see them.
+ *
+ * Several screens that have nothing to do with the catalogue still need its
+ * names: the offers, requests and providers lists label and filter by category,
+ * and a provider's bindings may point at a category the marketplace has not
+ * released. Requiring `CATALOG_READ` for those screens would say "you cannot
+ * look at offers unless you may see next quarter's catalogue", which is the
+ * wrong coupling — so a session without it gets a shorter dropdown and the page
+ * it actually came for.
+ *
+ * A raw fetch rather than `apiFetch`, deliberately: `apiFetch` turns a 403 into
+ * a redirect, and catching a redirect to ignore it is how a real refusal
+ * elsewhere gets swallowed by accident. This asks the question and answers it.
+ */
+export async function listCatalogueForFilter(): Promise<Category[]> {
+  try {
+    const cookieHeader = (await cookies()).toString();
+    const response = await fetch(`${apiUrl}/admin/categories`, {
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json', ...(cookieHeader ? { cookie: cookieHeader } : {}) },
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    return (await response.json()) as Category[];
+  } catch {
+    return [];
+  }
+}
+
 export async function requireAdmin(...required: AdminPermission[]): Promise<AdminSession> {
   const [user, access] = await Promise.all([
     apiFetch<AuthUser>('/auth/me'),

@@ -75,7 +75,7 @@ export const navGroups: NavGroup[] = [
   {
     title: 'Katalog',
     items: [
-      { href: '/categories', label: 'Kategoriler', permission: 'QUESTIONS_READ' },
+      { href: '/categories', label: 'Kategoriler', permission: 'CATALOG_READ' },
       // The vitrin catalogue is a catalogue: an operator maintains it the way
       // they maintain credit packages, and it belongs beside them rather than
       // with the runs it produces.

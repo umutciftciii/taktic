@@ -4373,6 +4373,16 @@ enum AdminPermission {
   /// of OPERATIONS_SETTINGS_WRITE (RG-7 §12.4).
   CAMPAIGN_ENGINE_TOGGLE
 
+  /// The unreleased catalogue — DRAFT and INACTIVE categories and everything
+  /// derived from them (router targets, the operator's tree).
+  ///
+  /// Its own permission, and deliberately not implied by panel access: what a
+  /// marketplace has decided to sell but not yet released is commercially
+  /// sensitive, and "this account is staff" is not the same statement as "this
+  /// account may see next quarter's catalogue". It is a **read**; writing stays
+  /// on the three narrower permissions below, so a role trusted to look is not
+  /// thereby trusted to publish.
+  CATALOG_READ
   CATEGORIES_WRITE
   /// DRAFT↔ACTIVE↔INACTIVE: public visibility, request intake and SEO
   /// indexability move together, which is why it is not CATEGORIES_WRITE.

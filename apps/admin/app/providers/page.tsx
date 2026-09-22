@@ -2,8 +2,8 @@ import { serviceAreaLabel } from '@taktic/shared';
 import Link from 'next/link';
 import {
   apiFetch,
-  Category,
   formatDateTime,
+  listCatalogueForFilter,
   ProviderProfile,
   ProviderStatus,
   requireAdmin,
@@ -81,9 +81,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
   const categorySlug = (params.category ?? '').trim();
   const ownership = normalizeOwnership(params.ownership);
 
-  const categories = await apiFetch<Category[]>('/categories?includeInactive=true').catch(
-    () => [] as Category[],
-  );
+  const categories = await listCatalogueForFilter();
 
   const categoryIdBySlug = new Map(categories.map((category) => [category.slug, category.id]));
   const categoryId = categorySlug ? categoryIdBySlug.get(categorySlug) ?? '' : '';

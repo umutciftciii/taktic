@@ -19,7 +19,7 @@ kataloğa hiç girmediği için hiçbir role devredilemiyor.
 
 | # | Karar | Gerekçe |
 | --- | --- | --- |
-| P1 | **`AdminPermission` bir Prisma enum'u, tablo değil.** 76 değer. | Panelden izin adı üretilemesin (D11). Enum değeri olmayan bir ad `AdminRolePermission`'a yazılamaz — kısıt uygulama kuralı değil, tipin kendisi. |
+| P1 | **`AdminPermission` bir Prisma enum'u, tablo değil.** 77 değer. | Panelden izin adı üretilemesin (D11). Enum değeri olmayan bir ad `AdminRolePermission`'a yazılamaz — kısıt uygulama kuralı değil, tipin kendisi. |
 | P2 | **Rol dinamik.** `AdminRole` + `AdminRolePermission` + `AdminRoleAssignment`; anahtar benzersiz ve yeniden kullanılmaz, rol **silinmez**, pasifleştirilir. | Yetkinin *şekli* operatörün, *sözlüğü* değil. Atama ve audit satırları role bakar; "geçen mart kim neyi yapabiliyordu" cevaplanabilir kalmalı. |
 | P3 | **Üç kök yetki kataloğa girmez:** rol tanımlama, personel hesabı oluşturma, davet bağlantısı mintleme. Rotaları `@Roles(UserRole.SUPER_ADMIN)` ile kalır. | RG-7 §12.1. Kendine izin ekleyebilen bir rol, izin modeli değildir. |
 | P4 | **`UserRole` += `ADMIN`.** Yetenek adı değil, personel **hesap türü**; yetki yalnız atanmış rollerden gelir. | Hesap başına tek rol kuralı (`User.email @unique` + `User.role`) yeni bir değer gerektiriyordu. |
@@ -33,6 +33,7 @@ kataloğa hiç girmediği için hiçbir role devredilemiyor.
 | P12 | **`PATCH /providers/:id` için `@RequiresPermissionFromStaff`.** İzin yalnız personel çağıranından istenir; sağlayıcının kendi yolu ve servisteki sahiplik kuralları aynen kalır. | RG-7 §12.3. `@RequiresPermission` her personel-olmayanı reddederdi ve rotayı asıl sahiplerinden alırdı. |
 | P13 | **`CAMPAIGN_ENGINE_TOGGLE` ayrı.** Rota, menü kartı ve aksiyon düğmesi ayrı kontrol eder. | RG-7 §12.4. Diğer dört ayar bir çalışma tercihi; bu, promosyon kredisi dağıtımını başlatan tek karar. |
 | P14 | **Operatör *görünümü* kontrolleri personel hesabını tanır; müşteri *sahipliği* kontrolleri tanımaz.** | §5. İkisi farklı sorular: "bu kişi operatör mü" ile "bu kayıt bu kişinin mi". |
+| P16 | **Yayımlanmamış katalog ayrı bir izin ve ayrı bir rota.** `CATALOG_READ` + `GET /admin/categories[/:slug]`; public uçlar genişleyen hiçbir parametre okumuyor; `routing/resolve` yalnız public katalogda yürüyor; `elevated-query.ts` silindi. | §5.1. Panel erişimi, "bu hesap gelecek çeyreğin katalogunu görebilir" ile aynı cümle değil. Sınırın bir query parametresi olması, onu bir kişinin hatırlamasına bağlı kılıyordu. |
 | P15 | **401 → `/login`, 403 → `/yetkisiz`.** | İzinler öncesinde ikisi aynı şeydi (yalnız SUPER_ADMIN vardı). Artık 403'ü giriş formuna yollamak bir döngüdür: kişi zaten girmiş. |
 
 ## 3. Migration H (`20260922150000_add_admin_rbac`)
@@ -72,7 +73,17 @@ birine haritayı verir.
 
 Kod tabanında 18 yerde `role === UserRole.SUPER_ADMIN` vardı. Hepsi aynı şey değildi:
 
-**Personel hesabını tanıyacak şekilde genişletilenler (5):** bunlar operatörün *ne gördüğünü* belirler ve
+### 5.1 Katalog, bu ayrımın dışına çıkarıldı
+
+İlk hâlde kategori görünümü `mayReachAdminPanel`'e bağlanmıştı — yani her personel hesabı DRAFT/INACTIVE
+kategorileri görüyordu. Yayımlanmamış katalog ticari olarak hassastır ve "bu hesap personel" ile "bu hesap
+yayımlanmamış katalogu görebilir" aynı cümle değildir. Çözüm, o iki çağrı yerini genişletmek değil,
+**ayrı bir yüzey** açmak oldu (P16): `CATALOG_READ` + `/admin/categories`. Public uçlarda genişleyen mod
+tamamen kaldırıldığı için `assertElevatedQueryAccess` ve `elevated-query.ts` gereksizleşti ve silindi.
+
+Geriye kalan üç genişletme aşağıdaki tabloda; ikisi (kategori) artık listede değil.
+
+**Personel hesabını tanıyacak şekilde genişletilenler (3):** bunlar operatörün *ne gördüğünü* belirler ve
 hangi operatörün orada olabileceğine rotanın izni zaten karar vermiştir.
 
 | Yer | Ne yapar |
@@ -80,12 +91,6 @@ hangi operatörün orada olabileceğine rotanın izni zaten karar vermiştir.
 | `providers.service.ts` `ensureProviderUpdateAccess` | Sahiplik kuralının operatör istisnası |
 | `providers.service.ts` `updateProvider` dönüş şekli | Operatörün kaydettiği profili aynı şekilde geri görmesi |
 | `providers.service.ts` `providerVisibility` | `admin` projeksiyonu |
-| `auth/elevated-query.ts` `assertElevatedQueryAccess` | DRAFT/INACTIVE kategori görünümü |
-| `categories.controller.ts` `isOperatorView` | Aynı kuralın iki çağrı yeri |
-
-Son ikisi bir izne değil **panel erişimine** bağlandı: bunlar operatör için genişleyen *public* rotalardır,
-adlandırılacak bir handler izni yoktur ve bir tane icat etmek kataloğa hiçbir rotayı korumayan bir değer
-koymak olurdu — kapalı kataloğun önlemek için var olduğu şey.
 
 **Dokunulmayanlar (13):** müşteri sahipliği kontrolleri (`ensureCustomerRequestAccess`,
 `service-requests`, `provider-reviews`, `phone-verification`), `ProviderAccessGuard` arkasındaki görünüm
@@ -100,8 +105,10 @@ veya onun adına işlem yapması, izin kataloğunun vereceği bir yetenek değil
 | `GET /admin/me/permissions` | `AdminAccessGuard` (izin yok — kendi yeteneklerini döner) |
 | `GET /admin/permissions` | **kök** — `@Roles(SUPER_ADMIN)` |
 | `GET/POST /admin/roles`, `GET/PATCH /admin/roles/:id`, `PUT /admin/roles/:id/permissions` | **kök** |
+| `GET /admin/categories`, `GET /admin/categories/:slug` | `CATALOG_READ` |
 | `GET/POST /admin/users/:userId/roles`, `DELETE /admin/users/:userId/roles/:roleId` | **kök** |
 | 119 mevcut admin rotası | Eşleme tablosundaki izin |
+| `GET /categories`, `GET /categories/:slug`, `POST /categories/routing/resolve` | **public, dar** — genişleyen parametre yok |
 | `PATCH /providers/:id` | `PROVIDERS_WRITE`, yalnız personelden |
 | `POST /users`, `POST /users/:id/invite-link` | **kök** |
 
@@ -124,7 +131,8 @@ veya onun adına işlem yapması, izin kataloğunun vereceği bir yetenek değil
 | Dosya | Ne kanıtlar |
 | --- | --- |
 | `admin-rbac-route-map.spec.ts` (7) | Eşleme **çift yönlü** sözleşme: sınıflandırılmamış admin rotası **kırmızı**, ölü eşleme **kırmızı**, izin uyuşmazlığı **kırmızı**; `PermissionsGuard` olan her yerde `AdminAccessGuard`; kök rotalar rolde ve izinde değil; katalog tamamı kullanılıyor ve yalnız katalog kullanılıyor; 76 değer, üç kök yetki yok (I-1) |
-| `admin-rbac-access.spec.ts` (16) | Atamasız `ADMIN` 403 · `SUPER_ADMIN` atamasız her şey · müşteri/sağlayıcı atama taşısa bile 403 · izin sınırı · revoke ve pasif rol anında etkili · `/admin/me/permissions` = guard davranışı · tüm izinli `ADMIN` kök rotalarda 403 (I-6) · `POST /users` → `ADMIN` (I-3) · davet rolü değiştirmez (I-4) · `SUPER_ADMIN` yazan rota yok (I-5) · motor anahtarı ayrı (I-8) · 13 sağlayıcı rotasında tüm izinli `ADMIN` 403 (I-7) · `PATCH /providers/:id` üç yol |
+| `admin-catalog-visibility.spec.ts` (11) | Public uç sekiz query yazımında da sızdırmıyor · slug ile de sızdırmıyor · müşteri/sağlayıcı/izinsiz ADMIN dar görünüm · routing walk taslağa girmiyor · izinsiz ADMIN 403, anonim 401 · `CATALOG_READ` tam katalog · atamasız `SUPER_ADMIN` örtük · yalnız okuma izniyle dört yazma da 403 · yayımlanmamış katalogu servis eden rota tam olarak iki |
+| `admin-rbac-access.spec.ts` (19) | Atamasız `ADMIN` 403 · `SUPER_ADMIN` atamasız her şey · müşteri/sağlayıcı atama taşısa bile 403 · izin sınırı · revoke ve pasif rol anında etkili · `/admin/me/permissions` = guard davranışı · tüm izinli `ADMIN` kök rotalarda 403 (I-6) · `POST /users` → `ADMIN` (I-3) · davet rolü değiştirmez (I-4) · `SUPER_ADMIN` yazan rota yok (I-5) · motor anahtarı ayrı (I-8) · 13 sağlayıcı rotasında tüm izinli `ADMIN` 403 (I-7) · `PATCH /providers/:id` üç yol |
 
 Rota haritası testi, bu PR'ın kendi kendini denetleyen parçasıdır: **eksik veya sınıflandırılmamış bir rota
 testi kırar.**

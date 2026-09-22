@@ -4,10 +4,10 @@ import {
   AdminProviderServiceCategories,
   ApiError,
   apiFetch,
-  Category,
   fetchOrNotFound,
   formatDateTime,
   formatPrice,
+  listCatalogueForFilter,
   ProviderProfile,
   ProviderRecentPackagePurchase,
   type ProviderReviewsPage,
@@ -149,7 +149,7 @@ export default async function ProviderDetailPage({
   // else.
   const [serviceCategories, categories, reviews] = await Promise.all([
     apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`),
-    apiFetch<Category[]>('/categories?includeInactive=true'),
+    listCatalogueForFilter(),
     // The provider's own list, which the provider route serves to an operator
     // as well. A failure hides the card rather than the screen: the reviews
     // are context here, not the subject.

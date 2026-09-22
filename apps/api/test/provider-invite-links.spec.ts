@@ -127,7 +127,7 @@ async function readinessCounts(
   slug: string,
 ): Promise<{ providers: number; invites: number }> {
   const response = await request(ctx.server)
-    .get('/categories?includeInactive=true')
+    .get('/admin/categories')
     .set('Cookie', adminCookie)
     .expect(200);
 
