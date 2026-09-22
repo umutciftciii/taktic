@@ -1931,6 +1931,16 @@ export class ApiError extends Error {
   }
 }
 
+/** The short machine code on an API refusal, when there is one. */
+function readErrorCode(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown };
+    return typeof parsed?.code === 'string' ? parsed.code : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
@@ -1945,24 +1955,29 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (!response.ok) {
     /*
-     * Two refusals, two destinations (PR-0).
+     * Three refusals, two destinations (PR-0).
      *
-     * 401 is "no usable session" — the sign-in form is the answer. 403 is "a
-     * session, but not enough authority", and sending that to the sign-in form
-     * is a loop: the person is already signed in, signing in again changes
-     * nothing, and the screen never explains why. It now goes to a page that
-     * says so.
+     * 401 — no usable session — is the sign-in form's, as it always was. A 403
+     * splits in two, and the API says which (`admin-access.guard.ts`):
      *
-     * Before permissions existed the two were the same thing — only a
-     * SUPER_ADMIN could reach any of this — which is why one destination was
-     * enough then and is not now.
+     *   NOT_STAFF  a customer's or a provider's session asking for an admin
+     *              screen. They are signed in as the wrong kind of account, so
+     *              the sign-in form is still the right answer — and this is the
+     *              behaviour that existed before permissions did.
+     *   otherwise  a staff account missing a role or a permission. Sending that
+     *              to the sign-in form is a loop: they are already past it,
+     *              signing in again changes nothing, and nothing explains why.
+     *
+     * A 403 with no readable code falls to `/yetkisiz`, which is the safer of
+     * the two: it explains rather than asking for credentials the caller
+     * already presented.
      */
     if (response.status === 401) {
       redirect('/login');
     }
 
     if (response.status === 403) {
-      redirect('/yetkisiz');
+      redirect(readErrorCode(await response.text()) === 'NOT_STAFF' ? '/login' : '/yetkisiz');
     }
 
     throw new ApiError(response.status, await response.text());

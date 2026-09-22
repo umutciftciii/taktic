@@ -57,8 +57,11 @@ test.describe('admin RBAC', () => {
 
       // Signing in succeeds — the account is real — and the panel still does
       // not open: an account nobody has given anything has not been given the
-      // panel either.
-      await expect(admin.page).toHaveURL(/\/(login|yetkisiz)$/);
+      // panel either. It lands on the explanation rather than back on the
+      // sign-in form, which it is already past (ADMIN_ACCESS_DENIED, not
+      // NOT_STAFF).
+      await expect(admin.page).toHaveURL(/\/yetkisiz$/);
+      await expect(admin.page.getByRole('heading', { name: /yetkiniz yok/i })).toBeVisible();
     } finally {
       await admin.close();
     }

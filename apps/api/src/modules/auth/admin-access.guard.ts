@@ -1,6 +1,22 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
-import { mayReachAdminPanel } from './admin-permissions';
+import { isStaff, mayReachAdminPanel } from './admin-permissions';
 import type { AuthUser } from './auth.types';
+
+/**
+ * Two refusals that look the same over HTTP and are not the same thing.
+ *
+ * `NOT_STAFF` is a customer's or a provider's session asking for an admin
+ * screen: they are signed in as the wrong kind of account, and the answer is
+ * the sign-in form. `ADMIN_ACCESS_DENIED` is a staff account nobody has given a
+ * role to — signing in again changes nothing, so the answer is a page that says
+ * what is missing.
+ *
+ * Neither code tells the caller anything it did not already know about its own
+ * session; what they let the panel do is stop sending the second case to a
+ * login form it is already past.
+ */
+export const NOT_STAFF = 'NOT_STAFF';
+export const ADMIN_ACCESS_DENIED = 'ADMIN_ACCESS_DENIED';
 
 /**
  * The door to the admin panel, enforced by the API rather than by a screen.
@@ -25,8 +41,14 @@ export class AdminAccessGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user = request.user as AuthUser | null | undefined;
 
-    if (!mayReachAdminPanel(user ? { role: user.role, permissions: user.permissions ?? [] } : null)) {
-      throw new ForbiddenException('Admin access denied');
+    const principal = user ? { role: user.role, permissions: user.permissions ?? [] } : null;
+
+    if (!isStaff(principal)) {
+      throw new ForbiddenException({ code: NOT_STAFF, message: 'Admin access denied' });
+    }
+
+    if (!mayReachAdminPanel(principal)) {
+      throw new ForbiddenException({ code: ADMIN_ACCESS_DENIED, message: 'Admin access denied' });
     }
 
     return true;

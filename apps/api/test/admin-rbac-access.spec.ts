@@ -67,6 +67,46 @@ describe('admin panel access', () => {
       .set('Cookie', cookie(session));
 
     expect(response.status).toBe(403);
+    // Not NOT_STAFF: this account *is* staff, and the panel must explain that
+    // rather than send it back to a sign-in form it is already past.
+    expect(response.body.code).toBe('ADMIN_ACCESS_DENIED');
+  });
+
+  it('tells a customer or a provider apart from a staff account, in the refusal', async () => {
+    // The panel routes on this code: NOT_STAFF goes to the sign-in form — the
+    // behaviour that existed before permissions did — and everything else goes
+    // to the page that explains. Without the distinction a provider who opens
+    // an admin URL would be told "you lack a permission", which is not what is
+    // wrong with them.
+    for (const role of [UserRole.CUSTOMER, UserRole.PROVIDER] as const) {
+      const user = await createUser(ctx.prisma, { role });
+      const session = await loginAs(ctx.prisma, user.id);
+
+      const viaAccessGuard = await request(ctx.server)
+        .get('/admin/me/permissions')
+        .set('Cookie', cookie(session));
+      expect(viaAccessGuard.status).toBe(403);
+      expect(viaAccessGuard.body.code).toBe('NOT_STAFF');
+
+      const viaPermissionsGuard = await request(ctx.server)
+        .get('/customers')
+        .set('Cookie', cookie(session));
+      expect(viaPermissionsGuard.status).toBe(403);
+      expect(viaPermissionsGuard.body.code).toBe('NOT_STAFF');
+    }
+  });
+
+  it('marks a staff account’s missing permission as its own refusal', async () => {
+    const { admin } = await createAdminWithPermissions(ctx.prisma, [AdminPermission.DASHBOARD_READ]);
+    const session = await loginAs(ctx.prisma, admin.id);
+
+    const response = await request(ctx.server).get('/customers').set('Cookie', cookie(session));
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('INSUFFICIENT_PERMISSION');
+    // The refusal never names what is missing: a 403 that lists the permission
+    // it wanted is a map of the panel for anybody probing it.
+    expect(JSON.stringify(response.body)).not.toContain('CUSTOMERS_READ');
   });
 
   it('refuses a customer and a provider even if an assignment somehow exists', async () => {

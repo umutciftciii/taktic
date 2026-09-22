@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { AdminPermission } from '@prisma/client';
+import { NOT_STAFF } from './admin-access.guard';
 import { hasPermission, isStaff } from './admin-permissions';
 import type { AuthUser } from './auth.types';
 import { REQUIRED_PERMISSIONS_KEY, STAFF_PERMISSIONS_KEY } from './permissions.decorator';
@@ -17,6 +18,8 @@ import { REQUIRED_PERMISSIONS_KEY, STAFF_PERMISSIONS_KEY } from './permissions.d
  * routes that do not name a permission, and `AdminAccessGuard` is what keeps
  * those from being public. The two are always used together.
  */
+export const INSUFFICIENT_PERMISSION = 'INSUFFICIENT_PERMISSION';
+
 @Injectable()
 export class PermissionsGuard implements CanActivate {
   constructor(@Inject(Reflector) private readonly reflector: Reflector) {}
@@ -44,16 +47,26 @@ export class PermissionsGuard implements CanActivate {
       }
 
       if (!hasPermission({ role: user!.role, permissions: user!.permissions ?? [] }, fromStaff)) {
-        throw new ForbiddenException('Insufficient permission');
+        throw new ForbiddenException({
+          code: INSUFFICIENT_PERMISSION,
+          message: 'Insufficient permission',
+        });
       }
 
       return true;
     }
 
-    if (!hasPermission(user ? { role: user.role, permissions: user.permissions ?? [] } : null, required)) {
+    const principal = user ? { role: user.role, permissions: user.permissions ?? [] } : null;
+
+    if (!hasPermission(principal, required)) {
       // The missing permission is deliberately not named: a refusal that lists
-      // what the caller lacks is a map of the panel for anyone probing it.
-      throw new ForbiddenException('Insufficient permission');
+      // what the caller lacks is a map of the panel for anyone probing it. The
+      // code says only which of the two refusals this is, so the panel can send
+      // a customer to the sign-in form and a staff account to an explanation.
+      throw new ForbiddenException({
+        code: isStaff(principal) ? INSUFFICIENT_PERMISSION : NOT_STAFF,
+        message: 'Insufficient permission',
+      });
     }
 
     return true;
