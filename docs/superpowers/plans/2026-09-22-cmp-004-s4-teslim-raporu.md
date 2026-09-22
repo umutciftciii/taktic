@@ -126,7 +126,7 @@ profilsiz 404; `:id/credits` yanıtında `promo` yok (sahip + admin); eski yol h
 
 ## 6. Değişen dosyalar
 
-48 dosya, +2896/−170 (`git diff --stat origin/main...HEAD`). Şema: `prisma/schema.prisma` (CampaignAuditLog), 1 migration. API: 11 kaynak
+rev. 1: 48 dosya, +2896/−170; rev. 2 (`28eb4c41`): +8 dosya değişikliği (credits controller/service, web credits page + `lib/api.ts`, 2 spec, 2 doc) (`git diff --stat origin/main...HEAD`). Şema: `prisma/schema.prisma` (CampaignAuditLog), 1 migration. API: 11 kaynak
 (+3 yeni: `offer-refund-settlement.ts`, `campaign-engine-settings.service.ts`, `campaign-engine-settings.controller.ts`), 7 spec (+5 yeni). Web:
 6 dosya + 1 spec. Admin: 9 dosya (+1 yeni `campaign-engine-toggle.tsx`) + 1 spec. E2E: `campaign-fixtures.ts` (yeni, `admin-campaign-operations`'tan
 çıkarıldı), 2 yeni spec, `playwright.config.ts` WebKit `testMatch`. Docs: tasarım, plan, dry-run, bu rapor.
@@ -144,7 +144,7 @@ profilsiz 404; `:id/credits` yanıtında `promo` yok (sahip + admin); eski yol h
 | E2E WebKit (`e2e:webkit`, aynı filtre, taze DB) | 5/5 ✓ |
 | Migration G dry-run | geçici DB: `migrate deploy` 72 ✓, `migrate diff` boş, CHECK/FK kayıtta; DB düşürüldü |
 | RED→GREEN | her dilimde önce kırmızı görüldü: settlement (modül yok → 8 ✗), e-posta (5 ✗), provider projection (1 ✗), ledger (2 ✗), promo (3 ✗), Migration G (6 ✗; ilk CHECK NULL summary'yi geçirdi → COALESCE), toggle (8 ✗ 404), web etiketleri (5 ✗), admin format (5 ✗), E2E promo (unique key → fixture düzeltildi) |
-| CI (GitHub Actions run 35666624866, head `a237c602`) | **3/3 yeşil** — typecheck·lint·test·build, e2e (chromium), e2e (webkit) |
+| CI | rev. 1 run 35666624866 3/3 ✓; rev. 2 (promo `me` endpoint'i, head `28eb4c41`) run 35713520866 **3/3 yeşil** — typecheck·lint·test·build, e2e (chromium), e2e (webkit) |
 
 ## 8. S4 sonrası kampanya açılışına kalan kontrollü staging adımları
 
