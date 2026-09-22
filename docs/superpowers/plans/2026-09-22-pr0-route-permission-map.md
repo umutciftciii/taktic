@@ -271,6 +271,7 @@ veri okur) · `AYAR` (operasyon davranışını değiştirir) · `YAYIN` (public
 | DELETE | `/providers/:providerId/service-categories/:categoryId` | `removeProviderServiceCategory` (L178) | Kapsamdan çıkarır | `PROVIDER_CATEGORIES_WRITE` | — |
 | POST | `/providers/:providerId/claim-invitations` | `resendClaimInvitation` (L197) | **Profili sahiplendiren token mintler** | `PROVIDER_CLAIM_INVITE_ISSUE` | **KİMLİK** |
 | PATCH | `/providers/:id/status` | `updateProviderStatus` (L223) | **Onay/ret/askı — `PROVIDER_APPROVED` kampanya tetikleyicisi** | `PROVIDERS_MODERATE` | KAMPANYA, YIKICI |
+| PATCH | `/providers/:id` | `updateProvider` (L217) | Profil düzenleme — **72'nin dışında**, §12.3 ile eklendi | `PROVIDERS_WRITE` | PII |
 
 > `POST` ve `DELETE` service-categories tek izindedir (kural 5): ikisi de aynı listeyi düzenler ve biri diğerinden
 > daha yıkıcı değil. Buna karşılık `GET admin-detail` ayrı bir izindedir, çünkü bugün ham vergi bilgisi
@@ -370,18 +371,22 @@ veri okur) · `AYAR` (operasyon davranışını değiştirir) · `YAYIN` (public
 | HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/users` | `list` (L26) | Admin hesapları | `ADMIN_USERS_READ` | PII |
-| POST | `/users` | `create` (L33) | **`SUPER_ADMIN` hesabı oluşturur** | `ADMIN_USERS_CREATE` | **KİMLİK**, YIKICI |
+| POST | `/users` | `create` (L33) | Personel hesabı oluşturur (§12.1 sonrası **`ADMIN`** rolünde) | **KÖK — `@Roles(SUPER_ADMIN)`** | **KİMLİK**, YIKICI |
 | GET | `/users/:id` | `detail` (L40) | Admin detayı | `ADMIN_USERS_READ` | PII |
 | PATCH | `/users/:id/status` | `updateStatus` (L47) | Admin hesabını kapatır | `ADMIN_USERS_STATUS` | YIKICI |
-| POST | `/users/:id/invite-link` | `createInviteLink` (L58) | **Admin davet token'ı mintler** | `ADMIN_INVITE_ISSUE` | **KİMLİK**, YIKICI |
+| POST | `/users/:id/invite-link` | `createInviteLink` (L58) | **Admin davet token'ı mintler** | **KÖK — `@Roles(SUPER_ADMIN)`** | **KİMLİK**, YIKICI |
 
-> `ADMIN_USERS_CREATE` ve `ADMIN_INVITE_ISSUE` ayrıdır: ikisi de admin hesabı doğurur ama farklı mekanizmalarla,
-> ve hiçbiri okuma iznine katılmaz. Bu ikisi kataloğun **yetki yükseltme** yüzeyidir; PR-0'da `ADMIN_ROLES_MANAGE`
-> ile birlikte yalnız `SUPER_ADMIN`'e bırakılması önerilir (§10 notu).
+> **§12.1 kararı:** bu iki rota ile `/admin/roles*` rotaları **kök yetkidir** — `AdminPermission` enum'unda
+> karşılıkları yoktur, dolayısıyla hiçbir rol satırı onları devralamaz. `@Roles(UserRole.SUPER_ADMIN)` ile
+> korunmaya devam ederler. `ADMIN_USERS_READ` ve `ADMIN_USERS_STATUS` devredilebilir kalır.
 
 ---
 
-## 4. İzin kataloğu — 77 sabit değer
+## 4. İzin kataloğu — 77 aday değer (§12.1 sonrası **76 dinamik**)
+
+> **§12 kararlarından sonra okuyun.** `ADMIN_USERS_CREATE` ve `ADMIN_INVITE_ISSUE` bu tablodan çıkarıldı ve
+> `@Roles(UserRole.SUPER_ADMIN)` ile korunan **kök yetki** oldular (§12.1); `PROVIDERS_WRITE` eklendi (§12.3).
+> Dinamik `AdminPermission` enum'u bu yüzden **76** değer taşır.
 
 `AdminPermission` Prisma enum'unun tamamı. Panelden üretilemez (D11); `SUPER_ADMIN` hepsine örtük sahiptir (D12).
 
@@ -410,10 +415,11 @@ veri okur) · `AYAR` (operasyon davranışını değiştirir) · `YAYIN` (public
 | Destek | `SUPPORT_READ` · `SUPPORT_WRITE` |
 | Bildirim | `NOTIFICATION_LOGS_READ` · `NOTIFICATION_RETRY` |
 | Yükleme | `UPLOADS_WRITE` |
-| Admin hesapları | `ADMIN_USERS_READ` · `ADMIN_USERS_CREATE` · `ADMIN_USERS_STATUS` · `ADMIN_INVITE_ISSUE` |
+| Admin hesapları | `ADMIN_USERS_READ` · `ADMIN_USERS_STATUS` · ~~`ADMIN_USERS_CREATE`~~ · ~~`ADMIN_INVITE_ISSUE`~~ (§12.1: kök yetki, enum'da yok) |
+| Hizmet veren (ek) | `PROVIDERS_WRITE` (§12.3 — `PATCH /providers/:id`) |
 
-**Bu tabloda olmayan ama PR-0 kodunun ekleyeceği iki değer:** `ADMIN_ROLES_MANAGE` ve `ADMIN_ACCESS`
-(bkz. §10.1). Bugün bir rotaya karşılık gelmedikleri için 77'ye dahil değildirler.
+**`ADMIN_ROLES_MANAGE` kataloğa hiç girmez** (§12.1): rol/izin yönetim rotaları `@Roles(UserRole.SUPER_ADMIN)`
+ile korunur. Panel erişimi bir izin değil, `AdminAccessGuard`'ın kendi kuralıdır (D12).
 
 **Ayrıca beş izin CMP-006 tasarımında adı geçtiği hâlde burada yoktur**, çünkü karşılık gelen rota henüz
 yazılmadı: `PACKAGE_REFUND_REQUEST_CREATE`, `PACKAGE_REFUND_APPROVE`, `PURCHASE_EVIDENCE_READ`,
@@ -453,7 +459,11 @@ sayılmasın.
 
 ---
 
-## 6. `ProviderAccessGuard` kaçağı — 21 rota (**PR-0'ın en kritik bulgusu**)
+## 6. `ProviderAccessGuard` kaçağı — 21 rota · **RBAC kapsamı dışında · admin impersonation yok**
+
+> **§12.2 kararı (bağlayıcı).** Aşağıdaki 21 rotanın tamamı PR-0'da **hiçbir `ADMIN` rolüne açılmaz** ve
+> guard'a `ADMIN` **eklenmez**. Sınıflandırmaları: *RBAC kapsamı dışında · admin impersonation yok*.
+> Her biri için, tüm izinleri atanmış bir `ADMIN` hesabının **403** aldığı test edilir (I-7).
 
 `apps/api/src/modules/auth/provider-access.guard.ts:20`:
 
@@ -499,11 +509,11 @@ olmadığı için reddeder. İki yanlış çözüm vardır ve ikisi de PR-0'da *
 - ❌ Hiçbir şey yapmayıp fark etmemek: operasyon personeli bugün yaptığı bir işi yapamaz hâle gelir ve bu, PR-0
   merge edildikten sonra üretimde keşfedilir.
 
-**Önerilen karar (PR-0 kapsamında, ayrı bir alt dilim olarak):** `ProviderAccessGuard`'ın `SUPER_ADMIN` kısa
-devresi **korunur** (SUPER_ADMIN örtük tam yetkilidir), `ADMIN` için ise guard'a eklenmez; bunun yerine bu 21
-rotanın operasyon tarafından gerçekten kullanılan alt kümesi belirlenip her biri kendi izniyle
-(`PROVIDER_IMPERSONATE_READ` gibi) açık biçimde açılır. Hangi alt kümenin gerçekten kullanıldığı **ürün
-sorusudur** ve PR-0'ın kodundan önce cevaplanmalıdır (§10.2, açık karar **K2**).
+**Verilen karar (§12.2):** `ProviderAccessGuard`'ın `SUPER_ADMIN` kısa devresi **olduğu gibi korunur**;
+`ADMIN` guard'a **eklenmez** ve bu 21 rotanın **hiçbiri** bir izne bağlanmaz. Mock ödeme, sağlayıcı adına
+teklif verme, kredi harcayan yazma ve sağlayıcıya ait diğer yazma aksiyonları yalnız **sağlayıcı sahibinin ya
+da `SUPER_ADMIN`'in** davranışı olarak kalır. Operasyon ihtiyacı ileride çıkarsa çözüm guard'ı gevşetmek
+değil, **ayrı admin rotası + sabit izin + audit**'tir.
 
 ---
 
@@ -608,7 +618,9 @@ başındaki uyarı bu belgeyle karşılanmıştır. **Tasarım notu bu PR'da de�
 
 ---
 
-## 10. PR-0 kodundan önce cevaplanacak açık kararlar
+## 10. PR-0 kodundan önce cevaplanacak açık kararlar — **§12'de cevaplandı**
+
+> Bu bölüm kararlar verilmeden önceki hâliyle bırakılmıştır; bağlayıcı cevaplar **§12**'dedir.
 
 ### 10.1 PR-0'ın kendi rotaları (K1)
 
@@ -660,3 +672,127 @@ kayıtları taranır ve:
 3. her rotanın `@RequiresPermission` metadata'sı tablodaki değere **eşit olmalıdır**.
 
 Böylece bu belge bir kerelik envanter değil, kodun yanında yaşayan bir sözleşme olur.
+
+---
+
+## 12. RG-7 kararları (bağlayıcı — 2026-09-22)
+
+§10'daki açık kararlar cevaplandı. Aşağıdakiler PR-0'ın bağlayıcı girdisidir ve §3/§4/§6/§7'yi **değiştirir**.
+
+### 12.1 K1 — kök yetkiler devredilemez
+
+Üç yetki **dinamik `AdminPermission` kataloğunda yer almaz**:
+
+| Yetki | Neden kök | PR-0'da nasıl korunur |
+| --- | --- | --- |
+| `ADMIN_ROLES_MANAGE` | Rol tanımlayıp izin bağlayabilen, kendi yetkisini genişletebilir | Enum'a **girmez**; rotalar `@Roles(UserRole.SUPER_ADMIN)` ile kalır |
+| `ADMIN_USERS_CREATE` | Personel hesabı doğurur | Enum'a **girmez**; `POST /users` `@Roles(UserRole.SUPER_ADMIN)` |
+| `ADMIN_INVITE_ISSUE` | Hesabı etkinleştiren token mintler | Enum'a **girmez**; `POST /users/:id/invite-link` `@Roles(UserRole.SUPER_ADMIN)` |
+
+**DB düzeyinde garanti:** bu üç ad `AdminPermission` enum'unun **değeri değildir**, dolayısıyla
+`AdminRolePermission` satırı olarak temsil edilemez. Hiçbir rol, hiçbir grant, hiçbir migration bunları
+devralamaz — kısıt bir uygulama kuralı değil, tip sisteminin ve enum'un kendisidir.
+
+**Bunun sonucu katalog büyüklüğü:** §4'teki 77 değerden `ADMIN_USERS_CREATE` ve `ADMIN_INVITE_ISSUE`
+çıkarılır (`ADMIN_ROLES_MANAGE` zaten 77'nin içinde değildi), §12.3 ile `PROVIDERS_WRITE` eklenir →
+**dinamik katalog = 76 değer**. `ADMIN_USERS_READ` ve `ADMIN_USERS_STATUS` **devredilebilir kalır**: admin
+listesini okumak ve bir hesabı pasife almak yetki yükseltmez.
+
+#### Davet zincirinin bugünkü hâli ve değişimi
+
+Bugün (`users.service.ts:79`, `admin-invite.service.ts:93,169,227`):
+
+```
+POST /users            → User{ role: SUPER_ADMIN, passwordHash: null }      ← hesap burada SUPER_ADMIN doğuyor
+POST /users/:id/invite-link → AdminInviteToken (yalnız role=SUPER_ADMIN, passwordHash=null olan hesaba)
+POST /auth/admin-invite     → o hesabın passwordHash'ini doldurur           ← davet yalnız etkinleştiriyor
+```
+
+Yani davet kabulü hesabı `SUPER_ADMIN` **yapmıyor**; hesap `POST /users` anında zaten `SUPER_ADMIN`
+doğuyor. PR-0'da:
+
+```
+POST /users            → User{ role: ADMIN, passwordHash: null }            ← artık ADMIN
+POST /users/:id/invite-link → AdminInviteToken (role=ADMIN, passwordHash=null)
+POST /auth/admin-invite     → passwordHash doldurur; rol DEĞİŞMEZ (ADMIN kalır)
+```
+
+**`SUPER_ADMIN` panelden ya da dinamik rolden oluşturulamaz ve hiçbir hesap `SUPER_ADMIN`'e terfi
+ettirilemez.** `SUPER_ADMIN` yalnız kontrollü bootstrap ile doğar (seed / operatör eliyle çalıştırılan
+kurulum adımı); PR-0 bu bootstrap'i olduğu gibi bırakır ve ona yeni bir HTTP yüzeyi eklemez.
+
+`admin-invite.service.ts`'in üç yerdeki `role !== UserRole.SUPER_ADMIN` kontrolü `role !== UserRole.ADMIN`
+olur; `users.service.ts`'in `where: { role: SUPER_ADMIN }` filtreleri **her iki personel rolünü** kapsar
+(`role: { in: [SUPER_ADMIN, ADMIN] }`) ki mevcut `SUPER_ADMIN` hesapları listede kaybolmasın.
+
+#### Bu zincir için zorunlu invariant testleri
+
+| # | Test | Katman |
+| --- | --- | --- |
+| I-1 | `AdminPermission` enum'unun değerleri arasında `ADMIN_ROLES_MANAGE`, `ADMIN_USERS_CREATE`, `ADMIN_INVITE_ISSUE` **yoktur** (enum değerleri üzerinde doğrudan assertion) | DB-katalog |
+| I-2 | `AdminRolePermission` tablosuna bu üç adı yazmak **tip düzeyinde imkânsız**; ham SQL ile denendiğinde PostgreSQL enum hatası verir | DB |
+| I-3 | `POST /users` `ADMIN` rolünde hesap üretir; hiçbir gövde alanı `SUPER_ADMIN` ürettiremez | API |
+| I-4 | `POST /auth/admin-invite` başarıyla tamamlandıktan sonra hesabın rolü hâlâ `ADMIN`'dir | API |
+| I-5 | Hiçbir rota bir hesabın `role`'ünü `SUPER_ADMIN`'e yazamaz (tüm rotalar taranır; `role: 'SUPER_ADMIN'` yazan servis yolu yalnız bootstrap'tir) | API |
+| I-6 | Tüm izinleri atanmış bir `ADMIN` hesabı `POST /users`, `POST /users/:id/invite-link` ve `/admin/roles*` rotalarında **403** alır | API |
+
+### 12.2 K2 — `ProviderAccessGuard` mirası: RBAC kapsamı dışında
+
+§6'daki **21 rota PR-0'da hiçbir `ADMIN` rolüne açılmaz** ve `ProviderAccessGuard`'a `ADMIN` **eklenmez**.
+Guard'ın `SUPER_ADMIN` kısa devresi (`provider-access.guard.ts:20`) **olduğu gibi kalır**.
+
+**İşaret:** §6'daki 21 rotanın tamamı **"RBAC kapsamı dışında · admin impersonation yok"** olarak
+sınıflandırılmıştır. Bu bir eksik değil, bir karardır.
+
+Özellikle şu dört aksiyon sınıfı **yalnız sağlayıcı sahibinin ya da `SUPER_ADMIN`'in davranışı** olarak kalır:
+
+| Aksiyon sınıfı | Rotalar |
+| --- | --- |
+| Mock ödeme | `POST /providers/:providerId/package-purchases/:purchaseId/mock-pay` |
+| Sağlayıcı adına teklif verme | `POST /providers/:providerId/requests/:requestId/offers` |
+| Kredi harcayan/geri alan yazma | `POST /providers/:providerId/offers/:offerId/withdraw`, `POST /providers/:providerId/package-purchases`, `POST /providers/:providerId/checkout-sessions` |
+| Sağlayıcıya ait diğer yazma | `PATCH /providers/:providerId/entitlements/:entitlementId/auto-renew`, `POST /providers/:providerId/entitlements/:entitlementId/cancel`, `POST /providers/:providerId/requests/:requestId/reports` |
+
+Operasyon ihtiyacı ileride çıkarsa çözüm **guard'ı gevşetmek değildir**: ayrı bir admin rotası + sabit bir
+izin + audit kaydı ile, kendi tasarım notuyla ele alınır.
+
+**PR-0 testi:** 21 rotanın her biri için, tüm izinleri atanmış bir `ADMIN` hesabının **403** aldığı
+doğrulanır (test I-7). Bu, "sessizce açıldı" hâlini imkânsız kılar.
+
+### 12.3 K3 — `PATCH /providers/:id`
+
+| Karar | Ayrıntı |
+| --- | --- |
+| API katmanı | `@RequiresPermission(PROVIDERS_WRITE)` eklenir — yetki artık guard'dan okunur |
+| Servis katmanı | `ensureProviderUpdateAccess` (`providers.service.ts:2048`) ve diğer sahiplik/iş kuralı kontrolleri **aynen korunur**; yeni guard onların yerine geçmez, önüne eklenir |
+| Sahip yolu | Sağlayıcının kendi profilini güncellemesi **değişmez**: guard `PROVIDERS_WRITE` ister, ama bu rota `@Roles` taşımadığı için sağlayıcı yolu `AuthGuard` + servis kontrolüyle çalışmaya devam eder — izin kontrolü yalnız personel hesabına uygulanır (`PermissionsGuard`, `ADMIN` rolü için) |
+| Tek kaynak | `PROVIDERS_WRITE`, `GET /admin/me/permissions` yanıtında görünür; menü, sayfa ve aksiyon görünürlüğü aynı değeri okur (D13) |
+
+`PROVIDERS_WRITE` §4 kataloğuna **eklenir** (76'nın içindedir) ve §3.20'nin altına bu rota 122. satır olarak
+girer. §3'ün 121 satırlık sayımı, 72 dekoratörün kapsamını ölçer; `PATCH /providers/:id` o 72'nin içinde
+olmadığı için sayımı değiştirmez.
+
+### 12.4 `CAMPAIGN_ENGINE_TOGGLE` ayrı kalır
+
+`PUT /operations-settings/campaign-engine`, `OPERATIONS_SETTINGS_WRITE` kapsamına **alınmaz**. Ayrı sabit izin
+olarak kalır ve üç katmanda ayrı kontrol edilir:
+
+| Katman | Kontrol |
+| --- | --- |
+| Rota | `@RequiresPermission(CAMPAIGN_ENGINE_TOGGLE)` |
+| Admin menüsü | Operasyon Ayarları sayfasındaki `#kampanya-motoru` kartı yalnız bu izinle render edilir |
+| Aksiyon | Onay kutusu + "Motoru aç/kapat" düğmesi yalnız bu izinle etkin; izinsiz oturumda düğme **yoktur** ve server action API'ye gitmez |
+
+`OPERATIONS_SETTINGS_WRITE` taşıyan ama `CAMPAIGN_ENGINE_TOGGLE` taşımayan bir rolün motoru açamadığı,
+PR-0'ın testinde ayrı bir vaka olarak doğrulanır (I-8).
+
+### 12.5 Kararların §3/§4'e yansıması — özet
+
+| Değişiklik | Etki |
+| --- | --- |
+| `ADMIN_USERS_CREATE`, `ADMIN_INVITE_ISSUE` kataloğdan çıktı | §3.28'deki iki satır artık `@Roles(UserRole.SUPER_ADMIN)` olarak **kök yetki**; izin adı yok |
+| `ADMIN_ROLES_MANAGE` kataloğa hiç girmedi | §10.1'deki öneri karara dönüştü |
+| `PROVIDERS_WRITE` eklendi | §12.3 |
+| Dinamik katalog | 77 → **76** (`−2 +1`) |
+| §6'daki 21 rota | "RBAC kapsamı dışında · admin impersonation yok" olarak işaretlendi |
+| §5'teki 27 karma rota | Kararı değişmedi: PR-0'da dokunulmaz |
