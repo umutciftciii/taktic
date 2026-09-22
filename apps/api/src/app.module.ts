@@ -33,6 +33,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { PackagePurchasesModule } from './modules/package-purchases/package-purchases.module';
+import { PackageRefundsModule } from './modules/package-refunds/package-refunds.module';
 import { PasswordResetModule } from './modules/password-reset/password-reset.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
@@ -83,6 +84,7 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
     DashboardModule,
     FinanceModule,
     PackagePurchasesModule,
+    PackageRefundsModule,
     PaymentsModule,
     UploadsModule,
     ContactSharingModule,

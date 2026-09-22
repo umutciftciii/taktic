@@ -3,6 +3,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { CampaignEngineModule } from '../campaigns/engine/campaign-engine.module';
 import { CreditsModule } from '../credits/credits.module';
+import { PurchaseTermsModule } from '../purchase-terms/purchase-terms.module';
 import { PackagePurchasesModule } from '../package-purchases/package-purchases.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
@@ -48,6 +49,8 @@ import { PaymentsWebhookService } from './payments-webhook.service';
     // The settlement raises the PACKAGE_PAYMENT_SUCCEEDED campaign event in
     // its own transaction (CMP-002 S2B2). Prisma-only module, no cycle.
     CampaignEngineModule,
+    // CMP-006 PR-A: the checkout reads and enforces the purchase-terms gate.
+    PurchaseTermsModule,
   ],
   controllers: [PaymentsController, LemonSqueezyWebhookController],
   providers: [

@@ -1,0 +1,74 @@
+CMP-006 PR-A Migration I dry-run — 2026-09-22T20:30:38Z
+Izole DB: cmp006_pra_migration_dryrun (gercek taktic DB'sine, .env'e ve container'lara dokunulmadi)
+
+== 1. origin/main semasi + 74 migration uygulanir ==
+74 migrations found in prisma/migrations
+All migrations have been successfully applied.
+
+== 2. Migration oncesi eski (legacy) satin alma satirlari ==
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+2 legacy satin alma satiri
+
+== 3. Migration I uygulanir (75.) ==
+75 migrations found in prisma/migrations
+Applying migration `20260922210000_add_purchase_terms_acceptance`
+All migrations have been successfully applied.
+
+== 4. migrate diff (drift kontrolu; bos olmali) ==
+-- This is an empty migration.
+
+== 5. Uygulanan migration sayisi ==
+75
+
+== 6. Eski satirlar durustce false/NULL kaldi (DML yok) ==
+pp-legacy-paid PAID required=false acceptance=NULL
+pp-legacy-pending PENDING required=false acceptance=NULL
+0 PurchaseTermsAcceptance satiri (0 olmali)
+
+== 7. CHECK kisitlari ==
+PackagePurchase_terms_acceptance_matches_requirement
+PackagePurchase_terms_acceptance_offer_only
+PurchaseTermsAcceptance_client_ip_length
+PurchaseTermsAcceptance_document_key
+PurchaseTermsAcceptance_document_version
+PurchaseTermsAcceptance_sha256_format
+PurchaseTermsAcceptance_sha256_matches_snapshot
+PurchaseTermsAcceptance_snapshot_shape
+PurchaseTermsAcceptance_user_agent_length
+
+== 8. Ertelenmis bilesik FK ==
+PackagePurchase_purchaseTermsAcceptanceId_fkey deferrable=false initially_deferred=false
+PurchaseTermsAcceptance_purchaseId_id_fkey deferrable=true initially_deferred=true
+
+== 9. Tetikleyiciler (depodaki tek tetikleyiciler bunlar) ==
+PackagePurchase_terms_evidence_immutable ON "PackagePurchase"
+PurchaseTermsAcceptance_append_only ON "PurchaseTermsAcceptance"
+
+== 10. Eski satirin diger kolonlari yazilabilir; kanit kolonlari yazilamaz ==
+pp-legacy-pending adminNote guncellendi
+UPDATE 1
+  (beklenen ret) ERROR:  PackagePurchase terms evidence is immutable
+  (beklenen ret) CONTEXT:  PL/pgSQL function "PackagePurchase_terms_evidence_immutable_fn"() line 5 at RAISE
+
+== 11. Zorunlu satin alma kabulsuz dogamaz (sahte eski createdAt dahil) ==
+  (beklenen ret) ERROR:  new row for relation "PackagePurchase" violates check constraint "PackagePurchase_terms_acceptance_matches_requirement"
+  (beklenen ret) DETAIL:  Failing row contains (pp-forged, p-legacy, pkg-legacy, PENDING, 10, 10000, TRY, x, null, null, null, null, null, null, null, null, null, null, 2000-01-01 00:00:00, 2026-09-22 20:30:41.69, null, null, null, null, null, null, null, null, null, null, OFFER_PACKAGE, null, null, null, null, null, null, null, t).
+
+== 12. Kabulu olmayan yetim kabul satiri COMMIT'te reddedilir ==
+  (beklenen ret) BEGIN
+  (beklenen ret) INSERT 0 1
+  (beklenen ret) ERROR:  insert or update on table "PurchaseTermsAcceptance" violates foreign key constraint "PurchaseTermsAcceptance_purchaseId_id_fkey"
+  (beklenen ret) DETAIL:  Key (purchaseId, id)=(yok, a-orphan) is not present in table "PackagePurchase".
+0 kabul satiri kaldi (0 olmali)
+
+== 13. Geri donus (rollback) plani ==
+Migration yalniz ekleme yapar. Geri alma gerekirse (henuz kabul satiri yokken):
+  DROP TRIGGER "PackagePurchase_terms_evidence_immutable" ON "PackagePurchase"; DROP FUNCTION "PackagePurchase_terms_evidence_immutable_fn"();
+  DROP TABLE "PurchaseTermsAcceptance" CASCADE; DROP FUNCTION "PurchaseTermsAcceptance_append_only_fn"();
+  ALTER TABLE "PackagePurchase" DROP COLUMN "purchaseTermsAcceptanceId", DROP COLUMN "termsAcceptanceRequired"; DROP TYPE "SourceChannel";
+Kapi acildiktan sonra kabul satiri varsa geri alma KANIT SILER; yapilmaz.
+
+Izole DB silindi.

@@ -22,6 +22,27 @@ const MAX_LEDGER_PAGE_SIZE = 200;
 const DEFAULT_PROVIDER_FINANCE_PAGE_SIZE = 25;
 const MAX_PROVIDER_FINANCE_PAGE_SIZE = 100;
 
+/**
+ * What the admin finance screen shows for a recent purchase, and nothing else.
+ *
+ * An allowlist, not an omit: a column added to PackagePurchase later — a
+ * payment correlation token, a checkout URL, a provider order id, an internal
+ * note — stays out of this response until someone names it here.
+ */
+const financeSummaryRecentPurchaseSelect = {
+  id: true,
+  purchaseNumber: true,
+  createdAt: true,
+  providerId: true,
+  provider: { select: { businessName: true } },
+  packageNameSnapshot: true,
+  creditAmountSnapshot: true,
+  priceAmountSnapshot: true,
+  currencySnapshot: true,
+  status: true,
+  mockPaymentReference: true,
+} satisfies Prisma.PackagePurchaseSelect;
+
 const ISTANBUL_TZ_OFFSET = '+03:00';
 const ANALYTICS_DEFAULT_RANGE_DAYS = 30;
 const ANALYTICS_BUCKET_LIMITS: Record<FinanceAnalyticsGroupBy, number> = {
@@ -152,14 +173,7 @@ export class FinanceService {
       this.prisma.packagePurchase.findMany({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: RECENT_PURCHASES_LIMIT,
-        include: {
-          provider: {
-            select: { id: true, businessName: true },
-          },
-          package: {
-            select: { id: true, name: true },
-          },
-        },
+        select: financeSummaryRecentPurchaseSelect,
       }),
     ]);
 

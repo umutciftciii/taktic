@@ -60,6 +60,8 @@ export type Runtime = {
   contactSharing: ContactSharing;
   providerClaim: boolean;
   paymentProvider: PaymentProviderKind;
+  /** CMP-006 PR-A: whether the API opens the purchase-terms release gate. */
+  purchaseTermsGate: boolean;
 };
 
 /**
@@ -127,6 +129,7 @@ function buildRuntime(
   contactSharing: ContactSharing = { enabled: false },
   providerClaim = false,
   paymentProvider: PaymentProviderKind = 'mock',
+  purchaseTermsGate = false,
 ): Runtime {
   return {
     name,
@@ -138,6 +141,7 @@ function buildRuntime(
     contactSharing,
     providerClaim,
     paymentProvider,
+    purchaseTermsGate,
   };
 }
 
@@ -233,6 +237,33 @@ export const lemonSqueezyRuntime = buildRuntime(
 );
 
 /**
+ * The same code with PURCHASE_TERMS_GATE=on (CMP-006 PR-A).
+ *
+ * A sixth API, for the reason every extra stack exists: the gate is read from
+ * the API's environment, so one process cannot represent both sides. The
+ * primary runtime keeps the gate closed and is what proves the checkout is
+ * unchanged without it; this one proves the consent box, the full-text terms
+ * and the evidence row. The mock payment provider, and no admin process —
+ * nothing here needs the operator's panel.
+ *
+ * NODE_ENV=test is what lets the API serve the draft text at all: on staging
+ * or production the same flag refuses to boot without a legally approved set.
+ */
+export const purchaseTermsRuntime = buildRuntime(
+  'purchase-terms',
+  {
+    api: port(process.env.E2E_TERMS_API_PORT, 3271),
+    web: port(process.env.E2E_TERMS_WEB_PORT, 3270),
+    admin: port(process.env.E2E_TERMS_ADMIN_PORT, 3272),
+  },
+  false,
+  { enabled: false },
+  false,
+  'mock',
+  true,
+);
+
+/**
  * One more web process, and only a web process: the primary runtime's API
  * behind a web server that declares itself `staging` and carries no
  * Turnstile site key. What it proves is the web's own fail-closed rule —
@@ -276,4 +307,5 @@ export const runtimes = [
   contactSharingRuntime,
   providerClaimRuntime,
   lemonSqueezyRuntime,
+  purchaseTermsRuntime,
 ];

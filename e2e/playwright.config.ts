@@ -19,6 +19,7 @@ import {
   phoneGateRuntime,
   primaryRuntime,
   providerClaimRuntime,
+  purchaseTermsRuntime,
   repoRoot,
   SEO_PRODUCTION_ORIGIN,
   seoProductionWebRuntime,
@@ -206,6 +207,10 @@ function apiServer(runtime: Runtime) {
       // override outside loopback, and refuses the sandbox provider entirely
       // under NODE_ENV=production, so no configuration here can reach Lemon
       // Squeezy.
+      // Closed on every runtime but the purchase-terms one (CMP-006 PR-A).
+      // Stated rather than left unset, so a developer's exported value cannot
+      // open it on a stack whose specs expect the unchanged checkout.
+      PURCHASE_TERMS_GATE: runtime.purchaseTermsGate ? 'on' : 'off',
       PAYMENT_PROVIDER: runtime.paymentProvider,
       ...(runtime.paymentProvider === 'lemon-squeezy-test'
         ? {
@@ -385,6 +390,13 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  * a provider pays to reach. A Chromium-only pass would be answering a different
  * question about them than the one an iPhone asks.
  *
+ * And the purchase-terms consent, for the form reason:
+ *
+ *   purchase-terms-checkout  a native checkbox that unlocks a server-action
+ *                            submit button, `<details>` holding the full terms
+ *                            text, and an evidence row that records the user
+ *                            agent the engine itself sent
+ *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
  * what keeps the existing CI job's browser download and wall clock unchanged;
@@ -399,7 +411,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];
@@ -468,6 +480,8 @@ export default defineConfig({
     apiServer(lemonSqueezyRuntime),
     nextServer(lemonSqueezyRuntime, 'web'),
     nextServer(lemonSqueezyRuntime, 'admin'),
+    apiServer(purchaseTermsRuntime),
+    nextServer(purchaseTermsRuntime, 'web'),
     turnstileClosedWebServer(),
     seoProductionWebServer(),
   ],

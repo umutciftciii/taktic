@@ -273,6 +273,8 @@ const TRUNCATED_TABLES = [
   'ProviderPackageEntitlementScope',
   'ProviderPackageEntitlement',
   'OfferPackageScopeCategory',
+  // CMP-006 PR-A: the acceptance points at its purchase (deferred FK).
+  'PurchaseTermsAcceptance',
   'PackagePurchase',
   'Offer',
   'ServiceRequestAnswer',

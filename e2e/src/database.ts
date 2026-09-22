@@ -30,6 +30,8 @@ const TRUNCATED_TABLES = [
   // The vitrin catalogue is the one showcase table nothing above cascades
   // into: every other showcase row hangs off a provider or a purchase.
   'ShowcasePackage',
+  // CMP-006 PR-A: the acceptance points at its purchase (deferred FK).
+  'PurchaseTermsAcceptance',
   'PackagePurchase',
   'Offer',
   'ServiceRequestAnswer',

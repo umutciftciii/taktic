@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -15,6 +16,8 @@ import {
   Prisma,
   UserRole,
 } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import type { RequestMeta } from '../../common/request-meta';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -26,6 +29,9 @@ import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
+import type { AuthUser } from '../auth/auth.types';
+import { purchaseTermsEvidenceOmit } from '../purchase-terms/purchase-terms.projection';
+import { PurchaseTermsService } from '../purchase-terms/purchase-terms.service';
 import { ShowcaseEntitlementService } from '../showcase/showcase-entitlement.service';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
@@ -49,6 +55,7 @@ export class PackagePurchasesService implements OnModuleInit {
     @Inject(ShowcaseEntitlementService)
     private readonly entitlements: ShowcaseEntitlementService,
     @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
+    @Inject(PurchaseTermsService) private readonly purchaseTerms: PurchaseTermsService,
   ) {}
 
   /** The mock settlement path mirrors the webhook's and raises the same campaign event (CMP-002 S2B2). */
@@ -71,12 +78,30 @@ export class PackagePurchasesService implements OnModuleInit {
    * statement that creates the row — a purchase that briefly exists without a
    * reference is a purchase a webhook could not match. Callers that omit it get
    * exactly the behaviour this method has always had.
+   *
+   * CMP-006 PR-A. While the purchase-terms gate is open this is also where the
+   * acceptance is enforced, for both routes that reach it: the request must
+   * carry a ticked box for the served version, only the provider account
+   * itself may accept, and the acceptance is inserted in the same transaction
+   * as the purchase — acceptance first, under an id minted here, then the
+   * purchase marked `termsAcceptanceRequired`. The database refuses the
+   * purchase without the acceptance and the acceptance without the purchase
+   * (see migration 20260922210000). With the gate closed nothing here runs:
+   * no row, no column and no check differ from before.
    */
   async createProviderPurchase(
     providerId: string,
     dto: CreatePackagePurchaseDto,
     payment?: { provider: string; reference: string },
+    actor?: { user: AuthUser; meta: RequestMeta },
   ) {
+    const terms = this.purchaseTerms.requireAcceptance(dto);
+    if (terms && actor?.user.role !== UserRole.PROVIDER) {
+      // An operator may read a business's screens but may not agree to terms
+      // on its behalf — the same rule the vitrin acceptances follow.
+      throw new ForbiddenException('Only the provider account can accept the purchase terms');
+    }
+
     await this.ensureProviderExists(providerId);
     const creditPackage = await this.prisma.offerCreditPackage.findFirst({
       where: { id: normalizeRequiredString(dto.packageId, 'Package ID'), isActive: true },
@@ -103,8 +128,27 @@ export class PackagePurchasesService implements OnModuleInit {
         NumberedEntityType.PACKAGE_PURCHASE,
       );
 
+      let evidence: { id: string; acceptanceId: string } | null = null;
+      if (terms && actor) {
+        const id = randomUUID();
+        const acceptance = await this.purchaseTerms.recordAcceptance(tx, {
+          purchaseId: id,
+          userId: actor.user.id,
+          terms,
+          meta: actor.meta,
+        });
+        evidence = { id, acceptanceId: acceptance.id };
+      }
+
       return tx.packagePurchase.create({
         data: {
+          ...(evidence
+            ? {
+                id: evidence.id,
+                termsAcceptanceRequired: true,
+                purchaseTermsAcceptanceId: evidence.acceptanceId,
+              }
+            : {}),
           providerId,
           packageId: creditPackage.id,
           purchaseNumber,
@@ -594,6 +638,7 @@ const packagePurchaseInclude = {
  */
 export const packagePurchaseOmit = {
   paymentReference: true,
+  ...purchaseTermsEvidenceOmit,
 } satisfies Prisma.PackagePurchaseOmit;
 
 function normalizeMockPayment(dto: MockPackagePaymentDto) {

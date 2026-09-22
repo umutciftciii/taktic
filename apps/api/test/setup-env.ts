@@ -33,6 +33,9 @@ delete process.env.ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED;
 delete process.env.UNVIEWED_OFFER_REFUND_ENABLED;
 delete process.env.REQUEST_EXPIRY_SCHEDULER_ENABLED;
 delete process.env.REQUEST_REMINDER_SCHEDULER_ENABLED;
+// CMP-006 PR-A: the purchase-terms gate starts closed in every spec, whatever
+// a developer has exported. Specs that open it set and restore it themselves.
+delete process.env.PURCHASE_TERMS_GATE;
 // A small, explicit auth budget keeps the rate-limit test fast. Each spec file
 // boots its own Nest app, so the in-memory counters never leak between files.
 process.env.AUTH_RATE_LIMIT_MAX ??= '5';

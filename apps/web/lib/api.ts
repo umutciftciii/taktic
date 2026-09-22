@@ -906,6 +906,25 @@ export type PaymentMode = {
   liveEnabled: false;
 };
 
+/**
+ * CMP-006 PR-A. The purchase terms a credit-package checkout must show and
+ * have accepted — or `required: false` while the API's release gate is
+ * closed, in which case the checkout form is exactly what it always was.
+ *
+ * `legalReviewStatus: 'PENDING'` means the text is a draft awaiting legal
+ * review; the screen labels it TASLAK and never calls it an approved contract.
+ * The API serves a draft only on a local stack or in tests.
+ */
+export type PurchaseTerms =
+  | { required: false }
+  | {
+      required: true;
+      documentKey: string;
+      version: string;
+      legalReviewStatus: 'PENDING' | 'APPROVED';
+      documents: { key: string; title: string; text: string }[];
+    };
+
 export type AdminPaymentConfig = PaymentMode & {
   configurableKeys: string[];
   /** Names of unfilled settings. The API never returns their values. */
