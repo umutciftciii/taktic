@@ -74,7 +74,7 @@ type CategoryDetailPageProps = {
 };
 
 export default async function CategoryDetailPage({ params }: CategoryDetailPageProps) {
-  await requireAdmin();
+  await requireAdmin('QUESTIONS_READ');
   const { slug } = await params;
   const category = await apiFetch<Category>(`/categories/${slug}?includeInactive=true`);
   const [questions, allCategories] = await Promise.all([

@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
-import { RolesGuard } from '../auth/roles.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
 import { PaymentsService } from './payments.service';
 
@@ -25,8 +27,8 @@ export class PaymentsController {
 
   /** The same, plus the names — never the values — of unfilled settings. */
   @Get('payments/config')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PAYMENTS_CONFIG_READ)
   readAdminPaymentConfig() {
     return this.payments.readAdminPaymentConfig();
   }

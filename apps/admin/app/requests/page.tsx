@@ -2,14 +2,15 @@ import Link from 'next/link';
 import {
   apiFetch,
   Category,
-  QualityLabel,
-  ServiceRequest,
-  ServiceRequestStatus,
   formatBudgetRange,
   formatDateTime,
   qualityBadgeClass,
+  QualityLabel,
   qualityLabel,
   requestStatusLabel,
+  requireAdmin,
+  ServiceRequest,
+  ServiceRequestStatus,
   statusBadgeClass,
 } from '../../lib/api';
 import { PageHeader } from '../../components/page-header';
@@ -122,6 +123,7 @@ function lifecycleNotes(request: ServiceRequest): string[] {
 }
 
 export default async function AdminRequestsPage({ searchParams }: AdminRequestsPageProps) {
+  await requireAdmin('REQUESTS_READ');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);

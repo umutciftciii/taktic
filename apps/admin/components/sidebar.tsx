@@ -2,13 +2,19 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { isNavItemActive, navGroups } from '../lib/nav';
+import { isNavItemActive, type NavGroup } from '../lib/nav';
 
 type SidebarProps = {
+  /**
+   * The rows this session may open, already filtered on the server against
+   * `GET /admin/me/permissions`. Passed in rather than imported, so the sidebar
+   * cannot show a row the API would refuse — it does not know the full list.
+   */
+  groups: NavGroup[];
   onNavigate?: () => void;
 };
 
-export function Sidebar({ onNavigate }: SidebarProps) {
+export function Sidebar({ groups, onNavigate }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -19,7 +25,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       </Link>
 
       <div className="admin-sidebar-groups">
-        {navGroups.map((group) => (
+        {groups.map((group) => (
           <div className="admin-sidebar-group" key={group.title}>
             <h2 className="admin-sidebar-group-title">{group.title}</h2>
             <ul className="admin-sidebar-list">

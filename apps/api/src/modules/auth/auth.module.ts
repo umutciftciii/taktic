@@ -19,6 +19,8 @@ import {
   SERVICE_REQUEST_THROTTLE_LIMIT,
   SERVICE_REQUEST_THROTTLE_TTL_MS,
 } from '../service-requests/service-requests.constants';
+import { AdminAccessGuard } from './admin-access.guard';
+import { PermissionsGuard } from './permissions.guard';
 import { RolesGuard } from './roles.guard';
 
 @Module({
@@ -63,6 +65,8 @@ import { RolesGuard } from './roles.guard';
     AuthGuard,
     OptionalAuthGuard,
     RolesGuard,
+    AdminAccessGuard,
+    PermissionsGuard,
     ProviderAccessGuard,
     AuthThrottlerGuard,
     RequestIdentityService,
@@ -72,6 +76,8 @@ import { RolesGuard } from './roles.guard';
     AuthGuard,
     OptionalAuthGuard,
     RolesGuard,
+    AdminAccessGuard,
+    PermissionsGuard,
     ProviderAccessGuard,
     RequestIdentityService,
     AuthThrottlerGuard,

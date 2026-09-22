@@ -1,9 +1,12 @@
 import { Controller, Get, Inject, Param, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission, UserRole } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ContactSharingService } from './contact-sharing.service';
 
@@ -55,8 +58,8 @@ export class ContactSharingController {
 
   /** The operator's view: the audit row, and both sides when one was revealed. */
   @Get('service-requests/:requestId/contact-reveal')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CONTACT_REVEAL_READ)
   getContactRevealForAdmin(@Param('requestId') requestId: string) {
     return this.contactSharing.getContactRevealForAdmin(requestId);
   }

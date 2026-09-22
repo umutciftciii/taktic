@@ -51,7 +51,7 @@ type LeadsPageProps = {
  * appears on the provider's own inbox.
  */
 export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps) {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_LEADS_READ');
 
   const { status, providerId } = await searchParams;
   const selected = STATUSES.find((candidate) => candidate === status) ?? null;

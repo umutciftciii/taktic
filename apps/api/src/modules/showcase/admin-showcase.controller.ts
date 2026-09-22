@@ -10,11 +10,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { AdminShowcaseService } from './admin-showcase.service';
 import { ShowcasePriceTermsService } from './showcase-price-terms.service';
 import {
@@ -25,7 +27,9 @@ import {
 } from './dto/review-showcase-version.dto';
 
 /**
- * Vitrin cards, for the operator. SUPER_ADMIN only.
+ * Vitrin cards, for the operator. SHOWCASE_REVIEW_READ / _DECIDE for the
+ * review queue, SHOWCASE_CARDS_READ / _MODERATE for the cards themselves, and
+ * SHOWCASE_TERMS_ACCEPTANCES_READ for the consent ledger.
  *
  * A separate prefix, separate guards and a separate service from the provider's
  * routes, for the reason the support desk splits the same way: nothing an
@@ -40,8 +44,7 @@ import {
  * their next version.
  */
 @Controller('admin/showcase')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class AdminShowcaseController {
   constructor(
     @Inject(AdminShowcaseService) private readonly showcase: AdminShowcaseService,
@@ -63,6 +66,7 @@ export class AdminShowcaseController {
    * history the table exists to keep.
    */
   @Get('price-terms-acceptances')
+  @RequiresPermission(AdminPermission.SHOWCASE_TERMS_ACCEPTANCES_READ)
   listPriceTermsAcceptances(
     @Query('providerId') providerId?: string,
     @Query('cardId') cardId?: string,
@@ -73,11 +77,13 @@ export class AdminShowcaseController {
 
   /** The queue. Defaults to PENDING — what is actually waiting on somebody. */
   @Get('versions')
+  @RequiresPermission(AdminPermission.SHOWCASE_REVIEW_READ)
   listVersions(@Query() query: ListShowcaseVersionsDto) {
     return this.showcase.listVersions(query);
   }
 
   @Get('versions/:versionId')
+  @RequiresPermission(AdminPermission.SHOWCASE_REVIEW_READ)
   getVersion(@Param('versionId') versionId: string) {
     return this.showcase.getVersion(versionId);
   }
@@ -88,12 +94,14 @@ export class AdminShowcaseController {
    * version in its new state.
    */
   @Post('versions/:versionId/approve')
+  @RequiresPermission(AdminPermission.SHOWCASE_REVIEW_DECIDE)
   @HttpCode(HttpStatus.OK)
   approveVersion(@Param('versionId') versionId: string, @CurrentUser() user: AuthUser) {
     return this.showcase.approveVersion(versionId, user);
   }
 
   @Post('versions/:versionId/reject')
+  @RequiresPermission(AdminPermission.SHOWCASE_REVIEW_DECIDE)
   @HttpCode(HttpStatus.OK)
   rejectVersion(
     @Param('versionId') versionId: string,
@@ -104,11 +112,13 @@ export class AdminShowcaseController {
   }
 
   @Get('cards')
+  @RequiresPermission(AdminPermission.SHOWCASE_CARDS_READ)
   listCards(@Query() query: ListShowcaseCardsDto) {
     return this.showcase.listCards(query);
   }
 
   @Get('cards/:cardId')
+  @RequiresPermission(AdminPermission.SHOWCASE_CARDS_READ)
   getCard(@Param('cardId') cardId: string) {
     return this.showcase.getCard(cardId);
   }
@@ -126,6 +136,7 @@ export class AdminShowcaseController {
    * it, so the days the provider cannot use are not billed to them.
    */
   @Post('cards/:cardId/suspend')
+  @RequiresPermission(AdminPermission.SHOWCASE_CARDS_MODERATE)
   @HttpCode(HttpStatus.OK)
   suspendCard(
     @Param('cardId') cardId: string,
@@ -136,6 +147,7 @@ export class AdminShowcaseController {
   }
 
   @Post('cards/:cardId/unsuspend')
+  @RequiresPermission(AdminPermission.SHOWCASE_CARDS_MODERATE)
   @HttpCode(HttpStatus.OK)
   unsuspendCard(@Param('cardId') cardId: string) {
     return this.showcase.unsuspendCard(cardId);

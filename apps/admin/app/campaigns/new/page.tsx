@@ -8,7 +8,7 @@ import { CampaignEngineNotice } from '../engine-notice';
 export const dynamic = 'force-dynamic';
 
 export default async function NewCampaignPage() {
-  await requireAdmin();
+  await requireAdmin('CAMPAIGNS_WRITE');
   // Only for the badge: the list endpoint is the cheapest reader of the switch.
   const { engineEnabled } = await apiFetch<CampaignListResponse>('/admin/campaigns?limit=1');
 

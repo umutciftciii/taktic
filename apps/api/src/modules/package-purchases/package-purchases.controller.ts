@@ -1,9 +1,10 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { PackagePurchaseStatus, UserRole } from '@prisma/client';
-import { Roles } from '../auth/auth.decorators';
+import { AdminPermission, PackagePurchaseStatus } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
-import { RolesGuard } from '../auth/roles.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
 import { UpdatePackagePurchaseStatusDto } from './dto/update-package-purchase-status.dto';
@@ -45,8 +46,8 @@ export class PackagePurchasesController {
   }
 
   @Get('package-purchases')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PACKAGE_PURCHASES_READ)
   listAdminPurchases(
     @Query('status') status?: PackagePurchaseStatus,
     @Query('providerId') providerId?: string,
@@ -56,15 +57,15 @@ export class PackagePurchasesController {
   }
 
   @Get('package-purchases/:id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PACKAGE_PURCHASES_READ)
   getAdminPurchase(@Param('id') id: string) {
     return this.packagePurchasesService.getAdminPurchase(id);
   }
 
   @Patch('package-purchases/:id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PACKAGE_PURCHASE_STATUS_WRITE)
   updateAdminPurchaseStatus(@Param('id') id: string, @Body() dto: UpdatePackagePurchaseStatusDto) {
     return this.packagePurchasesService.updateAdminPurchaseStatus(id, dto);
   }

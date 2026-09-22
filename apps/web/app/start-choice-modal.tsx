@@ -20,6 +20,7 @@ function resolveSellRoute(user: AuthUser | null): string {
     case 'PROVIDER':
       return '/providers/me';
     case 'SUPER_ADMIN':
+    case 'ADMIN':
       return '/providers/me';
     case 'CUSTOMER':
     default:

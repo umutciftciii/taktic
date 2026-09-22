@@ -8,6 +8,7 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
 import { PrismaService } from '../../prisma/prisma.service';
+import { STAFF_ROLES } from '../auth/admin-permissions';
 import { AuthUser } from '../auth/auth.types';
 import { AdminInviteService } from './admin-invite.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -76,7 +77,20 @@ export class UsersService {
             name,
             email,
             phone,
-            role: UserRole.SUPER_ADMIN,
+            /*
+             * A staff account, never a super admin (PR-0, RG-7 §12.1).
+             *
+             * This route used to mint SUPER_ADMIN directly, which meant the
+             * authority to add a colleague was the authority to add somebody
+             * with every capability there is — including the authority to add
+             * more of them. It now creates an ADMIN: an account that can do
+             * nothing at all until a role is assigned to it, and that cannot
+             * reach the panel before then.
+             *
+             * There is no route that promotes an account to SUPER_ADMIN.
+             * The bootstrap (prisma/seed.ts) is the only thing that makes one.
+             */
+            role: UserRole.ADMIN,
             isActive: true,
             passwordHash: null,
             customerOrigin: null,
@@ -150,7 +164,7 @@ export class UsersService {
     );
 
     const where: Prisma.UserWhereInput = {
-      role: UserRole.SUPER_ADMIN,
+      role: { in: [...STAFF_ROLES] },
     };
 
     if (filters.q) {
@@ -248,7 +262,9 @@ export class UsersService {
 
   async detail(id: string) {
     const user = await this.prisma.user.findFirst({
-      where: { id, role: UserRole.SUPER_ADMIN },
+      // Both staff kinds: the SUPER_ADMIN accounts that existed before PR-0
+      // must not vanish from the screen that lists them.
+      where: { id, role: { in: [...STAFF_ROLES] } },
       select: {
         id: true,
         name: true,
@@ -299,7 +315,7 @@ export class UsersService {
 
   async updateStatus(id: string, dto: UpdateUserStatusDto, actor: AuthUser) {
     const target = await this.prisma.user.findFirst({
-      where: { id, role: UserRole.SUPER_ADMIN },
+      where: { id, role: { in: [...STAFF_ROLES] } },
       select: { id: true, role: true, isActive: true },
     });
 
@@ -316,11 +332,23 @@ export class UsersService {
         throw new ConflictException('Kendi hesabınızı pasifleştiremezsiniz.');
       }
 
-      const activeSuperAdminCount = await this.prisma.user.count({
-        where: { role: UserRole.SUPER_ADMIN, isActive: true },
-      });
-      if (activeSuperAdminCount <= 1) {
-        throw new ConflictException('Son aktif süper admin pasifleştirilemez.');
+      /*
+       * The last super admin stays. Deliberately counts SUPER_ADMIN alone and
+       * not staff in general: an ADMIN cannot define roles, create staff or
+       * mint invite links, so a platform whose only remaining staff were
+       * ADMINs would have nobody able to give anyone else access — including
+       * the access needed to fix it.
+       *
+       * Deactivating an ADMIN is therefore unrestricted, and deactivating the
+       * last active SUPER_ADMIN is refused however many ADMINs exist.
+       */
+      if (target.role === UserRole.SUPER_ADMIN) {
+        const activeSuperAdminCount = await this.prisma.user.count({
+          where: { role: UserRole.SUPER_ADMIN, isActive: true },
+        });
+        if (activeSuperAdminCount <= 1) {
+          throw new ConflictException('Son aktif süper admin pasifleştirilemez.');
+        }
       }
     }
 

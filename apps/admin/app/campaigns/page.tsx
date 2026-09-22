@@ -28,7 +28,7 @@ type CampaignsPageProps = {
 };
 
 export default async function CampaignsPage({ searchParams }: CampaignsPageProps) {
-  await requireAdmin();
+  await requireAdmin('CAMPAIGNS_READ');
   const params = await searchParams;
   const query = new URLSearchParams({ limit: '25' });
   if (params.cursor) query.set('cursor', params.cursor);

@@ -1,15 +1,16 @@
 import { Body, Controller, ForbiddenException, Get, Inject, Put, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { SetSchedulerEnabledDto } from './dto/set-scheduler-enabled.dto';
 import { MarketplacePublishSettingsService } from './marketplace-publish-settings.service';
 
 @Controller('operations-settings/marketplace-publish')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class MarketplacePublishSettingsController {
   constructor(
     @Inject(MarketplacePublishSettingsService)
@@ -17,11 +18,13 @@ export class MarketplacePublishSettingsController {
   ) {}
 
   @Get()
+  @RequiresPermission(AdminPermission.OPERATIONS_SETTINGS_READ)
   get() {
     return this.settings.getForAdmin();
   }
 
   @Put()
+  @RequiresPermission(AdminPermission.MARKETPLACE_PUBLISH_WRITE)
   set(@Body() dto: SetSchedulerEnabledDto, @CurrentUser() user: AuthUser) {
     if (!user?.id) {
       throw new ForbiddenException('Bu ayar yalnızca oturum açmış bir yönetici tarafından değiştirilebilir');

@@ -33,7 +33,7 @@ function normalizeStatus(value: string | undefined): StatusFilter {
 }
 
 export default async function AdminCategoriesPage({ searchParams }: AdminCategoriesPageProps) {
-  await requireAdmin();
+  await requireAdmin('QUESTIONS_READ');
   const { q: rawQuery, status: rawStatus } = await searchParams;
   const query = (rawQuery ?? '').trim();
   const status = normalizeStatus(rawStatus);

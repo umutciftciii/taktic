@@ -152,7 +152,7 @@ export type AuthUser = {
   email: string | null;
   phone: string | null;
   name: string | null;
-  role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+  role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER' | 'ADMIN';
   isActive: boolean;
   /**
    * When the account proved its own `phone` (User.phoneVerifiedAt). Only on
@@ -339,7 +339,7 @@ export type ProviderProfile = {
     email: string | null;
     phone: string | null;
     name: string | null;
-    role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+    role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER' | 'ADMIN';
   } | null;
   serviceCategories: ProviderServiceCategory[];
   /**

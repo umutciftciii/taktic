@@ -6,6 +6,7 @@ import {
   formatPrice,
   ProviderCredits,
   ProviderProfile,
+  requireAdmin,
   statusBadgeClass,
   statusLabel,
 } from '../../../../lib/api';
@@ -34,6 +35,7 @@ type AdminProviderCreditsPageProps = {
 };
 
 export default async function AdminProviderCreditsPage({ params }: AdminProviderCreditsPageProps) {
+  await requireAdmin('FINANCE_LEDGER_READ');
   const { id } = await params;
 
   const [credits, provider, entitlements] = await Promise.all([

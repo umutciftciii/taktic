@@ -53,7 +53,7 @@ function queueHref(state: QueueState, cursor?: string | null): string {
 }
 
 export default async function ReviewReportsQueuePage({ searchParams }: ReviewReportsQueuePageProps) {
-  await requireAdmin();
+  await requireAdmin('PROVIDER_REVIEWS_READ');
 
   const params = await searchParams;
   const state = normalizeState(params.state);

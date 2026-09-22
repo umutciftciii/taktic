@@ -9,18 +9,21 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { SetSchedulerEnabledDto } from './dto/set-scheduler-enabled.dto';
 import { isSchedulerJobKey } from './scheduler-jobs';
 import { SchedulerSettingsService } from './scheduler-settings.service';
 
 /**
- * SUPER_ADMIN only, both ways — the same rule, for the same reason, as the
- * operations settings this sits beside.
+ * OPERATIONS_SETTINGS_READ to look, SCHEDULERS_WRITE to switch — kept apart
+ * from the general settings write because these switches start and stop jobs
+ * that move credit.
  *
  * Reading is restricted alongside writing because the response carries the
  * toggle history: who switched the refund worker on, and when. That is not an
@@ -34,8 +37,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
  * about what keys do exist.
  */
 @Controller('operations-settings/schedulers')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class SchedulerSettingsController {
   constructor(
     @Inject(SchedulerSettingsService)
@@ -43,11 +45,13 @@ export class SchedulerSettingsController {
   ) {}
 
   @Get()
+  @RequiresPermission(AdminPermission.OPERATIONS_SETTINGS_READ)
   list() {
     return this.schedulers.listForAdmin();
   }
 
   @Put(':job')
+  @RequiresPermission(AdminPermission.SCHEDULERS_WRITE)
   setEnabled(
     @Param('job') job: string,
     @Body() dto: SetSchedulerEnabledDto,

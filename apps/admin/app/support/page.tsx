@@ -76,7 +76,7 @@ function normalizePage(value: string | undefined): number {
 }
 
 export default async function AdminSupportPage({ searchParams }: AdminSupportPageProps) {
-  await requireAdmin();
+  await requireAdmin('SUPPORT_READ');
 
   const params = await searchParams;
   const statuses = parseStatusFilter(params.status);

@@ -44,7 +44,7 @@ export default async function CreditPackageDetailPage({
   params,
   searchParams,
 }: CreditPackageDetailPageProps) {
-  await requireAdmin();
+  await requireAdmin('CREDIT_PACKAGES_READ');
   const { id } = await params;
   const { error: rawError, ok: rawOk } = await searchParams;
   const errorMessage = (rawError ?? '').trim();

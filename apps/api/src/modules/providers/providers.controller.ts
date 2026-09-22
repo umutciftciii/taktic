@@ -11,11 +11,14 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission, UserRole } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
+import { RequiresPermission, RequiresPermissionFromStaff } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AddProviderServiceCategoryDto } from './dto/add-provider-service-category.dto';
 import { CreateProviderDto } from './dto/create-provider.dto';
@@ -44,8 +47,8 @@ export class ProvidersController {
   }
 
   @Get()
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDERS_READ)
   listProviders(
     @Query('status') status?: string,
     @Query('city') city?: string,
@@ -135,8 +138,8 @@ export class ProvidersController {
   }
 
   @Get(':providerId/admin-detail')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDERS_READ_DETAIL)
   getAdminProviderDetail(@Param('providerId') providerId: string) {
     return this.providersService.getAdminProviderDetail(providerId);
   }
@@ -144,14 +147,14 @@ export class ProvidersController {
   /**
    * The operator's view of a provider's service list, drafts included.
    *
-   * SUPER_ADMIN only, and for the same reason `includeInactive` is: a DRAFT
+   * PROVIDERS_READ, and restricted for the same reason `includeInactive` is: a DRAFT
    * category's name and slug are the unreleased catalogue, and this is the one
    * response body where a provider's bindings to one are visible at all. Every
    * other read of the same provider narrows them away.
    */
   @Get(':providerId/service-categories')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDERS_READ)
   listProviderServiceCategories(@Param('providerId') providerId: string) {
     return this.providersService.getAdminServiceCategories(providerId);
   }
@@ -166,8 +169,8 @@ export class ProvidersController {
    * binding, one route, one role.
    */
   @Post(':providerId/service-categories')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDER_CATEGORIES_WRITE)
   addProviderServiceCategory(
     @Param('providerId') providerId: string,
     @Body() dto: AddProviderServiceCategoryDto,
@@ -176,8 +179,8 @@ export class ProvidersController {
   }
 
   @Delete(':providerId/service-categories/:categoryId')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDER_CATEGORIES_WRITE)
   removeProviderServiceCategory(
     @Param('providerId') providerId: string,
     @Param('categoryId') categoryId: string,
@@ -188,15 +191,17 @@ export class ProvidersController {
   /**
    * Re-sends the claim invitation for an application nobody owns yet.
    *
-   * SUPER_ADMIN only, and deliberately the only way to ask for another link:
+   * PROVIDER_CLAIM_INVITE_ISSUE — its own permission because it mints a token
+   * that takes ownership of a profile — and deliberately the only way to ask
+   * for another link:
    * a public "resend to this address" endpoint would answer whether an address
    * has an application behind it, which is exactly the enumeration this feature
    * must not offer. The response carries a status and an expiry — never the
    * token, the URL or the address.
    */
   @Post(':providerId/claim-invitations')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDER_CLAIM_INVITE_ISSUE)
   resendClaimInvitation(
     @Param('providerId') providerId: string,
     @CurrentUser() actor: AuthUser,
@@ -214,15 +219,28 @@ export class ProvidersController {
     return this.providersService.getProviderForViewer(id, user);
   }
 
+  /**
+   * Two callers, one handler: the provider who owns this profile, and an
+   * operator correcting it.
+   *
+   * The permission is asked of the operator only (RG-7 §12.3). The service's
+   * own `ensureProviderUpdateAccess` is untouched and still decides everything
+   * it decided before — who owns the profile, whether a customer is refused,
+   * whether an unowned application may be pointed at another address. This
+   * guard is a gate in front of it, not a replacement for it: before PR-0 an
+   * operator's authority here was readable only inside the service, which is
+   * exactly the kind of permission the panel could not show.
+   */
   @Patch(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequiresPermissionFromStaff(AdminPermission.PROVIDERS_WRITE)
   updateProvider(@Param('id') id: string, @Body() dto: UpdateProviderDto, @CurrentUser() user: AuthUser | null) {
     return this.providersService.updateProvider(id, dto, user);
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDERS_MODERATE)
   updateProviderStatus(@Param('id') id: string, @Body() dto: UpdateProviderStatusDto) {
     return this.providersService.updateProviderStatus(id, dto);
   }

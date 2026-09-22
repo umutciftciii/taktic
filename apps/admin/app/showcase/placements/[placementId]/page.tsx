@@ -61,7 +61,7 @@ export default async function ShowcasePlacementPage({
   params,
   searchParams,
 }: PlacementPageProps) {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_PLACEMENTS_READ');
 
   const { placementId } = await params;
   const { error, suspended, resumed, cancelled } = await searchParams;

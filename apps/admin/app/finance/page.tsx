@@ -286,7 +286,7 @@ function pickPeak(
 export default async function AdminFinanceDashboardPage({
   searchParams,
 }: AdminFinancePageProps) {
-  await requireAdmin();
+  await requireAdmin('FINANCE_READ');
 
   const params = await searchParams;
   const period = normalizePeriod(params.period);

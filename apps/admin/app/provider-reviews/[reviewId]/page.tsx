@@ -58,7 +58,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 export default async function ReviewDetailPage({ params, searchParams }: ReviewDetailPageProps) {
-  await requireAdmin();
+  await requireAdmin('PROVIDER_REVIEWS_READ');
 
   const { reviewId } = await params;
   const { ok, error } = await searchParams;

@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { ServiceRequestsService } from '../service-requests/service-requests.service';
 import { ReopenRequestDto, ResolveRequestReportsDto } from './dto/resolve-request-reports.dto';
 import { RequestReportsService } from './request-reports.service';
@@ -21,8 +23,7 @@ import { RequestReportsService } from './request-reports.service';
  * import each other.
  */
 @Controller('service-requests')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class AdminRequestReportsController {
   constructor(
     @Inject(RequestReportsService) private readonly reports: RequestReportsService,
@@ -30,6 +31,7 @@ export class AdminRequestReportsController {
   ) {}
 
   @Get('reports')
+  @RequiresPermission(AdminPermission.REQUEST_REPORTS_READ)
   list(
     @Query('state') state?: string,
     @Query('cursor') cursor?: string,
@@ -44,11 +46,13 @@ export class AdminRequestReportsController {
   }
 
   @Get(':id/reports')
+  @RequiresPermission(AdminPermission.REQUEST_REPORTS_READ)
   listForRequest(@Param('id') id: string) {
     return this.reports.listForRequest(id);
   }
 
   @Post(':id/reports/resolve')
+  @RequiresPermission(AdminPermission.REQUEST_REPORTS_RESOLVE)
   resolve(
     @Param('id') id: string,
     @Body() dto: ResolveRequestReportsDto,
@@ -58,6 +62,7 @@ export class AdminRequestReportsController {
   }
 
   @Post(':id/reopen')
+  @RequiresPermission(AdminPermission.REQUESTS_REOPEN)
   reopen(@Param('id') id: string, @Body() dto: ReopenRequestDto, @CurrentUser() user: AuthUser) {
     return this.requests.reopenAfterRemoval(id, dto.moderationNote?.trim() || null, user);
   }

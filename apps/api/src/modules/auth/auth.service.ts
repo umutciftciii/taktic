@@ -5,7 +5,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { CustomerOrigin, UserRole } from '@prisma/client';
+import { AdminPermission, CustomerOrigin, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import {
   assertEmailFreeForAccountKind,
@@ -188,6 +188,30 @@ export class AuthService {
             // nobody else.
             emailVerifiedAt: true,
             phoneVerifiedAt: true,
+            /*
+             * The admin capabilities this session carries (PR-0).
+             *
+             * Read here, with the session, rather than on each guarded request:
+             * the session row is fetched on every authenticated call anyway, so
+             * this costs one join instead of a second round trip per route, and
+             * every guard in the request sees the same answer.
+             *
+             * Two filters, and both are the point. `revokedAt: null` drops an
+             * assignment somebody took away; `role.isActive` drops every
+             * assignment of a role that was deactivated — so deactivating a
+             * role removes the capability from everyone who held it, without a
+             * single assignment row being touched. A revoked assignment and an
+             * inactive role are therefore indistinguishable from never having
+             * held it, which is what both are meant to mean.
+             *
+             * Nothing is cached anywhere: the next request re-reads it, so a
+             * change takes effect on the operator's next click rather than at
+             * their next sign-in.
+             */
+            adminRoleAssignments: {
+              where: { revokedAt: null, role: { isActive: true } },
+              select: { role: { select: { permissions: { select: { permission: true } } } } },
+            },
           },
         },
       },
@@ -240,8 +264,14 @@ export class AuthService {
       }
     }
 
+    const { adminRoleAssignments, ...account } = session.user;
+
     return {
-      user: session.user,
+      // `adminRoleAssignments` is folded into a flat, de-duplicated permission
+      // list here and never travels further: nothing downstream needs to know
+      // which role granted what, and an AuthUser carrying role rows would
+      // invite a caller to reason about them instead of about capabilities.
+      user: { ...account, permissions: flattenPermissions(adminRoleAssignments) },
       lastSeenAt: effectiveLastSeenAt,
       session: {
         expiresAt: session.expiresAt,
@@ -416,4 +446,24 @@ function normalizeOptionalPhone(value: string | null | undefined) {
   // Stored in E.164 and nothing else, so that the unique index on User.phone
   // is a rule about numbers rather than about spellings.
   return canonicalAccountPhone(trimmed);
+}
+
+/**
+ * The union of the permissions of a set of live assignments, sorted and
+ * without duplicates.
+ *
+ * Two roles may legitimately hold the same permission, and the guard asks
+ * "does this set contain X" — so the shape that matters is a set, and sorting
+ * it only makes the API response and its tests stable.
+ */
+function flattenPermissions(
+  assignments: readonly { role: { permissions: readonly { permission: AdminPermission }[] } }[],
+): AdminPermission[] {
+  const held = new Set<AdminPermission>();
+  for (const assignment of assignments) {
+    for (const { permission } of assignment.role.permissions) {
+      held.add(permission);
+    }
+  }
+  return [...held].sort();
 }

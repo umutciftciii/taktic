@@ -47,7 +47,7 @@ export default async function ShowcaseReviewPage({
   params,
   searchParams,
 }: ShowcaseReviewPageProps) {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_REVIEW_READ');
   const { versionId } = await params;
   const { error, approved, rejected } = await searchParams;
 

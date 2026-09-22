@@ -10,6 +10,7 @@ const ROLE_LABELS: Record<string, string> = {
   CUSTOMER: 'Müşteri',
   PROVIDER: 'Hizmet veren',
   SUPER_ADMIN: 'Yönetici',
+  ADMIN: 'Yönetici',
 };
 
 type AccountProfilePageProps = {

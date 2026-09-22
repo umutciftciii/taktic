@@ -14,15 +14,18 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission, UserRole } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
+import { AuthUser } from '../auth/auth.types';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
+import { mayReachAdminPanel } from '../auth/admin-permissions';
 import {
   assertElevatedQueryAccess,
   type CredentialCarryingRequest,
 } from '../auth/elevated-query';
-import { RolesGuard } from '../auth/roles.guard';
-import { AuthUser } from '../auth/auth.types';
 import { CategoriesService, type CategoryViewOptions } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { ResolveRoutingDto } from './dto/resolve-routing.dto';
@@ -74,7 +77,9 @@ export class CategoriesController {
   async resolveRouting(@Body() dto: ResolveRoutingDto, @CurrentUser() user: AuthUser | null) {
     const resolution = await this.categoriesService.resolveRouting(
       dto,
-      user?.role === UserRole.SUPER_ADMIN,
+      // The operator's walk through an unreleased category: any staff account
+      // with panel access, for the reason assertElevatedQueryAccess gives.
+      isOperatorView(user),
     );
 
     // Deliberately narrow: slugs, kind and the next question — never ids, never
@@ -122,22 +127,22 @@ export class CategoriesController {
   }
 
   @Post()
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_WRITE)
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.categoriesService.createCategory(dto);
   }
 
   @Patch(':id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_WRITE)
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.categoriesService.updateCategory(id, dto);
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_STATUS)
   updateCategoryStatus(@Param('id') id: string, @Body() dto: UpdateCategoryStatusDto) {
     const status = resolveRequestedStatus(dto);
 
@@ -150,8 +155,8 @@ export class CategoriesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_DELETE)
   deleteCategory(@Param('id') id: string) {
     return this.categoriesService.deleteCategory(id);
   }
@@ -171,11 +176,24 @@ export class CategoriesController {
     includeInactive: string | undefined,
   ): CategoryViewOptions {
     if (includeInactive !== 'true') {
-      return { includeInactive: false, isSuperAdmin: user?.role === UserRole.SUPER_ADMIN };
+      return { includeInactive: false, isSuperAdmin: isOperatorView(user) };
     }
 
     assertElevatedQueryAccess(request, user);
 
     return { includeInactive: true, isSuperAdmin: true };
   }
+}
+
+/**
+ * Whether this caller sees the operator's catalogue — drafts, inactive rows and
+ * unreleased routing targets.
+ *
+ * One function so the two places that ask cannot answer differently, and the
+ * same rule `assertElevatedQueryAccess` applies: staff with panel access, which
+ * after PR-0 means a super admin or a staff account holding at least one live
+ * role.
+ */
+function isOperatorView(user: AuthUser | null): boolean {
+  return mayReachAdminPanel(user ? { role: user.role, permissions: user.permissions ?? [] } : null);
 }

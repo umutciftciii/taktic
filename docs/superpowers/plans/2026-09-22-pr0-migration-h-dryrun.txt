@@ -1,0 +1,24 @@
+PR-0 Migration H dry-run — 2026-09-22T16:13:07Z
+Izole DB: pr0_migration_dryrun (gercek taktic DB'sine dokunulmadi)
+
+== migrate deploy ==
+Datasource "db": PostgreSQL database "pr0_migration_dryrun", schema "public" at "localhost:5433"
+
+73 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+
+== migrate diff (drift kontrolu) ==
+
+-- This is an empty migration.
+
+
+== uygulanan migration sayisi ==
+73
+== partial unique index ==
+CREATE UNIQUE INDEX "AdminRoleAssignment_active_unique" ON public."AdminRoleAssignment" USING btree ("userId", "roleId") WHERE ("revokedAt" IS NULL)
+== AdminPermission deger sayisi ==
+76
+== kok yetkiler enum'da YOK (bos olmali) ==
+(bos = dogru)

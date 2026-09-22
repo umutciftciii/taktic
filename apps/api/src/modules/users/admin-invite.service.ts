@@ -9,6 +9,7 @@ import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { STAFF_ROLES } from '../auth/admin-permissions';
 import {
   ADMIN_INVITE_PATH,
   ADMIN_INVITE_TOKEN_TTL_HOURS,
@@ -91,7 +92,9 @@ export class AdminInviteService {
       },
     });
 
-    if (!target || target.role !== UserRole.SUPER_ADMIN) {
+    // Both staff kinds: an ADMIN created after PR-0, and a SUPER_ADMIN created
+    // before it who still has no password.
+    if (!target || !STAFF_ROLES.includes(target.role)) {
       throw new NotFoundException('User not found');
     }
 
@@ -163,10 +166,23 @@ export class AdminInviteService {
           throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
         }
 
+        /*
+         * Sets a password and nothing else.
+         *
+         * `role` is in the WHERE and not in the `data`: accepting an invite
+         * proves control of a mailbox, and control of a mailbox is not a
+         * promotion. An ADMIN who follows this link is an ADMIN afterwards,
+         * with exactly the roles somebody assigned it — which, on a fresh
+         * account, is none, so it signs in and is told it has no access yet.
+         *
+         * The role predicate is what keeps this from being a way to set a
+         * password on somebody else's account: only a staff account with no
+         * password, holding a live token, is touched.
+         */
         const userUpdate = await tx.user.updateMany({
           where: {
             id: lookup.user.id,
-            role: UserRole.SUPER_ADMIN,
+            role: { in: [...STAFF_ROLES] },
             passwordHash: null,
             isActive: true,
           },
@@ -224,7 +240,7 @@ export class AdminInviteService {
       throw new BadRequestException('Bağlantının süresi dolmuş.');
     }
 
-    if (record.user.role !== UserRole.SUPER_ADMIN) {
+    if (!STAFF_ROLES.includes(record.user.role)) {
       throw new BadRequestException('Bağlantı geçersiz.');
     }
 

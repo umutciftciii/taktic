@@ -1,8 +1,9 @@
 import { Controller, Get, Inject, Query, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { FinanceAnalyticsDto } from './dto/finance-analytics.dto';
 import { ListCreditLedgerDto } from './dto/list-credit-ledger.dto';
 import { ListProviderFinanceDto } from './dto/list-provider-finance.dto';
@@ -13,29 +14,29 @@ export class FinanceController {
   constructor(@Inject(FinanceService) private readonly financeService: FinanceService) {}
 
   @Get('summary')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.FINANCE_READ)
   summary() {
     return this.financeService.summary();
   }
 
   @Get('analytics')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.FINANCE_READ)
   analytics(@Query() query: FinanceAnalyticsDto) {
     return this.financeService.analytics(query);
   }
 
   @Get('credit-ledger')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.FINANCE_LEDGER_READ)
   creditLedger(@Query() query: ListCreditLedgerDto) {
     return this.financeService.listCreditLedger(query);
   }
 
   @Get('providers')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.FINANCE_READ)
   providerFinance(@Query() query: ListProviderFinanceDto) {
     return this.financeService.listProviderFinance(query);
   }

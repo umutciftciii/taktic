@@ -31,7 +31,7 @@ const PACKAGE_TYPES = [
 ] as const;
 
 export default async function NewCreditPackagePage({ searchParams }: NewCreditPackagePageProps) {
-  await requireAdmin();
+  await requireAdmin('CREDIT_PACKAGES_WRITE');
   const params = await searchParams;
   const errorMessage = (params.error ?? '').trim();
   // The pool an unlimited scope may be drawn from. Empty until an admin marks

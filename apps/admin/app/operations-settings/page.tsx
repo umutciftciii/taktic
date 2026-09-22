@@ -78,7 +78,7 @@ const RUN_OUTCOME_LABELS: Record<string, string> = {
 export default async function OperationsSettingsPage({
   searchParams,
 }: OperationsSettingsPageProps) {
-  await requireAdmin();
+  const { can } = await requireAdmin('OPERATIONS_SETTINGS_READ');
 
   const params = await searchParams;
   const errorMessage = (params.error ?? '').trim();
@@ -91,6 +91,17 @@ export default async function OperationsSettingsPage({
     apiFetch<ProviderReviewSettings>('/operations-settings/provider-reviews'),
     apiFetch<CampaignEngineSettings>('/operations-settings/campaign-engine'),
   ]);
+
+  /*
+   * The engine toggle is its own permission (RG-7 §12.4), not part of the
+   * operations write this page otherwise asks for: every other switch here is a
+   * working preference, and this one starts promotional credit flowing. A role
+   * trusted with the rest is not thereby trusted with this, so the card renders
+   * read-only without it and the button is not on the page at all — the server
+   * action would be refused anyway, and a button that cannot work is a worse
+   * answer than an explanation.
+   */
+  const canToggleEngine = can('CAMPAIGN_ENGINE_TOGGLE');
 
   // A rejected save carries the operator's own value back in the query, so the
   // form re-hydrates with what they typed rather than with what is stored.
@@ -374,7 +385,14 @@ export default async function OperationsSettingsPage({
                 {engine.enabled ? 'Açık' : 'Kapalı'}
               </span>
             </div>
-            <CampaignEngineToggle enabled={engine.enabled} />
+            {canToggleEngine ? (
+              <CampaignEngineToggle enabled={engine.enabled} />
+            ) : (
+              <p className="muted" data-testid="campaign-engine-toggle-forbidden">
+                Motoru açma/kapama yetkiniz yok. Bu, operasyon ayarlarını düzenleme yetkisinden ayrı tutulan
+                tek anahtardır; promosyon kredisi dağıtımını başlatan karar olduğu için ayrı bir izne bağlıdır.
+              </p>
+            )}
 
             <h3 className="operations-subheading">Son değişiklikler</h3>
             {engine.recentChanges.length === 0 ? (

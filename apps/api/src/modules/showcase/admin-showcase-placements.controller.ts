@@ -11,11 +11,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ShowcaseLeadStatus, UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission, ShowcaseLeadStatus } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import {
   CreateShowcasePackageDto,
   UpdateShowcasePackageDto,
@@ -54,8 +56,7 @@ import { ShowcasePlacementReadService } from './showcase-placement-read.service'
  *   checkout from the variant it was mapped to.
  */
 @Controller('admin/showcase')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class AdminShowcasePlacementsController {
   constructor(
     @Inject(ShowcasePackagesService) private readonly packages: ShowcasePackagesService,
@@ -67,22 +68,26 @@ export class AdminShowcasePlacementsController {
   ) {}
 
   @Get('packages')
+  @RequiresPermission(AdminPermission.SHOWCASE_PACKAGES_READ)
   listPackages() {
     return this.packages.listForAdmin();
   }
 
   @Get('packages/:packageId')
+  @RequiresPermission(AdminPermission.SHOWCASE_PACKAGES_READ)
   getPackage(@Param('packageId') packageId: string) {
     return this.packages.getForAdmin(packageId);
   }
 
   @Post('packages')
+  @RequiresPermission(AdminPermission.SHOWCASE_PACKAGES_WRITE)
   @HttpCode(HttpStatus.CREATED)
   createPackage(@Body() dto: CreateShowcasePackageDto) {
     return this.packages.create(dto);
   }
 
   @Patch('packages/:packageId')
+  @RequiresPermission(AdminPermission.SHOWCASE_PACKAGES_WRITE)
   updatePackage(
     @Param('packageId') packageId: string,
     @Body() dto: UpdateShowcasePackageDto,
@@ -91,6 +96,7 @@ export class AdminShowcasePlacementsController {
   }
 
   @Get('placements')
+  @RequiresPermission(AdminPermission.SHOWCASE_PLACEMENTS_READ)
   listPlacements(
     @Query('status') status?: string,
     @Query('providerId') providerId?: string,
@@ -100,6 +106,7 @@ export class AdminShowcasePlacementsController {
   }
 
   @Get('placements/:placementId')
+  @RequiresPermission(AdminPermission.SHOWCASE_PLACEMENTS_READ)
   getPlacement(@Param('placementId') placementId: string) {
     return this.placements.getForAdmin(placementId);
   }
@@ -113,6 +120,7 @@ export class AdminShowcasePlacementsController {
    * card down.
    */
   @Post('placements/:placementId/suspend')
+  @RequiresPermission(AdminPermission.SHOWCASE_PLACEMENTS_MODERATE)
   @HttpCode(HttpStatus.OK)
   suspendPlacement(
     @Param('placementId') placementId: string,
@@ -131,6 +139,7 @@ export class AdminShowcasePlacementsController {
    * back on a shelf that is still closed.
    */
   @Post('placements/:placementId/resume')
+  @RequiresPermission(AdminPermission.SHOWCASE_PLACEMENTS_MODERATE)
   @HttpCode(HttpStatus.OK)
   resumePlacement(@Param('placementId') placementId: string) {
     return this.admin.resume(placementId);
@@ -145,6 +154,7 @@ export class AdminShowcasePlacementsController {
    * without anyone looking at what the run had already delivered.
    */
   @Post('placements/:placementId/cancel')
+  @RequiresPermission(AdminPermission.SHOWCASE_PLACEMENT_CANCEL)
   @HttpCode(HttpStatus.OK)
   cancelPlacement(
     @Param('placementId') placementId: string,
@@ -155,6 +165,7 @@ export class AdminShowcasePlacementsController {
   }
 
   @Get('leads')
+  @RequiresPermission(AdminPermission.SHOWCASE_LEADS_READ)
   listLeads(
     @Query('status') status?: ShowcaseLeadStatus,
     @Query('providerId') providerId?: string,
@@ -163,6 +174,7 @@ export class AdminShowcasePlacementsController {
   }
 
   @Get('leads/:leadId')
+  @RequiresPermission(AdminPermission.SHOWCASE_LEADS_READ)
   getLead(@Param('leadId') leadId: string) {
     return this.leads.get(leadId);
   }

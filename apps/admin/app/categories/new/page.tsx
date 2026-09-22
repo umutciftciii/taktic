@@ -14,7 +14,7 @@ import {
 } from '../category-taxonomy';
 
 export default async function NewCategoryPage() {
-  await requireAdmin();
+  await requireAdmin('CATEGORIES_WRITE');
   const categories = await apiFetch<Category[]>('/categories?includeInactive=true');
   // Only a GROUP can be a parent — a service is not a folder — so the picker
   // offers exactly what the API will accept.

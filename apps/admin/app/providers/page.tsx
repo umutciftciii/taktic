@@ -3,9 +3,10 @@ import Link from 'next/link';
 import {
   apiFetch,
   Category,
+  formatDateTime,
   ProviderProfile,
   ProviderStatus,
-  formatDateTime,
+  requireAdmin,
   statusBadgeClass,
   statusLabel,
 } from '../../lib/api';
@@ -72,6 +73,7 @@ function toLower(value: string | null | undefined) {
 }
 
 export default async function AdminProvidersPage({ searchParams }: AdminProvidersPageProps) {
+  await requireAdmin('PROVIDERS_READ');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);

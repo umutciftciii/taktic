@@ -10,11 +10,14 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission, UserRole } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateCreditPackageDto } from './dto/create-credit-package.dto';
 import { ManualCreditTransactionDto } from './dto/manual-credit-transaction.dto';
@@ -45,8 +48,8 @@ export class CreditsController {
    * scope is not public information.
    */
   @Get('admin/offer-packages')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_READ)
   listAdminPackages(@Query('includeInactive') includeInactive?: string) {
     return this.creditsService.listAllPackagesForAdmin(includeInactive !== 'false');
   }
@@ -58,36 +61,36 @@ export class CreditsController {
    * default.
    */
   @Get('admin/offer-packages/unlimited-eligible-categories')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_READ)
   listUnlimitedEligibleCategories() {
     return this.creditsService.listUnlimitedEligibleCategories();
   }
 
   @Get('admin/offer-packages/:id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_READ)
   getAdminPackage(@Param('id') id: string) {
     return this.creditsService.getPackageForAdmin(id);
   }
 
   @Post('credit-packages')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_WRITE)
   createCreditPackage(@Body() dto: CreateCreditPackageDto) {
     return this.creditsService.createCreditPackage(dto);
   }
 
   @Patch('credit-packages/:id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_WRITE)
   updateCreditPackage(@Param('id') id: string, @Body() dto: UpdateCreditPackageDto) {
     return this.creditsService.updateCreditPackage(id, dto);
   }
 
   @Patch('credit-packages/:id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_STATUS)
   updateCreditPackageStatus(@Param('id') id: string, @Body() dto: UpdateCreditPackageStatusDto) {
     return this.creditsService.updateCreditPackageStatus(id, dto.isActive);
   }
@@ -128,8 +131,8 @@ export class CreditsController {
   }
 
   @Post('providers/:providerId/credits/grant')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDITS_GRANT)
   grantCredits(
     @Param('providerId') providerId: string,
     @Body() dto: ManualCreditTransactionDto,
@@ -139,8 +142,8 @@ export class CreditsController {
   }
 
   @Post('providers/:providerId/credits/deduct')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDITS_DEDUCT)
   deductCredits(
     @Param('providerId') providerId: string,
     @Body() dto: ManualCreditTransactionDto,

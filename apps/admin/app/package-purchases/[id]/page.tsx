@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import {
   apiFetch,
-  PackagePurchase,
-  statusLabel,
-  statusBadgeClass,
-  formatPrice,
   formatDateTime,
+  formatPrice,
+  PackagePurchase,
+  requireAdmin,
+  statusBadgeClass,
+  statusLabel,
 } from '../../../lib/api';
 import { updatePackagePurchaseStatusAction } from '../actions';
 
@@ -14,6 +15,7 @@ type AdminPackagePurchaseDetailPageProps = {
 };
 
 export default async function AdminPackagePurchaseDetailPage({ params }: AdminPackagePurchaseDetailPageProps) {
+  await requireAdmin('PACKAGE_PURCHASES_READ');
   const { id } = await params;
   const purchase = await apiFetch<PackagePurchase>(`/package-purchases/${id}`);
   const purchaseRef = purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;

@@ -12,11 +12,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { UserRole } from '@prisma/client';
+import { AdminPermission } from '@prisma/client';
 import { diskStorage } from 'multer';
-import { Roles } from '../auth/auth.decorators';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import {
   CATEGORY_IMAGE_ALLOWED_MIMES,
   CATEGORY_IMAGE_DIR,
@@ -36,8 +37,8 @@ export class UploadsController {
 
   @Post('category-image')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.UPLOADS_WRITE)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({

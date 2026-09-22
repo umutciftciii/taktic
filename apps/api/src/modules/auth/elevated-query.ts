@@ -1,5 +1,5 @@
+import { mayReachAdminPanel } from './admin-permissions';
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
 import { AuthUser } from './auth.types';
 import { getSessionIdFromRequest } from './cookie';
 
@@ -33,7 +33,20 @@ export function assertElevatedQueryAccess(
   request: CredentialCarryingRequest,
   user: AuthUser | null | undefined,
 ): void {
-  if (user?.role === UserRole.SUPER_ADMIN) {
+  /*
+   * Any staff account with panel access (PR-0), not only a super admin.
+   *
+   * The elevated view here is the operator's catalogue — DRAFT and INACTIVE
+   * categories — and "an operator" now means a staff account somebody has
+   * given a role to. A staff account with no live role is refused exactly as a
+   * customer is, because it cannot open the panel either.
+   *
+   * It is deliberately panel access rather than a named permission: these are
+   * public routes that widen for an operator, so there is no handler-level
+   * permission to name, and inventing one would put a value in the catalogue
+   * that guards no route — the thing the closed catalogue exists to prevent.
+   */
+  if (mayReachAdminPanel(user ? { role: user.role, permissions: user.permissions ?? [] } : null)) {
     return;
   }
 

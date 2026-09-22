@@ -25,7 +25,7 @@ export default async function NotificationDetailPage({
   params,
   searchParams,
 }: NotificationDetailPageProps) {
-  await requireAdmin();
+  await requireAdmin('NOTIFICATION_LOGS_READ');
   const { id } = await params;
   const { retry, message } = await searchParams;
 

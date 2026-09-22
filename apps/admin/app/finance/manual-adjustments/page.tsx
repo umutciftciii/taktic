@@ -112,7 +112,7 @@ function buildApiQuery(params: {
 export default async function AdminManualAdjustmentsPage({
   searchParams,
 }: AdminManualAdjustmentsPageProps) {
-  await requireAdmin();
+  await requireAdmin('FINANCE_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();

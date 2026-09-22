@@ -1,14 +1,16 @@
 import { Body, Controller, ForbiddenException, Get, Inject, Put, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { OperationsSettingsService } from './operations-settings.service';
 import { SaveOperationsSettingsDto } from './dto/save-operations-settings.dto';
 
 /**
- * SUPER_ADMIN only, both ways.
+ * OPERATIONS_SETTINGS_READ and OPERATIONS_SETTINGS_WRITE, as two permissions.
  *
  * The refund window is a commercial term: it is printed on provider screens as
  * a promise and it decides what the refund worker pays out. Reading it is
@@ -23,8 +25,7 @@ import { SaveOperationsSettingsDto } from './dto/save-operations-settings.dto';
  * {@link RefundPolicyController}, which exposes the number and nothing else.
  */
 @Controller('operations-settings')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class OperationsSettingsController {
   constructor(
     @Inject(OperationsSettingsService)
@@ -32,11 +33,13 @@ export class OperationsSettingsController {
   ) {}
 
   @Get()
+  @RequiresPermission(AdminPermission.OPERATIONS_SETTINGS_READ)
   getOperationsSettings() {
     return this.operationsSettings.getForAdmin();
   }
 
   @Put()
+  @RequiresPermission(AdminPermission.OPERATIONS_SETTINGS_WRITE)
   saveOperationsSettings(@Body() dto: SaveOperationsSettingsDto, @CurrentUser() user: AuthUser) {
     // The audit row's operator is NOT NULL in the database, so an anonymous
     // save is refused here rather than failing halfway through the transaction.

@@ -1,19 +1,23 @@
 import { Controller, Get, HttpCode, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { ListNotificationLogsDto } from './dto/list-notification-logs.dto';
 import { NotificationLogService } from './notification-log.service';
 import { NotificationRetryService } from './notification-retry.service';
 
 /**
- * SUPER_ADMIN only.
+ * NOTIFICATION_LOGS_READ for the two reads, NOTIFICATION_RETRY for the write.
  *
  * The audit trail says who the platform contacted and when, which makes it a
  * privacy surface even though every recipient in it is masked. AuthGuard turns
- * an anonymous call into 401 and RolesGuard turns a customer's or provider's
- * into 403 — no role but SUPER_ADMIN reaches the service.
+ * an anonymous call into 401, AdminAccessGuard turns a non-staff caller's into
+ * 403, and only staff holding NOTIFICATION_LOGS_READ reach the service.
+ *
+ * The retry is a separate permission because it is a separate act: reading who
+ * was contacted is not the same authority as contacting them again.
  *
  * The reads are the whole of it apart from one deliberate write: the retry,
  * which re-sends a row that already exists. Note what its route does *not*
@@ -23,8 +27,7 @@ import { NotificationRetryService } from './notification-retry.service';
  * mail arbitrary text to an arbitrary address with an admin session.
  */
 @Controller('notification-logs')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class NotificationLogController {
   constructor(
     @Inject(NotificationLogService) private readonly notificationLogs: NotificationLogService,
@@ -32,11 +35,13 @@ export class NotificationLogController {
   ) {}
 
   @Get()
+  @RequiresPermission(AdminPermission.NOTIFICATION_LOGS_READ)
   listNotificationLogs(@Query() query: ListNotificationLogsDto) {
     return this.notificationLogs.listNotificationLogs(query);
   }
 
   @Get(':id')
+  @RequiresPermission(AdminPermission.NOTIFICATION_LOGS_READ)
   getNotificationLog(@Param('id') id: string) {
     return this.notificationLogs.getNotificationLog(id);
   }
@@ -50,6 +55,7 @@ export class NotificationLogController {
    * row is not available right now, because another attempt holds it).
    */
   @Post(':id/retry')
+  @RequiresPermission(AdminPermission.NOTIFICATION_RETRY)
   @HttpCode(200)
   retryNotification(@Param('id') id: string) {
     return this.retries.retryNotification(id);
