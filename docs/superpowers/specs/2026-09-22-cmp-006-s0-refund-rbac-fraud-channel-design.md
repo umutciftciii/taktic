@@ -120,10 +120,13 @@ bağımsız bir temel dilimdir.
 | **D6** | **Bir webhook olayı en fazla bir talebi settle eder.** `PackageRefundRequest.settledByWebhookEventId String? @unique` (FK → `PaymentWebhookEvent`). Ayrıca paket başına en fazla bir `SETTLED` talep: partial unique index. | Düzeltme 2. |
 | **D7** | **Talebi olmayan dış iade mevcut yolu aynen çalıştırır.** `flagForManualReview`: bayrak + `isRelevantReversal` ise S3 revoke — **bugünküyle bire bir**. Yalnızca `APPROVED_PENDING_SETTLEMENT` bir talep varsa ek olarak o talep `SETTLED` olur. Talep yoksa hiçbir talep settle edilmez, hata da üretilmez. | Düzeltme 2. Geriye dönük davranış korunur; yeni yol yalnız ekler. |
 | **D8** | **Checkout kanıtı ayrı, boş varsayılanlı, zorunlu tek kutu.** Yeni `PurchaseTermsAcceptance`: `documentKey`, `documentVersion`, `documentSha256`, `documentTextSnapshot`, `acceptedAt`, `clientIp`, `userAgent`, `userId`, `providerId`, `purchaseId`, `sourceChannel`. Vitrin kabullerinden farkı: **idempotent değil** — satın alma başına bir satır. | Bağlayıcı karar. Sürüm + hash birlikte: sürüm dizgesi elle değiştirilebilir, hash metnin kendisine bağlıdır. |
+| **D8a** | **Snapshot link değil, tam metindir.** `documentTextSnapshot`, mesafeli satış sözleşmesinin, ön bilgilendirme formunun ve paket iade politikasının **o andaki tam metinlerini** içeren birleşik içeriktir; üç sayfaya yalnız bağlantı veren bir metin **kanıt sayılmaz**. `documentSha256` bu birleşik içeriğin kendisinin özetidir. Satır yazıldıktan sonra **hiçbir yol** onu güncellemez; sayfalar sonradan değişse geçmiş kanıt değişmez. | Düzeltme 2. Bağlantı, kabul anındaki metni saklamaz: sayfa değişince "neyi kabul etti" sorusu cevapsız kalır. Hash'in birleşik içeriğe ait olması, üç parçadan **birinin** değişmesinin de yeni sürüm gerektirmesini zorunlu kılar. |
 | **D9** | **Kanıtsız yeni satın alma DB'de imkânsız.** `PackagePurchase.purchaseTermsAcceptanceId String?` + CHECK `"createdAt" < TIMESTAMP '<migration anı>' OR "purchaseTermsAcceptanceId" IS NOT NULL`. Kabul, satın alma ile **aynı transaction'da** yazılır (vitrin örüntüsü, `schema.prisma:1684` yorumu). | Backfill yapılamaz (kimseye o metin gösterilmedi); NOT NULL da konulamaz. Zaman eşikli CHECK ikisini de çözer ve eski satırın NULL'ı dürüst kalır. |
 | **D10** | **IP/UA okuması tek yere toplanır:** `apps/api/src/common/request-meta.ts` → `readRequestMeta(req): { ipAddress, userAgent, sourceChannel }`. Üç mevcut kopya (1.2) bu dilimde **değiştirilmez**, yeni kod bunu kullanır. | Dört numaralı kopyayı yazmamak için; mevcut üçünü dokunmamak kapsam disiplini için. |
 | **D11** | **RBAC: rol dinamik, izin kataloğu sabit.** `AdminRole` (admin oluşturur/düzenler) + `AdminRolePermission` + `AdminRoleAssignment`; `AdminPermission` bir **Prisma enum**'dur — yeni izin adı ancak migration + kod ile gelir, panelden **üretilemez**. | Düzeltme 3. Enum olması, "izin adı" ile "guard'da gerçekten kontrol edilen şey" arasındaki boşluğu (panelden yazılan ama hiçbir rotayı korumayan izin) imkânsız kılar. |
-| **D12** | **`SUPER_ADMIN` rol ataması olmadan da tüm izinlere sahiptir.** `UserRole` enum'una **`ADMIN`** eklenir: yetkisi *yalnız* atanmış rollerden gelen personel hesabı. Admin paneline erişim = `SUPER_ADMIN` **veya** (`ADMIN` ve en az bir aktif rol ataması). Bunu **API zorlar** (`AdminAccessGuard`), UI değil. | Düzeltme 3. `ADMIN` bir yetenek adı değil, hesap türü işaretidir; yetenekler rol atamasından gelir — bu yüzden "sabit rol adı" itirazına girmez. Hesap başına tek rol kuralı (`User.email @unique` + `UserRole`) yeni bir değer gerektiriyor. |
+| **D12** | **`SUPER_ADMIN` rol ataması olmadan da tüm izinlere sahiptir.** `UserRole` enum'una **`ADMIN`** eklenir: yetkisi *yalnız* atanmış rollerden gelen **personel hesabı türü** — bir yetenek adı değil. Admin paneline erişim = `SUPER_ADMIN` **veya** (`ADMIN` ve en az bir aktif rol ataması). Bunu **API zorlar** (`AdminAccessGuard`), UI değil. | Düzeltme 3. Hesap başına tek rol kuralı (`User.email @unique` + `UserRole`) yeni bir değer gerektiriyor; yetenekler rol atamasından geldiği için "sabit rol adı" itirazına girmez. |
+| **D12a** | **`ADMIN` kendi kendine kayıt olamaz.** Hiçbir public kayıt yolu (`/register/*`, provider başvurusu, misafir talep, claim) `ADMIN` üretemez; tek doğuş yolu mevcut **davet** akışıdır (`admin-invite.service.ts`). Davetle doğan hesap **ilk aktif rol atamasına kadar panele giremez** — `AdminAccessGuard` onu 403 ile karşılar. | Düzeltme 1. Yetkisiz bir personel hesabının var olabilmesi (davet kabul edildi, rol henüz atanmadı) kabul edilir; **panele girebilmesi** kabul edilmez. |
+| **D12b** | **Bu sürümde bir hesap aynı anda hem personel hem sağlayıcı/müşteri olamaz.** Personel hesabı ayrıdır. `ADMIN` hesabının `ProviderProfile`'ı olamaz, `ServiceRequest` açamaz; `CUSTOMER`/`PROVIDER` hesabı `ADMIN`'e terfi ettirilemez ve tersi de olmaz. Rol değişimi bir rota değildir. | Düzeltme 1. Mevcut model zaten hesap başına tek rol taşıyor (`User.role`) ve destek talebi/mesaj tarafı rolü **satıra dondurarak** (`SupportTicketRequesterRole`, `MessageSenderRole`) rol değişimine karşı korunuyor; çift kimliği açmak bu korumaların hepsini yeniden açmak demek olurdu. |
 | **D13** | **İzin kaynağı tek:** `GET /admin/me/permissions` → `{ isSuperAdmin, permissions[] }`. Menü, liste, detay, aksiyon ve rota **aynı** kümeyi okur. UI'da gizlenen her şey API'de de 403'tür; API'de serbest olan hiçbir şey UI'da gizlenmez. | Düzeltme 3. İki kaynak olursa biri er geç diğerinden geniş olur. |
 | **D14** | **Destek talebi girişi PR-B'nin bağlayıcı parçası.** `SupportTicketTopic { GENERAL, PACKAGE_AND_CREDIT_REFUND }` (mevcut satırlar `GENERAL` — gerçek backfill) + `SupportTicket.packagePurchaseId`. Sağlayıcı konuyu seçer, **yalnız kendi** PAID paketlerinden birini bağlar; aynı tx'te `PackageRefundRequest` **DRAFT** doğar. Para iadesi ve uygunluk onayı vermez. | Düzeltme 5. |
 | **D15** | **Paket başına açık talep tekildir.** Partial unique index: `purchaseId` WHERE `status IN ('DRAFT','SUBMITTED','UNDER_REVIEW','APPROVED_PENDING_SETTLEMENT')`. İkinci deneme 409 `PACKAGE_REFUND_REQUEST_ALREADY_OPEN`. | Düzeltme 5. |
@@ -138,7 +141,9 @@ bağımsız bir temel dilimdir.
 | **D24** | **Kanal `triggerEventKey`'e girmez.** Anahtar bugünkü üç biçimini aynen korur. | Girseydi bir olayın kanalının farklı türetilmesi **ikinci anahtar → ikinci grant** üretirdi. Bu, tekrar-grant riskine karşı tek en önemli invariant. |
 | **D25** | **Fail-closed kanal eşleşmesi.** `WEB` veya `MOBILE` hedefleyen sürüm `UNKNOWN` kaynaklı olayla **asla** eşleşmez. `ALL` "kanal koşulu yok" demektir ve `UNKNOWN` dahil her şeyle eşleşir. | Ayrımcılık yapan sürüm, kaynağını bilmediği olaya hak ediş veremez. `ALL`'ın `UNKNOWN`'ı kabulü geriye dönük davranışı korur: bugünkü her kampanya `ALL`'dır ve bugünkü her olay `UNKNOWN`'dır. |
 | **D26** | **Mobil istemci yokken sessiz kampanya olmaz.** `FactSourceRegistry` ikizi `ChannelSourceRegistry`; hiçbir modül `MOBILE` kaynağı kaydetmemişken `channel = MOBILE` sürümünün aktivasyonu **reddedilir**: yeni aktivasyon hata kodu `CHANNEL_SOURCE_UNAVAILABLE` (katalogun `activationErrorCodes`'una eklenir). Admin builder'da sürüm kaydederken uyarı. | Bağlayıcı karar. `FACT_SOURCE_UNAVAILABLE` ile birebir aynı sözleşme. |
-| **D27** | **Kredi geri alımı otomatik değil, onaylı ve borçsuz.** Onay anında `creditClawbackCredits` kararlaştırılır; **settle anında** sistem aktörüyle tek `ADMIN_DEDUCT` satırı yazılır (`clawbackTransactionId @unique` ile idempotent). Bakiye yetmezse eldeki kadarı düşülür, kalanı `clawbackShortfallCredits` olarak **kayıt** edilir; **negatif bakiye ve borç yoktur** (CMP-001 §2.6). | `payments-webhook.service.ts:683-686` "otomatik düşme" itirazı korunur: düşen şey artık otomatik değil, maker-checker'dan geçmiş bir insan kararıdır. O yorum bu dilimde güncellenir. |
+| **D27** | **Kredi geri alımı otomatik değil, varsayılanı sıfır.** `creditClawbackCredits` **varsayılan 0**'dır ve **yalnız istisna iadelerinde**, ikinci yetkilinin (checker) **açık ve gerekçeli** kararıyla elle belirlenir. Sistem hiçbir gerekçe için bir miktar **önermez**, **hesaplamaz** ve **zorlamaz**. Sıfır bırakmak geçerli ve çoğu zaman doğru karardır — `DUPLICATE_CHARGE` ve `PLATFORM_SERVICE_FAULT`'ta tipik olarak doğrudur. `> 0` ise gerekçe zorunlu: CHECK `"creditClawbackCredits" = 0 OR "creditClawbackReason" IS NOT NULL`. | Düzeltme 3. Normal iade zaten *herhangi* bir kredi harcamasında engelleniyor (D1b), dolayısıyla bu alanın tek gerçek kullanım yeri istisnadır. Varsayılanı sıfır yapmak, "onayla" düğmesine basmanın kendiliğinden bakiye düşürmemesini garanti eder. |
+| **D27a** | **Geri alım borç üretmez.** Settle anında sistem aktörüyle tek `ADMIN_DEDUCT` satırı yazılır (`clawbackTransactionId @unique` ile idempotent). Bakiye yetmezse **eldeki kadarı** düşülür, **bakiye eksiye düşmez**; karşılanamayan kısım `unrecoveredCreditBenefit` olarak iade kaydında durur. Bu bir **borç değildir**: tahsil edilmez, faiz işlemez, bakiyeye negatif olarak yansımaz ve sağlayıcıya "borcunuz var" denmez. | CMP-001 §2.6 (harcanan promo "kayıttır, borç değildir") ile aynı ilke. |
+| **D27b** | **`unrecoveredCreditBenefit` sonraki promosyon uygunluğunda bir sinyaldir.** Sıfırdan büyükse `PRIOR_UNRECOVERED_BENEFIT` sinyali doğar ve o sağlayıcı için karar **en az `REVIEW`** olur (§7.3). | Düzeltme 3. Geri alınamamış bir fayda, aynı hesabın bir sonraki promosyonunda görülmesi gereken bir olgudur; ama tek başına `INELIGIBLE` değildir — sebebi TakTic'in kendi kusuru da olabilir. |
 
 ---
 
@@ -177,7 +182,7 @@ bağımsız bir temel dilimdir.
 | `DRAFT → SUBMITTED` | Sağlayıcı veya operatör | — | — |
 | `SUBMITTED → UNDER_REVIEW` | `PACKAGE_REFUND_REQUEST_CREATE` | `createdById` (maker) | `createdById` NOT NULL |
 | `UNDER_REVIEW → REJECTED` | `PACKAGE_REFUND_APPROVE` | `rejectedById`, gerekçe (1–500) | CHECK: `status <> 'REJECTED' OR ("rejectedById" IS NOT NULL AND "rejectionReason" IS NOT NULL)` |
-| `UNDER_REVIEW → APPROVED_PENDING_SETTLEMENT` | `PACKAGE_REFUND_APPROVE` | `approvedById ≠ createdById`, istisna gerekçesi, `creditClawbackCredits` | **D5 CHECK** |
+| `UNDER_REVIEW → APPROVED_PENDING_SETTLEMENT` | `PACKAGE_REFUND_APPROVE` | `approvedById ≠ createdById`, istisna gerekçesi; `creditClawbackCredits` **varsayılan 0**, `> 0` ise gerekçeli | **D5 + D27 CHECK** |
 | `APPROVED_PENDING_SETTLEMENT → SETTLED` | **yalnız webhook** | `settledByWebhookEventId` | **D4 + D6 CHECK/unique** |
 | `APPROVED_PENDING_SETTLEMENT → SETTLEMENT_ABANDONED` | `PACKAGE_REFUND_APPROVE` | gerekçe | — |
 | `* → WITHDRAWN` | Sağlayıcı (yalnız DRAFT/SUBMITTED) | — | — |
@@ -224,7 +229,7 @@ aynen.
 
 | Mekanizma | Yeni politikadaki rolü | Değişiklik |
 | --- | --- | --- |
-| `order_refunded` → `flagForManualReview` | **Tek mutabakat kapısı.** Bayrak + S3 revoke aynen; ek olarak varsa `APPROVED_PENDING_SETTLEMENT` talebi `SETTLED` yapar ve `creditClawbackCredits`'i uygular | **Ekleme**; mevcut davranış korunur (D7) |
+| `order_refunded` → `flagForManualReview` | **Tek mutabakat kapısı.** Bayrak + S3 revoke aynen; ek olarak varsa `APPROVED_PENDING_SETTLEMENT` talebi `SETTLED` yapar ve `creditClawbackCredits > 0` ise uygular (0 ise ledger satırı **yazılmaz**) | **Ekleme**; mevcut davranış korunur (D7) |
 | `CampaignRevokeService` | Kullanılmamış promosyonun iptali (D1d) | **Değişiklik yok** |
 | S4 `OfferRefundSettlement` | **Teklif kredisi** iadesinin net sonucu | **Değişiklik yok** — paket iadesiyle ilgisi yok |
 | `ManualOfferRefundAudit` | Teklif kredisi manuel iadesi | **Değişiklik yok** |
@@ -244,8 +249,8 @@ model PurchaseTermsAcceptance {
   purchaseId          String   @unique   // satın alma başına tam bir kanıt
   documentKey         String             // PR-A'da tek değer: 'PACKAGE_PURCHASE_TERMS' (§4.1 sonu)
   documentVersion     String             // boş olamaz (CHECK)
-  documentSha256      String             // metnin değişmez özeti (64 hex, CHECK)
-  documentTextSnapshot String            // gösterilen metnin kendisi
+  documentSha256      String             // birleşik içeriğin sha256'sı (64 hex, CHECK)
+  documentTextSnapshot String            // ÜÇ BELGENİN TAM METNİ (link değil) — D8a
   acceptedAt          DateTime @default(now())
   clientIp            String?            // §5 sınıflandırma
   userAgent           String?            // ≤500 karakter
@@ -259,6 +264,14 @@ model PurchaseTermsAcceptance {
 Vitrin kabullerinden (`ShowcasePackageTermsAcceptance`) **üç fark**: (1) idempotent değil — her satın alma kendi
 kanıtını taşır, çünkü kanıt "bu kişi bir kez kabul etmişti" değil "bu satın alma şu metin gösterilerek yapıldı"
 demektir; (2) IP/UA/kanal taşır; (3) `documentSha256` metnin kendisine bağlıdır.
+
+**Snapshot'ın içeriği (D8a).** `documentTextSnapshot`, üç belgenin kabul anındaki **tam metinlerini** taşıyan
+birleşik içeriktir — bölüm başlıklarıyla sırayla: mesafeli satış sözleşmesi, ön bilgilendirme formu, paket iade
+politikası. Sayfalara verilen bağlantılar metnin **yanında** durur, **yerine** değil. `documentSha256` bu birleşik
+içeriğin özetidir; üç parçadan herhangi biri değişirse hash değişir ve yeni bir `documentVersion` gerekir.
+`PurchaseTermsAcceptance` satırı **append-only**: servis katmanında `update` yolu yoktur ve metin sunucunun
+yürürlükteki kaynağından yazılır — istemcinin gönderdiği metin asla saklanmaz (§4.2). Böylece sayfalar sonradan
+değişse de geçmiş kabul kanıtı olduğu gibi kalır.
 
 **Neden tek belge, üç sayfa.** Kabul edilen şey **tek birleşik metindir** (`documentKey = 'PACKAGE_PURCHASE_TERMS'`);
 mesafeli satış, ön bilgilendirme ve iade politikası ayrı sayfalar olarak yayımlanır ve birleşik metin onlara atıf
@@ -402,6 +415,17 @@ model AdminRoleAuditLog { id String @id @default(cuid()) roleId String? targetUs
 
 `UserRole` enum'una **`ADMIN`** eklenir (D12). Mevcut üç değerin anlamı değişmez; hiçbir satır dönüştürülmez.
 
+**`ADMIN` hesabının kuralları (D12a, D12b).**
+1. **Doğuş yolu tektir:** davet (`admin-invite.service.ts`). Hiçbir public kayıt yolu — `/register/customer`,
+   `/register/provider`, sağlayıcı başvurusu, misafir talep, `provider-claim`, `customer-activation` — `ADMIN`
+   üretemez; her biri kendi rolünü sabit yazar ve bu bir testle bağlanır (T12a).
+2. **Atamasız `ADMIN` panele giremez.** Davet kabul edilmiş ama rol atanmamış hesap `AdminAccessGuard`'dan 403
+   alır. Böyle bir hesabın *var olması* normaldir (davet ile ilk atama arasındaki aralık); *girebilmesi* değildir.
+3. **Çift kimlik yok.** `ADMIN` hesabının `ProviderProfile`'ı olamaz ve `ServiceRequest` açamaz;
+   `CUSTOMER`/`PROVIDER` hesabı `ADMIN`'e, `ADMIN` hesabı da onlara **dönüştürülemez** — rol değiştiren bir rota
+   yoktur. Personel, işini gördüğü hesabı ayrı açar.
+4. **`SUPER_ADMIN` bu kuralların dışında değildir**, yalnız izin çözümünde örtük tüm izinlere sahiptir.
+
 ### 6.2 Zorlama
 
 | Katman | Nasıl |
@@ -415,7 +439,12 @@ model AdminRoleAuditLog { id String @id @default(cuid()) roleId String? targetUs
 + `@RequiresPermission(...)`'a çevrilir. `RolesGuard` ve `Roles` **silinmez** — sağlayıcı/müşteri rotalarında
 kullanılmaya devam eder (`@Roles(UserRole.PROVIDER)` vb.).
 
-### 6.3 Yetki matrisi (controller → izin)
+### 6.3 Yetki matrisi (alan → izin)
+
+> **Bu tablo bir özettir, eşleme değildir.** PR-0'a başlamadan önce 72 kullanımın her biri **rota + HTTP metodu +
+> aksiyon** düzeyinde eşlenmeli ve bu tabloya değil, ayrı bir eşleme tablosuna yazılmalıdır (§12 PR-0 ön koşulu).
+> Aynı controller'daki `GET :id` ile `DELETE :id` **aynı izni almaz**; okuma ve yıkıcı aksiyon ayrı izinlerdir.
+> Aşağıdaki "okuma / yazma" ayrımı o eşlemenin **alt sınırıdır**, tamamı değil.
 
 | Controller / alan | Okuma izni | Yazma izni |
 | --- | --- | --- |
@@ -493,6 +522,7 @@ filtrelerini geçen en az bir aday varken**. Aday yoksa karar hesaplanmaz ve eve
 | `PRIOR_PROMO_REDEMPTION` | `CampaignRedemption` (bu sağlayıcı), `CampaignRegistrationCounter` (bu işletme) | ✅ / **yeni** |
 | `BUSINESS_REGISTRATION` | `ProviderBusinessRegistration` | ❌ — PR-C |
 | `SHARED_IP` / `SHARED_DEVICE` | `Session.ipAddress`, `PurchaseTermsAcceptance.clientIp` (**yalnız eşitlik karşılaştırması**, ham değer karara yazılmaz) | Kısmen ✅ |
+| `PRIOR_UNRECOVERED_BENEFIT` | `PackageRefundRequest.unrecoveredCreditBenefit > 0` (bu sağlayıcının herhangi bir `SETTLED` talebinde) | **yeni** — PR-B'de doğar, PR-C'de okunur (D27b) |
 
 ### 7.3 Fraud karar matrisi
 
@@ -504,12 +534,14 @@ filtrelerini geçen en az bir aday varken**. Aday yoksa karar hesaplanmaz ve eve
 | İşletme kaydı **yok** veya `NONE_DECLARED` | **REVIEW** | `REGISTRATION_MISSING` — şahıs/esnaf dışlanmaz |
 | Aynı doğrulanmış telefon başka bir sağlayıcıda kullanılmış | **REVIEW** | `PHONE_SHARED` |
 | `paymentIdentityHash` başka bir sağlayıcının satın almasıyla aynı | **REVIEW** | `PAYMENT_IDENTITY_SHARED` |
+| Geri alınamamış fayda var (`unrecoveredCreditBenefit > 0`) | **REVIEW** | `PRIOR_UNRECOVERED_BENEFIT` — **tek başına yeter**; `INELIGIBLE` değil, çünkü sebebi TakTic kusuru da olabilir (D27b) |
 | Aynı IP veya cihaz kümesi | **REVIEW'a katkı** | `SHARED_IP` / `SHARED_DEVICE` — **tek başına asla engel değil (D18)** |
 | Hiçbiri | **ELIGIBLE** | — |
 
 **Öncelik:** herhangi bir `INELIGIBLE` koşulu diğerlerini ezer. `INELIGIBLE` yoksa ve en az bir `REVIEW` sinyali
 varsa karar `REVIEW`. `SHARED_IP`/`SHARED_DEVICE` **tek başına** `REVIEW` üretmez — en az bir başka `REVIEW`
-sinyaliyle birlikte üretir. Bu, D18'in mekanik hâlidir.
+sinyaliyle birlikte üretir. Bu, D18'in mekanik hâlidir. `PRIOR_UNRECOVERED_BENEFIT` ise **tek başına** `REVIEW`
+üretir (D27b): geri alınamamış bir fayda, bir sonraki promosyondan önce bir insanın görmesi gereken olgudur.
 
 ### 7.4 Yanlış pozitif ve manuel inceleme (D21, D22)
 
@@ -665,7 +697,7 @@ Filtre, boru hattının **4. adımında** pencere kontrolünün hemen ardından,
 | --- | --- | --- | --- |
 | **H** (PR-0) | `add_admin_rbac` | `UserRole` += `ADMIN`; `AdminPermission` enum; `AdminRole`, `AdminRolePermission`, `AdminRoleAssignment` (partial unique), `AdminRoleAuditLog`, `SensitiveDataAccessLog` | **Yok** — mevcut `SUPER_ADMIN` hesapları aynen kalır ve örtük tüm izinlere sahiptir |
 | **I** (PR-A) | `add_purchase_terms_acceptance` | `SourceChannel` enum; `PurchaseTermsAcceptance`; `PackagePurchase.purchaseTermsAcceptanceId` + `sourceChannel`; CHECK `PackagePurchase_terms_acceptance_required` (zaman eşikli, D9) | **Yok** |
-| **J** (PR-B) | `add_package_refund_requests` | `SupportTicketTopic` enum + `SupportTicket.topic` (`@default(GENERAL)`) + `packagePurchaseId` + 2 CHECK; `PackageRefundRequest*` enum'ları; `PackageRefundRequest` + D5/D4/§3.4 CHECK'leri + `settledByWebhookEventId @unique` + 2 partial unique | **Yok** (`topic` varsayılanı gerçek backfill) |
+| **J** (PR-B) | `add_package_refund_requests` | `SupportTicketTopic` enum + `SupportTicket.topic` (`@default(GENERAL)`) + `packagePurchaseId` + 2 CHECK; `PackageRefundRequest*` enum'ları; `PackageRefundRequest` (`creditClawbackCredits Int @default(0)`, `creditClawbackReason String?`, `clawbackTransactionId String? @unique`, `unrecoveredCreditBenefit Int @default(0)`) + D5/D4/D27/§3.4 CHECK'leri + `settledByWebhookEventId @unique` + 2 partial unique | **Yok** (`topic` varsayılanı gerçek backfill) |
 | **K** (PR-C) | `add_business_registration_and_eligibility` | `BusinessRegistrationType`, `PromotionEligibilityDecision` enum'ları; `ProviderBusinessRegistration`; `CampaignRegistrationCounter`; `PackagePurchase.paymentIdentityHash`; `CampaignTriggerEventStatus` += `HELD_FOR_REVIEW`; `CampaignEvaluationOutcome` += `PROMOTION_REVIEW_HELD`, `PROMOTION_INELIGIBLE`; `CampaignTriggerEvent.eligibilitySignals/eligibilityHeldAt`; `PromotionEligibilityReview` | **Yok** — `taxType/taxNumber` dönüştürülmez (D20) |
 | **L** (PR-D) | `add_campaign_channel` | `CampaignChannel` enum; `CampaignVersion.channel @default(ALL)`; `CampaignTriggerEvent.sourceChannel @default(UNKNOWN)`; `ProviderProfile.applicationSourceChannel @default(UNKNOWN)`; `CampaignEvaluationOutcome` += `CHANNEL_MISMATCH` | **Yok** — varsayılanlar gerçek backfill (D23, I4) |
 
@@ -726,10 +758,16 @@ Filtre, boru hattının **4. adımında** pencere kontrolünün hemen ardından,
 | T6 | Talebi olmayan iade: bayrak + S3 revoke **bugünküyle bire bir**, hiçbir talep settle edilmez | D7 |
 | T7 | Aynı paket için ikinci açık talep 409 | D15 |
 | T8 | Başkasının `purchaseId`'si → 404 (403 değil) | D16 |
+| T8a | Kabul satırının `documentTextSnapshot`'ı üç belgenin tam metnini içerir; yalnız bağlantı içeren bir metin kabul edilmez | D8a |
+| T8b | `documentSha256` = birleşik içeriğin sha256'sı; üç parçadan biri değişince hash değişir ve yeni sürüm gerekir | D8a |
+| T8c | Sayfa metni değiştikten sonra eski kabul satırı **bit bit aynı** kalır; `update` yolu yoktur | D8a |
 | T9 | Kanıtsız satın alma yazımı CHECK ile reddedilir; kabul + satın alma **aynı tx**, biri yoksa ikisi de yok | D9 |
 | T10 | `termsVersion` bayat → 400, satır yazılmaz | §4.2 |
 | T11 | `SUPER_ADMIN` **hiç rol ataması olmadan** tüm izinli rotaları geçer | D12 |
-| T12 | `ADMIN` + atama yok → admin rotalarında 403 (UI'a değil API'ye) | D12 |
+| T12 | `ADMIN` + atama yok → admin rotalarında 403 (UI'a değil API'ye) | D12, D12a |
+| T12a | Hiçbir public kayıt yolu `ADMIN` üretemez (`/register/*`, başvuru, misafir talep, claim, aktivasyon — hepsi tablo testi) | D12a |
+| T12b | `ADMIN` hesabı `ProviderProfile`/`ServiceRequest` sahibi olamaz; rol değiştiren rota yoktur | D12b |
+| T12c | Her rota + HTTP metodu için beklenen izin, eşleme tablosundan okunarak doğrulanır; eşlemesi olmayan admin rotası testi kırar | §6.3 ön koşulu |
 | T13 | Rol `isActive = false` / atama `revokedAt` dolu → izin sayılmaz | §6.2 |
 | T14 | `GET /admin/me/permissions` ile guard'ların kabul ettiği küme **aynıdır** (her izin için tablo testi) | D13 |
 | T15 | İzin adı üreten rota yoktur; bilinmeyen izin adı 400 | D11 |
@@ -744,7 +782,10 @@ Filtre, boru hattının **4. adımında** pencere kontrolünün hemen ardından,
 | T24 | D25 tablosunun altı satırı (özellikle `WEB` + `UNKNOWN` → `CHANNEL_MISMATCH`) | D25, I5 |
 | T25 | Kayıtlı `MOBILE` kaynağı yokken `channel = MOBILE` aktivasyonu 409 `CHANNEL_SOURCE_UNAVAILABLE` | D26 |
 | T26 | Motor **kapalıyken**: PR-A…PR-D hiçbir yeni tablo satırı doğurmaz (kampanya tarafında sıfır yazı) | §13 |
-| T27 | Clawback bakiyeyi negatife düşürmez; eksik `clawbackShortfallCredits`'e yazılır, borç yok | D27 |
+| T27 | `creditClawbackCredits` varsayılanı **0**; onay akışı miktar vermeden geçer ve **hiçbir ledger satırı yazılmaz** | D27 |
+| T27a | `creditClawbackCredits > 0` gerekçesiz reddedilir (CHECK) | D27 |
+| T27b | Clawback bakiyeyi negatife düşürmez; karşılanamayan kısım `unrecoveredCreditBenefit`'e yazılır, borç yok, bakiye ≥ 0 | D27a |
+| T27c | `unrecoveredCreditBenefit > 0` olan sağlayıcının sonraki uygunluk kararı en az `REVIEW` | D27b |
 | T28 | Teklif kredisi iadesi (`OfferRefundSettlement`, `GET /refund-policy`) **bire bir korunur** | D0 |
 
 ### 11.2 E2E (Playwright)
@@ -770,11 +811,18 @@ action yarışı; fixture adı/HTML assertion çakışması; `DATABASE_URL` expo
 
 | PR | Ad | Bağımlılık | İçerik | Migration |
 | --- | --- | --- | --- | --- |
-| **PR-0** | RBAC temeli — izin tabanlı admin yetkisi | — | `AdminPermission` katalogu, `AdminRole`/`AdminRolePermission`/`AdminRoleAssignment`, `AdminAccessGuard` + `PermissionsGuard`, 72 rotanın izne çevrilmesi, `GET /admin/me/permissions`, `nav.ts` filtresi, rol yönetim ekranları, `SensitiveDataAccessLog` | **H** |
+| **PR-0** | RBAC temeli — izin tabanlı admin yetkisi | **Ön koşul: rota eşleme tablosu** (aşağıda) | `AdminPermission` katalogu, `AdminRole`/`AdminRolePermission`/`AdminRoleAssignment`, `AdminAccessGuard` + `PermissionsGuard`, 72 rotanın izne çevrilmesi, `GET /admin/me/permissions`, `nav.ts` filtresi, rol yönetim ekranları, `SensitiveDataAccessLog` | **H** |
 | **PR-A** | Paket iade politikası + checkout kanıtı | **PR-0** (kanıt okuma yüzeyi `PURCHASE_EVIDENCE_READ` iznine bağlı) | `PurchaseTermsAcceptance`, checkout onay kutusu, üç sözleşme sayfası, `GET /package-refund-policy`, `readRequestMeta`, admin kanıt bloğu | **I** |
 | **PR-B** | İstisna iade: destek girişi + maker-checker + webhook mutabakatı | **PR-0**, **PR-A** | `SupportTicket.topic`/`packagePurchaseId`, sağlayıcı formu, `PackageRefundRequest` + durum makinesi, admin kuyruğu, `flagForManualReview` içinde settle + clawback | **J** |
 | **PR-C** | İşletme kaydı + promosyon uygunluk kararı | **PR-0**, **PR-B** | `ProviderBusinessRegistration`, `CampaignRegistrationCounter`, `paymentIdentityHash`, uygunluk servisi, `HELD_FOR_REVIEW`, `PromotionEligibilityReview`, inceleme kuyruğu | **K** |
 | **PR-D** | Kampanya kanalı | **PR-C** (yeni outcome değerleri aynı enum'da) | `CampaignChannel`, `sourceChannel` üç kaynağı, eşleşme filtresi, `ChannelSourceRegistry`, aktivasyon kapısı, builder UI | **L** |
+
+**PR-0'ın bağlayıcı ön koşulu.** Kod yazılmadan önce, 72 `@Roles(UserRole.SUPER_ADMIN)` kullanımının her biri
+**rota yolu + HTTP metodu + aksiyon** üçlüsüyle listelenip tek tek bir `AdminPermission` değerine eşlenir ve bu
+eşleme depoya yazılır (`docs/superpowers/plans/<tarih>-pr0-route-permission-map.md`). Controller düzeyinde toplu
+eşleme **yapılmaz**: aynı controller'ın `GET :id`'si ile `DELETE :id`'si veya `POST :id/approve`'u aynı izne
+bağlanırsa, okuma izni verilen bir role sessizce yıkıcı aksiyon açılır. Eşleme tablosu testin girdisidir (T12c):
+eşlemesi olmayan bir admin rotası testi kırar.
 
 Her PR: kendi tasarım/teslim notu, izole migration dry-run çıktısı, CI 3/3, motor anahtarı kapalı.
 
@@ -789,7 +837,8 @@ Her PR: kendi tasarım/teslim notu, izole migration dry-run çıktısı, CI 3/3,
 | **RG-3** | **Mutabakat prosedürü.** Lemon panelinde iade yapan operatörün adımları, `APPROVED_PENDING_SETTLEMENT`'ta bekleyen talebin SLA'sı ve webhook gelmezse ne olacağı (→ `SETTLEMENT_ABANDONED`) yazılı | PR-B üretimi | Operasyon |
 | **RG-4** | **HMAC pepper yönetimi.** Pepper üretilmiş, gizli tutulmuş ve **rotasyonun bir migration olduğu** yazılı; `.env`'de sessiz değişim yasak | PR-C üretimi | Operasyon + mühendislik |
 | **RG-5** | **Motor anahtarı kapalı kalır.** PR-0…PR-D'nin hiçbiri `campaignEngineEnabled`'ı açmaz; yerel ve staging'de kapalı doğrulanır. Motorun açılması ayrı bir karardır ve CMP-002 S2B1 ön koşullarına ek olarak RG-1…RG-4'e bağlıdır | Motorun açılması | Ürün sahibi |
-| **RG-6** | **`ADMIN` hesabı üretimi.** `UserRole.ADMIN` hesapları yalnız mevcut davet akışıyla ve en az bir rol atamasıyla doğar; atamasız `ADMIN` hesabı panele giremez (T12) | PR-0 üretimi | Mühendislik |
+| **RG-6** | **`ADMIN` hesabı üretimi.** `UserRole.ADMIN` yalnız davet akışıyla doğar (hiçbir public kayıt yolu üretemez, T12a); atamasız `ADMIN` panele giremez (T12); çift kimlik yoktur (T12b) | PR-0 üretimi | Mühendislik |
+| **RG-7** | **Rota eşleme tablosu.** PR-0'ın kodu, 72 kullanımın rota + HTTP metodu + aksiyon düzeyinde eşlendiği tablo depoya yazılmadan başlamaz (§12) | PR-0'ın **başlaması** | Mühendislik |
 
 ---
 

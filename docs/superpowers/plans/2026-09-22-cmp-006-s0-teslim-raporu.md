@@ -32,6 +32,10 @@ staging'de **kapalı** kalır. Planlanan PR-0…PR-D dilimlerinin hiçbiri de a�
 | Aynı paket için açık talep tekil | **D15**, §9 Migration J, T7 |
 | `HELD_FOR_REVIEW` izinli ve auditli çözülsün, snapshot saklansın | **D21**, **D22**, §7.4, T19–T21, E7 |
 | PR sırası: RBAC → iade/onay → destek/fraud → kanal | §12 (PR-0 → PR-A → PR-B → PR-C → PR-D) |
+| **`ADMIN` personel hesabı türüdür; davetle doğar, atamasız giremez, çift kimlik yok** | **D12a**, **D12b**, §6.1, T12–T12b, RG-6 |
+| **Birleşik kabul metni üç belgenin tam metnini içersin; hash ona ait olsun; geçmiş kanıt değişmesin** | **D8a**, §4.1, T8a–T8c |
+| **Geri alım varsayılanı 0, elle ve gerekçeli; eksik kısım borç değil `unrecoveredCreditBenefit`** | **D27**, **D27a**, **D27b**, §7.2, §7.3, T27–T27c |
+| **PR-0 öncesi eşleme rota + HTTP metodu + aksiyon düzeyinde olsun** | §6.3 uyarısı, §12 ön koşulu, T12c, **RG-7** |
 
 ## 3. Envanterin tasarımı değiştiren bulguları
 
@@ -48,7 +52,7 @@ staging'de **kapalı** kalır. Planlanan PR-0…PR-D dilimlerinin hiçbiri de a�
 | E9 | `ShowcasePackageTermsAcceptance` + `PackagePurchase.showcasePackageTermsAcceptanceId` aynı tx'te yazılıyor | Kanıt bağlama örüntüsü hazır → **D9** |
 | E10 | IP/UA okuması üç yerde kopyalanmış (`phone-verification.controller.ts:65`, `showcase-public.controller.ts:141`, `turnstile.guard.ts:108`) | Tek `readRequestMeta` helper'ı; mevcut üç kopya **bu dilimde değişmez** → **D10** |
 
-## 4. En önemli üç invariant
+## 4. En önemli beş invariant
 
 1. **`triggerEventKey` kanal içermez (I1–I3).** İçerseydi kanalın farklı türetilmesi ikinci anahtar → ikinci grant
    üretirdi. Kanal event satırının değişmez bir alanıdır; `ensurePendingEvent` onu yalnız `create`'te yazar.
@@ -56,6 +60,12 @@ staging'de **kapalı** kalır. Planlanan PR-0…PR-D dilimlerinin hiçbiri de a�
    karşılaştırması UNKNOWN döner ve CHECK'i geçer. `IS NOT NULL` konjunktı şart.
 3. **`SETTLED`'a yalnız webhook geçirir (D4).** "İade yaptım" beyanı ile "iade gerçekten oldu" farklı olgulardır;
    sistemin sakladığı ikincisidir ve DB yarısı `settledByWebhookEventId IS NOT NULL` CHECK'idir.
+4. **Kabul kanıtı link değil metindir (D8a).** `documentTextSnapshot` üç belgenin kabul anındaki tam metnini
+   taşır, `documentSha256` o birleşik içeriğin özetidir ve satırın `update` yolu yoktur. Sayfa sonradan değişse
+   "neyi kabul etti" sorusu cevaplanabilir kalır.
+5. **Geri alım varsayılanı sıfırdır ve borç üretmez (D27, D27a).** "Onayla" düğmesi kendiliğinden bakiye
+   düşürmez; miktar ikinci yetkilinin gerekçeli kararıdır, bakiye eksiye düşmez ve karşılanamayan kısım
+   `unrecoveredCreditBenefit` olarak **kayıt**tır — tahsil edilmez, yalnız sonraki uygunlukta `REVIEW` sinyalidir.
 
 ## 5. Bilerek kapsam dışı
 
@@ -76,8 +86,14 @@ mobil istemci · `Session.ipAddress/userAgent` retention değişikliği.
 
 ## 7. Sıradaki iş
 
-**PR-0 — RBAC temeli.** Tasarım §6, §9 Migration H, §11.1 T11–T15, §11.2 E1–E2. Başlamadan önce §6.3 yetki
-matrisinin 72 rotayla birebir eşlendiği doğrulanmalı (controller taraması).
+**PR-0 — RBAC temeli.** Tasarım §6, §9 Migration H, §11.1 T11–T15 + T12a–T12c, §11.2 E1–E2.
+
+**Kod yazılmadan önceki bağlayıcı ön koşul (RG-7):** 72 `@Roles(UserRole.SUPER_ADMIN)` kullanımının her biri
+**rota yolu + HTTP metodu + aksiyon** üçlüsüyle listelenip tek tek bir `AdminPermission` değerine eşlenecek ve
+eşleme `docs/superpowers/plans/<tarih>-pr0-route-permission-map.md` olarak depoya yazılacak. Controller düzeyinde
+toplu eşleme yapılmayacak: aynı controller'ın `GET :id`'si ile `DELETE :id`'si veya `POST :id/approve`'u aynı izne
+bağlanırsa, okuma izni verilen bir role sessizce yıkıcı aksiyon açılır. Tasarımın §6.3 tablosu bu eşlemenin
+**alt sınırıdır**, yerine geçmez; eşleme tablosu T12c'nin girdisidir.
 
 ## 8. CI
 
