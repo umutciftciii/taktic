@@ -81,8 +81,14 @@ matrisinin 72 rotayla birebir eşlendiği doğrulanmalı (controller taraması).
 
 ## 8. CI
 
-Sonuç aşağıya, PR açıldıktan ve 3/3 tamamlandıktan sonra yazılır.
+PR [#103](https://github.com/umutciftciii/taktic/pull/103) · run
+[35734636478](https://github.com/umutciftciii/taktic/actions/runs/35734636478) · **3/3 geçti**.
 
 | Job | Sonuç |
 | --- | --- |
-| — | PR açıldıktan sonra doldurulacak |
+| `typecheck · lint · test · build` | pass |
+| `e2e (chromium)` | pass |
+| `e2e (webkit · sign-in and mobile shells)` | pass |
+
+Bu PR kod çalıştırmıyor (diff yalnız `docs/`); CI, `main`'in yeşil kaldığını doğrular.
+Merge, deploy ve yerel eşitleme **yapılmadı** — görev tanımı gereği.
