@@ -1237,26 +1237,20 @@ export type FinanceSummaryRecentTransaction = {
   } | null;
 };
 
+/** Mirrors the API's allowlist select for the finance summary; nothing more. */
 export type FinanceSummaryRecentPurchase = {
   id: string;
   purchaseNumber: string | null;
   providerId: string;
-  packageId: string;
   status: PackagePurchaseStatus;
   creditAmountSnapshot: number;
   priceAmountSnapshot: number;
   currencySnapshot: string;
   packageNameSnapshot: string;
   mockPaymentReference: string | null;
-  paidAt: string | null;
   createdAt: string;
   provider: {
-    id: string;
     businessName: string;
-  };
-  package: {
-    id: string;
-    name: string;
   };
 };
 
