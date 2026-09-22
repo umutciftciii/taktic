@@ -133,6 +133,11 @@ services:
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       TURNSTILE_EXPECTED_HOSTNAMES: ${TURNSTILE_EXPECTED_HOSTNAMES:-}
       TURNSTILE_SITEVERIFY_TIMEOUT_MS: ${TURNSTILE_SITEVERIFY_TIMEOUT_MS:-}
+      # CMP-006 PR-A: the purchase-terms release gate. Empty is closed, on
+      # every environment, and the checkout is exactly what it was. `on` needs
+      # a whole document set, and outside a local stack a legally approved one
+      # (RG-1) — otherwise the API refuses to boot. See .env.example.
+      PURCHASE_TERMS_GATE: ${PURCHASE_TERMS_GATE:-}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross
       # the Docker Desktop VirtioFS/gRPC-FUSE boundary on macOS.

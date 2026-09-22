@@ -1,6 +1,9 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminPermission, PackagePurchaseStatus } from '@prisma/client';
+import { readRequestMeta, type RequestMetaSource } from '../../common/request-meta';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { AuthUser } from '../auth/auth.types';
 import { AuthGuard } from '../auth/auth.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
@@ -19,8 +22,16 @@ export class PackagePurchasesController {
 
   @Post('providers/:providerId/package-purchases')
   @UseGuards(AuthGuard, ProviderAccessGuard)
-  createProviderPurchase(@Param('providerId') providerId: string, @Body() dto: CreatePackagePurchaseDto) {
-    return this.packagePurchasesService.createProviderPurchase(providerId, dto);
+  createProviderPurchase(
+    @Param('providerId') providerId: string,
+    @Body() dto: CreatePackagePurchaseDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: RequestMetaSource,
+  ) {
+    return this.packagePurchasesService.createProviderPurchase(providerId, dto, undefined, {
+      user,
+      meta: readRequestMeta(req),
+    });
   }
 
   @Get('providers/:providerId/package-purchases')

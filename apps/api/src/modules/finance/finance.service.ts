@@ -5,6 +5,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { purchaseTermsEvidenceOmit } from '../purchase-terms/purchase-terms.projection';
 import {
   FinanceAnalyticsDto,
   FinanceAnalyticsGroupBy,
@@ -152,6 +153,7 @@ export class FinanceService {
       this.prisma.packagePurchase.findMany({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: RECENT_PURCHASES_LIMIT,
+        omit: purchaseTermsEvidenceOmit,
         include: {
           provider: {
             select: { id: true, businessName: true },

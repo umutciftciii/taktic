@@ -474,6 +474,8 @@ model User {
   showcasePlacementSuspensions    ShowcasePlacementSuspension[]      @relation("ShowcasePlacementSuspendedBy")
   showcasePriceTermsAcceptances   ShowcaseCardPriceTermsAcceptance[]
   showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]   @relation("ShowcasePackageTermsAcceptedBy")
+  /// CMP-006 PR-A. Purchase-terms acceptances this account made at checkout.
+  purchaseTermsAcceptances        PurchaseTermsAcceptance[]
   resolvedRequestReports          ServiceRequestReport[]             @relation("ServiceRequestReportResolvedBy")
   providerReviews                 ProviderReview[]                   @relation("ProviderReviewCustomer")
   resolvedReviewReports           ProviderReviewReport[]             @relation("ProviderReviewReportResolvedBy")
@@ -1752,10 +1754,31 @@ model PackagePurchase {
   expiredAt                        DateTime?
   refundedAt                       DateTime?
   creditTransactionId              String?
+  /// CMP-006 PR-A. Whether this purchase was opened while the purchase-terms
+  /// release gate was open, and therefore had to carry an acceptance.
+  ///
+  /// FALSE on every row that predates the gate — honestly: nobody was shown a
+  /// text then, so there is nothing to backfill. The CHECK
+  /// `PackagePurchase_terms_acceptance_matches_requirement` makes this column
+  /// and `purchaseTermsAcceptanceId` one fact (TRUE ⇔ an acceptance is
+  /// attached), and the trigger `PackagePurchase_terms_evidence_immutable`
+  /// refuses to change either after the insert, so an enforced purchase can
+  /// neither lose its evidence nor be re-labelled as unenforced.
+  termsAcceptanceRequired          Boolean               @default(false)
+  /// The acceptance written in the same transaction as this row. Never
+  /// projected by a purchase read: the snapshot, digest, client address and
+  /// user agent live only on the acceptance row.
+  purchaseTermsAcceptanceId        String?               @unique
   createdAt                        DateTime              @default(now())
   updatedAt                        DateTime              @updatedAt
 
   provider                       ProviderProfile                   @relation(fields: [providerId], references: [id])
+  /// CMP-006 PR-A. Restrict: evidence of what was sold on which terms.
+  purchaseTermsAcceptance        PurchaseTermsAcceptance?          @relation("PackagePurchaseTermsAcceptance", fields: [purchaseTermsAcceptanceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// The other half of the pair: the acceptance whose `purchaseId` names this
+  /// row. The composite FK behind it is what stops an acceptance from being
+  /// attached to any purchase but its own.
+  purchaseTermsAcceptanceOwner   PurchaseTermsAcceptance?          @relation("PurchaseTermsAcceptancePurchase")
   package                        OfferCreditPackage?               @relation(fields: [packageId], references: [id], onDelete: Restrict)
   /// Restrict on all three: a catalogue row, a card or a version that a
   /// settled payment points at is part of the record of what was sold, and a
@@ -1794,6 +1817,65 @@ model PackagePurchase {
   @@index([showcaseCardId])
   @@index([showcasePriceTermsAcceptanceId])
   @@index([showcasePackageTermsAcceptanceId])
+  /// Target of `PurchaseTermsAcceptance(purchaseId, id)`: an acceptance may
+  /// only exist for the purchase that points back at it.
+  @@unique([id, purchaseTermsAcceptanceId])
+}
+
+/// CMP-006 PR-A. Where an act of acceptance came from, as the client declared
+/// it. A label, not a proof: the web app declares WEB, nothing yet declares
+/// MOBILE, and anything else is UNKNOWN.
+enum SourceChannel {
+  WEB
+  MOBILE
+  UNKNOWN
+}
+
+/// CMP-006 PR-A. The evidence that one package purchase was made with one
+/// exact text shown and accepted — one row per purchase, never shared, never
+/// reused (unlike the idempotent vitrin acceptances).
+///
+/// Append-only in the database, not only in the service: the trigger
+/// `PurchaseTermsAcceptance_append_only` refuses every UPDATE and DELETE and
+/// stamps `acceptedAt` with the transaction's own clock on INSERT, so the
+/// moment of acceptance is never a value a caller supplied.
+///
+/// `documentTextSnapshot` is the full combined text of the three documents
+/// (distance-sales contract, pre-information form, package refund policy) as
+/// it was served — not links. `documentSha256` is the SHA-256 of exactly that
+/// text, and a CHECK recomputes it in the database, so digest and snapshot can
+/// never disagree.
+///
+/// `clientIp` and `userAgent` are personal data kept for one purpose — proving
+/// the acceptance (RG-2). No list, projection or public/provider response
+/// reads them; the only intended reader is the future permissioned refund
+/// review surface.
+model PurchaseTermsAcceptance {
+  id                   String        @id @default(cuid())
+  /// The purchase this acceptance belongs to. Unique: one acceptance per
+  /// purchase. Its FK is DEFERRABLE INITIALLY DEFERRED because the
+  /// acceptance is inserted first, in the same transaction as the purchase.
+  purchaseId           String        @unique
+  userId               String
+  documentKey          String
+  documentVersion      String
+  documentSha256       String
+  documentTextSnapshot String
+  acceptedAt           DateTime      @default(now())
+  clientIp             String?
+  userAgent            String?
+  sourceChannel        SourceChannel
+
+  /// Composite on purpose: (purchaseId, id) must match a purchase row's
+  /// (id, purchaseTermsAcceptanceId), so the purchase named here is the one
+  /// that names this acceptance back.
+  purchase         PackagePurchase  @relation("PurchaseTermsAcceptancePurchase", fields: [purchaseId, id], references: [id, purchaseTermsAcceptanceId], onDelete: Restrict, onUpdate: Restrict)
+  acceptedPurchase PackagePurchase? @relation("PackagePurchaseTermsAcceptance")
+  user             User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([purchaseId, id])
+  @@index([userId])
+  @@index([documentKey, documentVersion])
 }
 
 /**

@@ -5,6 +5,7 @@ import { CreditsModule } from '../credits/credits.module';
 import { NumberingModule } from '../numbering/numbering.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PurchaseTermsModule } from '../purchase-terms/purchase-terms.module';
 import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
 import { PackagePurchasesController } from './package-purchases.controller';
 import { PackagePurchasesService } from './package-purchases.service';
@@ -24,6 +25,9 @@ import { PackagePurchasesService } from './package-purchases.service';
     // The mock settlement raises the PACKAGE_PAYMENT_SUCCEEDED campaign event
     // exactly where the webhook does (CMP-002 S2B2). Prisma-only, no cycle.
     CampaignEngineModule,
+    // CMP-006 PR-A: a credit-package purchase opened while the purchase-terms
+    // gate is open carries its acceptance, written in the same transaction.
+    PurchaseTermsModule,
   ],
   controllers: [PackagePurchasesController],
   providers: [PackagePurchasesService],

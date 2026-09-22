@@ -8,6 +8,7 @@ import {
   OfferCreditPackage,
   PaymentMode,
   ProviderCredits,
+  PurchaseTerms,
   ProviderPromoCredits,
   getRefundPolicy,
   creditTxnTypeLabel,
@@ -18,20 +19,30 @@ import {
 } from '../../../../lib/api';
 import { IconArrowRight } from '../../../landing-icons';
 import { createPackagePurchaseAction } from '../package-purchases/actions';
+import { PurchaseTermsConsent } from '../package-purchases/purchase-terms-consent';
+import {
+  PURCHASE_TERMS_ERROR_MESSAGES,
+  PurchaseTermsDocuments,
+} from '../package-purchases/purchase-terms-documents';
 import { ProviderShell } from '../../provider-shell';
 
 type ProviderCreditsPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ kosullar?: string }>;
 };
 
-export default async function ProviderCreditsPage({ params }: ProviderCreditsPageProps) {
+export default async function ProviderCreditsPage({
+  params,
+  searchParams,
+}: ProviderCreditsPageProps) {
   const { id } = await params;
+  const { kosullar } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/credits`);
   }
 
-  const [credits, promo, packages, paymentMode, refundPolicy] = await Promise.all([
+  const [credits, promo, packages, paymentMode, refundPolicy, purchaseTerms] = await Promise.all([
     // Provider-scoped, so it is `fetchOrNotFound` rather than a bare fetch:
     // somebody else's provider id — or one that never existed — is refused with
     // 403 by ProviderAccessGuard, and an unwrapped 403 here became the generic
@@ -49,7 +60,11 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
     // The window a new offer would carry: this panel describes the promise
     // attached to the credits sitting in the balance, not to any one offer.
     getRefundPolicy(),
+    // CMP-006 PR-A. `required: false` while the API's gate is closed, and then
+    // nothing below renders differently from before.
+    apiFetch<PurchaseTerms>('/payments/purchase-terms'),
   ]);
+  const termsError = kosullar ? (PURCHASE_TERMS_ERROR_MESSAGES[kosullar] ?? null) : null;
 
   const activePackages = packages.filter((p) => p.isActive);
   const refundedTotal = credits.transactions
@@ -246,6 +261,16 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
         </h2>
       </div>
 
+      {purchaseTerms.required && termsError ? (
+        <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="purchase-terms-error">
+          <span>{termsError}</span>
+        </p>
+      ) : null}
+
+      {purchaseTerms.required && activePackages.length > 0 ? (
+        <PurchaseTermsDocuments terms={purchaseTerms} />
+      ) : null}
+
       {activePackages.length === 0 ? (
         <div className="pdash-empty">
           <h3>Şu an aktif paket yok</h3>
@@ -320,9 +345,19 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
                       <span>Not (isteğe bağlı)</span>
                       <input name="providerNote" placeholder="Satın alma için kısa not" />
                     </label>
-                    <button className="pdash-btn pdash-btn-primary pdash-btn-block" type="submit">
-                      Test Ödemesiyle Paket Al
-                    </button>
+                    {purchaseTerms.required ? (
+                      <>
+                        <input type="hidden" name="returnTo" value="credits" />
+                        <PurchaseTermsConsent
+                          version={purchaseTerms.version}
+                          buttonLabel="Test Ödemesiyle Paket Al"
+                        />
+                      </>
+                    ) : (
+                      <button className="pdash-btn pdash-btn-primary pdash-btn-block" type="submit">
+                        Test Ödemesiyle Paket Al
+                      </button>
+                    )}
                   </form>
                   <span className="pkg-note">Krediler süresizdir.</span>
                 </div>

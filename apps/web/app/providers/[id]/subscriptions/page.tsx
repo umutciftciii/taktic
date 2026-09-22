@@ -5,6 +5,7 @@ import {
   ProviderEntitlement,
   ProviderEntitlements,
   PurchasableOfferPackage,
+  PurchaseTerms,
   apiFetch,
   fetchOrNotFound,
   formatDateTime,
@@ -13,9 +14,17 @@ import {
 } from '../../../../lib/api';
 import { ProviderShell } from '../../provider-shell';
 import { createPackagePurchaseAction } from '../package-purchases/actions';
+import { PurchaseTermsConsent } from '../package-purchases/purchase-terms-consent';
+import {
+  PURCHASE_TERMS_ERROR_MESSAGES,
+  PurchaseTermsDocuments,
+} from '../package-purchases/purchase-terms-documents';
 import { AutoRenewControls } from './auto-renew-controls';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ kosullar?: string }>;
+};
 
 const TYPE_LABEL: Record<string, string> = {
   ONE_TIME_CREDITS: 'Tek seferlik kredi',
@@ -48,8 +57,9 @@ const RENEWAL_FAILURE_LABEL: Record<string, string> = {
   ENTITLEMENT_NOT_RENEWABLE: 'Bu paket yenilenebilir değil.',
 };
 
-export default async function ProviderSubscriptionsPage({ params }: PageProps) {
+export default async function ProviderSubscriptionsPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const { kosullar } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/subscriptions`);
@@ -59,10 +69,14 @@ export default async function ProviderSubscriptionsPage({ params }: PageProps) {
   // credits and offers screens do: ProviderAccessGuard answers 403 for another
   // provider's id and for one that names nothing, and that is the shared 404
   // rather than an error boundary.
-  const [entitlements, catalogue] = await Promise.all([
+  const [entitlements, catalogue, purchaseTerms] = await Promise.all([
     fetchOrNotFound(() => apiFetch<ProviderEntitlements>(`/providers/${id}/entitlements`)),
     fetchOrNotFound(() => apiFetch<OfferPackageCatalogue>(`/providers/${id}/offer-packages`)),
+    // CMP-006 PR-A. `required: false` while the API's gate is closed.
+    apiFetch<PurchaseTerms>('/payments/purchase-terms'),
   ]);
+  const termsError = kosullar ? (PURCHASE_TERMS_ERROR_MESSAGES[kosullar] ?? null) : null;
+  const anyPurchasable = catalogue.packages.some((item) => item.purchasable);
 
   const active = entitlements.entitlements.filter((item) => item.usable || item.queued);
   const past = entitlements.entitlements.filter((item) => !item.usable && !item.queued);
@@ -134,20 +148,32 @@ export default async function ProviderSubscriptionsPage({ params }: PageProps) {
           </h2>
         </div>
 
+        {purchaseTerms.required && termsError ? (
+          <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="purchase-terms-error">
+            <span>{termsError}</span>
+          </p>
+        ) : null}
+        {purchaseTerms.required && anyPurchasable ? (
+          <PurchaseTermsDocuments terms={purchaseTerms} />
+        ) : null}
+
         <PackageGroup
           providerId={id}
+          termsVersion={purchaseTerms.required ? purchaseTerms.version : null}
           title="Aylık kota paketleri"
           note={`Belirli sayıda teklif kredisi, satın alma anından itibaren ${catalogue.periodDays} gün geçerli. Kullanılmayan kota devretmez.`}
           packages={quota}
         />
         <PackageGroup
           providerId={id}
+          termsVersion={purchaseTerms.required ? purchaseTerms.version : null}
           title="Kategori limitsiz paketler"
           note={`Yalnızca aşağıda yazan kategorilerde geçerlidir ve ${catalogue.periodDays} gün sürer. Diğer kategorilerdeki teklifleriniz kredi bakiyenizden düşmeye devam eder.`}
           packages={unlimited}
         />
         <PackageGroup
           providerId={id}
+          termsVersion={purchaseTerms.required ? purchaseTerms.version : null}
           title="Tek seferlik kredi paketleri"
           note="Süresi dolmaz, kredi bakiyenize eklenir."
           packages={oneTime}
@@ -280,11 +306,14 @@ function EntitlementCard({
 
 function PackageGroup({
   providerId,
+  termsVersion,
   title,
   note,
   packages,
 }: {
   providerId: string;
+  /** The purchase-terms version to accept, or null while the gate is closed. */
+  termsVersion: string | null;
   title: string;
   note: string;
   packages: PurchasableOfferPackage[];
@@ -360,9 +389,19 @@ function PackageGroup({
                 <form action={createPackagePurchaseAction} className="pdash-form">
                   <input type="hidden" name="providerId" value={providerId} />
                   <input type="hidden" name="packageId" value={pkg.id} />
-                  <button className="pdash-btn pdash-btn-primary pdash-btn-block" type="submit">
-                    Test Ödemesiyle Satın Al
-                  </button>
+                  {termsVersion ? (
+                    <>
+                      <input type="hidden" name="returnTo" value="subscriptions" />
+                      <PurchaseTermsConsent
+                        version={termsVersion}
+                        buttonLabel="Test Ödemesiyle Satın Al"
+                      />
+                    </>
+                  ) : (
+                    <button className="pdash-btn pdash-btn-primary pdash-btn-block" type="submit">
+                      Test Ödemesiyle Satın Al
+                    </button>
+                  )}
                 </form>
               ) : (
                 <span className="pkg-note" data-testid="package-unavailable">

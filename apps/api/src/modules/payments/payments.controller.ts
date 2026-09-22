@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { AdminPermission } from '@prisma/client';
+import { readRequestMeta, type RequestMetaSource } from '../../common/request-meta';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -25,6 +26,18 @@ export class PaymentsController {
     return this.payments.readPaymentMode();
   }
 
+  /**
+   * CMP-006 PR-A. The purchase terms the checkout screen must show and have
+   * accepted, or `{ required: false }` while the release gate is closed — in
+   * which case no text is served at all. Never carries an acceptance, a
+   * digest, a client address or a user agent.
+   */
+  @Get('payments/purchase-terms')
+  @UseGuards(AuthGuard)
+  readPurchaseTerms() {
+    return this.payments.readPurchaseTerms();
+  }
+
   /** The same, plus the names — never the values — of unfilled settings. */
   @Get('payments/config')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
@@ -47,7 +60,8 @@ export class PaymentsController {
     @Param('providerId') providerId: string,
     @Body() dto: CreateCheckoutSessionDto,
     @CurrentUser() user: AuthUser,
+    @Req() req: RequestMetaSource,
   ) {
-    return this.payments.createCheckoutSession(providerId, user, dto);
+    return this.payments.createCheckoutSession(providerId, user, dto, readRequestMeta(req));
   }
 }

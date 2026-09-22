@@ -9,7 +9,9 @@ import {
 import { PackagePurchaseStatus, Prisma, UserRole } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { RequestMeta } from '../../common/request-meta';
 import { AuthUser } from '../auth/auth.types';
+import { PurchaseTermsService } from '../purchase-terms/purchase-terms.service';
 import {
   PackagePurchasesService,
   packagePurchaseOmit,
@@ -50,7 +52,13 @@ export class PaymentsService {
     @Inject(PaymentProviderPort) private readonly provider: PaymentProviderPort,
     @Inject(PackagePurchasesService)
     private readonly packagePurchases: PackagePurchasesService,
+    @Inject(PurchaseTermsService) private readonly purchaseTerms: PurchaseTermsService,
   ) {}
+
+  /** What the checkout screen shows and must have accepted (CMP-006 PR-A). */
+  readPurchaseTerms() {
+    return this.purchaseTerms.describeForCheckout();
+  }
 
   /**
    * What the provider-facing screens are allowed to know about the payment
@@ -85,13 +93,24 @@ export class PaymentsService {
     };
   }
 
-  async createCheckoutSession(providerId: string, user: AuthUser, dto: CreateCheckoutSessionDto) {
+  async createCheckoutSession(
+    providerId: string,
+    user: AuthUser,
+    dto: CreateCheckoutSessionDto,
+    meta: RequestMeta,
+  ) {
     // Stricter than ProviderAccessGuard on purpose. Buying credits is an act of
     // the account that owns the provider, not an administrative one: an admin
     // who needs to move a balance has the audited grant endpoint.
     if (user.role !== UserRole.PROVIDER) {
       throw new ForbiddenException('Only the provider account can start a credit package checkout');
     }
+
+    // CMP-006 PR-A. Null while the purchase-terms gate is closed, and then
+    // nothing below differs from before. Open, an unticked box or a stale
+    // version is refused here, before a reusable checkout could be handed back
+    // to a request that never accepted anything.
+    const terms = this.purchaseTerms.requireAcceptance(dto);
 
     const kind = resolvePaymentProviderKind();
     const creditPackage = await this.prisma.offerCreditPackage.findFirst({
@@ -102,7 +121,12 @@ export class PaymentsService {
       throw new BadRequestException('Active credit package not found');
     }
 
-    const reusable = await this.findReusableCheckout(providerId, creditPackage.id, kind);
+    const reusable = await this.findReusableCheckout(
+      providerId,
+      creditPackage.id,
+      kind,
+      terms?.version ?? null,
+    );
     if (reusable) {
       return this.present(reusable, kind, true);
     }
@@ -111,10 +135,12 @@ export class PaymentsService {
     // deliberately drops the token, so this is the only place it exists outside
     // the database column and the provider's checkout metadata.
     const reference = mintReference();
-    const purchase = await this.packagePurchases.createProviderPurchase(providerId, dto, {
-      provider: kind,
-      reference,
-    });
+    const purchase = await this.packagePurchases.createProviderPurchase(
+      providerId,
+      dto,
+      { provider: kind, reference },
+      { user, meta },
+    );
 
     // `package` became nullable on the model when vitrin purchases joined this
     // table, and it is NOT NULL on every OFFER_PACKAGE row —
@@ -188,6 +214,7 @@ export class PaymentsService {
     providerId: string,
     packageId: string,
     kind: PaymentProviderKind,
+    termsVersion: string | null,
   ) {
     return this.prisma.packagePurchase.findFirst({
       where: {
@@ -200,6 +227,13 @@ export class PaymentsService {
           { providerCheckoutExpiresAt: null },
           { providerCheckoutExpiresAt: { gt: new Date() } },
         ],
+        // CMP-006 PR-A. While the gate is open, only a checkout that was
+        // itself opened under the version being served may be handed back —
+        // never one opened before the gate, or under an older text. With the
+        // gate closed this clause is absent and reuse is exactly as before.
+        ...(termsVersion !== null
+          ? { purchaseTermsAcceptance: { is: { documentVersion: termsVersion } } }
+          : {}),
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: purchaseInclude,
