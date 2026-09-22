@@ -522,20 +522,26 @@ describe('none of the seventeen reaches a caller who is not an operator', () => 
   });
 
   it('refuses the operator view to an anonymous caller, a customer and a provider', async () => {
-    const callers: [string, string | null][] = [
-      ['anonim', null],
-      ['müşteri', await cookieFor(UserRole.CUSTOMER)],
-      ['hizmet veren', await cookieFor(UserRole.PROVIDER)],
+    /*
+     * An anonymous caller presented no credential, so the answer is 401 and the
+     * sign-in form; a customer or a provider presented a good one for an
+     * account with no business here, so it is 403. Neither names a slug of the
+     * unreleased wave.
+     */
+    const callers: [string, string | null, number][] = [
+      ['anonim', null, 401],
+      ['müşteri', await cookieFor(UserRole.CUSTOMER), 403],
+      ['hizmet veren', await cookieFor(UserRole.PROVIDER), 403],
     ];
 
-    for (const [who, cookie] of callers) {
+    for (const [who, cookie, expectedStatus] of callers) {
       for (const path of [
         '/admin/categories',
         '/admin/categories/beslenme-danismanligi',
         '/admin/categories/mobil-uygulama-gelistirme',
       ]) {
         const call = request(ctx.server).get(path);
-        const response = await (cookie ? call.set('Cookie', cookie) : call).expect(403);
+        const response = await (cookie ? call.set('Cookie', cookie) : call).expect(expectedStatus);
 
         // Not one slug of the unreleased wave, and not one of its figures,
         // even in the refusal.

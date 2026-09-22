@@ -589,11 +589,16 @@ test.describe('admin category management', () => {
 
 test.describe('the operator view of the taxonomy', () => {
   /**
-   * `includeInactive=true` is what the admin screens send to see the whole
-   * tree — every unreleased service, its questions and its wiring. It is a
-   * query parameter on two otherwise public endpoints, so the only thing
-   * standing between a stranger and the unreleased catalogue is the check these
-   * scenarios exercise from the outside.
+   * `GET /admin/categories` is what the admin screens read to see the whole
+   * tree — every unreleased service, its questions and its wiring.
+   *
+   * It used to be `?includeInactive=true` on two otherwise public endpoints,
+   * which made the boundary between the announced catalogue and the
+   * unannounced one a query parameter. It is now a separate route behind
+   * `CATALOG_READ`, and the public endpoints have no wide mode at all — which
+   * is the second thing these scenarios check from the outside: the old
+   * parameter is not refused, it is simply not a thing any more, so it returns
+   * the public answer.
    */
   test('nobody but an admin can ask for the unreleased catalogue', async ({ browser }) => {
     const draft = await createCategory(2, {
@@ -616,9 +621,17 @@ test.describe('the operator view of the taxonomy', () => {
     });
     const adminAccount = await createAdmin();
 
-    const paths = [
-      '/categories?includeInactive=true',
-      `/categories/${draft.slug}?includeInactive=true`,
+    const adminPaths = ['/admin/categories', `/admin/categories/${draft.slug}`];
+    /*
+     * The parameter that used to widen the public routes. Nothing reads it now,
+     * so each route answers exactly as it would without it — and the two
+     * answers are different shapes: the listing is a 200 that simply does not
+     * contain the draft, and the draft's own page is a 404, because to the
+     * public it does not exist. Both are non-leaks; only one of them is a body.
+     */
+    const publicPaths: [string, number][] = [
+      ['/categories?includeInactive=true', 200],
+      [`/categories/${draft.slug}?includeInactive=true`, 404],
     ];
 
     const visitor = await Actor.open(browser, 'visitor', primaryRuntime);
@@ -626,14 +639,40 @@ test.describe('the operator view of the taxonomy', () => {
     const provider = await Actor.open(browser, 'provider', primaryRuntime);
     const admin = await Actor.open(browser, 'admin', primaryRuntime);
 
-    async function expectRefused(actor: Actor, headers: Record<string, string> = {}) {
-      for (const path of paths) {
+    /**
+     * The admin route refuses, and the public routes answer narrowly. Both
+     * matter: a refusal that leaked would be a leak, and a public route that
+     * still widened would make the refusal pointless.
+     *
+     * `expectedStatus` is 401 for a caller with no credential and 403 for one
+     * whose account simply has no business here.
+     */
+    async function expectRefused(
+      actor: Actor,
+      expectedStatus: number,
+      headers: Record<string, string> = {},
+    ) {
+      for (const path of adminPaths) {
         const response = await actor.page.request.get(`${primaryRuntime.apiUrl}${path}`, {
           headers,
         });
-        expect(response.status(), `${actor.name} asked for ${path}`).toBe(403);
+        expect(response.status(), `${actor.name} asked for ${path}`).toBe(expectedStatus);
 
         // Not one word of the unreleased service, not even in the refusal.
+        const body = await response.text();
+        expect(body).not.toContain(draft.slug);
+        expect(body).not.toContain(draft.name);
+        expect(body).not.toContain(draftQuestion.key);
+      }
+
+      for (const [path, expectedPublicStatus] of publicPaths) {
+        const response = await actor.page.request.get(`${primaryRuntime.apiUrl}${path}`, {
+          headers,
+        });
+        // Not a refusal — the ordinary public answer. There is nothing to
+        // refuse, because there is nothing the route reads.
+        expect(response.status(), `${actor.name} asked for ${path}`).toBe(expectedPublicStatus);
+
         const body = await response.text();
         expect(body).not.toContain(draft.slug);
         expect(body).not.toContain(draft.name);
@@ -642,33 +681,32 @@ test.describe('the operator view of the taxonomy', () => {
     }
 
     try {
-      // Signed out.
-      await expectRefused(visitor);
+      // Signed out: no credential at all, so 401 on the admin route.
+      await expectRefused(visitor, 401);
 
       // Signed in as a customer.
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
-      await expectRefused(customer, { cookie: await sessionCookieHeader(customer) });
+      await expectRefused(customer, 403, { cookie: await sessionCookieHeader(customer) });
 
       // Signed in as a provider — the role with the most to gain from reading
       // the categories the marketplace has not launched yet.
       await provider.loginToWeb(providerAccount.email, providerAccount.password);
-      await expectRefused(provider, { cookie: await sessionCookieHeader(provider) });
+      await expectRefused(provider, 403, { cookie: await sessionCookieHeader(provider) });
 
       // And the same question, from the one account it belongs to.
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
       const adminCookie = await sessionCookieHeader(admin);
 
-      const listing = await admin.page.request.get(
-        `${primaryRuntime.apiUrl}/categories?includeInactive=true`,
-        { headers: { cookie: adminCookie } },
-      );
+      const listing = await admin.page.request.get(`${primaryRuntime.apiUrl}/admin/categories`, {
+        headers: { cookie: adminCookie },
+      });
       expect(listing.status()).toBe(200);
       expect(
         (await listing.json()).map((category: { slug: string }) => category.slug),
       ).toContain(draft.slug);
 
       const detail = await admin.page.request.get(
-        `${primaryRuntime.apiUrl}/categories/${draft.slug}?includeInactive=true`,
+        `${primaryRuntime.apiUrl}/admin/categories/${draft.slug}`,
         { headers: { cookie: adminCookie } },
       );
       expect(detail.status()).toBe(200);

@@ -74,7 +74,8 @@ vardı). Şimdi izinsiz bir sayfaya giren personel sonsuz giriş döngüsüne d�
 | `pnpm typecheck` (5 paket) | geçti |
 | `pnpm build` (3 paket) | geçti |
 | Yeni RBAC testleri | **23/23** |
-| Tam API paketi | **154 dosya / 3359 test** (taban 151/3322; fark tam olarak eklenen 37 test). Tek kırmızı `account-email-role-conflict` — bilinen, bu dilimden önce de var olan yarış flake'i; tek başına 20/20 geçiyor |
+| Tam API paketi | **154 dosya / 3359 test, hepsi geçti** (taban 151/3322; fark tam olarak eklenen 37 test) |
+| Tam E2E paketi | **293 geçti** (yerel, bağımsız koşu) |
 
 **Gerçek `taktic` DB'sine dokunulmadı**; tüm migration doğrulaması `pr0_migration_dryrun` izole veritabanında.
 
@@ -92,7 +93,15 @@ hesabı yayımlanmamış katalogu görebiliyordu. Bunu merge öncesi bir düzelt
 | `elevated-query.ts` | **Silindi**; tek tüketicisi buydu |
 | Yazma | `CATEGORIES_WRITE/STATUS/DELETE` ayrı kaldı; okuma yazma vermiyor |
 
-**Mevcut testler taşındı.** Dokuz spec dosyası eski sözleşmeyi kodluyordu. Yedisinde 17 çağrı mekanik
+**Mevcut testler taşındı.** Dokuz API spec'i ve bir E2E spec'i eski sözleşmeyi kodluyordu; ikisi ilk
+CI koşusunda yakalandı (aynı adlı ikinci API dosyası ve API dosyasının E2E kardeşi). E2E tarafında beklenti
+sadece rotayı değiştirmekle kalmadı: eski test `?includeInactive=true`'nun **403 döndüğünü** iddia ediyordu,
+oysa artık reddedilecek bir şey yok — parametre okunmadığı için rota sıradan public cevabını veriyor. Test
+şimdi her iki tarafı da kontrol ediyor: admin rotası reddediyor **ve** public rotalar dar cevap veriyor.
+Biri olmadan diğeri anlamsızdır. Public cevabın iki şekli olduğu da ayrıca yazıldı: liste 200 (taslak yok),
+taslağın sayfası 404 (public'e göre o kayıt yok).
+
+ Dokuz spec dosyası eski sözleşmeyi kodluyordu. Yedisinde 17 çağrı mekanik
 olarak `/admin/categories`'e taşındı; `category-visibility.spec.ts` **yeniden yazıldı** (konusu tam olarak
 bu sınırdı, 15 vaka); `sitemap-entries.spec.ts`'e dokunulmadı (farklı rotanın kendi parametresi).
 `wave-1-release-readiness.spec.ts`'te bir bekleyiş 403 → 401/403 olarak ayrıldı: kimlik sunmayan çağıran
