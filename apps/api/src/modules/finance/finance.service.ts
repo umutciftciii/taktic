@@ -62,6 +62,19 @@ type SourceNumberLookup = {
   purchaseNumberById: Map<string, string | null>;
 };
 
+/** What the ledger says about the campaign behind a CAMPAIGN_* row (CMP-004 S4). */
+type LedgerCampaignView = { id: string; name: string; versionNumber: number };
+/** Keyed by `<referenceType>:<referenceId>`. */
+type CampaignReferenceLookup = Map<string, LedgerCampaignView>;
+
+function resolveLedgerCampaign(
+  row: { referenceType: string | null; referenceId: string | null },
+  lookup: CampaignReferenceLookup,
+): LedgerCampaignView | null {
+  if (!row.referenceType || !row.referenceId) return null;
+  return lookup.get(`${row.referenceType}:${row.referenceId}`) ?? null;
+}
+
 function resolveSourceNumber(
   row: { referenceType: string | null; referenceId: string | null },
   lookup: SourceNumberLookup,
@@ -344,7 +357,10 @@ export class FinanceService {
       }),
     ]);
 
-    const sourceNumbers = await this.lookupSourceNumbers(rows);
+    const [sourceNumbers, campaignReferences] = await Promise.all([
+      this.lookupSourceNumbers(rows),
+      this.lookupCampaignReferences(rows),
+    ]);
 
     const items = rows.map((row) => ({
       id: row.id,
@@ -357,6 +373,9 @@ export class FinanceService {
       referenceType: row.referenceType,
       referenceId: row.referenceId,
       sourceNumber: resolveSourceNumber(row, sourceNumbers),
+      // CMP-004 S4: the campaign behind a CAMPAIGN_* row, by the exact
+      // reference the row carries; null for every other row.
+      campaign: resolveLedgerCampaign(row, campaignReferences),
       provider: row.provider,
       createdBy: row.createdBy,
     }));
@@ -549,6 +568,67 @@ export class FinanceService {
       purchaseNumberById.set(row.id, row.purchaseNumber);
 
     return { offerNumberById, purchaseNumberById };
+  }
+
+  /**
+   * The campaign (id, name, running rule version) behind each campaign
+   * reference on the page: a redemption for a grant, a lot for an expiry or
+   * revoke of the remainder, a consumption share for a refund-time forfeit.
+   * Three batched reads, keyed by the reference the ledger row carries; the
+   * campaign's rules, the redemption's revoke note and the provider's
+   * identity stay out of the result.
+   */
+  private async lookupCampaignReferences(
+    rows: Array<{ referenceType: string | null; referenceId: string | null }>,
+  ): Promise<CampaignReferenceLookup> {
+    const redemptionIds = new Set<string>();
+    const lotIds = new Set<string>();
+    const consumptionIds = new Set<string>();
+    for (const row of rows) {
+      if (!row.referenceId) continue;
+      if (row.referenceType === 'CampaignRedemption') redemptionIds.add(row.referenceId);
+      else if (row.referenceType === 'PromoCreditLot') lotIds.add(row.referenceId);
+      else if (row.referenceType === 'PromoCreditLotConsumption') consumptionIds.add(row.referenceId);
+    }
+
+    const campaignSelect = {
+      campaign: { select: { id: true, name: true } },
+      campaignVersion: { select: { versionNumber: true } },
+    } as const;
+    const [redemptions, lots, consumptions] = await Promise.all([
+      redemptionIds.size === 0
+        ? []
+        : this.prisma.campaignRedemption.findMany({
+            where: { id: { in: Array.from(redemptionIds) } },
+            select: { id: true, ...campaignSelect },
+          }),
+      lotIds.size === 0
+        ? []
+        : this.prisma.promoCreditLot.findMany({
+            where: { id: { in: Array.from(lotIds) } },
+            select: { id: true, redemption: { select: campaignSelect } },
+          }),
+      consumptionIds.size === 0
+        ? []
+        : this.prisma.promoCreditLotConsumption.findMany({
+            where: { id: { in: Array.from(consumptionIds) } },
+            select: { id: true, lot: { select: { redemption: { select: campaignSelect } } } },
+          }),
+    ]);
+
+    const toView = (redemption: {
+      campaign: { id: string; name: string };
+      campaignVersion: { versionNumber: number };
+    }): LedgerCampaignView => ({
+      id: redemption.campaign.id,
+      name: redemption.campaign.name,
+      versionNumber: redemption.campaignVersion.versionNumber,
+    });
+    const lookup: CampaignReferenceLookup = new Map();
+    for (const row of redemptions) lookup.set(`CampaignRedemption:${row.id}`, toView(row));
+    for (const row of lots) lookup.set(`PromoCreditLot:${row.id}`, toView(row.redemption));
+    for (const row of consumptions) lookup.set(`PromoCreditLotConsumption:${row.id}`, toView(row.lot.redemption));
+    return lookup;
   }
 
   private async attachSourceNumbers<

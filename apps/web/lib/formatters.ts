@@ -169,9 +169,95 @@ export function creditTxnTypeLabel(type: string) {
     OFFER_SPEND: 'Teklif harcaması',
     OFFER_REFUND: 'Teklif iadesi',
     ADJUSTMENT: 'Düzeltme',
+    // CMP-004 S4: the three campaign movements, in the provider's words.
+    CAMPAIGN_GRANT: 'Promosyon kredisi',
+    CAMPAIGN_EXPIRE: 'Promosyon süresi doldu',
+    CAMPAIGN_REVOKE: 'Promosyon geri alındı',
   };
 
   return labels[type] ?? type;
+}
+
+/**
+ * The ledger's stored reason, in the provider's words (CMP-004 S4).
+ *
+ * The API writes machine codes — `CAMPAIGN_GRANT`, `PROMO_FORFEIT_ON_REFUND:EXPIRED`,
+ * `MANUAL_ADMIN_REFUND:<CODE>` — and a provider's history must not print
+ * them. The manual-refund tail is an operations code an operator filed the
+ * case under, so it is dropped rather than shown. A reason this table does
+ * not know is printed as stored (it is then free text an operator wrote to
+ * be read), and a missing one is a dash.
+ */
+export function creditReasonLabel(reason: string | null | undefined): string {
+  const trimmed = reason?.trim();
+  if (!trimmed) return '-';
+  const separator = trimmed.indexOf(':');
+  const head = separator >= 0 ? trimmed.slice(0, separator) : trimmed;
+  const tail = separator >= 0 ? trimmed.slice(separator + 1) : '';
+
+  switch (head) {
+    case 'CAMPAIGN_GRANT':
+      return 'Kampanya promosyon kredisi';
+    case 'PROMO_LOT_EXPIRED':
+      return 'Promosyon kredisinin süresi doldu';
+    case 'PROMO_LOT_REVOKED':
+      return tail === 'PAYMENT_REVERSED' ? 'Promosyon geri alındı (ödeme iadesi)' : 'Promosyon geri alındı';
+    case 'PROMO_FORFEIT_ON_REFUND':
+      return tail === 'REVOKED'
+        ? 'Teklif iadesinde geri alınmış promosyon payı bakiyeye dönmedi'
+        : 'Teklif iadesinde süresi dolmuş promosyon payı bakiyeye dönmedi';
+    case 'UNVIEWED_OFFER_48H':
+    case 'NOT_VIEWED_48H':
+      return 'Teklif iade süresi içinde görüntülenmedi';
+    case 'MANUAL_ADMIN_REFUND':
+      return 'Platform tarafından iade edildi';
+    default:
+      return trimmed;
+  }
+}
+
+/** The settlement of one refund, as the API reports it (CMP-004 S4). */
+export type OfferRefundSettlement = {
+  refundTransactionId: string;
+  grossCredits: number;
+  promoRestoredCredits: number;
+  promoForfeitedCredits: { expired: number; revoked: number; total: number };
+  netCredits: number;
+  balanceBefore: number;
+  balanceAfter: number;
+};
+
+/**
+ * The refund line of an offer.
+ *
+ * Without a forfeited promotion share it is the line the screen always showed
+ * (`+5 iade`); with one it states the gross, what the wallet lost again and
+ * the net, plus one sentence saying why — so the provider is never shown a
+ * "+5" that their balance did not gain. `fallbackCredits` covers an offer the
+ * API reported as refunded without a settlement (none today; kept so the
+ * screen degrades to the old line rather than to nothing).
+ */
+export function refundSettlementSummary(
+  settlement: OfferRefundSettlement | null | undefined,
+  fallbackCredits?: number,
+): { headline: string; detail: string | null } {
+  const gross = settlement?.grossCredits ?? fallbackCredits ?? 0;
+  const forfeited = settlement?.promoForfeitedCredits;
+  if (!settlement || !forfeited || forfeited.total <= 0) {
+    return { headline: `+${gross} iade`, detail: null };
+  }
+  const net = settlement.netCredits;
+  const sign = net > 0 ? '+' : net < 0 ? '−' : '';
+  const cause =
+    forfeited.expired > 0 && forfeited.revoked > 0
+      ? 'Süresi dolmuş ve geri alınmış promosyon payları bakiyeye dönmedi.'
+      : forfeited.revoked > 0
+        ? 'Geri alınmış promosyon payı bakiyeye dönmedi.'
+        : 'Süresi dolmuş promosyon payı bakiyeye dönmedi.';
+  return {
+    headline: `+${gross} iade · −${forfeited.total} promosyon geri alındı · net ${sign}${Math.abs(net)}`,
+    detail: cause,
+  };
 }
 
 // `amountMinor` is the monetary value in the currency's minor unit (e.g. kuruş for TRY,

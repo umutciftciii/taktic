@@ -14,6 +14,7 @@ import {
   formatDateRange,
   formatPrice,
   formatDateTime,
+  refundSettlementSummary,
   urgencyLabel,
 } from '../../../../../lib/api';
 import { ProviderShell } from '../../../provider-shell';
@@ -70,6 +71,7 @@ export default async function ProviderOfferDetailPage({
    * come. Never the platform's current setting: an offer sold at 48 hours is
    * still a 48-hour offer after an administrator moves the setting to 72.
    */
+  const refundSummary = refundSettlementSummary(offer.creditRefundSettlement, offer.creditCost);
   const refundNotice =
     offer.refundEligibility.windowHours === null
       ? null
@@ -274,6 +276,22 @@ export default async function ProviderOfferDetailPage({
                 <dt>İade tarihi</dt>
                 <dd>{offer.creditRefundedAt ? formatDateTime(offer.creditRefundedAt) : 'Yok'}</dd>
               </div>
+              {/*
+                The net of the refund (CMP-004 S4), only for an offer that was
+                refunded, and only in more than one line when a promotion share
+                was taken back — otherwise the gross is the whole story.
+              */}
+              {offer.creditRefundedAt ? (
+                <div className="pdash-info-row" data-testid="offer-refund-settlement">
+                  <dt>İade tutarı</dt>
+                  <dd>
+                    {refundSummary.headline}
+                    {refundSummary.detail ? (
+                      <div style={{ color: 'var(--muted)', fontSize: 13 }}>{refundSummary.detail}</div>
+                    ) : null}
+                  </dd>
+                </div>
+              ) : null}
               {/*
                 Only for an offer the policy governs. One from before it has no
                 standing under this rule, and a row here would read as a promise

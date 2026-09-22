@@ -45,6 +45,7 @@ import { OperationsSettingsService } from '../operations-settings/operations-set
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
+import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import {
   canBeAssignedByAdmin,
   canBeSelectedByProviders,
@@ -1459,7 +1460,24 @@ export class ProvidersService implements OnModuleInit {
       include: providerOfferInclude,
     });
 
-    return offers.map(withRefundEligibility);
+    return this.withRefundSettlements(offers.map(withRefundEligibility));
+  }
+
+  /**
+   * The net of each refunded offer's refund (CMP-004 S4), read by exact
+   * reference through `creditRefundedTransactionId` in one query for the
+   * whole list — the same figure the refund response and the e-mail carry.
+   * Null for an offer that was never refunded.
+   */
+  private async withRefundSettlements<T extends { creditRefundedTransactionId: string | null }>(
+    offers: T[],
+  ): Promise<Array<T & { creditRefundSettlement: OfferRefundSettlement | null }>> {
+    const refundIds = offers.map((offer) => offer.creditRefundedTransactionId).filter((id): id is string => id !== null);
+    const settlements = await readOfferRefundSettlements(this.prisma, refundIds);
+    return offers.map((offer) => ({
+      ...offer,
+      creditRefundSettlement: offer.creditRefundedTransactionId ? (settlements.get(offer.creditRefundedTransactionId) ?? null) : null,
+    }));
   }
 
   async getProviderOffer(providerId: string, offerId: string) {
@@ -1498,7 +1516,8 @@ export class ProvidersService implements OnModuleInit {
         ? await this.loadAcceptedWorkScope(offer.requestId)
         : null;
 
-    return { ...withRefundEligibility(offer), acceptedWorkScope };
+    const [projected] = await this.withRefundSettlements([withRefundEligibility(offer)]);
+    return { ...projected!, acceptedWorkScope };
   }
 
   /**

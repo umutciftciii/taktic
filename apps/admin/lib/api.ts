@@ -659,7 +659,10 @@ export type CreditTransactionType =
   | 'PACKAGE_PURCHASE'
   | 'OFFER_SPEND'
   | 'OFFER_REFUND'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  | 'CAMPAIGN_GRANT'
+  | 'CAMPAIGN_EXPIRE'
+  | 'CAMPAIGN_REVOKE';
 
 export type OfferCreditPackage = {
   id: string;
@@ -1250,6 +1253,9 @@ export const CREDIT_TRANSACTION_TYPES: CreditTransactionType[] = [
   'ADMIN_GRANT',
   'ADMIN_DEDUCT',
   'ADJUSTMENT',
+  'CAMPAIGN_GRANT',
+  'CAMPAIGN_EXPIRE',
+  'CAMPAIGN_REVOKE',
 ];
 
 export type CreditLedgerProvider = {
@@ -1270,6 +1276,8 @@ export type CreditLedgerEntry = {
   referenceType: string | null;
   referenceId: string | null;
   sourceNumber: string | null;
+  /** The campaign behind a CAMPAIGN_* row (CMP-004 S4); null on every other row. */
+  campaign: { id: string; name: string; versionNumber: number } | null;
   provider: CreditLedgerProvider;
   createdBy: {
     id: string;
@@ -1852,6 +1860,9 @@ export function creditTxnTypeLabel(type: string) {
     OFFER_SPEND: 'Teklif harcaması',
     OFFER_REFUND: 'Teklif iadesi',
     ADJUSTMENT: 'Düzeltme',
+    CAMPAIGN_GRANT: 'Promosyon kredisi',
+    CAMPAIGN_EXPIRE: 'Promosyon süresi doldu',
+    CAMPAIGN_REVOKE: 'Promosyon geri alındı',
   };
 
   return labels[type] ?? type;
@@ -2107,6 +2118,17 @@ export const SCHEDULER_JOB_COPY: Record<
  * operations settings use.
  */
 export type MarketplacePublishSettings = {
+  enabled: boolean;
+  recentChanges: OperationsSettingsChange[];
+};
+
+/**
+ * The campaign engine's switch (CMP-004 S4): the same shape as the
+ * auto-publish one, on `/operations-settings/campaign-engine`. Off by
+ * default and read fail-closed by every engine path; only a SUPER_ADMIN
+ * reads or writes it, and the screen asks for an explicit confirmation.
+ */
+export type CampaignEngineSettings = {
   enabled: boolean;
   recentChanges: OperationsSettingsChange[];
 };
@@ -3020,7 +3042,8 @@ export type CampaignAuditEntry = {
   id: string;
   action: CampaignAuditAction;
   campaignVersionId: string | null;
-  actor: CampaignActor;
+  /** The person, or null for the system's own acts (CMP-004 S4: a payment reversal's revoke or auto-pause). */
+  actor: CampaignActor | null;
   summary: {
     versionNumber?: number | null;
     previousActiveVersionNumber?: number | null;
@@ -3030,7 +3053,7 @@ export type CampaignAuditEntry = {
     maxRedemptionsPerProvider?: number;
     changedFields?: string[];
     reason?: string;
-    /** AUTO_PAUSED (CMP-003 S3): SYSTEM when a payment reversal crossed the threshold; the actor is then nominal. */
+    /** SYSTEM on a payment reversal's revoke / auto-pause (actor null since CMP-004 S4; nominal on older rows), ADMIN otherwise. */
     actorKind?: 'SYSTEM' | 'ADMIN';
     source?: string;
     revokeCount?: number;

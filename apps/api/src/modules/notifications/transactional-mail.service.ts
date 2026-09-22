@@ -49,6 +49,7 @@ import {
   providerShowcaseUrl,
 } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import { readContactSharingConfig } from '../contact-sharing/contact-sharing.config';
 import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
@@ -410,11 +411,12 @@ export class TransactionalMailService {
       transaction.referenceType === 'Offer' && transaction.referenceId
         ? await loadOffer(this.prisma, transaction.referenceId)
         : null;
+    const settlement = await loadRefundSettlement(this.prisma, transaction.id);
 
     await this.send(
       'credit-refunded',
       provider.recipient,
-      creditRefundedData(provider, offer, transaction),
+      creditRefundedData(provider, offer, transaction, settlement),
       {
         providerId: provider.id,
         userId: provider.userId,
@@ -1621,10 +1623,11 @@ export class TransactionalMailService {
           transaction.referenceType === 'Offer' && transaction.referenceId
             ? await loadOffer(this.prisma, transaction.referenceId)
             : null;
+        const settlement = await loadRefundSettlement(this.prisma, transaction.id);
 
         return {
           to: provider.recipient,
-          data: creditRefundedData(provider, offer, transaction),
+          data: creditRefundedData(provider, offer, transaction, settlement),
         };
       }
     }
@@ -2720,11 +2723,25 @@ function refundWindowHoursFor(offer: {
   );
 }
 
+/**
+ * The refund message's variables (CMP-004 S4: driven by the settlement).
+ *
+ * Every figure comes from {@link OfferRefundSettlement}, the one summary of
+ * the refund row and the promo rows it settled, so the balance the provider
+ * reads is the wallet as the refund actually left it — after a forfeited
+ * promotion share, not merely after the refund row. Without a promotion the
+ * settlement is the refund row itself and every value below is what it has
+ * always been; the promotion keys are then null and the template prints no
+ * row for them.
+ */
 function creditRefundedData(
   provider: LoadedProvider,
   offer: LoadedOffer | null,
   transaction: RefundTransaction,
+  settlement: OfferRefundSettlement,
 ): MailData {
+  const forfeited = settlement.promoForfeitedCredits;
+  const positive = (value: number) => (value > 0 ? String(value) : null);
   return {
     fullName: provider.contactName,
     requestNumber: offer?.request.requestNumber ?? null,
@@ -2733,11 +2750,43 @@ function creditRefundedData(
       transaction.reason,
       offer?.unviewedRefundWindowHours ?? null,
     ),
-    refundedCredits: String(transaction.amount),
-    previousBalance: String(transaction.balanceAfter - transaction.amount),
-    currentBalance: String(transaction.balanceAfter),
+    refundedCredits: String(settlement.grossCredits),
+    promoRestoredCredits: positive(settlement.promoRestoredCredits),
+    promoForfeitedCredits: positive(forfeited.total),
+    promoForfeitedExpiredCredits: positive(forfeited.expired),
+    promoForfeitedRevokedCredits: positive(forfeited.revoked),
+    netCredits: forfeited.total > 0 ? String(settlement.netCredits) : null,
+    previousBalance: String(settlement.balanceBefore),
+    currentBalance: String(settlement.balanceAfter),
     creditsUrl: providerCreditsUrl(provider.id),
     accountUrl: providerAccountUrl(),
+  };
+}
+
+/**
+ * The settlement of one refund row, by exact reference. A refund row always
+ * has one — with no promo share it is the row itself — so a missing entry
+ * can only mean the id is not a refund, which `loadRefundTransaction` has
+ * already excluded; the fallback restates the row rather than inventing.
+ */
+async function loadRefundSettlement(prisma: PrismaService, refundTransactionId: string): Promise<OfferRefundSettlement> {
+  const settlements = await readOfferRefundSettlements(prisma, [refundTransactionId]);
+  const settlement = settlements.get(refundTransactionId);
+  if (settlement) {
+    return settlement;
+  }
+  const row = await prisma.providerCreditTransaction.findUniqueOrThrow({
+    where: { id: refundTransactionId },
+    select: { id: true, amount: true, balanceAfter: true },
+  });
+  return {
+    refundTransactionId: row.id,
+    grossCredits: row.amount,
+    promoRestoredCredits: 0,
+    promoForfeitedCredits: { expired: 0, revoked: 0, total: 0 },
+    netCredits: row.amount,
+    balanceBefore: row.balanceAfter - row.amount,
+    balanceAfter: row.balanceAfter,
   };
 }
 

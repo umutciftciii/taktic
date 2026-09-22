@@ -22,6 +22,7 @@ import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { restorePromoConsumptionsForRefund } from '../credits/promo-credit-ledger';
+import { summarizeOfferRefundSettlement, type SettledShareForSettlement } from '../credits/offer-refund-settlement';
 import {
   contactDisclosureRequiredException,
   contactDisclosureSupersededException,
@@ -260,7 +261,7 @@ export class OffersService {
           throw new ConflictException('Offer credit already refunded');
         }
 
-        const { refundTransaction, balanceAfter } = await refundOfferCreditInTransaction(
+        const { refundTransaction, balanceAfter, settlement } = await refundOfferCreditInTransaction(
           tx,
           offer,
           manualRefundStoredReason(reasonCode),
@@ -290,6 +291,8 @@ export class OffersService {
           offer: withRefundEligibility(updatedOffer),
           balance: balanceAfter,
           refundTransaction,
+          /** The net of everything this refund wrote — the same figure the e-mail and the web report. */
+          settlement,
         };
       },
       { label: 'offers.refundOfferCredit' },
@@ -978,11 +981,45 @@ export async function refundOfferCreditInTransaction(
       })
     : null;
 
+  /*
+   * The settlement (CMP-004 S4): the net of the refund row and the forfeit
+   * rows above, summarised once from what this transaction wrote. The
+   * forfeit rows are re-read by id inside the same transaction so the
+   * summary carries their `balanceAfter`; a reader outside the transaction
+   * arrives at the identical figure through `readOfferRefundSettlements`.
+   */
+  const forfeitRows =
+    promo && promo.forfeited.length > 0
+      ? await tx.providerCreditTransaction.findMany({
+          where: { id: { in: promo.forfeited.map((share) => share.transactionId) } },
+          select: { id: true, type: true, balanceAfter: true, createdAt: true },
+        })
+      : [];
+  const forfeitRowById = new Map(forfeitRows.map((row) => [row.id, row]));
+  const shares: SettledShareForSettlement[] = promo
+    ? [
+        ...promo.refunded.map((share) => ({
+          status: 'REFUNDED' as const,
+          refundedCredits: share.credits,
+          forfeitedCredits: 0,
+          forfeitTransaction: null,
+        })),
+        ...promo.forfeited.map((share) => ({
+          status: 'FORFEITED' as const,
+          refundedCredits: 0,
+          forfeitedCredits: share.credits,
+          forfeitTransaction: forfeitRowById.get(share.transactionId) ?? null,
+        })),
+      ]
+    : [];
+  const settlement = summarizeOfferRefundSettlement(refundTransaction, shares);
+
   return {
     refundTransaction,
     /** The wallet after everything this refund wrote — the figure a caller reports. */
     balanceAfter: promo?.balanceAfter ?? refundTransaction.balanceAfter,
     promo,
+    settlement,
   };
 }
 

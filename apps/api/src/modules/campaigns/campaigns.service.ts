@@ -151,7 +151,8 @@ export type CampaignAuditView = {
   id: string;
   action: CampaignAuditAction;
   campaignVersionId: string | null;
-  actor: ActorView;
+  /** The person, or null for the system's own acts (CMP-004 S4: `summary.actorKind = 'SYSTEM'`). */
+  actor: ActorView | null;
   summary: Prisma.JsonValue | null;
   createdAt: Date;
 };

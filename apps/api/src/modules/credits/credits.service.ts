@@ -12,6 +12,7 @@ import {
   ServiceCategoryStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { readSpendablePromoLots } from './promo-credit-ledger';
 import { PACKAGE_PERIOD_DAYS } from '../entitlements/entitlement-period';
 import { CreateCreditPackageDto } from './dto/create-credit-package.dto';
 import { ManualCreditTransactionDto } from './dto/manual-credit-transaction.dto';
@@ -257,6 +258,27 @@ export class CreditsService {
       balance,
       transactions,
     };
+  }
+
+  /**
+   * The signed-in provider's own spendable promotion (CMP-004 S4).
+   *
+   * Resolved from the session's account and nothing else: the route takes no
+   * provider id, so a caller cannot name another provider and learn — from a
+   * 403 against a 404, or from how long each takes — whether that id exists.
+   * An account that owns no profile is refused rather than answered with an
+   * empty list, so "no promotion" is never confused with "no provider".
+   */
+  async getMyPromoCredits(userId: string) {
+    const provider = await this.prisma.providerProfile.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!provider) {
+      throw new NotFoundException('Provider profile not found');
+    }
+    return readSpendablePromoLots(this.prisma, provider.id, new Date());
   }
 
   async listProviderCreditTransactions(

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   apiFetch,
+  CampaignEngineSettings,
   MarketplacePublishSettings,
   OperationsSettings,
   ProviderReviewSettings,
@@ -185,6 +186,61 @@ export async function toggleProviderReviewsAction(formData: FormData) {
 /** Back to the reviews card, so the operator lands on what they changed. */
 function providerReviewsUrl(params: Record<string, string>): string {
   return `/operations-settings?${new URLSearchParams(params).toString()}#degerlendirmeler`;
+}
+
+/**
+ * Switches the campaign engine on or off (CMP-004 S4).
+ *
+ * The one toggle on this screen that demands an explicit confirmation: the
+ * form carries a `confirm` checkbox, and a submission without it is refused
+ * here before any request is made — the browser's `required` is a
+ * convenience, this check is the rule. Everything else is the shape of the
+ * other toggles: the state asked for comes from the form, the operator from
+ * the session on the API side, and the API records one change per real
+ * change.
+ *
+ * Only new entitlement is affected. Switching on raises no event for
+ * anything that happened while the engine was off; switching off stops new
+ * events and evaluations while a refunded promotion is still taken back.
+ */
+export async function toggleCampaignEngineAction(formData: FormData) {
+  const enabled = readString(formData, 'enabled').trim();
+  const confirmed = readString(formData, 'confirm').trim() === 'yes';
+
+  if (enabled !== 'true' && enabled !== 'false') {
+    redirect(campaignEngineUrl({ error: 'Kampanya motoru durumu yalnızca açık veya kapalı olabilir.' }));
+  }
+  if (!confirmed) {
+    redirect(
+      campaignEngineUrl({
+        error: 'Kampanya motorunu değiştirmek için önce etkisini anladığınızı onaylayın; hiçbir şey değişmedi.',
+      }),
+    );
+  }
+
+  let errorMessage: string | null = null;
+  try {
+    await apiFetch<CampaignEngineSettings>('/operations-settings/campaign-engine', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: enabled === 'true' }),
+    });
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    errorMessage = extractApiMessage(error);
+  }
+
+  if (errorMessage) {
+    redirect(campaignEngineUrl({ error: errorMessage }));
+  }
+
+  revalidatePath('/operations-settings');
+  revalidatePath('/campaigns');
+  redirect(campaignEngineUrl({ ok: enabled === 'true' ? 'campaign-engine-on' : 'campaign-engine-off' }));
+}
+
+/** Back to the engine card, so the operator lands on what they changed. */
+function campaignEngineUrl(params: Record<string, string>): string {
+  return `/operations-settings?${new URLSearchParams(params).toString()}#kampanya-motoru`;
 }
 
 /** The same three rules the DTO enforces: a number, whole hours, in range. */

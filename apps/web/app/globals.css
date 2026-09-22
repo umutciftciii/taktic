@@ -4842,6 +4842,71 @@ input[readonly] {
 
 .credit-panel-foot { display: flex; flex-wrap: wrap; border-top: 1px solid var(--color-divider); }
 
+/* The provider's spendable promotion (CMP-004 S4): a strip between the balance and the totals. */
+.credit-promo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-accent-100);
+  min-width: 0;
+}
+
+.credit-promo-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.credit-promo-total {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.credit-promo-total small { font-size: 13px; font-weight: 400; color: var(--color-neutral-700); }
+
+.credit-promo-lots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.credit-promo-lot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px dashed var(--color-divider);
+  font-size: 14px;
+  min-width: 0;
+}
+
+.credit-promo-lot-amount { font-weight: 600; white-space: nowrap; }
+
+.credit-promo-lot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  color: var(--color-neutral-700);
+  font-size: 13px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .pkg-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));

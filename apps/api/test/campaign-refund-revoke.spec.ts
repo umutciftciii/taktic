@@ -202,7 +202,10 @@ describe('a refunded package revokes its promo lot inside the reversal transacti
     // Cumulative campaign counters are never decremented (CMP-001 §10.2).
     const campaignRow = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
     expect(campaignRow).toMatchObject({ status: 'ACTIVE', redemptionCount: 1, budgetConsumedCredits: PROMO_CREDITS });
-    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(0);
+    // One record of the revoke, by the system (CMP-004 S4); no pause.
+    expect(await ctx.prisma.campaignAuditLog.findMany({ where: { campaignId: campaign.id } })).toMatchObject([
+      { action: CampaignAuditAction.REDEMPTION_REVOKED, actorId: null, summary: { actorKind: 'SYSTEM', source: 'PAYMENT_REVERSED', redemptionId: redemption.id } },
+    ]);
     await expectInvariant(fixture.provider.id);
   });
 
@@ -256,7 +259,8 @@ describe('a refunded package revokes its promo lot inside the reversal transacti
     expect(rows.filter((row) => row.type === CreditTransactionType.CAMPAIGN_REVOKE)).toHaveLength(1);
     expect(await currentCreditBalance(ctx.prisma, fixture.provider.id)).toBe(PACKAGE_CREDITS);
     expect(await revokeCounter(campaign.id)).toBe(1);
-    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(0);
+    // One revoke, one record of it — the replayed loser and the duplicate write none.
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(1);
     expect(await ctx.prisma.paymentWebhookEvent.count({ where: { status: PaymentWebhookEventStatus.MANUAL_REVIEW_REQUIRED } })).toBe(2);
     await expectInvariant(fixture.provider.id);
   });
@@ -355,18 +359,35 @@ describe('the daily revoke threshold pauses the campaign by itself', () => {
 
     await refund(first).expect(200);
     expect((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe(CampaignStatus.ACTIVE);
-    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(0);
+    // CMP-004 S4: a reversal's revoke is on the record as the system's own act — no nominal person.
+    const firstAudit = await ctx.prisma.campaignAuditLog.findMany({ where: { campaignId: campaign.id } });
+    expect(firstAudit).toHaveLength(1);
+    expect(firstAudit[0]).toMatchObject({
+      action: CampaignAuditAction.REDEMPTION_REVOKED,
+      campaignVersionId: version.id,
+      actorId: null,
+      summary: {
+        actorKind: 'SYSTEM',
+        source: 'PAYMENT_REVERSED',
+        revokedCredits: PROMO_CREDITS,
+        spentAtRevoke: 0,
+        revokeCountToday: 1,
+        autoPaused: false,
+        versionNumber: 1,
+      },
+    });
+    expect(JSON.stringify(firstAudit[0]!.summary)).not.toContain(LEMON_BUYER_EMAIL);
 
     await refund(second).expect(200);
     const paused = await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
     expect(paused.status).toBe(CampaignStatus.PAUSED);
     expect(paused.activeVersionId).toBe(version.id);
-    const audit = await ctx.prisma.campaignAuditLog.findMany({ where: { campaignId: campaign.id } });
+    const audit = await ctx.prisma.campaignAuditLog.findMany({ where: { campaignId: campaign.id, action: CampaignAuditAction.AUTO_PAUSED } });
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({
       action: CampaignAuditAction.AUTO_PAUSED,
       campaignVersionId: version.id,
-      actorId: campaign.createdById,
+      actorId: null,
       summary: {
         reason: 'REVOKE_THRESHOLD_EXCEEDED',
         actorKind: 'SYSTEM',
@@ -377,11 +398,13 @@ describe('the daily revoke threshold pauses the campaign by itself', () => {
       },
     });
     expect(JSON.stringify(audit[0]!.summary)).not.toContain(LEMON_BUYER_EMAIL);
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.REDEMPTION_REVOKED, actorId: null } })).toBe(2);
 
     // Already paused: the third revoke still runs, the counter still moves, no second pause row.
     await refund(third).expect(200);
     expect(await revokeCounter(campaign.id)).toBe(3);
     expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.AUTO_PAUSED } })).toBe(1);
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.REDEMPTION_REVOKED } })).toBe(3);
     for (const fixture of [first, second, third]) {
       expect(await currentCreditBalance(ctx.prisma, fixture.provider.id)).toBe(PACKAGE_CREDITS);
       await expectInvariant(fixture.provider.id);
@@ -490,7 +513,8 @@ describe('the daily revoke threshold pauses the campaign by itself', () => {
     }
     expect(await revokeCounter(campaign.id)).toBe(4);
     expect(await ctx.prisma.providerCreditTransaction.count({ where: { type: 'CAMPAIGN_REVOKE' } })).toBe(4);
-    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(1);
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.AUTO_PAUSED } })).toBe(1);
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.REDEMPTION_REVOKED } })).toBe(4);
     for (const fixture of fixtures) {
       expect(await currentCreditBalance(ctx.prisma, fixture.provider.id)).toBe(PACKAGE_CREDITS);
     }
@@ -509,7 +533,8 @@ describe('the daily revoke threshold pauses the campaign by itself', () => {
     }
     expect(await revokeCounter(campaign.id)).toBe(3);
     expect((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe(CampaignStatus.ACTIVE);
-    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(0);
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.AUTO_PAUSED } })).toBe(0);
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.REDEMPTION_REVOKED } })).toBe(3);
   });
 });
 

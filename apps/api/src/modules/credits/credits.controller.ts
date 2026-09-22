@@ -92,6 +92,22 @@ export class CreditsController {
     return this.creditsService.updateCreditPackageStatus(id, dto.isActive);
   }
 
+  /**
+   * The signed-in provider's spendable promotion (CMP-004 S4).
+   *
+   * A static `me` path on purpose, declared before the id-taking credits
+   * routes: the provider is the session's own and the handler reads no route
+   * parameter, query, header or body, so there is no id here for anyone to
+   * enumerate. PROVIDER only — a super admin reads promotions through the
+   * ledger, and this projection is the provider's own screen.
+   */
+  @Get('providers/me/credits/promo')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.PROVIDER)
+  getMyPromoCredits(@CurrentUser() user: AuthUser) {
+    return this.creditsService.getMyPromoCredits(user.id);
+  }
+
   @Get('providers/:providerId/credits')
   @UseGuards(AuthGuard, ProviderAccessGuard)
   getProviderCredits(@Param('providerId') providerId: string, @CurrentUser() user: AuthUser) {

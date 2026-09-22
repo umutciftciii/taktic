@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { CampaignEngineSettingsController } from './campaign-engine-settings.controller';
+import { CampaignEngineSwitchService } from './campaign-engine-settings.service';
 import { MarketplacePublishPolicyController } from './marketplace-publish-policy.controller';
 import { MarketplacePublishSettingsController } from './marketplace-publish-settings.controller';
 import { MarketplacePublishSettingsService } from './marketplace-publish-settings.service';
@@ -31,6 +33,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     MarketplacePublishSettingsController,
     MarketplacePublishPolicyController,
     ProviderReviewSettingsController,
+    CampaignEngineSettingsController,
   ],
   providers: [
     OperationsSettingsService,
@@ -38,6 +41,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     SchedulerRunRegistry,
     MarketplacePublishSettingsService,
     ProviderReviewSettingsService,
+    CampaignEngineSwitchService,
   ],
   exports: [
     OperationsSettingsService,
@@ -45,6 +49,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     SchedulerRunRegistry,
     MarketplacePublishSettingsService,
     ProviderReviewSettingsService,
+    CampaignEngineSwitchService,
   ],
 })
 export class OperationsSettingsModule {}
