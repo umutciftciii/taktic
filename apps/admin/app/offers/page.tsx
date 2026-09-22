@@ -1,16 +1,17 @@
 import Link from 'next/link';
 import {
   apiFetch,
-  Category,
+  formatDateTime,
+  formatPrice,
+  listCatalogueForFilter,
   Offer,
   OfferStatus,
-  RefundRecommendedAction,
-  statusLabel,
-  statusBadgeClass,
-  refundActionLabel,
   refundActionBadgeClass,
-  formatPrice,
-  formatDateTime,
+  refundActionLabel,
+  RefundRecommendedAction,
+  requireAdmin,
+  statusBadgeClass,
+  statusLabel,
 } from '../../lib/api';
 import { PageHeader } from '../../components/page-header';
 import { EmptyState } from '../../components/empty-state';
@@ -85,6 +86,7 @@ function isIsoDate(value: string) {
 }
 
 export default async function AdminOffersPage({ searchParams }: AdminOffersPageProps) {
+  await requireAdmin('OFFERS_READ');
   const params = (await searchParams) ?? {};
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);
@@ -116,7 +118,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
 
   const [offers, categories] = await Promise.all([
     apiFetch<Offer[]>(offersPath),
-    apiFetch<Category[]>('/categories?includeInactive=true').catch(() => [] as Category[]),
+    listCatalogueForFilter(),
   ]);
 
   const filtered =

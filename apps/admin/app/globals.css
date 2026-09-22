@@ -4918,3 +4918,85 @@ button:disabled {
   margin-top: 10px;
   font-size: 13px;
 }
+
+/* ── PR-0: the permission matrix on the role screens ─────────────────────── */
+
+/*
+ * 76 checkboxes are unreadable as one column, so they are grouped by the area
+ * each permission names and laid out as cards that reflow. The grid is
+ * `auto-fill` rather than a fixed count: an operator on a laptop gets two
+ * columns and one on a wide screen gets four, without a breakpoint per size.
+ */
+.admin-permission-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.admin-permission-group {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0;
+  min-width: 0;
+}
+
+.admin-permission-group > legend {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted, #6b7280);
+  padding: 0 4px;
+}
+
+.admin-permission-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-permission-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.admin-permission-item input[type='checkbox'] {
+  grid-row: span 2;
+  align-self: center;
+}
+
+.admin-permission-action {
+  font-weight: 500;
+}
+
+/*
+ * The raw enum value, under the Turkish label. It is what the API refuses by
+ * and what an audit row records, so an operator comparing a screen with a log
+ * needs to see it — small and muted, because it is evidence rather than copy.
+ */
+.admin-permission-code {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+  word-break: break-all;
+}
+
+/* A destructive toggle's required acknowledgement (deactivating a role). */
+.admin-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}

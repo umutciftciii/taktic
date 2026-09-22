@@ -2,20 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
-import {
-  CreditTransactionType,
-  CustomerOrigin,
-  OfferPackageType,
-  PrismaClient,
-  ProviderServiceAreaScope,
-  ProviderStatus,
-  ProviderEntitlementStatus,
-  ServiceCategoryKind,
-  ServiceCategoryStatus,
-  ServiceRequestStatus,
-  ShowcaseCardKind,
-  UserRole,
-} from '@prisma/client';
+import { AdminPermission, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
@@ -215,6 +202,12 @@ export function resetAuthThrottle(app: INestApplication): void {
 
 const TRUNCATED_TABLES = [
   'CompanySettings',
+  // PR-0 admin RBAC, children first: an audit row points at a role and at two
+  // accounts, an assignment at a role and an account, a permission at a role.
+  'AdminRoleAuditLog',
+  'AdminRoleAssignment',
+  'AdminRolePermission',
+  'AdminRole',
   // Campaign engine infrastructure (CMP-002 S2A), children first: lots point
   // at redemptions, redemptions and logs at events, everything at the campaign.
   // S2B1: a consumption row references a lot and three ledger rows, so it
@@ -1278,3 +1271,70 @@ export const INDEX_ELIGIBLE_SCOPE = {
   scopeIncluded: ['Filtre temizliği', 'Gaz basıncı kontrolü', 'Drenaj hattı kontrolü'],
   scopeExcluded: ['Gaz dolumu'],
 };
+
+/**
+ * A staff account holding exactly the permissions named — the fixture every
+ * RBAC test is built from.
+ *
+ * `UserRole.ADMIN` with one role: that is the shape a real operations account
+ * has, and it is the shape the guards are supposed to admit. Passing no
+ * permission produces the other case the guards must handle — a staff account
+ * that exists, can sign in, and cannot open the panel.
+ */
+export async function createAdminWithPermissions(
+  prisma: PrismaClient,
+  permissions: AdminPermission[],
+  options: { roleActive?: boolean } = {},
+) {
+  const suffix = uniqueSuffix();
+  const superAdmin = await createUser(prisma, { role: UserRole.SUPER_ADMIN });
+  const admin = await createUser(prisma, { role: UserRole.ADMIN });
+
+  const role = await prisma.adminRole.create({
+    data: {
+      key: `role-${suffix}`,
+      name: `Role ${suffix}`,
+      isActive: options.roleActive ?? true,
+      createdById: superAdmin.id,
+      permissions: { create: permissions.map((permission) => ({ permission })) },
+    },
+    select: { id: true, key: true },
+  });
+
+  await prisma.adminRoleAssignment.create({
+    data: { userId: admin.id, roleId: role.id, assignedById: superAdmin.id },
+  });
+
+  return { admin, superAdmin, role };
+}
+
+/**
+ * Every HTTP route the booted application actually serves, read from Express's
+ * own router rather than from a list somebody maintains.
+ *
+ * This is what makes the route/permission map a contract instead of a
+ * document: a route that exists but is not mapped, and a mapping that names no
+ * route, are both visible from here.
+ */
+export function listRegisteredRoutes(app: INestApplication): { method: string; path: string }[] {
+  const instance = app.getHttpAdapter().getInstance() as {
+    _router?: { stack?: { route?: { path?: unknown; methods?: Record<string, boolean> } }[] };
+    router?: { stack?: { route?: { path?: unknown; methods?: Record<string, boolean> } }[] };
+  };
+  const stack = instance._router?.stack ?? instance.router?.stack ?? [];
+  const routes: { method: string; path: string }[] = [];
+
+  for (const layer of stack) {
+    const route = layer.route;
+    if (!route || typeof route.path !== 'string') {
+      continue;
+    }
+    for (const [method, enabled] of Object.entries(route.methods ?? {})) {
+      if (enabled && method !== '_all') {
+        routes.push({ method: method.toUpperCase(), path: route.path });
+      }
+    }
+  }
+
+  return routes;
+}

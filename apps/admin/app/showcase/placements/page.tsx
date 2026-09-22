@@ -40,7 +40,7 @@ type PlacementsPageProps = {
  * can set, which is the whole of the clock rule.
  */
 export default async function ShowcasePlacementsPage({ searchParams }: PlacementsPageProps) {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_PLACEMENTS_READ');
 
   const { status, providerId } = await searchParams;
   const selected = STATUSES.find((candidate) => candidate === status) ?? null;

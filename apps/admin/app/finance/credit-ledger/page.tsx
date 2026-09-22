@@ -127,7 +127,7 @@ function buildApiQuery(params: {
 }
 
 export default async function AdminCreditLedgerPage({ searchParams }: AdminCreditLedgerPageProps) {
-  await requireAdmin();
+  await requireAdmin('FINANCE_LEDGER_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();

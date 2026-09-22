@@ -7,10 +7,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// What kind of account this is — never what it may do.
+///
+/// `ADMIN` (PR-0) is the platform's staff account and carries **no capability
+/// of its own**: everything an ADMIN may do comes from the roles assigned to
+/// it (`AdminRoleAssignment` → `AdminRolePermission` → `AdminPermission`), and
+/// an ADMIN with no active assignment cannot reach the panel at all
+/// (`AdminAccessGuard`). It exists because one account holds exactly one role
+/// and a staff member is neither a customer nor a provider.
+///
+/// `SUPER_ADMIN` keeps every permission implicitly, with or without an
+/// assignment, and additionally holds the three **root** capabilities that are
+/// deliberately absent from `AdminPermission` and therefore cannot be
+/// delegated to any role: defining roles, creating staff accounts and minting
+/// their invite links. It is born only through the controlled bootstrap
+/// (`prisma/seed.ts`); no HTTP route creates one and no route promotes an
+/// account into one.
+///
+/// There is no route that changes an account's role. A staff member who also
+/// sells on the marketplace opens a separate provider account.
 enum UserRole {
   SUPER_ADMIN
   CUSTOMER
   PROVIDER
+  ADMIN
 }
 
 enum CustomerOrigin {
@@ -463,6 +483,15 @@ model User {
   campaignAuditEntries            CampaignAuditLog[]                 @relation("CampaignAuditActor")
   campaignRedemptions             CampaignRedemption[]               @relation("CampaignRedemptionUser")
   revokedCampaignRedemptions      CampaignRedemption[]               @relation("CampaignRedemptionRevokedBy")
+  /// PR-0 admin RBAC. An ADMIN account's capabilities are exactly the union of
+  /// the permissions of its live assignments; a SUPER_ADMIN's are everything,
+  /// assignment or not.
+  adminRoleAssignments            AdminRoleAssignment[]              @relation("AdminRoleAssignmentUser")
+  adminRoleAssignmentsGranted     AdminRoleAssignment[]              @relation("AdminRoleAssignmentAssignedBy")
+  adminRoleAssignmentsRevoked     AdminRoleAssignment[]              @relation("AdminRoleAssignmentRevokedBy")
+  createdAdminRoles               AdminRole[]                        @relation("AdminRoleCreatedBy")
+  adminRoleAuditEntries           AdminRoleAuditLog[]                @relation("AdminRoleAuditActor")
+  adminRoleAuditTargets           AdminRoleAuditLog[]                @relation("AdminRoleAuditTarget")
 
   @@index([role])
   @@index([isActive])
@@ -4304,4 +4333,265 @@ model CampaignRevokeDailyCounter {
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
 
   @@unique([campaignId, day])
+}
+
+// ─────────────────────────────── PR-0: admin RBAC ───────────────────────────────
+
+/// Every capability a role may be given — and nothing else.
+///
+/// A **closed catalogue**, deliberately a database enum rather than a table:
+/// an operator defines roles, but cannot invent a permission. A name that is
+/// not a value here cannot be stored in `AdminRolePermission`, so "a permission
+/// that guards nothing" — a box an operator can tick that opens no route — is
+/// unrepresentable rather than merely discouraged.
+///
+/// The 76 values are the route-level mapping in
+/// `docs/superpowers/plans/2026-09-22-pr0-route-permission-map.md`, and that
+/// document is the test's input (`route-permission-map.spec.ts`): a guarded
+/// admin route with no entry, and an entry naming no route, both fail.
+///
+/// **Three capabilities are absent on purpose** (RG-7 §12.1): defining roles,
+/// creating staff accounts and minting their invite links. Together they are a
+/// privilege-escalation chain — a role that can grant itself permissions is not
+/// a permission model — so they are not values here at all. Their routes keep
+/// `@Roles(UserRole.SUPER_ADMIN)`, and no role row, no grant and no migration
+/// can ever carry them, because PostgreSQL would reject the enum literal.
+///
+/// Reading the admin list (`ADMIN_USERS_READ`) and deactivating an account
+/// (`ADMIN_USERS_STATUS`) are *not* part of that chain and stay delegable.
+enum AdminPermission {
+  DASHBOARD_READ
+
+  CAMPAIGNS_READ
+  CAMPAIGNS_WRITE
+  /// Activating a version, resuming or ending a campaign — the transitions that
+  /// let the engine grant, kept apart from editing a draft that grants nothing.
+  CAMPAIGNS_LIFECYCLE
+  CAMPAIGN_REDEMPTION_REVOKE
+  CAMPAIGN_EVENT_RETRY
+  /// The one switch that lets promotional credit be granted at all. Never part
+  /// of OPERATIONS_SETTINGS_WRITE (RG-7 §12.4).
+  CAMPAIGN_ENGINE_TOGGLE
+
+  /// The unreleased catalogue — DRAFT and INACTIVE categories and everything
+  /// derived from them (router targets, the operator's tree).
+  ///
+  /// Its own permission, and deliberately not implied by panel access: what a
+  /// marketplace has decided to sell but not yet released is commercially
+  /// sensitive, and "this account is staff" is not the same statement as "this
+  /// account may see next quarter's catalogue". It is a **read**; writing stays
+  /// on the three narrower permissions below, so a role trusted to look is not
+  /// thereby trusted to publish.
+  CATALOG_READ
+  CATEGORIES_WRITE
+  /// DRAFT↔ACTIVE↔INACTIVE: public visibility, request intake and SEO
+  /// indexability move together, which is why it is not CATEGORIES_WRITE.
+  CATEGORIES_STATUS
+  CATEGORIES_DELETE
+
+  QUESTIONS_READ
+  QUESTIONS_WRITE
+  QUESTIONS_DELETE
+
+  COMPANY_SETTINGS_READ
+  COMPANY_SETTINGS_WRITE
+
+  OPERATIONS_SETTINGS_READ
+  OPERATIONS_SETTINGS_WRITE
+  SCHEDULERS_WRITE
+  MARKETPLACE_PUBLISH_WRITE
+  PROVIDER_REVIEWS_SETTING_WRITE
+
+  CREDIT_PACKAGES_READ
+  CREDIT_PACKAGES_WRITE
+  CREDIT_PACKAGES_STATUS
+
+  /// Split by direction on purpose: one "adjust credits" permission turns the
+  /// authority to correct a mistake into the authority to empty a wallet.
+  CREDITS_GRANT
+  CREDITS_DEDUCT
+
+  FINANCE_READ
+  /// Row-level movements per provider, unlike the aggregates above.
+  FINANCE_LEDGER_READ
+
+  PACKAGE_PURCHASES_READ
+  PACKAGE_PURCHASE_STATUS_WRITE
+
+  PAYMENTS_CONFIG_READ
+
+  OFFERS_READ
+  OFFERS_STATUS
+  /// The dry run of the bulk refund, kept with the bulk action rather than with
+  /// the offer list: it is that action's input.
+  OFFER_REFUND_SCAN_READ
+  OFFER_REFUND_EXECUTE
+  OFFER_REFUND_MANUAL
+
+  REQUESTS_READ
+  REQUESTS_STATUS
+  REQUESTS_QUALITY_RECALC
+  /// Republishes a request to providers, so it causes credit spends.
+  REQUESTS_REOPEN
+  REQUEST_REPORTS_READ
+  REQUEST_REPORTS_RESOLVE
+
+  CONTACT_REVEAL_READ
+
+  CUSTOMERS_READ
+  CUSTOMERS_STATUS
+  CUSTOMER_NOTES_READ
+  CUSTOMER_NOTES_WRITE
+  /// Mints a link that signs its bearer into that customer's account.
+  CUSTOMER_ACTIVATION_LINK_ISSUE
+
+  PROVIDERS_READ
+  /// Carries taxType/taxNumber today; CMP-006 PR-C moves the raw value behind
+  /// its own permission.
+  PROVIDERS_READ_DETAIL
+  PROVIDERS_WRITE
+  /// Approve / reject / suspend — the PROVIDER_APPROVED campaign trigger.
+  PROVIDERS_MODERATE
+  PROVIDER_CATEGORIES_WRITE
+  /// Mints a token that takes ownership of a provider profile.
+  PROVIDER_CLAIM_INVITE_ISSUE
+
+  PROVIDER_INVITES_READ
+  /// Mints a token that opens a provider account.
+  PROVIDER_INVITES_ISSUE
+  PROVIDER_INVITES_REVOKE
+
+  PROVIDER_REVIEWS_READ
+  PROVIDER_REVIEWS_MODERATE
+
+  SHOWCASE_PACKAGES_READ
+  SHOWCASE_PACKAGES_WRITE
+  SHOWCASE_PLACEMENTS_READ
+  SHOWCASE_PLACEMENTS_MODERATE
+  /// Ends a paid run for good, unlike suspend/resume.
+  SHOWCASE_PLACEMENT_CANCEL
+  SHOWCASE_LEADS_READ
+  SHOWCASE_TERMS_ACCEPTANCES_READ
+  SHOWCASE_REVIEW_READ
+  SHOWCASE_REVIEW_DECIDE
+  SHOWCASE_CARDS_READ
+  SHOWCASE_CARDS_MODERATE
+
+  SUPPORT_READ
+  SUPPORT_WRITE
+
+  NOTIFICATION_LOGS_READ
+  /// Sends a real message to a real person again.
+  NOTIFICATION_RETRY
+
+  UPLOADS_WRITE
+
+  ADMIN_USERS_READ
+  ADMIN_USERS_STATUS
+}
+
+/// What a role did to itself, or to somebody's access.
+enum AdminRoleAuditAction {
+  ROLE_CREATED
+  ROLE_UPDATED
+  ROLE_PERMISSIONS_REPLACED
+  ROLE_DEACTIVATED
+  ROLE_REACTIVATED
+  ASSIGNMENT_GRANTED
+  ASSIGNMENT_REVOKED
+}
+
+/// A named set of permissions an operator defines.
+///
+/// The role is dynamic — its key, its name and its permission set are an
+/// operator's to choose — while the permissions it may hold are not
+/// (`AdminPermission`). That asymmetry is the whole design: the shape of the
+/// authority is configurable, its vocabulary is not.
+///
+/// A role is never deleted, only deactivated, for the reason a campaign is
+/// ENDED rather than removed: assignments and audit rows point at it, and the
+/// answer to "who could do what last March" must survive.
+model AdminRole {
+  id          String  @id @default(cuid())
+  /// Stable slug, unique and never reused.
+  key         String  @unique
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User                   @relation("AdminRoleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  permissions AdminRolePermission[]
+  assignments AdminRoleAssignment[]
+  auditEntries AdminRoleAuditLog[]
+
+  @@index([isActive, name])
+  @@index([createdById])
+}
+
+/// One permission held by one role. Replaced wholesale when a role is edited.
+model AdminRolePermission {
+  id         String          @id @default(cuid())
+  roleId     String
+  permission AdminPermission
+
+  role AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@index([permission])
+}
+
+/// One staff account holding one role.
+///
+/// Revoked rather than deleted (`revokedAt`), so the history of who held what
+/// stays readable. A PostgreSQL partial unique index —
+/// `AdminRoleAssignment_active_unique`, UNIQUE (userId, roleId) WHERE
+/// "revokedAt" IS NULL — is created by the migration: Prisma cannot express a
+/// partial index here, and it is what makes "the same role twice, live" a state
+/// the database refuses rather than one the service is trusted to avoid.
+model AdminRoleAssignment {
+  id           String    @id @default(cuid())
+  userId       String
+  roleId       String
+  assignedById String
+  assignedAt   DateTime  @default(now())
+  revokedAt    DateTime?
+  revokedById  String?
+
+  user       User      @relation("AdminRoleAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  role       AdminRole @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  assignedBy User      @relation("AdminRoleAssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: Restrict)
+  revokedBy  User?     @relation("AdminRoleAssignmentRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+
+  /// The session's permission read: "this account's live assignments".
+  @@index([userId, revokedAt])
+  @@index([roleId, revokedAt])
+  @@index([assignedById])
+}
+
+/// Who changed a role or somebody's access, and when.
+///
+/// `summary` is a small structural record — the role key, the permissions added
+/// and removed, the target account id — never a password, a token or a
+/// permission the catalogue does not contain.
+model AdminRoleAuditLog {
+  id           String               @id @default(cuid())
+  action       AdminRoleAuditAction
+  roleId       String?
+  targetUserId String?
+  actorId      String
+  summary      Json
+  createdAt    DateTime             @default(now())
+
+  role       AdminRole? @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  targetUser User?      @relation("AdminRoleAuditTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  actor      User       @relation("AdminRoleAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([roleId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
 }

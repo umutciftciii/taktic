@@ -9,25 +9,29 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { AdminSupportTicketsService } from './admin-support-tickets.service';
 import { CreateSupportTicketMessageDto } from './dto/create-support-ticket-message.dto';
 import { ListSupportTicketsDto } from './dto/list-support-tickets.dto';
 import { UpdateSupportTicketStatusDto } from './dto/update-support-ticket-status.dto';
 
 /**
- * Support tickets, for the operator. SUPER_ADMIN only.
+ * Support tickets, for staff holding SUPPORT_READ (the two reads) and
+ * SUPPORT_WRITE (answering and moving the status).
  *
  * A separate path prefix, a separate guard and a separate service from the
  * customer's routes, on purpose: nothing an operator may do is reachable by
  * widening a customer endpoint, and nothing a customer may do is reachable by
- * calling an admin one. AuthGuard turns an anonymous call into 401 and
- * RolesGuard turns a customer's or a provider's into 403 — no other role
- * reaches the service.
+ * calling an admin one. AuthGuard turns an anonymous call into 401,
+ * AdminAccessGuard turns a customer's, a provider's or an unassigned staff
+ * account's into 403, and only a holder of the named permission reaches the
+ * service.
  *
  * Note what this controller does not have. There is no create route, so an
  * operator cannot open a ticket in somebody else's name; no route accepts a
@@ -35,24 +39,26 @@ import { UpdateSupportTicketStatusDto } from './dto/update-support-ticket-status
  * is no delete, so nothing here can remove what was said.
  */
 @Controller('admin/support/tickets')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class AdminSupportTicketsController {
   constructor(
     @Inject(AdminSupportTicketsService) private readonly tickets: AdminSupportTicketsService,
   ) {}
 
   @Get()
+  @RequiresPermission(AdminPermission.SUPPORT_READ)
   listTickets(@Query() query: ListSupportTicketsDto) {
     return this.tickets.listTickets(query);
   }
 
   @Get(':ticketId')
+  @RequiresPermission(AdminPermission.SUPPORT_READ)
   getTicket(@Param('ticketId') ticketId: string, @CurrentUser() user: AuthUser) {
     return this.tickets.getTicket(ticketId, user);
   }
 
   @Post(':ticketId/messages')
+  @RequiresPermission(AdminPermission.SUPPORT_WRITE)
   addMessage(
     @Param('ticketId') ticketId: string,
     @Body() dto: CreateSupportTicketMessageDto,
@@ -69,6 +75,7 @@ export class AdminSupportTicketsController {
    * timeline.
    */
   @Post(':ticketId/status')
+  @RequiresPermission(AdminPermission.SUPPORT_WRITE)
   @HttpCode(200)
   changeStatus(
     @Param('ticketId') ticketId: string,

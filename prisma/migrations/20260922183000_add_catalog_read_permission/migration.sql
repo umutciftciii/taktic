@@ -1,0 +1,12 @@
+-- PR-0 (Migration I): the unreleased catalogue gets its own permission.
+--
+-- Migration H shipped a catalogue in which no value covered reading DRAFT and
+-- INACTIVE categories: that view followed panel access instead, so every staff
+-- account could see what the marketplace had decided to sell but not yet
+-- released. CATALOG_READ makes it a capability somebody has to be given.
+--
+-- Additive only, and no DML. Nothing holds the new value the moment this runs —
+-- there is no role to backfill it onto, and inventing one would grant a
+-- capability nobody asked for. A SUPER_ADMIN keeps the view implicitly, as it
+-- keeps every other permission.
+ALTER TYPE "AdminPermission" ADD VALUE 'CATALOG_READ';

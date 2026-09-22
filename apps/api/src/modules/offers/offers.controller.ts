@@ -10,11 +10,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { ListOffersQueryDto } from './dto/list-offers-query.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { ExecuteRefundScanDto, RefundScanQueryDto } from './dto/refund-scan.dto';
@@ -31,8 +33,8 @@ export class OffersController {
   ) {}
 
   @Get()
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.OFFERS_READ)
   listOffers(@Query() query: ListOffersQueryDto) {
     return this.offersService.listOffers({
       q: query.q,
@@ -48,22 +50,22 @@ export class OffersController {
   }
 
   @Get('refund-scan')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.OFFER_REFUND_SCAN_READ)
   refundScan(@Query() query: RefundScanQueryDto) {
     return this.unviewedOfferRefund.dryRun({ limit: query.limit });
   }
 
   @Post('refund-scan/execute')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.OFFER_REFUND_EXECUTE)
   executeRefundScan(@Body() dto: ExecuteRefundScanDto) {
     return this.unviewedOfferRefund.execute(dto);
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.OFFERS_READ)
   getOffer(@Param('id') id: string) {
     return this.offersService.getOffer(id);
   }
@@ -77,8 +79,8 @@ export class OffersController {
    * service-request route did not already grant.
    */
   @Patch(':id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.OFFERS_STATUS)
   updateOfferStatus(
     @Param('id') id: string,
     @Body() dto: UpdateOfferStatusDto,
@@ -91,15 +93,15 @@ export class OffersController {
    * The operations refund: an administrator returning one offer's credit by
    * hand, for a case the automatic unviewed-offer rule cannot see.
    *
-   * SUPER_ADMIN only, and the caller is required rather than optional — the
+   * OFFER_REFUND_MANUAL, and the caller is required rather than optional — the
    * audit row this writes has a NOT NULL operator column, and a refund nobody
    * signed is the thing that column exists to prevent. The guards above already
    * make a null user unreachable; the check restates it so the invariant is
    * enforced where it is relied upon.
    */
   @Post(':id/refund-credit')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.OFFER_REFUND_MANUAL)
   refundOfferCredit(
     @Param('id') id: string,
     @Body() dto: RefundOfferCreditDto,

@@ -43,7 +43,7 @@ const OK_MESSAGES: Record<string, string> = {
 };
 
 export default async function CompanySettingsPage({ searchParams }: CompanySettingsPageProps) {
-  await requireAdmin();
+  await requireAdmin('COMPANY_SETTINGS_READ');
 
   const params = await searchParams;
   const errorMessage = (params.error ?? '').trim();

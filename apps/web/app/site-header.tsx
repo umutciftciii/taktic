@@ -147,7 +147,11 @@ function roleLabel(role: AuthUser['role']): string {
       return 'Müşteri';
     case 'PROVIDER':
       return 'Hizmet veren';
+    // Both staff kinds read as "Yönetici" here. The marketplace header has no
+    // business distinguishing a super admin from a staff account with roles —
+    // that difference lives in the admin panel and nowhere else.
     case 'SUPER_ADMIN':
+    case 'ADMIN':
       return 'Yönetici';
     default:
       return '';

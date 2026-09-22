@@ -28,7 +28,7 @@ import { SectionCard } from '../../../components/section-card';
  * read the scope, the price and the areas, and those are what the decision is.
  */
 export default async function ShowcaseReviewQueuePage() {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_REVIEW_READ');
 
   const versions = await apiFetch<ShowcaseVersionListEntry[]>('/admin/showcase/versions');
 

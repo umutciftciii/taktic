@@ -796,3 +796,41 @@ PR-0'ın testinde ayrı bir vaka olarak doğrulanır (I-8).
 | Dinamik katalog | 77 → **76** (`−2 +1`) |
 | §6'daki 21 rota | "RBAC kapsamı dışında · admin impersonation yok" olarak işaretlendi |
 | §5'teki 27 karma rota | Kararı değişmedi: PR-0'da dokunulmaz |
+
+---
+
+## 13. Katalog görünürlüğü düzeltmesi (2026-09-22, PR-0 içinde)
+
+§3.2'nin altındaki not — "kategori GET rotalarının hepsi public/korumasız, bu yüzden katalogda
+`CATEGORIES_READ` **yok**" — eksik bir gözlemdi. Rotalar korumasızdı ama `?includeInactive=true` ile
+**yayımlanmamış katalogu** (DRAFT/INACTIVE) döndürebiliyordu; PR-0'ın ilk hâli o genişlemeyi panel
+erişimine bağlamıştı, yani rolü ne olursa olsun her personel hesabı gelecek çeyreğin katalogunu görebiliyordu.
+
+**Karar:** yayımlanmamış katalog ayrı ve izinli bir admin yüzeyi olur.
+
+| Değişiklik | Ayrıntı |
+| --- | --- |
+| Yeni sabit izin | **`CATALOG_READ`** — katalog 76 → **77** |
+| Yeni rota | `GET /admin/categories`, `GET /admin/categories/:slug` — `@RequiresPermission(CATALOG_READ)` |
+| Public rotalar | `GET /categories` ve `GET /categories/:slug` artık **genişleyen hiçbir parametre okumuyor**; `includeInactive` diye bir şey yok. Spoof edilecek bir şey yok, çünkü geçirilecek bir şey yok |
+| `POST /categories/routing/resolve` | Yalnız public katalog üzerinde yürür. Operatör için genişlemesi kaldırıldı: yayımlanmamış katalogun ikinci kapısıydı ve "taslağı ne sızdırır" diye sorarken kimsenin bakmayacağı bir yerdi |
+| `auth/elevated-query.ts` | **Silindi** — tek tüketicisi buydu ve genişleyen mod artık yok |
+| Yazma | `CATEGORIES_WRITE` / `CATEGORIES_STATUS` / `CATEGORIES_DELETE` aynen ayrı; okuma izni yazma yetkisi vermiyor |
+| Admin UI | Katalog ekranları `/admin/categories`'i kullanıyor; `/categories` public görünüm için bile çağrılmıyor |
+
+**Filtre listeleri için kasıtlı düşüş yolu.** Teklifler, talepler ve hizmet veren ekranları kategori
+adlarını *filtre* için okuyor. Bunları `CATALOG_READ`'e bağlamak "gelecek çeyreğin katalogunu göremeyen
+teklifleri de göremesin" demek olurdu — yanlış bağ. `listCatalogueForFilter()` izin yoksa **boş liste**
+döndürür (yönlendirme değil): daha kısa bir açılır liste, gelinen sayfanın kendisi yerine.
+
+**Kasıtlı tek istisna:** `GET /categories/provider-enrollment` yayına girmemiş kategorileri de adlandırır —
+sıradaki dalgada açılacak bir mesleğin başvuru yapabilmesi için. Bu bir genişleme değil, kendi predicate'i
+ve kendi dar projeksiyonu olan ayrı bir yüzeydir; testi `status`, `isActive`, `questions` ve `children`
+alanlarının **olmadığını** doğrular.
+
+**Testler** (`admin-catalog-visibility.spec.ts`, 11 vaka): sekiz farklı query yazımıyla public uç
+sızdırmıyor · slug ile de sızdırmıyor · müşteri/sağlayıcı/`CATALOG_READ`'siz ADMIN dar görünüm alıyor ·
+routing walk taslağa girmiyor · izinsiz ADMIN 403 `INSUFFICIENT_PERMISSION` · anonim 401, müşteri/sağlayıcı
+403 `NOT_STAFF` · `CATALOG_READ` sahibi tam katalog · atamasız `SUPER_ADMIN` örtük erişim · yalnız
+`CATALOG_READ` taşıyan dört yazmada da 403 ve satır değişmiyor · yayımlanmamış katalogu servis eden rota
+sayısı **tam olarak iki**.

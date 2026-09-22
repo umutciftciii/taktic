@@ -1047,13 +1047,18 @@ export type AuthUser = {
   email: string | null;
   phone: string | null;
   name: string | null;
-  role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+  role: UserRole;
   isActive: boolean;
 };
 
-export type UserRole = 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+/**
+ * ADMIN joined the set in PR-0. It is an account kind and not a capability:
+ * what an ADMIN may do comes entirely from `AdminSession.permissions`, and an
+ * ADMIN with none cannot open the panel at all.
+ */
+export type UserRole = 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER' | 'ADMIN';
 
-export const USER_ROLE_VALUES = ['SUPER_ADMIN', 'CUSTOMER', 'PROVIDER'] as const;
+export const USER_ROLE_VALUES = ['SUPER_ADMIN', 'CUSTOMER', 'PROVIDER', 'ADMIN'] as const;
 
 export const USER_SORT_FIELDS = [
   'name',
@@ -1167,6 +1172,10 @@ export type AdminInviteValidateResponse = {
 export function userRoleLabel(role: UserRole): string {
   const labels: Record<UserRole, string> = {
     SUPER_ADMIN: 'Süper Admin',
+    // A staff account whose authority is entirely its assigned roles. Named
+    // "Yönetici" rather than after any one role, because the roles are the
+    // operator's to define and this label must not imply a fixed set.
+    ADMIN: 'Yönetici',
     CUSTOMER: 'Müşteri',
     PROVIDER: 'Hizmet Veren',
   };
@@ -1177,6 +1186,11 @@ export function userRoleBadgeClass(role: UserRole): string {
   switch (role) {
     case 'SUPER_ADMIN':
       return 'badge badge-warn';
+    // Deliberately quieter than SUPER_ADMIN's: a staff account with assigned
+    // roles is the ordinary case, and the warning colour should keep meaning
+    // "this one holds everything".
+    case 'ADMIN':
+      return 'badge badge-info';
     case 'PROVIDER':
       return 'badge badge-good';
     case 'CUSTOMER':
@@ -1917,6 +1931,16 @@ export class ApiError extends Error {
   }
 }
 
+/** The short machine code on an API refusal, when there is one. */
+function readErrorCode(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown };
+    return typeof parsed?.code === 'string' ? parsed.code : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {
@@ -1930,8 +1954,30 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
 
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
+    /*
+     * Three refusals, two destinations (PR-0).
+     *
+     * 401 — no usable session — is the sign-in form's, as it always was. A 403
+     * splits in two, and the API says which (`admin-access.guard.ts`):
+     *
+     *   NOT_STAFF  a customer's or a provider's session asking for an admin
+     *              screen. They are signed in as the wrong kind of account, so
+     *              the sign-in form is still the right answer — and this is the
+     *              behaviour that existed before permissions did.
+     *   otherwise  a staff account missing a role or a permission. Sending that
+     *              to the sign-in form is a loop: they are already past it,
+     *              signing in again changes nothing, and nothing explains why.
+     *
+     * A 403 with no readable code falls to `/yetkisiz`, which is the safer of
+     * the two: it explains rather than asking for credentials the caller
+     * already presented.
+     */
+    if (response.status === 401) {
       redirect('/login');
+    }
+
+    if (response.status === 403) {
+      redirect(readErrorCode(await response.text()) === 'NOT_STAFF' ? '/login' : '/yetkisiz');
     }
 
     throw new ApiError(response.status, await response.text());
@@ -1957,13 +2003,127 @@ export async function fetchOrNotFound<T>(loader: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function requireAdmin() {
-  const user = await apiFetch<AuthUser>('/auth/me');
-  if (user.role !== 'SUPER_ADMIN') {
-    redirect('/login');
+/** Every capability the API may ask of a staff account (PR-0 catalogue). */
+export type AdminPermission = string;
+
+export type AdminSession = {
+  user: AuthUser;
+  isSuperAdmin: boolean;
+  permissions: AdminPermission[];
+  /** The same question the API's PermissionsGuard asks, asked from a screen. */
+  can: (...required: AdminPermission[]) => boolean;
+};
+
+/**
+ * Who is looking at this screen, and what they may do — from the API, never
+ * from a guess about their role.
+ *
+ * `GET /admin/me/permissions` is the single source (design D13): the route
+ * guard, this call, the sidebar and every button answer from the same response,
+ * so a hidden control and a refused request are two views of one fact.
+ *
+ * Two different refusals, deliberately:
+ *
+ *   not staff at all  → /login, because there is nothing here for them and the
+ *                       likely truth is that they are signed in as somebody else.
+ *   staff, wrong      → /yetkisiz, because bouncing them to a login form they
+ *   permission          are already past is a loop, not an explanation.
+ *
+ * Pass the permission a page needs and it is checked before anything renders;
+ * pass nothing and the page only requires panel access.
+ */
+/**
+ * The session's capabilities, or null — never a redirect.
+ *
+ * The root layout renders on every page including `/login`, where there is no
+ * session at all, so it cannot use `requireAdmin`: a redirect to `/login` from
+ * the layout of `/login` is an infinite loop. This asks the same question and
+ * answers "nobody" instead of navigating, which is exactly what a sidebar needs
+ * — it has nothing to show a signed-out visitor and nothing to say about it.
+ *
+ * It deliberately swallows every failure. A sidebar that throws takes the whole
+ * panel down over a transport hiccup; a sidebar that renders empty is a bad
+ * minute, and the page itself still gates on `requireAdmin`.
+ */
+export async function readAdminAccess(): Promise<{
+  isSuperAdmin: boolean;
+  permissions: AdminPermission[];
+} | null> {
+  try {
+    const cookieHeader = (await cookies()).toString();
+    if (!cookieHeader) {
+      return null;
+    }
+
+    const response = await fetch(`${apiUrl}/admin/me/permissions`, {
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json', cookie: cookieHeader },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as { isSuperAdmin: boolean; permissions: AdminPermission[] };
+    return { isSuperAdmin: body.isSuperAdmin === true, permissions: body.permissions ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The operator's catalogue for a *filter* — draft categories included, and an
+ * empty list rather than a refusal when this session may not see them.
+ *
+ * Several screens that have nothing to do with the catalogue still need its
+ * names: the offers, requests and providers lists label and filter by category,
+ * and a provider's bindings may point at a category the marketplace has not
+ * released. Requiring `CATALOG_READ` for those screens would say "you cannot
+ * look at offers unless you may see next quarter's catalogue", which is the
+ * wrong coupling — so a session without it gets a shorter dropdown and the page
+ * it actually came for.
+ *
+ * A raw fetch rather than `apiFetch`, deliberately: `apiFetch` turns a 403 into
+ * a redirect, and catching a redirect to ignore it is how a real refusal
+ * elsewhere gets swallowed by accident. This asks the question and answers it.
+ */
+export async function listCatalogueForFilter(): Promise<Category[]> {
+  try {
+    const cookieHeader = (await cookies()).toString();
+    const response = await fetch(`${apiUrl}/admin/categories`, {
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json', ...(cookieHeader ? { cookie: cookieHeader } : {}) },
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    return (await response.json()) as Category[];
+  } catch {
+    return [];
+  }
+}
+
+export async function requireAdmin(...required: AdminPermission[]): Promise<AdminSession> {
+  const [user, access] = await Promise.all([
+    apiFetch<AuthUser>('/auth/me'),
+    // A 403 here means "not staff, or staff with no live role": apiFetch sends
+    // those to /login, which is the right destination for both.
+    apiFetch<{ role: UserRole; isSuperAdmin: boolean; permissions: AdminPermission[] }>(
+      '/admin/me/permissions',
+    ),
+  ]);
+
+  const held = new Set(access.permissions);
+  const can = (...names: AdminPermission[]) =>
+    access.isSuperAdmin || names.every((name) => held.has(name));
+
+  if (required.length > 0 && !can(...required)) {
+    redirect('/yetkisiz');
   }
 
-  return user;
+  return { user, isSuperAdmin: access.isSuperAdmin, permissions: access.permissions, can };
 }
 
 /** One recorded change to an operations setting. */
@@ -3210,4 +3370,124 @@ export function campaignStatusBadgeClass(status: CampaignStatus | string): strin
     default:
       return 'badge badge-info';
   }
+}
+
+// ───────────────────────────── PR-0: admin roles ─────────────────────────────
+
+/** One role as the panel lists it. */
+export type AdminRoleSummary = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  permissions: AdminPermission[];
+  activeAssignmentCount: number;
+};
+
+export type AdminRoleDetail = Omit<AdminRoleSummary, 'activeAssignmentCount'> & {
+  assignments: {
+    id: string;
+    assignedAt: string;
+    user: { id: string; name: string | null; email: string | null; role: UserRole; isActive: boolean };
+  }[];
+};
+
+export type AdminUserRoles = {
+  userId: string;
+  role: UserRole;
+  isSuperAdmin: boolean;
+  assignments: {
+    id: string;
+    assignedAt: string;
+    revokedAt: string | null;
+    role: { id: string; key: string; name: string; isActive: boolean; permissions: AdminPermission[] };
+  }[];
+};
+
+export function listAdminRoles() {
+  return apiFetch<AdminRoleSummary[]>('/admin/roles');
+}
+
+export function getAdminRole(id: string) {
+  return apiFetch<AdminRoleDetail>(`/admin/roles/${id}`);
+}
+
+export function listAdminPermissionCatalogue() {
+  return apiFetch<{ permissions: AdminPermission[] }>('/admin/permissions');
+}
+
+export function listAdminUserRoles(userId: string) {
+  return apiFetch<AdminUserRoles>(`/admin/users/${userId}/roles`);
+}
+
+/**
+ * The Turkish label for one permission, built from its own name.
+ *
+ * A hand-written dictionary of 76 entries would drift the first time a
+ * permission is added and nobody updates it; this derives the area and the verb
+ * from the value itself, so a new permission reads sensibly on the day it
+ * appears. The area names below are the only hand-written part, and a missing
+ * one falls back to the raw prefix rather than to nothing.
+ */
+export function adminPermissionLabel(permission: AdminPermission): {
+  area: string;
+  action: string;
+} {
+  const AREAS: Record<string, string> = {
+    DASHBOARD: 'Panel',
+    CAMPAIGNS: 'Kampanya',
+    CAMPAIGN: 'Kampanya',
+    CATEGORIES: 'Kategori',
+    QUESTIONS: 'Form soruları',
+    COMPANY: 'Şirket ayarları',
+    OPERATIONS: 'Operasyon ayarları',
+    SCHEDULERS: 'Zamanlanmış işler',
+    MARKETPLACE: 'Pazaryeri yayını',
+    CREDIT: 'Kredi paketleri',
+    CREDITS: 'Kredi bakiyesi',
+    FINANCE: 'Finans',
+    PACKAGE: 'Paket satın almaları',
+    PAYMENTS: 'Ödeme yapılandırması',
+    OFFERS: 'Teklifler',
+    OFFER: 'Teklif iadeleri',
+    REQUESTS: 'Talepler',
+    REQUEST: 'Talep bildirimleri',
+    CONTACT: 'İletişim paylaşımı',
+    CUSTOMERS: 'Hizmet alanlar',
+    CUSTOMER: 'Hizmet alan notları',
+    PROVIDERS: 'Hizmet verenler',
+    PROVIDER: 'Hizmet veren işlemleri',
+    SHOWCASE: 'Vitrin',
+    SUPPORT: 'Destek',
+    NOTIFICATION: 'Bildirimler',
+    UPLOADS: 'Yüklemeler',
+    ADMIN: 'Admin hesapları',
+  };
+  const ACTIONS: Record<string, string> = {
+    READ: 'okuma',
+    WRITE: 'yazma',
+    STATUS: 'durum değiştirme',
+    DELETE: 'silme',
+    MODERATE: 'moderasyon',
+    DECIDE: 'karar verme',
+    ISSUE: 'oluşturma',
+    REVOKE: 'geri alma',
+    RETRY: 'yeniden deneme',
+    EXECUTE: 'toplu çalıştırma',
+    CANCEL: 'iptal',
+    TOGGLE: 'açma/kapama',
+    GRANT: 'yükleme',
+    DEDUCT: 'düşme',
+    LIFECYCLE: 'yaşam döngüsü',
+    RECALC: 'yeniden hesaplama',
+    REOPEN: 'yeniden açma',
+  };
+
+  const parts = permission.split('_');
+  const area = AREAS[parts[0] ?? ''] ?? parts[0] ?? permission;
+  const action = ACTIONS[parts[parts.length - 1] ?? ''] ?? permission;
+  return { area, action };
 }

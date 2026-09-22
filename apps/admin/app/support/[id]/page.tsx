@@ -37,7 +37,7 @@ export default async function AdminSupportTicketPage({
   params,
   searchParams,
 }: AdminSupportTicketPageProps) {
-  await requireAdmin();
+  await requireAdmin('SUPPORT_READ');
 
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const ticket = await fetchOrNotFound(() =>

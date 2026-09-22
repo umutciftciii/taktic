@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import type { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
 import { DismissProviderReviewReportDto } from './dto/dismiss-provider-review-report.dto';
 import { ModerateProviderReviewDto } from './dto/moderate-provider-review.dto';
 import { ProviderReviewModerationService } from './provider-review-moderation.service';
@@ -18,8 +20,7 @@ const QUEUE_MAX_LIMIT = 100;
  * `:reviewId` parameter cannot collide whatever the module order.
  */
 @Controller('provider-reviews')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class AdminProviderReviewsController {
   constructor(
     @Inject(ProviderReviewModerationService)
@@ -27,6 +28,7 @@ export class AdminProviderReviewsController {
   ) {}
 
   @Get('reports')
+  @RequiresPermission(AdminPermission.PROVIDER_REVIEWS_READ)
   listReports(
     @Query('state') state?: string,
     @Query('cursor') cursor?: string,
@@ -41,11 +43,13 @@ export class AdminProviderReviewsController {
   }
 
   @Get(':reviewId')
+  @RequiresPermission(AdminPermission.PROVIDER_REVIEWS_READ)
   get(@Param('reviewId') reviewId: string) {
     return this.moderation.getForAdmin(reviewId);
   }
 
   @Post(':reviewId/moderate')
+  @RequiresPermission(AdminPermission.PROVIDER_REVIEWS_MODERATE)
   moderate(
     @Param('reviewId') reviewId: string,
     @Body() dto: ModerateProviderReviewDto,
@@ -55,6 +59,7 @@ export class AdminProviderReviewsController {
   }
 
   @Post(':reviewId/reports/dismiss')
+  @RequiresPermission(AdminPermission.PROVIDER_REVIEWS_MODERATE)
   dismiss(
     @Param('reviewId') reviewId: string,
     @Body() dto: DismissProviderReviewReportDto,

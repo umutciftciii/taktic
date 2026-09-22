@@ -1,16 +1,17 @@
 import { serviceAreaLabel } from '@taktic/shared';
 import Link from 'next/link';
 import {
+  AdminProviderServiceCategories,
   ApiError,
   apiFetch,
-  AdminProviderServiceCategories,
-  Category,
   fetchOrNotFound,
+  formatDateTime,
+  formatPrice,
+  listCatalogueForFilter,
   ProviderProfile,
   ProviderRecentPackagePurchase,
   type ProviderReviewsPage,
-  formatDateTime,
-  formatPrice,
+  requireAdmin,
   reviewResolutionLabel,
   statusBadgeClass,
   statusLabel,
@@ -132,6 +133,7 @@ export default async function ProviderDetailPage({
   params,
   searchParams,
 }: ProviderDetailPageProps) {
+  await requireAdmin('PROVIDERS_READ_DETAIL');
   const { id } = await params;
   const { claimInvite, categoryQuery: rawCategoryQuery, categoryNotice } = await searchParams;
   // An unknown id — including a path like /providers/new that falls through to
@@ -147,7 +149,7 @@ export default async function ProviderDetailPage({
   // else.
   const [serviceCategories, categories, reviews] = await Promise.all([
     apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`),
-    apiFetch<Category[]>('/categories?includeInactive=true'),
+    listCatalogueForFilter(),
     // The provider's own list, which the provider route serves to an operator
     // as well. A failure hides the card rather than the screen: the reviews
     // are context here, not the subject.

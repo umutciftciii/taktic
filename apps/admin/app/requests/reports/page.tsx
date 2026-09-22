@@ -55,7 +55,7 @@ function queueHref(state: QueueState, cursor?: string | null): string {
 }
 
 export default async function RequestReportsQueuePage({ searchParams }: ReportQueuePageProps) {
-  await requireAdmin();
+  await requireAdmin('REQUEST_REPORTS_READ');
 
   const params = await searchParams;
   const state = normalizeState(params.state);

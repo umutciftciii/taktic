@@ -6,6 +6,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  createAdminWithPermissions,
   createCategory,
   createSelectQuestion,
   createTestApp,
@@ -14,16 +15,23 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+import { AdminPermission } from '@prisma/client';
+import { ALL_ADMIN_PERMISSIONS } from '../src/modules/auth/admin-permissions';
 
 /**
  * Who may read an unreleased category.
  *
- * `includeInactive=true` is the operator's view of the taxonomy — every DRAFT
- * service the marketplace is preparing, every category it has closed, the
- * groups and routers that are navigation rather than services, and the
- * questions and routing destinations behind all of them. It used to be a plain
- * query parameter on two public endpoints, which made the whole unreleased
- * catalogue readable by anybody who typed it.
+ * The operator's view of the taxonomy — every DRAFT service the marketplace is
+ * preparing, every category it has closed, the groups and routers that are
+ * navigation rather than services, and the questions and routing destinations
+ * behind all of them.
+ *
+ * It has been three different things. First a plain `?includeInactive=true` on
+ * two public endpoints, readable by anybody who typed it. Then the same
+ * parameter behind a check, which made the boundary between the announced
+ * catalogue and the unannounced one a string in the URL. It is now
+ * `GET /admin/categories`, behind `CATALOG_READ` — a different route, with no
+ * parameter that widens the public ones.
  *
  * These cases pin the access matrix down at the HTTP boundary, because the
  * claim is about what a stranger can fetch — not about what a service method
@@ -93,14 +101,15 @@ function expectNoDraftLeak(
   expect(serialized).not.toContain(ServiceCategoryStatus.DRAFT);
 }
 
-describe('GET /categories?includeInactive=true', () => {
+describe('GET /admin/categories — the operator\'s catalogue', () => {
   it('refuses an anonymous caller and leaks nothing in the refusal', async () => {
     const fixture = await unreleasedFixture();
 
-    const response = await request(ctx.server)
-      .get('/categories?includeInactive=true')
-      .expect(403);
+    const response = await request(ctx.server).get('/admin/categories');
 
+    // 401 rather than 403: no credential was presented at all, and the answer
+    // to that is the sign-in form.
+    expect(response.status).toBe(401);
     expectNoDraftLeak(response.body, fixture);
   });
 
@@ -108,10 +117,11 @@ describe('GET /categories?includeInactive=true', () => {
     const fixture = await unreleasedFixture();
 
     const response = await request(ctx.server)
-      .get('/categories?includeInactive=true')
-      .set('Cookie', await cookieFor(UserRole.CUSTOMER))
-      .expect(403);
+      .get('/admin/categories')
+      .set('Cookie', await cookieFor(UserRole.CUSTOMER));
 
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('NOT_STAFF');
     expectNoDraftLeak(response.body, fixture);
   });
 
@@ -119,65 +129,91 @@ describe('GET /categories?includeInactive=true', () => {
     const fixture = await unreleasedFixture();
 
     const response = await request(ctx.server)
-      .get('/categories?includeInactive=true')
-      .set('Cookie', await cookieFor(UserRole.PROVIDER))
-      .expect(403);
+      .get('/admin/categories')
+      .set('Cookie', await cookieFor(UserRole.PROVIDER));
 
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('NOT_STAFF');
     expectNoDraftLeak(response.body, fixture);
   });
 
-  it('serves the whole tree to a SUPER_ADMIN', async () => {
+  it('refuses a staff account holding every permission except CATALOG_READ', async () => {
     const fixture = await unreleasedFixture();
+    const { admin } = await createAdminWithPermissions(
+      ctx.prisma,
+      ALL_ADMIN_PERMISSIONS.filter((permission) => permission !== AdminPermission.CATALOG_READ),
+    );
 
     const response = await request(ctx.server)
-      .get('/categories?includeInactive=true')
-      .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN))
-      .expect(200);
+      .get('/admin/categories')
+      .set('Cookie', await loginAs(ctx.prisma, admin.id));
 
-    const slugs = response.body.map((category: { slug: string }) => category.slug);
-
-    expect(slugs).toContain(fixture.draft.slug);
-    expect(slugs).toContain(fixture.closed.slug);
-    expect(slugs).toContain(fixture.group.slug);
-    expect(slugs).toContain(fixture.live.slug);
+    // Being staff is not the same statement as being allowed to see what the
+    // marketplace has not announced yet.
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('INSUFFICIENT_PERMISSION');
+    expectNoDraftLeak(response.body, fixture);
   });
 
-  it('is the query string that is refused, not the search behind it', async () => {
-    // The same request without the elevation is the public catalogue and stays
-    // open — a 403 here would have broken every visitor's category page.
+  it('serves the whole tree to a holder of CATALOG_READ', async () => {
+    const fixture = await unreleasedFixture();
+    const { admin } = await createAdminWithPermissions(ctx.prisma, [AdminPermission.CATALOG_READ]);
+
+    const response = await request(ctx.server)
+      .get('/admin/categories')
+      .set('Cookie', await loginAs(ctx.prisma, admin.id));
+
+    expect(response.status).toBe(200);
+    const serialized = JSON.stringify(response.body);
+    expect(serialized).toContain(fixture.draft.slug);
+    expect(serialized).toContain(fixture.closed.slug);
+    expect(serialized).toContain(fixture.group.slug);
+    expect(serialized).toContain(fixture.live.slug);
+  });
+
+  it('serves it to a SUPER_ADMIN with no role assignment', async () => {
     const fixture = await unreleasedFixture();
 
     const response = await request(ctx.server)
-      .get(`/categories?q=${encodeURIComponent('Hizmet')}`)
-      .expect(200);
+      .get('/admin/categories')
+      .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN));
 
-    expect(response.body.map((category: { slug: string }) => category.slug)).toEqual([
-      fixture.live.slug,
-    ]);
-    expectNoDraftLeak(response.body, fixture);
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(response.body)).toContain(fixture.draft.slug);
+  });
+
+  it('searches the whole tree, not only the public part', async () => {
+    const fixture = await unreleasedFixture();
+    const { admin } = await createAdminWithPermissions(ctx.prisma, [AdminPermission.CATALOG_READ]);
+
+    const response = await request(ctx.server)
+      .get('/admin/categories?q=Gizli')
+      .set('Cookie', await loginAs(ctx.prisma, admin.id));
+
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(response.body)).toContain(fixture.draft.slug);
   });
 });
 
-describe('GET /categories/:slug?includeInactive=true', () => {
+describe('GET /admin/categories/:slug', () => {
   it('refuses an anonymous caller', async () => {
     const fixture = await unreleasedFixture();
 
-    const response = await request(ctx.server)
-      .get(`/categories/${fixture.draft.slug}?includeInactive=true`)
-      .expect(403);
+    const response = await request(ctx.server).get(`/admin/categories/${fixture.draft.slug}`);
 
+    expect(response.status).toBe(401);
     expectNoDraftLeak(response.body, fixture);
   });
 
   it('refuses a CUSTOMER and a PROVIDER', async () => {
     const fixture = await unreleasedFixture();
 
-    for (const role of [UserRole.CUSTOMER, UserRole.PROVIDER]) {
+    for (const role of [UserRole.CUSTOMER, UserRole.PROVIDER] as const) {
       const response = await request(ctx.server)
-        .get(`/categories/${fixture.draft.slug}?includeInactive=true`)
-        .set('Cookie', await cookieFor(role))
-        .expect(403);
+        .get(`/admin/categories/${fixture.draft.slug}`)
+        .set('Cookie', await cookieFor(role));
 
+      expect(response.status).toBe(403);
       expectNoDraftLeak(response.body, fixture);
     }
   });
@@ -185,92 +221,83 @@ describe('GET /categories/:slug?includeInactive=true', () => {
   it('refuses before it looks the slug up, so it cannot confirm one exists', async () => {
     const fixture = await unreleasedFixture();
 
-    const existing = await request(ctx.server)
-      .get(`/categories/${fixture.draft.slug}?includeInactive=true`)
-      .expect(403);
-    const imaginary = await request(ctx.server)
-      .get('/categories/bu-slug-hicbir-zaman-var-olmadi?includeInactive=true')
-      .expect(403);
+    const real = await request(ctx.server)
+      .get(`/admin/categories/${fixture.draft.slug}`)
+      .set('Cookie', await cookieFor(UserRole.CUSTOMER));
+    const invented = await request(ctx.server)
+      .get('/admin/categories/boyle-bir-sey-yok')
+      .set('Cookie', await cookieFor(UserRole.CUSTOMER));
 
-    expect(existing.body).toEqual(imaginary.body);
+    // The same answer either way: a 403 for one slug and a 404 for another
+    // would be an oracle for the unreleased catalogue.
+    expect(real.status).toBe(invented.status);
+    expect(real.status).toBe(403);
   });
 
-  it('serves the draft and its questions to a SUPER_ADMIN', async () => {
+  it('serves the draft and its questions to a holder of CATALOG_READ', async () => {
     const fixture = await unreleasedFixture();
+    const { admin } = await createAdminWithPermissions(ctx.prisma, [AdminPermission.CATALOG_READ]);
 
     const response = await request(ctx.server)
-      .get(`/categories/${fixture.draft.slug}?includeInactive=true`)
-      .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN))
-      .expect(200);
+      .get(`/admin/categories/${fixture.draft.slug}`)
+      .set('Cookie', await loginAs(ctx.prisma, admin.id));
 
-    expect(response.body).toMatchObject({
-      slug: fixture.draft.slug,
-      status: ServiceCategoryStatus.DRAFT,
-      isActive: false,
-    });
-    expect(response.body.questions).toHaveLength(1);
-    expect(response.body.questions[0].key).toBe(fixture.draftQuestion.key);
+    expect(response.status).toBe(200);
+    expect(response.body.slug).toBe(fixture.draft.slug);
+    expect(JSON.stringify(response.body)).toContain(fixture.draftQuestion.key);
   });
 
-  it('still hides a draft behind a 404 when nobody asked to be elevated', async () => {
+  it('still hides a draft behind a 404 on the public route', async () => {
     const fixture = await unreleasedFixture();
 
-    // Unchanged, and deliberately not a 403: guessing the slug of an unreleased
-    // service must not confirm that it exists.
-    await request(ctx.server).get(`/categories/${fixture.draft.slug}`).expect(404);
+    const response = await request(ctx.server).get(`/categories/${fixture.draft.slug}`);
+
+    expect(response.status).toBe(404);
+    expectNoDraftLeak(response.body, fixture);
   });
 });
 
-describe('a credential that could not be resolved', () => {
-  /*
-   * A session cookie is this API's credential. One that resolves to no user —
-   * expired, revoked, forged — is not the same thing as no cookie at all, and
-   * answering it as though the caller had asked anonymously is how a client
-   * discovers its session died as a "wrong answer" rather than as a sign-in
-   * prompt. AuthGuard says 401 to that request everywhere else; so does this.
-   */
-  it('answers 401 on the list, not 403', async () => {
-    await unreleasedFixture();
-
-    await request(ctx.server)
-      .get('/categories?includeInactive=true')
-      .set('Cookie', `${COOKIE_NAME}=bu-oturum-hicbir-zaman-var-olmadi`)
-      .expect(401);
-  });
-
-  it('answers 401 on the detail, not 403', async () => {
+describe('the public routes have no wide mode left', () => {
+  it('ignores every spelling of the parameter that used to widen them', async () => {
     const fixture = await unreleasedFixture();
 
-    await request(ctx.server)
-      .get(`/categories/${fixture.draft.slug}?includeInactive=true`)
-      .set('Cookie', `${COOKIE_NAME}=bu-oturum-hicbir-zaman-var-olmadi`)
-      .expect(401);
+    for (const path of [
+      '/categories',
+      '/categories?includeInactive=true',
+      '/categories?includeInactive=TRUE',
+      '/categories?includeInactive=1',
+      '/categories?includeinactive=true',
+    ]) {
+      const response = await request(ctx.server).get(path);
+      expect(response.status, path).toBe(200);
+      expectNoDraftLeak(response.body, fixture);
+    }
   });
 
-  it('answers 401 to a bearer token, which this API has no scheme for', async () => {
-    await unreleasedFixture();
+  it('ignores it for a SUPER_ADMIN too, because the route no longer reads it', async () => {
+    const fixture = await unreleasedFixture();
 
-    // Counted as an attempt to authenticate precisely because nothing here
-    // accepts it: serving such a request as anonymous is the silent demotion
-    // this rule exists to prevent.
-    await request(ctx.server)
+    const response = await request(ctx.server)
       .get('/categories?includeInactive=true')
-      .set('Authorization', 'Bearer sahte-token')
-      .expect(401);
+      .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN));
+
+    // Not a refusal — a narrow answer. The parameter is not a thing any more,
+    // so there is nothing to refuse and nothing to grant.
+    expect(response.status).toBe(200);
+    expectNoDraftLeak(response.body, fixture);
   });
 
   it('leaves the public catalogue reachable with a dead session cookie', async () => {
-    // The elevation is what a broken credential blocks. A visitor whose session
-    // expired in another tab still gets the catalogue.
     const fixture = await unreleasedFixture();
 
     const response = await request(ctx.server)
       .get('/categories')
-      .set('Cookie', `${COOKIE_NAME}=bu-oturum-hicbir-zaman-var-olmadi`)
-      .expect(200);
+      .set('Cookie', `${COOKIE_NAME}=bu-oturum-yok`);
 
-    expect(response.body.map((category: { slug: string }) => category.slug)).toEqual([
-      fixture.live.slug,
-    ]);
+    // A broken credential is not a reason to hide the public catalogue: this
+    // route never looked at the session, and now it has no reason to.
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(response.body)).toContain(fixture.live.slug);
+    expectNoDraftLeak(response.body, fixture);
   });
 });

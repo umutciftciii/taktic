@@ -33,12 +33,14 @@ function normalizeStatus(value: string | undefined): StatusFilter {
 }
 
 export default async function AdminCategoriesPage({ searchParams }: AdminCategoriesPageProps) {
-  await requireAdmin();
+  await requireAdmin('CATALOG_READ');
   const { q: rawQuery, status: rawStatus } = await searchParams;
   const query = (rawQuery ?? '').trim();
   const status = normalizeStatus(rawStatus);
 
-  const categories = await apiFetch<Category[]>('/categories?includeInactive=true');
+  // The operator's catalogue, from the route that exists for it. The public
+  // endpoint no longer widens for anybody, by any query string.
+  const categories = await apiFetch<Category[]>('/admin/categories');
 
   const normalizedQuery = query.toLocaleLowerCase('tr-TR');
   const filtered = categories.filter((category) => {

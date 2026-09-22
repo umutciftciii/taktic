@@ -3,17 +3,25 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { Sidebar } from '../components/sidebar';
+import type { NavGroup } from '../lib/nav';
 import { Topbar } from '../components/topbar';
 import { SessionGuard } from './session/session-guard';
 
 type AdminShellProps = {
   children: ReactNode;
+  /**
+   * The sidebar rows this session may open, filtered on the server. An empty
+   * list is a signed-out visitor (or one whose session just expired), and the
+   * shell renders the page without navigation rather than with rows that would
+   * all refuse.
+   */
+  navGroups: NavGroup[];
 };
 
 const DESKTOP_QUERY = '(min-width: 1024px)';
 const SIDEBAR_ID = 'admin-sidebar';
 
-export function AdminShell({ children }: AdminShellProps) {
+export function AdminShell({ children, navGroups }: AdminShellProps) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement | null>(null);
@@ -124,7 +132,7 @@ export function AdminShell({ children }: AdminShellProps) {
             <span aria-hidden="true">✕</span>
           </button>
         </div>
-        <Sidebar onNavigate={closeSidebar} />
+        <Sidebar groups={navGroups} onNavigate={closeSidebar} />
       </aside>
 
       {/*

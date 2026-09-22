@@ -39,7 +39,7 @@ type ShowcaseCardsPageProps = {
  * its versions, and those live on the version's own screen.
  */
 export default async function ShowcaseCardsPage({ searchParams }: ShowcaseCardsPageProps) {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_CARDS_READ');
 
   const { status } = await searchParams;
   const selected = STATUSES.find((candidate) => candidate === status) ?? null;

@@ -53,7 +53,7 @@ async function adminCookie() {
 /** The status exactly as the readiness panel reads it, from the listing. */
 async function supplyStatusOf(cookie: string, slug: string) {
   const response = await request(ctx.server)
-    .get('/categories?includeInactive=true')
+    .get('/admin/categories')
     .set('Cookie', cookie)
     .expect(200);
 
@@ -174,7 +174,7 @@ describe('category supply status over HTTP', () => {
     });
 
     const response = await request(ctx.server)
-      .get(`/categories/${category.slug}?includeInactive=true`)
+      .get(`/admin/categories/${category.slug}`)
       .set('Cookie', cookie)
       .expect(200);
 
@@ -224,7 +224,7 @@ describe('category supply status over HTTP', () => {
 
     // And asking for the wide view without being an operator is still refused.
     await request(ctx.server)
-      .get('/categories?includeInactive=true')
+      .get('/admin/categories')
       .set('Cookie', customerCookie)
       .expect(403);
   });

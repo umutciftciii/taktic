@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { CustomersService } from './customers.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
@@ -19,29 +21,29 @@ export class CustomersController {
   ) {}
 
   @Get()
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CUSTOMERS_READ)
   list(@Query() query: ListCustomersDto) {
     return this.customersService.list(query);
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CUSTOMERS_READ)
   detail(@Param('id') id: string) {
     return this.customersService.detail(id);
   }
 
   @Get(':id/notes')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CUSTOMER_NOTES_READ)
   listNotes(@Param('id') id: string) {
     return this.customersService.listNotes(id);
   }
 
   @Post(':id/notes')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CUSTOMER_NOTES_WRITE)
   createNote(
     @Param('id') id: string,
     @Body() dto: CreateCustomerNoteDto,
@@ -51,15 +53,15 @@ export class CustomersController {
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CUSTOMERS_STATUS)
   updateStatus(@Param('id') id: string, @Body() dto: UpdateCustomerStatusDto) {
     return this.customersService.updateStatus(id, dto);
   }
 
   @Post(':id/activation-link')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CUSTOMER_ACTIVATION_LINK_ISSUE)
   createActivationLink(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.activationService.createForCustomer(id, user.id);
   }

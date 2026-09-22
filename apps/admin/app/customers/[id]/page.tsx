@@ -56,7 +56,7 @@ export default async function AdminCustomerDetailPage({
   params,
   searchParams,
 }: CustomerDetailPageProps) {
-  await requireAdmin();
+  await requireAdmin('CUSTOMERS_READ');
   const { id } = await params;
   const search = (await searchParams) ?? {};
 

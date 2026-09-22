@@ -6,7 +6,7 @@ import { StatCard } from '../components/stat-card';
 import { buildAdminDashboardMetrics } from '../lib/dashboard-metrics';
 
 export default async function AdminHomePage() {
-  const user = await requireAdmin();
+  const { user } = await requireAdmin('DASHBOARD_READ');
   const summary = await apiFetch<AdminSummary>('/dashboard/admin-summary');
   const metrics = buildAdminDashboardMetrics(summary);
 

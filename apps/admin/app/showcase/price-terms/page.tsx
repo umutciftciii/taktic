@@ -41,7 +41,7 @@ type PriceTermsPageProps = {
  * itself rather than looked up from here.
  */
 export default async function ShowcasePriceTermsPage({ searchParams }: PriceTermsPageProps) {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_TERMS_ACCEPTANCES_READ');
 
   const { providerId, cardId, termsVersion } = await searchParams;
 

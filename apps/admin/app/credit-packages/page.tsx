@@ -52,7 +52,7 @@ function canonicalSort(packages: AdminOfferPackage[]) {
 export default async function AdminCreditPackagesPage({
   searchParams,
 }: AdminCreditPackagesPageProps) {
-  await requireAdmin();
+  await requireAdmin('CREDIT_PACKAGES_READ');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatusFilter(params.status);

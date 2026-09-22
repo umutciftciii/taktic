@@ -4,6 +4,8 @@ import {
   AdminUserDetailResponse,
   apiFetch,
   formatDateTime,
+  listAdminRoles,
+  listAdminUserRoles,
   requireAdmin,
   userRoleBadgeClass,
   userRoleLabel,
@@ -12,6 +14,7 @@ import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
 import { createAdminInviteLinkAction, updateUserStatusAction } from '../actions';
+import { AdminRoleAssignmentCard } from './role-assignment-card';
 
 type SearchParams = {
   statusError?: string;
@@ -39,7 +42,7 @@ export default async function AdminUserDetailPage({
   params,
   searchParams,
 }: AdminUserDetailPageProps) {
-  const actor = await requireAdmin();
+  const { user: actor, isSuperAdmin: isSuperAdminViewer } = await requireAdmin('ADMIN_USERS_READ');
   const { id } = await params;
   const search = (await searchParams) ?? {};
 
@@ -55,6 +58,18 @@ export default async function AdminUserDetailPage({
 
   const { user, metrics } = response;
   const isSelf = actor.id === user.id;
+
+  /*
+   * Roles are a super admin's to hand out, so this block is fetched only for
+   * one. A staff account with ADMIN_USERS_READ sees the rest of the page and
+   * a line explaining why it cannot see this — better than a card that 403s on
+   * every button, and better than a silent gap.
+   */
+  const roleState = isSuperAdminViewer
+    ? await Promise.all([listAdminUserRoles(user.id), listAdminRoles()]).then(
+        ([assigned, catalogue]) => ({ assigned, catalogue }),
+      )
+    : null;
 
   const displayName = user.name ?? user.email ?? user.phone ?? '—';
   const subtitleParts: string[] = [];
@@ -230,9 +245,16 @@ export default async function AdminUserDetailPage({
             </dd>
           </dl>
           <p className="muted" style={{ marginTop: 12, lineHeight: 1.5 }}>
-            Rol değişikliği ve şifre sıfırlama sonraki fazda eklenecek.
+            Hesabın rol türü değiştirilemez: personel hesabı personel, hizmet veren hesabı hizmet veren olarak
+            kalır. Yetki, aşağıdan atanan rollerden gelir.
           </p>
         </SectionCard>
+
+        <AdminRoleAssignmentCard
+          isSuperAdminViewer={isSuperAdminViewer}
+          roles={roleState}
+          userId={user.id}
+        />
       </div>
     </main>
   );

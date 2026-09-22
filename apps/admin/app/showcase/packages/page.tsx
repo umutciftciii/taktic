@@ -103,7 +103,7 @@ function AdvancedSettings({ sortOrder }: { sortOrder: number }) {
  * setting the number is told which one they are setting.
  */
 export default async function ShowcasePackagesPage({ searchParams }: PackagesPageProps) {
-  await requireAdmin();
+  await requireAdmin('SHOWCASE_PACKAGES_READ');
 
   const { error, created, saved } = await searchParams;
   const { packages } = await apiFetch<{ packages: ShowcasePackage[] }>(

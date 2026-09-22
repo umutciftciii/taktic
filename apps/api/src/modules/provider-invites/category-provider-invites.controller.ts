@@ -8,11 +8,13 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
-import { RolesGuard } from '../auth/roles.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { ProviderInvitesService } from './provider-invites.service';
 
 /**
@@ -31,14 +33,14 @@ import { ProviderInvitesService } from './provider-invites.service';
  * the operator is administering, and it scopes every row the routes can reach.
  */
 @Controller('categories/:categoryId/provider-invites')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
 export class CategoryProviderInvitesController {
   constructor(
     @Inject(ProviderInvitesService) private readonly invites: ProviderInvitesService,
   ) {}
 
   @Get()
+  @RequiresPermission(AdminPermission.PROVIDER_INVITES_READ)
   list(@Param('categoryId') categoryId: string) {
     return this.invites.listForCategory(categoryId);
   }
@@ -49,6 +51,7 @@ export class CategoryProviderInvitesController {
    * invitation, by anybody, can produce it again.
    */
   @Post()
+  @RequiresPermission(AdminPermission.PROVIDER_INVITES_ISSUE)
   issue(@Param('categoryId') categoryId: string, @CurrentUser() actor: AuthUser) {
     return this.invites.issueForCategory(categoryId, actor);
   }
@@ -61,6 +64,7 @@ export class CategoryProviderInvitesController {
    * a thing that happened, and the list is the record of it.
    */
   @Post(':inviteId/revoke')
+  @RequiresPermission(AdminPermission.PROVIDER_INVITES_REVOKE)
   @HttpCode(HttpStatus.OK)
   revoke(@Param('categoryId') categoryId: string, @Param('inviteId') inviteId: string) {
     return this.invites.revoke(categoryId, inviteId);

@@ -76,7 +76,7 @@ const OK_MESSAGES: Record<string, string> = {
 };
 
 export default async function CampaignDetailPage({ params, searchParams }: CampaignDetailPageProps) {
-  await requireAdmin();
+  await requireAdmin('CAMPAIGNS_READ');
   const { id } = await params;
   const query = await searchParams;
   const base = `/admin/campaigns/${encodeURIComponent(id)}`;

@@ -10,7 +10,7 @@ const authCookieName = process.env.AUTH_COOKIE_NAME ?? 'taktic_session';
 
 type LoggedInUser = {
   id: string;
-  role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER';
+  role: 'SUPER_ADMIN' | 'CUSTOMER' | 'PROVIDER' | 'ADMIN';
 };
 
 export async function loginAction(formData: FormData) {

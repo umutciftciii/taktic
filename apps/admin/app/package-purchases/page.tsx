@@ -2,12 +2,13 @@ import Link from 'next/link';
 import {
   AdminPaymentConfig,
   apiFetch,
+  formatDateTime,
+  formatPrice,
   PackagePurchase,
   PackagePurchaseStatus,
-  statusLabel,
+  requireAdmin,
   statusBadgeClass,
-  formatPrice,
-  formatDateTime,
+  statusLabel,
 } from '../../lib/api';
 
 type AdminPackagePurchasesPageProps = {
@@ -19,6 +20,7 @@ type AdminPackagePurchasesPageProps = {
 };
 
 export default async function AdminPackagePurchasesPage({ searchParams }: AdminPackagePurchasesPageProps) {
+  await requireAdmin('PACKAGE_PURCHASES_READ');
   const params = (await searchParams) ?? {};
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);

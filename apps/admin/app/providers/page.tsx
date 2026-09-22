@@ -2,10 +2,11 @@ import { serviceAreaLabel } from '@taktic/shared';
 import Link from 'next/link';
 import {
   apiFetch,
-  Category,
+  formatDateTime,
+  listCatalogueForFilter,
   ProviderProfile,
   ProviderStatus,
-  formatDateTime,
+  requireAdmin,
   statusBadgeClass,
   statusLabel,
 } from '../../lib/api';
@@ -72,6 +73,7 @@ function toLower(value: string | null | undefined) {
 }
 
 export default async function AdminProvidersPage({ searchParams }: AdminProvidersPageProps) {
+  await requireAdmin('PROVIDERS_READ');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);
@@ -79,9 +81,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
   const categorySlug = (params.category ?? '').trim();
   const ownership = normalizeOwnership(params.ownership);
 
-  const categories = await apiFetch<Category[]>('/categories?includeInactive=true').catch(
-    () => [] as Category[],
-  );
+  const categories = await listCatalogueForFilter();
 
   const categoryIdBySlug = new Map(categories.map((category) => [category.slug, category.id]));
   const categoryId = categorySlug ? categoryIdBySlug.get(categorySlug) ?? '' : '';

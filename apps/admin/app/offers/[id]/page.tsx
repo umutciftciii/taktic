@@ -1,16 +1,17 @@
 import Link from 'next/link';
 import {
   apiFetch,
-  Offer,
-  OfferStatus,
-  RefundRecommendedAction,
-  statusLabel,
-  statusBadgeClass,
-  refundActionLabel,
-  refundActionBadgeClass,
-  formatPrice,
   formatDate,
   formatDateTime,
+  formatPrice,
+  Offer,
+  OfferStatus,
+  refundActionBadgeClass,
+  refundActionLabel,
+  RefundRecommendedAction,
+  requireAdmin,
+  statusBadgeClass,
+  statusLabel,
 } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
@@ -95,6 +96,7 @@ type OfferDetailPageProps = {
 };
 
 export default async function OfferDetailPage({ params, searchParams }: OfferDetailPageProps) {
+  await requireAdmin('OFFERS_READ');
   const { id } = await params;
   const search = (await searchParams) ?? {};
   const justRefunded = search.refunded === '1';

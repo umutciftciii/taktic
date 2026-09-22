@@ -107,7 +107,7 @@ describe('public catalogue', () => {
     const cookie = await adminCookie();
 
     const response = await request(ctx.server)
-      .get('/categories?includeInactive=true')
+      .get('/admin/categories')
       .set('Cookie', cookie)
       .expect(200);
 
@@ -887,7 +887,7 @@ describe('routing', () => {
     // The admin view is where the wiring is meant to be visible.
     const cookie = await adminCookie();
     const adminView = await request(ctx.server)
-      .get(`/categories/${router.slug}?includeInactive=true`)
+      .get(`/admin/categories/${router.slug}`)
       .set('Cookie', cookie)
       .expect(200);
 

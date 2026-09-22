@@ -114,7 +114,7 @@ function formatRangeDateForApi(value: string, endOfDay: boolean): string | undef
 export default async function AdminNotificationsPage({
   searchParams,
 }: AdminNotificationsPageProps) {
-  await requireAdmin();
+  await requireAdmin('NOTIFICATION_LOGS_READ');
 
   const params = await searchParams;
   const status = normalizeStatus(params.status);

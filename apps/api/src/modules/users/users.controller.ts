@@ -9,11 +9,14 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission, UserRole } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
+import { RolesGuard } from '../auth/roles.guard';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
@@ -24,8 +27,8 @@ export class UsersController {
   constructor(@Inject(UsersService) private readonly usersService: UsersService) {}
 
   @Get()
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.ADMIN_USERS_READ)
   list(@Query() query: ListUsersDto) {
     return this.usersService.list(query);
   }
@@ -38,15 +41,15 @@ export class UsersController {
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.ADMIN_USERS_READ)
   detail(@Param('id') id: string) {
     return this.usersService.detail(id);
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.ADMIN_USERS_STATUS)
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateUserStatusDto,

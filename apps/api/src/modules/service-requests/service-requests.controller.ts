@@ -1,8 +1,11 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { AdminPermission, UserRole } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto';
 import { getDraftTokenFromRequest } from '../request-drafts/request-draft.cookie';
@@ -38,8 +41,8 @@ export class ServiceRequestsController {
   }
 
   @Get()
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.REQUESTS_READ)
   listServiceRequests() {
     return this.serviceRequestsService.listServiceRequests();
   }
@@ -63,8 +66,8 @@ export class ServiceRequestsController {
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.REQUESTS_READ)
   getServiceRequest(@Param('id') id: string) {
     return this.serviceRequestsService.getServiceRequest(id);
   }
@@ -107,8 +110,8 @@ export class ServiceRequestsController {
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.REQUESTS_STATUS)
   updateServiceRequestStatus(
     @Param('id') id: string,
     @Body() dto: UpdateServiceRequestStatusDto,
@@ -139,8 +142,8 @@ export class ServiceRequestsController {
   }
 
   @Post(':id/recalculate-quality')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.REQUESTS_QUALITY_RECALC)
   recalculateQuality(@Param('id') id: string) {
     return this.serviceRequestsService.recalculateQuality(id);
   }

@@ -11,19 +11,14 @@ import {
   Patch,
   Post,
   Query,
-  Req,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/auth.decorators';
-import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
-import {
-  assertElevatedQueryAccess,
-  type CredentialCarryingRequest,
-} from '../auth/elevated-query';
-import { RolesGuard } from '../auth/roles.guard';
-import { AuthUser } from '../auth/auth.types';
-import { CategoriesService, type CategoryViewOptions } from './categories.service';
+import { AdminPermission } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
+import { AuthGuard } from '../auth/auth.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
+import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { ResolveRoutingDto } from './dto/resolve-routing.dto';
 import {
@@ -32,50 +27,56 @@ import {
 } from './dto/update-category-status.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
+/**
+ * The public catalogue, plus the writes an operator performs on it.
+ *
+ * What is **not** here is the point: no route on this controller returns a
+ * DRAFT or INACTIVE category, to anybody, with any query string. That view
+ * lives on `AdminCategoriesController` behind `CATALOG_READ`, which is a
+ * different path rather than a wider mode of these ones.
+ */
 @Controller('categories')
 export class CategoriesController {
   constructor(@Inject(CategoriesService) private readonly categoriesService: CategoriesService) {}
 
   /**
-   * The catalogue, in one of its two views.
+   * The public catalogue, and only ever the public catalogue.
    *
-   * Optionally authenticated rather than guarded: signed out this is the public
-   * listing and has to stay reachable. `includeInactive=true` asks for the
-   * operator's view instead, and {@link resolveView} is where that request is
-   * granted or refused — before the service is called, on the session rather
-   * than on anything the caller can write into the URL.
+   * Unauthenticated: this is what a visitor sees, and it must stay reachable
+   * without a session. It used to take `?includeInactive=true` and widen into
+   * the operator's view for a caller who passed a check — which meant the
+   * boundary between the announced catalogue and the unannounced one was a
+   * query parameter. It is now `GET /admin/categories`, behind `CATALOG_READ`,
+   * and this route has **no parameter that widens it**: there is nothing to
+   * spoof, because there is nothing to pass.
    */
   @Get()
-  @UseGuards(OptionalAuthGuard)
-  listCategories(
-    @Req() request: CredentialCarryingRequest,
-    @CurrentUser() user: AuthUser | null,
-    @Query('includeInactive') includeInactive?: string,
-    @Query('q') q?: string,
-    @Query('limit') limit?: string,
-  ) {
+  listCategories(@Query('q') q?: string, @Query('limit') limit?: string) {
     return this.categoriesService.listCategories({
-      ...this.resolveView(request, user, includeInactive),
+      includeInactive: false,
+      isSuperAdmin: false,
       q,
       limit: limit ? Number(limit) : undefined,
     });
   }
 
   /**
-   * Resolves a routed flow.
+   * Resolves a routed flow, over the public catalogue.
    *
-   * Optionally authenticated for the same reason request creation is: a signed
-   * in SUPER_ADMIN may walk a DRAFT category to check its wiring, and everybody
-   * else gets the public answer. It is a POST because the selections are a
-   * structured body, not because it writes — nothing here changes a row.
+   * Unauthenticated, and deliberately narrow: a router target that is not
+   * released is not reachable from here for anybody, operator included. It used
+   * to widen for a signed-in operator so they could walk a DRAFT flow, which
+   * made this a second door onto the unreleased catalogue — and one nobody
+   * would think to look at when asking "what leaks a draft". An operator who
+   * needs to check the wiring reads it through `GET /admin/categories/:slug`,
+   * which carries the router targets and asks for `CATALOG_READ`.
+   *
+   * It is a POST because the selections are a structured body, not because it
+   * writes — nothing here changes a row.
    */
   @Post('routing/resolve')
-  @UseGuards(OptionalAuthGuard)
-  async resolveRouting(@Body() dto: ResolveRoutingDto, @CurrentUser() user: AuthUser | null) {
-    const resolution = await this.categoriesService.resolveRouting(
-      dto,
-      user?.role === UserRole.SUPER_ADMIN,
-    );
+  async resolveRouting(@Body() dto: ResolveRoutingDto) {
+    const resolution = await this.categoriesService.resolveRouting(dto, false);
 
     // Deliberately narrow: slugs, kind and the next question — never ids, never
     // the target's status. What a client needs to render the next step and
@@ -106,38 +107,32 @@ export class CategoriesController {
     return this.categoriesService.listProviderEnrollmentCategories();
   }
 
-  /** Same two views, same gate, one category. */
+  /** The public view of one category. Same rule as the listing above. */
   @Get(':slug')
-  @UseGuards(OptionalAuthGuard)
-  getCategoryBySlug(
-    @Param('slug') slug: string,
-    @Req() request: CredentialCarryingRequest,
-    @CurrentUser() user: AuthUser | null,
-    @Query('includeInactive') includeInactive?: string,
-  ) {
-    return this.categoriesService.getCategoryBySlug(
-      slug,
-      this.resolveView(request, user, includeInactive),
-    );
+  getCategoryBySlug(@Param('slug') slug: string) {
+    return this.categoriesService.getCategoryBySlug(slug, {
+      includeInactive: false,
+      isSuperAdmin: false,
+    });
   }
 
   @Post()
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_WRITE)
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.categoriesService.createCategory(dto);
   }
 
   @Patch(':id')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_WRITE)
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.categoriesService.updateCategory(id, dto);
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_STATUS)
   updateCategoryStatus(@Param('id') id: string, @Body() dto: UpdateCategoryStatusDto) {
     const status = resolveRequestedStatus(dto);
 
@@ -150,32 +145,10 @@ export class CategoriesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CATEGORIES_DELETE)
   deleteCategory(@Param('id') id: string) {
     return this.categoriesService.deleteCategory(id);
   }
 
-  /**
-   * Reads `includeInactive` and decides, once, who is allowed to mean it.
-   *
-   * A caller who does not ask for the wide view is never challenged — that is
-   * the whole public catalogue and it must not require a session. A caller who
-   * does is held to SUPER_ADMIN here, and the refusal distinguishes a credential
-   * that could not be resolved (401) from one that simply is not an operator's
-   * (403). See assertElevatedQueryAccess.
-   */
-  private resolveView(
-    request: CredentialCarryingRequest,
-    user: AuthUser | null,
-    includeInactive: string | undefined,
-  ): CategoryViewOptions {
-    if (includeInactive !== 'true') {
-      return { includeInactive: false, isSuperAdmin: user?.role === UserRole.SUPER_ADMIN };
-    }
-
-    assertElevatedQueryAccess(request, user);
-
-    return { includeInactive: true, isSuperAdmin: true };
-  }
 }

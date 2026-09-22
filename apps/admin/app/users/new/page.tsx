@@ -19,7 +19,7 @@ type NewAdminUserPageProps = {
 };
 
 export default async function NewAdminUserPage({ searchParams }: NewAdminUserPageProps) {
-  await requireAdmin();
+  await requireAdmin('ADMIN_USERS_READ');
   const search = (await searchParams) ?? {};
 
   const created = Boolean(search.inviteUrl && search.userId);

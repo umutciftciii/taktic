@@ -1,15 +1,16 @@
 import Link from 'next/link';
 import {
   apiFetch,
-  Category,
-  QualityLabel,
-  ServiceRequest,
-  ServiceRequestStatus,
   formatBudgetRange,
   formatDateTime,
+  listCatalogueForFilter,
   qualityBadgeClass,
   qualityLabel,
+  QualityLabel,
   requestStatusLabel,
+  requireAdmin,
+  ServiceRequest,
+  ServiceRequestStatus,
   statusBadgeClass,
 } from '../../lib/api';
 import { PageHeader } from '../../components/page-header';
@@ -122,6 +123,7 @@ function lifecycleNotes(request: ServiceRequest): string[] {
 }
 
 export default async function AdminRequestsPage({ searchParams }: AdminRequestsPageProps) {
+  await requireAdmin('REQUESTS_READ');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);
@@ -133,7 +135,7 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
 
   const [requests, categories] = await Promise.all([
     apiFetch<ServiceRequest[]>('/service-requests'),
-    apiFetch<Category[]>('/categories?includeInactive=true').catch(() => [] as Category[]),
+    listCatalogueForFilter(),
   ]);
 
   const normalizedQuery = toLower(query);

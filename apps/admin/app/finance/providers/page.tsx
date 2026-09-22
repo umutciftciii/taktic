@@ -92,7 +92,7 @@ function formatDateOrDash(value: string | null | undefined): string {
 export default async function AdminProviderFinancePage({
   searchParams,
 }: AdminProviderFinancePageProps) {
-  await requireAdmin();
+  await requireAdmin('FINANCE_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();

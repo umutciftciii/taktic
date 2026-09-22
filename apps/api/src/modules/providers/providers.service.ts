@@ -44,6 +44,7 @@ import { EntitlementResolverService } from '../entitlements/entitlement-resolver
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { isStaff } from '../auth/admin-permissions';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import {
@@ -893,7 +894,10 @@ export class ProvidersService implements OnModuleInit {
       // endpoint, which keeps the drafts. Everybody else — the provider saving
       // their own profile — gets the same narrowed shape every other read
       // hands them.
-      return user?.role === UserRole.SUPER_ADMIN
+      // Staff, not just a super admin (PR-0): an ADMIN reaching this handler
+      // has already been checked for PROVIDERS_WRITE, and an operator who may
+      // save a profile must see the same shape back that they saved.
+      return isStaff(user)
         ? updated
         : withVisibleServiceCategories(updated);
     });
@@ -2002,7 +2006,16 @@ function resolveProviderVisibility(
     return 'public';
   }
 
-  if (user.role === UserRole.SUPER_ADMIN) {
+  /*
+   * Any staff account gets the operator's projection (PR-0).
+   *
+   * This is a *view* decision, not an authorization one: it widens what an
+   * operator is shown, and which operators exist is decided by the route's
+   * permission before this runs. Keeping it on SUPER_ADMIN would mean two
+   * staff accounts holding the same read permission saw different profiles,
+   * which is the drift the single permission source exists to prevent.
+   */
+  if (isStaff(user)) {
     return 'admin';
   }
 
@@ -2053,7 +2066,18 @@ function ensureProviderUpdateAccess(
     throw new ForbiddenException('Provider profile requires authentication');
   }
 
-  if (user.role === UserRole.SUPER_ADMIN) {
+  /*
+   * Staff: a SUPER_ADMIN, or an ADMIN the route has already checked for
+   * PROVIDERS_WRITE (`@RequiresPermissionFromStaff`, RG-7 §12.3).
+   *
+   * This function is about *ownership* and always was; it says "an operator is
+   * not bound by it". Before PR-0 "an operator" could only mean SUPER_ADMIN,
+   * because no other staff kind existed — the widening here is the same rule
+   * with the same meaning, not a new exemption. What decides whether a
+   * particular operator may be here at all is the permission, and that has
+   * already been answered by the time this runs.
+   */
+  if (isStaff(user)) {
     return;
   }
 

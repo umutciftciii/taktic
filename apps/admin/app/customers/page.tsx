@@ -101,7 +101,7 @@ function buildPageHref(
 }
 
 export default async function AdminCustomersPage({ searchParams }: AdminCustomersPageProps) {
-  await requireAdmin();
+  await requireAdmin('CUSTOMERS_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();

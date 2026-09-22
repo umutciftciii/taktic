@@ -141,7 +141,7 @@ async function catalogueCounts() {
 
 async function operatorListing(): Promise<ListedCategory[]> {
   const response = await request(ctx.server)
-    .get('/categories?includeInactive=true')
+    .get('/admin/categories')
     .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN))
     .expect(200);
 
@@ -276,7 +276,7 @@ describe('the readiness figures a SUPER_ADMIN sees', () => {
     // And the count on the detail endpoint, which is what the screen that flips
     // the status reads.
     const detail = await request(ctx.server)
-      .get('/categories/banyo-yenileme?includeInactive=true')
+      .get('/admin/categories/banyo-yenileme')
       .set('Cookie', await cookieFor(UserRole.SUPER_ADMIN))
       .expect(200);
 
@@ -322,19 +322,27 @@ describe('none of it reaches a caller who is not an operator', () => {
   });
 
   it('refuses the operator view to an anonymous caller, a customer and a provider', async () => {
-    const callers: [string, string | null][] = [
-      ['anonim', null],
-      ['müşteri', await cookieFor(UserRole.CUSTOMER)],
-      ['hizmet veren', await cookieFor(UserRole.PROVIDER)],
+    /*
+     * Two refusals, and the difference is the point.
+     *
+     * An anonymous caller presented no credential, so the answer is 401 and the
+     * sign-in form. A customer or a provider presented a perfectly good one for
+     * an account that has no business here, so the answer is 403. Neither says
+     * a word about the unreleased wave.
+     */
+    const callers: [string, string | null, number][] = [
+      ['anonim', null, 401],
+      ['müşteri', await cookieFor(UserRole.CUSTOMER), 403],
+      ['hizmet veren', await cookieFor(UserRole.PROVIDER), 403],
     ];
 
-    for (const [who, cookie] of callers) {
+    for (const [who, cookie, expectedStatus] of callers) {
       for (const path of [
-        '/categories?includeInactive=true',
-        '/categories/banyo-yenileme?includeInactive=true',
+        '/admin/categories',
+        '/admin/categories/banyo-yenileme',
       ]) {
         const call = request(ctx.server).get(path);
-        const response = await (cookie ? call.set('Cookie', cookie) : call).expect(403);
+        const response = await (cookie ? call.set('Cookie', cookie) : call).expect(expectedStatus);
 
         // Not one word of the unreleased wave, and not one of its figures,
         // even in the refusal.

@@ -337,6 +337,53 @@ export async function createClaimableCustomer(
   return { id: user.id, email, name: user.name ?? name, phone: user.phone ?? '' };
 }
 
+/**
+ * A staff account holding exactly the permissions named (PR-0).
+ *
+ * `UserRole.ADMIN` with one role: the shape a real operations account has.
+ * Passing no permission produces the other case the panel must handle — an
+ * account that can sign in and cannot get past the door.
+ */
+export async function createStaffAdmin(permissions: string[]): Promise<SeededCustomer> {
+  const suffix = uniqueSuffix();
+  const email = `e2e-staff-${suffix}@example.test`;
+  const owner = await createAdmin();
+
+  const user = await prisma().user.create({
+    data: {
+      email,
+      phone: uniquePhone(),
+      name: `E2E Personel ${suffix}`,
+      role: 'ADMIN',
+      isActive: true,
+      passwordHash: await bcrypt.hash(FIXTURE_PASSWORD, PASSWORD_ROUNDS),
+    },
+    select: { id: true, name: true, phone: true },
+  });
+
+  const role = await prisma().adminRole.create({
+    data: {
+      key: `e2e-role-${suffix}`,
+      name: `E2E Rol ${suffix}`,
+      createdById: owner.id,
+      permissions: { create: permissions.map((permission) => ({ permission: permission as never })) },
+    },
+    select: { id: true },
+  });
+
+  await prisma().adminRoleAssignment.create({
+    data: { userId: user.id, roleId: role.id, assignedById: owner.id },
+  });
+
+  return {
+    id: user.id,
+    email,
+    password: FIXTURE_PASSWORD,
+    name: user.name ?? 'staff',
+    phone: user.phone ?? '',
+  };
+}
+
 export async function createAdmin(): Promise<SeededCustomer> {
   const suffix = uniqueSuffix();
   const email = `e2e-admin-${suffix}@example.test`;
