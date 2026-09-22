@@ -877,11 +877,16 @@ export type ProviderPromoLot = {
   campaignName: string;
 };
 
+/**
+ * The provider's own spendable promotion: total and the live lots, soonest
+ * expiry first. Served by `GET /providers/me/credits/promo` — the session's
+ * provider, no id on the request — never by the id-taking credits route.
+ */
+export type ProviderPromoCredits = { spendableCredits: number; lots: ProviderPromoLot[] };
+
 export type ProviderCredits = {
   providerId: string;
   balance: number;
-  /** The provider's own spendable promotion: total and the live lots, soonest expiry first. */
-  promo: { spendableCredits: number; lots: ProviderPromoLot[] };
   transactions: ProviderCreditTransaction[];
 };
 

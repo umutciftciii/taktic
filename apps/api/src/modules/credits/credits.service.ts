@@ -241,11 +241,8 @@ export class CreditsService {
 
   async getProviderCredits(providerId: string, options: { includeActor?: boolean } = {}) {
     await this.ensureProviderExists(providerId);
-    const [balance, promo, transactions] = await Promise.all([
+    const [balance, transactions] = await Promise.all([
       this.getProviderCreditBalance(providerId),
-      // CMP-004 S4: the provider's own spendable promotion, beside the
-      // balance it is part of. Same guard as the balance (ProviderAccessGuard).
-      readSpendablePromoLots(this.prisma, providerId, new Date()),
       this.prisma.providerCreditTransaction.findMany({
         where: { providerId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -259,9 +256,29 @@ export class CreditsService {
     return {
       providerId,
       balance,
-      promo,
       transactions,
     };
+  }
+
+  /**
+   * The signed-in provider's own spendable promotion (CMP-004 S4).
+   *
+   * Resolved from the session's account and nothing else: the route takes no
+   * provider id, so a caller cannot name another provider and learn — from a
+   * 403 against a 404, or from how long each takes — whether that id exists.
+   * An account that owns no profile is refused rather than answered with an
+   * empty list, so "no promotion" is never confused with "no provider".
+   */
+  async getMyPromoCredits(userId: string) {
+    const provider = await this.prisma.providerProfile.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!provider) {
+      throw new NotFoundException('Provider profile not found');
+    }
+    return readSpendablePromoLots(this.prisma, provider.id, new Date());
   }
 
   async listProviderCreditTransactions(

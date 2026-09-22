@@ -1,12 +1,14 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
+  ApiError,
   apiFetch,
   fetchOrNotFound,
   getCurrentUser,
   OfferCreditPackage,
   PaymentMode,
   ProviderCredits,
+  ProviderPromoCredits,
   getRefundPolicy,
   creditTxnTypeLabel,
   creditReasonLabel,
@@ -29,13 +31,19 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
     redirect(`/login?redirectTo=/providers/${id}/credits`);
   }
 
-  const [credits, packages, paymentMode, refundPolicy] = await Promise.all([
+  const [credits, promo, packages, paymentMode, refundPolicy] = await Promise.all([
     // Provider-scoped, so it is `fetchOrNotFound` rather than a bare fetch:
     // somebody else's provider id — or one that never existed — is refused with
     // 403 by ProviderAccessGuard, and an unwrapped 403 here became the generic
     // error boundary. A 404 is both the honest answer and the quiet one: it does
     // not confirm that the id names a real provider.
     fetchOrNotFound(() => apiFetch<ProviderCredits>(`/providers/${id}/credits`)),
+    // The promotion is the session's own: the `me` route takes no id, so this
+    // page cannot be made to ask about anyone else's, and the id-taking route
+    // above carries none. Never built from `id`. A session the route refuses
+    // (a super admin reading a provider's screen) simply sees no promotion
+    // block — it is the provider's own figure, not part of the page's data.
+    loadOwnPromoCredits(),
     apiFetch<OfferCreditPackage[]>('/credit-packages'),
     apiFetch<PaymentMode>('/payments/mode'),
     // The window a new offer would carry: this panel describes the promise
@@ -148,19 +156,19 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
           not a "usable" credit and is not listed — the ledger below tells that
           story. The figure is the API's sum, not one computed here.
         */}
-        {credits.promo.lots.length > 0 ? (
+        {promo.lots.length > 0 ? (
           <div className="credit-promo" data-testid="promo-credits">
             <div className="credit-promo-head">
               <span className="metric-label" style={{ textAlign: 'left' }}>
                 Kullanılabilir promosyon kredisi
               </span>
               <span className="credit-promo-total" data-testid="promo-credits-total">
-                {credits.promo.spendableCredits}
+                {promo.spendableCredits}
                 <small>kredi</small>
               </span>
             </div>
             <ul className="credit-promo-lots">
-              {credits.promo.lots.map((lot) => (
+              {promo.lots.map((lot) => (
                 <li key={lot.id} className="credit-promo-lot" data-testid="promo-lot" data-lot={lot.id}>
                   <span className="credit-promo-lot-amount">{lot.remainingCredits} kredi</span>
                   <span className="credit-promo-lot-meta">
@@ -367,4 +375,23 @@ export default async function ProviderCreditsPage({ params }: ProviderCreditsPag
       </section>
     </ProviderShell>
   );
+}
+
+/**
+ * The session's own promotion, or nothing.
+ *
+ * Only a PROVIDER session is answered by `/providers/me/credits/promo`; any
+ * other session that can open this screen (a super admin) is refused with 403
+ * and shown no block rather than an error page. Anything else is a real
+ * failure and propagates.
+ */
+async function loadOwnPromoCredits(): Promise<ProviderPromoCredits> {
+  try {
+    return await apiFetch<ProviderPromoCredits>('/providers/me/credits/promo');
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+      return { spendableCredits: 0, lots: [] };
+    }
+    throw error;
+  }
 }

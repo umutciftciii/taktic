@@ -24,7 +24,7 @@ grant/consume/refund/expire/revoke), S3 revoke/auto-pause/sayaç kuralları, web
 | A · E-posta | `notifications/transactional-mail.service.ts`, `templates/transactional-templates.ts` | `creditRefundedData(provider, offer, tx, settlement)`; yeni anahtarlar `promoRestoredCredits`, `promoForfeitedCredits`, `promoForfeitedExpiredCredits`, `promoForfeitedRevokedCredits`, `netCredits` (0 → null); `previousBalance/currentBalance` settlement'tan. Şablon: Y>0 iken `Geri alınan promosyon kredisi −Y`, `Net değişim +Z`, konu `net +Z kredi`, açıklama notu; R>0 iken "R kredisi promosyon kredisi olarak geri döndü". Retry yolu aynı okuyucu; `dedupeKey` değişmedi. |
 | A · Web | `providers/providers.service.ts`, `apps/web/lib/{api,formatters}.ts`, `offers/offers-table.tsx`, `offers/[offerId]/page.tsx`, `credits/page.tsx` | `creditRefundSettlement` (liste + detay, tek toplu sorgu); `refundSettlementSummary` → `+X iade` / `+X iade · −Y promosyon geri alındı · net +Z` + neden; `creditTxnTypeLabel` + `creditReasonLabel` (kod yerine Türkçe). |
 | **B · Admin ledger** | `finance/finance.service.ts`, `apps/admin/lib/{api,finance-format}.ts`, `finance/credit-ledger/page.tsx`, `providers/[id]/credits/transactions-panel.tsx` | `items[].campaign {id,name,versionNumber}` (3 referans türü için toplu lookup, diğerlerinde null); üç `CAMPAIGN_*` etiket + rozet (GRANT yeşil / EXPIRE nötr / REVOKE kırmızı) + tür filtresi; reason kuyrukları etikete katlanır; "Kampanya · ad · sürüm N" → `/campaigns/<id>`; sağlayıcı kredi panelinde "Promosyon" filtresi + aynı etiketler. |
-| **C · Sağlayıcı promo** | `credits/promo-credit-ledger.ts` (+`readSpendablePromoLots`), `credits/credits.service.ts`, web `credits/page.tsx`, `globals.css` | `GET /providers/:id/credits.promo = { spendableCredits, lots[{id, remainingCredits, expiresAt, campaignName}] }` (spend predicate + sıra); kredi sayfasında yalnız lot varken görünen blok (`data-testid=promo-credits`). |
+| **C · Sağlayıcı promo** (rev. 2) | `credits/promo-credit-ledger.ts` (+`readSpendablePromoLots`), `credits/credits.{service,controller}.ts`, web `credits/page.tsx`, `lib/api.ts`, `globals.css` | `GET /providers/me/credits/promo = { spendableCredits, lots[{id, remainingCredits, expiresAt, campaignName}] }` — PROVIDER rolü, sağlayıcı yalnız oturumdan, handler'da `@Param/@Query/@Body/@Headers` yok; `:id/credits` yanıtında `promo` yok, `/providers/<id>/credits/promo` route değil (404). Web yalnız `me` yolunu çağırır (`loadOwnPromoCredits`); kredi sayfasında yalnız lot varken görünen blok (`data-testid=promo-credits`). |
 | **D · Migration G** | `prisma/migrations/20260922120000_campaign_audit_system_actor/`, `schema.prisma`, `campaign-revoke.service.ts`, `campaigns.service.ts`, admin `campaigns/[id]/page.tsx`, `lib/api.ts` | `actorId DROP NOT NULL` + CHECK `CampaignAuditLog_system_actor_marked`; `actor User? … onDelete: Restrict` (açık); webhook revoke → `REDEMPTION_REVOKED` SYSTEM audit, `AUTO_PAUSED` `actorId=null`; `CampaignAuditView.actor: ActorView \| null`; UI "Sistem (ödeme iadesi)". |
 | **E · Motor anahtarı** | `operations-settings/campaign-engine-settings.{service,controller}.ts`, `operations-settings.module.ts`, admin `operations-settings/{page,actions,campaign-engine-toggle}.tsx`, `campaigns/engine-notice.tsx`, `campaigns/[id]/page.tsx`, `globals.css` | `GET/PUT /operations-settings/campaign-engine` (SUPER_ADMIN); `#kampanya-motoru` kartı: durum pili, etki metni, zorunlu onay kutusu + "Motoru aç/kapat", son değişiklikler; kampanya ekranları karta bağlanır. |
 | Testler | §5 | API +5 spec/+27 test, güncellenen 4 spec; web +1 spec (6); admin +1 spec (5); E2E +2 spec (Chromium + WebKit). |
@@ -97,13 +97,32 @@ ALTER TABLE "CampaignAuditLog" ADD CONSTRAINT "CampaignAuditLog_system_actor_mar
 
 | Yüzey | Kontrol | Test |
 | --- | --- | --- |
-| `GET /providers/:id/credits` | anon 401; CUSTOMER 403; başka PROVIDER 403 (kendi görünümü boş promo); SUPER_ADMIN 200; JSON'da `definition/rulesSnapshot/conditions/limits/maxRedemptions/redemptionId/campaignId/key` yok; expired/unswept/revoked/exhausted lot dışarıda, sıra en yakın son kullanma | `provider-promo-visibility.spec` #1–#4 |
+| `GET /providers/me/credits/promo` | anon 401; CUSTOMER ve SUPER_ADMIN 403; PROVIDER yalnız kendi lotları (request'teki başka id'ler okunmaz); profilsiz 404; JSON'da `definition/rulesSnapshot/conditions/limits/maxRedemptions/redemptionId/campaignId/key/providerId/revokeNote` yok; expired/unswept/revoked/exhausted lot dışarıda, sıra en yakın son kullanma; `:id/credits` promo taşımaz, `/providers/<id>/credits/promo` her id için 404 | `provider-promo-visibility.spec` #1–#9 |
 | Sağlayıcı teklif listesi/detayı | yalnız iade edilmiş teklifte `creditRefundSettlement`; müşteri `GET /service-requests/:id/offers` anahtarsız, "promo" geçmez | `offer-refund-settlement.spec` #9 |
 | Admin ledger | SUPER_ADMIN dışı 401/403; `revokeNote` (`GIZLI-NOT`), `rulesSnapshot`, `definition` yok; bilinmeyen tür 400; eski filtre/pagination | `finance-credit-ledger-campaign.spec` #2–#4 |
 | Audit JSON | `LEMON_BUYER_EMAIL`/isim/referans/secret yok (SYSTEM satırları dahil) | `campaign-refund-revoke.spec` "stores no buyer detail" + eşik testi |
 | E-posta | `UNVIEWED_OFFER_48H` kodu yok; "borç" kelimesi yok | events spec (mevcut), render #2 |
 | Web E2E | sağlayıcı sayfasında başka işletmenin adı/kampanya adı yok; başka sağlayıcı kimliğiyle sayfa 404 ve blok yok; HTML'de `PROMO_LOT_EXPIRED`/`CAMPAIGN_GRANT` kodu yok | `provider-promo-credits` |
 | Admin E2E | sağlayıcı oturumu `/login`; ekran HTML'inde sağlayıcı e-posta/telefon yok (S3 spec korunur) | `admin-campaign-engine-toggle` #2, `admin-campaign-operations` #1 |
+
+### 5a. Pre-merge güvenlik revizyonu: promo endpoint'i (rev. 2)
+
+**Sorun.** Rev. 1 promo projeksiyonunu `GET /providers/:id/credits` yanıtına eklemişti. Yol id aldığından sahibi olmayan bir sağlayıcı farklı
+id'leri deneyebilir; `ProviderAccessGuard`'ın 403'ü ile var olmayan id'nin davranışı (ya da guard'ın profil sorgusunun süresi) **sağlayıcı
+kimliği yoklama (ID enumeration)** sinyali verir. Promo, oturum sahibinin kendi verisidir; id ile adreslenmesi gerekmez.
+
+**Değişiklik.** `:id/credits` yanıtından `promo` kaldırıldı. Yeni ve tek yol `GET /providers/me/credits/promo`: `AuthGuard + RolesGuard`,
+`@Roles(PROVIDER)`, handler yalnız `@CurrentUser()` okur (kaynak sözleşme testi `@Param/@Query/@Body/@Headers` yokluğunu korur), sağlayıcı
+`providerProfile.findFirst({ userId })` ile türetilir, profilsiz hesap 404. Statik `me` yolu id alan kredi rotalarından **önce** bildirildi ve
+segment sayısı farklı olduğundan çakışmaz (`providers/me/credits/promo` ≠ `providers/:providerId/credits`). Eski yol `/providers/<id>/credits/promo`
+alias/redirect/403 **değil**, var olmayan route'tur: mevcut/geçersiz/`me-not-quite` her id ve anon/sahip/yabancı/admin her oturum için aynı 404
+(test #8) — id'nin varlığı hakkında sıfır bilgi. Web sayfası promo'yu yalnız `'/providers/me/credits/promo'` ile okur, `id`'den yol kurmaz
+(kaynak testi `apps/web/test/provider-promo-endpoint.spec.ts`); rolü reddedilen oturum (admin) boş blok görür, hata sayfası değil.
+Projeksiyon/sıralama değişmedi; admin ledger, settlement, toggle ve Migration G koduna dokunulmadı.
+
+**Testler (`provider-promo-visibility.spec.ts`, 9):** kendi lotları/sıra/toplam; boş; sızıntı (kural, `providerId`, `revokeNote` yok); anon 401,
+CUSTOMER/SUPER_ADMIN 403; ikinci PROVIDER query/header/body ile başka id gönderse de yalnız kendi 2 kredisi ve yanıtta ilk sağlayıcının id'si yok;
+profilsiz 404; `:id/credits` yanıtında `promo` yok (sahip + admin); eski yol her id/oturum için 404; handler kaynak sözleşmesi.
 
 ## 6. Değişen dosyalar
 
