@@ -87,6 +87,31 @@ işaretlenebilen ama hiçbir şey açmayan bir kutudur (D11) — ve rota haritas
 
 ## 7. CI
 
+PR [#105](https://github.com/umutciftciii/taktic/pull/105) · kod commit'i `609a94ad` · run
+[35761161875](https://github.com/umutciftciii/taktic/actions/runs/35761161875) · **3/3 geçti**.
+
 | Job | Sonuç |
 | --- | --- |
-| — | PR açıldıktan sonra doldurulacak |
+| `typecheck · lint · test · build` | pass |
+| `e2e (chromium)` | pass |
+| `e2e (webkit · sign-in and mobile shells)` | pass |
+
+Ayrıca yerelde tam E2E paketi bağımsız olarak koşuldu: **293/293 geçti** (8.2 dk).
+
+### İlk koşu kırmızıydı — ne çıktı
+
+`511f6f72` ile açılan ilk koşuda `typecheck · lint · test · build` geçti, iki E2E job'ı kırıldı. Log'daki
+40+ kırmızı satırın yalnız **ikisi** gerçekti (16.3s süreyle); gerisi **0ms** ile "başarısız" görünüyordu,
+yani paket ilk gerçek hatalardan sonra bayılmıştı. Süre sütunu, kök nedeni enkazdan ayıran şeydi.
+
+Gerçek hata bir test kaprisi değil, **tasarımın kendisindeydi**: 403'ü toptan `/yetkisiz`'e yönlendirmek,
+iki farklı durumu birbirine karıştırıyordu.
+
+| Kim | Ne yanlış | Doğru yer |
+| --- | --- | --- |
+| Sağlayıcı/müşteri oturumu admin sayfasında | Yanlış türde hesapla girmiş | `/login` — izinler öncesindeki davranış |
+| Rolsüz veya izinsiz personel | Doğru hesap, yetersiz yetki | `/yetkisiz` — açıklama |
+
+Düzeltme (`609a94ad`): guard'lar reddedişi adlandırıyor — `NOT_STAFF`, `ADMIN_ACCESS_DENIED`,
+`INSUFFICIENT_PERMISSION`. Panel yalnız `NOT_STAFF`'ı giriş formuna yolluyor. Kod **hangi** iznin eksik
+olduğunu asla söylemiyor (onu sayan bir 403, paneli yoklayana haritayı verir) ve bu da teste bağlandı.
