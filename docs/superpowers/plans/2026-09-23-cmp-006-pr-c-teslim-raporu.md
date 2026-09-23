@@ -207,4 +207,4 @@ Kampanya motoru, `PURCHASE_TERMS_GATE`, fraud kuralları, fingerprint ve kayıt 
 | Web / admin birim, typecheck, lint, build | 355/355 · 78/78 · temiz · başarılı |
 | Tam Chromium E2E | **302/302** (8.5 dk) |
 | Tam WebKit E2E | **131/131** (3.9 dk) |
-| CI | _bekleniyor_ |
+| CI (`3b20b6c6`) | **3/3 yeşil** (verify ✅, e2e chromium ✅, e2e webkit ✅) |
