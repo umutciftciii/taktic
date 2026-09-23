@@ -23,7 +23,13 @@ import {
 } from '../../categories/category-taxonomy';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
-import { BUSINESS_REGISTRATION_STATUS_LABELS, businessRegistrationLabel } from '../../../lib/business-registration';
+import {
+  BUSINESS_REGISTRATION_STATUS_LABELS,
+  ELIGIBILITY_DECISION_LABELS,
+  businessRegistrationLabel,
+  eligibilitySignalLabel,
+  type PromotionEligibilityHoldView,
+} from '../../../lib/business-registration';
 import { RawRegistrationReveal } from './raw-registration-reveal';
 import { StatCard } from '../../../components/stat-card';
 import { EmptyState } from '../../../components/empty-state';
@@ -135,7 +141,7 @@ export default async function ProviderDetailPage({
   params,
   searchParams,
 }: ProviderDetailPageProps) {
-  const { can, isSuperAdmin } = await requireAdmin('PROVIDERS_READ_DETAIL');
+  const { can } = await requireAdmin('PROVIDERS_READ_DETAIL');
   const { id } = await params;
   const { claimInvite, categoryQuery: rawCategoryQuery, categoryNotice } = await searchParams;
   // An unknown id — including a path like /providers/new that falls through to
@@ -144,27 +150,39 @@ export default async function ProviderDetailPage({
     apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`),
   );
 
-  // Two reads rather than one: the bindings come from the endpoint that owns
-  // the "does this count for release" answer, and the catalogue is the same
-  // operator's view the categories screen uses. Neither is reachable without a
-  // SUPER_ADMIN session, which is what makes drafts nameable here and nowhere
-  // else.
-  const [serviceCategories, categories, reviews] = await Promise.all([
-    apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`),
-    listCatalogueForFilter(),
-    // The provider's own list, which the provider route serves to an operator
-    // as well. A failure hides the card rather than the screen: the reviews
-    // are context here, not the subject.
-    //
-    // SUPER_ADMIN only: that route's guard (ProviderAccessGuard) admits the
-    // owner and SUPER_ADMIN, and `apiFetch` turns its 403 into a redirect to
-    // /yetkisiz — which took the whole page away from every role-based staff
-    // account (found in CMP-006 PR-C). The card is context; its absence is not.
-    isSuperAdmin
-      ? apiFetch<ProviderReviewsPage>(`/providers/${id}/reviews?limit=10`).catch((error: unknown) => {
-          if (error instanceof ApiError) return null;
-          throw error;
-        })
+  // Every card beyond the profile itself is read under its own permission
+  // (CMP-006 PR-C.1). `apiFetch` turns a 403 into a redirect to /yetkisiz, so
+  // an unguarded read the account may not make would take the whole page away
+  // — which is what happened to every role-based staff account before. A card
+  // the account may not read is absent, and the API still refuses the read.
+  //
+  // The bindings come from the endpoint that owns the "does this count for
+  // release" answer (PROVIDERS_READ); the catalogue is the operator's view
+  // the categories screen uses (it answers an empty list without CATALOG_READ).
+  const canReadBindings = can('PROVIDERS_READ');
+  const canReadReviews = can('PROVIDER_REVIEWS_READ');
+  const canReadEligibility = can('PROMOTION_ELIGIBILITY_REVIEW');
+  const [serviceCategories, categories, reviews, eligibility] = await Promise.all([
+    canReadBindings
+      ? apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`)
+      : Promise.resolve(null),
+    canReadBindings ? listCatalogueForFilter() : Promise.resolve([]),
+    // The operator's own route (PROVIDER_REVIEWS_READ), not the provider
+    // panel's: that one is ownership-guarded. A failure hides the card rather
+    // than the screen — the reviews are context here, not the subject.
+    canReadReviews
+      ? apiFetch<ProviderReviewsPage>(`/provider-reviews/by-provider/${encodeURIComponent(id)}?limit=10`).catch(
+          (error: unknown) => {
+            if (error instanceof ApiError) return null;
+            throw error;
+          },
+        )
+      : Promise.resolve(null),
+    // This provider's promotion eligibility holds, open and decided.
+    canReadEligibility
+      ? apiFetch<{ items: PromotionEligibilityHoldView[] }>(
+          `/admin/promotion-eligibility/holds?filter=all&providerId=${encodeURIComponent(id)}`,
+        )
       : Promise.resolve(null),
   ]);
 
@@ -184,7 +202,7 @@ export default async function ProviderDetailPage({
 
   const categoryQuery = (rawCategoryQuery ?? '').trim();
   const categoryNoticeMessage = categoryNotice ? CATEGORY_NOTICES[categoryNotice] : undefined;
-  const bindings = serviceCategories.serviceCategories;
+  const bindings = serviceCategories?.serviceCategories ?? [];
   const boundCategoryIds = new Set(bindings.map((binding) => binding.categoryId));
 
   // The same rule the API enforces, restated so the screen never offers a
@@ -329,6 +347,7 @@ export default async function ProviderDetailPage({
           </dl>
         </SectionCard>
 
+        {serviceCategories ? (
         <SectionCard
           className="card-wide"
           title="Hizmet kategorileri"
@@ -471,6 +490,7 @@ export default async function ProviderDetailPage({
             </p>
           ) : null}
         </SectionCard>
+        ) : null}
 
         <SectionCard title="Hizmet bölgeleri">
           {provider.serviceAreas.length === 0 ? (
@@ -663,6 +683,29 @@ export default async function ProviderDetailPage({
           )}
         </SectionCard>
 
+        {eligibility ? (
+          <SectionCard title="Promosyon uygunluğu" className="card-wide">
+            {eligibility.items.length === 0 ? (
+              <p className="cell-muted" style={{ margin: 0 }} data-testid="provider-eligibility-empty">
+                Bu hizmet veren için uygunluk incelemesi yok.
+              </p>
+            ) : (
+              <ul className="plain-list" data-testid="provider-eligibility">
+                {eligibility.items.map((hold) => (
+                  <li key={hold.eventId}>
+                    <Link className="cell-link" href={`/promotion-eligibility/${hold.eventId}`}>
+                      {formatDateTime(hold.heldAt)}
+                    </Link>{' '}
+                    · {hold.snapshot.signals.map((signal) => eligibilitySignalLabel(signal.code)).join(' · ')} ·{' '}
+                    {hold.review ? ELIGIBILITY_DECISION_LABELS[hold.review.decision] : 'Karar bekliyor'}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
+        ) : null}
+
+        {canReadReviews ? (
         <SectionCard
           title="Değerlendirmeler"
           subtitle={
@@ -740,6 +783,7 @@ export default async function ProviderDetailPage({
             </div>
           )}
         </SectionCard>
+        ) : null}
 
         <SectionCard
           title="Son paket alımları"

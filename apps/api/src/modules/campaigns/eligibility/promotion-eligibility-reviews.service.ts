@@ -44,9 +44,16 @@ type HoldRow = Prisma.PromotionEligibilityHoldGetPayload<{ select: typeof holdSe
 export class PromotionEligibilityReviewsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async list(filter: 'open' | 'decided') {
+  /**
+   * The queue, or — with `providerId` — one provider's holds, which is the
+   * eligibility context the operator's provider page shows (PR-C.1).
+   */
+  async list(filter: 'open' | 'decided' | 'all', providerId: string | null = null) {
     const rows = await this.prisma.promotionEligibilityHold.findMany({
-      where: filter === 'open' ? { review: { is: null } } : { review: { isNot: null } },
+      where: {
+        ...(filter === 'open' ? { review: { is: null } } : filter === 'decided' ? { review: { isNot: null } } : {}),
+        ...(providerId ? { providerId } : {}),
+      },
       orderBy: [{ heldAt: filter === 'open' ? 'asc' : 'desc' }, { id: 'asc' }],
       take: 100,
       select: holdSelect,

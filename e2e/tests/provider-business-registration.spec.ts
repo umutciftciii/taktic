@@ -29,8 +29,13 @@ import { primaryRuntime } from '../src/runtime';
 const TCKN = '10000000146';
 const TCKN_MASKED = '*********46';
 
-/* DASHBOARD_READ so the landing page after sign-in is not /yetkisiz (WebKit race, see package-refund-request.spec). */
-const DETAIL = ['DASHBOARD_READ', 'PROVIDERS_READ', 'PROVIDERS_READ_DETAIL'];
+/*
+ * The fraud reviewer role (PR-C.1): existing permissions, assigned one by one.
+ * DASHBOARD_READ so the landing page after sign-in is not /yetkisiz (WebKit
+ * race, see package-refund-request.spec). No PROVIDERS_READ: the provider page
+ * must open without the list permission.
+ */
+const REVIEWER = ['DASHBOARD_READ', 'PROMOTION_ELIGIBILITY_REVIEW', 'PROVIDERS_READ_DETAIL', 'PROVIDER_REVIEWS_READ'];
 
 test.describe('business registration', () => {
   test('declared on the application, masked everywhere, revealed once with the sensitive permission', async ({ browser }) => {
@@ -38,9 +43,11 @@ test.describe('business registration', () => {
     const location = uniqueLocation();
     const businessName = `E2E Şahıs ${uniqueSuffix()}`;
     const applicant = await Actor.open(browser, 'applicant', primaryRuntime);
-    const viewerAccount = await createStaffAdmin(DETAIL);
-    const revealerAccount = await createStaffAdmin([...DETAIL, 'PROVIDER_REGISTRATION_READ_SENSITIVE']);
+    const viewerAccount = await createStaffAdmin(REVIEWER);
+    const listerAccount = await createStaffAdmin(['DASHBOARD_READ', 'PROVIDERS_READ']);
+    const revealerAccount = await createStaffAdmin([...REVIEWER, 'PROVIDER_REGISTRATION_READ_SENSITIVE']);
     const viewer = await Actor.open(browser, 'viewer', primaryRuntime);
+    const lister = await Actor.open(browser, 'lister', primaryRuntime);
     const revealer = await Actor.open(browser, 'revealer', primaryRuntime);
 
     try {
@@ -94,16 +101,23 @@ test.describe('business registration', () => {
       });
       expect(provider.businessRegistration).toEqual({ type: 'SOLE_PROPRIETOR_TR_ID', numberCanonical: TCKN, numberMasked: TCKN_MASKED });
 
-      // The detail permission shows the mask and no way to the raw value.
+      // The reviewer role opens the provider page — the mask, the reviews and the
+      // eligibility context — and has no way to the raw value.
       await viewer.loginToAdmin(viewerAccount.email, viewerAccount.password);
       await viewer.gotoAdmin(`/providers/${provider.id}`);
       await assertNoErrorScreen(viewer.page);
+      await expect(viewer.page).not.toHaveURL(/\/yetkisiz/);
       await expect(viewer.page.getByTestId('registration-masked')).toHaveText(TCKN_MASKED);
       await expect(viewer.page.getByTestId('registration-reveal')).toHaveCount(0);
+      await expect(viewer.page.getByRole('heading', { name: 'Değerlendirmeler' })).toBeVisible();
+      await expect(viewer.page.getByTestId('provider-eligibility-empty')).toBeVisible();
       expect(await viewer.page.content()).not.toContain(TCKN);
-      await viewer.gotoAdmin('/providers');
-      await expect(viewer.page.getByTestId('provider-registration').filter({ hasText: TCKN_MASKED })).toHaveCount(1);
-      expect(await viewer.page.content()).not.toContain(TCKN);
+
+      // The list permission alone: masked in the list.
+      await lister.loginToAdmin(listerAccount.email, listerAccount.password);
+      await lister.gotoAdmin('/providers');
+      await expect(lister.page.getByTestId('provider-registration').filter({ hasText: TCKN_MASKED })).toHaveCount(1);
+      expect(await lister.page.content()).not.toContain(TCKN);
 
       // The sensitive permission reveals it — and that is one logged read.
       await revealer.loginToAdmin(revealerAccount.email, revealerAccount.password);
@@ -119,6 +133,7 @@ test.describe('business registration', () => {
     } finally {
       await applicant.close();
       await viewer.close();
+      await lister.close();
       await revealer.close();
     }
   });
@@ -159,7 +174,7 @@ test.describe('promotion eligibility queue', () => {
     });
 
     const readerAccount = await createStaffAdmin(['DASHBOARD_READ', 'CAMPAIGNS_READ']);
-    const reviewerAccount = await createStaffAdmin(['DASHBOARD_READ', 'PROMOTION_ELIGIBILITY_REVIEW']);
+    const reviewerAccount = await createStaffAdmin(REVIEWER);
     const reader = await Actor.open(browser, 'reader', primaryRuntime);
     const reviewer = await Actor.open(browser, 'reviewer', primaryRuntime);
 
@@ -179,6 +194,17 @@ test.describe('promotion eligibility queue', () => {
       await expect(reviewer.page).toHaveURL(new RegExp(`/promotion-eligibility/${event.id}`));
       await expect(reviewer.page.getByTestId('eligibility-signals')).toContainText('İşletme kaydı beyan edilmedi');
       await expect(reviewer.page.getByRole('link', { name: seeded.campaign.name })).toBeVisible();
+
+      // The provider link on the hold opens the provider page for this role
+      // (PR-C.1: it used to send every role-based account to /yetkisiz), with
+      // the hold in its eligibility context.
+      await reviewer.page.getByRole('link', { name: provider.businessName }).first().click();
+      await expect(reviewer.page).toHaveURL(new RegExp(`/providers/${provider.id}$`));
+      await assertNoErrorScreen(reviewer.page);
+      await expect(reviewer.page.getByTestId('provider-eligibility')).toContainText('İşletme kaydı beyan edilmedi');
+      await expect(reviewer.page.getByTestId('registration-reveal')).toHaveCount(0);
+      await reviewer.page.goBack();
+      await expect(reviewer.page).toHaveURL(new RegExp(`/promotion-eligibility/${event.id}`));
 
       // No reason: the browser stops it; nothing is recorded.
       await reviewer.page.getByTestId('eligibility-decision-select').selectOption('INELIGIBLE');

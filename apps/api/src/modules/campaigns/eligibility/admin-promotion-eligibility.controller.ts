@@ -22,8 +22,8 @@ export class AdminPromotionEligibilityController {
 
   @Get('holds')
   @RequiresPermission(AdminPermission.PROMOTION_ELIGIBILITY_REVIEW)
-  list(@Query('filter') filter?: string) {
-    return this.reviews.list(filter === 'decided' ? 'decided' : 'open');
+  list(@Query('filter') filter?: string, @Query('providerId') providerId?: string) {
+    return this.reviews.list(filter === 'decided' ? 'decided' : filter === 'all' ? 'all' : 'open', providerId?.trim() || null);
   }
 
   @Get('holds/:eventId')

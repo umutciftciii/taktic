@@ -211,6 +211,16 @@ Kuyruk okuması da `PROMOTION_ELIGIBILITY_REVIEW` ister: snapshot, sağlayıcı 
 görür, snapshot'ı görmez. `SUPER_ADMIN` her ikisine örtük sahiptir. `PROVIDERS_READ_DETAIL` artık ham vergi
 numarası taşımaz (enum yorumu güncellendi).
 
+### 4.1 PR-C.1 — inceleme rolünün sağlayıcı detayına erişimi
+
+Yeni izin yok. Admin sağlayıcı detayı artık her kartı kendi izniyle okur: kategori bağları `PROVIDERS_READ`,
+müşteri değerlendirmeleri yeni admin rotası `GET /provider-reviews/by-provider/:providerId` (`PROVIDER_REVIEWS_READ`),
+uygunluk bağlamı `GET /admin/promotion-eligibility/holds?providerId=` (`PROMOTION_ELIGIBILITY_REVIEW`), ham kayıt
+`…/business-registration/raw` (`PROVIDER_REGISTRATION_READ_SENSITIVE`). Sağlayıcı panelinin sahiplik korumalı
+`GET /providers/:providerId/reviews` rotası değişmedi. Önerilen fraud inceleme rolü: `PROMOTION_ELIGIBILITY_REVIEW` +
+`PROVIDERS_READ_DETAIL` + `PROVIDER_REVIEWS_READ` (+ gerekirse `PROVIDER_REGISTRATION_READ_SENSITIVE`). Erişim
+matrisi: teslim raporu §7.2.
+
 ## 5. UI
 
 - **Web başvuru** (açık + davetli): "İşletme kaydı" bölümü — tür seçimi (zorunlu, `NONE_DECLARED` dahil) + numara;

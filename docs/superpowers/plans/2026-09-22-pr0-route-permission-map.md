@@ -881,3 +881,34 @@ değildir; bu tabloya girmez. Operatörün kanonik kaydı yazdığı bir rota **
 `PROVIDERS_READ` artık ham vergi/kayıt numarası taşımaz (maskeli; listede eski vergi numarası hiç yok).
 Mevcut `GET /admin/campaigns/:id/evaluation-events` (`CAMPAIGNS_READ`) `HELD_FOR_REVIEW` durumunu görür, snapshot'ı
 görmez; `POST …/retry` held event'i kabul etmez (409 `CAMPAIGN_EVENT_NOT_RETRYABLE`).
+
+### 15.1 CMP-006 PR-C.1 düzeltmesi (2026-09-23)
+
+İzin sayısı değişmez (**82**); yeni izin yok, mevcut izinler rotaya açıkça bağlandı.
+
+`provider-reviews/admin-provider-reviews.controller.ts` — sınıf düzeyi guard (`AuthGuard, AdminAccessGuard, PermissionsGuard`).
+
+| HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/provider-reviews/by-provider/:providerId` | `listForProvider` | Bir sağlayıcının müşteri değerlendirmeleri (admin sağlayıcı detayı kartı) | `PROVIDER_REVIEWS_READ` | KİŞİSEL VERİ (yorum) |
+
+`GET /admin/promotion-eligibility/holds` artık `providerId` ve `filter=all` alır (aynı rota, aynı izin) — admin sağlayıcı
+detayındaki "Promosyon uygunluğu" kartı.
+
+**Neden:** admin sağlayıcı detayı değerlendirme kartını sağlayıcı panelinin `GET /providers/:providerId/reviews`
+rotasından okuyordu; o rota `ProviderAccessGuard` ile yalnız sahibe + `SUPER_ADMIN`'e açık ve `apiFetch` 403'ü
+`/yetkisiz`e çevirdiği için sayfa rol atanmış **hiçbir** `ADMIN`'e açılmıyordu. `ProviderAccessGuard` değiştirilmedi
+(personele toplu erişim verilmez); admin yüzeyi kendi izinli rotasını kullanır ve sayfadaki her kart kendi iznine
+bağlıdır (`PROVIDERS_READ` → kategori bağları, `PROVIDER_REVIEWS_READ` → değerlendirmeler,
+`PROMOTION_ELIGIBILITY_REVIEW` → uygunluk bağlamı, `PROVIDER_REGISTRATION_READ_SENSITIVE` → ham kayıt).
+
+**Fraud inceleme rolü (önerilen, yalnız mevcut izinler):** `PROMOTION_ELIGIBILITY_REVIEW` + `PROVIDERS_READ_DETAIL` +
+`PROVIDER_REVIEWS_READ`; ham kayıt gerekirse ayrıca `PROVIDER_REGISTRATION_READ_SENSITIVE`.
+
+| Hesap | Kuyruk / hold / karar | Sağlayıcı detayı | Değerlendirmeler | Ham kayıt |
+| --- | --- | --- | --- | --- |
+| `SUPER_ADMIN` | ✅ | ✅ | ✅ | ✅ (+ audit) |
+| İnceleme rolü | ✅ | ✅ (maskeli) | ✅ | 403 |
+| Yalnız hassas izin | 403 | 403 | 403 | ✅ (+ audit) |
+| İnceleme + hassas | ✅ | ✅ (maskeli) | ✅ | ✅ (+ audit) |
+| İzinsiz `ADMIN` | 403 | 403 | 403 | 403 |

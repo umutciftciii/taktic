@@ -65,6 +65,8 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/admin/promotion-eligibility/holds/:eventId', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
   { method: 'POST', path: '/admin/promotion-eligibility/holds/:eventId/decision', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
   { method: 'GET', path: '/providers/:providerId/business-registration/raw', permission: AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE },
+  // CMP-006 PR-C.1: the operator's read of one provider's reviews (the provider panel's route stays ownership-guarded).
+  { method: 'GET', path: '/provider-reviews/by-provider/:providerId', permission: AdminPermission.PROVIDER_REVIEWS_READ },
   { method: 'GET', path: '/admin/offer-packages/:id', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/offer-packages/unlimited-eligible-categories', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/showcase/cards', permission: AdminPermission.SHOWCASE_CARDS_READ },

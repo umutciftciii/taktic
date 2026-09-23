@@ -20,9 +20,9 @@ checkout'un test/e2e DB'leri). Kampanya DSL'i (`campaign-rules.json`) değişmed
 | Yeni rota | Admin 4 (route-map'te) · Sağlayıcı 2 (`GET/PUT /providers/me/business-registration`) · başvuru gövdeleri += kayıt çifti |
 | Yeni env | `PROMOTION_FINGERPRINT_KEY`, `PROMOTION_FINGERPRINT_KEY_VERSION` — local/test'te boş geçer, staging/prod'da zorunlu (boot reddi); compose + `.env.example` güncellendi |
 | Yeni API testi | **111** (kurallar/normalizasyon 13 blok · anahtar sözleşmesi 6 · karar matrisi 8 blok · HTTP kayıt/sızıntı/audit 24 · kapı/hold/karar/sayaç 25) |
-| Tam API paketi | **168 dosya / 3652 test** — ilk koşuda 1 gerileme (`campaign-engine-settings`, fixture), düzeltildi ve yeniden geçti |
+| Tam API paketi | **169 dosya / 3656 test** (PR-C.1 sonrası) |
 | Web / admin birim | web 355/355 (yeni 4) · admin 78/78 (yeni 4) |
-| E2E | Yeni 2 senaryo · tam Chromium **301/302** → tek hata B7 ile düzeltildi, dosya yeniden 2/2 · mevcut 3 başvuru spec'i tür seçimiyle güncellendi |
+| E2E | Rev. 1: Chromium 301/302 (B7). **PR-C.1: Chromium 302/302, WebKit 131/131** — §7.4 |
 | typecheck | api (src + test), web, admin, e2e, shared temiz |
 
 ## 2. Görev tanımının maddeleri
@@ -66,11 +66,8 @@ checkout'un test/e2e DB'leri). Kampanya DSL'i (`campaign-rules.json`) değişmed
 - **B5 — Sayaç geri alınmaz.** Revoke edilen bir grant sayaçta kalır (kampanya `redemptionCount` ile aynı ilke:
   kümülatif). Bir sonraki hesapta REVIEW üretir, hard reject değil.
 - **B6 — Admin kuyruğu `admin/promotion-eligibility` altında**; `admin/campaigns/:id` onu yakalardı.
-- **B7 — Admin sağlayıcı detayı rol atanmış hiçbir ADMIN'e açılmıyordu (PR-0'dan kalan hata).** Sayfa değerlendirme
-  kartını `GET /providers/:providerId/reviews`'tan okuyor; o rotanın `ProviderAccessGuard`'ı yalnız sahip +
-  SUPER_ADMIN kabul ediyor ve `apiFetch` 403'ü `/yetkisiz`e yönlendiriyor. E2E bunu yakaladı. Asgari düzeltme: kart
-  yalnız SUPER_ADMIN için çekiliyor (kart bağlamdır, sayfanın konusu değil). Rolle değerlendirme okumanın düzgün
-  yolu (`PROVIDER_REVIEWS_READ` ile admin rotası) ayrı iş.
+- **B7 — Admin sağlayıcı detayı rol atanmış hiçbir ADMIN'e açılmıyordu (PR-0'dan kalan ürün hatası).** Rev. 1'deki
+  "kartı yalnız SUPER_ADMIN'e yükle" yaması geri alındı; kalıcı çözüm PR-C.1'de — §7.
 
 ## 4. Değişmeyenler
 
@@ -95,3 +92,55 @@ erişimi, public projeksiyonlar.
   admin sağlayıcı detayındaki kart koşuludur (SUPER_ADMIN davranışı aynı).
 - CI (PR #108, `cb947b16`): **3/3 yeşil** — typecheck · lint · test · build ✅, e2e (chromium) ✅, e2e (webkit) ✅.
   Merge ve yerel eşitleme yapılmadı; karar kullanıcıda.
+
+## 7. PR-C.1 — merge öncesi erişim ve E2E kapanışı
+
+### 7.1 301/302'nin kök nedeni
+
+| Soru | Cevap |
+| --- | --- |
+| Tekrar üretildi mi? | **Evet, deterministik.** Rev. 1 yaması geri alınıp admin yeniden derlendi; `pnpm e2e provider-business-registration` aynı adımda aynı hatayla düştü (`registration-masked` bulunamadı, sayfa `/yetkisiz`) |
+| Sınıf | **Ürün hatası** (flake, fixture veya ortam değil). PR-0'dan beri var; yeni senaryo onu ilk kez rol atanmış bir `ADMIN` ile açtığı için görüldü |
+| Mekanizma | Admin sağlayıcı detayı değerlendirme kartını sağlayıcı panelinin `GET /providers/:providerId/reviews` rotasından okuyordu. O rota `ProviderAccessGuard` (sahip + SUPER_ADMIN) ile korunuyor; 403, admin `apiFetch`'inde `/yetkisiz` yönlendirmesine dönüşüp **tüm sayfayı** götürüyordu. `PROVIDERS_READ` taşımayan hesapta kategori bağları okuması da aynı yoldan sayfayı düşürürdü |
+| Düzeltme | Üretim kodu: admin'e ait izinli rota `GET /provider-reviews/by-provider/:providerId` (**`PROVIDER_REVIEWS_READ`**, mevcut izin); sayfadaki her kart kendi iznine bağlandı; `ProviderAccessGuard`'a dokunulmadı |
+| Test beklentisi | Zayıflatılmadı; E2E artık `PROVIDERS_READ` **olmadan** yalnız inceleme rolüyle sayfayı açıyor, hold'dan sağlayıcıya geçişi de kapsıyor |
+
+### 7.2 Erişim sözleşmesi ve izinler
+
+Yeni izin **yok** (82 sabit). Fraud inceleme rolü yalnız mevcut izinlerden kurulur:
+`PROMOTION_ELIGIBILITY_REVIEW` (kuyruk, snapshot, karar) + `PROVIDERS_READ_DETAIL` (sağlayıcı detayı) +
+`PROVIDER_REVIEWS_READ` (müşteri değerlendirmeleri); ham kayıt için ayrıca `PROVIDER_REGISTRATION_READ_SENSITIVE`.
+`GET /admin/promotion-eligibility/holds` `providerId` ve `filter=all` alır (aynı rota, aynı izin) — sağlayıcı
+detayında "Promosyon uygunluğu" kartı.
+
+| Hesap | Kuyruk / sağlayıcı hold'ları / hold / karar | Sağlayıcı detayı | Değerlendirmeler | Ham kayıt |
+| --- | --- | --- | --- | --- |
+| `SUPER_ADMIN` | 200 | 200 | 200 | 200 + audit |
+| İnceleme rolü | 200 | 200 (maskeli) | 200 | **403** |
+| Yalnız hassas izin | 403 | 403 | 403 | 200 + audit |
+| İnceleme + hassas | 200 | 200 (maskeli) | 200 | 200 + audit |
+| İzinsiz `ADMIN` | 403 | 403 | 403 | 403 |
+
+`promotion-eligibility-access.spec.ts` bu tabloyu 5 hesap × 6 rota olarak doğrular; ham 200'ler dışındaki **her**
+gövdede (liste, detay, kuyruk, karar, 403/409 hata gövdeleri) ham numara yok; audit satırı sayısı = ham okuma sayısı
+(3), satırlarda değer yok. Karar: yalnız inceleme rolü (ve SUPER_ADMIN) verebilir; iki inceleyicinin eşzamanlı kararı
+→ bir 201 + bir 409 (`ELIGIBILITY_DECISION_ALREADY_RECORDED` veya `CONCURRENT_MODIFICATION` — başarı sayılmaz), ardından
+üç eşzamanlı worker geçişi → **1 karar, 1 grant, 1 lot, sayaç 1**. Sağlayıcı panelinin rotası sahiplik korumalı kaldı
+(`PROVIDER_REVIEWS_READ` taşıyan personel orada 403).
+
+### 7.3 Değişmeyenler
+
+Kampanya motoru ve `PURCHASE_TERMS_GATE` kapalı; fraud karar kuralları, HMAC biçimi, kayıt sayacı ve
+`HELD_FOR_REVIEW` yaşam döngüsü değişmedi. Lemon, gerçek e-posta/SMS, staging, `.env`, gerçek veri yok.
+
+### 7.4 Doğrulama
+
+| Kontrol | Sonuç |
+| --- | --- |
+| API tam paket | **169 dosya / 3656 test** (yeni 4: erişim matrisi) |
+| Web / admin birim | 355/355 · 78/78 |
+| typecheck (api src+test, web, admin, e2e, shared) | temiz |
+| lint / build | temiz / başarılı (turbo, 4/4 paket) |
+| Tam Chromium E2E (`pnpm e2e`) | **302/302** (8.4 dk; flake, retry yok — yerel koşu `retries: 0`) |
+| Tam WebKit E2E (`pnpm e2e:webkit`, CI'daki WebKit projesi; `provider-business-registration` eklendi) | **131/131** (4.1 dk) |
+| CI | _doldurulacak_ |
