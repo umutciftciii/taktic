@@ -39,11 +39,17 @@ SUBMITTED ──take──▶ UNDER_REVIEW ──reject──▶ REJECTED (termi
     │                   │
     │ withdraw          ├──approve (NORMAL | EXCEPTION)──▶ APPROVED_PENDING_SETTLEMENT
     ▼                   │ withdraw                               │            │
-WITHDRAWN ◀─────────────┘                    order_refunded webhook  settlement-failed (gerekçeli)
+WITHDRAWN ◀─────────────┘              kanıtlı tam iade webhook'u   kanıtsız iade webhook'u / operatör (gerekçeli)
 (terminal)                                                     ▼            ▼
-                                                           SETTLED    SETTLEMENT_FAILED
-                                                          (terminal)     (terminal)
+                                                           SETTLED ◀── SETTLEMENT_FAILED
+                                                          (terminal)   yalnız kanıtlı tam iade webhook'u
 ```
+
+**`SETTLEMENT_FAILED` terminal değildir** (rev. 3): dış ödemenin henüz kesinleşmemiş olduğunu kaydeden bir
+mutabakat hatasıdır. Tek çıkışı `SETTLED`'dır ve bu geçişi **yalnız** tam iadeyi kanıtlayan imzalı webhook yazabilir
+(operatör rotası yok; CHECK webhook olayını ister). Satır başarısızlık kaydını (zaman, gerekçe, neden) `SETTLED`
+olduktan sonra da taşır. Başka hiçbir geçişe ya da kolon değişikliğine izin yoktur. Açık istek sayılır
+(paket başına tek açık istek index'i onu içerir). Terminal durumlar: `REJECTED`, `SETTLED`, `WITHDRAWN`.
 
 | Geçiş | Aktör | Koşul | DB garantisi |
 | --- | --- | --- | --- |
@@ -54,12 +60,14 @@ WITHDRAWN ◀─────────────┘                    order
 | `UNDER_REVIEW → APPROVED_PENDING_SETTLEMENT` (NORMAL) | `PACKAGE_REFUND_APPROVE` | kapı açık, kanıt var, **o anda yeniden hesaplanan** uygunluk `REFUNDABLE` | CHECK: onaylayan + snapshot NOT NULL |
 | `UNDER_REVIEW → APPROVED_PENDING_SETTLEMENT` (EXCEPTION) | `PACKAGE_REFUND_APPROVE` | kapı açık, kanıt var, yeniden hesaplanan uygunluk `EXCEPTION_ONLY`, kapalı küme gerekçe kodu + açıklama 10–1000, **onaylayan ≠ açan ≠ işleme alan** | **maker-checker CHECK (NULL kaçağı kapalı)** |
 | `APPROVED_PENDING_SETTLEMENT → SETTLED` | **yalnız webhook** | imzalı, sandbox, doğru mağaza, bu satın almayı ödeyen sipariş, `order_refunded` | CHECK + FK + `settledByWebhookEventId @unique` + paket başına tek SETTLED |
+| `SETTLEMENT_FAILED → SETTLED` | **yalnız webhook** | §3 tam iade kanıtı | tetikleyici (başka çıkış yok) + `settled_by_webhook` CHECK |
 | `APPROVED_PENDING_SETTLEMENT → SETTLEMENT_FAILED` | `PACKAGE_REFUND_APPROVE` **veya** tam iadeyi kanıtlamayan imzalı `order_refunded` (§3) | gerekçe 10–1000 | CHECK: tam bir neden (`settlementFailedById` XOR `settlementFailedByWebhookEventId`) |
 | `SUBMITTED \| UNDER_REVIEW → WITHDRAWN` | PROVIDER, kendi talebi | — | tetikleyici: onaydan sonra imkânsız |
 
 **Tetikleyici `PackageRefundRequest_transition_guard`** (BEFORE UPDATE OR DELETE): DELETE reddedilir; kimlik kolonları
 (`supportTicketId`, `purchaseId`, `providerId`, `createdById`, `origin`, `submittedEligibility`, `createdAt`)
-değişmez; durum değişikliği yalnız yukarıdaki tablodaki çiftlerle; terminal satırın hiçbir kolonu değişmez.
+değişmez; durum değişikliği yalnız yukarıdaki tablodaki çiftlerle; terminal satırın (`REJECTED`, `SETTLED`,
+`WITHDRAWN`) hiçbir kolonu değişmez; `SETTLEMENT_FAILED` satırı yalnız `SETTLED`'a geçebilir.
 Böylece "admin `SETTLED` yazdı" ya da "onaylanmış talep geri çekildi" servis katmanını atlayan bir SQL'le de
 mümkün değildir.
 
@@ -139,15 +147,24 @@ Bayrak (`manualReviewAt`) her durumda eskisi gibi yazılır — mali etki değil
 
 **Main'deki hata kapandı:** talebe bağlı olmayan kısmi `order_refunded` artık S3 promo revoke tetiklemez.
 
-### 3.3 İdempotency
+### 3.3 İdempotency — iade durumu olayı (rev. 3)
 
-Aynı olay yeniden gelirse `MANUAL_REVIEW_REQUIRED` kısa devresi transaction'a girmez → ikinci durum/audit/bildirim
-yok. Ek olarak `settledByWebhookEventId` ve `settlementFailedByWebhookEventId` unique, audit `webhookEventId` unique.
+Lemon webhook'larında belgelenmiş bir teslim/olay kimliği **yok** (`X-Event-Name`, `X-Signature`, `meta.event_name`,
+`meta.custom_data`). `order_refunded` ise bir siparişin **her** iadesinde gelir. Sipariş başına tek anahtar, kısmi
+iadeden sonra gelen tamamlayıcı tam iadeyi "tekrar" sayıp mutabakatı imkânsız kılıyordu.
 
-**Bilinen sınır (RG-3):** `eventKey = order_refunded:orders:<orderId>`; aynı siparişe ait **ikinci** (farklı) bir
-iade olayı (ör. kısmi iadeyi tamamlayan ikinci iade) aynı anahtarla gelir ve tekrar sayılır. Kısmi iade sonrası
-istek zaten `SETTLEMENT_FAILED`'dır; sonraki tamamlayıcı iadenin etkileri (S3 revoke, `REFUNDED`) otomatik
-uygulanmaz, operatör manuel inceler. Olay anahtarı şeması bu PR'da değiştirilmedi.
+Yeni anahtar yalnız `order_refunded` için: `order_refunded:orders:<orderId>:<sha256(status, refunded,
+refunded_amount, currency) ilk 32 hex>`. Diğer tüm olaylar (`order_created` dahil) eski `event:type:id` biçimini korur.
+
+- Aynı iade durumunun tekrar teslimi aynı anahtar → mevcut `MANUAL_REVIEW_REQUIRED` kısa devresi → tek olay, sıfır ek etki.
+- Kümülatif `refunded_amount` yalnız artar, tam iade bayrağı yalnız bir kez döner → her gerçek yeni iade yeni anahtardır.
+- **Zaman damgası anahtara girmez:** sağlayıcı tekrar denemelerde `updated_at`'in aynen tekrarlandığını belgelemiyor;
+  zamanla değişen bir anahtar tek bildirimi ikiye bölerdi. Durum alanları yeni iadeyi ayırt etmeye yeter.
+- Anahtar özetlenmiş hâlde saklanır: `PaymentWebhookEvent.eventKey` tutar/para birimi taşımaz.
+
+Tam iade sonrası gelen her bildirim satın almayı `REFUNDED` bulur (ilgili ters işlem değildir) → bayrak dışında etki
+yok; ayrıca `SETTLED` istek paket başına tekildir. Unique: `settledByWebhookEventId`, `settlementFailedByWebhookEventId`,
+audit `webhookEventId`.
 
 Webhook gelmezse otomatik `SETTLED` yok; operatör yalnız `SETTLEMENT_FAILED` yazabilir.
 
@@ -231,4 +248,5 @@ gelmezse `SETTLEMENT_FAILED` kaydı ve sağlayıcıya destek talebinden bilgi ve
 **Ayrıca, motor veya kapı açılmadan önce staging'de gerçek Lemon sandbox üzerinde bir tam ve bir kısmi iade
 webhook'u doğrulanacak:** tam iadede `refunded === true`, `status === 'refunded'`, `refunded_amount ===` saklanan
 `total` ve `currency` eşleşmesi (→ `SETTLED`); kısmi iadede `partial_refund` (→ `SETTLEMENT_FAILED`, revoke yok).
-Aynı siparişe ikinci iade olayının aynı olay anahtarıyla gelmesi (§3.3) de bu doğrulamada gözlenecek.
+Aynı sipariş için kısmi → tam iade dizisinde iki ayrı olay geldiği ve payload'ın tekrar denemede aynı iade durumunu
+taşıdığı (§3.3) da bu doğrulamada gözlenecek.

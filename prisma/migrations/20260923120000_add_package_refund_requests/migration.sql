@@ -9,8 +9,10 @@
 --      purchase's provider, for that provider's credit-package purchase that
 --      carries purchase-terms evidence (insert trigger). A purchase from
 --      before the gate can never enter this flow, whatever code path tried.
---   2. Status moves only along the state machine; terminal rows never change;
---      identity columns never change; nothing is deleted (update trigger).
+--   2. Status moves only along the state machine; terminal rows (REJECTED,
+--      SETTLED, WITHDRAWN) never change; SETTLEMENT_FAILED — an unfinished
+--      reconciliation, not an end — may only become SETTLED; identity columns
+--      never change; nothing is deleted (update trigger).
 --   3. SETTLED requires the webhook event that settled it; one event settles
 --      at most one request; one purchase has at most one SETTLED request and
 --      at most one open one (CHECK + unique + partial unique).
@@ -277,14 +279,26 @@ ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_settled_
   CHECK (("status" = 'SETTLED') = ("settledByWebhookEventId" IS NOT NULL AND "settledAt" IS NOT NULL));
 
 -- A failed settlement has a moment, a reason, and exactly one author: the
--- operator, or the webhook whose refund did not prove full.
+-- operator, or the webhook whose refund did not prove full. The record stays
+-- on the row if a later, proven full refund settles it (SETTLEMENT_FAILED →
+-- SETTLED): the history of "it did not reconcile at first" is not erased.
+-- Anywhere else the four columns are empty.
 ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_settlement_failed_shape"
   CHECK (
-    ("status" = 'SETTLEMENT_FAILED')
-    = ("settlementFailedAt" IS NOT NULL AND "settlementFailureReason" IS NOT NULL
-       AND (("settlementFailedById" IS NOT NULL) <> ("settlementFailedByWebhookEventId" IS NOT NULL)))
-    AND ("settlementFailedById" IS NULL OR "status" = 'SETTLEMENT_FAILED')
-    AND ("settlementFailedByWebhookEventId" IS NULL OR "status" = 'SETTLEMENT_FAILED')
+    (
+      "status" <> 'SETTLEMENT_FAILED'
+      OR ("settlementFailedAt" IS NOT NULL AND "settlementFailureReason" IS NOT NULL
+          AND (("settlementFailedById" IS NOT NULL) <> ("settlementFailedByWebhookEventId" IS NOT NULL)))
+    )
+    AND (
+      ("settlementFailedAt" IS NULL AND "settlementFailureReason" IS NULL
+       AND "settlementFailedById" IS NULL AND "settlementFailedByWebhookEventId" IS NULL)
+      OR (
+        "status" IN ('SETTLEMENT_FAILED', 'SETTLED')
+        AND "settlementFailedAt" IS NOT NULL AND "settlementFailureReason" IS NOT NULL
+        AND (("settlementFailedById" IS NOT NULL) <> ("settlementFailedByWebhookEventId" IS NOT NULL))
+      )
+    )
     AND ("settlementFailureReason" IS NULL
          OR char_length(btrim("settlementFailureReason")) BETWEEN 10 AND 1000)
   );
@@ -293,9 +307,12 @@ ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_withdraw
   CHECK (("status" = 'WITHDRAWN') = ("withdrawnAt" IS NOT NULL));
 
 -- One open request per purchase, and one settled request per purchase.
+-- SETTLEMENT_FAILED is open: the external refund has not reconciled yet and a
+-- proven full refund may still settle it, so no second request may compete
+-- for the same payment.
 CREATE UNIQUE INDEX "PackageRefundRequest_one_open_per_purchase"
   ON "PackageRefundRequest" ("purchaseId")
-  WHERE "status" IN ('SUBMITTED', 'UNDER_REVIEW', 'APPROVED_PENDING_SETTLEMENT');
+  WHERE "status" IN ('SUBMITTED', 'UNDER_REVIEW', 'APPROVED_PENDING_SETTLEMENT', 'SETTLEMENT_FAILED');
 
 CREATE UNIQUE INDEX "PackageRefundRequest_one_settled_per_purchase"
   ON "PackageRefundRequest" ("purchaseId")
@@ -379,8 +396,16 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
-  IF OLD."status" IN ('REJECTED', 'SETTLED', 'SETTLEMENT_FAILED', 'WITHDRAWN') THEN
+  IF OLD."status" IN ('REJECTED', 'SETTLED', 'WITHDRAWN') THEN
     RAISE EXCEPTION 'PackageRefundRequest % is terminal', OLD."status"
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- An unfinished reconciliation is frozen except for the one move out of it:
+  -- a proven full refund, which only the webhook can record (the CHECK
+  -- "settled_by_webhook" demands the event that did it).
+  IF OLD."status" = 'SETTLEMENT_FAILED' AND NEW."status" <> 'SETTLED' THEN
+    RAISE EXCEPTION 'PackageRefundRequest SETTLEMENT_FAILED may only become SETTLED'
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -400,6 +425,7 @@ BEGIN
        (OLD."status" = 'SUBMITTED' AND NEW."status" IN ('UNDER_REVIEW', 'WITHDRAWN'))
     OR (OLD."status" = 'UNDER_REVIEW' AND NEW."status" IN ('REJECTED', 'APPROVED_PENDING_SETTLEMENT', 'WITHDRAWN'))
     OR (OLD."status" = 'APPROVED_PENDING_SETTLEMENT' AND NEW."status" IN ('SETTLED', 'SETTLEMENT_FAILED'))
+    OR (OLD."status" = 'SETTLEMENT_FAILED' AND NEW."status" = 'SETTLED')
   ) THEN
     RAISE EXCEPTION 'PackageRefundRequest cannot move from % to %', OLD."status", NEW."status"
       USING ERRCODE = 'check_violation';

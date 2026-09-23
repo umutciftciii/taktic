@@ -139,6 +139,12 @@ export default async function PackageRefundDetailPage({ params, searchParams }: 
             geldiğinde kendiliğinden tamamlanır; TakTic&apos;te &quot;iade tamamlandı&quot; işaretlenemez.
           </p>
         ) : null}
+        {refund.status === 'SETTLEMENT_FAILED' ? (
+          <p className="cell-muted" data-testid="package-refund-failed-hint">
+            Dış iade henüz mutabık değil. İstek, ödeme sağlayıcısından gelecek ve tam iadeyi kanıtlayan imzalı bir
+            bildirimle kendiliğinden tamamlanabilir; TakTic&apos;te elle tamamlanamaz.
+          </p>
+        ) : null}
         {!anyAction ? (
           <p className="cell-muted" data-testid="package-refund-no-actions">
             Bu isteğin şu anki durumunda sizin yapabileceğiniz bir işlem yok.
@@ -264,7 +270,11 @@ export default async function PackageRefundDetailPage({ params, searchParams }: 
           <div>
             <dt>Mutabakat</dt>
             <dd data-testid="package-refund-settlement">
-              {refund.settledAt ? `İmzalı iade bildirimiyle tamamlandı · ${formatDateTime(refund.settledAt)}` : 'Bildirim bekleniyor / yok'}
+              {refund.settledAt
+                ? `İmzalı iade bildirimiyle tamamlandı · ${formatDateTime(refund.settledAt)}`
+                : refund.status === 'SETTLEMENT_FAILED'
+                  ? 'Tamamlanmadı — kanıtlanmış tam iade bildirimi bekleniyor'
+                  : 'Bildirim bekleniyor / yok'}
             </dd>
           </div>
         </dl>

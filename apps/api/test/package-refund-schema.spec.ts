@@ -377,6 +377,44 @@ describe('webhook-recorded failures and the provider order total', () => {
     });
   });
 
+  it('SETTLEMENT_FAILED is unfinished: it may become SETTLED (keeping its failure record) and nothing else', async () => {
+    const fixture = await base();
+    const row = await approved(fixture);
+    const failedBy = await webhookEvent();
+    await ctx.prisma.packageRefundRequest.update({
+      where: { id: row.id },
+      data: {
+        status: 'SETTLEMENT_FAILED',
+        settlementFailedAt: new Date(),
+        settlementFailureReason: 'Dış iade tutarı paketin tamamıyla uyuşmadı.',
+        settlementFailedByWebhookEventId: failedBy.id,
+      },
+    });
+    for (const status of ['REJECTED', 'WITHDRAWN', 'APPROVED_PENDING_SETTLEMENT'] as const) {
+      await expect(
+        ctx.prisma.packageRefundRequest.update({ where: { id: row.id }, data: { status } }),
+      ).rejects.toThrow(/may only become SETTLED/);
+    }
+    await expect(
+      ctx.prisma.packageRefundRequest.update({ where: { id: row.id }, data: { settlementFailureReason: 'Sonradan değiştirilmiş gerekçe.' } }),
+    ).rejects.toThrow(/may only become SETTLED/);
+    // Still open: no second request may compete for the payment.
+    const otherTicket = await ctx.prisma.supportTicket.create({
+      data: { requesterId: fixture.owner.id, requesterRole: SupportTicketRequesterRole.PROVIDER, subject: 'z' },
+    });
+    await expect(insert(fixture, { supportTicketId: otherTicket.id })).rejects.toThrow(/Unique constraint/);
+
+    const settledBy = await webhookEvent();
+    const settled = await ctx.prisma.packageRefundRequest.update({
+      where: { id: row.id },
+      data: { status: 'SETTLED', settledAt: new Date(), settledByWebhookEventId: settledBy.id },
+    });
+    expect(settled.settlementFailedByWebhookEventId).toBe(failedBy.id);
+    await expect(
+      ctx.prisma.packageRefundRequest.update({ where: { id: row.id }, data: { status: 'SETTLEMENT_FAILED' } }),
+    ).rejects.toThrow(/terminal/);
+  });
+
   it('a webhook audit row may record SETTLED or SETTLEMENT_FAILED and nothing else', async () => {
     const fixture = await base();
     const row = await insert(fixture);

@@ -39,10 +39,23 @@ export function purchaseCarriesTermsEvidence(purchase: {
   );
 }
 
+/**
+ * The statuses that hold a purchase's one open request (partial unique index
+ * `PackageRefundRequest_one_open_per_purchase`). SETTLEMENT_FAILED is among
+ * them: it is an external refund that has not reconciled yet, and a later,
+ * proven full refund webhook may still settle it.
+ */
 export const OPEN_REFUND_STATUSES: readonly PackageRefundRequestStatus[] = [
   PackageRefundRequestStatus.SUBMITTED,
   PackageRefundRequestStatus.UNDER_REVIEW,
   PackageRefundRequestStatus.APPROVED_PENDING_SETTLEMENT,
+  PackageRefundRequestStatus.SETTLEMENT_FAILED,
+];
+
+/** The statuses a proven full refund webhook may settle. */
+export const SETTLEABLE_STATUSES: readonly PackageRefundRequestStatus[] = [
+  PackageRefundRequestStatus.APPROVED_PENDING_SETTLEMENT,
+  PackageRefundRequestStatus.SETTLEMENT_FAILED,
 ];
 
 /** The provider may withdraw only before an operator has approved anything. */

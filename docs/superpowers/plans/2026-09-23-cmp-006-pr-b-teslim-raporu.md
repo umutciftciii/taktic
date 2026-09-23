@@ -8,8 +8,9 @@ Dry-run: [`2026-09-23-cmp-006-pr-b-migration-j-dryrun.txt`](2026-09-23-cmp-006-p
 gerçek checkout, gerçek e-posta/SMS kullanılmadı; yerel/staging `taktic` verisine dokunulmadı (yalnız izole
 dry-run DB'si ve bu checkout'un test DB'leri). Hukuki metin değişmedi. Para/kredi hareketi yazan yeni kod yok.**
 
-> **Rev. 2 (2026-09-23, merge öncesi):** tam tutar mutabakatı (Seçenek 1) ve altı durum e-postası eklendi —
-> ayrıntılar §8. §1 tablosu rev. 2 sonrası güncel sayıları taşır.
+> **Rev. 2 (2026-09-23, merge öncesi):** tam tutar mutabakatı (Seçenek 1) ve altı durum e-postası eklendi — §8.
+> **Rev. 3:** iade webhook idempotency'si iade durumuna bağlandı; `SETTLEMENT_FAILED` terminal değil — §9.
+> §1 tablosu en güncel sayıları taşır.
 
 ## 1. Sayılarla
 
@@ -18,14 +19,14 @@ dry-run DB'si ve bu checkout'un test DB'leri). Hukuki metin değişmedi. Para/kr
 | Migration | **J** `20260923120000_add_package_refund_requests` — 76.; yalnız ekleme, **DML yok** |
 | Yeni tablo / enum | `PackageRefundRequest`, `PackageRefundRequestEvent` / 7 enum (`SupportTicketTopic` + 6 `PackageRefund*`) |
 | Yeni kolon | `SupportTicket.topic` (`GENERAL` varsayılanı gerçek backfill) · `PackagePurchase.providerOrderTotalAmount/Currency` (NULL, backfill yok) |
-| CHECK / partial unique / tetikleyici | 16 CHECK · 2 partial unique · 4 tetikleyici (doğum, durum makinesi, append-only audit, sağlayıcı toplamı değişmezliği) |
+| CHECK / partial unique / tetikleyici | 16 CHECK · 2 partial unique (açık istek `SETTLEMENT_FAILED` dahil) · 4 tetikleyici (doğum, durum makinesi, append-only audit, sağlayıcı toplamı değişmezliği) |
 | İzin | +3 (`PACKAGE_REFUND_READ`, `PACKAGE_REFUND_REQUEST_CREATE`, `PACKAGE_REFUND_APPROVE`) → 77 → **80** |
 | Yeni rota | Admin 7 (route-map'te) · Sağlayıcı 2 (`support/package-refund/*`) · `POST /support/tickets` += `topic`, `packagePurchaseId` |
-| Yeni API testi | **102** (akış 27 · mutabakat + e-posta 25 · yetki/sızıntı 10 · DB değişmezleri 17 · S3 tam/kısmi 7 · şablon render/koyu mod 16) |
-| Tam API paketi | **162 dosya / 3532 test — hepsi geçti** (rev. 2, temiz test DB'sinde) |
+| Yeni API testi | **111** (akış 27 · mutabakat + e-posta + çoklu iade 29 · yetki/sızıntı 10 · DB değişmezleri 18 · S3 tam/kısmi 8 · olay anahtarı 3 · şablon render/koyu mod 16) |
+| Tam API paketi | **163 dosya / 3541 test — hepsi geçti** (rev. 3, temiz test DB'sinde) |
 | Web / admin birim | web 351/351 (yeni 5) · admin 74/74 (yeni 3) |
 | Yeni E2E | 4 senaryo × Chromium + WebKit = **8/8** (purchase-terms runtime'ına admin süreci eklendi) |
-| Tam E2E Chromium | **300/300** (rev. 2 yerel koşu, 8.4 dk) · WebKit iade + purchase-terms 7/7 |
+| Tam E2E Chromium | **300/300** (rev. 3 yerel koşu, 9.0 dk) · WebKit iade + purchase-terms 7/7 |
 | typecheck / lint / build | api, web, admin, e2e temiz |
 
 ## 2. Görev tanımının maddeleri
@@ -66,8 +67,8 @@ tasarım §0'da gerekçeli.
 yapıyordu; artık yalnız saklı Lemon toplamına karşı kanıtlanmış tam iade SETTLED yazar.
 
 **B4 — Webhook onaydan önce gelirse.** Talep `UNDER_REVIEW`'da kalır (settle edilmez), satın alma bayraklanır ve
-uygunluk `NOT_APPLICABLE` olur → onay 409; operatör reddeder. `SETTLEMENT_FAILED` sonrası geç gelen webhook
-talebi canlandırmaz, yalnız mevcut bayrağı yazar.
+uygunluk `NOT_APPLICABLE` olur → onay 409; operatör reddeder. `SETTLEMENT_FAILED` sonrası geç gelen, tam iadeyi
+kanıtlayan webhook isteği `SETTLED` yapar (rev. 3, §9); kanıtlamayan bildirim yalnız bayrağı yazar.
 
 **B5 — Tetikleyici güçlendirmesi.** Servis kanıtsız satın almayı zaten reddediyordu; doğum tetikleyicisi de artık
 reddediyor (dry-run §12). Bu değişiklik geliştirme sırasında yapıldığı için eski sürümü uygulanmış iki test DB'si
@@ -148,9 +149,9 @@ Canary: referans, sipariş no, digest, kabul id, UA, Lemon toplamı ve olay adı
 
 ### 8.4 Bulgular
 
-**B9 — Aynı siparişe ikinci iade olayı.** `eventKey = order_refunded:orders:<orderId>`; kısmi iadeyi tamamlayan
-ikinci bir iade aynı anahtarla gelir ve tekrar sayılır. İstek zaten `SETTLEMENT_FAILED` olduğundan yanlış mali etki
-yok; ama tamamlayıcı iadenin S3 revoke ve `REFUNDED` etkileri otomatik uygulanmaz → operatör. RG-3 doğrulamasına eklendi.
+**B9 — Aynı siparişe ikinci iade olayı → rev. 3'te kapatıldı (§9).** Rev. 2'de anahtar sipariş başınaydı ve
+tamamlayıcı tam iade "tekrar" sayılıyordu; artık anahtar iade durumuna bağlı ve `SETTLEMENT_FAILED → SETTLED` webhook
+ile mümkün.
 
 **B10 — Davranış değişikliği (main'e göre).** Talebe bağlı olmayan `order_refunded` artık yalnız kanıtlanmış tam
 iadede S3 revoke çalıştırır. Bu PR'dan önce ödenmiş satın almalarda saklı toplam olmadığı için **hiçbir** `order_refunded`
@@ -160,5 +161,31 @@ revoke tetiklemez (bayrak yazılmaya devam eder). Kampanya motoru kapalı olduğ
 
 Motor veya `PURCHASE_TERMS_GATE` açılmadan önce staging'de **gerçek Lemon sandbox** üzerinde bir **tam** ve bir
 **kısmi** iade webhook'u doğrulanacak: tam iadede `refunded=true`, `status=refunded`, `refunded_amount` = saklı
-`total`, para birimi eşleşmesi → `SETTLED`; kısmi iadede `partial_refund` → `SETTLEMENT_FAILED`, revoke yok. B9 da
-bu koşuda gözlenecek.
+`total`, para birimi eşleşmesi → `SETTLED`; kısmi iadede `partial_refund` → `SETTLEMENT_FAILED`, revoke yok. Aynı
+sipariş için kısmi → tam dizisinin iki ayrı olay ürettiği ve tekrar denemenin aynı iade durumunu taşıdığı da bu
+koşuda gözlenecek (§9).
+
+## 9. Rev. 3 — iade durumu olayı ve `SETTLEMENT_FAILED → SETTLED`
+
+**`SETTLEMENT_FAILED` terminal değildir.** Dış ödemenin henüz kesinleşmemiş olduğunu kaydeden bir mutabakat
+hatasıdır; yalnız güvenilir, tam iadeyi kanıtlayan imzalı webhook onu `SETTLED`'a taşıyabilir. (Önceki metinlerde
+geçen "SETTLEMENT_FAILED terminaldir" ifadeleri bu sürümle geçersizdir.) Terminal durumlar: `REJECTED`, `SETTLED`,
+`WITHDRAWN`.
+
+| Konu | Uygulama / kanıt |
+| --- | --- |
+| Güvenilir teslim/olay kimliği | Lemon belgelerinde yok (`X-Event-Name`, `X-Signature`, `meta.event_name`, `meta.custom_data`) |
+| İade olay anahtarı | `order_refunded:orders:<id>:<sha256(status, refunded, refunded_amount, currency)[:32]>`; `order_created` ve diğerleri değişmedi; birim testi |
+| Zaman damgası | Anahtara **alınmadı**: tekrar denemede `updated_at`'in aynı kalacağı belgelenmemiş; kümülatif tutar + tam bayrağı yeni iadeyi ayırt etmeye yeter. Görev tanımındaki "güncelleme/olay zamanı" öğesinden bilinçli sapma |
+| Sızıntı | Anahtar özetli: tutar/para birimi/ham payload saklanmaz, loglanmaz |
+| `SETTLEMENT_FAILED → SETTLED` | Tetikleyici: tek izinli çıkış; CHECK: webhook olayı zorunlu, başarısızlık kaydı korunur; açık istek index'ine dahil |
+| Operatör | `SETTLED` yazamaz; `SETTLEMENT_FAILED` satırında ret/onay/ikinci başarısızlık 409, DB reddi |
+| Operatör kaydı sonrası geç gelen kanıtlı tam iade | `SETTLED` (önceki "canlandırmaz" davranışı değişti) |
+
+**Test matrisi (yeni):** kısmi → aynı kısmi → tam → aynı tam (her adımda olay sayısı 1/1/2/2, durum, webhook audit
+sayıları, ticket olayları, e-posta 1 `SETTLEMENT_FAILED` + 1 `SETTLED`, `REFUNDED`, ledger, S3 revoke çağrısı tam 1) ·
+tam → sonraki 3 farklı olay sıfır etki · iki farklı kısmi tutar = 2 olay, 1 başarısızlık · kısmi sonrası
+para birimi/status/refunded/tutar uyumsuz 5 "tam" bildirimi durum değiştirmez, doğrusu `SETTLED` yapar · operatör
+sınırları · talebe bağlı olmayan S3 yolunda gerçek lotla kısmi → aynı → tam → aynı: revoke tam bir kez · DB:
+`SETTLEMENT_FAILED` yalnız `SETTLED`'a gider, kaydını korur, `SETTLED` terminal · olay anahtarı birim testleri ·
+`order_created` anahtarı ve mevcut Lemon webhook paketi değişmeden geçti.

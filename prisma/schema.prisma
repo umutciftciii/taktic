@@ -4735,15 +4735,21 @@ model AdminRoleAuditLog {
   @@index([createdAt])
 }
 
-/// CMP-006 PR-B. Where a package refund request is in its one-way life.
+/// CMP-006 PR-B. Where a package refund request is in its life.
 ///
 ///   SUBMITTED → UNDER_REVIEW → REJECTED | APPROVED_PENDING_SETTLEMENT
 ///   APPROVED_PENDING_SETTLEMENT → SETTLED (webhook only) | SETTLEMENT_FAILED
+///   SETTLEMENT_FAILED → SETTLED (webhook only, a proven full refund)
 ///   SUBMITTED | UNDER_REVIEW → WITHDRAWN (the provider)
 ///
-/// The trigger `PackageRefundRequest_guard` refuses every other pair, and
-/// every change to a terminal row, so the table cannot be walked around the
-/// service.
+/// SETTLEMENT_FAILED is not an end: it records that the external refund has
+/// not reconciled (yet) — a partial refund, an unproven figure, or an
+/// operator's note that it did not happen. Only a signed webhook proving a
+/// full refund moves it on. REJECTED, SETTLED and WITHDRAWN are terminal.
+///
+/// The trigger `PackageRefundRequest_transition_guard` refuses every other
+/// pair and every change to a terminal row, so the table cannot be walked
+/// around the service.
 enum PackageRefundRequestStatus {
   SUBMITTED
   UNDER_REVIEW

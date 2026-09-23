@@ -9,6 +9,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { LemonSqueezyCheckoutAdapter } from '../src/modules/payments/lemon-squeezy.adapter';
 import { MANUAL_REVIEW_REASON } from '../src/modules/payments/payments-webhook.service';
 import { PackageRefundNotificationOutbox } from '../src/modules/notifications/package-refund-notification-outbox.service';
+import { vi } from 'vitest';
+import { CampaignRevokeService } from '../src/modules/campaigns/engine/campaign-revoke.service';
 import { createTestApp, resetDatabase, uniqueSuffix, type TestContext } from './harness';
 import {
   LEMON_HOSTED_URL,
@@ -297,7 +299,7 @@ describe('a reversal that must not settle anything', () => {
     expect(await ctx.prisma.paymentWebhookEvent.count({ where: { eventName: 'order_refunded' } })).toBe(0);
   });
 
-  it('with no webhook, the only way out is a reasoned SETTLEMENT_FAILED, which moves nothing', async () => {
+  it('with no webhook, the operator can only record a reasoned SETTLEMENT_FAILED, which moves nothing — and a late proven refund still settles it', async () => {
     const fixture = await paidThroughWebhook();
     const { requestId, admin } = await approvedRequest(fixture);
     const ledgerBefore = await ledgerCount(fixture.provider.id);
@@ -312,10 +314,19 @@ describe('a reversal that must not settle anything', () => {
     expect(purchase.status).toBe(PackagePurchaseStatus.PAID);
     expect(await ledgerCount(fixture.provider.id)).toBe(ledgerBefore);
 
-    // A late webhook does not resurrect a terminal request.
+    // SETTLEMENT_FAILED is an unfinished reconciliation, not an end: the
+    // refund that does arrive later, proven full, settles it — by webhook only.
     await deliverLemonWebhook(ctx, refunded(fixture)).expect(200);
     const current = await ctx.prisma.packageRefundRequest.findUniqueOrThrow({ where: { id: requestId } });
-    expect(current.status).toBe(PackageRefundRequestStatus.SETTLEMENT_FAILED);
+    expect(current.status).toBe(PackageRefundRequestStatus.SETTLED);
+    expect(current.settlementFailedById).not.toBeNull();
+    expect(current.settlementFailureReason).toContain('webhook gelmedi');
+    const settledPurchase = await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: fixture.purchaseId } });
+    expect(settledPurchase.status).toBe(PackagePurchaseStatus.REFUNDED);
+    const settledAudit = await ctx.prisma.packageRefundRequestEvent.findFirstOrThrow({
+      where: { requestId, action: 'SETTLED' },
+    });
+    expect(settledAudit.fromStatus).toBe('SETTLEMENT_FAILED');
   });
 });
 
@@ -542,5 +553,164 @@ describe('provider status e-mails, through the outbox', () => {
       where: { template: 'package-refund-status', dedupeKey: `package-refund-status:${reviewEvent.id}` },
     });
     expect(failedIntent.status).toBe('FAILED');
+  });
+});
+
+describe('one order, several refund notices: each refund state is its own event', () => {
+  const PARTIAL_1 = { refunded: false, status: 'partial_refund', refundedAmount: 10000 };
+  const PARTIAL_2 = { refunded: false, status: 'partial_refund', refundedAmount: 20000 };
+
+  async function deliver() {
+    await ctx.app.get(PackageRefundNotificationOutbox).deliverPending();
+  }
+
+  async function snapshot(fixture: { purchaseId: string; provider: { id: string } }, requestId: string, ticketId: string, cookie: string) {
+    await deliver();
+    const [events, refundRow, audit, purchase, ledger, ticket] = await Promise.all([
+      ctx.prisma.paymentWebhookEvent.count({ where: { eventName: 'order_refunded' } }),
+      ctx.prisma.packageRefundRequest.findUniqueOrThrow({ where: { id: requestId } }),
+      ctx.prisma.packageRefundRequestEvent.findMany({ where: { requestId, actorKind: 'PAYMENT_WEBHOOK' } }),
+      ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: fixture.purchaseId } }),
+      ctx.prisma.providerCreditTransaction.count({ where: { providerId: fixture.provider.id } }),
+      request(ctx.server).get(`/support/tickets/${ticketId}`).set('Cookie', cookie),
+    ]);
+    const mails = ctx.notifications.ofTemplate('package-refund-status').map((m) => m.data?.status);
+    return {
+      events,
+      status: refundRow.status,
+      failedAudits: audit.filter((row) => row.action === 'SETTLEMENT_FAILED').length,
+      settledAudits: audit.filter((row) => row.action === 'SETTLED').length,
+      ticketFailed: ticket.body.timeline.filter((e: { kind: string; toStatus?: string }) => e.kind === 'PACKAGE_REFUND_EVENT' && e.toStatus === 'SETTLEMENT_FAILED').length,
+      ticketSettled: ticket.body.timeline.filter((e: { kind: string; toStatus?: string }) => e.kind === 'PACKAGE_REFUND_EVENT' && e.toStatus === 'SETTLED').length,
+      failedMails: mails.filter((status) => status === 'SETTLEMENT_FAILED').length,
+      settledMails: mails.filter((status) => status === 'SETTLED').length,
+      purchase: purchase.status,
+      ledger,
+    };
+  }
+
+  it('partial → duplicate partial → full → duplicate full', async () => {
+    ctx.notifications.clear();
+    const revokes = vi.spyOn(ctx.app.get(CampaignRevokeService), 'revokeForRefundedPurchase');
+    try {
+      const fixture = await paidThroughWebhook();
+      const { requestId, ticketId } = await approvedRequest(fixture);
+      const ledger = await ledgerCount(fixture.provider.id);
+      const look = () => snapshot(fixture, requestId, ticketId, fixture.cookie);
+
+      await deliverLemonWebhook(ctx, refunded(fixture, PARTIAL_1)).expect(200);
+      expect(await look()).toEqual({
+        events: 1, status: 'SETTLEMENT_FAILED', failedAudits: 1, settledAudits: 0, ticketFailed: 1, ticketSettled: 0,
+        failedMails: 1, settledMails: 0, purchase: 'PAID', ledger,
+      });
+      expect(revokes).not.toHaveBeenCalled();
+
+      const duplicate = await deliverLemonWebhook(ctx, refunded(fixture, PARTIAL_1)).expect(200);
+      expect(duplicate.body).toEqual({ status: 'duplicate' });
+      expect(await look()).toEqual({
+        events: 1, status: 'SETTLEMENT_FAILED', failedAudits: 1, settledAudits: 0, ticketFailed: 1, ticketSettled: 0,
+        failedMails: 1, settledMails: 0, purchase: 'PAID', ledger,
+      });
+
+      const full = await deliverLemonWebhook(ctx, refunded(fixture)).expect(200);
+      expect(full.body).toEqual({ status: 'manual_review_required' });
+      expect(await look()).toEqual({
+        events: 2, status: 'SETTLED', failedAudits: 1, settledAudits: 1, ticketFailed: 1, ticketSettled: 1,
+        failedMails: 1, settledMails: 1, purchase: 'REFUNDED', ledger,
+      });
+      expect(revokes).toHaveBeenCalledTimes(1);
+
+      const again = await deliverLemonWebhook(ctx, refunded(fixture)).expect(200);
+      expect(again.body).toEqual({ status: 'duplicate' });
+      expect(await look()).toEqual({
+        events: 2, status: 'SETTLED', failedAudits: 1, settledAudits: 1, ticketFailed: 1, ticketSettled: 1,
+        failedMails: 1, settledMails: 1, purchase: 'REFUNDED', ledger,
+      });
+      expect(revokes).toHaveBeenCalledTimes(1);
+
+      const settled = await ctx.prisma.packageRefundRequest.findUniqueOrThrow({ where: { id: requestId } });
+      const events = await ctx.prisma.paymentWebhookEvent.findMany({ where: { eventName: 'order_refunded' }, orderBy: { createdAt: 'asc' } });
+      expect(settled.settlementFailedByWebhookEventId).toBe(events[0]!.id);
+      expect(settled.settledByWebhookEventId).toBe(events[1]!.id);
+      // The keys are opaque: no amount, currency or status written out.
+      for (const event of events) {
+        expect(event.eventKey).toMatch(new RegExp(`^order_refunded:orders:${fixture.orderId}:[0-9a-f]{32}$`));
+      }
+    } finally {
+      revokes.mockRestore();
+    }
+  });
+
+  it('full → any later notice is a new event with no effect at all', async () => {
+    ctx.notifications.clear();
+    const revokes = vi.spyOn(ctx.app.get(CampaignRevokeService), 'revokeForRefundedPurchase');
+    try {
+      const fixture = await paidThroughWebhook();
+      const { requestId, ticketId } = await approvedRequest(fixture);
+      const ledger = await ledgerCount(fixture.provider.id);
+      await deliverLemonWebhook(ctx, refunded(fixture)).expect(200);
+      const settled = await snapshot(fixture, requestId, ticketId, fixture.cookie);
+      expect(settled).toMatchObject({ status: 'SETTLED', settledAudits: 1, settledMails: 1, purchase: 'REFUNDED', ledger });
+      expect(revokes).toHaveBeenCalledTimes(1);
+
+      for (const later of [PARTIAL_1, { currency: 'USD' }, { refundedAmount: 49903 }]) {
+        await deliverLemonWebhook(ctx, refunded(fixture, later)).expect(200);
+      }
+      const after = await snapshot(fixture, requestId, ticketId, fixture.cookie);
+      expect(after).toEqual({ ...settled, events: 4 });
+      expect(revokes).toHaveBeenCalledTimes(1);
+    } finally {
+      revokes.mockRestore();
+    }
+  });
+
+  it('two different partial amounts are two events and one failure; a mismatched "full" keeps it failed; the proven one settles', async () => {
+    ctx.notifications.clear();
+    const fixture = await paidThroughWebhook();
+    const { requestId, ticketId } = await approvedRequest(fixture);
+    const ledger = await ledgerCount(fixture.provider.id);
+    const look = () => snapshot(fixture, requestId, ticketId, fixture.cookie);
+
+    await deliverLemonWebhook(ctx, refunded(fixture, PARTIAL_1)).expect(200);
+    await deliverLemonWebhook(ctx, refunded(fixture, PARTIAL_2)).expect(200);
+    expect(await look()).toMatchObject({ events: 2, status: 'SETTLEMENT_FAILED', failedAudits: 1, ticketFailed: 1, failedMails: 1, purchase: 'PAID', ledger });
+
+    for (const almost of [
+      { currency: 'USD' },
+      { status: 'partial_refund' },
+      { refunded: false },
+      { refunded: null },
+      { refundedAmount: 49903 },
+    ]) {
+      await deliverLemonWebhook(ctx, refunded(fixture, almost)).expect(200);
+    }
+    expect(await look()).toMatchObject({
+      events: 7, status: 'SETTLEMENT_FAILED', failedAudits: 1, settledAudits: 0, ticketFailed: 1, failedMails: 1, settledMails: 0, purchase: 'PAID', ledger,
+    });
+
+    await deliverLemonWebhook(ctx, refunded(fixture)).expect(200);
+    expect(await look()).toMatchObject({
+      events: 8, status: 'SETTLED', failedAudits: 1, settledAudits: 1, ticketSettled: 1, failedMails: 1, settledMails: 1, purchase: 'REFUNDED', ledger,
+    });
+  });
+
+  it('the operator still cannot write SETTLED, nor move a failed request anywhere', async () => {
+    const fixture = await paidThroughWebhook();
+    const { requestId, admin } = await approvedRequest(fixture);
+    await deliverLemonWebhook(ctx, refunded(fixture, PARTIAL_1)).expect(200);
+
+    expect((await admin.settlementFailed(requestId, 'İkinci kez başarısız kaydı.').expect(409)).body.code).toBe(
+      'PACKAGE_REFUND_INVALID_TRANSITION',
+    );
+    await admin.reject(requestId, 'Başarısız isteği reddetme denemesi.').expect(409);
+    await admin.approve(requestId, { kind: 'NORMAL' }).expect(409);
+    await expect(
+      ctx.prisma.packageRefundRequest.update({ where: { id: requestId }, data: { status: 'REJECTED' } }),
+    ).rejects.toThrow(/may only become SETTLED/);
+    await expect(
+      ctx.prisma.packageRefundRequest.update({ where: { id: requestId }, data: { status: 'SETTLED', settledAt: new Date() } }),
+    ).rejects.toThrow(/settled_by_webhook/);
+    // And the provider cannot open a second request while the first awaits reconciliation.
+    await openRefundTicket(ctx, fixture.cookie, fixture.purchaseId).expect(409);
   });
 });

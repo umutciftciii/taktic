@@ -1,4 +1,4 @@
-CMP-006 PR-B Migration J dry-run — 2026-09-23T14:50:58Z
+CMP-006 PR-B Migration J dry-run — 2026-09-23T16:24:04Z
 Izole DB: cmp006_prb_migration_dryrun (gercek taktic DB'sine, .env'e ve container'lara dokunulmadi)
 
 == 1. main@58c51e13 semasi + 75 migration uygulanir ==
@@ -49,7 +49,7 @@ PackageRefundRequest_withdrawn_shape
 SupportTicket_refund_topic_provider_only
 
 == 9. Kismi unique index'ler ==
-PackageRefundRequest_one_open_per_purchase: WHERE (status = ANY (ARRAY['SUBMITTED'::"PackageRefundRequestStatus", 'UNDER_REVIEW'::"PackageRefundRequestStatus", 'APPROVED_PENDING_SETTLEMENT'::"PackageRefundRequestStatus"]))
+PackageRefundRequest_one_open_per_purchase: WHERE (status = ANY (ARRAY['SUBMITTED'::"PackageRefundRequestStatus", 'UNDER_REVIEW'::"PackageRefundRequestStatus", 'APPROVED_PENDING_SETTLEMENT'::"PackageRefundRequestStatus", 'SETTLEMENT_FAILED'::"PackageRefundRequestStatus"]))
 PackageRefundRequest_one_settled_per_purchase: WHERE (status = 'SETTLED'::"PackageRefundRequestStatus")
 
 == 10. Tetikleyiciler ==
@@ -105,5 +105,14 @@ PackageRefundRequest_transition_guard ON "PackageRefundRequest"
   e-3 yazildi
   (beklenen ret) ERROR:  new row for relation "PackageRefundRequestEvent" violates check constraint "PackageRefundRequestEvent_actor_shape"
 
-== 19. Temizlik ==
+== 19. SETTLEMENT_FAILED terminal degil: yalniz webhook olayiyla SETTLED, baska cikis yok, acik istek sayilir ==
+  (beklenen ret) ERROR:  PackageRefundRequest SETTLEMENT_FAILED may only become SETTLED
+  (beklenen ret) ERROR:  PackageRefundRequest SETTLEMENT_FAILED may only become SETTLED
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequest" violates check constraint "PackageRefundRequest_settled_by_webhook"
+  (beklenen ret) ERROR:  duplicate key value violates unique constraint "PackageRefundRequest_one_open_per_purchase"
+  r-2 SETTLEMENT_FAILED -> SETTLED (we-4)
+r-2 basarisizlik kaydi korundu: true
+  (beklenen ret) ERROR:  PackageRefundRequest SETTLED is terminal
+
+== 20. Temizlik ==
   cmp006_prb_migration_dryrun silindi

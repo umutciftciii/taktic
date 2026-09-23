@@ -9,6 +9,7 @@ import {
 import { enqueuePackageRefundNotice } from '../notifications/package-refund-notification-outbox.service';
 import type { FullRefundFailure } from '../payments/payments-webhook.service';
 import { touchTicket } from './package-refund-requests.service';
+import { SETTLEABLE_STATUSES } from './package-refund-request.rules';
 
 /**
  * The reason a webhook-recorded failure carries: one fixed sentence for the
@@ -35,12 +36,18 @@ export function webhookSettlementFailureReason(failure: FullRefundFailure): stri
  * clawback is not in this slice, and the credit/promo side of a reversal is
  * the S3 revoke that already ran.
  *
- * A purchase with no request waiting for settlement is left exactly as the
- * S3 path left it; nothing is created. A redelivery never reaches this method
- * (the webhook short-circuits a MANUAL_REVIEW_REQUIRED event before its
- * transaction does anything), and if it somehow did, the request is no longer
- * APPROVED_PENDING_SETTLEMENT and the unique indexes on the webhook event would
- * refuse a second settlement anyway.
+ * It settles a request that is APPROVED_PENDING_SETTLEMENT or — after an
+ * earlier refund notice for the same order did not prove a full refund, or
+ * an operator recorded that the refund had not happened — SETTLEMENT_FAILED.
+ * That second move is the webhook's alone, like the first.
+ *
+ * A purchase with no such request is left exactly as the S3 path left it;
+ * nothing is created. A redelivery of the same refund state never reaches
+ * this method (it keys the same `PaymentWebhookEvent` and is short-circuited
+ * before the transaction does anything). A later notice after settlement
+ * finds the purchase REFUNDED — no longer a relevant reversal — and the
+ * unique indexes on the webhook event and on one SETTLED request per purchase
+ * would refuse a second settlement anyway.
  */
 @Injectable()
 export class PackageRefundSettlementService {
@@ -48,12 +55,13 @@ export class PackageRefundSettlementService {
     tx: Prisma.TransactionClient,
     input: { purchaseId: string; webhookEventId: string; now: Date },
   ): Promise<string | null> {
+    // Approved and waiting, or failed to reconcile earlier (a partial refund,
+    // an unproven figure, an operator's record that the refund had not
+    // happened): a proven full refund settles either. The one-open-request
+    // index means there is at most one such row per purchase.
     const request = await tx.packageRefundRequest.findFirst({
-      where: {
-        purchaseId: input.purchaseId,
-        status: PackageRefundRequestStatus.APPROVED_PENDING_SETTLEMENT,
-      },
-      select: { id: true, supportTicketId: true },
+      where: { purchaseId: input.purchaseId, status: { in: [...SETTLEABLE_STATUSES] } },
+      select: { id: true, supportTicketId: true, status: true },
     });
 
     if (!request) {
@@ -61,7 +69,7 @@ export class PackageRefundSettlementService {
     }
 
     const swapped = await tx.packageRefundRequest.updateMany({
-      where: { id: request.id, status: PackageRefundRequestStatus.APPROVED_PENDING_SETTLEMENT },
+      where: { id: request.id, status: request.status },
       data: {
         status: PackageRefundRequestStatus.SETTLED,
         settledAt: input.now,
@@ -76,7 +84,7 @@ export class PackageRefundSettlementService {
       data: {
         requestId: request.id,
         action: PackageRefundAuditAction.SETTLED,
-        fromStatus: PackageRefundRequestStatus.APPROVED_PENDING_SETTLEMENT,
+        fromStatus: request.status,
         toStatus: PackageRefundRequestStatus.SETTLED,
         actorKind: PackageRefundActorKind.PAYMENT_WEBHOOK,
         actorId: null,
