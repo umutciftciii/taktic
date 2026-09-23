@@ -151,7 +151,10 @@ function TimelineEntry({ entry }: { entry: SupportTicketTimelineEntry }) {
   if (entry.kind === 'PACKAGE_REFUND_EVENT') {
     return (
       <li className="msg-event" data-testid="support-refund-event" data-to-status={entry.toStatus}>
-        <span className="msg-event-text">{packageRefundTimelineText(entry.statusLabel)}</span>
+        <span className="msg-event-text">
+          {packageRefundTimelineText(entry.statusLabel)}
+          {entry.detail ? ` — ${entry.detail}` : ''}
+        </span>
         <time className="msg-item-time" dateTime={entry.createdAt}>
           {formatDateTime(entry.createdAt)}
         </time>

@@ -337,3 +337,76 @@ describe('the audit trail', () => {
     ).rejects.toThrow(/actor_shape/);
   });
 });
+
+describe('webhook-recorded failures and the provider order total', () => {
+  async function approved(fixture: Awaited<ReturnType<typeof base>>) {
+    const row = await underReview(fixture);
+    return ctx.prisma.packageRefundRequest.update({
+      where: { id: row.id },
+      data: {
+        status: 'APPROVED_PENDING_SETTLEMENT',
+        approvalKind: 'NORMAL',
+        approvalEligibility: ELIGIBILITY,
+        approvedById: fixture.admin.id,
+        approvedAt: new Date(),
+      },
+    });
+  }
+
+  it('a SETTLEMENT_FAILED names exactly one cause: the operator or the webhook', async () => {
+    const fixture = await base();
+    const row = await approved(fixture);
+    const event = await webhookEvent();
+    const failure = {
+      status: 'SETTLEMENT_FAILED' as const,
+      settlementFailedAt: new Date(),
+      settlementFailureReason: 'Dış iade tutarı paketin tamamıyla uyuşmadı.',
+    };
+    await expect(
+      ctx.prisma.packageRefundRequest.update({ where: { id: row.id }, data: failure }),
+    ).rejects.toThrow(/settlement_failed_shape/);
+    await expect(
+      ctx.prisma.packageRefundRequest.update({
+        where: { id: row.id },
+        data: { ...failure, settlementFailedById: fixture.admin.id, settlementFailedByWebhookEventId: event.id },
+      }),
+    ).rejects.toThrow(/settlement_failed_shape/);
+    await ctx.prisma.packageRefundRequest.update({
+      where: { id: row.id },
+      data: { ...failure, settlementFailedByWebhookEventId: event.id },
+    });
+  });
+
+  it('a webhook audit row may record SETTLED or SETTLEMENT_FAILED and nothing else', async () => {
+    const fixture = await base();
+    const row = await insert(fixture);
+    const first = await webhookEvent();
+    await ctx.prisma.packageRefundRequestEvent.create({
+      data: { requestId: row.id, action: 'SETTLEMENT_FAILED', toStatus: 'SETTLEMENT_FAILED', actorKind: 'PAYMENT_WEBHOOK', webhookEventId: first.id },
+    });
+    const second = await webhookEvent();
+    await expect(
+      ctx.prisma.packageRefundRequestEvent.create({
+        data: { requestId: row.id, action: 'REJECTED', toStatus: 'REJECTED', actorKind: 'PAYMENT_WEBHOOK', webhookEventId: second.id },
+      }),
+    ).rejects.toThrow(/actor_shape/);
+  });
+
+  it('the provider order total is both-or-neither, a real amount and an ISO code', async () => {
+    const fixture = await base();
+    const id = fixture.purchase.id;
+    await expect(
+      ctx.prisma.packagePurchase.update({ where: { id }, data: { providerOrderTotalAmount: 100 } }),
+    ).rejects.toThrow(/provider_order_total_pair/);
+    await expect(
+      ctx.prisma.packagePurchase.update({ where: { id }, data: { providerOrderTotalAmount: -1, providerOrderCurrency: 'TRY' } }),
+    ).rejects.toThrow(/provider_order_total_shape/);
+    await expect(
+      ctx.prisma.packagePurchase.update({ where: { id }, data: { providerOrderTotalAmount: 100, providerOrderCurrency: 'try' } }),
+    ).rejects.toThrow(/provider_order_total_shape/);
+    await ctx.prisma.packagePurchase.update({ where: { id }, data: { providerOrderTotalAmount: 100, providerOrderCurrency: 'TRY' } });
+    await expect(
+      ctx.prisma.packagePurchase.update({ where: { id }, data: { providerOrderTotalAmount: 101 } }),
+    ).rejects.toThrow(/immutable/);
+  });
+});

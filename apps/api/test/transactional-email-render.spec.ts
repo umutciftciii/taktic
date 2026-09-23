@@ -248,6 +248,19 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     adminReviewUrl: `${ADMIN}/provider-reviews/rev_1`,
     accountUrl: null,
   },
+  'package-refund-status': {
+    fullName: 'Mehmet Usta',
+    status: 'APPROVED_PENDING_SETTLEMENT',
+    failureSource: 'OPERATOR',
+    packageName: 'Başlangıç Paketi',
+    purchaseNumber: 'PKG-2026-000042',
+    priceAmountMinor: '49900',
+    currency: 'TRY',
+    changedAt: '2026-09-23T10:00:00.000Z',
+    ticketSubject: 'Paket ve kredi iadesi: Başlangıç Paketi',
+    ticketUrl: `${WEB}/destek/tkt_1`,
+    accountUrl: `${WEB}/account/profile`,
+  },
   'review-removed': {
     fullName: 'Ayşe Yılmaz',
     scopeLabel: 'Yorumunuz',
@@ -553,7 +566,7 @@ describe('transactional e-mail rendering', () => {
     // Twenty-eight before vitrin's four, then the seven of the run's life,
     // then the two of a request report, then the four of a provider review,
     // then the provider's mailbox proof (AUTH-PROVIDER-CONTACT-001).
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(46);
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(47);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -792,6 +805,7 @@ describe('transactional e-mail rendering', () => {
       'review-received': 'Yeni değerlendirme aldınız — TR-2026-000123',
       'review-report-new-for-support': 'Yeni değerlendirme bildirimi',
       'review-removed': 'Yorumunuz kaldırıldı — TR-2026-000123',
+      'package-refund-status': 'Paket iade talebiniz: onaylandı, ödeme iadesi bekleniyor — Başlangıç Paketi',
       'support-ticket-created': 'Destek talebiniz alındı — Faturam ulaşmadı',
       'support-ticket-new-for-support': 'Yeni destek talebi — Faturam ulaşmadı',
       'support-ticket-customer-reply': 'Destek talebine müşteri yanıtı — Faturam ulaşmadı',

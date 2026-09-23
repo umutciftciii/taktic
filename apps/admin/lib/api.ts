@@ -1556,6 +1556,7 @@ export function notificationTemplateLabel(template: string): string {
     'review-received': 'Yeni değerlendirme',
     'review-report-new-for-support': 'Değerlendirme bildirimi (destek)',
     'review-removed': 'Değerlendirme kaldırıldı',
+    'package-refund-status': 'Paket iade talebi durumu',
   };
 
   return labels[template] ?? template;
@@ -2840,6 +2841,8 @@ export type PackageRefundDetail = PackageRefundListItem & {
   settledAt: string | null;
   settledByWebhook: boolean;
   settlementFailedAt: string | null;
+  /** True when a signed webhook that did not prove a full refund recorded the failure. */
+  settlementFailedByWebhook: boolean;
   creditClawbackCredits: number;
   termsEvidence: { documentVersion: string; acceptedAt: string } | null;
   events: PackageRefundTimelineEntry[];

@@ -1786,6 +1786,17 @@ model PackagePurchase {
   /// projected by a purchase read: the snapshot, digest, client address and
   /// user agent live only on the acceptance row.
   purchaseTermsAcceptanceId        String?               @unique
+  /// CMP-006 PR-B. The payment provider's own order total and currency, as the
+  /// signed settlement webhook stated them — Lemon Squeezy's figure, which may
+  /// drift a minor unit or two from `priceAmountSnapshot` after its USD
+  /// normalisation. Written once, by the webhook settlement that makes the row
+  /// PAID, and never again (trigger `PackagePurchase_provider_order_total_immutable`).
+  /// A refund is proven full only against exactly these two values. NULL on
+  /// every purchase settled before this column existed, honestly: such a
+  /// purchase can never be settled as a full refund automatically. Never
+  /// projected by any response.
+  providerOrderTotalAmount         Int?
+  providerOrderCurrency            String?
   createdAt                        DateTime              @default(now())
   updatedAt                        DateTime              @updatedAt
 
@@ -2095,6 +2106,7 @@ model PaymentWebhookEvent {
   /// CMP-006 PR-B: the one package refund request this `order_refunded` event
   /// settled, and its audit row. Unique on the request side.
   settledPackageRefundRequest PackageRefundRequest?      @relation("PackageRefundRequestSettledByWebhookEvent")
+  failedPackageRefundRequest  PackageRefundRequest?      @relation("PackageRefundRequestFailedByWebhookEvent")
   packageRefundRequestEvents  PackageRefundRequestEvent[] @relation("PackageRefundRequestEventWebhook")
 
   @@unique([provider, eventKey])
@@ -4830,6 +4842,10 @@ model PackageRefundRequest {
   settledByWebhookEventId String?                       @unique
 
   settlementFailedById    String?
+  /// Set instead of `settlementFailedById` when the failure was recorded by a
+  /// signed `order_refunded` that did not prove a full refund. Exactly one of
+  /// the two names who failed it (CHECK). Unique: one event fails one request.
+  settlementFailedByWebhookEventId String?             @unique
   settlementFailedAt      DateTime?
   settlementFailureReason String?
 
@@ -4848,6 +4864,7 @@ model PackageRefundRequest {
   rejectedBy             User?                @relation("PackageRefundRequestRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
   settlementFailedBy     User?                @relation("PackageRefundRequestSettlementFailedBy", fields: [settlementFailedById], references: [id], onDelete: Restrict)
   settledByWebhookEvent  PaymentWebhookEvent? @relation("PackageRefundRequestSettledByWebhookEvent", fields: [settledByWebhookEventId], references: [id], onDelete: Restrict)
+  settlementFailedByWebhookEvent PaymentWebhookEvent? @relation("PackageRefundRequestFailedByWebhookEvent", fields: [settlementFailedByWebhookEventId], references: [id], onDelete: Restrict)
   events                 PackageRefundRequestEvent[]
 
   @@index([status, createdAt])

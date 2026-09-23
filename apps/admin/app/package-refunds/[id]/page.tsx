@@ -254,7 +254,10 @@ export default async function PackageRefundDetailPage({ params, searchParams }: 
             <div>
               <dt>Tamamlanamadı</dt>
               <dd>
-                {refund.settlementFailedBy?.name ?? 'İsimsiz'} — {refund.settlementFailureReason}
+                {refund.settlementFailedByWebhook
+                  ? 'Ödeme sağlayıcısı bildirimi'
+                  : (refund.settlementFailedBy?.name ?? 'İsimsiz')}{' '}
+                — {refund.settlementFailureReason}
               </dd>
             </div>
           ) : null}

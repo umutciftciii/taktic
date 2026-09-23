@@ -71,6 +71,9 @@ export function toProviderRefundRequest(request: ProviderRefundRow) {
 
 export type RefundTimelineAudience = 'PROVIDER' | 'ADMIN';
 
+export const WEBHOOK_SETTLEMENT_MISMATCH_DETAIL =
+  'Dış iade tutarı paketin tamamıyla uyuşmadı; manuel inceleme gerekli.';
+
 export const refundEventSelect = {
   id: true,
   action: true,
@@ -95,7 +98,12 @@ export function toRefundTimelineEvent(event: RefundEventRow, audience: RefundTim
   };
 
   if (audience === 'PROVIDER') {
-    return base;
+    // A failure the payment provider's own notice caused is explained with a
+    // fixed sentence — never the stored reason (which carries a machine code)
+    // and never an operator's words.
+    return event.actorKind === 'PAYMENT_WEBHOOK' && event.toStatus === 'SETTLEMENT_FAILED'
+      ? { ...base, detail: WEBHOOK_SETTLEMENT_MISMATCH_DETAIL }
+      : base;
   }
 
   return {
@@ -163,6 +171,9 @@ export const adminRefundDetailSelect = {
   withdrawnAt: true,
   settledAt: true,
   settlementFailedAt: true,
+  // Whether a webhook recorded the failure — never which event (its key and
+  // id stay inside the payments module).
+  settlementFailedByWebhookEventId: true,
   creditClawbackCredits: true,
   createdBy: { select: { id: true, name: true, role: true } },
   reviewStartedBy: { select: staffSelect },
@@ -217,6 +228,7 @@ export function toAdminRefundDetail(
     settledAt: iso(request.settledAt),
     settledByWebhook: request.settledAt !== null,
     settlementFailedAt: iso(request.settlementFailedAt),
+    settlementFailedByWebhook: request.settlementFailedByWebhookEventId !== null,
     creditClawbackCredits: request.creditClawbackCredits,
     termsEvidence: evidence
       ? { documentVersion: evidence.documentVersion, acceptedAt: evidence.acceptedAt.toISOString() }

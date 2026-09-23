@@ -19,6 +19,12 @@
 --      that took it into review — with no NULL escape (CHECK).
 --   5. No clawback in this slice: "creditClawbackCredits" is pinned to 0.
 --   6. The audit table is append-only, and a webhook row names no person.
+--   7. A SETTLEMENT_FAILED names exactly one cause: the operator who recorded
+--      it, or the signed webhook whose refund was not proven full.
+--   8. The provider's own order total/currency on PackagePurchase — the only
+--      baseline a refund is proven full against — are both-or-neither and
+--      immutable once written (trigger). No DML: every existing purchase
+--      keeps NULL, honestly, and so can never settle a refund automatically.
 --
 -- The three AdminPermission values are added but not used here (a value added
 -- by ALTER TYPE cannot be used in the same transaction).
@@ -57,6 +63,10 @@ ALTER TYPE "AdminPermission" ADD VALUE 'PACKAGE_REFUND_REQUEST_CREATE';
 ALTER TYPE "AdminPermission" ADD VALUE 'PACKAGE_REFUND_APPROVE';
 
 -- AlterTable
+ALTER TABLE "PackagePurchase" ADD COLUMN     "providerOrderCurrency" TEXT,
+ADD COLUMN     "providerOrderTotalAmount" INTEGER;
+
+-- AlterTable
 ALTER TABLE "SupportTicket" ADD COLUMN     "topic" "SupportTicketTopic" NOT NULL DEFAULT 'GENERAL';
 
 -- CreateTable
@@ -85,6 +95,7 @@ CREATE TABLE "PackageRefundRequest" (
     "settledAt" TIMESTAMP(3),
     "settledByWebhookEventId" TEXT,
     "settlementFailedById" TEXT,
+    "settlementFailedByWebhookEventId" TEXT,
     "settlementFailedAt" TIMESTAMP(3),
     "settlementFailureReason" TEXT,
     "creditClawbackCredits" INTEGER NOT NULL DEFAULT 0,
@@ -115,6 +126,9 @@ CREATE UNIQUE INDEX "PackageRefundRequest_supportTicketId_key" ON "PackageRefund
 
 -- CreateIndex
 CREATE UNIQUE INDEX "PackageRefundRequest_settledByWebhookEventId_key" ON "PackageRefundRequest"("settledByWebhookEventId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PackageRefundRequest_settlementFailedByWebhookEventId_key" ON "PackageRefundRequest"("settlementFailedByWebhookEventId");
 
 -- CreateIndex
 CREATE INDEX "PackageRefundRequest_status_createdAt_idx" ON "PackageRefundRequest"("status", "createdAt");
@@ -177,6 +191,9 @@ ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_settleme
 ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_settledByWebhookEventId_fkey" FOREIGN KEY ("settledByWebhookEventId") REFERENCES "PaymentWebhookEvent"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_settlementFailedByWebhookEventId_fkey" FOREIGN KEY ("settlementFailedByWebhookEventId") REFERENCES "PaymentWebhookEvent"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "PackageRefundRequestEvent" ADD CONSTRAINT "PackageRefundRequestEvent_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "PackageRefundRequest"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -184,7 +201,6 @@ ALTER TABLE "PackageRefundRequestEvent" ADD CONSTRAINT "PackageRefundRequestEven
 
 -- AddForeignKey
 ALTER TABLE "PackageRefundRequestEvent" ADD CONSTRAINT "PackageRefundRequestEvent_webhookEventId_fkey" FOREIGN KEY ("webhookEventId") REFERENCES "PaymentWebhookEvent"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
 
 -- ---------------------------------------------------------------------------
 -- Hand-written from here on. Prisma cannot express CHECKs, partial indexes or
@@ -260,11 +276,15 @@ ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_rejected
 ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_settled_by_webhook"
   CHECK (("status" = 'SETTLED') = ("settledByWebhookEventId" IS NOT NULL AND "settledAt" IS NOT NULL));
 
+-- A failed settlement has a moment, a reason, and exactly one author: the
+-- operator, or the webhook whose refund did not prove full.
 ALTER TABLE "PackageRefundRequest" ADD CONSTRAINT "PackageRefundRequest_settlement_failed_shape"
   CHECK (
     ("status" = 'SETTLEMENT_FAILED')
-    = ("settlementFailedById" IS NOT NULL AND "settlementFailedAt" IS NOT NULL
-       AND "settlementFailureReason" IS NOT NULL)
+    = ("settlementFailedAt" IS NOT NULL AND "settlementFailureReason" IS NOT NULL
+       AND (("settlementFailedById" IS NOT NULL) <> ("settlementFailedByWebhookEventId" IS NOT NULL)))
+    AND ("settlementFailedById" IS NULL OR "status" = 'SETTLEMENT_FAILED')
+    AND ("settlementFailedByWebhookEventId" IS NULL OR "status" = 'SETTLEMENT_FAILED')
     AND ("settlementFailureReason" IS NULL
          OR char_length(btrim("settlementFailureReason")) BETWEEN 10 AND 1000)
   );
@@ -282,12 +302,14 @@ CREATE UNIQUE INDEX "PackageRefundRequest_one_settled_per_purchase"
   WHERE "status" = 'SETTLED';
 
 -- The audit row: a webhook row names the event and no person; a person's row
--- names the person and no event. Only a webhook writes SETTLED.
+-- names the person and no event. Only a webhook writes SETTLED, and a webhook
+-- writes nothing but SETTLED or SETTLEMENT_FAILED.
 ALTER TABLE "PackageRefundRequestEvent" ADD CONSTRAINT "PackageRefundRequestEvent_actor_shape"
   CHECK (
     ("actorKind" = 'PAYMENT_WEBHOOK') = ("actorId" IS NULL)
     AND ("actorKind" = 'PAYMENT_WEBHOOK') = ("webhookEventId" IS NOT NULL)
-    AND ("action" = 'SETTLED') = ("actorKind" = 'PAYMENT_WEBHOOK')
+    AND ("action" <> 'SETTLED' OR "actorKind" = 'PAYMENT_WEBHOOK')
+    AND ("actorKind" <> 'PAYMENT_WEBHOOK' OR "action" IN ('SETTLED', 'SETTLEMENT_FAILED'))
   );
 
 ALTER TABLE "PackageRefundRequestEvent" ADD CONSTRAINT "PackageRefundRequestEvent_note_length"
@@ -390,6 +412,37 @@ $$;
 CREATE TRIGGER "PackageRefundRequest_transition_guard"
   BEFORE UPDATE OR DELETE ON "PackageRefundRequest"
   FOR EACH ROW EXECUTE FUNCTION "PackageRefundRequest_transition_guard_fn"();
+
+-- The provider's order total: both or neither, a real amount, an ISO code.
+ALTER TABLE "PackagePurchase" ADD CONSTRAINT "PackagePurchase_provider_order_total_pair"
+  CHECK (("providerOrderTotalAmount" IS NULL) = ("providerOrderCurrency" IS NULL));
+
+ALTER TABLE "PackagePurchase" ADD CONSTRAINT "PackagePurchase_provider_order_total_shape"
+  CHECK (
+    ("providerOrderTotalAmount" IS NULL OR "providerOrderTotalAmount" >= 0)
+    AND ("providerOrderCurrency" IS NULL OR "providerOrderCurrency" ~ '^[A-Z]{3}$')
+  );
+
+-- Trigger: once the webhook settlement has written the provider's order total
+-- and currency, nothing changes or clears them. A later statement that tries —
+-- from any code path — is refused, so the baseline a refund is measured
+-- against is always the one the provider stated when the order was paid.
+CREATE FUNCTION "PackagePurchase_provider_order_total_immutable_fn"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD."providerOrderTotalAmount" IS NOT NULL
+     AND (NEW."providerOrderTotalAmount" IS DISTINCT FROM OLD."providerOrderTotalAmount"
+          OR NEW."providerOrderCurrency" IS DISTINCT FROM OLD."providerOrderCurrency") THEN
+    RAISE EXCEPTION 'PackagePurchase provider order total is immutable'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "PackagePurchase_provider_order_total_immutable"
+  BEFORE UPDATE ON "PackagePurchase"
+  FOR EACH ROW EXECUTE FUNCTION "PackagePurchase_provider_order_total_immutable_fn"();
 
 -- Trigger: the audit trail is append-only.
 CREATE FUNCTION "PackageRefundRequestEvent_append_only_fn"() RETURNS trigger

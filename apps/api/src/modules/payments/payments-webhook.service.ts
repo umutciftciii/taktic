@@ -25,6 +25,7 @@ import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { CampaignRevokeService } from '../campaigns/engine/campaign-revoke.service';
 import { CreditsService } from '../credits/credits.service';
 import { PackageRefundSettlementService } from '../package-refunds/package-refund-settlement.service';
+import { PackageRefundNotificationOutbox } from '../notifications/package-refund-notification-outbox.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
 import { ShowcaseEntitlementService } from '../showcase/showcase-entitlement.service';
@@ -170,6 +171,8 @@ export class PaymentsWebhookService implements OnModuleInit {
     @Inject(CampaignRevokeService) private readonly campaignRevokes: CampaignRevokeService,
     @Inject(PackageRefundSettlementService)
     private readonly packageRefundSettlement: PackageRefundSettlementService,
+    @Inject(PackageRefundNotificationOutbox)
+    private readonly packageRefundNotices: PackageRefundNotificationOutbox,
   ) {}
 
   /** `settle` below raises PACKAGE_PAYMENT_SUCCEEDED for every purchase it writes PAID (CMP-002 S2B2). */
@@ -562,6 +565,7 @@ export class PaymentsWebhookService implements OnModuleInit {
           status: PackagePurchaseStatus.PAID,
           paidAt: now,
           providerOrderId: event.objectId,
+          ...providerOrderTotal(event),
         },
       });
 
@@ -606,6 +610,7 @@ export class PaymentsWebhookService implements OnModuleInit {
         status: PackagePurchaseStatus.PAID,
         paidAt: now,
         providerOrderId: event.objectId,
+        ...providerOrderTotal(event),
         ...(creditTransaction ? { creditTransactionId: creditTransaction.id } : {}),
       },
     });
@@ -715,12 +720,16 @@ export class PaymentsWebhookService implements OnModuleInit {
   private async flagForManualReview(event: LemonSqueezyEvent, expectedStoreId: string): Promise<WebhookOutcome> {
     let redelivered: RedeliveredEvent = null;
     let outcome: WebhookOutcome;
+    // Set inside the transaction when a refund request moved; read after the
+    // commit, so a rolled-back attempt never triggers a delivery.
+    let refundNoticeOwed = false;
 
     try {
       outcome = await runSerializable(
         this.prisma,
         async (tx) => {
           redelivered = null;
+          refundNoticeOwed = false;
 
           const now = new Date();
           const existing = await readEvent(tx, event);
@@ -758,29 +767,56 @@ export class PaymentsWebhookService implements OnModuleInit {
           );
 
           if (purchase && isRelevantReversal(event, purchase, expectedStoreId)) {
-            const revoked = await this.campaignRevokes.revokeForRefundedPurchase(tx, {
-              purchaseId: purchase.id,
-              webhookEventId: recorded.id,
-              now,
-            });
-            if (revoked.length > 0) {
-              this.logger.log(
-                `webhook ${event.eventName} revoked ${revoked.length} campaign promotion(s) of the refunded purchase`,
-              );
-            }
+            // CMP-006 PR-B. An `order_refunded` arrives for a full *and* for a
+            // partial refund. Only one proven full against the provider's own
+            // stored order total may have full-package effects: the S3 promo
+            // revoke, SETTLED and REFUNDED. Anything short of that proof — a
+            // partial, an over- or under-amount, another currency, a missing
+            // figure, a purchase settled before the total was stored — moves no
+            // money, credit or promo, and fails the linked approved request
+            // (if any) for a person to look at. A subscription refund is not a
+            // package refund: it keeps the S3 behaviour it always had and never
+            // touches a refund request.
+            const isOrderRefund = event.eventName === LEMON_SQUEEZY_ORDER_REFUNDED;
+            const failure = isOrderRefund ? fullRefundFailure(event, purchase) : null;
 
-            // CMP-006 PR-B: the only writer of SETTLED. Added after every step
-            // above, which it leaves exactly as they were; a purchase with no
-            // approved refund request waiting for this event gets nothing more.
-            // A subscription refund is not a package refund and never settles.
-            if (event.eventName === LEMON_SQUEEZY_ORDER_REFUNDED) {
-              const settled = await this.packageRefundSettlement.settleFromWebhook(tx, {
+            if (failure) {
+              const failed = await this.packageRefundSettlement.failFromWebhook(tx, {
+                purchaseId: purchase.id,
+                webhookEventId: recorded.id,
+                failure,
+                now,
+              });
+              // The code only — never an amount, a currency or a reference.
+              this.logger.warn(`webhook ${event.eventName} is not a proven full refund (${failure})`);
+              if (failed) {
+                refundNoticeOwed = true;
+                this.logger.log(`webhook ${event.eventName} failed package refund request ${failed}`);
+              }
+            } else {
+              const revoked = await this.campaignRevokes.revokeForRefundedPurchase(tx, {
                 purchaseId: purchase.id,
                 webhookEventId: recorded.id,
                 now,
               });
-              if (settled) {
-                this.logger.log(`webhook ${event.eventName} settled package refund request ${settled}`);
+              if (revoked.length > 0) {
+                this.logger.log(
+                  `webhook ${event.eventName} revoked ${revoked.length} campaign promotion(s) of the refunded purchase`,
+                );
+              }
+
+              // CMP-006 PR-B: the only writer of SETTLED. A purchase with no
+              // approved refund request waiting for this event gets nothing more.
+              if (isOrderRefund) {
+                const settled = await this.packageRefundSettlement.settleFromWebhook(tx, {
+                  purchaseId: purchase.id,
+                  webhookEventId: recorded.id,
+                  now,
+                });
+                if (settled) {
+                  refundNoticeOwed = true;
+                  this.logger.log(`webhook ${event.eventName} settled package refund request ${settled}`);
+                }
               }
             }
           }
@@ -805,6 +841,10 @@ export class PaymentsWebhookService implements OnModuleInit {
     }
 
     await this.countRedelivery(redelivered);
+    if (refundNoticeOwed) {
+      // The intent committed with the transition; this only hurries it.
+      this.packageRefundNotices.deliverSoon();
+    }
     return outcome;
   }
 
@@ -1070,6 +1110,64 @@ function isRelevantReversal(
     purchase.providerOrderId !== null &&
     purchase.providerOrderId === event.objectId
   );
+}
+
+/**
+ * CMP-006 PR-B. The order's own total and currency, written once, by the
+ * settlement that makes the purchase PAID — the only writer. Both or neither:
+ * a payload missing either leaves both NULL, and a refund of that purchase can
+ * then never be proven full (it fails closed). A database trigger refuses any
+ * later change once they are set.
+ */
+function providerOrderTotal(event: LemonSqueezyEvent) {
+  return event.orderTotalMinor !== null && event.currency !== null
+    ? { providerOrderTotalAmount: event.orderTotalMinor, providerOrderCurrency: event.currency }
+    : {};
+}
+
+/**
+ * CMP-006 PR-B. Why a reversal does not prove a full refund, or null when it
+ * does. Every clause is an exact comparison against what the settlement stored
+ * from the provider's own order — never the purchase's price, never a
+ * tolerance, never a conversion:
+ *
+ *   - the purchase carries the stored provider total and currency;
+ *   - `refunded === true` (the provider's "fully refunded" flag);
+ *   - `status === 'refunded'` (not `partial_refund`);
+ *   - `refunded_amount === stored total`;
+ *   - `currency === stored currency`.
+ */
+export type FullRefundFailure =
+  | 'PROVIDER_TOTAL_MISSING'
+  | 'NOT_FULLY_REFUNDED'
+  | 'REFUND_STATUS_NOT_FULL'
+  | 'REFUND_AMOUNT_MISSING'
+  | 'REFUND_AMOUNT_MISMATCH'
+  | 'REFUND_CURRENCY_MISMATCH';
+
+export function fullRefundFailure(
+  event: Pick<LemonSqueezyEvent, 'refunded' | 'orderStatus' | 'refundedAmountMinor' | 'currency'>,
+  purchase: { providerOrderTotalAmount: number | null; providerOrderCurrency: string | null },
+): FullRefundFailure | null {
+  if (purchase.providerOrderTotalAmount === null || purchase.providerOrderCurrency === null) {
+    return 'PROVIDER_TOTAL_MISSING';
+  }
+  if (event.refunded !== true) {
+    return 'NOT_FULLY_REFUNDED';
+  }
+  if (event.orderStatus !== 'refunded') {
+    return 'REFUND_STATUS_NOT_FULL';
+  }
+  if (event.refundedAmountMinor === null) {
+    return 'REFUND_AMOUNT_MISSING';
+  }
+  if (event.refundedAmountMinor !== purchase.providerOrderTotalAmount) {
+    return 'REFUND_AMOUNT_MISMATCH';
+  }
+  if (event.currency !== purchase.providerOrderCurrency) {
+    return 'REFUND_CURRENCY_MISMATCH';
+  }
+  return null;
 }
 
 function isUniqueViolation(error: unknown): boolean {

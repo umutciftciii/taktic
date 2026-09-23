@@ -196,6 +196,13 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'review-received',
   'review-report-new-for-support',
   'review-removed',
+  // CMP-006 PR-B: one message per lasting state of a provider's package
+  // refund request (not the withdrawal, which the provider did themselves).
+  // One template, keyed on the audit row of the transition, so a transition
+  // mails once and a replayed webhook — which writes no audit row — mails
+  // nothing. It carries the package and the state, never an operator's words,
+  // an amount the payment provider reported, a reference or a text snapshot.
+  'package-refund-status',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -315,6 +322,11 @@ export function transactionalSubject(
       return withSuffix('Yeni değerlendirme aldınız', text(data.requestNumber));
     case 'review-report-new-for-support':
       return 'Yeni değerlendirme bildirimi';
+    case 'package-refund-status':
+      return withSuffix(
+        `Paket iade talebiniz: ${packageRefundStatusLabel(data.status) ?? 'güncellendi'}`,
+        text(data.packageName),
+      );
     // The scope is the news: a customer whose comment was taken down still
     // has their stars on the provider's profile, and the subject says so.
     case 'review-removed':
@@ -476,6 +488,8 @@ export function buildDocument(
       return reviewReportNewForSupport(subject, fullName, data);
     case 'review-removed':
       return reviewRemoved(subject, fullName, data);
+    case 'package-refund-status':
+      return packageRefundStatus(subject, fullName, data);
     case 'support-ticket-created':
       return supportTicketCreated(subject, fullName, data);
     case 'support-ticket-new-for-support':
@@ -2811,4 +2825,88 @@ function joinNonEmpty(parts: (string | null)[], separator: string): string | nul
 
 function withSuffix(base: string, suffix: string | null): string {
   return suffix ? `${base} — ${suffix}` : base;
+}
+
+// ───────────────────────── CMP-006 PR-B · package refund ─────────────────────
+
+const PACKAGE_REFUND_STATUS_LABELS: Record<string, string> = {
+  SUBMITTED: 'alındı',
+  UNDER_REVIEW: 'incelemeye alındı',
+  REJECTED: 'onaylanmadı',
+  APPROVED_PENDING_SETTLEMENT: 'onaylandı, ödeme iadesi bekleniyor',
+  SETTLED: 'ödeme iadesi tamamlandı',
+  SETTLEMENT_FAILED: 'ödeme iadesi tamamlanamadı',
+};
+
+function packageRefundStatusLabel(value: string | null | undefined): string | null {
+  const status = text(value);
+  return status ? (PACKAGE_REFUND_STATUS_LABELS[status] ?? null) : null;
+}
+
+/**
+ * What each lasting state says to the provider. Fixed sentences only: a
+ * rejection or a failed settlement is summarised, never quoted — the
+ * operator's reason is an internal record, and a failure the payment
+ * provider's notice caused is described without its figures.
+ */
+function packageRefundStatusSentence(data: Data): string {
+  switch (text(data.status)) {
+    case 'SUBMITTED':
+      return 'Paket ve kredi iadesi talebinizi aldık. Destek ekibimiz talebinizi inceleyecek.';
+    case 'UNDER_REVIEW':
+      return 'İade talebiniz destek ekibimiz tarafından incelemeye alındı.';
+    case 'REJECTED':
+      return (
+        'İade talebiniz iade koşullarına göre değerlendirildi ve onaylanmadı. ' +
+        'Sorularınızı destek talebiniz üzerinden iletebilirsiniz.'
+      );
+    case 'APPROVED_PENDING_SETTLEMENT':
+      return (
+        'İade talebiniz onaylandı. Ödeme iadesi ödeme sağlayıcısı üzerinden işlenecek; ' +
+        'tamamlandığında size ayrıca bilgi vereceğiz.'
+      );
+    case 'SETTLED':
+      return (
+        'Ödeme sağlayıcısı ödeme iadesinin tamamlandığını bildirdi. İadenin hesabınıza ' +
+        'yansıma süresi bankanıza göre değişebilir.'
+      );
+    case 'SETTLEMENT_FAILED':
+      return text(data.failureSource) === 'WEBHOOK'
+        ? 'Ödeme sağlayıcısından gelen iade kaydı paketin tamamıyla eşleşmedi. Ekibimiz durumu manuel olarak inceliyor ve destek talebiniz üzerinden bilgi verecek.'
+        : 'Ödeme iadesi tamamlanamadı. Ekibimiz durumu inceliyor ve destek talebiniz üzerinden bilgi verecek.';
+    default:
+      return 'Paket iade talebinizin durumu güncellendi.';
+  }
+}
+
+function packageRefundStatus(subject: string, fullName: string, data: Data): EmailDocument {
+  const label = packageRefundStatusLabel(data.status);
+  const sentence = packageRefundStatusSentence(data);
+
+  return {
+    subject,
+    preheader: sentence,
+    audience: 'HİZMET VEREN',
+    kicker: 'Paket iadesi',
+    heading: label ? `İade talebiniz ${label}` : 'İade talebiniz güncellendi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(sentence),
+      spacer(4),
+      dataTable([
+        row('Paket', text(data.packageName)),
+        row('Satın alma no', text(data.purchaseNumber)),
+        row('Paket tutarı', formatMoneyMinorIn(int(data.priceAmountMinor), text(data.currency))),
+        row('Durum', label),
+        row('Güncelleme zamanı', formatDateTime(data.changedAt)),
+      ]),
+      spacer(24),
+      cta('Talebi görüntüle', text(data.ticketUrl), 'primary'),
+      spacer(20),
+      note(
+        'TakTic hesabınızda otomatik bir para veya kredi hareketi yapılmaz; ödeme iadesi yalnız ödeme sağlayıcısı üzerinden işlenir.',
+      ),
+    ]),
+  };
 }

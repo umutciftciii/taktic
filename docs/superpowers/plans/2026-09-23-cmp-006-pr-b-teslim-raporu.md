@@ -8,21 +8,24 @@ Dry-run: [`2026-09-23-cmp-006-pr-b-migration-j-dryrun.txt`](2026-09-23-cmp-006-p
 gerçek checkout, gerçek e-posta/SMS kullanılmadı; yerel/staging `taktic` verisine dokunulmadı (yalnız izole
 dry-run DB'si ve bu checkout'un test DB'leri). Hukuki metin değişmedi. Para/kredi hareketi yazan yeni kod yok.**
 
+> **Rev. 2 (2026-09-23, merge öncesi):** tam tutar mutabakatı (Seçenek 1) ve altı durum e-postası eklendi —
+> ayrıntılar §8. §1 tablosu rev. 2 sonrası güncel sayıları taşır.
+
 ## 1. Sayılarla
 
 | Ölçüm | Değer |
 | --- | --- |
 | Migration | **J** `20260923120000_add_package_refund_requests` — 76.; yalnız ekleme, **DML yok** |
 | Yeni tablo / enum | `PackageRefundRequest`, `PackageRefundRequestEvent` / 7 enum (`SupportTicketTopic` + 6 `PackageRefund*`) |
-| Yeni kolon | `SupportTicket.topic` (`GENERAL` varsayılanı gerçek backfill) |
-| CHECK / partial unique / tetikleyici | 14 CHECK · 2 partial unique · 3 tetikleyici (doğum, durum makinesi, append-only audit) |
+| Yeni kolon | `SupportTicket.topic` (`GENERAL` varsayılanı gerçek backfill) · `PackagePurchase.providerOrderTotalAmount/Currency` (NULL, backfill yok) |
+| CHECK / partial unique / tetikleyici | 16 CHECK · 2 partial unique · 4 tetikleyici (doğum, durum makinesi, append-only audit, sağlayıcı toplamı değişmezliği) |
 | İzin | +3 (`PACKAGE_REFUND_READ`, `PACKAGE_REFUND_REQUEST_CREATE`, `PACKAGE_REFUND_APPROVE`) → 77 → **80** |
 | Yeni rota | Admin 7 (route-map'te) · Sağlayıcı 2 (`support/package-refund/*`) · `POST /support/tickets` += `topic`, `packagePurchaseId` |
-| Yeni API testi | **62** (akış 27 · mutabakat 11 · yetki/sızıntı 10 · DB değişmezleri 14) |
-| Tam API paketi | **162 dosya / 3492 test — hepsi geçti** (temiz test DB'sinde) |
+| Yeni API testi | **102** (akış 27 · mutabakat + e-posta 25 · yetki/sızıntı 10 · DB değişmezleri 17 · S3 tam/kısmi 7 · şablon render/koyu mod 16) |
+| Tam API paketi | **162 dosya / 3532 test — hepsi geçti** (rev. 2, temiz test DB'sinde) |
 | Web / admin birim | web 351/351 (yeni 5) · admin 74/74 (yeni 3) |
 | Yeni E2E | 4 senaryo × Chromium + WebKit = **8/8** (purchase-terms runtime'ına admin süreci eklendi) |
-| Tam E2E Chromium | **300/300** (yerel koşu, 8.9 dk) |
+| Tam E2E Chromium | **300/300** (rev. 2 yerel koşu, 8.4 dk) · WebKit iade + purchase-terms 7/7 |
 | typecheck / lint / build | api, web, admin, e2e temiz |
 
 ## 2. Görev tanımının maddeleri
@@ -59,8 +62,8 @@ Admin tarafında hâlâ ticket oluşturma yolu yok (mevcut destek sözleşmesi k
 işleme alan kişi verebilir (kanonik uygunluk + onay anı yeniden hesap). S0 D5 her onayı kapsıyordu; fark
 tasarım §0'da gerekçeli.
 
-**B3 — Kısmi iade sınırı (RG-3'e eklendi).** Sandbox parser `refunded_amount` okumuyor; kısmi bir `order_refunded`
-da talebi SETTLED yapar. Operasyon prosedürü paket iadesini **tam tutar** yapmalı; admin ekranı bunu yazıyor.
+**B3 — Kısmi iade sınırı → rev. 2'de kapatıldı (§8).** İlk sürümde kısmi bir `order_refunded` da talebi SETTLED
+yapıyordu; artık yalnız saklı Lemon toplamına karşı kanıtlanmış tam iade SETTLED yazar.
 
 **B4 — Webhook onaydan önce gelirse.** Talep `UNDER_REVIEW`'da kalır (settle edilmez), satın alma bayraklanır ve
 uygunluk `NOT_APPLICABLE` olur → onay 409; operatör reddeder. `SETTLEMENT_FAILED` sonrası geç gelen webhook
@@ -112,3 +115,50 @@ ardından api/web/admin restart. Kapı yerelde açılmaz → iade konusu görün
 - `pnpm typecheck` (api, web, admin, e2e), `lint`, `pnpm build` → temiz
 - `pnpm e2e package-refund-request` → Chromium 4/4 · `pnpm e2e:webkit package-refund-request` → WebKit 4/4
 - `pnpm e2e` (tam Chromium) → 300/300
+
+## 8. Rev. 2 — tam iade mutabakatı ve durum e-postaları
+
+### 8.1 Sağlayıcı sözleşmesinin tespiti
+
+Resmi Order nesnesi: `total`, `refunded_amount` (sipariş para biriminde kuruş), `currency`, `refunded` (tamamen iade
+edildiyse `true`), `status` (`refunded` | `partial_refund`); `order_refunded` tam ve kısmi iadede gelir. Yerel parser
+bu alanları okumuyordu. Sipariş düzeyi tutarlar USD normalizasyonuyla `priceAmountSnapshot`'tan kayar (99900 → 99904,
+`624f843d`) → `priceAmountSnapshot` eşitliği doğru bir tam iadeyi reddederdi. Seçenek 1 uygulandı. Ham payload,
+ödeme referansı veya tutar hiçbir log/yanıt/rapora yazılmadı (log yalnız kısa kod taşır).
+
+### 8.2 A — yapılanlar
+
+| Madde | Uygulama / kanıt |
+| --- | --- |
+| Kanonik toplam ödeme anında, tek yazıcı, değişmez, sızmaz | `providerOrderTotal(event)` yalnız PAID yapan iki settlement dalında; CHECK pair/shape + `PackagePurchase_provider_order_total_immutable`; `packagePurchaseOmit`; "stores … once" testi |
+| Tam kanıt: saklı toplam var ∧ `refunded===true` ∧ `status==='refunded'` ∧ `refunded_amount===toplam` ∧ `currency` | `fullRefundFailure()`; normalizasyon farkıyla (49900 fiyat, 49902 toplam) tam iade SETTLED testi |
+| Kısmi/fazla/eksik/para birimi/tutar yok/eski satın alma → SETTLED yok, REFUNDED yok, mali etki yok, tek `SETTLEMENT_FAILED` + audit + ticket olayı | 8 senaryolu matris + eski satın alma testi; `failFromWebhook`; ticket'ta sabit açıklama |
+| Tekrar teslimde tek durum/audit | matris her senaryoda aynı olayı iki kez teslim eder |
+| Talebe bağlı olmayan kısmi iade S3 revoke tetiklemez (main hatası) | `campaign-refund-revoke.spec.ts` 6 senaryolu kısmi matris; tam iade revoke bir kez |
+| Eski satın almalar backfill/tahmin/Lemon çağrısı olmadan fail-closed | Migration J DML içermez; `PROVIDER_TOTAL_MISSING` |
+
+### 8.3 B — durum e-postaları
+
+`package-refund-status` şablonu; niyet geçişle aynı transaction'da, dedupe anahtarı geçişin audit satırı; commit
+sonrası `deliverSoon`, kalan niyetleri request lifecycle tick'i süpürür. Testler: tam akış 4 mesaj (SUBMITTED,
+UNDER_REVIEW, APPROVED_PENDING_SETTLEMENT, SETTLED), tekrar webhook ve ikinci süpürme ek mesaj üretmez; REJECTED ve
+operatör SETTLEMENT_FAILED birer kez ve iç gerekçe olmadan; uyumsuz webhook SETTLEMENT_FAILED bir kez
+(`failureSource=WEBHOOK`, tutar yok); geri çekme mesaj üretmez; gönderim hatası niyeti FAILED yapar, durum kalır.
+Canary: referans, sipariş no, digest, kabul id, UA, Lemon toplamı ve olay adı hiçbir mesajda yok.
+
+### 8.4 Bulgular
+
+**B9 — Aynı siparişe ikinci iade olayı.** `eventKey = order_refunded:orders:<orderId>`; kısmi iadeyi tamamlayan
+ikinci bir iade aynı anahtarla gelir ve tekrar sayılır. İstek zaten `SETTLEMENT_FAILED` olduğundan yanlış mali etki
+yok; ama tamamlayıcı iadenin S3 revoke ve `REFUNDED` etkileri otomatik uygulanmaz → operatör. RG-3 doğrulamasına eklendi.
+
+**B10 — Davranış değişikliği (main'e göre).** Talebe bağlı olmayan `order_refunded` artık yalnız kanıtlanmış tam
+iadede S3 revoke çalıştırır. Bu PR'dan önce ödenmiş satın almalarda saklı toplam olmadığı için **hiçbir** `order_refunded`
+revoke tetiklemez (bayrak yazılmaya devam eder). Kampanya motoru kapalı olduğundan bugün etkilenen lot yok.
+
+### 8.5 RG-3 (güncel)
+
+Motor veya `PURCHASE_TERMS_GATE` açılmadan önce staging'de **gerçek Lemon sandbox** üzerinde bir **tam** ve bir
+**kısmi** iade webhook'u doğrulanacak: tam iadede `refunded=true`, `status=refunded`, `refunded_amount` = saklı
+`total`, para birimi eşleşmesi → `SETTLED`; kısmi iadede `partial_refund` → `SETTLEMENT_FAILED`, revoke yok. B9 da
+bu koşuda gözlenecek.

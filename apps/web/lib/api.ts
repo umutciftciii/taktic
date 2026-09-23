@@ -1434,6 +1434,8 @@ export type SupportTicketTimelineEntry =
       action: string;
       toStatus: PackageRefundRequestStatus;
       statusLabel: string;
+      /** A fixed explanation, present only on a failure the payment provider's notice caused. */
+      detail?: string;
       createdAt: string;
     }
   | {

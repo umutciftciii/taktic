@@ -1,4 +1,4 @@
-CMP-006 PR-B Migration J dry-run — 2026-09-23T10:34:04Z
+CMP-006 PR-B Migration J dry-run — 2026-09-23T14:50:58Z
 Izole DB: cmp006_prb_migration_dryrun (gercek taktic DB'sine, .env'e ve container'lara dokunulmadi)
 
 == 1. main@58c51e13 semasi + 75 migration uygulanir ==
@@ -89,5 +89,21 @@ PackageRefundRequest_transition_guard ON "PackageRefundRequest"
   (beklenen ret) ERROR:  PackageRefundRequestEvent is append-only (UPDATE refused)
   (beklenen ret) ERROR:  new row for relation "PackageRefundRequestEvent" violates check constraint "PackageRefundRequestEvent_actor_shape"
 
-== 17. Temizlik ==
+== 17. Saglayici siparis toplami: ikisi birlikte, gecerli bicim, bir kez yazilir ==
+  (beklenen ret) ERROR:  new row for relation "PackagePurchase" violates check constraint "PackagePurchase_provider_order_total_pair"
+  (beklenen ret) ERROR:  new row for relation "PackagePurchase" violates check constraint "PackagePurchase_provider_order_total_shape"
+  pur-legacy toplam yazildi (10004 TRY; fiyat 10000 — normalizasyon farki)
+  (beklenen ret) ERROR:  PackagePurchase provider order total is immutable
+  (beklenen ret) ERROR:  PackagePurchase provider order total is immutable
+
+== 18. Webhook kaynakli SETTLEMENT_FAILED: tek neden (operator XOR webhook), webhook yalniz SETTLED/SETTLEMENT_FAILED yazar ==
+  pur-2 PAID + acc-2 yazildi
+  r-2 APPROVED_PENDING_SETTLEMENT
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequest" violates check constraint "PackageRefundRequest_settlement_failed_shape"
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequest" violates check constraint "PackageRefundRequest_settlement_failed_shape"
+  r-2 SETTLEMENT_FAILED (we-2)
+  e-3 yazildi
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequestEvent" violates check constraint "PackageRefundRequestEvent_actor_shape"
+
+== 19. Temizlik ==
   cmp006_prb_migration_dryrun silindi

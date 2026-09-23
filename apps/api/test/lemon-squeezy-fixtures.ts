@@ -62,12 +62,22 @@ export type LemonOrderOverrides = {
   testMode?: boolean;
   storeId?: number | string;
   status?: string;
-  total?: number;
+  /** `null` omits the order total, as a payload that does not carry it would. */
+  total?: number | null;
   itemPrice?: number | null;
   quantity?: number | null;
   currency?: string;
   variantId?: string;
   reference?: string | null;
+  /**
+   * CMP-006 PR-B: the refund fields of Lemon Squeezy's Order object. On an
+   * `order_refunded` delivery they default to a *full* refund of the order —
+   * `refunded: true`, `status: 'refunded'`, `refunded_amount` equal to the
+   * order's `total` — which is what the provider sends when the whole order
+   * is refunded. `null` omits the field from the payload.
+   */
+  refunded?: boolean | null;
+  refundedAmount?: number | null;
 };
 
 /**
@@ -75,9 +85,15 @@ export type LemonOrderOverrides = {
  * so the assertions about what is *not* stored have something real to bite on.
  */
 export function lemonOrderPayload(overrides: LemonOrderOverrides = {}) {
+  const eventName = overrides.eventName ?? 'order_created';
+  const isRefund = eventName === 'order_refunded';
+  const total = overrides.total === undefined ? 49902 : overrides.total;
+  const refunded = overrides.refunded === undefined ? isRefund : overrides.refunded;
+  const refundedAmount =
+    overrides.refundedAmount === undefined ? (isRefund ? total : 0) : overrides.refundedAmount;
   return {
     meta: {
-      event_name: overrides.eventName ?? 'order_created',
+      event_name: eventName,
       test_mode: overrides.testMode ?? true,
       custom_data: overrides.reference === null ? {} : { purchase_reference: overrides.reference },
     },
@@ -86,8 +102,10 @@ export function lemonOrderPayload(overrides: LemonOrderOverrides = {}) {
       id: overrides.orderId ?? 'order-991',
       attributes: {
         store_id: overrides.storeId ?? Number(LEMON_STORE_ID),
-        status: overrides.status ?? 'paid',
-        total: overrides.total ?? 49902,
+        status: overrides.status ?? (isRefund ? 'refunded' : 'paid'),
+        ...(total === null ? {} : { total }),
+        ...(refunded === null ? {} : { refunded }),
+        ...(refundedAmount === null ? {} : { refunded_amount: refundedAmount }),
         currency: overrides.currency ?? 'TRY',
         user_name: LEMON_BUYER_NAME,
         user_email: LEMON_BUYER_EMAIL,

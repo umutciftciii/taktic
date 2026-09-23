@@ -75,6 +75,22 @@ export type LemonSqueezyEvent = {
    */
   chargedMinor: number | null;
   currency: string | null;
+  /**
+   * CMP-006 PR-B. The order's own `total` in the order currency, minor units —
+   * Lemon Squeezy's figure, which may drift a minor unit or two from the line
+   * item after its USD normalisation (see chargedMinor). Never compared with
+   * the purchase's price: it is stored at settlement as the provider's own
+   * statement of what the order cost, and a refund is later measured against
+   * exactly that stored value.
+   */
+  orderTotalMinor: number | null;
+  /**
+   * `attributes.refunded`: true only when the order has been fully refunded.
+   * Null when absent or not a boolean — never inferred.
+   */
+  refunded: boolean | null;
+  /** `attributes.refunded_amount` in the order currency, minor units. */
+  refundedAmountMinor: number | null;
   /** This application's own correlation token, echoed back in custom data. */
   reference: string | null;
 };
@@ -157,6 +173,9 @@ export function readLemonSqueezyEvent(rawBody: Buffer): LemonSqueezyEvent | null
     orderStatus: readOpaque(attributes.status),
     chargedMinor: readChargedAmount(firstItem),
     currency: readCurrency(attributes.currency),
+    orderTotalMinor: readMinorAmount(attributes.total),
+    refunded: typeof attributes.refunded === 'boolean' ? attributes.refunded : null,
+    refundedAmountMinor: readMinorAmount(attributes.refunded_amount),
     reference: readReference(custom.purchase_reference),
   };
 }

@@ -25,6 +25,10 @@ import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { hasPermission } from '../auth/admin-permissions';
 import type { AuthUser } from '../auth/auth.types';
+import {
+  enqueuePackageRefundNotice,
+  PackageRefundNotificationOutbox,
+} from '../notifications/package-refund-notification-outbox.service';
 import { SUPPORT_TICKET_SUBJECT_MAX_LENGTH } from '../support-tickets/support-tickets.config';
 import {
   evaluatePackageRefundEligibility,
@@ -116,6 +120,8 @@ export class PackageRefundRequestsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PackageRefundEligibilityService)
     private readonly eligibility: PackageRefundEligibilityService,
+    @Inject(PackageRefundNotificationOutbox)
+    private readonly notices: PackageRefundNotificationOutbox,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -210,7 +216,7 @@ export class PackageRefundRequestsService {
     const now = new Date();
 
     try {
-      return await runSerializable(
+      const opened = await runSerializable(
         this.prisma,
         async (tx) => {
           // Ownership in the where clause: another provider's purchase id is the
@@ -282,6 +288,8 @@ export class PackageRefundRequestsService {
         },
         { label: 'packageRefunds.openProviderRefundTicket' },
       );
+      this.notices.deliverSoon();
+      return opened;
     } catch (error) {
       throw mapOpenRequestViolation(error);
     }
@@ -539,6 +547,7 @@ export class PackageRefundRequestsService {
         },
         { label: 'packageRefunds.createByAdmin' },
       );
+      this.notices.deliverSoon();
       return this.detail(created, admin);
     } catch (error) {
       throw mapOpenRequestViolation(error);
@@ -666,6 +675,7 @@ export class PackageRefundRequestsService {
       },
       { label: 'packageRefunds.approve' },
     );
+    this.notices.deliverSoon();
 
     return this.detail(id, admin);
   }
@@ -897,9 +907,11 @@ export class PackageRefundRequestsService {
       });
       await touchTicket(tx, request.supportTicketId, now);
     });
+    // After the commit: the intent is already durable, this only hurries it.
+    this.notices.deliverSoon();
   }
 
-  private audit(
+  private async audit(
     tx: Tx,
     input: {
       requestId: string;
@@ -912,7 +924,7 @@ export class PackageRefundRequestsService {
       now: Date;
     },
   ) {
-    return tx.packageRefundRequestEvent.create({
+    const event = await tx.packageRefundRequestEvent.create({
       data: {
         requestId: input.requestId,
         action: input.action,
@@ -923,7 +935,12 @@ export class PackageRefundRequestsService {
         note: input.note ?? null,
         createdAt: input.now,
       },
+      select: { id: true },
     });
+    // The provider's notice for this transition, in the same transaction:
+    // committed together or not at all. A withdrawal owes none.
+    await enqueuePackageRefundNotice(tx, event.id);
+    return event;
   }
 }
 
