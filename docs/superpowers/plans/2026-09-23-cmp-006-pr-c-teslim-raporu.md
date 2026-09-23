@@ -157,4 +157,4 @@ Kampanya motoru ve `PURCHASE_TERMS_GATE` kapalı; fraud karar kuralları, HMAC b
 | lint / build | temiz / başarılı (turbo, 4/4 paket) |
 | Tam Chromium E2E (`pnpm e2e`) | `ce31243f`: **302/302** (8.4 dk, `retries: 0`) · auth düzeltmesi sonrası: **302/302** (8.5 dk) |
 | Tam WebKit E2E (`pnpm e2e:webkit`, CI'daki WebKit projesi; `provider-business-registration` eklendi) | `ce31243f`: **131/131** (4.1 dk) · auth düzeltmesi sonrası: **131/131** (4.1 dk) |
-| CI | `ce31243f`: e2e chromium ✅ · e2e webkit ✅ · verify ❌ (§7.2a yarışı) · düzeltme sonrası: _bekleniyor_ |
+| CI | `ce31243f`: e2e chromium ✅ · e2e webkit ✅ · verify ❌ (§7.2a yarışı) · `5630b74d`: **3/3 yeşil** (verify ✅, e2e chromium ✅, e2e webkit ✅) |
