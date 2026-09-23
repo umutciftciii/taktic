@@ -19,7 +19,13 @@ import { primaryRuntime, purchaseTermsRuntime, type Runtime } from '../src/runti
  * could have carried it.
  */
 
+/*
+ * DASHBOARD_READ so the panel's landing page after sign-in is the dashboard
+ * itself: without it, `/` redirects to `/yetkisiz`, and on WebKit that second
+ * navigation races the test's own next `goto` (seen in CI).
+ */
 const REFUND_PERMISSIONS = [
+  'DASHBOARD_READ',
   'SUPPORT_READ',
   'PACKAGE_REFUND_READ',
   'PACKAGE_REFUND_REQUEST_CREATE',
@@ -30,6 +36,13 @@ const REFUND_PERMISSIONS = [
  * The topic radios are visually hidden inside their labels (`.radio`), so the
  * label text is what a person — and this suite — clicks.
  */
+
+/** Signs in and waits until the panel has settled on its landing page. */
+async function signInStaff(actor: Actor, staff: { email: string; password: string }) {
+  await actor.loginToAdmin(staff.email, staff.password);
+  await expect(actor.page.locator('#admin-sidebar')).toBeVisible();
+  await actor.page.waitForLoadState('load');
+}
 
 /** A provider who bought one package with the consent box ticked, now paid. */
 async function providerWithPaidPurchase(browser: Browser, runtime: Runtime, label: string) {
@@ -104,7 +117,7 @@ test.describe('package refund request', () => {
       const acceptance = await prisma().purchaseTermsAcceptance.findUniqueOrThrow({ where: { purchaseId: purchase.id } });
 
       // The operator's queue and detail.
-      await admin.loginToAdmin(staff.email, staff.password);
+      await signInStaff(admin, staff);
       await admin.gotoAdmin('/package-refunds');
       await expect(admin.page.locator('#admin-sidebar').getByRole('link', { name: 'Paket İadeleri' })).toBeVisible();
       const row = admin.page.getByTestId('package-refund-row').filter({ hasText: seeded.businessName });
@@ -215,7 +228,7 @@ test.describe('package refund request', () => {
       const ticketId = new URL(provider.page.url()).pathname.split('/').pop()!;
 
       // The maker opens and takes the request from the ticket screen.
-      await makerActor.loginToAdmin(maker.email, maker.password);
+      await signInStaff(makerActor, maker);
       await makerActor.gotoAdmin(`/support/${ticketId}`);
       await makerActor.page.locator('#support-refund-purchase').selectOption(purchase.id);
       await makerActor.page.getByTestId('support-refund-open').click();
@@ -228,7 +241,7 @@ test.describe('package refund request', () => {
       const detailPath = new URL(makerActor.page.url()).pathname;
 
       // The checker approves it as an exception, with a ground and a reason.
-      await checkerActor.loginToAdmin(checker.email, checker.password);
+      await signInStaff(checkerActor, checker);
       await checkerActor.gotoAdmin(detailPath);
       const form = checkerActor.page.getByTestId('package-refund-exception-form');
       await form.locator('select[name="exceptionGround"]').selectOption('DUPLICATE_CHARGE');

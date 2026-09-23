@@ -76,6 +76,12 @@ reddediyor (dry-run §12). Bu değişiklik geliştirme sırasında yapıldığı
 **B7 — Bildirim yok.** Durum değişikliklerinde e-posta/SMS gönderilmiyor; sağlayıcı ticket'ı açınca görür.
 Refund ticket'ı açılırken mevcut "destek talebi açıldı" bildirimi aynen çalışır.
 
+**B8 — CI WebKit yarışı (ilk CI koşusu).** `DASHBOARD_READ` taşımayan personel girişte `/` → `/yetkisiz`
+yönlendirmesi alıyor; WebKit'te bu ikinci navigasyon testin sıradaki `goto`'sunu kesti ("interrupted by another
+navigation"). Ürün hatası değil: E2E personeline `DASHBOARD_READ` verildi ve giriş sonrası sidebar görünene kadar
+bekleniyor. Aynı koşudaki sonraki `TEST_WORKER_INDEX … no location block` hataları, bilinen art arda başarısızlık
+artçısıdır (showcase-package-price 45 sn zaman aşımı sonrası).
+
 ## 4. Davranış değişiklikleri (dikkat)
 
 | Değişiklik | Kim etkilenir |
