@@ -22,7 +22,7 @@ dry-run DB'si ve bu checkout'un test DB'leri). Hukuki metin değişmedi. Para/kr
 | Tam API paketi | **162 dosya / 3492 test — hepsi geçti** (temiz test DB'sinde) |
 | Web / admin birim | web 351/351 (yeni 5) · admin 74/74 (yeni 3) |
 | Yeni E2E | 4 senaryo × Chromium + WebKit = **8/8** (purchase-terms runtime'ına admin süreci eklendi) |
-| Tam E2E Chromium | §7'ye bakınız |
+| Tam E2E Chromium | **300/300** (yerel koşu, 8.9 dk) |
 | typecheck / lint / build | api, web, admin, e2e temiz |
 
 ## 2. Görev tanımının maddeleri
@@ -105,4 +105,4 @@ ardından api/web/admin restart. Kapı yerelde açılmaz → iade konusu görün
 - `pnpm --filter @taktic/web exec vitest run` → 351/351 · `pnpm --filter @taktic/admin exec vitest run` → 74/74
 - `pnpm typecheck` (api, web, admin, e2e), `lint`, `pnpm build` → temiz
 - `pnpm e2e package-refund-request` → Chromium 4/4 · `pnpm e2e:webkit package-refund-request` → WebKit 4/4
-- Tam Chromium E2E → _PR açıklamasında raporlanır_
+- `pnpm e2e` (tam Chromium) → 300/300
