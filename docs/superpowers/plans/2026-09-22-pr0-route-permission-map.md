@@ -855,3 +855,29 @@ sayısı **tam olarak iki**.
 Sağlayıcı rotaları (`support/package-refund/*`, `@Roles(PROVIDER)`) ve `POST /support/tickets`'in yeni
 `topic` alanı admin rotası değildir; bu tabloya girmez. Admin destek talebi detayı (`SUPPORT_READ`) iade
 bloğunu ve iade zaman çizelgesi olaylarını yalnız `PACKAGE_REFUND_READ` sahibine döndürür.
+
+## 15. CMP-006 PR-C eklemesi (2026-09-23)
+
+İki yeni sabit izin, dört rota. İzin sayısı 80 → **82**. Tasarım:
+[`2026-09-23-cmp-006-pr-c-business-registration-promotion-eligibility-design.md`](../specs/2026-09-23-cmp-006-pr-c-business-registration-promotion-eligibility-design.md).
+
+`campaigns/eligibility/admin-promotion-eligibility.controller.ts` — sınıf düzeyi guard
+(`AuthGuard, AdminAccessGuard, PermissionsGuard`). `admin/campaigns/…` altında değil: orada `GET :id` yakalardı.
+
+| HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/admin/promotion-eligibility/holds` | `list` | Bekleyen / karar verilen uygunluk incelemeleri | `PROMOTION_ELIGIBILITY_REVIEW` | RİSK GEREKÇESİ (okuma) |
+| GET | `/admin/promotion-eligibility/holds/:eventId` | `get` | Hold snapshot'ı, aday kampanyalar, karar | `PROMOTION_ELIGIBILITY_REVIEW` | RİSK GEREKÇESİ (okuma) |
+| POST | `/admin/promotion-eligibility/holds/:eventId/decision` | `decide` | Gerekçeli `ELIGIBLE`/`INELIGIBLE`, bir kez | `PROMOTION_ELIGIBILITY_REVIEW` | PROMOSYON (dolaylı PARA) |
+
+`business-registration/business-registration.controller.ts` — metod düzeyi.
+
+| HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/providers/:providerId/business-registration/raw` | `readRaw` | Ham kayıt numarası + ham eski vergi numarası; her okuma `SensitiveDataAccessLog`; `no-store` | `PROVIDER_REGISTRATION_READ_SENSITIVE` | KİŞİSEL VERİ (TCKN olabilir) |
+
+`GET/PUT /providers/me/business-registration` sağlayıcının kendi rotasıdır (`@Roles(PROVIDER)`), admin rotası
+değildir; bu tabloya girmez. Operatörün kanonik kaydı yazdığı bir rota **yoktur**. `PROVIDERS_READ_DETAIL` ve
+`PROVIDERS_READ` artık ham vergi/kayıt numarası taşımaz (maskeli; listede eski vergi numarası hiç yok).
+Mevcut `GET /admin/campaigns/:id/evaluation-events` (`CAMPAIGNS_READ`) `HELD_FOR_REVIEW` durumunu görür, snapshot'ı
+görmez; `POST …/retry` held event'i kabul etmez (409 `CAMPAIGN_EVENT_NOT_RETRYABLE`).

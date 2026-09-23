@@ -12,6 +12,7 @@ import { assertPaymentProviderConfig } from './modules/payments/payment-provider
 import { assertPhoneVerificationTestBypassConfig } from './modules/phone-verification/phone-verification-test-bypass.config';
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
 import { assertTurnstileConfig } from './modules/turnstile/turnstile.config';
+import { assertPromotionFingerprintConfig } from './modules/business-registration/promotion-fingerprint';
 import { UPLOAD_ROOT_DIR } from './modules/uploads/uploads.constants';
 
 async function bootstrap() {
@@ -75,6 +76,7 @@ async function bootstrap() {
   // write unprotected; a bypass mode outside NODE_ENV=test or a declared local
   // stack stops it just the same. The message names variables, never values.
   assertTurnstileConfig();
+  assertPromotionFingerprintConfig();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // Keeps the untouched request bytes on `req.rawBody`. The payment webhook

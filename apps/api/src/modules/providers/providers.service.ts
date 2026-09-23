@@ -11,6 +11,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import {
+  type BusinessRegistrationType,
   CreditTransactionType,
   NumberedEntityType,
   OfferEntitlementSource,
@@ -44,6 +45,16 @@ import { EntitlementResolverService } from '../entitlements/entitlement-resolver
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import {
+  maskLegacyTaxNumber,
+  requireValidBusinessRegistration,
+  type NormalizedBusinessRegistration,
+} from '../business-registration/business-registration.rules';
+import {
+  businessRegistrationMaskedSelect,
+  registrationView,
+  writeBusinessRegistration,
+} from '../business-registration/business-registration.writer';
 import { isStaff } from '../auth/admin-permissions';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
@@ -107,8 +118,14 @@ type NormalizedProviderPayload = {
   contactName: string;
   phone: string;
   email: string | null;
-  taxType: string | null;
-  taxNumber: string | null;
+  /**
+   * `undefined` on an edit that did not send them: the legacy pair is left as
+   * it is rather than wiped (the profile form never carried them).
+   */
+  taxType: string | null | undefined;
+  taxNumber: string | null | undefined;
+  /** CMP-006 PR-C. Null when the application declared nothing (then no row is written). */
+  businessRegistration: NormalizedBusinessRegistration | null;
   city: string;
   district: string;
   addressNote: string | null;
@@ -223,14 +240,17 @@ export class ProvidersService implements OnModuleInit {
     let provider: Awaited<ReturnType<ProvidersService['createApplicationRecord']>>;
 
     try {
-      provider = await this.createApplicationRecord(this.prisma, payload, user);
+      // One transaction since CMP-006 PR-C: the profile and its business
+      // registration are one application, and a profile without the
+      // registration its applicant declared would read as a legacy record.
+      provider = await this.prisma.$transaction((tx) => this.createApplicationRecord(tx, payload, user));
     } catch (error) {
       throw translateApplicationWriteError(error);
     }
 
     await this.announceNewApplication(provider.id, user, meta);
 
-    return withVisibleServiceCategories(provider);
+    return toProviderRecord(withVisibleServiceCategories(provider));
   }
 
   /**
@@ -308,12 +328,12 @@ export class ProvidersService implements OnModuleInit {
    * so there is no second place, and no caller-supplied list, that could put an
    * application against a category the checks above never saw.
    */
-  createApplicationRecord(
-    client: Pick<Prisma.TransactionClient, 'providerProfile'>,
+  async createApplicationRecord(
+    client: Prisma.TransactionClient,
     payload: NormalizedProviderPayload,
     user: AuthUser | null,
   ) {
-    return client.providerProfile.create({
+    const provider = await client.providerProfile.create({
       data: {
         userId: user?.role === UserRole.PROVIDER ? user.id : undefined,
         businessName: payload.businessName,
@@ -337,6 +357,23 @@ export class ProvidersService implements OnModuleInit {
       },
       include: providerInclude,
     });
+    if (!payload.businessRegistration) {
+      return provider;
+    }
+    const written = await writeBusinessRegistration(client, {
+      providerId: provider.id,
+      declaration: payload.businessRegistration,
+      actorKind: 'APPLICANT',
+      actorUserId: user?.role === UserRole.PROVIDER ? user.id : null,
+    });
+    return {
+      ...provider,
+      businessRegistration: {
+        type: written.view.type!,
+        numberMasked: written.view.numberMasked,
+        updatedAt: written.view.updatedAt!,
+      },
+    };
   }
 
   /**
@@ -408,7 +445,7 @@ export class ProvidersService implements OnModuleInit {
     const metrics = await this.getProviderListMetrics(providerIds);
 
     return providers.map((provider) => ({
-      ...provider,
+      ...toProviderListRecord(provider),
       creditBalance: metrics.creditBalance.get(provider.id) ?? 0,
       activeOffersCount: metrics.activeOffers.get(provider.id) ?? 0,
       totalOffersCount: metrics.totalOffers.get(provider.id) ?? 0,
@@ -463,10 +500,10 @@ export class ProvidersService implements OnModuleInit {
     // release preparation, and its name and slug are exactly what the
     // unreleased catalogue must not leak.
     if (visibility === 'owner') {
-      return { ...withVisibleServiceCategories(provider), visibility };
+      return { ...toProviderRecord(withVisibleServiceCategories(provider)), visibility };
     }
 
-    return { ...provider, visibility };
+    return { ...toProviderRecord(provider), visibility };
   }
 
   async getAdminProviderDetail(id: string) {
@@ -538,7 +575,7 @@ export class ProvidersService implements OnModuleInit {
     ]);
 
     return {
-      ...provider,
+      ...toProviderRecord(provider),
       creditBalance,
       activeOffersCount,
       totalOffersCount,
@@ -755,7 +792,7 @@ export class ProvidersService implements OnModuleInit {
       throw new NotFoundException('Provider profile not found');
     }
 
-    return withVisibleServiceCategories(provider);
+    return toProviderRecord(withVisibleServiceCategories(provider));
   }
 
   async getProviderDashboardForUser(userId: string) {
@@ -795,7 +832,7 @@ export class ProvidersService implements OnModuleInit {
     ]);
 
     return {
-      provider: withVisibleServiceCategories(provider),
+      provider: toProviderRecord(withVisibleServiceCategories(provider)),
       creditBalance,
       activeOffersCount,
       recentOffersCount,
@@ -898,8 +935,8 @@ export class ProvidersService implements OnModuleInit {
       // has already been checked for PROVIDERS_WRITE, and an operator who may
       // save a profile must see the same shape back that they saved.
       return isStaff(user)
-        ? updated
-        : withVisibleServiceCategories(updated);
+        ? toProviderRecord(updated)
+        : toProviderRecord(withVisibleServiceCategories(updated));
     });
   }
 
@@ -1061,7 +1098,7 @@ export class ProvidersService implements OnModuleInit {
       await this.notify(() => this.mail.sendProviderApplicationApproved(id, now), id);
     }
 
-    return provider;
+    return toProviderRecord(provider);
   }
 
   async listMatchingRequests(providerId: string, filters: RequestDiscoveryFilters) {
@@ -1680,8 +1717,12 @@ export class ProvidersService implements OnModuleInit {
       // a folded value and an unfolded one fails for anybody who typed a
       // capital letter.
       email: normalizeProviderEmail(dto.email),
-      taxType: normalizeNullableString(dto.taxType),
-      taxNumber: normalizeNullableString(dto.taxNumber),
+      taxType: dto.taxType === undefined ? undefined : normalizeNullableString(dto.taxType),
+      taxNumber: dto.taxNumber === undefined ? undefined : normalizeNullableString(dto.taxNumber),
+      businessRegistration: requireValidBusinessRegistration(
+        dto.businessRegistrationType,
+        dto.businessRegistrationNumber,
+      ),
       // Canonical spelling, for the same reason the service areas above get it:
       // discovery compares a request's city and district against these as text.
       city: address.city,
@@ -1895,7 +1936,42 @@ const providerInclude = {
   serviceAreas: {
     orderBy: [{ city: 'asc' }, { district: 'asc' }, { neighborhood: 'asc' }],
   },
+  // CMP-006 PR-C: type and mask only. The raw number is read by one audited
+  // route (BusinessRegistrationService.readRaw) and by nothing that builds a
+  // provider response.
+  businessRegistration: businessRegistrationMaskedSelect,
 } satisfies Prisma.ProviderProfileInclude;
+
+/**
+ * Every non-public provider response goes through here (CMP-006 PR-C): the
+ * legacy free-text tax number leaves only masked — it is often a T.C.
+ * identity number — and the registration relation becomes its view, with
+ * "unspecified" for a profile that has none.
+ */
+function toProviderRecord<
+  T extends {
+    taxNumber: string | null;
+    businessRegistration: { type: BusinessRegistrationType; numberMasked: string | null; updatedAt: Date } | null;
+  },
+>(provider: T) {
+  const { taxNumber, businessRegistration, ...rest } = provider;
+  return {
+    ...rest,
+    taxNumberMasked: maskLegacyTaxNumber(taxNumber),
+    businessRegistration: registrationView(businessRegistration),
+  };
+}
+
+/** The list carries no legacy tax number at all, masked or not. */
+function toProviderListRecord<
+  T extends {
+    taxNumber: string | null;
+    businessRegistration: { type: BusinessRegistrationType; numberMasked: string | null; updatedAt: Date } | null;
+  },
+>(provider: T) {
+  const { taxNumberMasked: _legacy, ...rest } = toProviderRecord(provider);
+  return rest;
+}
 
 /**
  * The binding shape everyone who is not an operator sees.

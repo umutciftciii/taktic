@@ -17,6 +17,7 @@ import { createCampaignFixture, engineWriteSnapshot, setEngineEnabled, walletInv
 import {
   createOfferPackage,
   createProviderProfile,
+  declareBusinessRegistration,
   createTestApp,
   createUser,
   resetDatabase,
@@ -54,13 +55,19 @@ beforeEach(async () => {
   await setEngineEnabled(ctx.prisma, true);
 });
 
+/**
+ * Both proofs and a declared business registration by default since CMP-006
+ * PR-C: the promotion eligibility gate stands in front of the introductory
+ * triggers, and this spec's subject is the engine behind it
+ * (promotion-eligibility.spec.ts is the gate's).
+ */
 async function providerWithAccount(overrides: { email?: boolean; phone?: boolean; approved?: boolean } = {}) {
   const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
   await ctx.prisma.user.update({
     where: { id: owner.id },
     data: {
-      emailVerifiedAt: overrides.email ? new Date() : null,
-      phoneVerifiedAt: overrides.phone ? new Date() : null,
+      emailVerifiedAt: overrides.email === false ? null : new Date(),
+      phoneVerifiedAt: overrides.phone === false ? null : new Date(),
     },
   });
   const approved = overrides.approved ?? true;
@@ -71,6 +78,7 @@ async function providerWithAccount(overrides: { email?: boolean; phone?: boolean
   if (approved) {
     await ctx.prisma.providerProfile.update({ where: { id: provider.id }, data: { approvedAt: new Date() } });
   }
+  await declareBusinessRegistration(ctx.prisma, provider.id);
   return { owner, provider };
 }
 
@@ -576,7 +584,7 @@ describe('eligibility transition through onProviderFact', () => {
     'grants exactly once when the facts complete in the order %s',
     async (_label, order) => {
       const { campaign } = await createCampaignFixture(ctx.prisma, { trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: [...FACTS] });
-      const { provider, owner } = await providerWithAccount({ approved: false });
+      const { provider, owner } = await providerWithAccount({ approved: false, email: false, phone: false });
       const outcomes: string[] = [];
 
       for (const fact of order) {

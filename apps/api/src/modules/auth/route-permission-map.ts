@@ -60,6 +60,11 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'POST', path: '/admin/package-refund-requests/:id/reject', permission: AdminPermission.PACKAGE_REFUND_APPROVE },
   { method: 'POST', path: '/admin/package-refund-requests/:id/settlement-failed', permission: AdminPermission.PACKAGE_REFUND_APPROVE },
   { method: 'POST', path: '/admin/package-refund-requests/:id/take', permission: AdminPermission.PACKAGE_REFUND_REQUEST_CREATE },
+  // CMP-006 PR-C
+  { method: 'GET', path: '/admin/promotion-eligibility/holds', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
+  { method: 'GET', path: '/admin/promotion-eligibility/holds/:eventId', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
+  { method: 'POST', path: '/admin/promotion-eligibility/holds/:eventId/decision', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
+  { method: 'GET', path: '/providers/:providerId/business-registration/raw', permission: AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE },
   { method: 'GET', path: '/admin/offer-packages/:id', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/offer-packages/unlimited-eligible-categories', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/showcase/cards', permission: AdminPermission.SHOWCASE_CARDS_READ },

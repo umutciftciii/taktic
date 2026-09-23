@@ -22,6 +22,7 @@ import { createCampaignFixture, engineWriteSnapshot, setEngineEnabled, walletInv
 import {
   createOfferPackage,
   createProviderProfile,
+  declareBusinessRegistration,
   createTestApp,
   createUser,
   currentCreditBalance,
@@ -117,10 +118,32 @@ async function admin() {
   return { user, cookie: await loginAs(ctx.prisma, user.id) };
 }
 
-/** A PROVIDER account with a profile under review, nothing proven yet. */
-async function newProvider(status: ProviderStatus = ProviderStatus.PENDING_REVIEW) {
+/**
+ * A PROVIDER account with a profile under review, nothing proven yet — but a
+ * declared business registration of its own (CMP-006 PR-C), so the promotion
+ * eligibility gate answers on the proofs alone; promotion-eligibility.spec.ts
+ * is where the gate itself is the subject.
+ */
+async function newProvider(
+  status: ProviderStatus = ProviderStatus.PENDING_REVIEW,
+  /**
+   * Proofs written straight to the account, for the scenarios whose subject
+   * is another path: the gate asks for both before an introductory grant.
+   */
+  proofs: { email?: boolean; phone?: boolean } = {},
+) {
   const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER, phone: `0555${uniqueSuffix().padStart(7, '0').slice(-7)}` });
+  if (proofs.email || proofs.phone) {
+    await ctx.prisma.user.update({
+      where: { id: owner.id },
+      data: {
+        ...(proofs.email ? { emailVerifiedAt: new Date() } : {}),
+        ...(proofs.phone ? { phoneVerifiedAt: new Date() } : {}),
+      },
+    });
+  }
   const provider = await createProviderProfile(ctx.prisma, { userId: owner.id, status });
+  await declareBusinessRegistration(ctx.prisma, provider.id);
   return { owner, provider, cookie: await loginAs(ctx.prisma, owner.id) };
 }
 
@@ -489,7 +512,7 @@ describe('durability — class 1: an error before the PENDING event is durable r
       setUp: async () => {
         const { campaign } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
         const { cookie: adminCookie } = await admin();
-        const { provider } = await newProvider();
+        const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
         return {
           campaignId: campaign.id,
           providerId: provider.id,
@@ -511,7 +534,7 @@ describe('durability — class 1: an error before the PENDING event is durable r
       name: 'provider e-mail proof',
       setUp: async () => {
         const { campaign } = await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED'], credits: 4 });
-        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED, { phone: true });
         const token = await requestEmailToken(cookie);
         return {
           campaignId: campaign.id,
@@ -535,7 +558,7 @@ describe('durability — class 1: an error before the PENDING event is durable r
       name: 'provider telephone proof',
       setUp: async () => {
         const { campaign } = await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'PHONE_VERIFIED'], credits: 3 });
-        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+        const { provider, cookie } = await newProvider(ProviderStatus.APPROVED, { email: true });
         const code = await requestPhoneCode(cookie);
         return {
           campaignId: campaign.id,
@@ -642,7 +665,7 @@ describe('durability — class 1: an error before the PENDING event is durable r
 
   it('an error before the event is even computed (the fact re-read) rolls the proof back the same way', async () => {
     await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'PHONE_VERIFIED'], credits: 3 });
-    const { provider, cookie } = await newProvider(ProviderStatus.APPROVED);
+    const { provider, cookie } = await newProvider(ProviderStatus.APPROVED, { email: true });
     const code = await requestPhoneCode(cookie);
     const registry = ctx.app.get(FactSourceRegistry);
     vi.spyOn(registry, 'readAll').mockRejectedValueOnce(new TypeError('simulated bug in the fact read'));
@@ -685,7 +708,7 @@ describe('durability — class 2: the PENDING event committed, then the evaluato
     const { campaign, version } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
     const good = await corrupt(version.id);
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
 
     await approve(adminCookie, provider.id).expect(200);
     expect((await ctx.prisma.providerProfile.findUniqueOrThrow({ where: { id: provider.id } })).status).toBe(ProviderStatus.APPROVED);
@@ -782,7 +805,7 @@ describe('durability — class 2: the PENDING event committed, then the evaluato
     const poor = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 5, priority: 1 });
     const good = await corrupt(rich.version.id);
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
     await approve(adminCookie, provider.id).expect(200);
 
     expect((await worker.runOnce()).outcomes[0]?.outcome).toBe('ENGINE_ERROR');
@@ -798,7 +821,7 @@ describe('durability — class 2: the PENDING event committed, then the evaluato
   it('a serialization budget exhausted in the worker parks the event with CONCURRENT_MODIFICATION; a plain error parks it with WORKER_ERROR', async () => {
     await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
     await approve(adminCookie, provider.id).expect(200);
     const engine = ctx.app.get(CampaignEngineService);
 
@@ -824,7 +847,7 @@ describe('claims and leases', () => {
   it('four concurrent worker passes over one event: exactly one claims it, exactly one grant', async () => {
     const { campaign } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
     await approve(adminCookie, provider.id).expect(200);
     // Four independent workers (four processes, in effect): the in-process
     // guard is bypassed by constructing them separately.
@@ -846,7 +869,7 @@ describe('claims and leases', () => {
   it('four concurrent hooks for one provider: one PENDING event; the worker then grants once and no committed raise is silently lost', async () => {
     const { campaign } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
 
     const responses = await Promise.all(Array.from({ length: 4 }, () => approve(adminCookie, provider.id)));
     const statuses = responses.map((r) => r.status);
@@ -883,7 +906,7 @@ describe('claims and leases', () => {
   it('an expired lease (a worker that died mid-flight) is reclaimed and evaluated; a live lease is not', async () => {
     const { campaign } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
     await approve(adminCookie, provider.id).expect(200);
     const event = await ctx.prisma.campaignTriggerEvent.findFirstOrThrow();
 
@@ -930,8 +953,8 @@ describe('claims and leases', () => {
     const { campaign, version } = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10 });
     const good = await corrupt(version.id);
     const { cookie: adminCookie } = await admin();
-    const first = await newProvider();
-    const second = await newProvider();
+    const first = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
+    const second = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
     await approve(adminCookie, first.provider.id).expect(200);
     expect((await worker.runOnce()).outcomes[0]?.outcome).toBe('ENGINE_ERROR');
     await ctx.prisma.campaignVersion.update({ where: { id: version.id }, data: { definition: good } });
@@ -958,7 +981,7 @@ describe('stack and independence through the real routes', () => {
     const small = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 5, priority: 1 });
     const big = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 10, priority: 100 });
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
     await approve(adminCookie, provider.id).expect(200);
     await worker.runOnce();
     await expectSingleGrant(provider.id, big.campaign.id, 10);
@@ -972,7 +995,7 @@ describe('stack and independence through the real routes', () => {
     await ctx.prisma.campaign.update({ where: { id: exhausted.campaign.id }, data: { redemptionCount: 1, budgetConsumedCredits: 10 } });
     const runnerUp = await activeCampaign({ trigger: 'PROVIDER_APPROVED', credits: 5 });
     const { cookie: adminCookie } = await admin();
-    const { provider } = await newProvider();
+    const { provider } = await newProvider(ProviderStatus.PENDING_REVIEW, { email: true, phone: true });
     await approve(adminCookie, provider.id).expect(200);
     await worker.runOnce();
     await expectSingleGrant(provider.id, runnerUp.campaign.id, 5);

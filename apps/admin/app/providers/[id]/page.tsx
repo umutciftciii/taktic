@@ -23,6 +23,8 @@ import {
 } from '../../categories/category-taxonomy';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
+import { BUSINESS_REGISTRATION_STATUS_LABELS, businessRegistrationLabel } from '../../../lib/business-registration';
+import { RawRegistrationReveal } from './raw-registration-reveal';
 import { StatCard } from '../../../components/stat-card';
 import { EmptyState } from '../../../components/empty-state';
 import { ModerationDialog } from '../../../components/moderation-dialog';
@@ -133,7 +135,7 @@ export default async function ProviderDetailPage({
   params,
   searchParams,
 }: ProviderDetailPageProps) {
-  await requireAdmin('PROVIDERS_READ_DETAIL');
+  const { can, isSuperAdmin } = await requireAdmin('PROVIDERS_READ_DETAIL');
   const { id } = await params;
   const { claimInvite, categoryQuery: rawCategoryQuery, categoryNotice } = await searchParams;
   // An unknown id — including a path like /providers/new that falls through to
@@ -153,10 +155,17 @@ export default async function ProviderDetailPage({
     // The provider's own list, which the provider route serves to an operator
     // as well. A failure hides the card rather than the screen: the reviews
     // are context here, not the subject.
-    apiFetch<ProviderReviewsPage>(`/providers/${id}/reviews?limit=10`).catch((error: unknown) => {
-      if (error instanceof ApiError) return null;
-      throw error;
-    }),
+    //
+    // SUPER_ADMIN only: that route's guard (ProviderAccessGuard) admits the
+    // owner and SUPER_ADMIN, and `apiFetch` turns its 403 into a redirect to
+    // /yetkisiz — which took the whole page away from every role-based staff
+    // account (found in CMP-006 PR-C). The card is context; its absence is not.
+    isSuperAdmin
+      ? apiFetch<ProviderReviewsPage>(`/providers/${id}/reviews?limit=10`).catch((error: unknown) => {
+          if (error instanceof ApiError) return null;
+          throw error;
+        })
+      : Promise.resolve(null),
   ]);
 
   const claim = provider.claim ?? null;
@@ -169,7 +178,9 @@ export default async function ProviderDetailPage({
   const recentOffers = provider.recentOffers ?? [];
   const recentPackagePurchases = provider.recentPackagePurchases ?? [];
 
-  const hasTaxInfo = Boolean(provider.taxType || provider.taxNumber);
+  const hasTaxInfo = Boolean(provider.taxType || provider.taxNumberMasked);
+  const registration = provider.businessRegistration;
+  const canReadRaw = can('PROVIDER_REGISTRATION_READ_SENSITIVE');
 
   const categoryQuery = (rawCategoryQuery ?? '').trim();
   const categoryNoticeMessage = categoryNotice ? CATEGORY_NOTICES[categoryNotice] : undefined;
@@ -548,16 +559,31 @@ export default async function ProviderDetailPage({
           </p>
         </SectionCard>
 
-        {hasTaxInfo ? (
-          <SectionCard title="Vergi bilgisi">
-            <dl className="meta-row">
-              <dt>Vergi türü</dt>
-              <dd>{provider.taxType ?? '-'}</dd>
-              <dt>Vergi numarası</dt>
-              <dd>{provider.taxNumber ?? '-'}</dd>
+        {/* CMP-006 PR-C: masked only; the raw value is one audited read away. */}
+        <SectionCard title="İşletme kaydı">
+          <dl className="meta-row" data-testid="registration-card">
+            <dt>Durum</dt>
+            <dd data-testid="registration-status">
+              {BUSINESS_REGISTRATION_STATUS_LABELS[registration?.status ?? 'UNSPECIFIED']}
+            </dd>
+            <dt>Tür</dt>
+            <dd>{businessRegistrationLabel(registration?.type)}</dd>
+            <dt>Numara</dt>
+            <dd data-testid="registration-masked">{registration?.numberMasked ?? '—'}</dd>
+          </dl>
+          {hasTaxInfo ? (
+            <dl className="meta-row" style={{ marginTop: 12 }}>
+              <dt>Eski vergi beyanı</dt>
+              <dd>
+                <span className="muted">Doğrulanmamış eski kayıt</span> · {provider.taxType ?? '-'} ·{' '}
+                <span data-testid="legacy-tax-masked">{provider.taxNumberMasked ?? '-'}</span>
+              </dd>
             </dl>
-          </SectionCard>
-        ) : null}
+          ) : null}
+          {canReadRaw && (registration?.status === 'DECLARED' || hasTaxInfo) ? (
+            <RawRegistrationReveal providerId={provider.id} />
+          ) : null}
+        </SectionCard>
 
         <SectionCard title="Durum bilgileri">
           <dl className="meta-row">

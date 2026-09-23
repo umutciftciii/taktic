@@ -16,6 +16,12 @@ import {
 } from './campaign-engine.repository';
 import { evaluateConditions, type EvaluationFacts } from './condition-evaluator';
 import { FactSourceRegistry } from './fact-source-registry';
+import {
+  PROMOTION_GATED_TRIGGERS,
+  PROMOTION_SNAPSHOT_VERSION,
+  decidePromotionEligibility,
+} from './promotion-eligibility';
+import { PromotionEligibilityReader } from './promotion-eligibility.reader';
 import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from './trigger-event-key';
 
 /**
@@ -86,6 +92,12 @@ export type EngineEvaluatedResult = {
   triggerEventId: string;
   triggerEventKey: string;
   granted: GrantView | null;
+  /**
+   * CMP-006 PR-C: the promotion eligibility gate answered REVIEW and wrote the
+   * event's hold snapshot. The caller (the worker) parks the event
+   * HELD_FOR_REVIEW; nothing was granted or consumed.
+   */
+  heldForReview: boolean;
   evaluations: EvaluationEntry[];
 };
 
@@ -110,6 +122,7 @@ export class CampaignEngineService {
     @Inject(CampaignEngineRepository) private readonly repository: CampaignEngineRepository,
     @Inject(CampaignFactReader) private readonly facts: CampaignFactReader,
     @Inject(FactSourceRegistry) private readonly registry: FactSourceRegistry,
+    @Inject(PromotionEligibilityReader) private readonly eligibility: PromotionEligibilityReader,
   ) {}
 
   async evaluate(tx: Prisma.TransactionClient, input: EngineInput): Promise<EngineResult> {
@@ -194,11 +207,12 @@ export class CampaignEngineService {
     };
     const of = (candidate: CandidateRow) => ({ campaignId: candidate.id, campaignVersionId: candidate.activeVersion.id });
     const none = { campaignId: null, campaignVersionId: null };
-    const result = (granted: GrantView | null): EngineEvaluatedResult => ({
+    const result = (granted: GrantView | null, heldForReview = false): EngineEvaluatedResult => ({
       outcome: 'EVALUATED',
       triggerEventId: event.id,
       triggerEventKey,
       granted,
+      heldForReview,
       evaluations,
     });
 
@@ -249,6 +263,22 @@ export class CampaignEngineService {
         continue;
       }
       eligible.push(candidate);
+    }
+
+    // 4b. PROVIDER_PROMOTION_ELIGIBLE (CMP-006 PR-C), for the introductory
+    //     triggers and only when a candidate is left to grant: a person's
+    //     decision on this event if there is one, the gate otherwise. REVIEW
+    //     and INELIGIBLE log every surviving candidate and stop here — before
+    //     any counter, limit or budget is touched.
+    if (eligible.length > 0 && PROMOTION_GATED_TRIGGERS.has(input.trigger)) {
+      const gate = await this.promotionGate(tx, event.id, input.providerId);
+      if (gate.kind !== 'proceed') {
+        const outcome = gate.kind === 'hold' ? 'PROMOTION_REVIEW_HELD' : 'PROMOTION_INELIGIBLE';
+        for (const candidate of eligible) {
+          await log(of(candidate), outcome, { reasonCode: gate.reasonCode });
+        }
+        return result(null, gate.kind === 'hold');
+      }
     }
 
     // 5. EXCLUSIVE_CREDIT_BONUS order: most credits, then lowest priority
@@ -330,6 +360,12 @@ export class CampaignEngineService {
         now,
       });
       await this.repository.settleEvent(tx, event.id, candidate.id, redemptionId);
+      // CMP-006 PR-C: an introductory grant counts against the business
+      // registration it was granted under — here, inside the candidate
+      // savepoint, so a grant that is rolled back leaves no count behind.
+      if (PROMOTION_GATED_TRIGGERS.has(event.trigger)) {
+        await this.repository.countRegistrationGrant(tx, providerId, redemptionId);
+      }
       await this.repository.release(tx, SAVEPOINT.candidate);
       return { kind: 'granted', redemptionId, lotId: grant.lotId, grantTransactionId: grant.transactionId, expiresAt };
     } catch (error) {
@@ -341,6 +377,50 @@ export class CampaignEngineService {
       }
       throw error;
     }
+  }
+
+  /**
+   * A person's decision wins and is never recomputed (design §2.4). Without
+   * one: a hold snapshot that already exists keeps the event held (no second
+   * snapshot), otherwise the gate decides and a REVIEW writes the snapshot.
+   */
+  private async promotionGate(
+    tx: Prisma.TransactionClient,
+    triggerEventId: string,
+    providerId: string,
+  ): Promise<{ kind: 'proceed' } | { kind: 'hold' | 'ineligible'; reasonCode: string }> {
+    const review = await tx.promotionEligibilityReview.findUnique({
+      where: { triggerEventId },
+      select: { decision: true },
+    });
+    if (review) {
+      return review.decision === 'ELIGIBLE' ? { kind: 'proceed' } : { kind: 'ineligible', reasonCode: 'HUMAN_DECISION' };
+    }
+    const existingHold = await tx.promotionEligibilityHold.findUnique({
+      where: { triggerEventId },
+      select: { signals: true },
+    });
+    if (existingHold) {
+      return { kind: 'hold', reasonCode: firstSignalCode(existingHold.signals) ?? 'HELD' };
+    }
+
+    const decision = decidePromotionEligibility(await this.eligibility.read(tx, providerId));
+    if (decision.outcome === 'ELIGIBLE') {
+      return { kind: 'proceed' };
+    }
+    const reasonCode = decision.signals[0]!.code;
+    if (decision.outcome === 'INELIGIBLE') {
+      return { kind: 'ineligible', reasonCode };
+    }
+    await tx.promotionEligibilityHold.create({
+      data: {
+        triggerEventId,
+        providerId,
+        snapshotVersion: PROMOTION_SNAPSHOT_VERSION,
+        signals: { outcome: decision.outcome, signals: decision.signals } as Prisma.InputJsonValue,
+      },
+    });
+    return { kind: 'hold', reasonCode };
   }
 
   private async readFacts(tx: Prisma.TransactionClient, input: EngineInput, now: Date): Promise<EvaluationFacts> {
@@ -413,4 +493,10 @@ function parseDefinition(candidate: CandidateRow): CampaignDefinition {
     );
   }
   return parsed.definition;
+}
+
+function firstSignalCode(snapshot: Prisma.JsonValue): string | null {
+  const signals = (snapshot as { signals?: Array<{ code?: unknown }> } | null)?.signals;
+  const code = Array.isArray(signals) ? signals[0]?.code : undefined;
+  return typeof code === 'string' ? code : null;
 }

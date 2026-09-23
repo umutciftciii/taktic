@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "types": {
+    "TRADE_REGISTRY": { "label": "Ticaret sicil numarası", "minDigits": 1, "maxDigits": 12, "checksum": null },
+    "MERSIS": { "label": "MERSİS numarası", "minDigits": 16, "maxDigits": 16, "checksum": null },
+    "TAX_NUMBER": { "label": "Vergi kimlik numarası", "minDigits": 10, "maxDigits": 10, "checksum": null },
+    "CRAFTSMAN_REGISTRY": { "label": "Esnaf ve sanatkâr sicil numarası", "minDigits": 1, "maxDigits": 12, "checksum": null },
+    "SOLE_PROPRIETOR_TR_ID": { "label": "Şahıs işletmesi (T.C. kimlik numarası)", "minDigits": 11, "maxDigits": 11, "checksum": "TR_IDENTITY" },
+    "NONE_DECLARED": { "label": "Beyan etmiyorum", "minDigits": 0, "maxDigits": 0, "checksum": null }
+  },
+  "order": ["TAX_NUMBER", "SOLE_PROPRIETOR_TR_ID", "TRADE_REGISTRY", "MERSIS", "CRAFTSMAN_REGISTRY", "NONE_DECLARED"],
+  "maskVisibleDigits": 2,
+  "inputMaxLength": 40
+}

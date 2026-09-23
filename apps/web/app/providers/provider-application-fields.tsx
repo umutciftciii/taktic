@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { ProvinceWithDistricts } from '../../lib/locations';
+import { BusinessRegistrationFields } from './business-registration-fields';
 import { CityDistrictFields } from './city-district-fields';
 import { ServiceAreaFields } from './service-area-fields';
 
@@ -78,6 +79,16 @@ export function ProviderApplicationFields({
               placeholder="Ad Soyad"
             />
           </label>
+          {/* CMP-006 PR-C: the canonical business registration. */}
+          <BusinessRegistrationFields
+            classNames={{
+              field: 'provider-apply-field',
+              label: 'provider-apply-label',
+              input: 'provider-apply-input',
+              help: 'provider-apply-help',
+              required: 'provider-apply-required',
+            }}
+          />
           <label className="provider-apply-field provider-apply-field-full">
             <span className="provider-apply-label">Açıklama</span>
             <textarea

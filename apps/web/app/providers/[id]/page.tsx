@@ -10,6 +10,7 @@ import {
   type ReviewSummary,
   statusLabel,
 } from '../../../lib/api';
+import { describeBusinessRegistration } from '../../../lib/business-registration';
 import { readTurnstileWebConfig } from '../../../lib/turnstile';
 import { ReviewSummaryCard } from '../../review-summary-card';
 import { ProviderShell } from '../provider-shell';
@@ -127,6 +128,11 @@ export default async function ProviderPreviewPage({ params, searchParams }: Prov
               <div className="pdash-info-row">
                 <dt>Tanıtım</dt>
                 <dd>{provider.description ?? '-'}</dd>
+              </div>
+              {/* CMP-006 PR-C: type and masked number, "unspecified" for a legacy record. */}
+              <div className="pdash-info-row">
+                <dt>İşletme kaydı</dt>
+                <dd>{describeBusinessRegistration(provider.businessRegistration)}</dd>
               </div>
             </dl>
           </section>

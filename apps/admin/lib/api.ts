@@ -5,6 +5,7 @@ import { notFound, redirect } from 'next/navigation';
 // Re-exported by the `export *` further down; imported by name as well
 // because a re-export does not put the names in this module's own scope.
 import type { ReviewModerationAction, ReviewReportReason, ReviewReportResolution } from './reviews';
+import type { BusinessRegistrationView } from './business-registration';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -393,8 +394,11 @@ export type ProviderProfile = {
   contactName: string;
   phone: string;
   email: string | null;
+  /** The unverified legacy pair; the number arrives masked only (CMP-006 PR-C). Absent on the list. */
   taxType: string | null;
-  taxNumber: string | null;
+  taxNumberMasked?: string | null;
+  /** CMP-006 PR-C: type and masked number; "UNSPECIFIED" for a legacy record. */
+  businessRegistration?: BusinessRegistrationView;
   city: string;
   district: string;
   addressNote: string | null;
@@ -3685,6 +3689,14 @@ export function adminPermissionLabel(permission: AdminPermission): {
   };
   if (PACKAGE_REFUND[permission]) {
     return { area: 'Paket iadeleri', action: PACKAGE_REFUND[permission] };
+  }
+
+  // CMP-006 PR-C: two permissions whose last word is not a verb.
+  if (permission === 'PROVIDER_REGISTRATION_READ_SENSITIVE') {
+    return { area: 'Hizmet verenler', action: 'işletme kayıt numarasının ham değerini görme (her görüntüleme kayıt altına alınır)' };
+  }
+  if (permission === 'PROMOTION_ELIGIBILITY_REVIEW') {
+    return { area: 'Kampanya', action: 'promosyon uygunluk incelemesi ve kararı' };
   }
 
   const parts = permission.split('_');

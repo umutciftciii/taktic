@@ -37,6 +37,8 @@ const PRIVATE_FIELDS = [
   'contactName',
   'taxType',
   'taxNumber',
+  'taxNumberMasked',
+  'businessRegistration',
   'addressNote',
   'moderationNote',
   'rejectionReason',
@@ -222,7 +224,12 @@ describe('GET /providers/:id — private projection', () => {
     expect(response.body.phone).toBe(provider.phone);
     expect(response.body.email).toBe(provider.email);
     expect(response.body.contactName).toBe(provider.contactName);
-    expect(response.body.taxNumber).toBe(provider.taxNumber);
+    // CMP-006 PR-C: the legacy tax number is masked for the owner as well —
+    // often a T.C. identity number — and never raw.
+    expect(response.body).not.toHaveProperty('taxNumber');
+    expect(response.body.taxNumberMasked).toBe(`${'*'.repeat(provider.taxNumber!.length - 2)}${provider.taxNumber!.slice(-2)}`);
+    expect(JSON.stringify(response.body)).not.toContain(provider.taxNumber!);
+    expect(response.body.businessRegistration).toEqual({ status: 'UNSPECIFIED', type: null, numberMasked: null, updatedAt: null });
   });
 
   it('gives SUPER_ADMIN the full record including moderation fields', async () => {
@@ -238,7 +245,9 @@ describe('GET /providers/:id — private projection', () => {
     expect(response.body.visibility).toBe('admin');
     expect(response.body).not.toHaveProperty('seoIndexable');
     expect(response.body.phone).toBe(provider.phone);
-    expect(response.body.taxNumber).toBe(provider.taxNumber);
+    // Masked for staff too: the raw value is its own audited route (CMP-006 PR-C).
+    expect(response.body).not.toHaveProperty('taxNumber');
+    expect(JSON.stringify(response.body)).not.toContain(provider.taxNumber!);
     expect(response.body.moderationNote).toBe('İç moderasyon notu');
   });
 });

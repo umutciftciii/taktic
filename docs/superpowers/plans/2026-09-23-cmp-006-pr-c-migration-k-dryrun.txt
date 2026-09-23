@@ -1,0 +1,69 @@
+CMP-006 PR-C Migration K dry-run — 2026-09-23T19:04:07Z
+Izole DB: cmp006_prc_migration_dryrun (gercek taktic DB'sine, .env'e ve container'lara dokunulmadi)
+
+== 1. main@b4dc5f51 migration'lari uygulanir ==
+76 migrations found in prisma/migrations
+All migrations have been successfully applied.
+76 migration uygulandi
+
+== 2. Migration oncesi eski kayit: serbest metin vergi alanli saglayici + bir kampanya olayi ==
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+p-legacy taxType=SAHIS taxNumber=10000000146
+
+== 3. Migration K uygulanir ==
+77 migrations found in prisma/migrations
+Applying migration `20260923180000_add_business_registration_and_promotion_eligibility`
+All migrations have been successfully applied.
+
+== 4. migrate diff (drift kontrolu; bos olmali) ==
+-- This is an empty migration.
+
+
+== 5. Uygulanan migration sayisi ==
+77
+
+== 6. DML yok: eski vergi alanlari aynen, hicbir kanonik kayit/sayac/hold dogmadi ==
+p-legacy taxType=SAHIS taxNumber=10000000146
+0 ProviderBusinessRegistration (0 olmali)
+0 ProviderBusinessRegistrationChange (0 olmali)
+0 CampaignRegistrationCounter (0 olmali)
+0 PromotionEligibilityHold (0 olmali)
+0 PromotionEligibilityReview (0 olmali)
+0 SensitiveDataAccessLog (0 olmali)
+e-legacy status=EVALUATED
+
+== 7. Yeni enum degerleri ==
+82 AdminPermission degeri (82 olmali)
+PROVIDER_REGISTRATION_READ_SENSITIVE
+PROMOTION_ELIGIBILITY_REVIEW
+CampaignTriggerEventStatus: PENDING,PROCESSING,EVALUATED,SETTLED,RETRY_WAIT,HELD_FOR_REVIEW
+PROMOTION_REVIEW_HELD
+PROMOTION_INELIGIBLE
+BusinessRegistrationType: TRADE_REGISTRY,MERSIS,TAX_NUMBER,CRAFTSMAN_REGISTRY,SOLE_PROPRIETOR_TR_ID,NONE_DECLARED
+
+== 8. CHECK kisitlari ==
+CampaignRegistrationCounter_fingerprint_shape
+PromotionEligibilityHold_snapshot_shape
+PromotionEligibilityReview_reason_length
+ProviderBusinessRegistrationChange_fingerprints
+ProviderBusinessRegistration_number_matches_type
+SensitiveDataAccessLog_fields_present
+
+== 9. Tetikleyiciler ==
+PromotionEligibilityHold_append_only ON "PromotionEligibilityHold"
+PromotionEligibilityReview_append_only ON "PromotionEligibilityReview"
+PromotionEligibilityReview_insert_guard ON "PromotionEligibilityReview"
+ProviderBusinessRegistrationChange_append_only ON "ProviderBusinessRegistrationChange"
+SensitiveDataAccessLog_append_only ON "SensitiveDataAccessLog"
+
+== 10. Sayac tablosunun kolonlari (numara kolonu yok) ==
+id,registrationType,fingerprint,fingerprintVersion,providerId,redemptionCount,firstRedemptionId,lastRedemptionId,createdAt,updatedAt
+
+== 11. CHECK davranisi: NONE_DECLARED + numara ve numarasiz VKN reddedilir ==
+violates check constraint "ProviderBusinessRegistration_number_matches_type"
+violates check constraint "ProviderBusinessRegistration_number_matches_type"
+
+== 12. Temizlik ==
+cmp006_prc_migration_dryrun silindi

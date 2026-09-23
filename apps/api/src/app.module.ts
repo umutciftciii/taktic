@@ -19,6 +19,7 @@ import { SupportTicketsModule } from './modules/support-tickets/support-tickets.
 import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
 import { ProviderInvitesModule } from './modules/provider-invites/provider-invites.module';
 import { ProvidersModule } from './modules/providers/providers.module';
+import { BusinessRegistrationModule } from './modules/business-registration/business-registration.module';
 import { ProviderReviewsModule } from './modules/provider-reviews/provider-reviews.module';
 import { RequestReportsModule } from './modules/request-reports/request-reports.module';
 import { OffersModule } from './modules/offers/offers.module';
@@ -70,6 +71,9 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
     RequestReportsModule,
     ServiceRequestsModule,
     ProviderClaimModule,
+    // Before ProvidersModule: `GET /providers/me/business-registration` must not
+    // be read as anything of ProvidersController's.
+    BusinessRegistrationModule,
     ProvidersModule,
     ProviderReviewsModule,
     ProviderInvitesModule,

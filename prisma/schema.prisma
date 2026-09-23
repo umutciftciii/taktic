@@ -449,66 +449,71 @@ model User {
 
   serviceRequests                 ServiceRequest[]
   providerProfile                 ProviderProfile?
-  accountPhoneVerifications       PhoneVerification[]                @relation("PhoneVerificationUser")
+  accountPhoneVerifications       PhoneVerification[]                  @relation("PhoneVerificationUser")
   creditTransactions              ProviderCreditTransaction[]
   sessions                        Session[]
-  customerNotes                   CustomerNote[]                     @relation("CustomerNoteCustomer")
-  createdCustomerNotes            CustomerNote[]                     @relation("CustomerNoteCreatedBy")
-  activationTokens                CustomerActivationToken[]          @relation("CustomerActivationTokenCustomer")
-  requestDraftsExpected           RequestDraft[]                     @relation("RequestDraftExpectedUser")
-  requestDrafts                   RequestDraft[]                     @relation("RequestDraftUser")
-  createdActivationTokens         CustomerActivationToken[]          @relation("CustomerActivationTokenCreatedBy")
-  adminInviteTokens               AdminInviteToken[]                 @relation("AdminInviteTokenUser")
+  /// CMP-006 PR-C.
+  businessRegistrationsDeclared   ProviderBusinessRegistration[]       @relation("ProviderBusinessRegistrationDeclaredBy")
+  businessRegistrationChanges     ProviderBusinessRegistrationChange[] @relation("ProviderBusinessRegistrationChangeActor")
+  sensitiveDataReads              SensitiveDataAccessLog[]             @relation("SensitiveDataAccessLogActor")
+  promotionEligibilityDecisions   PromotionEligibilityReview[]         @relation("PromotionEligibilityReviewDecidedBy")
+  customerNotes                   CustomerNote[]                       @relation("CustomerNoteCustomer")
+  createdCustomerNotes            CustomerNote[]                       @relation("CustomerNoteCreatedBy")
+  activationTokens                CustomerActivationToken[]            @relation("CustomerActivationTokenCustomer")
+  requestDraftsExpected           RequestDraft[]                       @relation("RequestDraftExpectedUser")
+  requestDrafts                   RequestDraft[]                       @relation("RequestDraftUser")
+  createdActivationTokens         CustomerActivationToken[]            @relation("CustomerActivationTokenCreatedBy")
+  adminInviteTokens               AdminInviteToken[]                   @relation("AdminInviteTokenUser")
   passwordResetTokens             PasswordResetToken[]
   emailVerificationTokens         EmailVerificationToken[]
-  createdAdminInviteTokens        AdminInviteToken[]                 @relation("AdminInviteTokenCreatedBy")
+  createdAdminInviteTokens        AdminInviteToken[]                   @relation("AdminInviteTokenCreatedBy")
   notificationLogs                NotificationLog[]
   contactRevealEvents             ContactRevealEvent[]
-  createdProviderClaimTokens      ProviderClaimToken[]               @relation("ProviderClaimTokenCreatedBy")
-  createdProviderInvites          ProviderInviteToken[]              @relation("ProviderInviteTokenCreatedBy")
-  companySettingsUpdates          CompanySettings[]                  @relation("CompanySettingsUpdatedBy")
-  operationsSettingsUpdates       OperationsSettings[]               @relation("OperationsSettingsUpdatedBy")
-  operationsSettingsChanges       OperationsSettingsChange[]         @relation("OperationsSettingsChangedBy")
-  customerMessageThreads          MessageThread[]                    @relation("MessageThreadCustomer")
-  manualOfferRefunds              ManualOfferRefundAudit[]           @relation("ManualOfferRefundPerformedBy")
-  providerMessageThreads          MessageThread[]                    @relation("MessageThreadProviderUser")
-  sentMessages                    Message[]                          @relation("MessageSender")
-  supportTickets                  SupportTicket[]                    @relation("SupportTicketRequester")
-  supportTicketMessages           SupportTicketMessage[]             @relation("SupportTicketMessageAuthor")
-  supportTicketStatusChanges      SupportTicketStatusChange[]        @relation("SupportTicketStatusChangedBy")
-  showcaseCardReviews             ShowcaseCardReview[]               @relation("ShowcaseCardReviewedBy")
-  showcasePlacementSuspensions    ShowcasePlacementSuspension[]      @relation("ShowcasePlacementSuspendedBy")
+  createdProviderClaimTokens      ProviderClaimToken[]                 @relation("ProviderClaimTokenCreatedBy")
+  createdProviderInvites          ProviderInviteToken[]                @relation("ProviderInviteTokenCreatedBy")
+  companySettingsUpdates          CompanySettings[]                    @relation("CompanySettingsUpdatedBy")
+  operationsSettingsUpdates       OperationsSettings[]                 @relation("OperationsSettingsUpdatedBy")
+  operationsSettingsChanges       OperationsSettingsChange[]           @relation("OperationsSettingsChangedBy")
+  customerMessageThreads          MessageThread[]                      @relation("MessageThreadCustomer")
+  manualOfferRefunds              ManualOfferRefundAudit[]             @relation("ManualOfferRefundPerformedBy")
+  providerMessageThreads          MessageThread[]                      @relation("MessageThreadProviderUser")
+  sentMessages                    Message[]                            @relation("MessageSender")
+  supportTickets                  SupportTicket[]                      @relation("SupportTicketRequester")
+  supportTicketMessages           SupportTicketMessage[]               @relation("SupportTicketMessageAuthor")
+  supportTicketStatusChanges      SupportTicketStatusChange[]          @relation("SupportTicketStatusChangedBy")
+  showcaseCardReviews             ShowcaseCardReview[]                 @relation("ShowcaseCardReviewedBy")
+  showcasePlacementSuspensions    ShowcasePlacementSuspension[]        @relation("ShowcasePlacementSuspendedBy")
   showcasePriceTermsAcceptances   ShowcaseCardPriceTermsAcceptance[]
-  showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]   @relation("ShowcasePackageTermsAcceptedBy")
+  showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]     @relation("ShowcasePackageTermsAcceptedBy")
   /// CMP-006 PR-A. Purchase-terms acceptances this account made at checkout.
   purchaseTermsAcceptances        PurchaseTermsAcceptance[]
-  resolvedRequestReports          ServiceRequestReport[]             @relation("ServiceRequestReportResolvedBy")
-  providerReviews                 ProviderReview[]                   @relation("ProviderReviewCustomer")
-  resolvedReviewReports           ProviderReviewReport[]             @relation("ProviderReviewReportResolvedBy")
-  reviewModerations               ProviderReviewModeration[]         @relation("ProviderReviewModerationPerformedBy")
-  createdCampaigns                Campaign[]                         @relation("CampaignCreatedBy")
-  createdCampaignVersions         CampaignVersion[]                  @relation("CampaignVersionCreatedBy")
-  campaignAuditEntries            CampaignAuditLog[]                 @relation("CampaignAuditActor")
-  campaignRedemptions             CampaignRedemption[]               @relation("CampaignRedemptionUser")
-  revokedCampaignRedemptions      CampaignRedemption[]               @relation("CampaignRedemptionRevokedBy")
+  resolvedRequestReports          ServiceRequestReport[]               @relation("ServiceRequestReportResolvedBy")
+  providerReviews                 ProviderReview[]                     @relation("ProviderReviewCustomer")
+  resolvedReviewReports           ProviderReviewReport[]               @relation("ProviderReviewReportResolvedBy")
+  reviewModerations               ProviderReviewModeration[]           @relation("ProviderReviewModerationPerformedBy")
+  createdCampaigns                Campaign[]                           @relation("CampaignCreatedBy")
+  createdCampaignVersions         CampaignVersion[]                    @relation("CampaignVersionCreatedBy")
+  campaignAuditEntries            CampaignAuditLog[]                   @relation("CampaignAuditActor")
+  campaignRedemptions             CampaignRedemption[]                 @relation("CampaignRedemptionUser")
+  revokedCampaignRedemptions      CampaignRedemption[]                 @relation("CampaignRedemptionRevokedBy")
   /// PR-0 admin RBAC. An ADMIN account's capabilities are exactly the union of
   /// the permissions of its live assignments; a SUPER_ADMIN's are everything,
   /// assignment or not.
-  adminRoleAssignments            AdminRoleAssignment[]              @relation("AdminRoleAssignmentUser")
-  adminRoleAssignmentsGranted     AdminRoleAssignment[]              @relation("AdminRoleAssignmentAssignedBy")
-  adminRoleAssignmentsRevoked     AdminRoleAssignment[]              @relation("AdminRoleAssignmentRevokedBy")
-  createdAdminRoles               AdminRole[]                        @relation("AdminRoleCreatedBy")
-  adminRoleAuditEntries           AdminRoleAuditLog[]                @relation("AdminRoleAuditActor")
-  adminRoleAuditTargets           AdminRoleAuditLog[]                @relation("AdminRoleAuditTarget")
+  adminRoleAssignments            AdminRoleAssignment[]                @relation("AdminRoleAssignmentUser")
+  adminRoleAssignmentsGranted     AdminRoleAssignment[]                @relation("AdminRoleAssignmentAssignedBy")
+  adminRoleAssignmentsRevoked     AdminRoleAssignment[]                @relation("AdminRoleAssignmentRevokedBy")
+  createdAdminRoles               AdminRole[]                          @relation("AdminRoleCreatedBy")
+  adminRoleAuditEntries           AdminRoleAuditLog[]                  @relation("AdminRoleAuditActor")
+  adminRoleAuditTargets           AdminRoleAuditLog[]                  @relation("AdminRoleAuditTarget")
   /// CMP-006 PR-B: package refund requests this account opened, took into
   /// review, decided or closed, and the audit rows it wrote. Restrict on the
   /// other side: the record of who decided a refund outlives the account.
-  packageRefundRequestsCreated    PackageRefundRequest[]             @relation("PackageRefundRequestCreatedBy")
-  packageRefundRequestsReviewed   PackageRefundRequest[]             @relation("PackageRefundRequestReviewStartedBy")
-  packageRefundRequestsApproved   PackageRefundRequest[]             @relation("PackageRefundRequestApprovedBy")
-  packageRefundRequestsRejected   PackageRefundRequest[]             @relation("PackageRefundRequestRejectedBy")
-  packageRefundRequestsFailed     PackageRefundRequest[]             @relation("PackageRefundRequestSettlementFailedBy")
-  packageRefundRequestEvents      PackageRefundRequestEvent[]        @relation("PackageRefundRequestEventActor")
+  packageRefundRequestsCreated    PackageRefundRequest[]               @relation("PackageRefundRequestCreatedBy")
+  packageRefundRequestsReviewed   PackageRefundRequest[]               @relation("PackageRefundRequestReviewStartedBy")
+  packageRefundRequestsApproved   PackageRefundRequest[]               @relation("PackageRefundRequestApprovedBy")
+  packageRefundRequestsRejected   PackageRefundRequest[]               @relation("PackageRefundRequestRejectedBy")
+  packageRefundRequestsFailed     PackageRefundRequest[]               @relation("PackageRefundRequestSettlementFailedBy")
+  packageRefundRequestEvents      PackageRefundRequestEvent[]          @relation("PackageRefundRequestEventActor")
 
   @@index([role])
   @@index([isActive])
@@ -1262,6 +1267,9 @@ model ProviderProfile {
   contactName     String
   phone           String
   email           String?
+  /// Unverified free text from before CMP-006 PR-C, kept as it was written
+  /// (never converted into a canonical registration). Masked in every
+  /// response; the raw value only through the audited sensitive read.
   taxType         String?
   taxNumber       String?
   /// The single service location a provider used to have, kept as it is.
@@ -1309,7 +1317,7 @@ model ProviderProfile {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user                            User?                              @relation(fields: [userId], references: [id])
+  user                            User?                                @relation(fields: [userId], references: [id])
   serviceCategories               ProviderServiceCategory[]
   serviceAreas                    ProviderServiceArea[]
   offers                          Offer[]
@@ -1331,7 +1339,7 @@ model ProviderProfile {
   showcasePriceTermsAcceptances   ShowcaseCardPriceTermsAcceptance[]
   showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]
   showcaseEntitlements            ShowcaseEntitlement[]
-  directShowcaseRequests          ServiceRequest[]                   @relation("ServiceRequestDirectShowcaseProvider")
+  directShowcaseRequests          ServiceRequest[]                     @relation("ServiceRequestDirectShowcaseProvider")
   requestReports                  ServiceRequestReport[]
   reviews                         ProviderReview[]
   reviewReports                   ProviderReviewReport[]
@@ -1340,6 +1348,13 @@ model ProviderProfile {
   campaignEvaluationLogs          CampaignEvaluationLog[]
   promoCreditLots                 PromoCreditLot[]
   campaignProviderCounters        CampaignProviderCounter[]
+  /// CMP-006 PR-C.
+  businessRegistration            ProviderBusinessRegistration?
+  businessRegistrationChanges     ProviderBusinessRegistrationChange[]
+  sensitiveDataAccessLogs         SensitiveDataAccessLog[]
+  campaignRegistrationCounters    CampaignRegistrationCounter[]
+  promotionEligibilityHolds       PromotionEligibilityHold[]
+  promotionEligibilityReviews     PromotionEligibilityReview[]
 
   @@index([status])
   @@index([city])
@@ -1838,6 +1853,9 @@ model PackagePurchase {
   /// one open and at most one SETTLED at a time (partial unique indexes).
   packageRefundRequests          PackageRefundRequest[]
 
+  /// Target of `PurchaseTermsAcceptance(purchaseId, id)`: an acceptance may
+  /// only exist for the purchase that points back at it.
+  @@unique([id, purchaseTermsAcceptanceId])
   @@index([providerId])
   @@index([packageId])
   @@index([status])
@@ -1848,9 +1866,6 @@ model PackagePurchase {
   @@index([showcaseCardId])
   @@index([showcasePriceTermsAcceptanceId])
   @@index([showcasePackageTermsAcceptanceId])
-  /// Target of `PurchaseTermsAcceptance(purchaseId, id)`: an acceptance may
-  /// only exist for the purchase that points back at it.
-  @@unique([id, purchaseTermsAcceptanceId])
 }
 
 /// CMP-006 PR-A. Where an act of acceptance came from, as the client declared
@@ -2105,8 +2120,8 @@ model PaymentWebhookEvent {
 
   /// CMP-006 PR-B: the one package refund request this `order_refunded` event
   /// settled, and its audit row. Unique on the request side.
-  settledPackageRefundRequest PackageRefundRequest?      @relation("PackageRefundRequestSettledByWebhookEvent")
-  failedPackageRefundRequest  PackageRefundRequest?      @relation("PackageRefundRequestFailedByWebhookEvent")
+  settledPackageRefundRequest PackageRefundRequest?       @relation("PackageRefundRequestSettledByWebhookEvent")
+  failedPackageRefundRequest  PackageRefundRequest?       @relation("PackageRefundRequestFailedByWebhookEvent")
   packageRefundRequestEvents  PackageRefundRequestEvent[] @relation("PackageRefundRequestEventWebhook")
 
   @@unique([provider, eventKey])
@@ -2599,9 +2614,9 @@ model SupportTicket {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  requester     User                        @relation("SupportTicketRequester", fields: [requesterId], references: [id])
-  messages      SupportTicketMessage[]
-  statusChanges SupportTicketStatusChange[]
+  requester            User                        @relation("SupportTicketRequester", fields: [requesterId], references: [id])
+  messages             SupportTicketMessage[]
+  statusChanges        SupportTicketStatusChange[]
   /// CMP-006 PR-B: the one package refund request this ticket carries, if any.
   packageRefundRequest PackageRefundRequest?
 
@@ -3982,6 +3997,9 @@ enum CampaignTriggerEventStatus {
   EVALUATED
   SETTLED
   RETRY_WAIT
+  /// CMP-006 PR-C. The promotion eligibility gate answered REVIEW. The worker
+  /// never claims it; only a PromotionEligibilityReview moves it on.
+  HELD_FOR_REVIEW
 }
 
 enum CampaignAuditAction {
@@ -4035,14 +4053,14 @@ model Campaign {
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
 
-  currentVersion   CampaignVersion?          @relation("CampaignCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
-  activeVersion    CampaignVersion?          @relation("CampaignActiveVersion", fields: [activeVersionId], references: [id], onDelete: Restrict)
-  createdBy        User                      @relation("CampaignCreatedBy", fields: [createdById], references: [id])
-  versions         CampaignVersion[]         @relation("CampaignVersions")
+  currentVersion   CampaignVersion?             @relation("CampaignCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
+  activeVersion    CampaignVersion?             @relation("CampaignActiveVersion", fields: [activeVersionId], references: [id], onDelete: Restrict)
+  createdBy        User                         @relation("CampaignCreatedBy", fields: [createdById], references: [id])
+  versions         CampaignVersion[]            @relation("CampaignVersions")
   auditEntries     CampaignAuditLog[]
   redemptions      CampaignRedemption[]
-  evaluationLogs   CampaignEvaluationLog[]   @relation("CampaignEvaluationLogCampaign")
-  wonEvaluations   CampaignEvaluationLog[]   @relation("CampaignEvaluationLogWinner")
+  evaluationLogs   CampaignEvaluationLog[]      @relation("CampaignEvaluationLogCampaign")
+  wonEvaluations   CampaignEvaluationLog[]      @relation("CampaignEvaluationLogWinner")
   settledEvents    CampaignTriggerEvent[]
   providerCounters CampaignProviderCounter[]
   dailyCounters    CampaignDailyCounter[]
@@ -4189,6 +4207,10 @@ enum CampaignEvaluationOutcome {
   BUDGET_EXHAUSTED
   ENGINE_DISABLED
   ENGINE_ERROR
+  /// CMP-006 PR-C: the promotion eligibility gate held the event for a person.
+  PROMOTION_REVIEW_HELD
+  /// CMP-006 PR-C: a missing precondition, or a person's INELIGIBLE decision.
+  PROMOTION_INELIGIBLE
 }
 
 /// One business event the engine has seen, independent of any campaign.
@@ -4200,17 +4222,17 @@ enum CampaignEvaluationOutcome {
 /// one of them settles it, and the three `settled*` columns record which. The
 /// row is otherwise immutable — only `lastSeenAt` and `evaluationCount` move.
 model CampaignTriggerEvent {
-  id                  String          @id @default(cuid())
-  triggerEventKey     String          @unique
+  id                  String                     @id @default(cuid())
+  triggerEventKey     String                     @unique
   trigger             CampaignTrigger
   providerId          String
   purchaseId          String?
   factSetKey          String?
-  firstSeenAt         DateTime        @default(now())
-  lastSeenAt          DateTime        @default(now())
-  evaluationCount     Int             @default(0)
+  firstSeenAt         DateTime                   @default(now())
+  lastSeenAt          DateTime                   @default(now())
+  evaluationCount     Int                        @default(0)
   settledByCampaignId String?
-  settledRedemptionId String?         @unique
+  settledRedemptionId String?                    @unique
   settledAt           DateTime?
   /// Durable evaluation state (CMP-002 S2B2 rev. 2). The business
   /// transaction that raises an event writes it PENDING and commits; a worker
@@ -4223,9 +4245,9 @@ model CampaignTriggerEvent {
   /// event stays visible and claimable.
   status              CampaignTriggerEventStatus @default(PENDING)
   /// Worker claims, cumulative. `evaluationCount` counts engine evaluations.
-  attemptCount        Int             @default(0)
+  attemptCount        Int                        @default(0)
   lastAttemptAt       DateTime?
-  nextAttemptAt       DateTime        @default(now())
+  nextAttemptAt       DateTime                   @default(now())
   /// Set while PROCESSING; an expired lease makes the event claimable again.
   leaseUntil          DateTime?
   claimedAt           DateTime?
@@ -4233,12 +4255,15 @@ model CampaignTriggerEvent {
   lastErrorCode       String?
   lastErrorAt         DateTime?
 
-  provider          ProviderProfile         @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  purchase          PackagePurchase?        @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
-  settledByCampaign Campaign?               @relation(fields: [settledByCampaignId], references: [id], onDelete: Restrict)
-  settledRedemption CampaignRedemption?     @relation("CampaignTriggerEventSettledBy", fields: [settledRedemptionId], references: [id], onDelete: Restrict)
-  redemptions       CampaignRedemption[]    @relation("CampaignRedemptionEvent")
+  provider          ProviderProfile             @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  purchase          PackagePurchase?            @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  settledByCampaign Campaign?                   @relation(fields: [settledByCampaignId], references: [id], onDelete: Restrict)
+  settledRedemption CampaignRedemption?         @relation("CampaignTriggerEventSettledBy", fields: [settledRedemptionId], references: [id], onDelete: Restrict)
+  redemptions       CampaignRedemption[]        @relation("CampaignRedemptionEvent")
   evaluationLogs    CampaignEvaluationLog[]
+  /// CMP-006 PR-C.
+  eligibilityHold   PromotionEligibilityHold?
+  eligibilityReview PromotionEligibilityReview?
 
   @@index([providerId, firstSeenAt])
   @@index([purchaseId])
@@ -4255,26 +4280,26 @@ model CampaignTriggerEvent {
 /// changes nothing about what was granted. `grantTransactionId` is the
 /// CAMPAIGN_GRANT ledger row — NULL throughout S2A, which writes no ledger.
 model CampaignRedemption {
-  id                 String                   @id @default(cuid())
-  campaignId         String
-  campaignVersionId  String
-  providerId         String
-  userId             String?
-  trigger            CampaignTrigger
-  triggerEventId     String
-  triggerEventKey    String
-  purchaseId         String?
-  status             CampaignRedemptionStatus @default(GRANTED)
-  rulesSnapshot      Json
-  grantedCredits     Int
-  grantTransactionId String?                  @unique
-  grantedAt          DateTime                 @default(now())
-  revokedAt          DateTime?
-  revokeReason       CampaignRevokeReason?
+  id                      String                   @id @default(cuid())
+  campaignId              String
+  campaignVersionId       String
+  providerId              String
+  userId                  String?
+  trigger                 CampaignTrigger
+  triggerEventId          String
+  triggerEventKey         String
+  purchaseId              String?
+  status                  CampaignRedemptionStatus @default(GRANTED)
+  rulesSnapshot           Json
+  grantedCredits          Int
+  grantTransactionId      String?                  @unique
+  grantedAt               DateTime                 @default(now())
+  revokedAt               DateTime?
+  revokeReason            CampaignRevokeReason?
   /// How much of the lot had been spent when it was revoked; there is no
   /// debt model, so this is a record for an operator, not a balance (CMP-001 §2.6).
-  spentAtRevoke      Int?
-  revokedById        String?
+  spentAtRevoke           Int?
+  revokedById             String?
   /// CMP-003 S3. The operator's reason on an admin revoke (1–500 chars by
   /// CHECK; never shown outside the admin panel), and the verified payment
   /// webhook event whose reversal revoked this redemption. Exactly one of the
@@ -4282,17 +4307,20 @@ model CampaignRedemption {
   revokeNote              String?
   revokedByWebhookEventId String?
 
-  campaign         Campaign                   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
-  campaignVersion  CampaignVersion            @relation(fields: [campaignVersionId], references: [id], onDelete: Restrict)
-  provider         ProviderProfile            @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  user             User?                      @relation("CampaignRedemptionUser", fields: [userId], references: [id], onDelete: Restrict)
-  triggerEvent     CampaignTriggerEvent       @relation("CampaignRedemptionEvent", fields: [triggerEventId], references: [id], onDelete: Restrict)
-  purchase         PackagePurchase?           @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
-  grantTransaction ProviderCreditTransaction? @relation("CampaignRedemptionGrantTransaction", fields: [grantTransactionId], references: [id], onDelete: Restrict)
-  revokedBy        User?                      @relation("CampaignRedemptionRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
-  revokedByWebhookEvent PaymentWebhookEvent?  @relation("CampaignRedemptionRevokedByWebhookEvent", fields: [revokedByWebhookEventId], references: [id], onDelete: Restrict)
-  settledEvent     CampaignTriggerEvent?      @relation("CampaignTriggerEventSettledBy")
-  promoLot         PromoCreditLot?
+  campaign                  Campaign                      @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  campaignVersion           CampaignVersion               @relation(fields: [campaignVersionId], references: [id], onDelete: Restrict)
+  provider                  ProviderProfile               @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  user                      User?                         @relation("CampaignRedemptionUser", fields: [userId], references: [id], onDelete: Restrict)
+  triggerEvent              CampaignTriggerEvent          @relation("CampaignRedemptionEvent", fields: [triggerEventId], references: [id], onDelete: Restrict)
+  purchase                  PackagePurchase?              @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  grantTransaction          ProviderCreditTransaction?    @relation("CampaignRedemptionGrantTransaction", fields: [grantTransactionId], references: [id], onDelete: Restrict)
+  revokedBy                 User?                         @relation("CampaignRedemptionRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+  revokedByWebhookEvent     PaymentWebhookEvent?          @relation("CampaignRedemptionRevokedByWebhookEvent", fields: [revokedByWebhookEventId], references: [id], onDelete: Restrict)
+  settledEvent              CampaignTriggerEvent?         @relation("CampaignTriggerEventSettledBy")
+  promoLot                  PromoCreditLot?
+  /// CMP-006 PR-C.
+  registrationCountersFirst CampaignRegistrationCounter[] @relation("CampaignRegistrationCounterFirst")
+  registrationCountersLast  CampaignRegistrationCounter[] @relation("CampaignRegistrationCounterLast")
 
   @@unique([campaignId, triggerEventKey])
   @@index([triggerEventKey])
@@ -4557,6 +4585,14 @@ enum AdminPermission {
   /// request is refused by a database CHECK, whatever this permission says.
   PACKAGE_REFUND_APPROVE
 
+  /// CMP-006 PR-C. The raw business registration number (a T.C. identity
+  /// number for a sole proprietor) and the legacy tax number. Every read is
+  /// written to SensitiveDataAccessLog.
+  PROVIDER_REGISTRATION_READ_SENSITIVE
+  /// CMP-006 PR-C. The promotion eligibility queue: held events, their frozen
+  /// risk signals, and the ELIGIBLE / INELIGIBLE decision.
+  PROMOTION_ELIGIBILITY_REVIEW
+
   PAYMENTS_CONFIG_READ
 
   OFFERS_READ
@@ -4585,8 +4621,8 @@ enum AdminPermission {
   CUSTOMER_ACTIVATION_LINK_ISSUE
 
   PROVIDERS_READ
-  /// Carries taxType/taxNumber today; CMP-006 PR-C moves the raw value behind
-  /// its own permission.
+  /// The operator's provider page. Since CMP-006 PR-C it carries registration
+  /// and legacy tax numbers masked only.
   PROVIDERS_READ_DETAIL
   PROVIDERS_WRITE
   /// Approve / reject / suspend — the PROVIDER_APPROVED campaign trigger.
@@ -4662,9 +4698,9 @@ model AdminRole {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  createdBy   User                   @relation("AdminRoleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  permissions AdminRolePermission[]
-  assignments AdminRoleAssignment[]
+  createdBy    User                  @relation("AdminRoleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  permissions  AdminRolePermission[]
+  assignments  AdminRoleAssignment[]
   auditEntries AdminRoleAuditLog[]
 
   @@index([isActive, name])
@@ -4814,12 +4850,12 @@ enum PackageRefundActorKind {
 /// Reasons and eligibility snapshots are internal operator records. The
 /// provider's projection carries the status and the purchase summary only.
 model PackageRefundRequest {
-  id                      String                        @id @default(cuid())
+  id                      String                     @id @default(cuid())
   /// The ticket this request lives on — its evidence and conversation chain.
-  supportTicketId         String                        @unique
+  supportTicketId         String                     @unique
   purchaseId              String
   providerId              String
-  status                  PackageRefundRequestStatus    @default(SUBMITTED)
+  status                  PackageRefundRequestStatus @default(SUBMITTED)
   origin                  PackageRefundRequestOrigin
   /// The provider's user (origin PROVIDER) or the operator (origin ADMIN).
   createdById             String
@@ -4827,51 +4863,51 @@ model PackageRefundRequest {
   submittedEligibility    Json
   submittedRecommendation String
 
-  reviewStartedById       String?
-  reviewStartedAt         DateTime?
+  reviewStartedById String?
+  reviewStartedAt   DateTime?
 
-  approvalKind            PackageRefundApprovalKind?
-  exceptionGround         PackageRefundExceptionGround?
-  exceptionReason         String?
+  approvalKind        PackageRefundApprovalKind?
+  exceptionGround     PackageRefundExceptionGround?
+  exceptionReason     String?
   /// The canonical evaluation recomputed inside the approving transaction.
-  approvalEligibility     Json?
-  approvedById            String?
-  approvedAt              DateTime?
+  approvalEligibility Json?
+  approvedById        String?
+  approvedAt          DateTime?
 
-  rejectedById            String?
-  rejectedAt              DateTime?
-  rejectionReason         String?
+  rejectedById    String?
+  rejectedAt      DateTime?
+  rejectionReason String?
 
-  withdrawnAt             DateTime?
+  withdrawnAt DateTime?
 
   settledAt               DateTime?
-  settledByWebhookEventId String?                       @unique
+  settledByWebhookEventId String?   @unique
 
-  settlementFailedById    String?
+  settlementFailedById             String?
   /// Set instead of `settlementFailedById` when the failure was recorded by a
   /// signed `order_refunded` that did not prove a full refund. Exactly one of
   /// the two names who failed it (CHECK). Unique: one event fails one request.
-  settlementFailedByWebhookEventId String?             @unique
-  settlementFailedAt      DateTime?
-  settlementFailureReason String?
+  settlementFailedByWebhookEventId String?   @unique
+  settlementFailedAt               DateTime?
+  settlementFailureReason          String?
 
   /// Pinned to 0 by CHECK in PR-B (no clawback in this slice).
-  creditClawbackCredits   Int                           @default(0)
+  creditClawbackCredits Int @default(0)
 
-  createdAt               DateTime                      @default(now())
-  updatedAt               DateTime                      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  supportTicket          SupportTicket        @relation(fields: [supportTicketId], references: [id], onDelete: Restrict)
-  purchase               PackagePurchase      @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
-  provider               ProviderProfile      @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  createdBy              User                 @relation("PackageRefundRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  reviewStartedBy        User?                @relation("PackageRefundRequestReviewStartedBy", fields: [reviewStartedById], references: [id], onDelete: Restrict)
-  approvedBy             User?                @relation("PackageRefundRequestApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
-  rejectedBy             User?                @relation("PackageRefundRequestRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
-  settlementFailedBy     User?                @relation("PackageRefundRequestSettlementFailedBy", fields: [settlementFailedById], references: [id], onDelete: Restrict)
-  settledByWebhookEvent  PaymentWebhookEvent? @relation("PackageRefundRequestSettledByWebhookEvent", fields: [settledByWebhookEventId], references: [id], onDelete: Restrict)
-  settlementFailedByWebhookEvent PaymentWebhookEvent? @relation("PackageRefundRequestFailedByWebhookEvent", fields: [settlementFailedByWebhookEventId], references: [id], onDelete: Restrict)
-  events                 PackageRefundRequestEvent[]
+  supportTicket                  SupportTicket               @relation(fields: [supportTicketId], references: [id], onDelete: Restrict)
+  purchase                       PackagePurchase             @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  provider                       ProviderProfile             @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  createdBy                      User                        @relation("PackageRefundRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewStartedBy                User?                       @relation("PackageRefundRequestReviewStartedBy", fields: [reviewStartedById], references: [id], onDelete: Restrict)
+  approvedBy                     User?                       @relation("PackageRefundRequestApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  rejectedBy                     User?                       @relation("PackageRefundRequestRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
+  settlementFailedBy             User?                       @relation("PackageRefundRequestSettlementFailedBy", fields: [settlementFailedById], references: [id], onDelete: Restrict)
+  settledByWebhookEvent          PaymentWebhookEvent?        @relation("PackageRefundRequestSettledByWebhookEvent", fields: [settledByWebhookEventId], references: [id], onDelete: Restrict)
+  settlementFailedByWebhookEvent PaymentWebhookEvent?        @relation("PackageRefundRequestFailedByWebhookEvent", fields: [settlementFailedByWebhookEventId], references: [id], onDelete: Restrict)
+  events                         PackageRefundRequestEvent[]
 
   @@index([status, createdAt])
   @@index([providerId, createdAt])
@@ -4907,4 +4943,168 @@ model PackageRefundRequestEvent {
 
   @@index([requestId, createdAt, id])
   @@index([actorId])
+}
+
+// ─────────────────────────── CMP-006 PR-C ───────────────────────────
+
+/// The kind of canonical business registration a provider declared.
+/// NONE_DECLARED carries no number and is a REVIEW signal, never a refusal.
+enum BusinessRegistrationType {
+  TRADE_REGISTRY
+  MERSIS
+  TAX_NUMBER
+  CRAFTSMAN_REGISTRY
+  SOLE_PROPRIETOR_TR_ID
+  NONE_DECLARED
+}
+
+enum ProviderBusinessRegistrationActor {
+  /// The applicant, on the application form (open or invited).
+  APPLICANT
+  /// The owning provider, on their own company information screen.
+  PROVIDER
+}
+
+enum SensitiveDataSubject {
+  PROVIDER_BUSINESS_REGISTRATION
+}
+
+enum PromotionEligibilityDecision {
+  ELIGIBLE
+  INELIGIBLE
+}
+
+/// One provider's canonical business registration (CMP-006 PR-C).
+///
+/// The only row that holds the raw number (`numberCanonical`). Its own table
+/// on purpose: provider responses are built from a full-row include, and a
+/// column here would have reached all of them. The relation is selected
+/// explicitly and only as `{ type, numberMasked, updatedAt }`.
+///
+/// No row means the registration is unspecified — every provider from before
+/// this table. Nothing was backfilled from the free-text taxType/taxNumber.
+/// CHECK `ProviderBusinessRegistration_number_matches_type`: NONE_DECLARED has
+/// no number, mask or fingerprint; every other type has all four.
+model ProviderBusinessRegistration {
+  id                 String                   @id @default(cuid())
+  providerId         String                   @unique
+  type               BusinessRegistrationType
+  numberCanonical    String?
+  numberMasked       String?
+  /// HMAC-SHA256 under the versioned promotion fingerprint key.
+  fingerprint        String?
+  fingerprintVersion Int?
+  declaredByUserId   String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  provider   ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  declaredBy User?           @relation("ProviderBusinessRegistrationDeclaredBy", fields: [declaredByUserId], references: [id], onDelete: Restrict)
+
+  @@index([type, fingerprint, fingerprintVersion])
+  @@index([declaredByUserId])
+}
+
+/// Append-only (trigger) history of registration writes. Type and fingerprint
+/// only — never the number, raw or masked.
+model ProviderBusinessRegistrationChange {
+  id                         String                            @id @default(cuid())
+  providerId                 String
+  actorKind                  ProviderBusinessRegistrationActor
+  actorUserId                String?
+  previousType               BusinessRegistrationType?
+  previousFingerprint        String?
+  previousFingerprintVersion Int?
+  newType                    BusinessRegistrationType
+  newFingerprint             String?
+  newFingerprintVersion      Int?
+  createdAt                  DateTime                          @default(now())
+
+  provider  ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  actorUser User?           @relation("ProviderBusinessRegistrationChangeActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, createdAt])
+  @@index([actorUserId])
+}
+
+/// Append-only (trigger): one row per read of a raw sensitive value. Names the
+/// fields read, never their values.
+model SensitiveDataAccessLog {
+  id         String               @id @default(cuid())
+  actorId    String
+  subject    SensitiveDataSubject
+  providerId String
+  fields     String[]
+  readAt     DateTime             @default(now())
+
+  actor    User            @relation("SensitiveDataAccessLogActor", fields: [actorId], references: [id], onDelete: Restrict)
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, readAt])
+  @@index([actorId, readAt])
+}
+
+/// Promotion grants per canonical registration and provider (CMP-006 PR-C).
+/// Carries the type and the versioned HMAC fingerprint — never the number.
+/// Moved only by the campaign engine, inside the savepoint of a real grant.
+model CampaignRegistrationCounter {
+  id                 String                   @id @default(cuid())
+  registrationType   BusinessRegistrationType
+  fingerprint        String
+  fingerprintVersion Int
+  providerId         String
+  redemptionCount    Int                      @default(0)
+  firstRedemptionId  String                   @unique
+  lastRedemptionId   String
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  provider        ProviderProfile    @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  firstRedemption CampaignRedemption @relation("CampaignRegistrationCounterFirst", fields: [firstRedemptionId], references: [id], onDelete: Restrict)
+  lastRedemption  CampaignRedemption @relation("CampaignRegistrationCounterLast", fields: [lastRedemptionId], references: [id], onDelete: Restrict)
+
+  @@unique([registrationType, fingerprint, fingerprintVersion, providerId])
+  @@index([providerId])
+  @@index([lastRedemptionId])
+}
+
+/// The frozen answer of the eligibility gate when it held an event (REVIEW).
+/// Append-only (trigger); at most one per event. `signals` holds closed codes,
+/// counts and HMAC fingerprints — no number, no address, no phone.
+model PromotionEligibilityHold {
+  id              String   @id @default(cuid())
+  triggerEventId  String   @unique
+  providerId      String
+  signals         Json
+  snapshotVersion Int
+  heldAt          DateTime @default(now())
+
+  triggerEvent CampaignTriggerEvent        @relation(fields: [triggerEventId], references: [id], onDelete: Restrict)
+  provider     ProviderProfile             @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  review       PromotionEligibilityReview?
+
+  @@index([providerId, heldAt])
+  @@index([heldAt])
+}
+
+/// A person's decision on a held event. Append-only (trigger), one per event
+/// and per hold. The row is the audit: who, when, why, on which hold.
+/// CHECK: reason is 10–1000 characters after trimming.
+model PromotionEligibilityReview {
+  id             String                       @id @default(cuid())
+  triggerEventId String                       @unique
+  holdId         String                       @unique
+  providerId     String
+  decision       PromotionEligibilityDecision
+  reason         String
+  decidedById    String
+  decidedAt      DateTime                     @default(now())
+
+  triggerEvent CampaignTriggerEvent     @relation(fields: [triggerEventId], references: [id], onDelete: Restrict)
+  hold         PromotionEligibilityHold @relation(fields: [holdId], references: [id], onDelete: Restrict)
+  provider     ProviderProfile          @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  decidedBy    User                     @relation("PromotionEligibilityReviewDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([providerId, decidedAt])
+  @@index([decidedById])
 }

@@ -840,6 +840,8 @@ Her PR: kendi tasarım/teslim notu, izole migration dry-run çıktısı, CI 3/3,
 | **RG-6** | **`ADMIN` hesabı üretimi.** `UserRole.ADMIN` yalnız davet akışıyla doğar (hiçbir public kayıt yolu üretemez, T12a); atamasız `ADMIN` panele giremez (T12); çift kimlik yoktur (T12b) | PR-0 üretimi | Mühendislik |
 | **RG-7** | **Rota eşleme tablosu.** PR-0'ın kodu, 72 kullanımın rota + HTTP metodu + aksiyon düzeyinde eşlendiği tablo depoya yazılmadan başlamaz (§12) | PR-0'ın **başlaması** | Mühendislik |
 
+> **RG-2 güncellemesi (2026-09-23, PR-C):** hâlâ **açık**. PR-C'de ham kayıt numarası (TCKN dahil) tek tabloda, yalnız `PROVIDER_REGISTRATION_READ_SENSITIVE` ile okunur ve her okuma `SensitiveDataAccessLog`'a yazılır; eski `taxNumber` her yanıtta maskeli; IP sinyali yalnız mevcut `Session.ipAddress` eşitliğidir ve snapshot'a sürümlü HMAC olarak girer. Açık kararlar — saklama süreleri, `Session.ipAddress` süpürücüsü, fingerprint'lerin takma adlı kişisel veri statüsü, TCKN işleme dayanağı, aydınlatma metni — [PR-C tasarım notu §9](2026-09-23-cmp-006-pr-c-business-registration-promotion-eligibility-design.md)'da. RG-4 (fingerprint anahtarı) aynı notun §3'ünde.
+
 ---
 
 ## 14. Kapsam dışı (bu belgede kasıtlı olarak yok)

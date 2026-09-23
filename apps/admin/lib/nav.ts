@@ -112,6 +112,8 @@ export const navGroups: NavGroup[] = [
       // definition an operator drafts, not money that moves — the engine
       // that would move it is off and has no switch here.
       { href: '/campaigns', label: 'Kampanyalar', permission: 'CAMPAIGNS_READ' },
+      // CMP-006 PR-C: events the promotion eligibility gate held for a person.
+      { href: '/promotion-eligibility', label: 'Uygunluk İncelemesi', permission: 'PROMOTION_ELIGIBILITY_REVIEW' },
       { href: '/notifications', label: 'Bildirim Geçmişi', permission: 'NOTIFICATION_LOGS_READ' },
     ],
   },
