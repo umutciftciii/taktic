@@ -93,7 +93,7 @@ kalsın" dediği için: gövdede **yoksa** bu iki alan artık **değişmez** (a�
 | Staff `GET /providers/:id` | ✅ | **maskeli** | **maskeli** |
 | **`GET /providers/:id/business-registration/raw`** | ✅ | **ham** | **ham** |
 
-Ham rota `PROVIDER_REGISTRATION_READ_SENSITIVE` ister; **her çağrı**, yanıttan önce ve aynı transaction'da
+Ham rota `PROVIDER_REGISTRATION_READ_SENSITIVE` **ve** fraud inceleme bağlamını (`PROMOTION_ELIGIBILITY_REVIEW` ∧ `PROVIDERS_READ_DETAIL`, PR-C.2) ister; **her başarılı çağrı**, yanıttan önce ve aynı transaction'da
 `SensitiveDataAccessLog` satırı yazar (aktör, sağlayıcı, okunan alan adları, zaman — **değer yok**). Yanıt
 `Cache-Control: no-store`. Satır yoksa ve eski alanlar boşsa da okuma denemesi kaydedilir (neye bakıldığı bilgisi).
 
@@ -203,7 +203,7 @@ giriş bonusu açar (S0 §5 kural 2).
 
 | İzin | Rotalar |
 | --- | --- |
-| `PROVIDER_REGISTRATION_READ_SENSITIVE` | `GET /providers/:providerId/business-registration/raw` |
+| `PROVIDER_REGISTRATION_READ_SENSITIVE` | `GET /providers/:providerId/business-registration/raw` — **PR-C.2:** yalnız `PROMOTION_ELIGIBILITY_REVIEW` ∧ `PROVIDERS_READ_DETAIL` ile birlikte (katmanlı; tek başına 403) |
 | `PROMOTION_ELIGIBILITY_REVIEW` | `GET /admin/campaigns/eligibility-holds`, `GET …/:eventId`, `POST …/:eventId/decision` |
 
 Kuyruk okuması da `PROMOTION_ELIGIBILITY_REVIEW` ister: snapshot, sağlayıcı başına risk gerekçesidir ve

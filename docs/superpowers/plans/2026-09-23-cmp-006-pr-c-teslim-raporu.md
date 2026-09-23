@@ -113,17 +113,20 @@ Yeni izin **yok** (82 sabit). Fraud inceleme rolü yalnız mevcut izinlerden kur
 `GET /admin/promotion-eligibility/holds` `providerId` ve `filter=all` alır (aynı rota, aynı izin) — sağlayıcı
 detayında "Promosyon uygunluğu" kartı.
 
+> **PR-C.2 ile düzeltildi — aşağıdaki tablo günceldir.** PR-C.1'de "yalnız hassas izin → ham kayıt 200" idi; bu artık
+> 403'tür (§8).
+
 | Hesap | Kuyruk / sağlayıcı hold'ları / hold / karar | Sağlayıcı detayı | Değerlendirmeler | Ham kayıt |
 | --- | --- | --- | --- | --- |
 | `SUPER_ADMIN` | 200 | 200 | 200 | 200 + audit |
 | İnceleme rolü | 200 | 200 (maskeli) | 200 | **403** |
-| Yalnız hassas izin | 403 | 403 | 403 | 200 + audit |
+| Yalnız hassas izin | 403 | 403 | 403 | **403, audit yok** |
 | İnceleme + hassas | 200 | 200 (maskeli) | 200 | 200 + audit |
 | İzinsiz `ADMIN` | 403 | 403 | 403 | 403 |
 
-`promotion-eligibility-access.spec.ts` bu tabloyu 5 hesap × 6 rota olarak doğrular; ham 200'ler dışındaki **her**
-gövdede (liste, detay, kuyruk, karar, 403/409 hata gövdeleri) ham numara yok; audit satırı sayısı = ham okuma sayısı
-(3), satırlarda değer yok. Karar: yalnız inceleme rolü (ve SUPER_ADMIN) verebilir; iki inceleyicinin eşzamanlı kararı
+`promotion-eligibility-access.spec.ts` bu tabloyu (PR-C.2 sonrası 8 hesap × 7 rota, §8) doğrular; izinli ham 200'ler
+dışındaki **her** gövdede (liste, detay, kuyruk, karar, 403/404/409 hata gövdeleri) ham numara yok; audit satırı yalnız
+izinli 200'lerde ve okuma başına bir tane, satırlarda değer yok. Karar: yalnız inceleme rolü (ve SUPER_ADMIN) verebilir; iki inceleyicinin eşzamanlı kararı
 → bir 201 + bir 409 (`ELIGIBILITY_DECISION_ALREADY_RECORDED` veya `CONCURRENT_MODIFICATION` — başarı sayılmaz), ardından
 üç eşzamanlı worker geçişi → **1 karar, 1 grant, 1 lot, sayaç 1**. Sağlayıcı panelinin rotası sahiplik korumalı kaldı
 (`PROVIDER_REVIEWS_READ` taşıyan personel orada 403).
@@ -158,3 +161,50 @@ Kampanya motoru ve `PURCHASE_TERMS_GATE` kapalı; fraud karar kuralları, HMAC b
 | Tam Chromium E2E (`pnpm e2e`) | `ce31243f`: **302/302** (8.4 dk, `retries: 0`) · auth düzeltmesi sonrası: **302/302** (8.5 dk) |
 | Tam WebKit E2E (`pnpm e2e:webkit`, CI'daki WebKit projesi; `provider-business-registration` eklendi) | `ce31243f`: **131/131** (4.1 dk) · auth düzeltmesi sonrası: **131/131** (4.1 dk) |
 | CI | `ce31243f`: e2e chromium ✅ · e2e webkit ✅ · verify ❌ (§7.2a yarışı) · `5630b74d`: **3/3 yeşil** (verify ✅, e2e chromium ✅, e2e webkit ✅) |
+
+## 8. PR-C.2 — ham işletme kaydı için katmanlı yetki
+
+**Sorun:** PR-C.1'de `PROVIDER_REGISTRATION_READ_SENSITIVE` tek başına ham numarayı okuyabiliyordu; bu hesap sağlayıcı
+detayını, kuyruğu veya incelemeyi göremediği hâlde en hassas veriye doğrudan ulaşıyordu. Audit bir erişim yetkisi değildir.
+
+**Kural:** `GET /providers/:providerId/business-registration/raw` =
+`PROVIDER_REGISTRATION_READ_SENSITIVE` ∧ `PROMOTION_ELIGIBILITY_REVIEW` ∧ `PROVIDERS_READ_DETAIL`. `PermissionsGuard`
+zaten birleşik — yeni guard mantığı gerekmedi. **Tek bağlam: fraud incelemesi.** "Detay + hassas" alternatifi kabul
+edilmedi: üründe kayıt numarasını okuyan başka bir operasyon akışı yok (operatör yazma rotası da yok), bu yüzden
+"A ∧ (B ∨ C)" desteği eklenmedi. `PROVIDER_REVIEWS_READ` bağlamın parçası değil. `ProviderAccessGuard` değişmedi.
+Admin'deki "Ham değeri göster" düğmesi aynı kuralla gösterilir (yalnız kozmetik; zorlayan API).
+
+**Audit:** yalnız başarılı 200 okumasında. Ret guard'da, servis çalışmadan olur → 403'ler ve bilinmeyen sağlayıcı (404)
+satır üretmez; test her istekten önce/sonra sayar.
+
+**Rota haritası:** girdiye `alsoRequires` alanı eklendi; harita testi artık rotanın bildirdiği izin kümesinin **tam olarak**
+harita kümesine eşit olmasını ister (eksik veya fazla bağlam izni testi kırar).
+
+**Testler:**
+
+| Hesap | Kuyruk | Sağlayıcı hold'ları | Hold | Detay | Değerlendirmeler | Ham | Ham (bilinmeyen) | Audit |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| SUPER_ADMIN | 200 | 200 | 200 | 200 | 200 | **200** | 404 | 1 |
+| İnceleme rolü | 200 | 200 | 200 | 200 | 200 | 403 | 403 | 0 |
+| Yalnız hassas | 403 | 403 | 403 | 403 | 403 | **403** | 403 | **0** |
+| İnceleme + hassas | 200 | 200 | 200 | 200 | 200 | **200** | 404 | 1 |
+| İnceleme + detay + hassas (değerlendirme yok) | 200 | 200 | 200 | 200 | 403 | **200** | 404 | 1 |
+| İnceleme + hassas (detay yok) | 200 | 200 | 200 | 403 | 403 | 403 | 403 | 0 |
+| Detay + hassas (inceleme yok) | 403 | 403 | 403 | 200 | 403 | 403 | 403 | 0 |
+| İzinsiz ADMIN | 403 | 403 | 403 | 403 | 403 | 403 | 403 | 0 |
+
+İzinli ham okumalarda doğru maskesiz değer (`10000000146`) ve okuma başına tam bir audit satırı (okuyanın kimliğiyle);
+diğer tüm gövdelerde ham numara yok. `provider-business-registration.spec.ts` ayrıca beş eksik kombinasyonun (bağlamsız
+hassas, hassassız bağlam, yarım bağlamlar) 403'ünü ve gövdesini doğrular.
+
+Kampanya motoru, `PURCHASE_TERMS_GATE`, fraud kuralları, fingerprint ve kayıt sayacı değişmedi.
+
+### 8.1 Doğrulama
+
+| Kontrol | Sonuç |
+| --- | --- |
+| API tam paket | **169 dosya / 3658 test** |
+| Web / admin birim, typecheck, lint, build | 355/355 · 78/78 · temiz · başarılı |
+| Tam Chromium E2E | **302/302** (8.5 dk) |
+| Tam WebKit E2E | **131/131** (3.9 dk) |
+| CI | _bekleniyor_ |

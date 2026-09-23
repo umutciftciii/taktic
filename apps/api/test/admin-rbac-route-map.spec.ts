@@ -156,8 +156,12 @@ describe('PR-0 route/permission map', () => {
       const route = byKey.get(key(entry));
       if (!route) continue;
       const declared = [...route.permissions, ...route.staffPermissions];
-      if (!declared.includes(entry.permission)) {
-        mismatched.push(`${key(entry)} → beklenen ${entry.permission}, bulunan ${declared.join(',') || '(yok)'}`);
+      // Exactly the map's set — the named permission plus any context it
+      // demands (PR-C.2). A route that quietly drops a context permission, or
+      // gains one the map does not know about, fails here.
+      const expected = [entry.permission, ...(entry.alsoRequires ?? [])];
+      if ([...new Set(declared)].sort().join(',') !== [...new Set(expected)].sort().join(',')) {
+        mismatched.push(`${key(entry)} → beklenen ${expected.join('+')}, bulunan ${declared.join(',') || '(yok)'}`);
       }
     }
 

@@ -37,6 +37,13 @@ beforeEach(async () => {
 const TCKN = '10000000146';
 const TCKN_MASKED = '*********46';
 
+/** The raw read's layered rule (PR-C.2): the sensitive permission within the fraud review context. */
+const RAW_READER = [
+  AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE,
+  AdminPermission.PROMOTION_ELIGIBILITY_REVIEW,
+  AdminPermission.PROVIDERS_READ_DETAIL,
+];
+
 async function apply(overrides: Record<string, unknown>, status: number) {
   const category = await createCategory(ctx.prisma, `Kategori ${Math.random().toString(36).slice(2, 8)}`);
   return request(ctx.server).post('/providers').send({ ...providerPayload([category.id]), ...overrides }).expect(status);
@@ -263,18 +270,22 @@ describe('leak matrix — no raw number outside the audited route', () => {
 });
 
 describe('GET /providers/:id/business-registration/raw', () => {
-  it('needs PROVIDER_REGISTRATION_READ_SENSITIVE: the detail and list permissions are not enough', async () => {
+  it('is layered (PR-C.2): neither the context without the sensitive permission, nor the sensitive permission without its context', async () => {
     const { provider } = await ownedProvider();
-    const { admin } = await createAdminWithPermissions(ctx.prisma, [
-      AdminPermission.PROVIDERS_READ,
-      AdminPermission.PROVIDERS_READ_DETAIL,
-      AdminPermission.PROVIDERS_WRITE,
-    ]);
-    const refused = await request(ctx.server)
-      .get(`/providers/${provider.id}/business-registration/raw`)
-      .set('Cookie', await loginAs(ctx.prisma, admin.id))
-      .expect(403);
-    expect(JSON.stringify(refused.body)).not.toContain(provider.taxNumber!);
+    for (const permissions of [
+      [AdminPermission.PROVIDERS_READ, AdminPermission.PROVIDERS_READ_DETAIL, AdminPermission.PROVIDERS_WRITE],
+      [AdminPermission.PROMOTION_ELIGIBILITY_REVIEW, AdminPermission.PROVIDERS_READ_DETAIL],
+      [AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE],
+      [AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE, AdminPermission.PROVIDERS_READ_DETAIL],
+      [AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE, AdminPermission.PROMOTION_ELIGIBILITY_REVIEW],
+    ]) {
+      const { admin } = await createAdminWithPermissions(ctx.prisma, permissions);
+      const refused = await request(ctx.server)
+        .get(`/providers/${provider.id}/business-registration/raw`)
+        .set('Cookie', await loginAs(ctx.prisma, admin.id))
+        .expect(403);
+      expect(JSON.stringify(refused.body), permissions.join('+')).not.toContain(provider.taxNumber!);
+    }
     const owner = await ctx.prisma.providerProfile.findUniqueOrThrow({ where: { id: provider.id }, select: { userId: true } });
     await request(ctx.server)
       .get(`/providers/${provider.id}/business-registration/raw`)
@@ -287,7 +298,7 @@ describe('GET /providers/:id/business-registration/raw', () => {
   it('answers the raw values, uncached, and writes one access row per read — field names, never values', async () => {
     const { provider, cookie } = await ownedProvider();
     await putOwn(cookie, { type: 'SOLE_PROPRIETOR_TR_ID', number: TCKN }).expect(200);
-    const { admin } = await createAdminWithPermissions(ctx.prisma, [AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE]);
+    const { admin } = await createAdminWithPermissions(ctx.prisma, RAW_READER);
     const staff = await loginAs(ctx.prisma, admin.id);
 
     const first = await request(ctx.server).get(`/providers/${provider.id}/business-registration/raw`).set('Cookie', staff).expect(200);

@@ -50,19 +50,48 @@ const REVIEWER = [
   AdminPermission.PROVIDER_REVIEWS_READ,
 ];
 
-type Actor = 'superAdmin' | 'reviewer' | 'sensitiveOnly' | 'reviewerSensitive' | 'none';
+type Actor =
+  | 'superAdmin'
+  | 'reviewer'
+  | 'sensitiveOnly'
+  | 'reviewerSensitive'
+  | 'reviewContextSensitive'
+  | 'reviewNoDetailSensitive'
+  | 'detailSensitive'
+  | 'none';
+
+const SENSITIVE = AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE;
+
+/** Cookies per actor, and the account id behind each (the access log names the reader). */
+async function actors(): Promise<{ cookie: Record<Actor, string>; id: Record<Actor, string> }> {
+  const root = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+  const entries: Array<[Actor, string]> = [['superAdmin', root.id]];
+  const permissionsOf: Record<Exclude<Actor, 'superAdmin'>, AdminPermission[]> = {
+    reviewer: REVIEWER,
+    sensitiveOnly: [SENSITIVE],
+    reviewerSensitive: [...REVIEWER, SENSITIVE],
+    // The raw read's own context (PR-C.2) — the review and the provider page —
+    // without the customer-reviews permission, which is not part of it.
+    reviewContextSensitive: [AdminPermission.PROMOTION_ELIGIBILITY_REVIEW, AdminPermission.PROVIDERS_READ_DETAIL, SENSITIVE],
+    // Each half of the context alone is not enough.
+    reviewNoDetailSensitive: [AdminPermission.PROMOTION_ELIGIBILITY_REVIEW, SENSITIVE],
+    detailSensitive: [AdminPermission.PROVIDERS_READ_DETAIL, SENSITIVE],
+    none: [AdminPermission.DASHBOARD_READ],
+  };
+  for (const [actor, permissions] of Object.entries(permissionsOf) as Array<[Actor, AdminPermission[]]>) {
+    entries.push([actor, (await createAdminWithPermissions(ctx.prisma, permissions)).admin.id]);
+  }
+  const cookie = {} as Record<Actor, string>;
+  const id = {} as Record<Actor, string>;
+  for (const [actor, userId] of entries) {
+    cookie[actor] = await loginAs(ctx.prisma, userId);
+    id[actor] = userId;
+  }
+  return { cookie, id };
+}
 
 async function cookies(): Promise<Record<Actor, string>> {
-  const root = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
-  const make = async (permissions: AdminPermission[]) =>
-    loginAs(ctx.prisma, (await createAdminWithPermissions(ctx.prisma, permissions)).admin.id);
-  return {
-    superAdmin: await loginAs(ctx.prisma, root.id),
-    reviewer: await make(REVIEWER),
-    sensitiveOnly: await make([AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE]),
-    reviewerSensitive: await make([...REVIEWER, AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE]),
-    none: await make([AdminPermission.DASHBOARD_READ]),
-  };
+  return (await actors()).cookie;
 }
 
 /** A provider declared as a sole proprietor, approved, and held by the gate (the same number is already promoted elsewhere). */
@@ -91,9 +120,9 @@ async function heldProvider() {
 const REASON = 'Belgeler incelendi; aynı işletmenin ikinci şubesi.';
 
 describe('the fraud reviewer access matrix', () => {
-  it('each route answers exactly as the assigned permissions say, and no body but the sensitive read carries the number', async () => {
+  it('each route answers exactly as the assigned permissions say, and no body but a granted raw read carries the number', async () => {
     const { provider, event } = await heldProvider();
-    const as = await cookies();
+    const { cookie, id } = await actors();
     const routes = {
       queue: () => request(ctx.server).get('/admin/promotion-eligibility/holds'),
       providerHolds: () => request(ctx.server).get(`/admin/promotion-eligibility/holds?filter=all&providerId=${provider.id}`),
@@ -101,35 +130,50 @@ describe('the fraud reviewer access matrix', () => {
       detail: () => request(ctx.server).get(`/providers/${provider.id}/admin-detail`),
       reviews: () => request(ctx.server).get(`/provider-reviews/by-provider/${provider.id}`),
       raw: () => request(ctx.server).get(`/providers/${provider.id}/business-registration/raw`),
+      rawUnknown: () => request(ctx.server).get('/providers/no-such-provider/business-registration/raw'),
     };
+    const R = { queue: 403, providerHolds: 403, hold: 403, detail: 403, reviews: 403, raw: 403, rawUnknown: 403 };
+    const REVIEW_OK = { queue: 200, providerHolds: 200, hold: 200, detail: 200 };
     const expected: Record<Actor, Record<keyof typeof routes, number>> = {
-      superAdmin: { queue: 200, providerHolds: 200, hold: 200, detail: 200, reviews: 200, raw: 200 },
-      reviewer: { queue: 200, providerHolds: 200, hold: 200, detail: 200, reviews: 200, raw: 403 },
-      sensitiveOnly: { queue: 403, providerHolds: 403, hold: 403, detail: 403, reviews: 403, raw: 200 },
-      reviewerSensitive: { queue: 200, providerHolds: 200, hold: 200, detail: 200, reviews: 200, raw: 200 },
-      none: { queue: 403, providerHolds: 403, hold: 403, detail: 403, reviews: 403, raw: 403 },
+      superAdmin: { ...REVIEW_OK, reviews: 200, raw: 200, rawUnknown: 404 },
+      reviewer: { ...REVIEW_OK, reviews: 200, raw: 403, rawUnknown: 403 },
+      sensitiveOnly: { ...R },
+      reviewerSensitive: { ...REVIEW_OK, reviews: 200, raw: 200, rawUnknown: 404 },
+      reviewContextSensitive: { ...REVIEW_OK, reviews: 403, raw: 200, rawUnknown: 404 },
+      reviewNoDetailSensitive: { ...R, queue: 200, providerHolds: 200, hold: 200 },
+      detailSensitive: { ...R, detail: 200 },
+      none: { ...R },
     };
 
-    let rawReads = 0;
+    const granted = new Map<Actor, number>();
     for (const actor of Object.keys(expected) as Actor[]) {
       for (const [name, open] of Object.entries(routes) as Array<[keyof typeof routes, () => request.Test]>) {
-        const response = await open().set('Cookie', as[actor]);
+        const before = await ctx.prisma.sensitiveDataAccessLog.count();
+        const response = await open().set('Cookie', cookie[actor]);
         expect(response.status, `${actor} ${name}`).toBe(expected[actor][name]);
-        const body = JSON.stringify(response.body ?? null);
+        const after = await ctx.prisma.sensitiveDataAccessLog.count();
         if (name === 'raw' && response.status === 200) {
-          rawReads += 1;
+          granted.set(actor, (granted.get(actor) ?? 0) + 1);
           expect(response.body.registration.number).toBe(TCKN);
           expect(response.headers['cache-control']).toBe('no-store');
+          // Exactly one access row per granted read, naming this reader.
+          expect(after - before, `${actor} raw audit`).toBe(1);
         } else {
-          expect(body, `${actor} ${name} must not carry the raw number`).not.toContain(TCKN);
+          // Refusals (403), unknown providers (404) and every other route write no access row …
+          expect(after - before, `${actor} ${name} audit`).toBe(0);
+          // … and never carry the number, in a body or an error.
+          expect(JSON.stringify(response.body ?? null), `${actor} ${name} must not carry the raw number`).not.toContain(TCKN);
         }
       }
     }
-    // Every raw read — and only a raw read — left one access row, naming no value.
+
+    expect([...granted.keys()].sort()).toEqual(['reviewContextSensitive', 'reviewerSensitive', 'superAdmin']);
     const log = await ctx.prisma.sensitiveDataAccessLog.findMany();
-    expect(log).toHaveLength(rawReads);
-    expect(rawReads).toBe(3);
+    expect(log.map((row) => row.actorId).sort()).toEqual([id.reviewContextSensitive, id.reviewerSensitive, id.superAdmin].sort());
+    expect(log.every((row) => row.providerId === provider.id)).toBe(true);
     expect(JSON.stringify(log)).not.toContain(TCKN);
+    // The sensitive permission alone read nothing and left nothing.
+    expect(log.some((row) => row.actorId === id.sensitiveOnly)).toBe(false);
   });
 
   it('the reviewer sees the provider and its eligibility context masked, and decides; the others cannot decide', async () => {

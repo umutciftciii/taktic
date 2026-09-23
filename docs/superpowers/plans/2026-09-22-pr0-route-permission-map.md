@@ -874,7 +874,7 @@ bloğunu ve iade zaman çizelgesi olaylarını yalnız `PACKAGE_REFUND_READ` sah
 
 | HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/providers/:providerId/business-registration/raw` | `readRaw` | Ham kayıt numarası + ham eski vergi numarası; her okuma `SensitiveDataAccessLog`; `no-store` | `PROVIDER_REGISTRATION_READ_SENSITIVE` | KİŞİSEL VERİ (TCKN olabilir) |
+| GET | `/providers/:providerId/business-registration/raw` | `readRaw` | Ham kayıt numarası + ham eski vergi numarası; her **başarılı** okuma `SensitiveDataAccessLog`; `no-store` | `PROVIDER_REGISTRATION_READ_SENSITIVE` **∧** `PROMOTION_ELIGIBILITY_REVIEW` **∧** `PROVIDERS_READ_DETAIL` (PR-C.2, §15.2) | KİŞİSEL VERİ (TCKN olabilir) |
 
 `GET/PUT /providers/me/business-registration` sağlayıcının kendi rotasıdır (`@Roles(PROVIDER)`), admin rotası
 değildir; bu tabloya girmez. Operatörün kanonik kaydı yazdığı bir rota **yoktur**. `PROVIDERS_READ_DETAIL` ve
@@ -903,12 +903,33 @@ bağlıdır (`PROVIDERS_READ` → kategori bağları, `PROVIDER_REVIEWS_READ` �
 `PROMOTION_ELIGIBILITY_REVIEW` → uygunluk bağlamı, `PROVIDER_REGISTRATION_READ_SENSITIVE` → ham kayıt).
 
 **Fraud inceleme rolü (önerilen, yalnız mevcut izinler):** `PROMOTION_ELIGIBILITY_REVIEW` + `PROVIDERS_READ_DETAIL` +
-`PROVIDER_REVIEWS_READ`; ham kayıt gerekirse ayrıca `PROVIDER_REGISTRATION_READ_SENSITIVE`.
+`PROVIDER_REVIEWS_READ`; ham kayıt gerekirse ayrıca `PROVIDER_REGISTRATION_READ_SENSITIVE`. Erişim tablosu §15.2'de
+(PR-C.1'deki "yalnız hassas izin → ham kayıt ✅" satırı PR-C.2 ile **kaldırıldı**).
 
-| Hesap | Kuyruk / hold / karar | Sağlayıcı detayı | Değerlendirmeler | Ham kayıt |
-| --- | --- | --- | --- | --- |
-| `SUPER_ADMIN` | ✅ | ✅ | ✅ | ✅ (+ audit) |
-| İnceleme rolü | ✅ | ✅ (maskeli) | ✅ | 403 |
-| Yalnız hassas izin | 403 | 403 | 403 | ✅ (+ audit) |
-| İnceleme + hassas | ✅ | ✅ (maskeli) | ✅ | ✅ (+ audit) |
-| İzinsiz `ADMIN` | 403 | 403 | 403 | 403 |
+### 15.2 CMP-006 PR-C.2 — ham kayıt için katmanlı yetki (2026-09-24)
+
+İzin sayısı değişmez (**82**). `GET /providers/:providerId/business-registration/raw` artık üç izni birlikte ister:
+
+    PROVIDER_REGISTRATION_READ_SENSITIVE  ∧  PROMOTION_ELIGIBILITY_REVIEW  ∧  PROVIDERS_READ_DETAIL
+
+- `PermissionsGuard` birleşiktir; üç izni `@RequiresPermission` listesine yazmak kuralın tamamıdır. `SUPER_ADMIN` örtük geçer.
+- **Tek bağlam kabul edilir: fraud incelemesi.** "Detay + hassas" alternatifi kabul edilmedi — üründe kayıt numarasını
+  okuyan başka bir operasyon akışı (moderasyon, destek, finans, operatör yazımı) yok; `A ∧ (B ∨ C)` kimsenin istemediği bir
+  yol açardı. Böyle bir akış doğarsa guard'a VEYA desteği o akışla birlikte, gerekçesiyle eklenir.
+- `PROVIDER_REVIEWS_READ` bağlamın parçası değildir (müşteri yorumları numarayla ilgisiz); inceleme rolünde bulunur ama
+  ham okumanın şartı değildir.
+- Ret (403), bilinmeyen sağlayıcı (404) ve her hata gövdesi numarayı taşımaz; **audit satırı yalnız başarılı 200 okumasında**
+  yazılır (guard servis çalışmadan reddeder).
+- Rota haritası girdisi `alsoRequires` alanıyla bağlamı taşır; harita testi rotanın bildirdiği kümenin **tam olarak**
+  `permission + alsoRequires` olmasını ister.
+
+| Hesap | Kuyruk / hold / karar | Sağlayıcı detayı | Değerlendirmeler | Ham kayıt | Audit |
+| --- | --- | --- | --- | --- | --- |
+| `SUPER_ADMIN` | ✅ | ✅ | ✅ | ✅ | okuma başına 1 |
+| İnceleme rolü | ✅ | ✅ (maskeli) | ✅ | **403** | 0 |
+| Yalnız hassas izin | **403** | **403** | **403** | **403** | **0** |
+| İnceleme + hassas | ✅ | ✅ (maskeli) | ✅ | ✅ | okuma başına 1 |
+| (İnceleme + detay + hassas, değerlendirme izni yok) | ✅ | ✅ | 403 | ✅ | okuma başına 1 |
+| (İnceleme + hassas, detay yok) | ✅ | 403 | 403 | **403** | 0 |
+| (Detay + hassas, inceleme yok) | 403 | ✅ | 403 | **403** | 0 |
+| İzinsiz `ADMIN` | 403 | 403 | 403 | 403 | 0 |

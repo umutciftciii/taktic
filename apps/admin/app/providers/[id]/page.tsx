@@ -198,7 +198,10 @@ export default async function ProviderDetailPage({
 
   const hasTaxInfo = Boolean(provider.taxType || provider.taxNumberMasked);
   const registration = provider.businessRegistration;
-  const canReadRaw = can('PROVIDER_REGISTRATION_READ_SENSITIVE');
+  // The API's rule, restated so the button is never offered where the read
+  // would be refused (PR-C.2): the sensitive permission and the fraud review
+  // context together. The route enforces it; this only hides a dead button.
+  const canReadRaw = can('PROVIDER_REGISTRATION_READ_SENSITIVE') && can('PROMOTION_ELIGIBILITY_REVIEW');
 
   const categoryQuery = (rawCategoryQuery ?? '').trim();
   const categoryNoticeMessage = categoryNotice ? CATEGORY_NOTICES[categoryNotice] : undefined;

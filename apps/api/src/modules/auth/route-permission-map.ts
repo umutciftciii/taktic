@@ -31,6 +31,13 @@ export type AdminRoutePermission = {
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   path: string;
   permission: AdminPermission;
+  /**
+   * Permissions the route demands *in addition* — the guard is conjunctive.
+   * Used only where holding the capability is not enough without its context
+   * (CMP-006 PR-C.2: the raw registration number). The map test holds the
+   * route's declared set to exactly `permission` + these.
+   */
+  alsoRequires?: readonly AdminPermission[];
 };
 
 export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
@@ -64,7 +71,12 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/admin/promotion-eligibility/holds', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
   { method: 'GET', path: '/admin/promotion-eligibility/holds/:eventId', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
   { method: 'POST', path: '/admin/promotion-eligibility/holds/:eventId/decision', permission: AdminPermission.PROMOTION_ELIGIBILITY_REVIEW },
-  { method: 'GET', path: '/providers/:providerId/business-registration/raw', permission: AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE },
+  {
+    method: 'GET',
+    path: '/providers/:providerId/business-registration/raw',
+    permission: AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE,
+    alsoRequires: [AdminPermission.PROMOTION_ELIGIBILITY_REVIEW, AdminPermission.PROVIDERS_READ_DETAIL],
+  },
   // CMP-006 PR-C.1: the operator's read of one provider's reviews (the provider panel's route stays ownership-guarded).
   { method: 'GET', path: '/provider-reviews/by-provider/:providerId', permission: AdminPermission.PROVIDER_REVIEWS_READ },
   { method: 'GET', path: '/admin/offer-packages/:id', permission: AdminPermission.CREDIT_PACKAGES_READ },

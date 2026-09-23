@@ -31,12 +31,30 @@ export class BusinessRegistrationController {
   }
 
   /**
-   * The raw numbers. Its own permission — PROVIDERS_READ_DETAIL is not enough —
-   * and every call leaves a SensitiveDataAccessLog row. Never cached.
+   * The raw numbers. Never cached; every successful read leaves one
+   * SensitiveDataAccessLog row (a refused one leaves none — the guard stops it
+   * before the service runs).
+   *
+   * Layered (CMP-006 PR-C.2): the sensitive permission alone is not enough.
+   * The number is read in one operational context — the fraud review of a
+   * provider — so the route also demands that context's permissions:
+   *
+   *   PROVIDER_REGISTRATION_READ_SENSITIVE
+   *     ∧ PROMOTION_ELIGIBILITY_REVIEW   (the review the number serves)
+   *     ∧ PROVIDERS_READ_DETAIL          (the page the number is shown on)
+   *
+   * `PermissionsGuard` is conjunctive, so listing the three is the whole rule.
+   * No second context is accepted: nothing else in the product — moderation,
+   * support, finance — reads a registration number, and an "A ∧ (B ∨ C)" rule
+   * would open a path nobody asked for. SUPER_ADMIN passes implicitly.
    */
   @Get(':providerId/business-registration/raw')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
-  @RequiresPermission(AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE)
+  @RequiresPermission(
+    AdminPermission.PROVIDER_REGISTRATION_READ_SENSITIVE,
+    AdminPermission.PROMOTION_ELIGIBILITY_REVIEW,
+    AdminPermission.PROVIDERS_READ_DETAIL,
+  )
   @Header('Cache-Control', 'no-store')
   readRaw(@CurrentUser() user: AuthUser, @Param('providerId') providerId: string) {
     return this.registrations.readRaw(user, providerId);
