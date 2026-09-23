@@ -93,4 +93,5 @@ erişimi, public projeksiyonlar.
 - Yerel tam E2E (Chromium, `pnpm e2e`): **301 geçti / 1 hata** (8.8 dk). Hata yeni senaryodaydı ve B7'yi ortaya
   çıkardı; düzeltme sonrası `pnpm e2e provider-business-registration` **2/2**. Diğer 300 senaryoya dokunan tek değişiklik
   admin sağlayıcı detayındaki kart koşuludur (SUPER_ADMIN davranışı aynı).
-- CI: PR açıldıktan sonra izlenir; **3/3 yeşil olmadan merge ve yerel eşitleme yapılmaz.**
+- CI (PR #108, `cb947b16`): **3/3 yeşil** — typecheck · lint · test · build ✅, e2e (chromium) ✅, e2e (webkit) ✅.
+  Merge ve yerel eşitleme yapılmadı; karar kullanıcıda.
