@@ -1,13 +1,15 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   Prisma,
   SupportTicketAuthorRole,
   SupportTicketRequesterRole,
+  SupportTicketTopic,
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
+import { PackageRefundRequestsService } from '../package-refunds/package-refund-requests.service';
 import {
   supportTicketSelect,
   toSupportTicketMessage,
@@ -58,6 +60,8 @@ export class RequesterSupportTicketsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(PackageRefundRequestsService)
+    private readonly refunds: PackageRefundRequestsService,
   ) {}
 
   /** The caller's own tickets, most recent activity first. Never anybody else's. */
@@ -85,8 +89,24 @@ export class RequesterSupportTicketsService {
    * hizmet veren's ticket is filed as a hizmet veren's and its first message
    * reads as one, without either fact ever passing through a request body.
    */
-  async createTicket(user: AuthUser, input: { subject: string; message: string }) {
+  async createTicket(
+    user: AuthUser,
+    input: {
+      subject?: string;
+      message: string;
+      topic?: SupportTicketTopic;
+      packagePurchaseId?: string;
+    },
+  ) {
     const requesterRole = this.requireRequesterRole(user);
+
+    if (input.topic === SupportTicketTopic.PACKAGE_AND_CREDIT_REFUND) {
+      return this.createRefundTicket(user, input);
+    }
+    if (input.packagePurchaseId !== undefined) {
+      throw new BadRequestException('Paket seçimi yalnız paket ve kredi iadesi konusunda yapılabilir.');
+    }
+
     const subject = normalizeSupportTicketSubject(input.subject);
     const body = normalizeSupportTicketBody(input.message);
     const now = new Date();
@@ -129,15 +149,51 @@ export class RequesterSupportTicketsService {
     return toSupportTicketSummary(ticket);
   }
 
+  /**
+   * CMP-006 PR-B. The refund topic: the ticket, its opening message, the
+   * refund request and its first audit row are one transaction, owned by the
+   * refund module (which also decides whether the flow is open at all and
+   * whether this purchase is the caller's and eligible). The opening notice
+   * afterwards is the ordinary one.
+   */
+  private async createRefundTicket(
+    user: AuthUser,
+    input: { message: string; packagePurchaseId?: string },
+  ) {
+    const body = normalizeSupportTicketBody(input.message);
+    if (!input.packagePurchaseId) {
+      throw new BadRequestException('İade talebi için bir paket seçmelisiniz.');
+    }
+
+    const { ticketId } = await this.refunds.openProviderRefundTicket(user, {
+      purchaseId: input.packagePurchaseId,
+      body,
+    });
+
+    const ticket = await this.loadOwnTicket(ticketId, user);
+    await this.notify(() => this.mail.sendSupportTicketOpened(ticket.id), `ticket ${ticket.id}`);
+    return toSupportTicketSummary(ticket);
+  }
+
   /** One of the caller's own tickets, with its whole timeline. */
   async getTicket(ticketId: string, user: AuthUser) {
     const ticket = await this.loadOwnTicket(ticketId, user);
     const [messages, statusChanges] = await readSupportTicketTimeline(this.prisma, ticket.id);
+    // Only a provider's ticket can carry a refund request (a CHECK says so);
+    // the provider's projection of it carries no operator detail.
+    const [packageRefundRequest, refundEvents] =
+      ticket.requesterRole === SupportTicketRequesterRole.PROVIDER
+        ? await Promise.all([
+            this.refunds.providerRequestForTicket(ticket.id),
+            this.refunds.timelineEvents(ticket.id, 'PROVIDER'),
+          ])
+        : [null, []];
 
     return {
       ...toSupportTicketSummary(ticket),
       canReply: REQUESTER_WRITABLE_STATUSES.includes(ticket.status),
-      timeline: toSupportTicketTimeline(messages, statusChanges, user.id),
+      packageRefundRequest,
+      timeline: toSupportTicketTimeline(messages, statusChanges, user.id, refundEvents),
     };
   }
 

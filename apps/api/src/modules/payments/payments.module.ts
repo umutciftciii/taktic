@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { CampaignEngineModule } from '../campaigns/engine/campaign-engine.module';
 import { CreditsModule } from '../credits/credits.module';
 import { PurchaseTermsModule } from '../purchase-terms/purchase-terms.module';
+import { PackageRefundsModule } from '../package-refunds/package-refunds.module';
 import { PackagePurchasesModule } from '../package-purchases/package-purchases.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ShowcaseLifecycleModule } from '../showcase/showcase-lifecycle.module';
@@ -51,6 +52,8 @@ import { PaymentsWebhookService } from './payments-webhook.service';
     CampaignEngineModule,
     // CMP-006 PR-A: the checkout reads and enforces the purchase-terms gate.
     PurchaseTermsModule,
+    // CMP-006 PR-B: the webhook-only settlement of package refund requests.
+    PackageRefundsModule,
   ],
   controllers: [PaymentsController, LemonSqueezyWebhookController],
   providers: [

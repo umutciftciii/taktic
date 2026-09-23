@@ -972,9 +972,10 @@ describe('what the feature is allowed to write down', () => {
     }
 
     // The audit rows carry an opaque event identity and a short code, nothing
-    // that could be read back into a payload.
+    // that could be read back into a payload. A refund notice's key also
+    // carries a digest of its refund state (CMP-006 PR-B) — hex, no figures.
     for (const audit of audits) {
-      expect(audit.eventKey).toMatch(/^[a-z_]+:orders:order-991$/);
+      expect(audit.eventKey).toMatch(/^[a-z_]+:orders:order-991(:[0-9a-f]{32})?$/);
       expect(audit.detail === null || /^[A-Z_]+$/.test(audit.detail)).toBe(true);
     }
 

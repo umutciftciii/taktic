@@ -584,3 +584,80 @@ describe('NO_PRIOR_REVOCATION reads the revoke as a fact', () => {
     expect(await currentCreditBalance(ctx.prisma, fixture.provider.id)).toBe(PACKAGE_CREDITS * 2 + 3);
   });
 });
+
+describe('CMP-006 PR-B: only a proven full refund revokes (no refund request involved)', () => {
+  it.each([
+    ['a partial refund', { refunded: false, status: 'partial_refund', refundedAmount: 20000 }],
+    ['a refund below the order total', { refundedAmount: 49901 }],
+    ['a refund above the order total', { refundedAmount: 49903 }],
+    ['a refund in another currency', { currency: 'USD' }],
+    ['a refund with no amount', { refundedAmount: null }],
+    ['a refund with no refunded flag', { refunded: null }],
+  ])('%s leaves the lot, the ledger and the purchase untouched — only the flag is written', async (_label, overrides) => {
+    const { category, creditPackage, campaign } = await scenario();
+    const fixture = await providerWithPendingPurchase(creditPackage.id, category.id);
+    const redemption = await settleAndGrant(fixture);
+    const ledgerBefore = await ledger(fixture.provider.id);
+
+    await refund(fixture, overrides).expect(200);
+
+    const purchase = await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: fixture.purchase.id } });
+    expect(purchase.status).toBe('PAID');
+    expect(purchase.refundedAt).toBeNull();
+    expect(purchase.manualReviewReason).toBe(MANUAL_REVIEW_REASON);
+    const lot = await ctx.prisma.promoCreditLot.findUniqueOrThrow({ where: { redemptionId: redemption.id } });
+    expect(lot.status).toBe('ACTIVE');
+    const after = await ctx.prisma.campaignRedemption.findUniqueOrThrow({ where: { id: redemption.id } });
+    expect(after.status).toBe('GRANTED');
+    expect(await ledger(fixture.provider.id)).toEqual(ledgerBefore);
+    expect(await revokeCounter(campaign.id)).toBe(0);
+    expect(await ctx.prisma.packageRefundRequest.count()).toBe(0);
+  });
+
+  it('a full refund (the provider total, not the TakTic price) revokes exactly once, redelivery or not', async () => {
+    const { category, creditPackage, campaign } = await scenario();
+    const fixture = await providerWithPendingPurchase(creditPackage.id, category.id);
+    const redemption = await settleAndGrant(fixture);
+    const stored = await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: fixture.purchase.id } });
+    // The drift the provider's USD normalisation introduces: its total is not our price.
+    expect(stored.priceAmountSnapshot).toBe(49900);
+    expect(stored.providerOrderTotalAmount).toBe(49902);
+    expect(stored.providerOrderCurrency).toBe('TRY');
+
+    await refund(fixture).expect(200);
+    await refund(fixture).expect(200);
+
+    const after = await ctx.prisma.campaignRedemption.findUniqueOrThrow({ where: { id: redemption.id } });
+    expect(after.status).toBe('REVOKED');
+    const revokes = (await ledger(fixture.provider.id)).filter((row) => row.type === CreditTransactionType.CAMPAIGN_REVOKE);
+    expect(revokes).toHaveLength(1);
+    expect(await revokeCounter(campaign.id)).toBe(1);
+    // No request, so nothing is settled and the purchase is not re-labelled.
+    const purchase = await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: fixture.purchase.id } });
+    expect(purchase.status).toBe('PAID');
+  });
+});
+
+describe('CMP-006 PR-B: refund notices of one order, keyed by refund state', () => {
+  it('partial → duplicate partial → full → duplicate full revokes the lot exactly once, on the full one', async () => {
+    const { category, creditPackage, campaign } = await scenario();
+    const fixture = await providerWithPendingPurchase(creditPackage.id, category.id);
+    const redemption = await settleAndGrant(fixture);
+    const partial = { refunded: false, status: 'partial_refund', refundedAmount: 20000 };
+    const revokeRows = async () =>
+      (await ledger(fixture.provider.id)).filter((row) => row.type === CreditTransactionType.CAMPAIGN_REVOKE).length;
+
+    await refund(fixture, partial).expect(200);
+    expect((await refund(fixture, partial).expect(200)).body).toEqual({ status: 'duplicate' });
+    expect(await revokeRows()).toBe(0);
+    expect((await ctx.prisma.campaignRedemption.findUniqueOrThrow({ where: { id: redemption.id } })).status).toBe('GRANTED');
+
+    expect((await refund(fixture).expect(200)).body).toEqual({ status: 'manual_review_required' });
+    expect((await refund(fixture).expect(200)).body).toEqual({ status: 'duplicate' });
+    expect(await revokeRows()).toBe(1);
+    expect(await revokeCounter(campaign.id)).toBe(1);
+    expect((await ctx.prisma.campaignRedemption.findUniqueOrThrow({ where: { id: redemption.id } })).status).toBe('REVOKED');
+    expect(await ctx.prisma.paymentWebhookEvent.count({ where: { eventName: 'order_refunded' } })).toBe(2);
+    await expectInvariant(fixture.provider.id);
+  });
+});

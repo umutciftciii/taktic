@@ -639,6 +639,11 @@ const packagePurchaseInclude = {
 export const packagePurchaseOmit = {
   paymentReference: true,
   ...purchaseTermsEvidenceOmit,
+  // CMP-006 PR-B: the payment provider's own order total and currency are the
+  // refund-reconciliation baseline, written by the webhook alone. No purchase
+  // projection — provider's, admin's, checkout's — carries them.
+  providerOrderTotalAmount: true,
+  providerOrderCurrency: true,
 } satisfies Prisma.PackagePurchaseOmit;
 
 function normalizeMockPayment(dto: MockPackagePaymentDto) {

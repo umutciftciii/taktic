@@ -396,6 +396,9 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *                            submit button, `<details>` holding the full terms
  *                            text, and an evidence row that records the user
  *                            agent the engine itself sent
+ *   package-refund-request   radios hidden inside their labels, a card picker
+ *                            with disabled options, and server-action forms on
+ *                            both the provider's and the operator's side
  *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
@@ -411,7 +414,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];
@@ -482,6 +485,9 @@ export default defineConfig({
     nextServer(lemonSqueezyRuntime, 'admin'),
     apiServer(purchaseTermsRuntime),
     nextServer(purchaseTermsRuntime, 'web'),
+    // CMP-006 PR-B: the refund queue is an operator screen, and it only has
+    // anything on it where the purchase-terms gate is open.
+    nextServer(purchaseTermsRuntime, 'admin'),
     turnstileClosedWebServer(),
     seoProductionWebServer(),
   ],

@@ -6797,6 +6797,13 @@ body.has-drawer-open {
 }
 
 .provider-choice-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+
+/* CMP-006 PR-B: the refund picker reuses these cards. A package that does not
+   meet the normal refund rules stays visible, with its reason, but cannot be
+   chosen; the native radio is disabled, so it is skipped by the keyboard too. */
+.provider-choice.is-disabled { cursor: not-allowed; background: var(--color-neutral-50, var(--color-bg)); color: var(--color-neutral-700); }
+.provider-choice.is-disabled:hover { border-color: var(--color-divider); }
+.provider-choice.is-disabled .provider-choice-mark { border-color: var(--color-divider); }
 .provider-choice-name { font-family: var(--font-heading); font-weight: 700; font-size: 15px; }
 .provider-choice-meta { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--color-neutral-800); }
 .provider-choice-line { display: flex; flex-wrap: wrap; gap: 4px 8px; }

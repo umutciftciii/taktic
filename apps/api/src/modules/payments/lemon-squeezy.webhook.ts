@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 /**
  * Signature verification and payload reading for Lemon Squeezy webhooks.
@@ -52,7 +52,9 @@ export type LemonSqueezyEvent = {
   /**
    * The provider's own opaque identity for this event object, used as the
    * idempotency key. Derived from the event name and the object it refers to,
-   * so a redelivery of the same notice keys the same way.
+   * so a redelivery of the same notice keys the same way — and, for
+   * `order_refunded` only, from the order's refund state as well (see
+   * orderRefundedEventKey), so a later refund of the same order is a new event.
    */
   eventKey: string;
   testMode: boolean;
@@ -75,6 +77,22 @@ export type LemonSqueezyEvent = {
    */
   chargedMinor: number | null;
   currency: string | null;
+  /**
+   * CMP-006 PR-B. The order's own `total` in the order currency, minor units —
+   * Lemon Squeezy's figure, which may drift a minor unit or two from the line
+   * item after its USD normalisation (see chargedMinor). Never compared with
+   * the purchase's price: it is stored at settlement as the provider's own
+   * statement of what the order cost, and a refund is later measured against
+   * exactly that stored value.
+   */
+  orderTotalMinor: number | null;
+  /**
+   * `attributes.refunded`: true only when the order has been fully refunded.
+   * Null when absent or not a boolean — never inferred.
+   */
+  refunded: boolean | null;
+  /** `attributes.refunded_amount` in the order currency, minor units. */
+  refundedAmountMinor: number | null;
   /** This application's own correlation token, echoed back in custom data. */
   reference: string | null;
 };
@@ -143,10 +161,17 @@ export function readLemonSqueezyEvent(rawBody: Buffer): LemonSqueezyEvent | null
   const attributes = data?.attributes ?? {};
   const custom = (meta?.custom_data ?? {}) as Record<string, unknown>;
   const firstItem = attributes.first_order_item as Record<string, unknown> | undefined;
+  const orderStatus = readOpaque(attributes.status);
+  const currency = readCurrency(attributes.currency);
+  const refunded = typeof attributes.refunded === 'boolean' ? attributes.refunded : null;
+  const refundedAmountMinor = readMinorAmount(attributes.refunded_amount);
 
   return {
     eventName,
-    eventKey: `${eventName}:${objectType}:${objectId}`,
+    eventKey:
+      eventName === ORDER_REFUNDED_EVENT
+        ? orderRefundedEventKey(objectType, objectId, { orderStatus, refunded, refundedAmountMinor, currency })
+        : `${eventName}:${objectType}:${objectId}`,
     // Anything other than a literal `true` is treated as a live delivery, which
     // this build refuses to act on.
     testMode: meta?.test_mode === true,
@@ -154,11 +179,64 @@ export function readLemonSqueezyEvent(rawBody: Buffer): LemonSqueezyEvent | null
     objectId,
     storeId: readNumericId(attributes.store_id),
     variantId: readNumericId(firstItem?.variant_id),
-    orderStatus: readOpaque(attributes.status),
+    orderStatus,
     chargedMinor: readChargedAmount(firstItem),
-    currency: readCurrency(attributes.currency),
+    currency,
+    orderTotalMinor: readMinorAmount(attributes.total),
+    refunded,
+    refundedAmountMinor,
     reference: readReference(custom.purchase_reference),
   };
+}
+
+const ORDER_REFUNDED_EVENT = 'order_refunded';
+
+/**
+ * CMP-006 PR-B. The idempotency key of an `order_refunded` delivery.
+ *
+ * Lemon Squeezy sends no per-delivery or per-event id (its requests carry
+ * `X-Event-Name`, `X-Signature`, `meta.event_name` and `meta.custom_data`),
+ * and it sends `order_refunded` for *every* refund of an order — a partial
+ * one and, later, the one that completes it. Keying by the order alone made
+ * the completing refund a "duplicate" of the partial one, so it could never
+ * be reconciled.
+ *
+ * The key is therefore the order **and its refund state** as the signed
+ * payload states it: `status`, `refunded`, the cumulative `refunded_amount`
+ * and `currency`. A redelivery of the same notice carries the same state and
+ * keys the same way (one event, one effect); a later refund moves the
+ * cumulative amount or the full-refund flag and is a new event. No timestamp
+ * is part of it: the provider does not document that a retried delivery
+ * repeats `updated_at` byte for byte, and a key that changed on a retry would
+ * turn one notice into two. The cumulative amount only ever grows, so two
+ * genuine refunds cannot share a state.
+ *
+ * The state is folded into a SHA-256 digest rather than written out, so the
+ * stored key carries no amount or currency — `PaymentWebhookEvent.eventKey`
+ * stays an opaque identity, as its model comment requires.
+ */
+function orderRefundedEventKey(
+  objectType: string,
+  objectId: string,
+  state: {
+    orderStatus: string | null;
+    refunded: boolean | null;
+    refundedAmountMinor: number | null;
+    currency: string | null;
+  },
+): string {
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify([
+        state.orderStatus,
+        state.refunded,
+        state.refundedAmountMinor,
+        state.currency,
+      ]),
+    )
+    .digest('hex')
+    .slice(0, 32);
+  return `${ORDER_REFUNDED_EVENT}:${objectType}:${objectId}:${digest}`;
 }
 
 /**

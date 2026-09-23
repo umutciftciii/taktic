@@ -11,12 +11,18 @@ import {
   supportTicketStatusChangeLabel,
   supportTicketStatusLabel,
   supportTicketTransitionLabel,
+  formatPrice,
+  PACKAGE_REFUND_ACTOR_LABELS,
+  PACKAGE_REFUND_RECOMMENDATION_LABELS,
+  PACKAGE_REFUND_STATUS_LABELS,
+  packageRefundStatusBadgeClass,
   type SupportTicketDetail,
   type SupportTicketTimelineEntry,
 } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { changeSupportTicketStatusAction, replySupportTicketAction } from '../actions';
+import { openPackageRefundRequestAction } from '../../package-refunds/actions';
 
 type AdminSupportTicketPageProps = {
   params: Promise<{ id: string }>;
@@ -135,6 +141,53 @@ export default async function AdminSupportTicketPage({
         </dl>
       </SectionCard>
 
+      {ticket.packageRefund ? (
+        <SectionCard
+          title="Paket ve kredi iadesi"
+          subtitle={
+            ticket.topic === 'PACKAGE_AND_CREDIT_REFUND'
+              ? 'Hizmet veren bu talebi iade konusuyla açtı.'
+              : 'Bu genel talebe bağlı iade isteği.'
+          }
+        >
+          {ticket.packageRefund.request ? (
+            <p data-testid="support-refund-link">
+              <span className={packageRefundStatusBadgeClass(ticket.packageRefund.request.status)}>
+                {PACKAGE_REFUND_STATUS_LABELS[ticket.packageRefund.request.status]}
+              </span>{' '}
+              <Link href={`/package-refunds/${ticket.packageRefund.request.id}`}>İade isteğini aç</Link>
+            </p>
+          ) : ticket.packageRefund.canOpen ? (
+            <form action={openPackageRefundRequestAction} data-testid="support-refund-open-form">
+              <input type="hidden" name="supportTicketId" value={ticket.id} />
+              <label className="form-row" htmlFor="support-refund-purchase">
+                <span>Bu talep üzerinden iade isteği aç (istisna incelemesi dahil)</span>
+                <select id="support-refund-purchase" name="purchaseId" required defaultValue="">
+                  <option value="" disabled>
+                    Satın alma seçin
+                  </option>
+                  {ticket.packageRefund.candidatePurchases.map((purchase) => (
+                    <option key={purchase.id} value={purchase.id}>
+                      {`${purchase.packageName} · ${purchase.purchaseNumber ?? purchase.id} · ${formatPrice(
+                        purchase.priceAmount,
+                        purchase.currency,
+                      )} · ${PACKAGE_REFUND_RECOMMENDATION_LABELS[purchase.recommendation]}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="btn btn-secondary btn-sm" type="submit" data-testid="support-refund-open">
+                İade isteği aç
+              </button>
+            </form>
+          ) : (
+            <p className="cell-muted" data-testid="support-refund-none">
+              Bu talebe bağlı bir iade isteği yok.
+            </p>
+          )}
+        </SectionCard>
+      ) : null}
+
       <SectionCard
         title="Durum"
         subtitle="Yalnızca bu talebin şu anda yapabileceği geçişler gösterilir."
@@ -237,6 +290,18 @@ const TIMELINE_AUTHOR_LABELS: Record<'CUSTOMER' | 'ADMIN' | 'PROVIDER', string> 
  * colleagues' actions were answers and which were moves.
  */
 function TimelineEntry({ entry }: { entry: SupportTicketTimelineEntry }) {
+  if (entry.kind === 'PACKAGE_REFUND_EVENT') {
+    return (
+      <li className="support-timeline-event" data-testid="support-refund-event" data-to-status={entry.toStatus}>
+        <span>
+          İade isteği: {entry.statusLabel} — {PACKAGE_REFUND_ACTOR_LABELS[entry.actorKind]}
+          {entry.actor?.name ? ` (${entry.actor.name})` : ''}
+        </span>
+        <time dateTime={entry.createdAt}>{formatDateTime(entry.createdAt)}</time>
+      </li>
+    );
+  }
+
   if (entry.kind === 'STATUS_CHANGE') {
     return (
       <li

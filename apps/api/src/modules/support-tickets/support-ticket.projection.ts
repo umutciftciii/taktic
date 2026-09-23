@@ -46,6 +46,7 @@ export const supportTicketSelect = {
   subject: true,
   status: true,
   requesterRole: true,
+  topic: true,
   lastActivityAt: true,
   resolvedAt: true,
   closedAt: true,
@@ -82,7 +83,13 @@ export type SupportTicketTimelineEntry =
       fromStatus: SupportTicketStatus | null;
       toStatus: SupportTicketStatus;
       createdAt: string;
-    };
+    }
+  /**
+   * CMP-006 PR-B: a transition of the package refund request this ticket
+   * carries. Projected per audience by the refund module — the provider's copy
+   * carries the status and nothing about who moved it or why.
+   */
+  | ({ kind: 'PACKAGE_REFUND_EVENT'; id: string; createdAt: string } & Record<string, unknown>);
 
 export function toSupportTicketSummary(ticket: SupportTicketRow) {
   return {
@@ -98,6 +105,8 @@ export function toSupportTicketSummary(ticket: SupportTicketRow) {
      * without inferring the answer from the session.
      */
     requesterRole: ticket.requesterRole,
+    /** CMP-006 PR-B: GENERAL or PACKAGE_AND_CREDIT_REFUND, as the requester chose. */
+    topic: ticket.topic,
     lastActivityAt: ticket.lastActivityAt.toISOString(),
     resolvedAt: ticket.resolvedAt ? ticket.resolvedAt.toISOString() : null,
     closedAt: ticket.closedAt ? ticket.closedAt.toISOString() : null,
@@ -144,6 +153,7 @@ export function toSupportTicketTimeline(
   messages: SupportTicketMessageRow[],
   statusChanges: SupportTicketStatusChangeRow[],
   viewerUserId: string,
+  refundEvents: readonly Extract<SupportTicketTimelineEntry, { kind: 'PACKAGE_REFUND_EVENT' }>[] = [],
 ): SupportTicketTimelineEntry[] {
   const entries: SupportTicketTimelineEntry[] = [
     ...messages.map((message): SupportTicketTimelineEntry => ({
@@ -161,6 +171,7 @@ export function toSupportTicketTimeline(
       toStatus: change.toStatus,
       createdAt: change.createdAt.toISOString(),
     })),
+    ...refundEvents,
   ];
 
   return entries.sort((a, b) => {

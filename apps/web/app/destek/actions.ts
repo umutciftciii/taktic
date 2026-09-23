@@ -33,6 +33,9 @@ export type SupportTicketFormState = {
   /** Kept so a refused submission does not also lose what was typed. */
   subject?: string;
   body?: string;
+  /** CMP-006 PR-B: the topic and package that were chosen, so a refusal keeps them. */
+  topic?: 'GENERAL' | 'PACKAGE_AND_CREDIT_REFUND';
+  packagePurchaseId?: string;
 };
 
 export async function createSupportTicketAction(
@@ -41,6 +44,10 @@ export async function createSupportTicketAction(
 ): Promise<SupportTicketFormState> {
   const subject = readString(formData, 'subject');
   const message = readString(formData, 'message');
+
+  if (readString(formData, 'topic') === 'PACKAGE_AND_CREDIT_REFUND') {
+    return createRefundTicket(message, readString(formData, 'packagePurchaseId'));
+  }
 
   // The same two checks the API makes, in the same order, so the obvious
   // mistakes are answered without a round trip. They are a courtesy, not the
@@ -108,6 +115,90 @@ export async function createSupportTicketAction(
 
   revalidatePath('/destek');
   redirect(`/destek/${ticketId}?created=1`);
+}
+
+/**
+ * CMP-006 PR-B. The refund topic: a package and a reason, and no subject — the
+ * API writes the subject from the purchase. Whether the flow is open, whether
+ * the package is the caller's and whether it meets the rules is the API's
+ * decision alone; its refusal comes back verbatim.
+ */
+async function createRefundTicket(
+  message: string,
+  packagePurchaseId: string,
+): Promise<SupportTicketFormState> {
+  const kept = { topic: 'PACKAGE_AND_CREDIT_REFUND' as const, packagePurchaseId, body: message };
+
+  if (!packagePurchaseId) {
+    return { status: 'error', message: 'İade istediğiniz paketi seçin.', ...kept };
+  }
+  if (!message.trim()) {
+    return { status: 'error', message: 'İade gerekçenizi yazın.', ...kept };
+  }
+  if (message.length > SUPPORT_TICKET_MESSAGE_MAX_LENGTH) {
+    return {
+      status: 'error',
+      message: `Mesaj en fazla ${SUPPORT_TICKET_MESSAGE_MAX_LENGTH} karakter olabilir.`,
+      ...kept,
+    };
+  }
+
+  let response: Response;
+  try {
+    response = await supportFetch('/support/tickets', {
+      method: 'POST',
+      body: JSON.stringify({ topic: 'PACKAGE_AND_CREDIT_REFUND', packagePurchaseId, message }),
+    });
+  } catch {
+    return {
+      status: 'error',
+      message: 'İade talebi gönderilemedi. Bağlantınızı kontrol edip tekrar deneyin.',
+      ...kept,
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      status: 'error',
+      message:
+        (await readApiMessage(response)) ??
+        'İade talebi gönderilemedi. Durumunuzu "Genel" konusuyla bize yazabilirsiniz.',
+      ...kept,
+    };
+  }
+
+  const created = (await response.json()) as { id?: unknown };
+  revalidatePath('/destek');
+  if (typeof created.id !== 'string') {
+    redirect('/destek?created=1');
+  }
+  redirect(`/destek/${created.id}?created=refund`);
+}
+
+/**
+ * CMP-006 PR-B. The provider withdrawing their own refund request, before any
+ * approval. The API scopes it to the caller's own ticket and decides whether
+ * it is still possible.
+ */
+export async function withdrawPackageRefundAction(formData: FormData): Promise<void> {
+  const ticketId = readString(formData, 'ticketId');
+  if (!ticketId) {
+    redirect('/destek');
+  }
+
+  let ok = false;
+  try {
+    const response = await supportFetch(
+      `/support/package-refund/tickets/${encodeURIComponent(ticketId)}/withdraw`,
+      { method: 'POST' },
+    );
+    ok = response.ok;
+  } catch {
+    ok = false;
+  }
+
+  revalidatePath(`/destek/${ticketId}`);
+  redirect(`/destek/${ticketId}?refund=${ok ? 'withdrawn' : 'withdraw-failed'}`);
 }
 
 export async function replySupportTicketAction(

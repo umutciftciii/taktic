@@ -1350,6 +1350,8 @@ export type SupportTicketSummary = {
    * it: they do not, which is what keeps the two panels showing one interface.
    */
   requesterRole: SupportTicketRequesterRole;
+  /** CMP-006 PR-B: what the requester chose the ticket to be about. */
+  topic: SupportTicketTopic;
   /** The last message or status change, whichever came later. */
   lastActivityAt: string;
   resolvedAt: string | null;
@@ -1357,7 +1359,85 @@ export type SupportTicketSummary = {
   createdAt: string;
 };
 
+export type SupportTicketTopic = 'GENERAL' | 'PACKAGE_AND_CREDIT_REFUND';
+
+export type PackageRefundRequestStatus =
+  | 'SUBMITTED'
+  | 'UNDER_REVIEW'
+  | 'REJECTED'
+  | 'APPROVED_PENDING_SETTLEMENT'
+  | 'SETTLED'
+  | 'SETTLEMENT_FAILED'
+  | 'WITHDRAWN';
+
+/** The purchase a refund request is about, as the provider sees it. */
+export type PackageRefundPurchaseSummary = {
+  id: string;
+  purchaseNumber: string | null;
+  packageName: string;
+  creditAmount: number;
+  priceAmount: number;
+  currency: string;
+  paidAt: string | null;
+};
+
+/**
+ * CMP-006 PR-B. The provider's own refund request on one of their tickets —
+ * the status and the purchase, never an operator's name, reason or decision
+ * detail. `canWithdraw` is the API's answer, not a guess from the status.
+ */
+export type ProviderPackageRefundRequest = {
+  id: string;
+  status: PackageRefundRequestStatus;
+  statusLabel: string;
+  canWithdraw: boolean;
+  createdAt: string;
+  purchase: PackageRefundPurchaseSummary;
+};
+
+/** One purchase the support form may offer, with the rule it meets or does not. */
+export type PackageRefundOption = {
+  id: string;
+  purchaseNumber: string | null;
+  packageName: string;
+  creditAmount: number;
+  priceAmount: number;
+  currency: string;
+  paidAt: string | null;
+  windowEndsAt: string | null;
+  selectable: boolean;
+  notes: string[];
+};
+
+export type PackageRefundOptions = {
+  /** False with the flow closed, or with nothing bought under it. The topic is then not offered at all. */
+  available: boolean;
+  purchases: PackageRefundOption[];
+};
+
+/**
+ * What the refund topic may offer this provider, or a closed answer on any
+ * failure: the form falls back to the general topic rather than to an error.
+ */
+export async function loadPackageRefundOptions(): Promise<PackageRefundOptions> {
+  try {
+    return await apiFetch<PackageRefundOptions>('/support/package-refund/options');
+  } catch {
+    return { available: false, purchases: [] };
+  }
+}
+
 export type SupportTicketTimelineEntry =
+  | {
+      kind: 'PACKAGE_REFUND_EVENT';
+      id: string;
+      action: string;
+      toStatus: PackageRefundRequestStatus;
+      statusLabel: string;
+      /** A fixed explanation, present only on a failure the payment provider's notice caused. */
+      detail?: string;
+      createdAt: string;
+    }
   | {
       kind: 'MESSAGE';
       id: string;
@@ -1388,6 +1468,8 @@ export type SupportTicketDetail = SupportTicketSummary & {
    * only one of them can enforce it.
    */
   canReply: boolean;
+  /** CMP-006 PR-B: the refund request this ticket carries, if any. */
+  packageRefundRequest?: ProviderPackageRefundRequest | null;
   timeline: SupportTicketTimelineEntry[];
 };
 

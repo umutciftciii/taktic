@@ -50,6 +50,16 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'POST', path: '/admin/campaigns/:id/versions/:versionNumber/activate', permission: AdminPermission.CAMPAIGNS_LIFECYCLE },
   { method: 'POST', path: '/admin/campaigns/validate', permission: AdminPermission.CAMPAIGNS_READ },
   { method: 'GET', path: '/admin/offer-packages', permission: AdminPermission.CREDIT_PACKAGES_READ },
+  // CMP-006 PR-B: the package refund queue. Maker (open, take) and checker
+  // (approve, reject, failed settlement) are separate permissions; no route
+  // writes SETTLED.
+  { method: 'GET', path: '/admin/package-refund-requests', permission: AdminPermission.PACKAGE_REFUND_READ },
+  { method: 'POST', path: '/admin/package-refund-requests', permission: AdminPermission.PACKAGE_REFUND_REQUEST_CREATE },
+  { method: 'GET', path: '/admin/package-refund-requests/:id', permission: AdminPermission.PACKAGE_REFUND_READ },
+  { method: 'POST', path: '/admin/package-refund-requests/:id/approve', permission: AdminPermission.PACKAGE_REFUND_APPROVE },
+  { method: 'POST', path: '/admin/package-refund-requests/:id/reject', permission: AdminPermission.PACKAGE_REFUND_APPROVE },
+  { method: 'POST', path: '/admin/package-refund-requests/:id/settlement-failed', permission: AdminPermission.PACKAGE_REFUND_APPROVE },
+  { method: 'POST', path: '/admin/package-refund-requests/:id/take', permission: AdminPermission.PACKAGE_REFUND_REQUEST_CREATE },
   { method: 'GET', path: '/admin/offer-packages/:id', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/offer-packages/unlimited-eligible-categories', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/showcase/cards', permission: AdminPermission.SHOWCASE_CARDS_READ },

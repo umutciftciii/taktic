@@ -1544,6 +1544,14 @@ export class TransactionalMailService {
           : null;
       }
 
+      case 'package-refund-status': {
+        const event = await loadPackageRefundEvent(this.prisma, source.ids[0]);
+        const recipient = event ? recipientFor(event.request.provider) : null;
+        return event && recipient && PACKAGE_REFUND_NOTIFIED_STATUSES.has(event.toStatus)
+          ? { to: recipient, data: packageRefundStatusData(event) }
+          : null;
+      }
+
       case 'review-invitation': {
         const request = await loadRequestForReviewInvitation(this.prisma, source.ids[0]);
         // Rebuilt only while the invitation is still worth acting on: the job
@@ -2985,6 +2993,10 @@ const RETRY_DEDUPE_PREFIXES = {
   'review-received': 'review-received',
   'review-report-new-for-support': 'review-report-new',
   'review-removed': 'review-removed',
+  // CMP-006 PR-B. Keyed on the refund request's audit row for the transition,
+  // so one transition is one message and a replayed webhook (no new audit row)
+  // is none. *Delivered* through this table by PackageRefundNotificationOutbox.
+  'package-refund-status': 'package-refund-status',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -3047,6 +3059,8 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'review-report-new-for-support': 1,
   /** The review only; the ISO timestamp after it is ignored, as for request-removed. */
   'review-removed': 1,
+  /** The audit row of the refund request's transition. */
+  'package-refund-status': 1,
 };
 
 /**
@@ -3108,6 +3122,72 @@ function parseRetrySource(template: string, dedupeKey: string | null): RetrySour
  * is no account behind it yet and it is the only address there is. That is the
  * case the claim invitation is for, and it is unchanged.
  */
+/**
+ * CMP-006 PR-B. The lasting states a provider is told about. WITHDRAWN is not
+ * one of them: the provider did it themselves, and the ticket says so.
+ */
+export const PACKAGE_REFUND_NOTIFIED_STATUSES: ReadonlySet<string> = new Set([
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'REJECTED',
+  'APPROVED_PENDING_SETTLEMENT',
+  'SETTLED',
+  'SETTLEMENT_FAILED',
+]);
+
+/**
+ * One transition of a refund request, read back for its message. An explicit
+ * select: the operator's note, the eligibility snapshots, the webhook event's
+ * key and every purchase-terms or payment identifier stay out.
+ */
+async function loadPackageRefundEvent(prisma: PrismaService, eventId: string) {
+  return prisma.packageRefundRequestEvent.findUnique({
+    where: { id: eventId },
+    select: {
+      id: true,
+      toStatus: true,
+      actorKind: true,
+      createdAt: true,
+      request: {
+        select: {
+          supportTicketId: true,
+          supportTicket: { select: { id: true, subject: true } },
+          purchase: {
+            select: {
+              purchaseNumber: true,
+              packageNameSnapshot: true,
+              priceAmountSnapshot: true,
+              currencySnapshot: true,
+            },
+          },
+          provider: { select: { email: true, contactName: true, user: { select: { email: true, name: true } } } },
+        },
+      },
+    },
+  });
+}
+
+function packageRefundStatusData(
+  event: NonNullable<Awaited<ReturnType<typeof loadPackageRefundEvent>>>,
+): MailData {
+  const { request } = event;
+  return {
+    fullName: request.provider.user?.name ?? request.provider.contactName,
+    status: event.toStatus,
+    // Which side recorded a failed settlement decides the sentence, not the
+    // wording of any reason: the provider's notice or the operator's.
+    failureSource: event.actorKind === 'PAYMENT_WEBHOOK' ? 'WEBHOOK' : 'OPERATOR',
+    packageName: request.purchase.packageNameSnapshot,
+    purchaseNumber: request.purchase.purchaseNumber,
+    priceAmountMinor: String(request.purchase.priceAmountSnapshot),
+    currency: request.purchase.currencySnapshot,
+    changedAt: event.createdAt.toISOString(),
+    ticketSubject: request.supportTicket.subject,
+    ticketUrl: customerSupportTicketUrl(request.supportTicket.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
 export function recipientFor(provider: {
   email: string | null;
   user?: { email: string | null } | null;
