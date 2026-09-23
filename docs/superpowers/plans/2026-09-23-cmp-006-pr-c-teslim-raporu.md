@@ -20,7 +20,7 @@ checkout'un test/e2e DB'leri). Kampanya DSL'i (`campaign-rules.json`) değişmed
 | Yeni rota | Admin 4 (route-map'te) · Sağlayıcı 2 (`GET/PUT /providers/me/business-registration`) · başvuru gövdeleri += kayıt çifti |
 | Yeni env | `PROMOTION_FINGERPRINT_KEY`, `PROMOTION_FINGERPRINT_KEY_VERSION` — local/test'te boş geçer, staging/prod'da zorunlu (boot reddi); compose + `.env.example` güncellendi |
 | Yeni API testi | **111** (kurallar/normalizasyon 13 blok · anahtar sözleşmesi 6 · karar matrisi 8 blok · HTTP kayıt/sızıntı/audit 24 · kapı/hold/karar/sayaç 25) |
-| Tam API paketi | **169 dosya / 3656 test** (PR-C.1 sonrası) |
+| Tam API paketi | **169 dosya / 3658 test** (PR-C.1 sonrası) |
 | Web / admin birim | web 355/355 (yeni 4) · admin 78/78 (yeni 4) |
 | E2E | Rev. 1: Chromium 301/302 (B7). **PR-C.1: Chromium 302/302, WebKit 131/131** — §7.4 |
 | typecheck | api (src + test), web, admin, e2e, shared temiz |
@@ -128,6 +128,20 @@ gövdede (liste, detay, kuyruk, karar, 403/409 hata gövdeleri) ham numara yok; 
 üç eşzamanlı worker geçişi → **1 karar, 1 grant, 1 lot, sayaç 1**. Sağlayıcı panelinin rotası sahiplik korumalı kaldı
 (`PROVIDER_REVIEWS_READ` taşıyan personel orada 403).
 
+### 7.2a CI'da görülen API yarışı (`account-email-role-conflict`)
+
+`ce31243f`'nin CI verify işi, bu PR'ın dokunmadığı "iki eşzamanlı çapraz rol kayıt" testinde düştü
+(`CUSTOMER_IDENTITY_CONFLICT` ≠ `EMAIL_ROLE_CONFLICT`). Daha önce main CI'da da görülmüş, backlog'daki flake.
+Yeniden çalıştırılarak kapatılmadı:
+
+| Soru | Cevap |
+| --- | --- |
+| Sınıf | **Ürün yarışı** (test/fixture değil): kaybedene dönen kod zamanlamaya bağlıydı |
+| Mekanizma | `AuthService.register` önce çapraz rol ön kontrolünü, sonra genel iletişim kontrolünü yapıyor; iki okuma tek snapshot değil. Diğer rolün kaydı **ikisinin arasında** commit olursa ikinci okuma adresi görüp genel `CUSTOMER_IDENTITY_CONFLICT`'i döndürüyordu. Unique-ihlali dalı bu soruyu zaten yeniden soruyordu; ön kontrol dalı sormuyordu |
+| Yeniden üretim | Deterministik: yeni test pencereyi zorluyor (kazanan hesap iki okuma arasında yazılıyor); **düzeltmesiz 2/2 düşüyor**, aynı hata |
+| Düzeltme | Üretim kodu: iletişim kontrolü adres çakışmasıyla reddederse çapraz rol sorusu o an oradaki hesaba yeniden sorulur (unique-ihlali dalıyla aynı kural). Test beklentisi değişmedi |
+| Nihai invariant | Mevcut eşzamanlı testler (tam bir 201 + bir 409, 409'un kodu ve metni, hesap sayısı 1) aynen duruyor |
+
 ### 7.3 Değişmeyenler
 
 Kampanya motoru ve `PURCHASE_TERMS_GATE` kapalı; fraud karar kuralları, HMAC biçimi, kayıt sayacı ve
@@ -137,10 +151,10 @@ Kampanya motoru ve `PURCHASE_TERMS_GATE` kapalı; fraud karar kuralları, HMAC b
 
 | Kontrol | Sonuç |
 | --- | --- |
-| API tam paket | **169 dosya / 3656 test** (yeni 4: erişim matrisi) |
+| API tam paket | **169 dosya / 3658 test** (yeni: erişim matrisi 4 + yarış penceresi 2) |
 | Web / admin birim | 355/355 · 78/78 |
 | typecheck (api src+test, web, admin, e2e, shared) | temiz |
 | lint / build | temiz / başarılı (turbo, 4/4 paket) |
-| Tam Chromium E2E (`pnpm e2e`) | **302/302** (8.4 dk; flake, retry yok — yerel koşu `retries: 0`) |
-| Tam WebKit E2E (`pnpm e2e:webkit`, CI'daki WebKit projesi; `provider-business-registration` eklendi) | **131/131** (4.1 dk) |
-| CI | _doldurulacak_ |
+| Tam Chromium E2E (`pnpm e2e`) | `ce31243f`: **302/302** (8.4 dk, `retries: 0`) · auth düzeltmesi sonrası: **302/302** (8.5 dk) |
+| Tam WebKit E2E (`pnpm e2e:webkit`, CI'daki WebKit projesi; `provider-business-registration` eklendi) | `ce31243f`: **131/131** (4.1 dk) · auth düzeltmesi sonrası: **131/131** (4.1 dk) |
+| CI | `ce31243f`: e2e chromium ✅ · e2e webkit ✅ · verify ❌ (§7.2a yarışı) · düzeltme sonrası: _bekleniyor_ |

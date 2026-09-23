@@ -1,7 +1,8 @@
 import { CustomerOrigin, UserRole } from '@prisma/client';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CROSS_ROLE_EMAIL_CONFLICT_CODE } from '../src/common/account-email';
+import { AuthService } from '../src/modules/auth/auth.service';
 import { ProviderClaimRateLimiter } from '../src/modules/provider-claim/provider-claim.rate-limiter';
 import {
   createCategory,
@@ -268,6 +269,34 @@ describe('two simultaneous cross-role registrations cannot both win', () => {
     expect(loser.body.message).toBe(CONFLICT_MESSAGE);
 
     expect(await countUsersFor(CONTESTED)).toBe(1);
+  });
+
+  /*
+   * The window the race above only sometimes hits, forced (CMP-006 PR-C.1):
+   * the cross-role pre-check passes, the other kind of account commits, and
+   * only then does the contact check read the address. The loser must still
+   * get the rule's own sentence, not the generic identity refusal.
+   */
+  it.each([
+    ['customer wins, provider loses', UserRole.CUSTOMER, registerProvider],
+    ['provider wins, customer loses', UserRole.PROVIDER, registerCustomer],
+  ] as const)('%s between the two pre-reads: still EMAIL_ROLE_CONFLICT', async (_label, winnerRole, loserRegisters) => {
+    const auth = ctx.app.get(AuthService) as unknown as { assertContactFree: (email: string, phone: string | null) => Promise<void> };
+    const original = auth.assertContactFree.bind(auth);
+    const spy = vi.spyOn(auth, 'assertContactFree').mockImplementationOnce(async (email, phone) => {
+      await createUser(ctx.prisma, { role: winnerRole, email: CONTESTED, phone: '05553330001' });
+      return original(email, phone);
+    });
+    try {
+      const loser = await loserRegisters(CONTESTED, { phone: '05553330002' });
+      expect(loser.status).toBe(409);
+      expect(loser.body.code).toBe(CROSS_ROLE_EMAIL_CONFLICT_CODE);
+      expect(loser.body.message).toBe(CONFLICT_MESSAGE);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(await countUsersFor(CONTESTED)).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('lets exactly one of many simultaneous attempts through', async () => {
