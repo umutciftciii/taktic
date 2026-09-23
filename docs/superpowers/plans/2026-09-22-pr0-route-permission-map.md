@@ -230,8 +230,8 @@ veri okur) · `AYAR` (operasyon davranışını değiştirir) · `YAYIN` (public
 | GET | `/package-purchases/:id` | `getAdminPurchase` (L58) | Satın alma detayı | `PACKAGE_PURCHASES_READ` | PARA (okuma) |
 | PATCH | `/package-purchases/:id/status` | `updateAdminPurchaseStatus` (L65) | **Ödeme durumunu elle değiştirir** | `PACKAGE_PURCHASE_STATUS_WRITE` | PARA, YIKICI |
 
-> CMP-006 PR-B bu controller'a iade talebi rotalarını ekleyecek; `PACKAGE_REFUND_REQUEST_CREATE` ve
-> `PACKAGE_REFUND_APPROVE` **bugün bir rotaya karşılık gelmediği için** bu tabloda yoktur (§10).
+> CMP-006 PR-B (2026-09-23) iade talebi rotalarını bu controller'a değil, ayrı bir controller'a ekledi — bkz.
+> §14. İzinler `PACKAGE_REFUND_READ` / `PACKAGE_REFUND_REQUEST_CREATE` / `PACKAGE_REFUND_APPROVE`.
 
 ### 3.17 `payments/payments.controller.ts` — metod düzeyi ×1
 
@@ -834,3 +834,24 @@ routing walk taslağa girmiyor · izinsiz ADMIN 403 `INSUFFICIENT_PERMISSION` ·
 403 `NOT_STAFF` · `CATALOG_READ` sahibi tam katalog · atamasız `SUPER_ADMIN` örtük erişim · yalnız
 `CATALOG_READ` taşıyan dört yazmada da 403 ve satır değişmiyor · yayımlanmamış katalogu servis eden rota
 sayısı **tam olarak iki**.
+
+## 14. CMP-006 PR-B eklemesi (2026-09-23)
+
+`package-refunds/admin-package-refund-requests.controller.ts` — sınıf düzeyi guard
+(`AuthGuard, AdminAccessGuard, PermissionsGuard`), 7 rota. İzin sayısı 77 → **80**.
+
+| HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/admin/package-refund-requests` | `list` | İade isteği kuyruğu | `PACKAGE_REFUND_READ` | PARA (okuma) |
+| GET | `/admin/package-refund-requests/:id` | `detail` | Detay, snapshot'lar, audit | `PACKAGE_REFUND_READ` | PARA (okuma) |
+| POST | `/admin/package-refund-requests` | `create` | Sağlayıcının mevcut talebine iade isteği bağlar (maker) | `PACKAGE_REFUND_REQUEST_CREATE` | PARA |
+| POST | `/admin/package-refund-requests/:id/take` | `take` | İşleme alır (maker) | `PACKAGE_REFUND_REQUEST_CREATE` | PARA |
+| POST | `/admin/package-refund-requests/:id/approve` | `approve` | Normal/istisna onayı (checker; istisnada DB maker-checker) | `PACKAGE_REFUND_APPROVE` | PARA, YIKICI |
+| POST | `/admin/package-refund-requests/:id/reject` | `reject` | Gerekçeli ret | `PACKAGE_REFUND_APPROVE` | PARA |
+| POST | `/admin/package-refund-requests/:id/settlement-failed` | `settlementFailed` | Dış iade tamamlanamadı kaydı | `PACKAGE_REFUND_APPROVE` | PARA |
+
+**`SETTLED` yazan rota yoktur.** Tek yazarı imzalı `order_refunded` webhook'udur (RBAC dışı, imza ile korunur).
+
+Sağlayıcı rotaları (`support/package-refund/*`, `@Roles(PROVIDER)`) ve `POST /support/tickets`'in yeni
+`topic` alanı admin rotası değildir; bu tabloya girmez. Admin destek talebi detayı (`SUPPORT_READ`) iade
+bloğunu ve iade zaman çizelgesi olaylarını yalnız `PACKAGE_REFUND_READ` sahibine döndürür.

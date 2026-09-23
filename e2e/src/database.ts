@@ -15,6 +15,10 @@ const TRUNCATED_TABLES = [
   'ServiceRequestQuestionCondition',
   'Message',
   'MessageThread',
+  // CMP-006 PR-B: the audit rows point at the request, the request at the
+  // ticket, the purchase and the webhook event below.
+  'PackageRefundRequestEvent',
+  'PackageRefundRequest',
   'SupportTicketStatusChange',
   'SupportTicketMessage',
   'SupportTicket',

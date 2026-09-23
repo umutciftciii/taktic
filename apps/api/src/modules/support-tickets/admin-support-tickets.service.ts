@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  AdminPermission,
   Prisma,
   SupportTicketAuthorRole,
   SupportTicketRequesterRole,
@@ -7,7 +8,9 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { hasPermission } from '../auth/admin-permissions';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
+import { PackageRefundRequestsService } from '../package-refunds/package-refund-requests.service';
 import { ListSupportTicketsDto } from './dto/list-support-tickets.dto';
 import { SupportTicketInvalidTransitionException } from './support-ticket.errors';
 import {
@@ -54,6 +57,8 @@ export class AdminSupportTicketsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(PackageRefundRequestsService)
+    private readonly refunds: PackageRefundRequestsService,
   ) {}
 
   /**
@@ -132,12 +137,27 @@ export class AdminSupportTicketsService {
     const ticket = await this.loadTicket(ticketId);
     const [messages, statusChanges] = await readSupportTicketTimeline(this.prisma, ticket.id);
 
+    // CMP-006 PR-B: the refund block and the refund entries of the timeline
+    // are for a viewer who may read refunds. SUPPORT_READ alone sees the
+    // topic and the conversation, and nothing about the request itself.
+    const mayReadRefunds = hasPermission(
+      { role: user.role, permissions: user.permissions ?? [] },
+      [AdminPermission.PACKAGE_REFUND_READ],
+    );
+    const [packageRefund, refundEvents] = mayReadRefunds
+      ? await Promise.all([
+          this.refunds.adminTicketBlock(ticket, user),
+          this.refunds.timelineEvents(ticket.id, 'ADMIN'),
+        ])
+      : [null, []];
+
     return {
       ...toAdminSupportTicketSummary(ticket),
       canReply: ADMIN_WRITABLE_STATUSES.includes(ticket.status),
       /** Exactly the moves this ticket may make right now, and no others. */
       allowedTransitions: allowedTransitionsFor(ticket.status),
-      timeline: toSupportTicketTimeline(messages, statusChanges, user.id),
+      packageRefund,
+      timeline: toSupportTicketTimeline(messages, statusChanges, user.id, refundEvents),
     };
   }
 

@@ -91,6 +91,10 @@ export const navGroups: NavGroup[] = [
       { href: '/finance/manual-adjustments', label: 'Manuel İşlemler', permission: 'FINANCE_READ' },
       { href: '/finance/providers', label: 'Provider Finans Bakiyeleri', permission: 'FINANCE_READ' },
       { href: '/package-purchases', label: 'Paket Satın Almaları', permission: 'PACKAGE_PURCHASES_READ' },
+      // CMP-006 PR-B: the package money-refund queue. Beside the purchases it
+      // is about; its own permission, because reading purchases is not reading
+      // who asked for their money back and why.
+      { href: '/package-refunds', label: 'Paket İadeleri', permission: 'PACKAGE_REFUND_READ' },
       { href: '/refund-scan', label: 'İade Taraması', permission: 'OFFER_REFUND_SCAN_READ' },
     ],
   },

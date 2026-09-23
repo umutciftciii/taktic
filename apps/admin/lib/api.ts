@@ -2679,6 +2679,7 @@ export type SupportTicketListResponse = {
 };
 
 export type SupportTicketTimelineEntry =
+  | PackageRefundTimelineEntry
   | {
       kind: 'MESSAGE';
       id: string;
@@ -2701,7 +2702,199 @@ export type SupportTicketDetail = SupportTicketListEntry & {
   canReply: boolean;
   /** Exactly the moves this ticket may make right now, decided by the API. */
   allowedTransitions: SupportTicketStatus[];
+  /** CMP-006 PR-B: what the requester chose the ticket to be about. */
+  topic: 'GENERAL' | 'PACKAGE_AND_CREDIT_REFUND';
+  /**
+   * CMP-006 PR-B: null unless this operator holds PACKAGE_REFUND_READ. The
+   * candidates are filled only when this operator may open a request here now.
+   */
+  packageRefund: {
+    request: { id: string; status: PackageRefundRequestStatus } | null;
+    canOpen: boolean;
+    candidatePurchases: {
+      id: string;
+      purchaseNumber: string | null;
+      packageName: string;
+      priceAmount: number;
+      currency: string;
+      paidAt: string | null;
+      recommendation: PackageRefundRecommendation;
+    }[];
+  } | null;
   timeline: SupportTicketTimelineEntry[];
+};
+
+// ── Paket iadeleri (CMP-006 PR-B) ──────────────────────────────────────────
+
+export type PackageRefundRequestStatus =
+  | 'SUBMITTED'
+  | 'UNDER_REVIEW'
+  | 'REJECTED'
+  | 'APPROVED_PENDING_SETTLEMENT'
+  | 'SETTLED'
+  | 'SETTLEMENT_FAILED'
+  | 'WITHDRAWN';
+
+export const PACKAGE_REFUND_STATUSES: PackageRefundRequestStatus[] = [
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'APPROVED_PENDING_SETTLEMENT',
+  'SETTLED',
+  'SETTLEMENT_FAILED',
+  'REJECTED',
+  'WITHDRAWN',
+];
+
+export type PackageRefundRecommendation = 'REFUNDABLE' | 'EXCEPTION_ONLY' | 'NOT_APPLICABLE';
+export type PackageRefundExceptionGround =
+  | 'STATUTORY_RIGHT'
+  | 'UNAUTHORIZED_TRANSACTION'
+  | 'DUPLICATE_CHARGE'
+  | 'PLATFORM_SERVICE_FAULT';
+
+export const PACKAGE_REFUND_EXCEPTION_GROUNDS: PackageRefundExceptionGround[] = [
+  'STATUTORY_RIGHT',
+  'UNAUTHORIZED_TRANSACTION',
+  'DUPLICATE_CHARGE',
+  'PLATFORM_SERVICE_FAULT',
+];
+
+export type PackageRefundEligibility = {
+  purchaseId: string;
+  recommendation: PackageRefundRecommendation;
+  summary: string;
+  reasons: { code: string; blocking: boolean; explanation: string }[];
+  blockingCodes: string[];
+  evaluatedAt: string;
+  paidAt: string | null;
+  windowEndsAt: string | null;
+};
+
+export type PackageRefundTimelineEntry = {
+  kind: 'PACKAGE_REFUND_EVENT';
+  id: string;
+  action: string;
+  toStatus: PackageRefundRequestStatus;
+  statusLabel: string;
+  fromStatus: PackageRefundRequestStatus | null;
+  actorKind: 'PROVIDER' | 'ADMIN' | 'PAYMENT_WEBHOOK';
+  actor: { id: string; name: string | null } | null;
+  note: string | null;
+  createdAt: string;
+};
+
+export type PackageRefundPurchase = {
+  id: string;
+  purchaseNumber: string | null;
+  packageName: string;
+  creditAmount: number;
+  priceAmount: number;
+  currency: string;
+  paidAt: string | null;
+};
+
+export type PackageRefundListItem = {
+  id: string;
+  status: PackageRefundRequestStatus;
+  statusLabel: string;
+  origin: 'PROVIDER' | 'ADMIN';
+  submittedRecommendation: PackageRefundRecommendation;
+  approvalKind: 'NORMAL' | 'EXCEPTION' | null;
+  exceptionGround: PackageRefundExceptionGround | null;
+  supportTicketId: string;
+  createdAt: string;
+  updatedAt: string;
+  provider: { id: string; businessName: string };
+  purchase: PackageRefundPurchase;
+};
+
+export type PackageRefundListResponse = {
+  items: PackageRefundListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  statusCounts: Record<PackageRefundRequestStatus, number>;
+};
+
+type StaffRef = { id: string; name: string | null } | null;
+
+export type PackageRefundDetail = PackageRefundListItem & {
+  purchase: PackageRefundPurchase & { kind: string; status: string; refundedAt: string | null };
+  supportTicket: { id: string; subject: string; status: SupportTicketStatus; topic: string };
+  createdBy: { id: string; name: string | null; role: string };
+  reviewStartedBy: StaffRef;
+  approvedBy: StaffRef;
+  rejectedBy: StaffRef;
+  settlementFailedBy: StaffRef;
+  submittedEligibility: PackageRefundEligibility;
+  approvalEligibility: PackageRefundEligibility | null;
+  currentEligibility: PackageRefundEligibility;
+  exceptionReason: string | null;
+  rejectionReason: string | null;
+  settlementFailureReason: string | null;
+  reviewStartedAt: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  withdrawnAt: string | null;
+  settledAt: string | null;
+  settledByWebhook: boolean;
+  settlementFailedAt: string | null;
+  creditClawbackCredits: number;
+  termsEvidence: { documentVersion: string; acceptedAt: string } | null;
+  events: PackageRefundTimelineEntry[];
+  flowOpen: boolean;
+  allowedActions: {
+    take: boolean;
+    approveNormal: boolean;
+    approveException: boolean;
+    reject: boolean;
+    markSettlementFailed: boolean;
+  };
+  exceptionBlockedByMakerChecker: boolean;
+};
+
+export function packageRefundStatusBadgeClass(status: PackageRefundRequestStatus): string {
+  switch (status) {
+    case 'SETTLED':
+      return 'badge badge-good';
+    case 'REJECTED':
+    case 'SETTLEMENT_FAILED':
+      return 'badge badge-bad';
+    case 'WITHDRAWN':
+      return 'badge badge-muted';
+    default:
+      return 'badge badge-warn';
+  }
+}
+
+export const PACKAGE_REFUND_STATUS_LABELS: Record<PackageRefundRequestStatus, string> = {
+  SUBMITTED: 'Gönderildi',
+  UNDER_REVIEW: 'İnceleniyor',
+  REJECTED: 'Reddedildi',
+  APPROVED_PENDING_SETTLEMENT: 'Onaylandı, ödeme iadesi bekleniyor',
+  SETTLED: 'Ödeme iadesi tamamlandı',
+  SETTLEMENT_FAILED: 'Ödeme iadesi tamamlanamadı',
+  WITHDRAWN: 'Geri çekildi',
+};
+
+export const PACKAGE_REFUND_RECOMMENDATION_LABELS: Record<PackageRefundRecommendation, string> = {
+  REFUNDABLE: 'Normal iadeye uygun',
+  EXCEPTION_ONLY: 'Yalnız istisna ile',
+  NOT_APPLICABLE: 'İade edilecek ödeme yok',
+};
+
+export const PACKAGE_REFUND_EXCEPTION_GROUND_LABELS: Record<PackageRefundExceptionGround, string> = {
+  STATUTORY_RIGHT: 'Zorunlu kanuni hak',
+  UNAUTHORIZED_TRANSACTION: 'Doğrulanmış yetkisiz işlem',
+  DUPLICATE_CHARGE: 'Çift tahsilat',
+  PLATFORM_SERVICE_FAULT: 'TakTic kaynaklı hizmet kusuru',
+};
+
+export const PACKAGE_REFUND_ACTOR_LABELS: Record<PackageRefundTimelineEntry['actorKind'], string> = {
+  PROVIDER: 'Hizmet veren',
+  ADMIN: 'Yönetici',
+  PAYMENT_WEBHOOK: 'Ödeme sağlayıcısı bildirimi',
 };
 
 // ── Vitrin (showcase) ───────────────────────────────────────────────────────
@@ -3479,6 +3672,17 @@ export function adminPermissionLabel(permission: AdminPermission): {
     RECALC: 'yeniden hesaplama',
     REOPEN: 'yeniden açma',
   };
+
+  // CMP-006 PR-B: the refund queue is its own area, and its two write
+  // permissions name roles in a maker-checker pair rather than verbs.
+  const PACKAGE_REFUND: Record<string, string> = {
+    PACKAGE_REFUND_READ: 'okuma',
+    PACKAGE_REFUND_REQUEST_CREATE: 'talep açma ve işleme alma',
+    PACKAGE_REFUND_APPROVE: 'onay, ret ve mutabakat kaydı',
+  };
+  if (PACKAGE_REFUND[permission]) {
+    return { area: 'Paket iadeleri', action: PACKAGE_REFUND[permission] };
+  }
 
   const parts = permission.split('_');
   const area = AREAS[parts[0] ?? ''] ?? parts[0] ?? permission;

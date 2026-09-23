@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { PackageRefundsModule } from '../package-refunds/package-refunds.module';
 import { AdminSupportTicketsController } from './admin-support-tickets.controller';
 import { AdminSupportTicketsService } from './admin-support-tickets.service';
 import { RequesterSupportTicketsController } from './requester-support-tickets.controller';
@@ -17,7 +18,7 @@ import { RequesterSupportTicketsService } from './requester-support-tickets.serv
  * disagree about what a message is or which statuses take one.
  */
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, PackageRefundsModule],
   controllers: [RequesterSupportTicketsController, AdminSupportTicketsController],
   providers: [RequesterSupportTicketsService, AdminSupportTicketsService],
 })

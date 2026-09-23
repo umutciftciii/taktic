@@ -1,0 +1,93 @@
+CMP-006 PR-B Migration J dry-run — 2026-09-23T10:34:04Z
+Izole DB: cmp006_prb_migration_dryrun (gercek taktic DB'sine, .env'e ve container'lara dokunulmadi)
+
+== 1. main@58c51e13 semasi + 75 migration uygulanir ==
+Applying migration `20260922210000_add_purchase_terms_acceptance`
+All migrations have been successfully applied.
+
+== 2. Migration oncesi eski destek talepleri ve bir PAID satin alma ==
+2 destek talebi
+
+== 3. Migration J uygulanir (76.) ==
+76 migrations found in prisma/migrations
+Applying migration `20260923120000_add_package_refund_requests`
+All migrations have been successfully applied.
+
+== 4. migrate diff (drift kontrolu; bos olmali) ==
+-- This is an empty migration.
+
+
+== 5. Uygulanan migration sayisi ==
+76
+
+== 6. Eski talepler durustce GENERAL (DML yok), iade kaydi yok ==
+t-legacy-c CUSTOMER topic=GENERAL
+t-legacy-p PROVIDER topic=GENERAL
+0 PackageRefundRequest satiri (0 olmali)
+pur-legacy status=PAID required=false
+
+== 7. Yeni AdminPermission degerleri (toplam 80) ==
+80 deger
+PACKAGE_REFUND_READ
+PACKAGE_REFUND_REQUEST_CREATE
+PACKAGE_REFUND_APPROVE
+
+== 8. CHECK kisitlari ==
+PackageRefundRequestEvent_actor_shape
+PackageRefundRequestEvent_note_length
+PackageRefundRequest_approval_shape
+PackageRefundRequest_exception_maker_checker
+PackageRefundRequest_exception_shape
+PackageRefundRequest_no_clawback
+PackageRefundRequest_rejected_shape
+PackageRefundRequest_review_pair
+PackageRefundRequest_reviewed_states
+PackageRefundRequest_settled_by_webhook
+PackageRefundRequest_settlement_failed_shape
+PackageRefundRequest_submitted_recommendation
+PackageRefundRequest_withdrawn_shape
+SupportTicket_refund_topic_provider_only
+
+== 9. Kismi unique index'ler ==
+PackageRefundRequest_one_open_per_purchase: WHERE (status = ANY (ARRAY['SUBMITTED'::"PackageRefundRequestStatus", 'UNDER_REVIEW'::"PackageRefundRequestStatus", 'APPROVED_PENDING_SETTLEMENT'::"PackageRefundRequestStatus"]))
+PackageRefundRequest_one_settled_per_purchase: WHERE (status = 'SETTLED'::"PackageRefundRequestStatus")
+
+== 10. Tetikleyiciler ==
+PackageRefundRequestEvent_append_only ON "PackageRefundRequestEvent"
+PackageRefundRequest_insert_guard ON "PackageRefundRequest"
+PackageRefundRequest_transition_guard ON "PackageRefundRequest"
+
+== 11. Musteri talebi iade konusu tasiyamaz ==
+  (beklenen ret) ERROR:  new row for relation "SupportTicket" violates check constraint "SupportTicket_refund_topic_provider_only"
+
+== 12. Musteri talebine iade istegi baglanamaz; kanitsiz (kapi oncesi) satin alma hicbir yoldan akisa giremez ==
+  (beklenen ret) ERROR:  PackageRefundRequest must link the provider's own purchase and ticket
+  (beklenen ret) ERROR:  PackageRefundRequest requires a credit-package purchase with purchase-terms evidence
+  kanitli satin alma (kabul + satin alma ayni transaction'da):
+  pur-new PAID + acc-1 yazildi
+
+== 13. Istek SUBMITTED dogar; SETTLED'a dogrudan, webhook'suz gecilemez ==
+  r-1 SUBMITTED yazildi
+  (beklenen ret) ERROR:  PackageRefundRequest cannot move from SUBMITTED to SETTLED
+  r-1 UNDER_REVIEW (u-a)
+
+== 14. Maker-checker: istisna onayini isleme alan veremez, NULL kacagi yok ==
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequest" violates check constraint "PackageRefundRequest_exception_maker_checker"
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequest" violates check constraint "PackageRefundRequest_approval_shape"
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequest" violates check constraint "PackageRefundRequest_no_clawback"
+  r-1 ikinci yetkili (u-b) ile onaylandi
+  (beklenen ret) ERROR:  PackageRefundRequest cannot move from APPROVED_PENDING_SETTLEMENT to WITHDRAWN
+
+== 15. SETTLED yalniz webhook olayi ile; olay basina tek istek; terminal satir donar; silme yok ==
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequest" violates check constraint "PackageRefundRequest_settled_by_webhook"
+  r-1 SETTLED (we-1)
+  (beklenen ret) ERROR:  PackageRefundRequest SETTLED is terminal
+  (beklenen ret) ERROR:  PackageRefundRequest rows are never deleted
+
+== 16. Audit append-only; webhook satiri kisi adlandiramaz ==
+  e-1 yazildi
+  (beklenen ret) ERROR:  PackageRefundRequestEvent is append-only (UPDATE refused)
+  (beklenen ret) ERROR:  new row for relation "PackageRefundRequestEvent" violates check constraint "PackageRefundRequestEvent_actor_shape"
+
+== 17. Temizlik ==
+  cmp006_prb_migration_dryrun silindi

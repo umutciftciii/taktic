@@ -243,8 +243,9 @@ export const lemonSqueezyRuntime = buildRuntime(
  * the API's environment, so one process cannot represent both sides. The
  * primary runtime keeps the gate closed and is what proves the checkout is
  * unchanged without it; this one proves the consent box, the full-text terms
- * and the evidence row. The mock payment provider, and no admin process —
- * nothing here needs the operator's panel.
+ * and the evidence row. The mock payment provider. Its admin process exists
+ * since CMP-006 PR-B: the package refund queue only has requests on it where
+ * the gate is open, so the operator's screens are exercised here.
  *
  * NODE_ENV=test is what lets the API serve the draft text at all: on staging
  * or production the same flag refuses to boot without a legally approved set.

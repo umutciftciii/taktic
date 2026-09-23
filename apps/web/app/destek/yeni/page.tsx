@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getCurrentUser } from '../../../lib/api';
+import { getCurrentUser, loadPackageRefundOptions } from '../../../lib/api';
 import { IconArrowLeft } from '../../landing-icons';
 import { PanelShell } from '../../panel-shell';
 import { NewTicketForm } from '../new-ticket-form';
@@ -26,6 +26,11 @@ export default async function NewSupportTicketPage() {
     redirect('/');
   }
 
+  // CMP-006 PR-B: only a provider can ask for a package refund, and only when
+  // the API says the flow is open and something was bought under it. Anything
+  // else — including a failed read — leaves the form exactly the general one.
+  const refundOptions = user.role === 'PROVIDER' ? await loadPackageRefundOptions() : null;
+
   return (
     <PanelShell user={user} active="support">
       <div className="cdash-support" data-testid="support-screen">
@@ -45,7 +50,7 @@ export default async function NewSupportTicketPage() {
 
         <section className="cdash-detail-card" aria-labelledby="support-new-heading">
           <h2 id="support-new-heading">Talep bilgileri</h2>
-          <NewTicketForm />
+          <NewTicketForm refundOptions={refundOptions?.available ? refundOptions : null} />
         </section>
 
         <div className="cdash-notice">

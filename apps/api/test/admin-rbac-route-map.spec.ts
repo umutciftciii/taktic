@@ -224,6 +224,6 @@ describe('PR-0 route/permission map', () => {
      * `CATALOG_READ` could not be added quietly: the number had to move, and
      * moving it meant naming the capability in a commit message.
      */
-    expect(Object.keys(AdminPermission)).toHaveLength(77);
+    expect(Object.keys(AdminPermission)).toHaveLength(80);
   });
 });

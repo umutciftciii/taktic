@@ -375,6 +375,12 @@ enum SupportTicketRequesterRole {
   PROVIDER
 }
 
+/// CMP-006 PR-B. What a ticket is about, as the requester chose it.
+enum SupportTicketTopic {
+  GENERAL
+  PACKAGE_AND_CREDIT_REFUND
+}
+
 model User {
   id              String          @id @default(cuid())
   /// The account's address, and the platform's answer to "which kind of account
@@ -494,6 +500,15 @@ model User {
   createdAdminRoles               AdminRole[]                        @relation("AdminRoleCreatedBy")
   adminRoleAuditEntries           AdminRoleAuditLog[]                @relation("AdminRoleAuditActor")
   adminRoleAuditTargets           AdminRoleAuditLog[]                @relation("AdminRoleAuditTarget")
+  /// CMP-006 PR-B: package refund requests this account opened, took into
+  /// review, decided or closed, and the audit rows it wrote. Restrict on the
+  /// other side: the record of who decided a refund outlives the account.
+  packageRefundRequestsCreated    PackageRefundRequest[]             @relation("PackageRefundRequestCreatedBy")
+  packageRefundRequestsReviewed   PackageRefundRequest[]             @relation("PackageRefundRequestReviewStartedBy")
+  packageRefundRequestsApproved   PackageRefundRequest[]             @relation("PackageRefundRequestApprovedBy")
+  packageRefundRequestsRejected   PackageRefundRequest[]             @relation("PackageRefundRequestRejectedBy")
+  packageRefundRequestsFailed     PackageRefundRequest[]             @relation("PackageRefundRequestSettlementFailedBy")
+  packageRefundRequestEvents      PackageRefundRequestEvent[]        @relation("PackageRefundRequestEventActor")
 
   @@index([role])
   @@index([isActive])
@@ -1301,6 +1316,8 @@ model ProviderProfile {
   creditTransactions              ProviderCreditTransaction[]
   manualOfferRefunds              ManualOfferRefundAudit[]
   packagePurchases                PackagePurchase[]
+  /// CMP-006 PR-B.
+  packageRefundRequests           PackageRefundRequest[]
   contactRevealEvents             ContactRevealEvent[]
   claimTokens                     ProviderClaimToken[]
   notificationLogs                NotificationLog[]
@@ -1806,6 +1823,9 @@ model PackagePurchase {
   /// record of why a promotion was granted.
   campaignTriggerEvents          CampaignTriggerEvent[]
   campaignRedemptions            CampaignRedemption[]
+  /// CMP-006 PR-B: the refund requests raised against this purchase. At most
+  /// one open and at most one SETTLED at a time (partial unique indexes).
+  packageRefundRequests          PackageRefundRequest[]
 
   @@index([providerId])
   @@index([packageId])
@@ -2071,6 +2091,11 @@ model PaymentWebhookEvent {
 
   /// CMP-003 S3: the campaign redemptions this event's reversal revoked.
   revokedRedemptions CampaignRedemption[] @relation("CampaignRedemptionRevokedByWebhookEvent")
+
+  /// CMP-006 PR-B: the one package refund request this `order_refunded` event
+  /// settled, and its audit row. Unique on the request side.
+  settledPackageRefundRequest PackageRefundRequest?      @relation("PackageRefundRequestSettledByWebhookEvent")
+  packageRefundRequestEvents  PackageRefundRequestEvent[] @relation("PackageRefundRequestEventWebhook")
 
   @@unique([provider, eventKey])
   @@index([status])
@@ -2536,6 +2561,12 @@ model SupportTicket {
   requesterRole SupportTicketRequesterRole
   subject       String
   status        SupportTicketStatus        @default(OPEN)
+  /// CMP-006 PR-B. What the requester said the ticket is about. Every ticket
+  /// opened before the refund topic existed really was a general one, so the
+  /// default is the backfill. Only a provider, with the purchase-terms gate
+  /// open, can open a PACKAGE_AND_CREDIT_REFUND ticket — and that ticket is
+  /// born with its PackageRefundRequest in the same transaction.
+  topic         SupportTicketTopic         @default(GENERAL)
 
   /// When something last happened on this ticket — a message from either side,
   /// or a status change.
@@ -2559,6 +2590,8 @@ model SupportTicket {
   requester     User                        @relation("SupportTicketRequester", fields: [requesterId], references: [id])
   messages      SupportTicketMessage[]
   statusChanges SupportTicketStatusChange[]
+  /// CMP-006 PR-B: the one package refund request this ticket carries, if any.
+  packageRefundRequest PackageRefundRequest?
 
   /// The owner's own list: "my tickets, most recent activity first".
   @@index([requesterId, lastActivityAt])
@@ -4500,6 +4533,18 @@ enum AdminPermission {
   PACKAGE_PURCHASES_READ
   PACKAGE_PURCHASE_STATUS_WRITE
 
+  /// CMP-006 PR-B. The package *money* refund queue: requests, their frozen
+  /// eligibility and their audit. Separate from PACKAGE_PURCHASES_READ — seeing
+  /// what was bought is not seeing who asked for their money back and why.
+  PACKAGE_REFUND_READ
+  /// Opening a refund request on a provider's existing ticket, and taking a
+  /// submitted one into review (the maker side).
+  PACKAGE_REFUND_REQUEST_CREATE
+  /// Approving, rejecting, and recording a failed settlement (the checker
+  /// side). An EXCEPTION approval by the account that opened or took the
+  /// request is refused by a database CHECK, whatever this permission says.
+  PACKAGE_REFUND_APPROVE
+
   PAYMENTS_CONFIG_READ
 
   OFFERS_READ
@@ -4676,4 +4721,167 @@ model AdminRoleAuditLog {
   @@index([targetUserId, createdAt])
   @@index([actorId, createdAt])
   @@index([createdAt])
+}
+
+/// CMP-006 PR-B. Where a package refund request is in its one-way life.
+///
+///   SUBMITTED → UNDER_REVIEW → REJECTED | APPROVED_PENDING_SETTLEMENT
+///   APPROVED_PENDING_SETTLEMENT → SETTLED (webhook only) | SETTLEMENT_FAILED
+///   SUBMITTED | UNDER_REVIEW → WITHDRAWN (the provider)
+///
+/// The trigger `PackageRefundRequest_guard` refuses every other pair, and
+/// every change to a terminal row, so the table cannot be walked around the
+/// service.
+enum PackageRefundRequestStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  REJECTED
+  APPROVED_PENDING_SETTLEMENT
+  SETTLED
+  SETTLEMENT_FAILED
+  WITHDRAWN
+}
+
+/// NORMAL: the canonical eligibility said REFUNDABLE at the moment of approval.
+/// EXCEPTION: it did not, and a closed-set ground was recorded by a second
+/// operator.
+enum PackageRefundApprovalKind {
+  NORMAL
+  EXCEPTION
+}
+
+/// The closed set of grounds an exception approval may cite (S0 §3.4).
+enum PackageRefundExceptionGround {
+  STATUTORY_RIGHT
+  UNAUTHORIZED_TRANSACTION
+  DUPLICATE_CHARGE
+  PLATFORM_SERVICE_FAULT
+}
+
+/// Who opened the request: the provider from the support form, or an operator
+/// on the provider's own existing ticket.
+enum PackageRefundRequestOrigin {
+  PROVIDER
+  ADMIN
+}
+
+enum PackageRefundAuditAction {
+  SUBMITTED
+  REVIEW_STARTED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  SETTLED
+  SETTLEMENT_FAILED
+}
+
+enum PackageRefundActorKind {
+  PROVIDER
+  ADMIN
+  PAYMENT_WEBHOOK
+}
+
+/// CMP-006 PR-B. A provider's request to have the money paid for one package
+/// purchase returned — a review record, never a payment instruction.
+///
+/// Nothing here moves money or credit. The operator refunds outside TakTic (in
+/// the payment provider's panel); the only way to SETTLED is the signed
+/// `order_refunded` webhook for the order that paid this purchase, which is
+/// why `settledByWebhookEventId` is required by CHECK and unique.
+///
+/// `creditClawbackCredits` exists so the next slice has a column to widen, and
+/// is pinned to 0 by CHECK in this one: no approval, settlement or failure can
+/// take credit back, create a debt or make a balance negative.
+///
+/// Reasons and eligibility snapshots are internal operator records. The
+/// provider's projection carries the status and the purchase summary only.
+model PackageRefundRequest {
+  id                      String                        @id @default(cuid())
+  /// The ticket this request lives on — its evidence and conversation chain.
+  supportTicketId         String                        @unique
+  purchaseId              String
+  providerId              String
+  status                  PackageRefundRequestStatus    @default(SUBMITTED)
+  origin                  PackageRefundRequestOrigin
+  /// The provider's user (origin PROVIDER) or the operator (origin ADMIN).
+  createdById             String
+  /// The canonical PR-A evaluation at submission, frozen.
+  submittedEligibility    Json
+  submittedRecommendation String
+
+  reviewStartedById       String?
+  reviewStartedAt         DateTime?
+
+  approvalKind            PackageRefundApprovalKind?
+  exceptionGround         PackageRefundExceptionGround?
+  exceptionReason         String?
+  /// The canonical evaluation recomputed inside the approving transaction.
+  approvalEligibility     Json?
+  approvedById            String?
+  approvedAt              DateTime?
+
+  rejectedById            String?
+  rejectedAt              DateTime?
+  rejectionReason         String?
+
+  withdrawnAt             DateTime?
+
+  settledAt               DateTime?
+  settledByWebhookEventId String?                       @unique
+
+  settlementFailedById    String?
+  settlementFailedAt      DateTime?
+  settlementFailureReason String?
+
+  /// Pinned to 0 by CHECK in PR-B (no clawback in this slice).
+  creditClawbackCredits   Int                           @default(0)
+
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
+
+  supportTicket          SupportTicket        @relation(fields: [supportTicketId], references: [id], onDelete: Restrict)
+  purchase               PackagePurchase      @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  provider               ProviderProfile      @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  createdBy              User                 @relation("PackageRefundRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewStartedBy        User?                @relation("PackageRefundRequestReviewStartedBy", fields: [reviewStartedById], references: [id], onDelete: Restrict)
+  approvedBy             User?                @relation("PackageRefundRequestApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  rejectedBy             User?                @relation("PackageRefundRequestRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
+  settlementFailedBy     User?                @relation("PackageRefundRequestSettlementFailedBy", fields: [settlementFailedById], references: [id], onDelete: Restrict)
+  settledByWebhookEvent  PaymentWebhookEvent? @relation("PackageRefundRequestSettledByWebhookEvent", fields: [settledByWebhookEventId], references: [id], onDelete: Restrict)
+  events                 PackageRefundRequestEvent[]
+
+  @@index([status, createdAt])
+  @@index([providerId, createdAt])
+  @@index([purchaseId])
+  @@index([createdById])
+  @@index([reviewStartedById])
+  @@index([approvedById])
+  @@index([rejectedById])
+  @@index([settlementFailedById])
+}
+
+/// CMP-006 PR-B. One row per transition of a PackageRefundRequest — the audit
+/// trail and the source of the refund entries on the ticket's timeline.
+/// Append-only (trigger). A webhook-written row names the event and no person.
+model PackageRefundRequestEvent {
+  id             String                      @id @default(cuid())
+  requestId      String
+  action         PackageRefundAuditAction
+  fromStatus     PackageRefundRequestStatus?
+  toStatus       PackageRefundRequestStatus
+  actorKind      PackageRefundActorKind
+  actorId        String?
+  /// Unique: one webhook event writes at most one audit row.
+  webhookEventId String?                     @unique
+  /// An operator's reason (rejection, exception, failed settlement). Never
+  /// shown to the provider.
+  note           String?
+  createdAt      DateTime                    @default(now())
+
+  request      PackageRefundRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  actor        User?                @relation("PackageRefundRequestEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  webhookEvent PaymentWebhookEvent? @relation("PackageRefundRequestEventWebhook", fields: [webhookEventId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt, id])
+  @@index([actorId])
 }

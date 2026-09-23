@@ -1,4 +1,5 @@
-import { IsString, MinLength } from 'class-validator';
+import { SupportTicketTopic } from '@prisma/client';
+import { IsEnum, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { MaxCodeUnitLength } from '../../../common/max-code-unit-length.validator';
 import {
   SUPPORT_TICKET_MESSAGE_MAX_LENGTH,
@@ -20,10 +21,27 @@ import {
  * that names it rather than by a generic sentence later.
  */
 export class CreateSupportTicketDto {
+  /**
+   * CMP-006 PR-B. Omitted means GENERAL, which is what every client sent
+   * before the refund topic existed. The refund topic's subject is written by
+   * the server from the purchase, so the field is not required there.
+   */
+  @IsOptional()
+  @IsEnum(SupportTicketTopic)
+  topic?: SupportTicketTopic;
+
+  /** CMP-006 PR-B. The provider's own PAID purchase, for the refund topic only. */
+  @ValidateIf((dto: CreateSupportTicketDto) => dto.topic === SupportTicketTopic.PACKAGE_AND_CREDIT_REFUND)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  packagePurchaseId?: string;
+
+  @ValidateIf((dto: CreateSupportTicketDto) => dto.topic !== SupportTicketTopic.PACKAGE_AND_CREDIT_REFUND)
   @IsString()
   @MinLength(1)
   @MaxCodeUnitLength(SUPPORT_TICKET_SUBJECT_MAX_LENGTH)
-  subject!: string;
+  subject?: string;
 
   @IsString()
   @MinLength(1)

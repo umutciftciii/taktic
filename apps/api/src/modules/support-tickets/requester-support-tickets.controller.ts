@@ -47,7 +47,12 @@ export class RequesterSupportTicketsController {
 
   @Post()
   createTicket(@Body() dto: CreateSupportTicketDto, @CurrentUser() user: AuthUser) {
-    return this.tickets.createTicket(user, { subject: dto.subject, message: dto.message });
+    return this.tickets.createTicket(user, {
+      subject: dto.subject,
+      message: dto.message,
+      topic: dto.topic,
+      packagePurchaseId: dto.packagePurchaseId,
+    });
   }
 
   @Get(':ticketId')

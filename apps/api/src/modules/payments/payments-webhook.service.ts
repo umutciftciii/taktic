@@ -24,6 +24,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { CampaignRevokeService } from '../campaigns/engine/campaign-revoke.service';
 import { CreditsService } from '../credits/credits.service';
+import { PackageRefundSettlementService } from '../package-refunds/package-refund-settlement.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { grantEntitlementForPurchase } from '../entitlements/entitlement-grant';
 import { ShowcaseEntitlementService } from '../showcase/showcase-entitlement.service';
@@ -109,6 +110,9 @@ type MismatchCode =
 
 export const MANUAL_REVIEW_REASON = 'PAYMENT_REVERSAL_REPORTED';
 
+/** The one reversal event that can settle a package refund request (CMP-006 PR-B). */
+const LEMON_SQUEEZY_ORDER_REFUNDED = 'order_refunded';
+
 /**
  * Outcomes a later delivery of the same event may overturn.
  *
@@ -164,6 +168,8 @@ export class PaymentsWebhookService implements OnModuleInit {
     @Inject(ShowcaseEntitlementService) private readonly entitlements: ShowcaseEntitlementService,
     @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
     @Inject(CampaignRevokeService) private readonly campaignRevokes: CampaignRevokeService,
+    @Inject(PackageRefundSettlementService)
+    private readonly packageRefundSettlement: PackageRefundSettlementService,
   ) {}
 
   /** `settle` below raises PACKAGE_PAYMENT_SUCCEEDED for every purchase it writes PAID (CMP-002 S2B2). */
@@ -698,6 +704,13 @@ export class PaymentsWebhookService implements OnModuleInit {
    * purchase that earned no promotion leaves this transaction exactly as it
    * did before this slice. The engine switch is not consulted: reversing an
    * existing lot is accounting, not entitlement.
+   *
+   * CMP-006 PR-B adds one step at the very end, for a relevant
+   * `order_refunded` only: if the purchase has a package refund request
+   * approved and waiting for settlement, it becomes SETTLED naming this event
+   * (see `PackageRefundSettlementService`). That is bookkeeping — no credit,
+   * no ledger row. With no such request nothing more happens, so a refund the
+   * operator made without a request keeps exactly the behaviour above.
    */
   private async flagForManualReview(event: LemonSqueezyEvent, expectedStoreId: string): Promise<WebhookOutcome> {
     let redelivered: RedeliveredEvent = null;
@@ -754,6 +767,21 @@ export class PaymentsWebhookService implements OnModuleInit {
               this.logger.log(
                 `webhook ${event.eventName} revoked ${revoked.length} campaign promotion(s) of the refunded purchase`,
               );
+            }
+
+            // CMP-006 PR-B: the only writer of SETTLED. Added after every step
+            // above, which it leaves exactly as they were; a purchase with no
+            // approved refund request waiting for this event gets nothing more.
+            // A subscription refund is not a package refund and never settles.
+            if (event.eventName === LEMON_SQUEEZY_ORDER_REFUNDED) {
+              const settled = await this.packageRefundSettlement.settleFromWebhook(tx, {
+                purchaseId: purchase.id,
+                webhookEventId: recorded.id,
+                now,
+              });
+              if (settled) {
+                this.logger.log(`webhook ${event.eventName} settled package refund request ${settled}`);
+              }
             }
           }
 
