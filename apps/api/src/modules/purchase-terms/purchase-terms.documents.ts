@@ -48,8 +48,19 @@ export type PurchaseTermsDocument = {
   text: string;
 };
 
+/**
+ * What a document set is for (CMP-006 PR-B.1). `PRODUCTION` is the set the
+ * `on` gate serves — a draft until RG-1, an approved contract after it.
+ * `TEST` is a set written only to exercise the purchase and refund flows on a
+ * local stack, in the test suite or on staging (`PURCHASE_TERMS_GATE=test`);
+ * it is never a contract, says so in every document, and the gate refuses to
+ * serve it anywhere production could be (purchase-terms.config.ts).
+ */
+export type PurchaseTermsDocumentPurpose = 'PRODUCTION' | 'TEST';
+
 export type PurchaseTermsDocumentSet = {
   documentKey: string;
+  purpose: PurchaseTermsDocumentPurpose;
   version: string;
   legalReview: PurchaseTermsLegalReview;
   /** SHA-256 (hex) of the combined snapshot built by purchase-terms.snapshot.ts. */
@@ -64,6 +75,7 @@ const DRAFT_NOTICE =
 
 export const PURCHASE_TERMS_DOCUMENT_SET: PurchaseTermsDocumentSet = {
   documentKey: PURCHASE_TERMS_DOCUMENT_SET_KEY,
+  purpose: 'PRODUCTION',
   version: '2026-09-22.taslak-1',
   legalReview: { status: 'PENDING' },
   sha256: 'b0a419dabf432ad719341c213ffd278a06c4604e28cded0a470d15527d4f1877',

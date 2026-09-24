@@ -2,8 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { PackageRefundOptions } from '../lib/api';
 import {
+  initialPackageRefundSelection,
   PACKAGE_REFUND_FORM_EXPLANATION,
   PACKAGE_REFUND_SUBMITTED_NOTICE,
+  packageRefundRequestHref,
   packageRefundStatusBadgeClass,
   packageRefundTimelineText,
 } from '../lib/package-refund';
@@ -27,6 +29,7 @@ const { NewTicketForm } = await import('../app/destek/new-ticket-form');
 
 const OPTIONS: PackageRefundOptions = {
   available: true,
+  testMode: false,
   purchases: [
     {
       id: 'pp-1',
@@ -37,8 +40,7 @@ const OPTIONS: PackageRefundOptions = {
       currency: 'TRY',
       paidAt: '2026-09-20T10:00:00.000Z',
       windowEndsAt: '2026-10-04T10:00:00.000Z',
-      selectable: true,
-      notes: ['Normal iade koşullarını sağlıyor.'],
+      ticketSubject: 'Paket ve kredi iadesi: Başlangıç Paketi (PKG-2026-000001)',
     },
   ],
 };
@@ -51,13 +53,77 @@ describe('the support form', () => {
     expect(markup).toContain('support-subject-input');
   });
 
-  it('with the flow open, offers the topic and starts on the general one', () => {
+  it('with the flow open, offers the type choice and starts on general support', () => {
     const markup = renderToStaticMarkup(<NewTicketForm refundOptions={OPTIONS} />);
     expect(markup).toContain('data-testid="support-topic"');
+    expect(markup).toContain('Talep türü');
+    expect(markup).toContain('Genel destek');
     expect(markup).toContain('Paket ve kredi iadesi');
-    // The picker is behind the topic choice, so it is not rendered until chosen.
+    // The picker is behind the type choice, so it is not rendered until chosen.
     expect(markup).not.toContain('refund-purchase-picker');
     expect(markup).toContain('support-subject-input');
+  });
+
+  it('from the purchase page: the refund type, the purchase chosen, the subject fixed and not a field', () => {
+    const markup = renderToStaticMarkup(
+      <NewTicketForm refundOptions={OPTIONS} initialRefund initialPurchaseId="pp-1" />,
+    );
+    expect(markup).toContain('refund-purchase-picker');
+    expect(markup).toMatch(/name="packagePurchaseId" checked="" value="pp-1"/);
+    expect(markup).toContain('Paket ve kredi iadesi: Başlangıç Paketi (PKG-2026-000001)');
+    expect(markup).not.toContain('support-subject-input');
+    expect(markup).not.toContain('name="subject"');
+    // The message stays the provider's to write.
+    expect(markup).toContain('support-message-input');
+    expect(markup).not.toContain('refund-test-environment');
+  });
+
+  it('an id that is not on the API’s list is never pre-selected', () => {
+    const markup = renderToStaticMarkup(
+      <NewTicketForm refundOptions={OPTIONS} initialRefund initialPurchaseId="pp-foreign" />,
+    );
+    expect(markup).toContain('refund-purchase-picker');
+    expect(markup).not.toMatch(/name="packagePurchaseId" checked=""/);
+    expect(markup).not.toContain('pp-foreign');
+  });
+
+  it('under the test gate, says it is a test environment', () => {
+    const markup = renderToStaticMarkup(
+      <NewTicketForm refundOptions={{ ...OPTIONS, testMode: true }} initialRefund />,
+    );
+    expect(markup).toContain('data-testid="refund-test-environment"');
+    expect(markup).toContain('Test ortamı — üretim sözleşmesi değildir.');
+  });
+});
+
+describe('the purchase page link and the query it carries', () => {
+  it('links to the support form on the refund type with the purchase', () => {
+    expect(packageRefundRequestHref('pp-1')).toBe('/destek/yeni?type=PACKAGE_REFUND&purchaseId=pp-1');
+    expect(packageRefundRequestHref('a&b=c')).toBe('/destek/yeni?type=PACKAGE_REFUND&purchaseId=a%26b%3Dc');
+  });
+
+  it('keeps a listed purchase, drops anything else, and ignores the query when the API offers nothing', () => {
+    expect(initialPackageRefundSelection({ type: 'PACKAGE_REFUND', purchaseId: 'pp-1' }, OPTIONS)).toEqual({
+      refund: true,
+      purchaseId: 'pp-1',
+    });
+    expect(initialPackageRefundSelection({ type: 'PACKAGE_REFUND', purchaseId: 'pp-foreign' }, OPTIONS)).toEqual({
+      refund: true,
+      purchaseId: '',
+    });
+    expect(initialPackageRefundSelection({ type: 'GENERAL', purchaseId: 'pp-1' }, OPTIONS)).toEqual({
+      refund: false,
+      purchaseId: '',
+    });
+    expect(
+      initialPackageRefundSelection({ type: ['PACKAGE_REFUND', 'x'], purchaseId: ['pp-1'] }, OPTIONS),
+    ).toEqual({ refund: false, purchaseId: '' });
+    for (const closed of [null, { available: false, purchases: [] }]) {
+      expect(initialPackageRefundSelection({ type: 'PACKAGE_REFUND', purchaseId: 'pp-1' }, closed)).toEqual({
+        refund: false,
+        purchaseId: '',
+      });
+    }
   });
 });
 

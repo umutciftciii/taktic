@@ -13,12 +13,44 @@ export const PACKAGE_REFUND_SUBMITTED_NOTICE =
   'Talep gönderildi; ödeme iadesi onaylanırsa ödeme sağlayıcısı üzerinden işlenir.';
 
 export const PACKAGE_REFUND_FORM_EXPLANATION =
-  'Bu konu yalnızca ödemesi tamamlanmış kredi paketleriniz içindir. Talebiniz destek ekibimiz tarafından ' +
+  'Listede yalnızca şu anda iade talebi oluşturabileceğiniz kredi paketleriniz yer alır. Talebiniz destek ekibimiz tarafından ' +
   'incelenir; TakTic hesabınızda otomatik bir para veya kredi hareketi yapılmaz. Ödeme iadesi onaylanırsa ' +
   'ödeme sağlayıcısı üzerinden işlenir.';
 
 export const PACKAGE_REFUND_FALLBACK_HINT =
-  'Listede seçilemeyen bir paket için durumunuzu "Genel" konusuyla bize yazabilirsiniz.';
+  'Listede olmayan bir paket için durumunuzu "Genel destek" türüyle bize yazabilirsiniz.';
+
+export const PACKAGE_REFUND_TEST_ENVIRONMENT_NOTICE = 'Test ortamı — üretim sözleşmesi değildir.';
+
+/** The query value that opens the support form on the refund type (CMP-006 PR-B.1). */
+export const PACKAGE_REFUND_REQUEST_TYPE = 'PACKAGE_REFUND';
+
+/** Where "İade talebi oluştur" goes: the support form, on the refund type, with this purchase. */
+export function packageRefundRequestHref(purchaseId: string): string {
+  const query = new URLSearchParams({ type: PACKAGE_REFUND_REQUEST_TYPE, purchaseId });
+  return `/destek/yeni?${query.toString()}`;
+}
+
+/**
+ * The form's starting point from the URL, checked against the API's own list:
+ * the refund type only when the API offers it, and a purchase only when it is
+ * one of the listed — the caller's own, requestable — purchases. Anything
+ * else in the query (another provider's id, an invented one, a closed flow)
+ * is dropped without a word, so the URL can neither reveal nor pre-fill
+ * anything that is not already on the caller's list.
+ */
+export function initialPackageRefundSelection(
+  query: { type?: string | string[]; purchaseId?: string | string[] },
+  options: { available: boolean; purchases: { id: string }[] } | null,
+): { refund: boolean; purchaseId: string } {
+  const type = typeof query.type === 'string' ? query.type : '';
+  const purchaseId = typeof query.purchaseId === 'string' ? query.purchaseId : '';
+  if (!options?.available || type !== PACKAGE_REFUND_REQUEST_TYPE) {
+    return { refund: false, purchaseId: '' };
+  }
+  const listed = options.purchases.some((purchase) => purchase.id === purchaseId);
+  return { refund: true, purchaseId: listed ? purchaseId : '' };
+}
 
 const BADGE: Record<PackageRefundRequestStatus, string> = {
   SUBMITTED: 'badge badge-warn',

@@ -13,7 +13,10 @@ import {
   consumePromoCreditsForSpend,
   grantPromoCreditLot,
 } from '../src/modules/credits/promo-credit-ledger';
-import { PURCHASE_TERMS_DOCUMENT_SET } from '../src/modules/purchase-terms/purchase-terms.documents';
+import {
+  PURCHASE_TERMS_DOCUMENT_SET,
+  type PurchaseTermsDocumentSet,
+} from '../src/modules/purchase-terms/purchase-terms.documents';
 import { buildPurchaseTermsSnapshot } from '../src/modules/purchase-terms/purchase-terms.snapshot';
 import { createCampaignFixture } from './campaign-fixtures';
 import {
@@ -37,7 +40,6 @@ import {
  */
 
 export const TERMS = PURCHASE_TERMS_DOCUMENT_SET;
-const SNAPSHOT = buildPurchaseTermsSnapshot(TERMS);
 export const ACCEPTED_TERMS = { termsAccepted: true, termsVersion: TERMS.version };
 
 export const ALL_REFUND_PERMISSIONS = [
@@ -55,6 +57,10 @@ export function gateSwitch() {
     },
     open() {
       process.env.PURCHASE_TERMS_GATE = 'on';
+    },
+    /** PR-B.1: the TEST document set; NODE_ENV=test in the worker permits it. */
+    openTest() {
+      process.env.PURCHASE_TERMS_GATE = 'test';
     },
     close() {
       delete process.env.PURCHASE_TERMS_GATE;
@@ -92,8 +98,11 @@ export async function paidPurchase(
     evidence?: boolean;
     type?: OfferPackageType;
     status?: PackagePurchaseStatus;
+    /** PR-B.1: the document set the evidence records; the production draft by default. */
+    terms?: PurchaseTermsDocumentSet;
   },
 ) {
+  const terms = input.terms ?? TERMS;
   const pkg = await createOfferPackage(prisma, { type: input.type, creditAmount: 25, priceAmount: 49_900 });
   const id = `pp-${randomUUID()}`;
   const evidence = input.evidence ?? true;
@@ -105,10 +114,10 @@ export async function paidPurchase(
           data: {
             purchaseId: id,
             userId: input.userId,
-            documentKey: TERMS.documentKey,
-            documentVersion: TERMS.version,
-            documentSha256: TERMS.sha256,
-            documentTextSnapshot: SNAPSHOT,
+            documentKey: terms.documentKey,
+            documentVersion: terms.version,
+            documentSha256: terms.sha256,
+            documentTextSnapshot: buildPurchaseTermsSnapshot(terms),
             clientIp: '203.0.113.77',
             userAgent: 'Mozilla/5.0 (RefundCanaryAgent/1.0)',
             sourceChannel: SourceChannel.WEB,

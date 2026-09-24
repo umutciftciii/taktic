@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser, loadPackageRefundOptions } from '../../../lib/api';
 import { IconArrowLeft } from '../../landing-icons';
 import { PanelShell } from '../../panel-shell';
+import { initialPackageRefundSelection } from '../../../lib/package-refund';
 import { NewTicketForm } from '../new-ticket-form';
 
 /**
@@ -17,10 +18,27 @@ import { NewTicketForm } from '../new-ticket-form';
  * the API takes that from the session alongside the owner, so the same two
  * fields open a hizmet alan's ticket and a hizmet veren's.
  */
-export default async function NewSupportTicketPage() {
+type NewSupportTicketPageProps = {
+  searchParams: Promise<{ type?: string | string[]; purchaseId?: string | string[] }>;
+};
+
+export default async function NewSupportTicketPage({ searchParams }: NewSupportTicketPageProps) {
+  const query = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
-    redirect('/login?redirectTo=/destek/yeni');
+    // The purchase page's link survives sign-in: the query is only a
+    // starting point, re-checked against the API's list after it.
+    const back = new URLSearchParams();
+    if (typeof query.type === 'string') back.set('type', query.type);
+    if (typeof query.purchaseId === 'string') back.set('purchaseId', query.purchaseId);
+    // Encoded only when there is a query to carry: its `&` would otherwise
+    // end `redirectTo` early. The plain path keeps its long-standing form.
+    const search = back.toString();
+    redirect(
+      search
+        ? `/login?redirectTo=${encodeURIComponent(`/destek/yeni?${search}`)}`
+        : '/login?redirectTo=/destek/yeni',
+    );
   }
   if (user.role !== 'CUSTOMER' && user.role !== 'PROVIDER') {
     redirect('/');
@@ -30,6 +48,10 @@ export default async function NewSupportTicketPage() {
   // the API says the flow is open and something was bought under it. Anything
   // else — including a failed read — leaves the form exactly the general one.
   const refundOptions = user.role === 'PROVIDER' ? await loadPackageRefundOptions() : null;
+  // PR-B.1: `?type=PACKAGE_REFUND&purchaseId=…` from the purchase page. The
+  // query can only choose among what the API listed; a purchase that is not
+  // on that list is dropped, never shown.
+  const initial = initialPackageRefundSelection(query, refundOptions);
 
   return (
     <PanelShell user={user} active="support">
@@ -50,7 +72,11 @@ export default async function NewSupportTicketPage() {
 
         <section className="cdash-detail-card" aria-labelledby="support-new-heading">
           <h2 id="support-new-heading">Talep bilgileri</h2>
-          <NewTicketForm refundOptions={refundOptions?.available ? refundOptions : null} />
+          <NewTicketForm
+            refundOptions={refundOptions?.available ? refundOptions : null}
+            initialRefund={initial.refund}
+            initialPurchaseId={initial.purchaseId}
+          />
         </section>
 
         <div className="cdash-notice">

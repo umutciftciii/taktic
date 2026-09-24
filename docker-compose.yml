@@ -136,7 +136,9 @@ services:
       # CMP-006 PR-A: the purchase-terms release gate. Empty is closed, on
       # every environment, and the checkout is exactly what it was. `on` needs
       # a whole document set, and outside a local stack a legally approved one
-      # (RG-1) — otherwise the API refuses to boot. See .env.example.
+      # (RG-1) — otherwise the API refuses to boot. `test` (PR-B.1) serves the
+      # TEST document set on local/staging only and refuses to boot on
+      # production. Never defaulted here: open it explicitly. See .env.example.
       PURCHASE_TERMS_GATE: ${PURCHASE_TERMS_GATE:-}
       # CMP-006 PR-C: the promotion fingerprint key. Empty on a local stack
       # (APP_ENVIRONMENT=local uses the development key); required elsewhere.
