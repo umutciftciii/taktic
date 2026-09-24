@@ -181,7 +181,7 @@ p {
 }
 
 main {
-  width: min(1500px, calc(100% - 48px));
+  width: min(1500px, calc(100% - 32px));
   margin: 0 auto;
   padding: 28px 0 64px;
 }
@@ -600,7 +600,7 @@ section {
  * <main> would have, without touching the screens themselves.
  */
 .admin-content:not(:has(> main)) {
-  width: min(1500px, calc(100% - 48px));
+  width: min(1500px, calc(100% - 32px));
   margin: 0 auto;
   padding: 28px 0 64px;
 }
