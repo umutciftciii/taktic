@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { AdminShell } from './admin-shell';
 import { readAdminAccess, readAdminIdentity } from '../lib/api';
 import { summarizeAdminAccount } from '../lib/admin-account';
-import { filterNavGroups, navGroups } from '../lib/nav';
+import { filterNavMenu, type NavMenu } from '../lib/nav';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -32,19 +32,18 @@ type RootLayoutProps = {
  */
 export default async function RootLayout({ children }: RootLayoutProps) {
   const [access, identity] = await Promise.all([readAdminAccess(), readAdminIdentity()]);
-  const groups = access
-    ? filterNavGroups(
-        navGroups,
+  const menu: NavMenu = access
+    ? filterNavMenu(
         (permission) => access.isSuperAdmin || access.permissions.includes(permission),
         access.isSuperAdmin,
       )
-    : [];
+    : { home: null, groups: [] };
   const account = access ? summarizeAdminAccount(access, identity) : null;
 
   return (
     <html lang="tr">
       <body>
-        <AdminShell navGroups={groups} account={account}>{children}</AdminShell>
+        <AdminShell navMenu={menu} account={account}>{children}</AdminShell>
       </body>
     </html>
   );

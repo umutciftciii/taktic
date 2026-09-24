@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { middleware } from '../middleware';
 import { isLocalEnvironment } from '../lib/local-environment';
 import { isNextControlFlowError, rethrowNextControlFlow } from '../lib/next-control-flow';
-import { isNavItemActive, navGroups } from '../lib/nav';
+import { allNavItems, isNavItemActive } from '../lib/nav';
 
 /**
  * ADMIN-DESIGN-000: the access rules that are not a screen.
@@ -85,7 +85,7 @@ describe('sidebar row ↔ page gate', () => {
    * exactly what the page asks for. F2 was a row on FINANCE_READ in front of
    * a page whose data needs FINANCE_LEDGER_READ: visible, then /yetkisiz.
    */
-  const rows = navGroups.flatMap((group) => group.items);
+  const rows = allNavItems();
 
   it.each(rows.map((row) => [row.href, row] as const))('%s', (href, row) => {
     const file = resolve(__dirname, '../app', `.${href === '/' ? '' : href}`, 'page.tsx');
@@ -236,8 +236,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
   });
 
   it.each(Object.entries(SCREENS))('%s lights the recorded row', (route, screen) => {
-    const lit = navGroups
-      .flatMap((group) => group.items)
+    const lit = allNavItems()
       .filter((row) => isNavItemActive(row, samplePath(route)))
       .map((row) => row.href);
     expect(lit).toEqual(screen.row ? [screen.row] : []);
@@ -245,7 +244,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
 
   it.each(Object.entries(SCREENS))('%s: a different gate from its row is a recorded exception', (_route, screen) => {
     if (!screen.row) return;
-    const row = navGroups.flatMap((group) => group.items).find((entry) => entry.href === screen.row);
+    const row = allNavItems().find((entry) => entry.href === screen.row);
     const rowGate = row?.superAdminOnly ? 'superAdmin' : [row?.permission];
     const same = JSON.stringify(rowGate) === JSON.stringify(screen.gate);
     expect(same || Boolean(screen.exception)).toBe(true);

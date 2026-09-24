@@ -42,21 +42,34 @@ export type NavGroup = {
   /** The group heading, and the first half of the top bar's "Grup / Sayfa". */
   title: string;
   icon: NavIconName;
-  /**
-   * A group that is only its rows, with no collapsible heading of its own —
-   * "Genel görünüm" at the top of the design. Its title still names it in the
-   * top bar and in icon mode.
-   */
-  bare?: boolean;
   items: NavItem[];
 };
 
 /**
+ * What one session is given: the dashboard row on its own, above the groups,
+ * and the groups themselves. `home` is null when the session cannot open the
+ * dashboard — the row is then simply absent, never an empty wrapper.
+ */
+export type NavMenu = {
+  home: NavItem | null;
+  groups: NavGroup[];
+};
+
+/**
+ * "Genel görünüm": a single top-level row, not a group. It has no heading, no
+ * fold and no siblings, so it is not modelled as a one-row group either — a
+ * group that is only there to hold it would be a ninth heading nobody can see.
+ */
+export const navHome: NavItem = { href: '/', label: 'Genel görünüm', exact: true, permission: 'DASHBOARD_READ' };
+export const NAV_HOME_ICON: NavIconName = 'grid';
+
+/**
  * The sidebar, grouped by what an operator is looking at (ADMIN-DESIGN-001).
  *
- * The design's eight groups, with its "SEO ve adresler" group left out (SEO-004
- * has no screens yet) and its "Sistem" group split into Operasyon and Yönetim,
- * so the five screens the design had no row for have a place (K1):
+ * Exactly eight groups, under the standalone `navHome` row: the design's own,
+ * with its "SEO ve adresler" group left out (SEO-004 has no screens yet) and its
+ * "Sistem" group split into Operasyon and Yönetim, so the five screens the
+ * design had no row for have a place (K1):
  * Paket iadeleri under Finans, Vitrin kartları and Vitrin metin onayları under
  * Vitrin, Kampanya uygunluk incelemesi under Operasyon and Roller ve izinler
  * under Yönetim.
@@ -70,13 +83,6 @@ export type NavGroup = {
  * badge (K2) — neither has a source this panel may show yet.
  */
 export const navGroups: NavGroup[] = [
-  {
-    key: 'panel',
-    title: 'Panel',
-    icon: 'grid',
-    bare: true,
-    items: [{ href: '/', label: 'Genel görünüm', exact: true, permission: 'DASHBOARD_READ' }],
-  },
   {
     key: 'talepler',
     title: 'Talepler',
@@ -182,6 +188,11 @@ export const navGroups: NavGroup[] = [
   },
 ];
 
+/** Every row the sidebar can show: the dashboard row, then each group's rows. */
+export function allNavItems(): NavItem[] {
+  return [navHome, ...navGroups.flatMap((group) => group.items)];
+}
+
 function matchesNavItem(item: NavItem, pathname: string): boolean {
   if (item.exact) {
     return pathname === item.href;
@@ -206,14 +217,12 @@ export function isNavItemActive(item: NavItem, pathname: string): boolean {
     return false;
   }
 
-  return !navGroups.some((group) =>
-    group.items.some(
-      (other) =>
-        other !== item &&
-        other.href.length > item.href.length &&
-        other.href.startsWith(`${item.href}/`) &&
-        matchesNavItem(other, pathname),
-    ),
+  return !allNavItems().some(
+    (other) =>
+      other !== item &&
+      other.href.length > item.href.length &&
+      other.href.startsWith(`${item.href}/`) &&
+      matchesNavItem(other, pathname),
   );
 }
 
@@ -226,10 +235,13 @@ export function isNavItemActive(item: NavItem, pathname: string): boolean {
  * cannot open.
  */
 export function findActiveNavEntry(
-  groups: readonly NavGroup[],
+  menu: NavMenu,
   pathname: string,
-): { group: NavGroup; item: NavItem } | null {
-  for (const group of groups) {
+): { group: NavGroup | null; item: NavItem } | null {
+  if (menu.home && isNavItemActive(menu.home, pathname)) {
+    return { group: null, item: menu.home };
+  }
+  for (const group of menu.groups) {
     for (const item of group.items) {
       if (isNavItemActive(item, pathname)) {
         return { group, item };
@@ -260,12 +272,22 @@ export function filterNavGroups(
   return groups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => {
-        if (item.superAdminOnly) {
-          return isSuperAdmin;
-        }
-        return !item.permission || can(item.permission);
-      }),
+      items: group.items.filter((item) => mayOpen(item, can, isSuperAdmin)),
     }))
     .filter((group) => group.items.length > 0);
+}
+
+function mayOpen(item: NavItem, can: (permission: string) => boolean, isSuperAdmin: boolean): boolean {
+  if (item.superAdminOnly) {
+    return isSuperAdmin;
+  }
+  return !item.permission || can(item.permission);
+}
+
+/** The whole menu for one session: `filterNavGroups` plus the dashboard row, by the same rule. */
+export function filterNavMenu(can: (permission: string) => boolean, isSuperAdmin = false): NavMenu {
+  return {
+    home: mayOpen(navHome, can, isSuperAdmin) ? navHome : null,
+    groups: filterNavGroups(navGroups, can, isSuperAdmin),
+  };
 }

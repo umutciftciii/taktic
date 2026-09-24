@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { NavIcon } from '../components/nav-icon';
 import { Sidebar } from '../components/sidebar';
 import type { AdminAccountSummary } from '../lib/admin-account';
-import type { NavGroup } from '../lib/nav';
+import type { NavMenu } from '../lib/nav';
 import { Topbar } from '../components/topbar';
 import { SessionGuard } from './session/session-guard';
 
@@ -17,7 +17,7 @@ type AdminShellProps = {
    * shell renders the page without navigation rather than with rows that would
    * all refuse.
    */
-  navGroups: NavGroup[];
+  navMenu: NavMenu;
   /** The sidebar's account block, from the same permissions answer; null when signed out. */
   account: AdminAccountSummary | null;
 };
@@ -50,7 +50,7 @@ function writeRailPreference(rail: boolean) {
   }
 }
 
-export function AdminShell({ children, navGroups, account }: AdminShellProps) {
+export function AdminShell({ children, navMenu, account }: AdminShellProps) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /**
@@ -152,13 +152,37 @@ export function AdminShell({ children, navGroups, account }: AdminShellProps) {
     };
   }, [sidebarOpen, closeSidebar]);
 
+  /**
+   * Opening moves focus to the drawer's close button; closing hands it back to
+   * the hamburger.
+   *
+   * `focus()` is a silent no-op on an element that is not rendered yet — and
+   * the drawer used to be exactly that in the frame it opened: its
+   * `visibility: hidden` was still transitioning away, so the call did nothing
+   * and focus stayed on the hamburger behind the backdrop. The stylesheet now
+   * flips visibility at once, but the focus move no longer depends on it: if
+   * the first attempt does not land, it is retried on the next frames until
+   * the button can take it (bounded, and cancelled if the drawer closes).
+   */
   useEffect(() => {
+    let frame = 0;
     if (sidebarOpen && !wasOpen.current) {
-      closeRef.current?.focus();
+      const target = closeRef.current;
+      let attempts = 0;
+      const tryFocus = () => {
+        if (!target) return;
+        target.focus();
+        if (document.activeElement !== target && attempts < 10) {
+          attempts += 1;
+          frame = window.requestAnimationFrame(tryFocus);
+        }
+      };
+      tryFocus();
     } else if (!sidebarOpen && wasOpen.current) {
       toggleRef.current?.focus();
     }
     wasOpen.current = sidebarOpen;
+    return () => window.cancelAnimationFrame(frame);
   }, [sidebarOpen]);
 
   if (pathname === '/login' || pathname === '/admin-invite') {
@@ -185,7 +209,7 @@ export function AdminShell({ children, navGroups, account }: AdminShellProps) {
           </button>
         </div>
         <Sidebar
-          groups={navGroups}
+          menu={navMenu}
           account={account}
           rail={rail}
           onToggleRail={toggleRail}
@@ -210,7 +234,7 @@ export function AdminShell({ children, navGroups, account }: AdminShellProps) {
 
       <div className="admin-main">
         <Topbar
-          groups={navGroups}
+          menu={navMenu}
           onToggleSidebar={toggleSidebar}
           sidebarOpen={sidebarOpen}
           sidebarId={SIDEBAR_ID}

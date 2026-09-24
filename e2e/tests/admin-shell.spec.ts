@@ -27,9 +27,12 @@ const DESKTOP: Viewport = { width: 1440, height: 900 };
 const PHONE: Viewport = { width: 390, height: 844 };
 const SHOTS = resolve(artifactsDir, 'admin-design');
 
-/** The full menu, in order, as a super admin sees it. */
+/**
+ * The full menu, in order, as a super admin sees it: the standalone dashboard
+ * row first, then exactly eight groups.
+ */
+const HOME_ROW = 'Genel görünüm';
 const FULL_MENU: Array<[group: string, rows: string[]]> = [
-  ['Panel', ['Genel görünüm']],
   ['Talepler', ['Tüm talepler', 'Şikayet edilen talepler']],
   ['Teklifler', ['Tüm teklifler']],
   ['Kişiler', ['Hizmet verenler', 'Hizmet alanlar', 'Destek talepleri']],
@@ -78,6 +81,25 @@ async function sidebarGroupTitles(page: Page): Promise<string[]> {
   return page.locator('#admin-sidebar .admin-sidebar-group-title').allTextContents();
 }
 
+/** The groups as assistive technology sees them: role="group", named by their heading. */
+async function sidebarGroupNames(page: Page): Promise<string[]> {
+  return page
+    .locator('#admin-sidebar [role="group"]')
+    .evaluateAll((groups) =>
+      groups.map((group) => {
+        const heading = document.getElementById(group.getAttribute('aria-labelledby') ?? '');
+        return heading?.textContent?.trim() ?? '';
+      }),
+    );
+}
+
+/** The dashboard row stands alone: it is in the sidebar, and inside no group. */
+async function expectHomeRowOutsideGroups(page: Page) {
+  const home = page.locator('#admin-sidebar').getByTestId('admin-nav-home');
+  await expect(home).toHaveText(HOME_ROW);
+  await expect(page.locator('#admin-sidebar [role="group"]').getByTestId('admin-nav-home')).toHaveCount(0);
+}
+
 async function openAs(browser: Parameters<typeof Actor.open>[0], who: string[] | 'super', viewport = DESKTOP) {
   const account = who === 'super' ? await createAdmin() : await createStaffAdmin(who);
   const actor = await Actor.open(browser, `shell-${who === 'super' ? 'super' : 'staff'}`, primaryRuntime, { viewport });
@@ -93,15 +115,20 @@ test.describe('admin shell (ADMIN-DESIGN-001)', () => {
       await admin.gotoAdmin('/');
       await expect(admin.page.locator('#admin-sidebar')).toBeVisible();
 
-      expect(await sidebarRowLabels(admin.page)).toEqual(FULL_MENU.flatMap(([, rows]) => rows));
-      // The bare "Genel görünüm" group has no heading of its own.
-      expect(await sidebarGroupTitles(admin.page)).toEqual(FULL_MENU.slice(1).map(([group]) => group));
+      expect(await sidebarRowLabels(admin.page)).toEqual([HOME_ROW, ...FULL_MENU.flatMap(([, rows]) => rows)]);
+      // Exactly eight groups, each a role="group" named by its heading; the
+      // dashboard row is not one of them and sits inside none of them.
+      expect(await sidebarGroupTitles(admin.page)).toEqual(FULL_MENU.map(([group]) => group));
+      expect(await sidebarGroupNames(admin.page)).toEqual(FULL_MENU.map(([group]) => group));
+      await expect(admin.page.locator('#admin-sidebar [role="group"]')).toHaveCount(8);
+      await expectHomeRowOutsideGroups(admin.page);
+      await expect(admin.page.getByTestId('admin-nav-home')).toHaveAttribute('aria-current', 'page');
       await expect(admin.page.getByTestId('admin-account-role')).toHaveText('Süper yönetici');
       await expect(admin.page.locator('#admin-sidebar')).not.toContainText(/tam yetkili/i);
 
       // No search, no bell, no counters (K2, K3): the bar is where you are and
       // the way out.
-      await expect(admin.page.getByTestId('admin-topbar-context')).toHaveText(/Panel\s*\/\s*Genel görünüm/);
+      await expect(admin.page.getByTestId('admin-topbar-context')).toHaveText('Genel görünüm');
       await expect(admin.page.locator('.admin-topbar').getByRole('searchbox')).toHaveCount(0);
       await expect(admin.page.locator('.admin-topbar').getByRole('button')).toHaveText(['Çıkış']);
 
@@ -137,6 +164,8 @@ test.describe('admin shell (ADMIN-DESIGN-001)', () => {
       ]);
       // A group with nothing the session holds is dropped, heading and all.
       expect(await sidebarGroupTitles(staff.page)).toEqual(['Kişiler', 'Finans', 'Vitrin']);
+      expect(await sidebarGroupNames(staff.page)).toEqual(['Kişiler', 'Finans', 'Vitrin']);
+      await expectHomeRowOutsideGroups(staff.page);
       const sidebar = staff.page.locator('#admin-sidebar');
       for (const absent of ['Talepler', 'Teklifler', 'Katalog', 'Operasyon', 'Yönetim']) {
         await expect(sidebar.getByRole('button', { name: absent, exact: true })).toHaveCount(0);
@@ -273,6 +302,29 @@ test.describe('admin shell (ADMIN-DESIGN-001)', () => {
     }
   });
 
+  test('first focus does not depend on the stylesheet flipping visibility in time', async ({ browser }) => {
+    const admin = await openAs(browser, 'super', PHONE);
+
+    try {
+      await admin.gotoAdmin('/');
+      // Put back the transition that used to swallow the focus call: the drawer
+      // stays `visibility: hidden` for the first 200ms after it opens.
+      await admin.page.addStyleTag({
+        content:
+          '.admin-shell.is-sidebar-open .admin-sidebar { transition: transform 0.2s ease, visibility 0.2s ease !important; }',
+      });
+      await admin.page.getByTestId('panel-drawer-toggle').click();
+      // No key pressed: only the shell's own retry can have put it there.
+      await expect
+        .poll(() => admin.page.evaluate(() => document.activeElement?.classList.contains('admin-drawer-close') ?? false))
+        .toBe(true);
+      await admin.page.keyboard.press('Escape');
+      await expect(admin.page.getByTestId('panel-drawer-toggle')).toBeFocused();
+    } finally {
+      await admin.close();
+    }
+  });
+
   test('the phone drawer opens, keeps Tab inside, closes on Escape and returns focus', async ({ browser }) => {
     const admin = await openAs(browser, 'super', PHONE);
     const sidebar = admin.page.locator('#admin-sidebar');
@@ -286,6 +338,17 @@ test.describe('admin shell (ADMIN-DESIGN-001)', () => {
       await admin.page.screenshot({ path: shot('dashboard-390-closed'), fullPage: false });
 
       await toggle.click();
+      // First focus, read straight after the click with no key pressed and no
+      // waiting: the shell itself moved it to the drawer's close button.
+      const focusedOnOpen = await admin.page.evaluate(() => {
+        const active = document.activeElement;
+        return {
+          isClose: active?.classList.contains('admin-drawer-close') ?? false,
+          insideDrawer: Boolean(document.getElementById('admin-sidebar')?.contains(active)),
+          label: active?.getAttribute('aria-label') ?? null,
+        };
+      });
+      expect(focusedOnOpen).toEqual({ isClose: true, insideDrawer: true, label: 'Menüyü kapat' });
       await expect(sidebar).toBeVisible();
       await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       await expect(admin.page.locator('body')).toHaveClass(/has-drawer-open/);
@@ -294,16 +357,19 @@ test.describe('admin shell (ADMIN-DESIGN-001)', () => {
         .toBe(0);
       // Icon mode is a desktop control; the drawer does not offer it.
       await expect(admin.page.getByTestId('admin-rail-toggle')).toBeHidden();
-      await expect(admin.page.getByRole('button', { name: 'Menüyü kapat' }).first()).toBeFocused();
+      await expect(sidebar.locator('.admin-drawer-close')).toBeFocused();
       expect(await horizontalOverflow(admin.page)).toBeLessThanOrEqual(0);
       await admin.page.screenshot({ path: shot('dashboard-390-drawer-open'), fullPage: false });
 
-      // Shift+Tab from the first control wraps to the last one inside the drawer.
+      // The trap, both ways: Shift+Tab on the first control lands on the last
+      // one, Tab on the last lands back on the first — never behind the drawer.
+      const focusables = sidebar.locator('a[href], button:not([disabled])');
+      const first = sidebar.locator('.admin-drawer-close');
+      const last = focusables.last();
       await admin.page.keyboard.press('Shift+Tab');
-      const insideAfterWrap = await admin.page.evaluate(() =>
-        Boolean(document.getElementById('admin-sidebar')?.contains(document.activeElement)),
-      );
-      expect(insideAfterWrap).toBe(true);
+      await expect(last).toBeFocused();
+      await admin.page.keyboard.press('Tab');
+      await expect(first).toBeFocused();
 
       await admin.page.keyboard.press('Escape');
       await expect(sidebar).toBeHidden();

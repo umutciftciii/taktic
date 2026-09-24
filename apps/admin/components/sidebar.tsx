@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import type { AdminAccountSummary } from '../lib/admin-account';
-import { isNavItemActive, type NavGroup } from '../lib/nav';
+import { isNavItemActive, NAV_HOME_ICON, type NavMenu } from '../lib/nav';
 import { BrandMark } from './brand-mark';
 import { NavIcon } from './nav-icon';
 
@@ -14,7 +14,7 @@ type SidebarProps = {
    * `GET /admin/me/permissions`. Passed in rather than imported, so the sidebar
    * cannot show a row the API would refuse — it does not know the full list.
    */
-  groups: NavGroup[];
+  menu: NavMenu;
   /** The account block at the foot; null when the session could not be read. */
   account: AdminAccountSummary | null;
   /**
@@ -28,12 +28,13 @@ type SidebarProps = {
   onNavigate?: () => void;
 };
 
-export function Sidebar({ groups, account, rail, onToggleRail, onExpandRail, onNavigate }: SidebarProps) {
+export function Sidebar({ menu, account, rail, onToggleRail, onExpandRail, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   // Every group starts open. A collapsed group is the operator's choice for
   // this page view; it is not remembered, so nobody comes back to a menu with
   // the row they need folded away.
   const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set());
+  const homeActive = menu.home ? isNavItemActive(menu.home, pathname) : false;
 
   const toggleGroup = (key: string) => {
     if (rail) {
@@ -80,38 +81,44 @@ export function Sidebar({ groups, account, rail, onToggleRail, onExpandRail, onN
       </div>
 
       <div className="admin-sidebar-groups">
-        {groups.map((group) => {
-          if (group.bare) {
-            return (
-              <ul className="admin-sidebar-list is-bare" key={group.key} aria-label={group.title}>
-                {group.items.map((item) => {
-                  const active = isNavItemActive(item, pathname);
-                  return (
-                    <li key={item.href}>
-                      <Link
-                        className={active ? 'admin-sidebar-link has-icon is-active' : 'admin-sidebar-link has-icon'}
-                        href={item.href}
-                        aria-current={active ? 'page' : undefined}
-                        onClick={onNavigate}
-                        title={rail ? item.label : undefined}
-                      >
-                        <NavIcon name={group.icon} />
-                        <span className="admin-sidebar-link-label">{item.label}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            );
-          }
+        {/*
+          "Genel görünüm" is a single top-level row, not a group: no heading, no
+          fold, no role="group" around it. Absent when the session cannot open
+          the dashboard.
+        */}
+        {menu.home ? (
+          <ul className="admin-sidebar-list is-home">
+            <li>
+              <Link
+                className={homeActive ? 'admin-sidebar-link has-icon is-active' : 'admin-sidebar-link has-icon'}
+                href={menu.home.href}
+                aria-current={homeActive ? 'page' : undefined}
+                onClick={onNavigate}
+                title={rail ? menu.home.label : undefined}
+                data-testid="admin-nav-home"
+              >
+                <NavIcon name={NAV_HOME_ICON} />
+                <span className="admin-sidebar-link-label">{menu.home.label}</span>
+              </Link>
+            </li>
+          </ul>
+        ) : null}
 
+        {menu.groups.map((group) => {
           const listId = `admin-nav-${group.key}`;
           const open = !rail && !closed.has(group.key);
           const holdsActive = group.items.some((item) => isNavItemActive(item, pathname));
 
           return (
-            <div className={holdsActive ? 'admin-sidebar-group holds-active' : 'admin-sidebar-group'} key={group.key}>
+            <div
+              className={holdsActive ? 'admin-sidebar-group holds-active' : 'admin-sidebar-group'}
+              key={group.key}
+              role="group"
+              aria-labelledby={`${listId}-heading`}
+              data-nav-group={group.key}
+            >
               <button
+                id={`${listId}-heading`}
                 type="button"
                 className="admin-sidebar-group-toggle"
                 aria-expanded={open}
