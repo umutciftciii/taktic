@@ -19,6 +19,7 @@ export type CampaignTrigger = (typeof catalog.triggers)[number];
 export type CampaignFact = (typeof catalog.facts)[number];
 export type CampaignConditionType = keyof typeof catalog.conditions;
 export type ConditionGroup = 'all' | 'any';
+export type CampaignChannelChoice = (typeof catalog.channels.values)[number];
 
 type ArgumentSpec =
   | { kind: 'integer'; min: number; max: number }
@@ -97,6 +98,37 @@ export const ENUM_VALUE_LABELS: Record<string, string> = {
 
 export const STACK_POLICY_LABEL = 'Özel kredi bonusu — bir olay en fazla bir kampanyadan kredi üretir';
 
+// CMP-006 PR-D. The version's target channel, and the channel an event came from.
+export const CHANNEL_LABELS: Record<string, string> = {
+  WEB: 'Web',
+  MOBILE: 'Mobil',
+  ALL: 'Tümü',
+};
+
+export const CHANNEL_HELP: Record<string, string> = {
+  WEB: 'Yalnız kaynağı sunucuda Web olarak belirlenen olaylar. Kaynağı bilinmeyen olaylar hak ediş üretmez.',
+  MOBILE: 'Yalnız mobil istemciden gelen olaylar. Kaynağı bilinmeyen olaylar hak ediş üretmez.',
+  ALL: 'Kanal koşulu yok: Web, mobil ve kaynağı bilinmeyen tüm olaylar değerlendirilir.',
+};
+
+export const SOURCE_CHANNEL_LABELS: Record<string, string> = {
+  WEB: 'Web',
+  MOBILE: 'Mobil',
+  UNKNOWN: 'Bilinmiyor',
+};
+
+/** The sentence the builder shows while MOBILE is selected; the API is what refuses activation. */
+export const MOBILE_CHANNEL_WARNING =
+  'Mobil istemci henüz yayında değil; mobil kanal kaynağı kayıtlı olmadığından bu sürüm etkinleştirilemez ve hiçbir hak ediş üretmez. Taslak olarak kaydedebilirsiniz.';
+
+export const CAMPAIGN_CHANNEL_OPTIONS: Array<{ value: CampaignChannelChoice; label: string; help: string }> =
+  // Offered as Web, Mobil, Tümü — the catalogue's own order.
+  catalog.channels.values.map((value) => ({ value, label: CHANNEL_LABELS[value] ?? value, help: CHANNEL_HELP[value] ?? '' }));
+
+export function channelLabel(channel: string | null | undefined): string {
+  return CHANNEL_LABELS[channel ?? catalog.channels.default] ?? String(channel);
+}
+
 const RULE_ERROR_FALLBACKS: Record<string, string> = {
   SCHEMA_INVALID: 'Tanım beklenen yapıda değil.',
   UNSUPPORTED_SCHEMA_VERSION: 'Desteklenmeyen şema sürümü.',
@@ -122,9 +154,11 @@ const RULE_ERROR_FALLBACKS: Record<string, string> = {
   WINDOW_INVALID: 'Zaman penceresi geçersiz.',
   STACK_POLICY_INVALID: 'Desteklenmeyen stack politikası.',
   PRIORITY_INVALID: 'Öncelik 1–1000 arası tam sayı olmalı.',
+  CHANNEL_INVALID: 'Kanal Web, Mobil veya Tümü olmalı.',
   // Activation-only refusals (CMP-002 S2B2); the API's own sentence is preferred.
   FACT_SOURCE_UNAVAILABLE: 'Bu olgunun hizmet veren yazıcısı kayıtlı değil; sürüm etkinleştirilemez.',
   LIMIT_BELOW_CONSUMED: 'Limit, kampanyanın zaten tükettiği değerin altında.',
+  CHANNEL_SOURCE_UNAVAILABLE: 'Bu kanaldan olay üreten kayıtlı bir kaynak yok; sürüm etkinleştirilemez.',
 };
 
 /** The API's sentence when it sent one; the catalogue fallback otherwise. */
@@ -184,6 +218,8 @@ export type CampaignForm = {
   windowStartAt: string;
   windowEndAt: string;
   priority: string;
+  /** CMP-006 PR-D. */
+  channel: CampaignChannelChoice;
 };
 
 export function emptyForm(): CampaignForm {
@@ -201,6 +237,7 @@ export function emptyForm(): CampaignForm {
     windowStartAt: '',
     windowEndAt: '',
     priority: String(catalog.priority.default),
+    channel: catalog.channels.default as CampaignChannelChoice,
   };
 }
 
@@ -267,6 +304,7 @@ export type CampaignDefinitionDraft = {
   window: { startAt: unknown; endAt: unknown };
   stackPolicy: string;
   priority: unknown;
+  channel: string;
 };
 
 /**
@@ -314,6 +352,7 @@ export function buildDefinition(form: CampaignForm): CampaignDefinitionDraft {
     window: { startAt: instantOrRaw(form.windowStartAt), endAt: instantOrRaw(form.windowEndAt) },
     stackPolicy: catalog.stackPolicies[0]!,
     priority: numberOrRaw(form.priority),
+    channel: form.channel,
   };
 }
 
@@ -381,6 +420,10 @@ export function formFromDefinition(definition: unknown): CampaignForm {
   form.windowStartAt = instantToLocalInput(window.startAt);
   form.windowEndAt = instantToLocalInput(window.endAt);
   form.priority = stringOf(record.priority);
+  // An absent channel is ALL — what a definition saved before the field meant.
+  if (typeof record.channel === 'string' && (catalog.channels.values as readonly string[]).includes(record.channel)) {
+    form.channel = record.channel as CampaignChannelChoice;
+  }
   return form;
 }
 
@@ -388,7 +431,7 @@ export function formFromDefinition(definition: unknown): CampaignForm {
 
 export type ErrorTarget =
   | { field: 'form' }
-  | { field: 'trigger' | 'facts' | 'conditions' | 'credits' | 'expiresInDays' | 'priority' }
+  | { field: 'trigger' | 'facts' | 'conditions' | 'credits' | 'expiresInDays' | 'priority' | 'channel' }
   | { field: 'maxRedemptionsPerProvider' | 'maxRedemptionsGlobal' | 'maxRedemptionsPerDay' | 'budgetCredits' | 'maxRevokesPerDay' }
   | { field: 'windowStartAt' | 'windowEndAt' }
   | { field: 'condition'; conditionId: string; argument: string | null };
@@ -404,6 +447,7 @@ export function errorFieldOf(path: string, form: CampaignForm): ErrorTarget {
   if (path === 'benefit.credits') return { field: 'credits' };
   if (path === 'benefit.expiresInDays') return { field: 'expiresInDays' };
   if (path === 'priority') return { field: 'priority' };
+  if (path === 'channel') return { field: 'channel' };
   const limit = /^limits\.(maxRedemptionsPerProvider|maxRedemptionsGlobal|maxRedemptionsPerDay|budgetCredits|maxRevokesPerDay)$/.exec(path);
   if (limit) return { field: limit[1] as 'maxRedemptionsPerProvider' };
   if (path === 'window.startAt') return { field: 'windowStartAt' };

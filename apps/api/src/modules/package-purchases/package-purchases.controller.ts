@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminPermission, PackagePurchaseStatus } from '@prisma/client';
 import { readRequestMeta, type RequestMetaSource } from '../../common/request-meta';
+import { WEB_SURFACE_CHANNEL } from '../../common/web-surface-channel';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { CurrentUser } from '../auth/auth.decorators';
 import { AuthUser } from '../auth/auth.types';
@@ -31,6 +32,9 @@ export class PackagePurchasesController {
     return this.packagePurchasesService.createProviderPurchase(providerId, dto, undefined, {
       user,
       meta: readRequestMeta(req),
+      // CMP-006 PR-D: the route's channel — not `meta.sourceChannel`, which is
+      // the client's own declaration and stays on the terms acceptance only.
+      channel: WEB_SURFACE_CHANNEL,
     });
   }
 

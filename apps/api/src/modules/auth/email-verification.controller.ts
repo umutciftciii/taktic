@@ -9,6 +9,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { WEB_SURFACE_CHANNEL } from '../../common/web-surface-channel';
 import { ConfirmEmailVerificationDto } from '../email-verification/dto/confirm-email-verification.dto';
 import { EmailVerificationService } from '../email-verification/email-verification.service';
 import { AuthGuard } from './auth.guard';
@@ -44,9 +45,13 @@ export class EmailVerificationController {
     return this.service.validate(token);
   }
 
-  /** No session required: the link is opened from an inbox. */
+  /**
+   * No session required: the link is opened from an inbox. The web
+   * application's confirmation page is this route's client, so the proof it
+   * confirms carries WEB (CMP-006 PR-D) — from the route, not the request.
+   */
   @Post('confirm')
   confirm(@Body() dto: ConfirmEmailVerificationDto) {
-    return this.service.confirm(dto.token);
+    return this.service.confirm(dto.token, WEB_SURFACE_CHANNEL);
   }
 }

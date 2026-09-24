@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { AdminPermission } from '@prisma/client';
 import { readRequestMeta, type RequestMetaSource } from '../../common/request-meta';
+import { WEB_SURFACE_CHANNEL } from '../../common/web-surface-channel';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -62,6 +63,8 @@ export class PaymentsController {
     @CurrentUser() user: AuthUser,
     @Req() req: RequestMetaSource,
   ) {
-    return this.payments.createCheckoutSession(providerId, user, dto, readRequestMeta(req));
+    // CMP-006 PR-D: the web application's checkout form is this route's
+    // client — WEB from the route, never from the request's own label.
+    return this.payments.createCheckoutSession(providerId, user, dto, readRequestMeta(req), WEB_SURFACE_CHANNEL);
   }
 }

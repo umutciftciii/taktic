@@ -162,6 +162,7 @@ describe('creating a draft', () => {
       benefitCredits: 10,
       benefitExpiresInDays: 30,
       maxRedemptionsPerProvider: 1,
+      channel: 'ALL',
       changedFields: [],
     });
     expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
@@ -237,6 +238,7 @@ describe('validate-only', () => {
         conditionCount: 1,
         benefitCredits: 5,
         benefitExpiresInDays: 14,
+        channel: 'ALL',
       },
     });
 
@@ -463,7 +465,8 @@ describe('reading', () => {
     expect(detail.body.campaign.key).toBe(keys[2]);
     expect(detail.body.currentVersion.versionNumber).toBe(2);
     expect(detail.body.versions.map((v: { versionNumber: number }) => v.versionNumber)).toEqual([2, 1]);
-    expect(detail.body.versions[1].definition).toEqual(K2);
+    // Normalised: an absent channel is stored and served as ALL (CMP-006 PR-D).
+    expect(detail.body.versions[1].definition).toEqual({ ...K2, channel: 'ALL' });
     expect(detail.body.audit.map((a: { action: string }) => a.action)).toEqual(['VERSION_CREATED', 'VERSION_CREATED', 'CREATED']);
     expect(detail.body.audit[0].actor).toEqual({ id: expect.any(String), name: expect.any(String) });
   });

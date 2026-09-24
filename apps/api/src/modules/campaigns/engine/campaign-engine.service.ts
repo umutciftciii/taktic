@@ -1,10 +1,17 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { CampaignStatus, type CampaignEligibilityFact, type CampaignEvaluationOutcome, type Prisma } from '@prisma/client';
+import {
+  CampaignStatus,
+  type CampaignEligibilityFact,
+  type CampaignEvaluationOutcome,
+  type Prisma,
+  SourceChannel,
+} from '@prisma/client';
 import { isWriteConflictError } from '../../../common/serializable-transaction';
 import { grantPromoCreditLot } from '../../credits/promo-credit-ledger';
 import { OPERATIONS_SETTINGS_ID } from '../../operations-settings/operations-settings.service';
 import type { CampaignDefinition } from '../rules/types';
 import { validateCampaignDefinition } from '../rules/validator';
+import { matchChannel } from './campaign-channel';
 import { CampaignFactReader } from './campaign-fact-reader';
 import {
   CampaignEngineRepository,
@@ -64,6 +71,14 @@ export type EngineInput = CampaignTriggerInput & {
   approvalTransition?: boolean;
   /** PROVIDER_ELIGIBILITY_REACHED via onProviderFact: the fact whose write raised this evaluation. */
   raisedByFact?: CampaignEligibilityFact;
+  /**
+   * CMP-006 PR-D. Used only if this evaluation has to create the event row
+   * (a direct call with no durable event behind it); UNKNOWN when omitted.
+   * The channel the engine judges by is always the one stored on the event
+   * row — the worker's input never carries one, and an existing event keeps
+   * the channel it was born with.
+   */
+  sourceChannel?: SourceChannel;
 };
 
 export type EngineDisabledResult = { outcome: 'CAMPAIGN_ENGINE_DISABLED' };
@@ -186,6 +201,7 @@ export class CampaignEngineService {
       providerId: input.providerId,
       purchaseId,
       factSetKey,
+      sourceChannel: input.sourceChannel ?? SourceChannel.UNKNOWN,
     });
     const evaluations: EvaluationEntry[] = [];
     const log = async (
@@ -248,13 +264,22 @@ export class CampaignEngineService {
       active.push({ ...candidate, definition: parseDefinition(candidate) });
     }
 
-    // 4. Window and conditions, from canonical facts read once per event.
+    // 4. Window, channel and conditions, from canonical facts read once per
+    //    event. The channel (CMP-006 PR-D) is the event row's own, stored at
+    //    its birth: an ALL version takes every event, a WEB/MOBILE version
+    //    only that channel — never UNKNOWN (fail-closed). A mismatch is an
+    //    outcome with a reason, not an error: nothing is retried or consumed.
     const facts = active.length > 0 ? await this.readFacts(tx, input, now) : null;
     const eligible: Candidate[] = [];
     for (const candidate of active) {
       const version = candidate.activeVersion;
       if ((version.windowStartAt && version.windowStartAt > now) || (version.windowEndAt && version.windowEndAt <= now)) {
         await log(of(candidate), 'WINDOW_CLOSED');
+        continue;
+      }
+      const channel = matchChannel(version.channel, event.sourceChannel);
+      if (!channel.matches) {
+        await log(of(candidate), 'CHANNEL_MISMATCH', { reasonCode: channel.reasonCode });
         continue;
       }
       const verdict = evaluateConditions(candidate.definition, facts!);

@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, SourceChannel, UserRole } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { runSerializable } from '../../common/serializable-transaction';
 import { emailVerificationUrl } from '../../common/web-routes';
@@ -64,6 +64,9 @@ export class EmailVerificationService implements OnModuleInit {
   /** `confirm` below is the one writer of EMAIL_VERIFIED for every kind of account; registered for PROVIDER accounts. */
   onModuleInit() {
     this.campaignHooks.registerFactWriter('EMAIL_VERIFIED', { module: 'email-verification', role: UserRole.PROVIDER });
+    // CMP-006 PR-D: the confirmation route is the web application's, so a
+    // proof confirmed through it carries WEB (see WEB_SURFACE_CHANNEL).
+    this.campaignHooks.registerChannelSource('EMAIL_VERIFIED', SourceChannel.WEB, { module: 'email-verification' });
   }
 
   /**
@@ -130,6 +133,8 @@ export class EmailVerificationService implements OnModuleInit {
    */
   async confirm(
     rawToken: string,
+    /** CMP-006 PR-D: the route's channel, never the request's; UNKNOWN when a caller cannot vouch. */
+    sourceChannel: SourceChannel = SourceChannel.UNKNOWN,
   ): Promise<{ success: true; alreadyVerified: boolean; accountKind: VerifiedAccountKind }> {
     const record = await this.lookupActiveToken(rawToken);
     const now = new Date();
@@ -180,7 +185,7 @@ export class EmailVerificationService implements OnModuleInit {
           // event durable — the evaluation runs later in the worker and can
           // never undo this proof. Last step of the transaction.
           if (proven.count === 1 && record.user.role === UserRole.PROVIDER) {
-            await this.campaignHooks.accountFactProven(tx, record.userId, 'EMAIL_VERIFIED');
+            await this.campaignHooks.accountFactProven(tx, record.userId, 'EMAIL_VERIFIED', sourceChannel);
           }
         },
         { label: 'emailVerification.confirm' },

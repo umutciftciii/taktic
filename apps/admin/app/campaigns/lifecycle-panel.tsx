@@ -1,8 +1,8 @@
 'use client';
 
 import { useActionState } from 'react';
-import type { Campaign, CampaignVersionSummary } from '../../lib/api';
-import { ruleErrorMessage } from '../../lib/campaign-rules';
+import type { Campaign, CampaignChannelReadiness, CampaignVersionSummary } from '../../lib/api';
+import { channelLabel, ruleErrorMessage } from '../../lib/campaign-rules';
 import { campaignLifecycleAction } from './actions';
 import { IDLE_CAMPAIGN_LIFECYCLE_STATE } from './lifecycle-state';
 
@@ -11,6 +11,8 @@ type CampaignLifecyclePanelProps = {
   engineEnabled: boolean;
   activeVersion: CampaignVersionSummary | null;
   currentVersion: CampaignVersionSummary | null;
+  /** CMP-006 PR-D: the API's answer for the version "activate" would activate. */
+  currentVersionChannel: CampaignChannelReadiness | null;
 };
 
 /**
@@ -24,8 +26,20 @@ type CampaignLifecyclePanelProps = {
  * refuse them with CAMPAIGN_ENGINE_DISABLED and a screen must not offer an
  * action it knows will come back as an error. Pause and end never need the
  * engine. Nothing here can turn the engine on.
+ *
+ * The same holds for the channel (CMP-006 PR-D): when the API reports that
+ * no registered source produces the stored version's channel — MOBILE today —
+ * the panel says so and disables activation; the API's
+ * CHANNEL_SOURCE_UNAVAILABLE is the authority, and a forced submission shows
+ * its refusal.
  */
-export function CampaignLifecyclePanel({ campaign, engineEnabled, activeVersion, currentVersion }: CampaignLifecyclePanelProps) {
+export function CampaignLifecyclePanel({
+  campaign,
+  engineEnabled,
+  activeVersion,
+  currentVersion,
+  currentVersionChannel,
+}: CampaignLifecyclePanelProps) {
   const [state, submit, pending] = useActionState(campaignLifecycleAction, IDLE_CAMPAIGN_LIFECYCLE_STATE);
   const status = campaign.status;
   // Offer "activate version N" only where it does something a plain resume
@@ -34,6 +48,7 @@ export function CampaignLifecyclePanel({ campaign, engineEnabled, activeVersion,
   const canActivate = status === 'DRAFT' || ((status === 'ACTIVE' || status === 'PAUSED') && newerVersionStored);
   const activateVersion = currentVersion;
   const needsEngine = !engineEnabled;
+  const channelBlocked = canActivate && currentVersionChannel !== null && !currentVersionChannel.available;
 
   return (
     <div className="admin-action-panel" data-testid="campaign-lifecycle-panel" data-status={status}>
@@ -49,6 +64,16 @@ export function CampaignLifecyclePanel({ campaign, engineEnabled, activeVersion,
         <p data-testid="campaign-lifecycle-engine-off">
           <strong>Kampanya motoru kapalı — etkinleştirme yapılamaz.</strong> Etkinleştir ve devam ettir, motor açılana
           kadar reddedilir. Duraklat ve sonlandır her zaman kullanılabilir.
+        </p>
+      ) : null}
+
+      {channelBlocked && currentVersionChannel ? (
+        <p className="notice notice-warning" data-testid="campaign-lifecycle-channel-unavailable" data-channel={currentVersionChannel.channel}>
+          <strong>
+            {channelLabel(currentVersionChannel.channel)} kanalı için kayıtlı kaynak yok — sürüm {activateVersion?.versionNumber} etkinleştirilemez.
+          </strong>{' '}
+          Bu kanaldan olay üreten bir kaynak ({currentVersionChannel.missingSources.join(', ')}) kayıtlı olmadığından sürüm hiçbir
+          hak ediş üretemez. Kanalı Web veya Tümü olan yeni bir revizyon kaydedin.
         </p>
       ) : null}
 
@@ -75,9 +100,15 @@ export function CampaignLifecyclePanel({ campaign, engineEnabled, activeVersion,
           <button
             className="btn btn-primary btn-sm"
             type="submit"
-            disabled={pending || needsEngine}
+            disabled={pending || needsEngine || channelBlocked}
             data-testid="campaign-activate"
-            title={needsEngine ? 'Kampanya motoru kapalı — etkinleştirme yapılamaz' : undefined}
+            title={
+              needsEngine
+                ? 'Kampanya motoru kapalı — etkinleştirme yapılamaz'
+                : channelBlocked
+                  ? 'Bu kanal için kayıtlı kaynak yok — etkinleştirme yapılamaz'
+                  : undefined
+            }
           >
             {status === 'DRAFT' ? `Sürüm ${activateVersion.versionNumber}’i etkinleştir` : status === 'PAUSED' ? `Sürüm ${activateVersion.versionNumber} ile devam ettir` : `Sürüm ${activateVersion.versionNumber}’e geç`}
           </button>

@@ -3374,11 +3374,26 @@ export type CampaignVersionSummary = {
   windowEndAt: string | null;
   stackPolicy: string;
   priority: number;
+  /** CMP-006 PR-D: WEB | MOBILE | ALL — part of the immutable version; ALL on every version before the field. */
+  channel: CampaignChannel;
   createdAt: string;
   createdBy: CampaignActor;
 };
 
 export type CampaignVersion = CampaignVersionSummary & { definition: unknown };
+
+export type CampaignChannel = 'WEB' | 'MOBILE' | 'ALL';
+export type CampaignSourceChannel = 'WEB' | 'MOBILE' | 'UNKNOWN';
+
+/**
+ * CMP-006 PR-D. The API's own answer to "would the activation gate find a
+ * producer of this version's channel now?" — the panel only reflects it.
+ */
+export type CampaignChannelReadiness = {
+  channel: CampaignChannel;
+  available: boolean;
+  missingSources: string[];
+};
 
 export type CampaignAuditAction =
   | 'CREATED'
@@ -3405,6 +3420,8 @@ export type CampaignAuditEntry = {
     benefitCredits?: number;
     benefitExpiresInDays?: number;
     maxRedemptionsPerProvider?: number;
+    /** CMP-006 PR-D: on VERSION_CREATED / VERSION_ACTIVATED; absent on older rows (= ALL). */
+    channel?: CampaignChannel;
     changedFields?: string[];
     reason?: string;
     /** SYSTEM on a payment reversal's revoke / auto-pause (actor null since CMP-004 S4; nominal on older rows), ADMIN otherwise. */
@@ -3467,6 +3484,8 @@ export type CampaignEvaluationEvent = {
   lastErrorAt: string | null;
   settledByCampaignId: string | null;
   settledAt: string | null;
+  /** CMP-006 PR-D: server-derived; UNKNOWN when nobody could vouch for it. */
+  sourceChannel: CampaignSourceChannel;
   lastOutcome: { outcome: string; reasonCode: string | null; evaluatedAt: string } | null;
   retryable: boolean;
 };
@@ -3524,6 +3543,9 @@ export type CampaignDetailResponse = {
   campaign: Campaign;
   currentVersion: CampaignVersion | null;
   activeVersion: CampaignVersion | null;
+  /** CMP-006 PR-D: channel readiness of the stored and the running version, as the activation gate would judge now. */
+  currentVersionChannel: CampaignChannelReadiness | null;
+  activeVersionChannel: CampaignChannelReadiness | null;
   versions: CampaignVersion[];
   audit: CampaignAuditEntry[];
 };
@@ -3540,6 +3562,8 @@ export type CampaignValidationResponse = {
     conditionCount: number;
     benefitCredits: number;
     benefitExpiresInDays: number;
+    /** CMP-006 PR-D. */
+    channel?: string;
   } | null;
 };
 

@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdminPermission, UserRole } from '@prisma/client';
+import { WEB_SURFACE_CHANNEL } from '../../common/web-surface-channel';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -39,11 +40,18 @@ export class ProvidersController {
     @Req() request: any,
   ) {
     // The client address is passed through only so the claim invitation this
-    // may trigger can be rate limited. It is never stored.
-    return this.providersService.createProvider(dto, user, {
-      ipAddress: request.ip ?? null,
-      userAgent: request.headers?.['user-agent'] ?? null,
-    });
+    // may trigger can be rate limited. It is never stored. The web
+    // application's apply form is this route's client: WEB, from the route
+    // (CMP-006 PR-D).
+    return this.providersService.createProvider(
+      dto,
+      user,
+      {
+        ipAddress: request.ip ?? null,
+        userAgent: request.headers?.['user-agent'] ?? null,
+      },
+      WEB_SURFACE_CHANNEL,
+    );
   }
 
   @Get()

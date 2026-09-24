@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
-import { AdminPermission, BusinessRegistrationType, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, UserRole } from '@prisma/client';
+import { AdminPermission, BusinessRegistrationType, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, SourceChannel, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
@@ -455,11 +455,14 @@ export async function createProviderProfile(
     claimedAt?: Date | null;
     /** The public "about" text; the default is too short to be index-eligible (SEO-003). */
     description?: string | null;
+    /** CMP-006 PR-D: the server-derived application channel; the column default (UNKNOWN) when omitted. */
+    applicationSourceChannel?: SourceChannel;
   } = {},
 ) {
   const suffix = uniqueSuffix();
   return prisma.providerProfile.create({
     data: {
+      ...(overrides.applicationSourceChannel ? { applicationSourceChannel: overrides.applicationSourceChannel } : {}),
       userId: overrides.userId ?? null,
       claimedAt: overrides.claimedAt ?? null,
       businessName: `İşletme ${suffix}`,

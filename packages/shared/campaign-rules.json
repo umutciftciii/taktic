@@ -81,6 +81,7 @@
   },
   "stackPolicies": ["EXCLUSIVE_CREDIT_BONUS"],
   "priority": { "min": 1, "max": 1000, "default": 100 },
+  "channels": { "values": ["WEB", "MOBILE", "ALL"], "default": "ALL" },
   "errorCodes": [
     "SCHEMA_INVALID",
     "UNSUPPORTED_SCHEMA_VERSION",
@@ -105,7 +106,8 @@
     "LIMIT_INVALID",
     "WINDOW_INVALID",
     "STACK_POLICY_INVALID",
-    "PRIORITY_INVALID"
+    "PRIORITY_INVALID",
+    "CHANNEL_INVALID"
   ],
-  "activationErrorCodes": ["FACT_SOURCE_UNAVAILABLE", "LIMIT_BELOW_CONSUMED"]
+  "activationErrorCodes": ["FACT_SOURCE_UNAVAILABLE", "LIMIT_BELOW_CONSUMED", "CHANNEL_SOURCE_UNAVAILABLE"]
 }

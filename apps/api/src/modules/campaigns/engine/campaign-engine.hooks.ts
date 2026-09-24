@@ -1,9 +1,21 @@
 import { HttpStatus, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { type CampaignEligibilityFact, type CampaignTriggerEventStatus, type Prisma, UserRole } from '@prisma/client';
+import {
+  type CampaignEligibilityFact,
+  type CampaignTriggerEventStatus,
+  type Prisma,
+  SourceChannel,
+  UserRole,
+} from '@prisma/client';
 import { isWriteConflictError } from '../../../common/serializable-transaction';
 import { OPERATIONS_SETTINGS_ID } from '../../operations-settings/operations-settings.service';
 import { CampaignEngineRepository } from './campaign-engine.repository';
-import { type CampaignFactSource, FactSourceRegistry, type FactWriter } from './fact-source-registry';
+import {
+  type CampaignFactSource,
+  type ChannelProducer,
+  FactSourceRegistry,
+  type FactWriter,
+  type RegistrableChannel,
+} from './fact-source-registry';
 import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from './trigger-event-key';
 
 /**
@@ -56,6 +68,27 @@ import { buildFactSetKey, buildTriggerEventKey, type CampaignTriggerInput } from
  * Writers register themselves here at boot (`registerFactWriter`), which is
  * what the activation gate reads: a version that depends on a source no
  * booted module raises cannot go ACTIVE (`FACT_SOURCE_UNAVAILABLE`).
+ *
+ * Channel (CMP-006 PR-D). Every event is written with the `sourceChannel` of
+ * the business act that raised it, derived here from the canonical row and
+ * never from anything a client sent:
+ *
+ *   PROVIDER_APPROVED             ProviderProfile.applicationSourceChannel —
+ *                                 the approving request is the operator's;
+ *                                 the business came in through its application
+ *   PACKAGE_PAYMENT_SUCCEEDED     PackagePurchase.sourceChannel — the webhook
+ *                                 that settles it has no channel of its own
+ *   PROVIDER_ELIGIBILITY_REACHED  the channel of the proof that completed the
+ *                                 set: the application's when the approval
+ *                                 did, the caller's (server-derived) when an
+ *                                 account proof did
+ *
+ * The channel is written on INSERT only (`ensurePendingEvent`), is not part
+ * of `triggerEventKey`, and a database trigger refuses to change it — so a
+ * re-raise that derives a different channel neither moves the event nor
+ * mints a second one. Producers register at boot (`registerChannelSource`);
+ * the activation gate refuses a WEB/MOBILE version whose sources have no
+ * producer of that channel (`CHANNEL_SOURCE_UNAVAILABLE`).
  */
 
 export const CAMPAIGN_EVENT_NOT_DURABLE = 'CAMPAIGN_EVENT_NOT_DURABLE';
@@ -84,6 +117,11 @@ export class CampaignEngineHooks {
     this.registry.register(source, writer);
   }
 
+  /** Called at boot by each module that derives a channel for `source`'s events on the server. */
+  registerChannelSource(source: CampaignFactSource, channel: RegistrableChannel, producer: ChannelProducer): void {
+    this.registry.registerChannel(source, channel, producer);
+  }
+
   /**
    * A genuine transition into APPROVED: the PROVIDER_APPROVED event itself,
    * plus — the fact having become true — every eligibility set that names it
@@ -94,9 +132,14 @@ export class CampaignEngineHooks {
       return { outcome: 'CAMPAIGN_ENGINE_DISABLED' };
     }
     return this.durable(async (now) => {
+      const profile = await tx.providerProfile.findUnique({
+        where: { id: providerId },
+        select: { applicationSourceChannel: true },
+      });
+      const sourceChannel = profile?.applicationSourceChannel ?? SourceChannel.UNKNOWN;
       const events: RaisedEvent[] = [];
-      events.push(await this.raise(tx, { trigger: 'PROVIDER_APPROVED', providerId }, now));
-      const eligibility = await this.raiseEligibility(tx, providerId, 'PROVIDER_APPROVED', now);
+      events.push(await this.raise(tx, { trigger: 'PROVIDER_APPROVED', providerId }, sourceChannel, now));
+      const eligibility = await this.raiseEligibility(tx, providerId, 'PROVIDER_APPROVED', sourceChannel, now);
       events.push(...eligibility.events);
       return { outcome: 'RAISED', events, incompleteFactSetKeys: eligibility.incompleteFactSetKeys } as const;
     });
@@ -106,8 +149,17 @@ export class CampaignEngineHooks {
    * An account proof that just became true for `userId`. Resolved to the
    * provider profile the account owns; a CUSTOMER's or SUPER_ADMIN's proof,
    * or an account with no profile, produces no campaign fact at all.
+   *
+   * `sourceChannel` is the channel of the proof itself, as the *server*
+   * knows it from the route that confirmed it — the web application's
+   * confirmation routes pass WEB; anything that cannot vouch passes UNKNOWN.
    */
-  async accountFactProven(tx: Prisma.TransactionClient, userId: string, fact: AccountProofFact): Promise<HookResult> {
+  async accountFactProven(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    fact: AccountProofFact,
+    sourceChannel: SourceChannel,
+  ): Promise<HookResult> {
     if (!(await this.isEnabled(tx))) {
       return { outcome: 'CAMPAIGN_ENGINE_DISABLED' };
     }
@@ -119,7 +171,7 @@ export class CampaignEngineHooks {
       return { outcome: 'NOT_A_PROVIDER_FACT' };
     }
     return this.durable(async (now) => {
-      const eligibility = await this.raiseEligibility(tx, profile.id, fact, now);
+      const eligibility = await this.raiseEligibility(tx, profile.id, fact, sourceChannel, now);
       return { outcome: 'RAISED', ...eligibility } as const;
     });
   }
@@ -129,16 +181,29 @@ export class CampaignEngineHooks {
     if (!(await this.isEnabled(tx))) {
       return { outcome: 'CAMPAIGN_ENGINE_DISABLED' };
     }
-    return this.durable(async (now) => ({
-      outcome: 'RAISED' as const,
-      events: [await this.raise(tx, { trigger: 'PACKAGE_PAYMENT_SUCCEEDED', providerId, purchaseId }, now)],
-      incompleteFactSetKeys: [],
-    }));
+    return this.durable(async (now) => {
+      const purchase = await tx.packagePurchase.findUnique({
+        where: { id: purchaseId },
+        select: { sourceChannel: true },
+      });
+      const sourceChannel = purchase?.sourceChannel ?? SourceChannel.UNKNOWN;
+      return {
+        outcome: 'RAISED' as const,
+        events: [await this.raise(tx, { trigger: 'PACKAGE_PAYMENT_SUCCEEDED', providerId, purchaseId }, sourceChannel, now)],
+        incompleteFactSetKeys: [],
+      };
+    });
   }
 
   // ─────────────────────────────── internals ───────────────────────────────
 
-  private async raise(tx: Prisma.TransactionClient, input: CampaignTriggerInput, now: Date): Promise<RaisedEvent> {
+  private async raise(
+    tx: Prisma.TransactionClient,
+    input: CampaignTriggerInput,
+    sourceChannel: SourceChannel,
+    now: Date,
+  ): Promise<RaisedEvent> {
+    // The key is built from the input alone: the channel never enters it.
     const triggerEventKey = buildTriggerEventKey(input);
     const ensured = await this.repository.ensurePendingEvent(
       tx,
@@ -148,6 +213,7 @@ export class CampaignEngineHooks {
         providerId: input.providerId,
         purchaseId: input.trigger === 'PACKAGE_PAYMENT_SUCCEEDED' ? input.purchaseId : null,
         factSetKey: input.trigger === 'PROVIDER_ELIGIBILITY_REACHED' ? buildFactSetKey(input.facts) : null,
+        sourceChannel,
       },
       now,
     );
@@ -158,12 +224,14 @@ export class CampaignEngineHooks {
    * Every ACTIVE eligibility set naming `fact` is re-read from the canonical
    * columns (never trusting the caller's "it is true now"); each set that is
    * complete gets its lifetime-unique event. An incomplete set gets nothing:
-   * its event does not exist until the last fact lands (CMP-001 §8.3).
+   * its event does not exist until the last fact lands (CMP-001 §8.3) —
+   * and that last fact's channel is the event's.
    */
   private async raiseEligibility(
     tx: Prisma.TransactionClient,
     providerId: string,
     fact: CampaignEligibilityFact,
+    sourceChannel: SourceChannel,
     now: Date,
   ): Promise<{ events: RaisedEvent[]; incompleteFactSetKeys: string[] }> {
     const sets = await this.repository.factSetsNaming(tx, fact);
@@ -175,7 +243,9 @@ export class CampaignEngineHooks {
         incompleteFactSetKeys.push(set.factSetKey);
         continue;
       }
-      events.push(await this.raise(tx, { trigger: 'PROVIDER_ELIGIBILITY_REACHED', providerId, facts: set.facts }, now));
+      events.push(
+        await this.raise(tx, { trigger: 'PROVIDER_ELIGIBILITY_REACHED', providerId, facts: set.facts }, sourceChannel, now),
+      );
     }
     return { events, incompleteFactSetKeys };
   }

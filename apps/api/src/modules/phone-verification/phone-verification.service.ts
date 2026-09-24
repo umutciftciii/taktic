@@ -9,7 +9,7 @@ import {
   NotFoundException,
   type OnModuleInit,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, SourceChannel, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'node:crypto';
 import { runSerializable } from '../../common/serializable-transaction';
@@ -55,6 +55,9 @@ export class PhoneVerificationService implements OnModuleInit {
   /** `verifyAccountCode` below is the PROVIDER writer of PHONE_VERIFIED; the request flow's CUSTOMER write is not a campaign fact. */
   onModuleInit() {
     this.campaignHooks.registerFactWriter('PHONE_VERIFIED', { module: 'phone-verification', role: UserRole.PROVIDER });
+    // CMP-006 PR-D: the provider OTP route is the web application's, so a
+    // proof confirmed through it carries WEB (see WEB_SURFACE_CHANNEL).
+    this.campaignHooks.registerChannelSource('PHONE_VERIFIED', SourceChannel.WEB, { module: 'phone-verification' });
   }
 
   async sendCode(requestId: string, user: AuthUser, meta: VerificationRequestMeta) {
@@ -364,7 +367,13 @@ export class PhoneVerificationService implements OnModuleInit {
    * and on the column being NULL, so a replay or a race cannot move a proof
    * already on file.
    */
-  async verifyAccountCode(user: AuthUser, rawCode: string, meta: VerificationRequestMeta) {
+  async verifyAccountCode(
+    user: AuthUser,
+    rawCode: string,
+    meta: VerificationRequestMeta,
+    /** CMP-006 PR-D: the route's channel, never the request's; UNKNOWN when a caller cannot vouch. */
+    sourceChannel: SourceChannel = SourceChannel.UNKNOWN,
+  ) {
     const code = normalizeCode(rawCode);
     const account = await this.getAccountForProof(user, { requirePhone: false });
 
@@ -432,7 +441,7 @@ export class PhoneVerificationService implements OnModuleInit {
         // this is that transaction's last step. The hook only makes the
         // eligibility event durable; the evaluation runs later in the worker
         // and can never undo this proof.
-        await this.campaignHooks.accountFactProven(tx, user.id, 'PHONE_VERIFIED');
+        await this.campaignHooks.accountFactProven(tx, user.id, 'PHONE_VERIFIED', sourceChannel);
 
         return { ok: true as const, verifiedAt: now };
       },

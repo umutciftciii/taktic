@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { WEB_SURFACE_CHANNEL } from '../../common/web-surface-channel';
 import { CurrentUser } from '../auth/auth.decorators';
 import { OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -55,9 +56,16 @@ export class ProviderInvitesController {
   ) {
     // The client address is passed through only so the claim invitation this
     // may trigger can be rate limited. It is never stored.
-    return this.invites.submitApplication(dto, user, {
-      ipAddress: request.ip ?? null,
-      userAgent: request.headers?.['user-agent'] ?? null,
-    });
+    // The web application's invitation page is this route's client: WEB,
+    // from the route (CMP-006 PR-D).
+    return this.invites.submitApplication(
+      dto,
+      user,
+      {
+        ipAddress: request.ip ?? null,
+        userAgent: request.headers?.['user-agent'] ?? null,
+      },
+      WEB_SURFACE_CHANNEL,
+    );
   }
 }

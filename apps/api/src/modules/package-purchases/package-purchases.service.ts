@@ -15,6 +15,7 @@ import {
   PackagePurchaseStatus,
   Prisma,
   UserRole,
+  SourceChannel,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { RequestMeta } from '../../common/request-meta';
@@ -64,6 +65,13 @@ export class PackagePurchasesService implements OnModuleInit {
       module: 'package-purchases-mock',
       role: UserRole.PROVIDER,
     });
+    // CMP-006 PR-D: every purchase row is written here, and the provider
+    // account's own routes (checkout, package purchase) are the web
+    // application's — they stamp WEB on the row, which the settlement's event
+    // inherits.
+    this.campaignHooks.registerChannelSource('PACKAGE_PAYMENT_SUCCEEDED', SourceChannel.WEB, {
+      module: 'package-purchases',
+    });
   }
 
   /**
@@ -93,7 +101,13 @@ export class PackagePurchasesService implements OnModuleInit {
     providerId: string,
     dto: CreatePackagePurchaseDto,
     payment?: { provider: string; reference: string },
-    actor?: { user: AuthUser; meta: RequestMeta },
+    /**
+     * `channel` (CMP-006 PR-D) is the channel of the route that received the
+     * request, never anything the request says. It is recorded on the row only
+     * when the actor is the provider account itself; an operator acting for a
+     * business, and a caller with no actor, leave it UNKNOWN.
+     */
+    actor?: { user: AuthUser; meta: RequestMeta; channel?: SourceChannel },
   ) {
     const terms = this.purchaseTerms.requireAcceptance(dto);
     if (terms && actor?.user.role !== UserRole.PROVIDER) {
@@ -152,6 +166,8 @@ export class PackagePurchasesService implements OnModuleInit {
           providerId,
           packageId: creditPackage.id,
           purchaseNumber,
+          sourceChannel:
+            actor?.user.role === UserRole.PROVIDER ? (actor.channel ?? SourceChannel.UNKNOWN) : SourceChannel.UNKNOWN,
           creditAmountSnapshot: creditPackage.creditAmount,
           priceAmountSnapshot: creditPackage.priceAmount,
           currencySnapshot: creditPackage.currency,
@@ -644,6 +660,9 @@ export const packagePurchaseOmit = {
   // projection — provider's, admin's, checkout's — carries them.
   providerOrderTotalAmount: true,
   providerOrderCurrency: true,
+  // CMP-006 PR-D: the server-derived channel exists for the campaign engine;
+  // no purchase projection carries it.
+  sourceChannel: true,
 } satisfies Prisma.PackagePurchaseOmit;
 
 function normalizeMockPayment(dto: MockPackagePaymentDto) {

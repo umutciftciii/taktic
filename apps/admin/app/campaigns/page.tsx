@@ -7,7 +7,7 @@ import {
   requireAdmin,
   type CampaignListResponse,
 } from '../../lib/api';
-import { TRIGGER_LABELS, type CampaignTrigger } from '../../lib/campaign-rules';
+import { TRIGGER_LABELS, channelLabel, type CampaignTrigger } from '../../lib/campaign-rules';
 import { EmptyState } from '../../components/empty-state';
 import { PageHeader } from '../../components/page-header';
 import { CampaignEngineNotice } from './engine-notice';
@@ -82,6 +82,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
                   <th>Kampanya</th>
                   <th>Durum</th>
                   <th>Tetikleyici</th>
+                  <th>Kanal</th>
                   <th className="col-num">Kredi</th>
                   <th className="col-num">Gün</th>
                   <th className="col-num">Çalışan</th>
@@ -111,6 +112,9 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
                       {shown
                         ? (TRIGGER_LABELS[shown.trigger as CampaignTrigger] ?? shown.trigger)
                         : '—'}
+                    </td>
+                    <td data-testid="campaign-row-channel" data-channel={shown?.channel ?? ''}>
+                      {shown ? channelLabel(shown.channel) : '—'}
                     </td>
                     <td className="col-num">{shown?.benefitCredits ?? '—'}</td>
                     <td className="col-num">{shown?.benefitExpiresInDays ?? '—'}</td>

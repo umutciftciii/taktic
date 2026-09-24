@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import catalog from '../../../packages/shared/campaign-rules.json';
 import {
+  CAMPAIGN_CHANNEL_OPTIONS,
   CAMPAIGN_TRIGGER_OPTIONS,
   CONDITION_LABELS,
   FACT_LABELS,
   buildDefinition,
+  channelLabel,
   conditionOptionsFor,
   emptyForm,
   errorFieldOf,
@@ -103,6 +105,7 @@ describe('form → definition', () => {
       window: { startAt: '2026-10-01T00:00:00Z', endAt: null },
       stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
       priority: 100,
+      channel: 'ALL',
     });
   });
 
@@ -131,6 +134,32 @@ describe('form → definition', () => {
     const again = formFromDefinition(buildDefinition(form));
     expect(buildDefinition(again)).toEqual(buildDefinition(form));
     expect(again.conditions.map((c) => c.group)).toEqual(['all', 'all', 'any', 'any']);
+  });
+});
+
+describe('channel (CMP-006 PR-D)', () => {
+  it('offers Web, Mobil and Tümü — the catalogue channels in its order — defaulting to Tümü', () => {
+    expect(CAMPAIGN_CHANNEL_OPTIONS.map((option) => option.value)).toEqual(catalog.channels.values);
+    expect(CAMPAIGN_CHANNEL_OPTIONS.map((option) => option.label)).toEqual(['Web', 'Mobil', 'Tümü']);
+    expect(emptyForm().channel).toBe('ALL');
+    expect(buildDefinition(emptyForm()).channel).toBe('ALL');
+  });
+
+  it('carries the selected channel, round-trips it, and reads an absent one as Tümü', () => {
+    for (const channel of ['WEB', 'MOBILE', 'ALL'] as const) {
+      const form: CampaignForm = { ...packageBonusForm(), channel };
+      expect(buildDefinition(form).channel).toBe(channel);
+      expect(formFromDefinition(buildDefinition(form)).channel).toBe(channel);
+    }
+    const { channel: _omitted, ...legacy } = buildDefinition({ ...packageBonusForm(), channel: 'WEB' });
+    expect(formFromDefinition(legacy).channel).toBe('ALL');
+    expect(formFromDefinition({ ...legacy, channel: 'web' }).channel).toBe('ALL');
+    expect(channelLabel(undefined)).toBe('Tümü');
+    expect(channelLabel('MOBILE')).toBe('Mobil');
+  });
+
+  it('points a channel error at the channel field', () => {
+    expect(errorFieldOf('channel', packageBonusForm())).toEqual({ field: 'channel' });
   });
 });
 

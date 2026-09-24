@@ -21,8 +21,10 @@ import {
   CONDITION_LABELS,
   ENUM_VALUE_LABELS,
   FACT_LABELS,
+  SOURCE_CHANNEL_LABELS,
   STACK_POLICY_LABEL,
   TRIGGER_LABELS,
+  channelLabel,
   formFromDefinition,
   type CampaignConditionType,
   type CampaignFact,
@@ -156,6 +158,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                   <tr>
                     <th className="col-num">Sürüm</th>
                     <th>Tetikleyici</th>
+                    <th>Kanal</th>
                     <th className="col-num">Kredi</th>
                     <th className="col-num">Gün</th>
                     <th className="col-num">HV başına</th>
@@ -177,6 +180,9 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                         {currentVersion?.id === version.id ? ' (son)' : ''}
                       </td>
                       <td>{TRIGGER_LABELS[version.trigger as CampaignTrigger] ?? version.trigger}</td>
+                      <td data-testid="campaign-version-channel" data-channel={version.channel}>
+                        {channelLabel(version.channel)}
+                      </td>
                       <td className="col-num">{version.benefitCredits}</td>
                       <td className="col-num">{version.benefitExpiresInDays}</td>
                       <td className="col-num">{version.maxRedemptionsPerProvider}</td>
@@ -311,6 +317,9 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                         </td>
                         <td className="campaign-ops-wrap">
                           <code>{row.triggerEventKey}</code>
+                          <span className="campaign-ops-meta" data-testid="campaign-event-channel" data-channel={row.sourceChannel}>
+                            kaynak kanal: {SOURCE_CHANNEL_LABELS[row.sourceChannel] ?? row.sourceChannel}
+                          </span>
                           <span className="campaign-ops-meta">
                             ilk {formatDateTime(row.firstSeenAt)} · son {formatDateTime(row.lastSeenAt)}
                           </span>
@@ -374,6 +383,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
             engineEnabled={data.engineEnabled}
             activeVersion={activeVersion}
             currentVersion={currentVersion}
+            currentVersionChannel={data.currentVersionChannel}
           />
 
           <SectionCard title="Denetim izi" subtitle="Kim, ne zaman, hangi sürümü.">
@@ -388,6 +398,9 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                     {auditActorLabel(entry)}
                     {entry.summary?.versionNumber ? ` · sürüm ${entry.summary.versionNumber}` : ''}
                     {entry.summary?.previousActiveVersionNumber ? ` (önceki: sürüm ${entry.summary.previousActiveVersionNumber})` : ''}
+                    {(entry.action === 'VERSION_CREATED' || entry.action === 'VERSION_ACTIVATED') && entry.summary
+                      ? ` · kanal: ${channelLabel(entry.summary.channel)}`
+                      : ''}
                     {entry.summary?.changedFields && entry.summary.changedFields.length > 0
                       ? ` · değişen: ${entry.summary.changedFields.join(', ')}`
                       : ''}
@@ -504,6 +517,12 @@ function VersionDefinition({ version }: { version: CampaignVersion }) {
     <dl className="campaign-summary" data-testid="campaign-current-definition">
       <dt>Tetikleyici</dt>
       <dd>{TRIGGER_LABELS[form.trigger] ?? form.trigger}</dd>
+      <dt>Kanal</dt>
+      <dd>
+        <span className="badge badge-info" data-testid="campaign-definition-channel" data-channel={version.channel}>
+          {channelLabel(version.channel)}
+        </span>
+      </dd>
       {form.facts.length > 0 ? (
         <>
           <dt>Olgu kümesi</dt>

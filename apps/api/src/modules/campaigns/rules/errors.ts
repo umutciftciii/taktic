@@ -33,18 +33,23 @@ export type CampaignRuleErrorCode =
   | 'LIMIT_INVALID'
   | 'WINDOW_INVALID'
   | 'STACK_POLICY_INVALID'
-  | 'PRIORITY_INVALID';
+  | 'PRIORITY_INVALID'
+  | 'CHANNEL_INVALID';
 
 export const CAMPAIGN_RULE_ERROR_CODES =
   CAMPAIGN_RULE_ERROR_CODE_LIST as readonly CampaignRuleErrorCode[];
 
 /**
- * The two refusals that exist only at activation (CMP-002 S2B2). A stored
- * version is a valid definition by construction; what activation adds is the
- * state of the world — which writers are booted, what the campaign already
- * consumed — and these name the two ways that state can say no.
+ * The refusals that exist only at activation (CMP-002 S2B2, CMP-006 PR-D). A
+ * stored version is a valid definition by construction; what activation adds
+ * is the state of the world — which writers are booted, which channels they
+ * can stamp on an event, what the campaign already consumed — and these name
+ * the ways that state can say no.
  */
-export type CampaignActivationErrorCode = 'FACT_SOURCE_UNAVAILABLE' | 'LIMIT_BELOW_CONSUMED';
+export type CampaignActivationErrorCode =
+  | 'FACT_SOURCE_UNAVAILABLE'
+  | 'LIMIT_BELOW_CONSUMED'
+  | 'CHANNEL_SOURCE_UNAVAILABLE';
 
 export const CAMPAIGN_ACTIVATION_ERROR_CODES =
   CAMPAIGN_ACTIVATION_ERROR_CODE_LIST as readonly CampaignActivationErrorCode[];
@@ -56,7 +61,7 @@ export type CampaignRuleError = {
   message: string;
 };
 
-/** An activation refusal: a definition error, or one of the two activation-only codes, same shape. */
+/** An activation refusal: a definition error, or one of the activation-only codes, same shape. */
 export type CampaignActivationError = {
   path: string;
   code: CampaignRuleErrorCode | CampaignActivationErrorCode;
@@ -94,10 +99,13 @@ export const CAMPAIGN_RULE_ERROR_MESSAGES: Readonly<Record<CampaignRuleErrorCode
   WINDOW_INVALID: 'Zaman penceresi geçersiz.',
   STACK_POLICY_INVALID: 'Yalnızca EXCLUSIVE_CREDIT_BONUS politikası desteklenir.',
   PRIORITY_INVALID: 'Öncelik 1–1000 arası tam sayı olmalıdır.',
+  CHANNEL_INVALID: 'Kanal yalnızca WEB, MOBILE veya ALL olabilir.',
 };
 
 export const CAMPAIGN_ACTIVATION_ERROR_MESSAGES: Readonly<Record<CampaignActivationErrorCode, string>> = {
   FACT_SOURCE_UNAVAILABLE:
     'Bu olgunun/tetikleyicinin hizmet veren hesapları için kayıtlı bir yazıcısı yok; sürüm etkinleştirilemez.',
   LIMIT_BELOW_CONSUMED: 'Limit, kampanyanın halihazırda tükettiği değerin altında; önce daha yüksek bir limitle sürüm oluşturun.',
+  CHANNEL_SOURCE_UNAVAILABLE:
+    'Bu kanaldan olay üreten kayıtlı bir kaynak yok; bu kanalı hedefleyen sürüm hiçbir hak ediş üretemeyeceği için etkinleştirilemez.',
 };

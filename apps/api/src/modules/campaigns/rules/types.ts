@@ -31,6 +31,11 @@ export type CampaignDefinition = {
   window: { startAt: string | null; endAt: string | null };
   stackPolicy: string;
   priority: number;
+  /**
+   * CMP-006 PR-D: WEB | MOBILE | ALL. A definition stored before the field
+   * existed has none and normalises to ALL — what it always meant.
+   */
+  channel: string;
 };
 
 /** What the panel shows beside a valid definition, and what the version row denormalises. */
@@ -41,6 +46,7 @@ export type CampaignDefinitionSummary = {
   conditionCount: number;
   benefitCredits: number;
   benefitExpiresInDays: number;
+  channel: string;
 };
 
 export function isAnyGroup(entry: CampaignCondition | CampaignAnyGroup): entry is CampaignAnyGroup {

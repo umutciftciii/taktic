@@ -1298,6 +1298,15 @@ model ProviderProfile {
   district        String
   addressNote     String?
   description     String?
+  /// CMP-006 PR-D. The channel the application behind this profile arrived
+  /// through, written once by the server when the application row is created
+  /// — never read from a client header, query or body. The web application
+  /// routes write WEB; an application an operator filed on a business's
+  /// behalf, and every row that predates this column, is honestly UNKNOWN.
+  /// It is the channel of PROVIDER_APPROVED: the approving request is the
+  /// operator's, not the business's. Immutable after insert (trigger
+  /// `ProviderProfile_application_source_channel_immutable`).
+  applicationSourceChannel SourceChannel @default(UNKNOWN)
   status          ProviderStatus @default(PENDING_REVIEW)
   moderationNote  String?
   rejectionReason String?
@@ -1797,6 +1806,15 @@ model PackagePurchase {
   /// refuses to change either after the insert, so an enforced purchase can
   /// neither lose its evidence nor be re-labelled as unenforced.
   termsAcceptanceRequired          Boolean               @default(false)
+  /// CMP-006 PR-D. The channel the checkout was opened through, written by
+  /// the server when this row is created: WEB when the provider account opened
+  /// it on the web application's route, UNKNOWN for an operator acting for the
+  /// business and for every row that predates this column. Never the
+  /// client-declared label on the terms acceptance. It is the channel of
+  /// PACKAGE_PAYMENT_SUCCEEDED — the webhook that settles the row is
+  /// asynchronous and has no channel of its own. Immutable after insert
+  /// (trigger `PackagePurchase_source_channel_immutable`).
+  sourceChannel                    SourceChannel         @default(UNKNOWN)
   /// The acceptance written in the same transaction as this row. Never
   /// projected by a purchase read: the snapshot, digest, client address and
   /// user agent live only on the acceptance row.
@@ -1871,6 +1889,11 @@ model PackagePurchase {
 /// CMP-006 PR-A. Where an act of acceptance came from, as the client declared
 /// it. A label, not a proof: the web app declares WEB, nothing yet declares
 /// MOBILE, and anything else is UNKNOWN.
+///
+/// CMP-006 PR-D reuses the enum for the *server-derived* channel of a
+/// business event (`PackagePurchase.sourceChannel`,
+/// `ProviderProfile.applicationSourceChannel`,
+/// `CampaignTriggerEvent.sourceChannel`), which no client declares.
 enum SourceChannel {
   WEB
   MOBILE
@@ -3990,6 +4013,17 @@ enum CampaignStackPolicy {
   EXCLUSIVE_CREDIT_BONUS
 }
 
+/// CMP-006 PR-D. Which source channel a campaign version grants for. ALL is
+/// "no channel condition" and matches WEB, MOBILE and UNKNOWN events alike —
+/// which is what every version written before this column did. WEB and
+/// MOBILE match only an event of exactly that channel: an UNKNOWN event is
+/// never a candidate of a channel-targeted version (fail-closed).
+enum CampaignChannel {
+  WEB
+  MOBILE
+  ALL
+}
+
 /// See CampaignTriggerEvent.status.
 enum CampaignTriggerEventStatus {
   PENDING
@@ -4106,6 +4140,12 @@ model CampaignVersion {
   windowEndAt               DateTime?
   stackPolicy               CampaignStackPolicy
   priority                  Int
+  /// CMP-006 PR-D. The channel this version grants for (`definition.channel`,
+  /// denormalised like every other rule column). Every version written before
+  /// the column is ALL — honestly: no campaign ever discriminated by channel.
+  /// Part of the immutable snapshot: a different channel is a new version,
+  /// and the trigger `CampaignVersion_channel_immutable` refuses an UPDATE.
+  channel                   CampaignChannel           @default(ALL)
   createdById               String
   createdAt                 DateTime                  @default(now())
 
@@ -4211,6 +4251,10 @@ enum CampaignEvaluationOutcome {
   PROMOTION_REVIEW_HELD
   /// CMP-006 PR-C: a missing precondition, or a person's INELIGIBLE decision.
   PROMOTION_INELIGIBLE
+  /// CMP-006 PR-D: the version targets WEB or MOBILE and the event's source
+  /// channel is another one (or UNKNOWN). `reasonCode` is `SOURCE_<channel>`.
+  /// Not an error and never retried: the event is simply not this version's.
+  CHANNEL_MISMATCH
 }
 
 /// One business event the engine has seen, independent of any campaign.
@@ -4254,6 +4298,16 @@ model CampaignTriggerEvent {
   /// A closed code (ENGINE_ERROR, CONCURRENT_MODIFICATION, WORKER_ERROR) — never a message, never PII.
   lastErrorCode       String?
   lastErrorAt         DateTime?
+  /// CMP-006 PR-D. The channel of the business act that raised this event,
+  /// derived on the server from its canonical source — the purchase's
+  /// `sourceChannel`, the profile's `applicationSourceChannel`, or the
+  /// channel of the proof that completed an eligibility set. Written on
+  /// INSERT only and never again (trigger
+  /// `CampaignTriggerEvent_source_channel_immutable`): a re-raise of the same
+  /// key with another channel changes nothing, and the channel is not part of
+  /// `triggerEventKey`, so it can never mint a second event or grant. Rows
+  /// written before the column are UNKNOWN.
+  sourceChannel       SourceChannel              @default(UNKNOWN)
 
   provider          ProviderProfile             @relation(fields: [providerId], references: [id], onDelete: Restrict)
   purchase          PackagePurchase?            @relation(fields: [purchaseId], references: [id], onDelete: Restrict)

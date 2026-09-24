@@ -1,0 +1,66 @@
+CMP-006 PR-D Migration L dry-run — 2026-09-24T11:16:31Z
+Izole DB: cmp006_prd_migration_dryrun (gercek taktic DB'sine, .env'e ve container'lara dokunulmadi)
+
+== 1. main@6ac194dd migration'lari uygulanir ==
+Applying migration `20260923180000_add_business_registration_and_promotion_eligibility`
+All migrations have been successfully applied.
+77 migration uygulandi
+
+== 2. Migration oncesi eski kayitlar: saglayici, satin alma, kampanya surumu (channel alani yok), olay ==
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+definition md5 (oncesi): 5bb25b5ebbd73ed9ca193f34bf4406fb
+triggerEventKey (oncesi): PACKAGE_PAYMENT_SUCCEEDED:pp-legacy
+
+== 3. Migration L uygulanir ==
+78 migrations found in prisma/migrations
+Applying migration `20260924150000_add_campaign_channel`
+All migrations have been successfully applied.
+
+== 4. migrate diff (drift kontrolu; bos olmali) ==
+
+-- This is an empty migration.
+
+
+== 5. Uygulanan migration sayisi ==
+78
+
+== 6. DML yok; eski satirlar dogru varsayilan degeri aldi (surum ALL, digerleri UNKNOWN) ==
+CampaignVersion v-legacy channel=ALL
+CampaignTriggerEvent e-legacy sourceChannel=UNKNOWN status=EVALUATED
+PackagePurchase pp-legacy sourceChannel=UNKNOWN
+ProviderProfile p-legacy applicationSourceChannel=UNKNOWN
+definition md5 (sonrasi): 5bb25b5ebbd73ed9ca193f34bf4406fb  (degismemeli; JSON'a channel yazilmadi)
+triggerEventKey (sonrasi): PACKAGE_PAYMENT_SUCCEEDED:pp-legacy  (kanal anahtara girmedi)
+
+== 7. Yeni enum ve degerler ==
+CampaignChannel: WEB,MOBILE,ALL
+CampaignEvaluationOutcome son deger: CHANNEL_MISMATCH
+
+== 8. Kolonlar (NOT NULL + varsayilan) ==
+CampaignTriggerEvent.sourceChannel SourceChannel nullable=NO default='UNKNOWN'::"SourceChannel"
+CampaignVersion.channel CampaignChannel nullable=NO default='ALL'::"CampaignChannel"
+PackagePurchase.sourceChannel SourceChannel nullable=NO default='UNKNOWN'::"SourceChannel"
+ProviderProfile.applicationSourceChannel SourceChannel nullable=NO default='UNKNOWN'::"SourceChannel"
+
+== 9. Degismezlik tetikleyicileri ==
+CampaignTriggerEvent_source_channel_immutable ON "CampaignTriggerEvent"
+CampaignVersion_channel_immutable ON "CampaignVersion"
+PackagePurchase_source_channel_immutable ON "PackagePurchase"
+ProviderProfile_application_source_channel_immutable ON "ProviderProfile"
+
+== 10. Tetikleyici davranisi: kanal degisikligi reddedilir, ayni deger ve diger kolonlar serbest ==
+ERROR:  CampaignVersion.channel is written on insert and never changed
+ERROR:  CampaignTriggerEvent.sourceChannel is written on insert and never changed
+ERROR:  PackagePurchase.sourceChannel is written on insert and never changed
+ERROR:  ProviderProfile.applicationSourceChannel is written on insert and never changed
+ayni deger: UPDATE 1
+diger kolon: UPDATE 1
+
+== 11. Temizlik ==
+cmp006_prd_migration_dryrun silindi

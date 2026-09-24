@@ -104,7 +104,8 @@ describe('accepted definitions', () => {
     const result = validateCampaignDefinition(K2_PACKAGE_BONUS);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.definition).toEqual(K2_PACKAGE_BONUS);
+    // CMP-006 PR-D: an absent channel normalises to ALL, explicitly.
+    expect(result.definition).toEqual({ ...K2_PACKAGE_BONUS, channel: 'ALL' });
     expect(result.summary).toEqual({
       trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
       factSetKey: null,
@@ -112,6 +113,7 @@ describe('accepted definitions', () => {
       conditionCount: 4,
       benefitCredits: 10,
       benefitExpiresInDays: 30,
+      channel: 'ALL',
     });
   });
 
@@ -579,6 +581,7 @@ describe('the error catalogue', () => {
       { ...K2_PACKAGE_BONUS, window: { startAt: 'x' } },
       { ...K2_PACKAGE_BONUS, stackPolicy: 'X' },
       { ...K2_PACKAGE_BONUS, priority: 0 },
+      { ...K2_PACKAGE_BONUS, channel: 'web' },
     ];
     for (const input of cases) {
       const result = validateCampaignDefinition(input);
@@ -594,6 +597,32 @@ describe('the error catalogue', () => {
 
     const missing = CAMPAIGN_RULE_ERROR_CODES.filter((code) => !produced.has(code));
     expect(missing).toEqual([]);
-    expect(CAMPAIGN_RULE_ERROR_CODES).toHaveLength(24);
+    expect(CAMPAIGN_RULE_ERROR_CODES).toHaveLength(25);
   });
+});
+
+describe('channel (CMP-006 PR-D)', () => {
+  it('normalises an absent channel to ALL — what every definition before the field meant', () => {
+    const result = validateCampaignDefinition(K2_PACKAGE_BONUS);
+    expect(result.ok && result.definition.channel).toBe('ALL');
+    expect(result.ok && result.summary.channel).toBe('ALL');
+  });
+
+  it.each(['WEB', 'MOBILE', 'ALL'])('accepts %s and keeps it', (channel) => {
+    const result = validateCampaignDefinition({ ...K2_PACKAGE_BONUS, channel });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.definition.channel).toBe(channel);
+    expect(result.summary.channel).toBe(channel);
+  });
+
+  it.each([['web'], ['Mobile'], ['UNKNOWN'], [''], [null], [1], [['WEB']], [{ value: 'WEB' }]])(
+    'refuses %j with CHANNEL_INVALID at `channel`, coercing nothing',
+    (channel) => {
+      const result = validateCampaignDefinition({ ...K2_PACKAGE_BONUS, channel });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.errors).toEqual([{ path: 'channel', code: 'CHANNEL_INVALID', message: expect.any(String) }]);
+    },
+  );
 });

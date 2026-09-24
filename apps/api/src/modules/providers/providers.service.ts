@@ -26,6 +26,7 @@ import {
   ServiceCategoryStatus,
   ServiceRequestStatus,
   UserRole,
+  SourceChannel,
 } from '@prisma/client';
 import {
   isValidProviderEmail,
@@ -228,12 +229,18 @@ export class ProvidersService implements OnModuleInit {
    */
   onModuleInit() {
     this.campaignHooks.registerFactWriter('PROVIDER_APPROVED', { module: 'providers', role: UserRole.PROVIDER });
+    // CMP-006 PR-D: the approval's channel is the application's, and the two
+    // routes that write an application here (POST /providers and the
+    // invitation application) are the web application's — they stamp WEB.
+    this.campaignHooks.registerChannelSource('PROVIDER_APPROVED', SourceChannel.WEB, { module: 'providers' });
   }
 
   async createProvider(
     dto: CreateProviderDto,
     user: AuthUser | null = null,
     meta: ApplicationRequestMeta = {},
+    /** CMP-006 PR-D: the route's channel, never the request's; UNKNOWN when a caller cannot vouch. */
+    sourceChannel: SourceChannel = SourceChannel.UNKNOWN,
   ) {
     const payload = await this.prepareApplication(dto, user);
 
@@ -243,7 +250,9 @@ export class ProvidersService implements OnModuleInit {
       // One transaction since CMP-006 PR-C: the profile and its business
       // registration are one application, and a profile without the
       // registration its applicant declared would read as a legacy record.
-      provider = await this.prisma.$transaction((tx) => this.createApplicationRecord(tx, payload, user));
+      provider = await this.prisma.$transaction((tx) =>
+        this.createApplicationRecord(tx, payload, user, sourceChannel),
+      );
     } catch (error) {
       throw translateApplicationWriteError(error);
     }
@@ -327,14 +336,23 @@ export class ProvidersService implements OnModuleInit {
    * {@link ProvidersService.prepareApplication} and is already in the payload —
    * so there is no second place, and no caller-supplied list, that could put an
    * application against a category the checks above never saw.
+   *
+   * `sourceChannel` (CMP-006 PR-D) is the channel of the route that received
+   * the application. It is recorded only when the applicant is the business
+   * itself — a guest or its own provider account; an application an operator
+   * files on a business's behalf did not arrive through the business's
+   * channel, and is UNKNOWN whatever route carried it.
    */
   async createApplicationRecord(
     client: Prisma.TransactionClient,
     payload: NormalizedProviderPayload,
     user: AuthUser | null,
+    sourceChannel: SourceChannel = SourceChannel.UNKNOWN,
   ) {
+    const applicantIsBusiness = user === null || user.role === UserRole.PROVIDER;
     const provider = await client.providerProfile.create({
       data: {
+        applicationSourceChannel: applicantIsBusiness ? sourceChannel : SourceChannel.UNKNOWN,
         userId: user?.role === UserRole.PROVIDER ? user.id : undefined,
         businessName: payload.businessName,
         contactName: payload.contactName,
@@ -1954,7 +1972,11 @@ function toProviderRecord<
     businessRegistration: { type: BusinessRegistrationType; numberMasked: string | null; updatedAt: Date } | null;
   },
 >(provider: T) {
-  const { taxNumber, businessRegistration, ...rest } = provider;
+  // CMP-006 PR-D: the application channel exists for the campaign engine; no
+  // provider record carries it.
+  const { taxNumber, businessRegistration, applicationSourceChannel: _channel, ...rest } = provider as T & {
+    applicationSourceChannel?: unknown;
+  };
   return {
     ...rest,
     taxNumberMasked: maskLegacyTaxNumber(taxNumber),
