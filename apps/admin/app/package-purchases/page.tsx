@@ -20,7 +20,12 @@ type AdminPackagePurchasesPageProps = {
 };
 
 export default async function AdminPackagePurchasesPage({ searchParams }: AdminPackagePurchasesPageProps) {
-  await requireAdmin('PACKAGE_PURCHASES_READ');
+  const { can } = await requireAdmin('PACKAGE_PURCHASES_READ');
+  // The payment provider card is its own read (PAYMENTS_CONFIG_READ). A role
+  // that may see purchases but not the provider setup gets the list without
+  // the card, not a redirect to /yetkisiz for the whole screen.
+  const canReadPaymentConfig = can('PAYMENTS_CONFIG_READ');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const params = (await searchParams) ?? {};
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
@@ -30,7 +35,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
     apiFetch<PackagePurchase[]>(
       `/package-purchases${query.toString() ? `?${query.toString()}` : ''}`,
     ),
-    apiFetch<AdminPaymentConfig>('/payments/config'),
+    canReadPaymentConfig ? apiFetch<AdminPaymentConfig>('/payments/config') : Promise.resolve(null),
   ]);
 
   const manualReviewCount = purchases.filter((purchase) => purchase.manualReviewAt).length;
@@ -42,6 +47,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
         <p className="page-subtitle">Hizmet verenlerin paket satın alma kayıtları.</p>
       </header>
 
+      {paymentConfig ? (
       <section className="card" data-testid="payment-provider-config">
         <h2>Ödeme sağlayıcı</h2>
         <p className="muted" style={{ marginTop: 0 }}>
@@ -90,6 +96,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
           </dd>
         </dl>
       </section>
+      ) : null}
 
       {manualReviewCount > 0 ? (
         <div className="notice notice-warn" style={{ marginBottom: 18 }} data-testid="manual-review-notice">
@@ -150,9 +157,11 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
                         <Link className="btn btn-secondary btn-sm" href={`/package-purchases/${purchase.id}`}>
                           Detay
                         </Link>
-                        <Link className="btn btn-ghost btn-sm" href={`/providers/${purchase.providerId}`}>
-                          HV
-                        </Link>
+                        {canOpenProvider ? (
+                          <Link className="btn btn-ghost btn-sm" href={`/providers/${purchase.providerId}`}>
+                            HV
+                          </Link>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

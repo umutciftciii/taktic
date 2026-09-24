@@ -18,7 +18,8 @@ type PageProps = { searchParams: Promise<{ filter?: string }> };
  * worker; it waits here until someone decides it, once, with a reason.
  */
 export default async function PromotionEligibilityPage({ searchParams }: PageProps) {
-  await requireAdmin('PROMOTION_ELIGIBILITY_REVIEW');
+  const { can } = await requireAdmin('PROMOTION_ELIGIBILITY_REVIEW');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const filter = (await searchParams).filter === 'decided' ? 'decided' : 'open';
   const { items } = await apiFetch<{ items: PromotionEligibilityHoldView[] }>(
     `/admin/promotion-eligibility/holds?filter=${filter}`,
@@ -66,9 +67,13 @@ export default async function PromotionEligibilityPage({ searchParams }: PagePro
                 {items.map((item) => (
                   <tr key={item.eventId} data-testid="eligibility-row" data-event={item.eventId}>
                     <td>
-                      <Link className="cell-link" href={`/providers/${item.provider.id}`}>
-                        {item.provider.businessName}
-                      </Link>
+                      {canOpenProvider ? (
+                        <Link className="cell-link" href={`/providers/${item.provider.id}`}>
+                          {item.provider.businessName}
+                        </Link>
+                      ) : (
+                        item.provider.businessName
+                      )}
                     </td>
                     <td>{ELIGIBILITY_TRIGGER_LABELS[item.trigger] ?? item.trigger}</td>
                     <td>

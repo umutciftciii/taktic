@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, type SupportTicketDetail } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 /**
  * The two things an operator may do to a ticket: answer it, and move it.
@@ -79,7 +80,7 @@ async function run(call: () => Promise<unknown>): Promise<string | null> {
     await call();
     return null;
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     return extractApiMessage(error);
   }
 }
@@ -108,10 +109,4 @@ function extractApiMessage(error: unknown): string {
     /* fall through */
   }
   return raw || 'Beklenmeyen hata.';
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }

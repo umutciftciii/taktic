@@ -11,13 +11,27 @@ import { formatDateTime, type CampaignEvaluationQueue } from '../../lib/api';
  * off, activation and resumption are refused by the API and the screen says
  * so before the operator tries.
  */
-export function CampaignEngineNotice({ engineEnabled, queue }: { engineEnabled: boolean; queue?: CampaignEvaluationQueue }) {
+export function CampaignEngineNotice({
+  engineEnabled,
+  queue,
+  canOpenOperationsSettings,
+}: {
+  engineEnabled: boolean;
+  queue?: CampaignEvaluationQueue;
+  /** OPERATIONS_SETTINGS_READ — without it the screen's name is plain text, not a link to /yetkisiz. */
+  canOpenOperationsSettings: boolean;
+}) {
+  const settingsLink = canOpenOperationsSettings ? (
+    <Link href="/operations-settings#kampanya-motoru">Operasyon Ayarları</Link>
+  ) : (
+    'Operasyon Ayarları'
+  );
   if (engineEnabled) {
     return (
       <div className="notice notice-info" role="status" data-testid="campaign-engine-state" data-engine="on">
         <strong>Kampanya motoru açık.</strong> Gerçek olaylar (onay, kanıt, ödeme) bekleyen olay olarak kaydedilir ve
         değerlendirme işçisi tarafından ayrı bir işlemde değerlendirilir; hak ediş promosyon kredisi olarak yazılır. Motor{' '}
-        <Link href="/operations-settings#kampanya-motoru">Operasyon Ayarları</Link> ekranından kapatılır.
+        {settingsLink} ekranından kapatılır.
         {queue ? <QueueLine queue={queue} /> : null}
       </div>
     );
@@ -26,7 +40,7 @@ export function CampaignEngineNotice({ engineEnabled, queue }: { engineEnabled: 
     <div className="notice notice-warning" role="status" data-testid="campaign-engine-state" data-engine="off">
       <strong>Kampanya motoru kapalı — etkinleştirme yapılamaz.</strong> Kampanyalar tanımlanır ve saklanır; hiçbir olay
       kaydedilmez ya da değerlendirilmez, hiçbir hizmet verene kredi verilmez. Etkinleştir ve devam ettir motor açılana kadar
-      reddedilir; motor yalnız <Link href="/operations-settings#kampanya-motoru">Operasyon Ayarları</Link> ekranından, açık
+      reddedilir; motor yalnız {settingsLink} ekranından, açık
       onayla açılır.
       {queue && queue.pending + queue.processing + queue.retryWait > 0 ? <QueueLine queue={queue} /> : null}
     </div>

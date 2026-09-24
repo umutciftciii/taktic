@@ -123,7 +123,8 @@ function lifecycleNotes(request: ServiceRequest): string[] {
 }
 
 export default async function AdminRequestsPage({ searchParams }: AdminRequestsPageProps) {
-  await requireAdmin('REQUESTS_READ');
+  const { can } = await requireAdmin('REQUESTS_READ');
+  const canReadOffers = can('OFFERS_READ');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);
@@ -430,12 +431,14 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
                           <Link className="btn btn-secondary btn-sm" href={`/requests/${request.id}`}>
                             Detay
                           </Link>
-                          <Link
-                            className="btn btn-ghost btn-sm"
-                            href={`/offers?requestId=${request.id}`}
-                          >
-                            Teklifler
-                          </Link>
+                          {canReadOffers ? (
+                            <Link
+                              className="btn btn-ghost btn-sm"
+                              href={`/offers?requestId=${request.id}`}
+                            >
+                              Teklifler
+                            </Link>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

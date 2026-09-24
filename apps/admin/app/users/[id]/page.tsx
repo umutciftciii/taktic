@@ -13,14 +13,20 @@ import {
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
-import { createAdminInviteLinkAction, updateUserStatusAction } from '../actions';
+import { updateUserStatusAction } from '../actions';
+import { AdminInviteLinkForm } from './admin-invite-link-form';
 import { AdminRoleAssignmentCard } from './role-assignment-card';
 
 type SearchParams = {
   statusError?: string;
-  inviteUrl?: string;
-  inviteExpiresAt?: string;
-  inviteError?: string;
+  /** Written by the role assign/revoke actions (app/roles/actions.ts). */
+  ok?: string;
+  error?: string;
+};
+
+const ROLE_OK_MESSAGES: Record<string, string> = {
+  'role-assigned': 'Rol atandı.',
+  'role-revoked': 'Rol geri alındı.',
 };
 
 type AdminUserDetailPageProps = {
@@ -42,7 +48,12 @@ export default async function AdminUserDetailPage({
   params,
   searchParams,
 }: AdminUserDetailPageProps) {
-  const { user: actor, isSuperAdmin: isSuperAdminViewer } = await requireAdmin('ADMIN_USERS_READ');
+  const {
+    user: actor,
+    isSuperAdmin: isSuperAdminViewer,
+    can,
+  } = await requireAdmin('ADMIN_USERS_READ');
+  const canChangeStatus = can('ADMIN_USERS_STATUS');
   const { id } = await params;
   const search = (await searchParams) ?? {};
 
@@ -175,12 +186,11 @@ export default async function AdminUserDetailPage({
           </details>
         </SectionCard>
 
-        <AdminInviteSection
-          user={user}
-          inviteUrl={search.inviteUrl}
-          inviteExpiresAt={search.inviteExpiresAt}
-          inviteError={search.inviteError}
-        />
+        {/*
+          Minting an invite link is root-only (`POST /users/:id/invite-link`,
+          RG-7 §12.1). The card is rendered for a super admin viewer only.
+        */}
+        {isSuperAdminViewer ? <AdminInviteSection user={user} /> : null}
 
         <SectionCard title="Güvenlik & Yönetim" className="card-wide">
           <dl className="meta-row">
@@ -194,7 +204,7 @@ export default async function AdminUserDetailPage({
                 ) : (
                   <span className="badge badge-bad">Pasif</span>
                 )}
-                {isSelf && user.isActive ? null : (
+                {!canChangeStatus || (isSelf && user.isActive) ? null : (
                   <form action={updateUserStatusAction}>
                     <input type="hidden" name="userId" value={user.id} />
                     <input
@@ -250,6 +260,17 @@ export default async function AdminUserDetailPage({
           </p>
         </SectionCard>
 
+        {search.ok && ROLE_OK_MESSAGES[search.ok] ? (
+          <div className="notice notice-success card-wide" role="status" data-testid="role-assignment-ok">
+            {ROLE_OK_MESSAGES[search.ok]}
+          </div>
+        ) : null}
+        {search.error ? (
+          <div className="notice notice-error card-wide" data-testid="role-assignment-error">
+            {search.error}
+          </div>
+        ) : null}
+
         <AdminRoleAssignmentCard
           isSuperAdminViewer={isSuperAdminViewer}
           roles={roleState}
@@ -260,18 +281,12 @@ export default async function AdminUserDetailPage({
   );
 }
 
-function AdminInviteSection({
-  user,
-  inviteUrl,
-  inviteExpiresAt,
-  inviteError,
-}: {
-  user: AdminUserDetailResponse['user'];
-  inviteUrl?: string;
-  inviteExpiresAt?: string;
-  inviteError?: string;
-}) {
-  if (user.role !== 'SUPER_ADMIN') {
+function AdminInviteSection({ user }: { user: AdminUserDetailResponse['user'] }) {
+  // Both staff kinds: the API regenerates a link for an ADMIN (every account
+  // `POST /users` has made since PR-0) as well as for a SUPER_ADMIN. The card
+  // used to render for SUPER_ADMIN targets only, so an ADMIN whose first link
+  // expired had no way to get a second one from this screen.
+  if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
     return null;
   }
 
@@ -305,58 +320,8 @@ function AdminInviteSection({
           ve manuel olarak paylaşabilirsiniz. Yeni bir bağlantı oluşturulduğunda önceki kullanılmamış
           bağlantılar geçersiz olur.
         </p>
-        <form action={createAdminInviteLinkAction}>
-          <input type="hidden" name="userId" value={user.id} />
-          <button type="submit" className="btn btn-primary btn-sm">
-            Davet linki oluştur
-          </button>
-        </form>
+        <AdminInviteLinkForm userId={user.id} />
       </div>
-
-      {inviteError ? (
-        <div
-          role="alert"
-          style={{
-            marginTop: 12,
-            padding: 10,
-            borderRadius: 8,
-            background: 'rgba(220, 38, 38, 0.08)',
-            border: '1px solid rgba(220, 38, 38, 0.25)',
-            color: 'rgb(153, 27, 27)',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          {inviteError}
-        </div>
-      ) : null}
-
-      {inviteUrl ? (
-        <div style={{ marginTop: 12 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
-            Davet bağlantısı oluşturuldu. Bu bağlantı 72 saat geçerlidir.
-          </div>
-          <code
-            style={{
-              display: 'block',
-              padding: 10,
-              background: 'var(--surface-soft, #f3f4f6)',
-              border: '1px solid var(--border, #e5e7eb)',
-              borderRadius: 8,
-              fontSize: 12,
-              lineHeight: 1.5,
-              wordBreak: 'break-all',
-            }}
-          >
-            {inviteUrl}
-          </code>
-          {inviteExpiresAt ? (
-            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-              Son geçerlilik: {formatDateTime(inviteExpiresAt)}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </SectionCard>
   );
 }

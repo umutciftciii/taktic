@@ -112,7 +112,10 @@ function buildApiQuery(params: {
 export default async function AdminManualAdjustmentsPage({
   searchParams,
 }: AdminManualAdjustmentsPageProps) {
-  await requireAdmin('FINANCE_READ');
+  // The list is `/finance/credit-ledger` filtered to the two manual types, so
+  // it needs the permission that route needs. FINANCE_READ used to open the
+  // page and then the ledger read sent the session to /yetkisiz (F2).
+  const { can } = await requireAdmin('FINANCE_LEDGER_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
@@ -150,9 +153,11 @@ export default async function AdminManualAdjustmentsPage({
             <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
               Tüm Kredi Hareketleri
             </Link>
-            <Link className="btn btn-ghost btn-sm" href="/finance">
-              Finans Dashboard
-            </Link>
+            {can('FINANCE_READ') ? (
+              <Link className="btn btn-ghost btn-sm" href="/finance">
+                Finans Dashboard
+              </Link>
+            ) : null}
           </>
         }
       />
@@ -166,7 +171,8 @@ export default async function AdminManualAdjustmentsPage({
           </li>
           <li>
             Yeni işlem yapmak için ilgili hizmet verenin{' '}
-            <Link href="/providers">kredi ekranına</Link> gidilmelidir.
+            {can('PROVIDERS_READ') ? <Link href="/providers">kredi ekranına</Link> : 'kredi ekranına'}{' '}
+            gidilmelidir.
           </li>
         </ul>
       </SectionCard>

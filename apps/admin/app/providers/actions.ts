@@ -10,6 +10,7 @@ import {
   ProviderProfile,
   ProviderStatus,
 } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 export async function updateProviderStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
@@ -48,6 +49,7 @@ export async function addProviderServiceCategoryAction(formData: FormData) {
       { method: 'POST', body: JSON.stringify({ categoryId }) },
     );
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(providerCategoryUrl(id, query, categoryFailureCode(error)));
   }
 
@@ -70,6 +72,7 @@ export async function removeProviderServiceCategoryAction(formData: FormData) {
       { method: 'DELETE' },
     );
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(providerCategoryUrl(id, query, categoryFailureCode(error)));
   }
 
@@ -122,6 +125,7 @@ export async function sendProviderClaimInviteAction(formData: FormData) {
       body: JSON.stringify({}),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(`/providers/${id}?claimInvite=${inviteFailureCode(error)}`);
   }
 

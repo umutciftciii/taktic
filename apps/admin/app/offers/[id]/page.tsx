@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   formatDate,
   formatDateTime,
   formatPrice,
@@ -96,13 +97,18 @@ type OfferDetailPageProps = {
 };
 
 export default async function OfferDetailPage({ params, searchParams }: OfferDetailPageProps) {
-  await requireAdmin('OFFERS_READ');
+  const { can } = await requireAdmin('OFFERS_READ');
+  const canReadRequests = can('REQUESTS_READ');
+  const canReadProviderDetail = can('PROVIDERS_READ_DETAIL');
+  const canReadProviderCredits = can('FINANCE_LEDGER_READ');
+  const canUpdateStatus = can('OFFERS_STATUS');
+  const canManualRefund = can('OFFER_REFUND_MANUAL');
   const { id } = await params;
   const search = (await searchParams) ?? {};
   const justRefunded = search.refunded === '1';
   const justStatusSaved = search.statusSaved === '1';
 
-  const offer = await apiFetch<Offer>(`/offers/${id}`);
+  const offer = await fetchOrNotFound(() => apiFetch<Offer>(`/offers/${id}`));
 
   const timeline = buildTimeline(offer);
   const customerName = offer.request.customerName;
@@ -117,7 +123,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
     <main>
       <PageHeader
         breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
+          { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
           { label: 'Teklifler', href: '/offers' },
           { label: 'Detay' },
         ]}
@@ -133,12 +139,16 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
         }
         actions={
           <>
-            <Link className="btn btn-secondary btn-sm" href={`/requests/${offer.request.id}`}>
-              Talebi aç
-            </Link>
-            <Link className="btn btn-secondary btn-sm" href={`/providers/${offer.provider.id}`}>
-              Hizmet vereni aç
-            </Link>
+            {canReadRequests ? (
+              <Link className="btn btn-secondary btn-sm" href={`/requests/${offer.request.id}`}>
+                Talebi aç
+              </Link>
+            ) : null}
+            {canReadProviderDetail ? (
+              <Link className="btn btn-secondary btn-sm" href={`/providers/${offer.provider.id}`}>
+                Hizmet vereni aç
+              </Link>
+            ) : null}
             <Link
               className="btn btn-ghost btn-sm"
               href={`/offers?requestId=${offer.request.id}`}
@@ -303,14 +313,16 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
               <dt>Gönderim sonrası saat</dt>
               <dd>{offer.refundEligibility.hoursSinceSubmitted ?? '-'}</dd>
             </dl>
-            <div className="inline-actions" style={{ marginTop: 12 }}>
-              <Link
-                className="btn btn-ghost btn-sm"
-                href={`/providers/${offer.provider.id}/credits`}
-              >
-                Hizmet veren kredi geçmişi
-              </Link>
-            </div>
+            {canReadProviderCredits ? (
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <Link
+                  className="btn btn-ghost btn-sm"
+                  href={`/providers/${offer.provider.id}/credits`}
+                >
+                  Hizmet veren kredi geçmişi
+                </Link>
+              </div>
+            ) : null}
           </SectionCard>
         </div>
 
@@ -353,12 +365,14 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
               </dd>
             </dl>
             <div className="inline-actions" style={{ marginTop: 12 }}>
-              <Link
-                className="btn btn-ghost btn-sm"
-                href={`/providers/${offer.provider.id}/credits`}
-              >
-                Kredi geçmişi
-              </Link>
+              {canReadProviderCredits ? (
+                <Link
+                  className="btn btn-ghost btn-sm"
+                  href={`/providers/${offer.provider.id}/credits`}
+                >
+                  Kredi geçmişi
+                </Link>
+              ) : null}
               <Link
                 className="btn btn-ghost btn-sm"
                 href={`/offers?providerId=${offer.provider.id}`}
@@ -372,9 +386,13 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
             <dl className="meta-row">
               <dt>Talep No</dt>
               <dd>
-                <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+                {canReadRequests ? (
+                  <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+                    <code>{requestRef}</code>
+                  </Link>
+                ) : (
                   <code>{requestRef}</code>
-                </Link>
+                )}
               </dd>
               <dt>Kategori</dt>
               <dd>{offer.request.category.name}</dd>
@@ -422,42 +440,46 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                 </>
               ) : null}
             </dl>
-            <div className="inline-actions" style={{ marginTop: 12 }}>
-              <Link className="btn btn-ghost btn-sm" href={`/requests/${offer.request.id}`}>
-                Talep detayı
-              </Link>
-            </div>
+            {canReadRequests ? (
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <Link className="btn btn-ghost btn-sm" href={`/requests/${offer.request.id}`}>
+                  Talep detayı
+                </Link>
+              </div>
+            ) : null}
           </SectionCard>
 
-          <SectionCard title="Durumu Güncelle">
-            <form action={updateOfferStatusAction} style={{ display: 'grid', gap: 12 }}>
-              <input type="hidden" name="id" value={offer.id} />
-              <label className="form-row">
-                <span>İşlem</span>
-                {/*
-                  Not defaulted to the offer's current status: the list is a set
-                  of actions to take, and several offers are in a state that is
-                  not one of them.
-                */}
-                <select name="status" defaultValue="SHORTLISTED">
-                  {statuses.map((status) => (
-                    <option key={status} value={status}>
-                      {statusLabel(status)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                Bu işlem müşteri panelindeki işlemle aynı akışı çalıştırır: kabul, talebi
-                eşleştirir ve diğer teklifleri kapatır; ilgili bildirim e-postaları gönderilir.
-              </p>
-              <div>
-                <button className="btn btn-primary btn-block" type="submit">
-                  Durumu Kaydet
-                </button>
-              </div>
-            </form>
-          </SectionCard>
+          {canUpdateStatus ? (
+            <SectionCard title="Durumu Güncelle">
+              <form action={updateOfferStatusAction} style={{ display: 'grid', gap: 12 }}>
+                <input type="hidden" name="id" value={offer.id} />
+                <label className="form-row">
+                  <span>İşlem</span>
+                  {/*
+                    Not defaulted to the offer's current status: the list is a set
+                    of actions to take, and several offers are in a state that is
+                    not one of them.
+                  */}
+                  <select name="status" defaultValue="SHORTLISTED">
+                    {statuses.map((status) => (
+                      <option key={status} value={status}>
+                        {statusLabel(status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Bu işlem müşteri panelindeki işlemle aynı akışı çalıştırır: kabul, talebi
+                  eşleştirir ve diğer teklifleri kapatır; ilgili bildirim e-postaları gönderilir.
+                </p>
+                <div>
+                  <button className="btn btn-primary btn-block" type="submit">
+                    Durumu Kaydet
+                  </button>
+                </div>
+              </form>
+            </SectionCard>
+          ) : null}
 
           {/*
             Two things, kept apart on purpose.
@@ -516,7 +538,9 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                   </div>
                 )}
 
-                {offer.creditSpentTransactionId ? (
+                {!offer.creditSpentTransactionId ? (
+                  <div className="notice-warning">Bu teklifin kredi harcama işlemi yok.</div>
+                ) : canManualRefund ? (
                   <form action={refundOfferCreditAction} style={{ display: 'grid', gap: 12 }}>
                     <input type="hidden" name="id" value={offer.id} />
                     <p className="muted" style={{ margin: 0, fontSize: 13 }}>
@@ -544,9 +568,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                       </button>
                     </div>
                   </form>
-                ) : (
-                  <div className="notice-warning">Bu teklifin kredi harcama işlemi yok.</div>
-                )}
+                ) : null}
               </>
             )}
           </SectionCard>

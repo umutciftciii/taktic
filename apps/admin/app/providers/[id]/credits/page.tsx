@@ -4,8 +4,8 @@ import {
   apiFetch,
   formatDateTime,
   formatPrice,
-  ProviderCredits,
-  ProviderProfile,
+  AdminProviderCredits,
+  fetchOrNotFound,
   requireAdmin,
   statusBadgeClass,
   statusLabel,
@@ -35,14 +35,26 @@ type AdminProviderCreditsPageProps = {
 };
 
 export default async function AdminProviderCreditsPage({ params }: AdminProviderCreditsPageProps) {
-  await requireAdmin('FINANCE_LEDGER_READ');
+  const { can } = await requireAdmin('FINANCE_LEDGER_READ');
   const { id } = await params;
+  // The provider-owner routes (`/providers/:id/credits`, `…/entitlements`)
+  // admit the owner or a SUPER_ADMIN and nobody else. This screen reads the
+  // staff routes instead: credits on FINANCE_LEDGER_READ (this page's gate),
+  // periods on PACKAGE_PURCHASES_READ. The credits answer carries the
+  // provider's label, so the header needs no PROVIDERS_READ_DETAIL.
+  const canReadPeriods = can('PACKAGE_PURCHASES_READ');
+  const canGrant = can('CREDITS_GRANT');
+  const canDeduct = can('CREDITS_DEDUCT');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
+  const canOpenOffers = can('OFFERS_READ');
 
-  const [credits, provider, entitlements] = await Promise.all([
-    apiFetch<ProviderCredits>(`/providers/${id}/credits`),
-    apiFetch<ProviderProfile>(`/providers/${id}/admin-detail`),
-    apiFetch<AdminProviderEntitlements>(`/providers/${id}/entitlements`),
+  const [credits, entitlements] = await Promise.all([
+    fetchOrNotFound(() => apiFetch<AdminProviderCredits>(`/admin/providers/${id}/credits`)),
+    canReadPeriods
+      ? apiFetch<AdminProviderEntitlements>(`/admin/providers/${id}/entitlements`)
+      : Promise.resolve(null),
   ]);
+  const provider = credits.provider;
 
   const transactions = credits.transactions;
   const totalGrant = transactions
@@ -58,9 +70,9 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
     <main className="credit-ops-page">
       <PageHeader
         breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Hizmet Verenler', href: '/providers' },
-          { label: provider.businessName, href: `/providers/${id}` },
+          { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
+          { label: 'Hizmet Verenler', href: can('PROVIDERS_READ') ? '/providers' : undefined },
+          { label: provider.businessName, href: canOpenProvider ? `/providers/${id}` : undefined },
           { label: 'Krediler' },
         ]}
         title="Hizmet Veren Kredileri"
@@ -79,12 +91,16 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
         }
         actions={
           <>
-            <Link className="btn btn-secondary btn-sm" href={`/providers/${id}`}>
-              Hizmet veren detayı
-            </Link>
-            <Link className="btn btn-ghost btn-sm" href={`/offers?providerId=${id}`}>
-              Teklifler
-            </Link>
+            {canOpenProvider ? (
+              <Link className="btn btn-secondary btn-sm" href={`/providers/${id}`}>
+                Hizmet veren detayı
+              </Link>
+            ) : null}
+            {canOpenOffers ? (
+              <Link className="btn btn-ghost btn-sm" href={`/offers?providerId=${id}`}>
+                Teklifler
+              </Link>
+            ) : null}
           </>
         }
       />
@@ -100,6 +116,7 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
         <StatCard label="Manuel düşme" value={totalDeduct} hint={listedHint} />
       </section>
 
+      {entitlements ? (
       <SectionCard
         title="Dönemsel paketler"
         subtitle={
@@ -207,6 +224,7 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
           </div>
         )}
       </SectionCard>
+      ) : null}
 
       <div className="credit-ops-grid">
         <SectionCard
@@ -219,17 +237,27 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
         </SectionCard>
 
         <div className="credit-ops-side">
-          <SectionCard
-            title="Manuel kredi işlemi"
-            subtitle="Ekle veya düş — tek formdan"
-            className="credit-operation-card"
-          >
-            <CreditOperationForm
-              providerId={id}
-              currentBalance={credits.balance}
-              action={submitCreditOperationAction}
-            />
-          </SectionCard>
+          {canGrant || canDeduct ? (
+            <SectionCard
+              title="Manuel kredi işlemi"
+              subtitle={
+                canGrant && canDeduct
+                  ? 'Ekle veya düş — tek formdan'
+                  : canGrant
+                    ? 'Kredi ekle'
+                    : 'Kredi düş'
+              }
+              className="credit-operation-card"
+            >
+              <CreditOperationForm
+                providerId={id}
+                currentBalance={credits.balance}
+                action={submitCreditOperationAction}
+                canGrant={canGrant}
+                canDeduct={canDeduct}
+              />
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Denetim notu" className="credit-ops-audit">
             <ul className="credit-ops-audit-list">

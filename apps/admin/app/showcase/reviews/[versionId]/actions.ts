@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../../../lib/api';
+import { rethrowNextControlFlow } from '../../../../lib/next-control-flow';
 
 /**
  * The two things an operator may do to a version: approve it, or refuse it with
@@ -35,7 +36,7 @@ export async function approveShowcaseVersionAction(formData: FormData) {
     );
     isFirstPublication = before.card.liveVersion === null;
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     // Falls through with isFirstPublication left false; the approve call below
     // fails the same way and its own error is what reaches the operator.
   }
@@ -111,7 +112,7 @@ async function run(call: () => Promise<unknown>): Promise<string | null> {
     await call();
     return null;
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     return extractApiMessage(error);
   }
 }
@@ -138,10 +139,4 @@ function extractApiMessage(error: unknown): string {
     /* fall through */
   }
   return error.message || 'Beklenmeyen hata.';
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }

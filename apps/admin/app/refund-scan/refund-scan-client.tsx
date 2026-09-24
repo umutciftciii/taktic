@@ -9,9 +9,11 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 type RefundScanClientProps = {
   initialScan: RefundScanResponse;
   initialLimit: number;
+  /** OFFER_REFUND_EXECUTE, decided on the server; the API refuses regardless. */
+  canExecute: boolean;
 };
 
-export function RefundScanClient({ initialScan, initialLimit }: RefundScanClientProps) {
+export function RefundScanClient({ initialScan, initialLimit, canExecute }: RefundScanClientProps) {
   const [limit, setLimit] = useState(initialLimit);
   const [scan, setScan] = useState(initialScan);
   const [executeResult, setExecuteResult] = useState<RefundScanExecuteResponse | null>(null);
@@ -29,6 +31,7 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
         });
         setScan(await readApiResponse<RefundScanResponse>(response));
       } catch (err) {
+        if (err instanceof NavigatingAway) return;
         setError(err instanceof Error ? err.message : 'Dry-run başarısız');
       }
     });
@@ -48,6 +51,7 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
         setExecuteResult(result);
         refreshDryRun();
       } catch (err) {
+        if (err instanceof NavigatingAway) return;
         setError(err instanceof Error ? err.message : 'Çalıştırma başarısız');
       }
     });
@@ -80,14 +84,16 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
           <button className="btn btn-secondary btn-sm" disabled={isPending} type="button" onClick={refreshDryRun}>
             Dry-run yenile
           </button>
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={isPending || scan.eligibleCount === 0}
-            type="button"
-            onClick={executeScan}
-          >
-            Taramayı çalıştır
-          </button>
+          {canExecute ? (
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={isPending || scan.eligibleCount === 0}
+              type="button"
+              onClick={executeScan}
+            >
+              Taramayı çalıştır
+            </button>
+          ) : null}
         </div>
         {error ? <div className="notice-error" role="alert">{error}</div> : null}
       </section>
@@ -230,7 +236,25 @@ export function RefundScanClient({ initialScan, initialLimit }: RefundScanClient
   );
 }
 
+/**
+ * Thrown after the tab has been sent elsewhere, so the caller shows no error
+ * for a request whose answer was "not this screen".
+ */
+class NavigatingAway extends Error {}
+
 async function readApiResponse<T>(response: Response) {
+  // The same two destinations `apiFetch` uses on the server: no session goes
+  // to the sign-in form, a staff account missing the permission to /yetkisiz.
+  if (response.status === 401) {
+    window.location.assign('/login');
+    throw new NavigatingAway();
+  }
+
+  if (response.status === 403) {
+    window.location.assign('/yetkisiz');
+    throw new NavigatingAway();
+  }
+
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || `API isteği ${response.status} ile başarısız`);

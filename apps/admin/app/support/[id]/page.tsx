@@ -43,7 +43,11 @@ export default async function AdminSupportTicketPage({
   params,
   searchParams,
 }: AdminSupportTicketPageProps) {
-  await requireAdmin('SUPPORT_READ');
+  const { can } = await requireAdmin('SUPPORT_READ');
+  const canWrite = can('SUPPORT_WRITE');
+  const canOpenRefund = can('PACKAGE_REFUND_REQUEST_CREATE');
+  const canReadRefund = can('PACKAGE_REFUND_READ');
+  const canReadUser = can('ADMIN_USERS_READ');
 
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const ticket = await fetchOrNotFound(() =>
@@ -135,7 +139,11 @@ export default async function AdminSupportTicketPage({
                 ticket is now either a hizmet alan or a hizmet veren, and the
                 customer screen would 404 on half of them.
               */}
-              <Link href={`/users/${ticket.requester.id}`}>Hesabı görüntüle</Link>
+              {canReadUser ? (
+                <Link href={`/users/${ticket.requester.id}`}>Hesabı görüntüle</Link>
+              ) : (
+                <span className="cell-muted">-</span>
+              )}
             </dd>
           </div>
         </dl>
@@ -155,9 +163,11 @@ export default async function AdminSupportTicketPage({
               <span className={packageRefundStatusBadgeClass(ticket.packageRefund.request.status)}>
                 {PACKAGE_REFUND_STATUS_LABELS[ticket.packageRefund.request.status]}
               </span>{' '}
-              <Link href={`/package-refunds/${ticket.packageRefund.request.id}`}>İade isteğini aç</Link>
+              {canReadRefund ? (
+                <Link href={`/package-refunds/${ticket.packageRefund.request.id}`}>İade isteğini aç</Link>
+              ) : null}
             </p>
-          ) : ticket.packageRefund.canOpen ? (
+          ) : ticket.packageRefund.canOpen && canOpenRefund ? (
             <form action={openPackageRefundRequestAction} data-testid="support-refund-open-form">
               <input type="hidden" name="supportTicketId" value={ticket.id} />
               <label className="form-row" htmlFor="support-refund-purchase">
@@ -188,33 +198,35 @@ export default async function AdminSupportTicketPage({
         </SectionCard>
       ) : null}
 
-      <SectionCard
-        title="Durum"
-        subtitle="Yalnızca bu talebin şu anda yapabileceği geçişler gösterilir."
-      >
-        {ticket.allowedTransitions.length === 0 ? (
-          <p className="cell-muted" data-testid="support-no-transitions">
-            Kapatılmış bir talep yeniden açılamaz. Konu devam ediyorsa talep sahibi yeni bir talep
-            açabilir.
-          </p>
-        ) : (
-          <div className="inline-actions" data-testid="support-transitions">
-            {ticket.allowedTransitions.map((next) => (
-              <form key={next} action={changeSupportTicketStatusAction}>
-                <input type="hidden" name="id" value={ticket.id} />
-                <input type="hidden" name="status" value={next} />
-                <button
-                  className="btn btn-secondary btn-sm"
-                  type="submit"
-                  data-testid={`support-transition-${next}`}
-                >
-                  {supportTicketTransitionLabel(next)}
-                </button>
-              </form>
-            ))}
-          </div>
-        )}
-      </SectionCard>
+      {canWrite ? (
+        <SectionCard
+          title="Durum"
+          subtitle="Yalnızca bu talebin şu anda yapabileceği geçişler gösterilir."
+        >
+          {ticket.allowedTransitions.length === 0 ? (
+            <p className="cell-muted" data-testid="support-no-transitions">
+              Kapatılmış bir talep yeniden açılamaz. Konu devam ediyorsa talep sahibi yeni bir talep
+              açabilir.
+            </p>
+          ) : (
+            <div className="inline-actions" data-testid="support-transitions">
+              {ticket.allowedTransitions.map((next) => (
+                <form key={next} action={changeSupportTicketStatusAction}>
+                  <input type="hidden" name="id" value={ticket.id} />
+                  <input type="hidden" name="status" value={next} />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="submit"
+                    data-testid={`support-transition-${next}`}
+                  >
+                    {supportTicketTransitionLabel(next)}
+                  </button>
+                </form>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
 
       <SectionCard title="Yazışma" subtitle="Mesajlar ve durum değişiklikleri, olduğu sırayla.">
         <ol className="support-timeline" data-testid="support-timeline">
@@ -224,44 +236,46 @@ export default async function AdminSupportTicketPage({
         </ol>
       </SectionCard>
 
-      <SectionCard title="Yanıtla">
-        {ticket.canReply ? (
-          <form action={replySupportTicketAction} data-testid="support-reply-form">
-            <input type="hidden" name="id" value={ticket.id} />
-            <label className="form-row" htmlFor="support-admin-reply">
-              <span>Mesajınız</span>
-              {/*
-                The same limit the API enforces and the same one the customer's
-                composer counts against — both sides read
-                `packages/shared/limits.json`, so an operator cannot type a
-                reply the server will refuse.
-              */}
-              <textarea
-                id="support-admin-reply"
-                name="body"
-                rows={5}
-                required
-                maxLength={SUPPORT_TICKET_MESSAGE_MAX_LENGTH}
-                placeholder="Talep sahibine yazacağınız yanıt…"
-                data-testid="support-reply-input"
-              />
-            </label>
-            <div className="inline-actions" style={{ marginTop: 12 }}>
-              <button
-                className="btn btn-primary btn-sm"
-                type="submit"
-                data-testid="support-reply-send"
-              >
-                Yanıtı gönder
-              </button>
-            </div>
-          </form>
-        ) : (
-          <p className="cell-muted" data-testid="support-reply-closed">
-            Kapatılmış bir talebe mesaj eklenemez.
-          </p>
-        )}
-      </SectionCard>
+      {canWrite ? (
+        <SectionCard title="Yanıtla">
+          {ticket.canReply ? (
+            <form action={replySupportTicketAction} data-testid="support-reply-form">
+              <input type="hidden" name="id" value={ticket.id} />
+              <label className="form-row" htmlFor="support-admin-reply">
+                <span>Mesajınız</span>
+                {/*
+                  The same limit the API enforces and the same one the customer's
+                  composer counts against — both sides read
+                  `packages/shared/limits.json`, so an operator cannot type a
+                  reply the server will refuse.
+                */}
+                <textarea
+                  id="support-admin-reply"
+                  name="body"
+                  rows={5}
+                  required
+                  maxLength={SUPPORT_TICKET_MESSAGE_MAX_LENGTH}
+                  placeholder="Talep sahibine yazacağınız yanıt…"
+                  data-testid="support-reply-input"
+                />
+              </label>
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  type="submit"
+                  data-testid="support-reply-send"
+                >
+                  Yanıtı gönder
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="cell-muted" data-testid="support-reply-closed">
+              Kapatılmış bir talebe mesaj eklenemez.
+            </p>
+          )}
+        </SectionCard>
+      ) : null}
     </main>
   );
 }

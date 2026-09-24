@@ -57,6 +57,12 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'POST', path: '/admin/campaigns/:id/versions/:versionNumber/activate', permission: AdminPermission.CAMPAIGNS_LIFECYCLE },
   { method: 'POST', path: '/admin/campaigns/validate', permission: AdminPermission.CAMPAIGNS_READ },
   { method: 'GET', path: '/admin/offer-packages', permission: AdminPermission.CREDIT_PACKAGES_READ },
+  // ADMIN-DESIGN-000 (F4): staff reads of one provider's credits and periods.
+  // `ProviderAccessGuard` stays owner-or-SUPER_ADMIN; these are separate
+  // read-only routes on the permissions that already read the same data in
+  // aggregate (the ledger, and purchases with their payment references).
+  { method: 'GET', path: '/admin/providers/:providerId/credits', permission: AdminPermission.FINANCE_LEDGER_READ },
+  { method: 'GET', path: '/admin/providers/:providerId/entitlements', permission: AdminPermission.PACKAGE_PURCHASES_READ },
   // CMP-006 PR-B: the package refund queue. Maker (open, take) and checker
   // (approve, reject, failed settlement) are separate permissions; no route
   // writes SETTLED.

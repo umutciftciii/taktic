@@ -39,7 +39,9 @@ type ShowcaseCardsPageProps = {
  * its versions, and those live on the version's own screen.
  */
 export default async function ShowcaseCardsPage({ searchParams }: ShowcaseCardsPageProps) {
-  await requireAdmin('SHOWCASE_CARDS_READ');
+  const { can } = await requireAdmin('SHOWCASE_CARDS_READ');
+  const canOpenReview = can('SHOWCASE_REVIEW_READ');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
 
   const { status } = await searchParams;
   const selected = STATUSES.find((candidate) => candidate === status) ?? null;
@@ -106,7 +108,7 @@ export default async function ShowcaseCardsPage({ searchParams }: ShowcaseCardsP
                   return (
                     <tr key={card.id}>
                       <td>
-                        {reviewable ? (
+                        {reviewable && canOpenReview ? (
                           <Link href={`/showcase/reviews/${reviewable.id}`}>
                             {shown?.title ?? 'Adsız kart'}
                           </Link>
@@ -116,9 +118,13 @@ export default async function ShowcaseCardsPage({ searchParams }: ShowcaseCardsP
                         <div className="cell-muted">{card.category.name}</div>
                       </td>
                       <td>
-                        <Link href={`/providers/${card.provider.id}`}>
-                          {card.provider.businessName}
-                        </Link>
+                        {canOpenProvider ? (
+                          <Link href={`/providers/${card.provider.id}`}>
+                            {card.provider.businessName}
+                          </Link>
+                        ) : (
+                          card.provider.businessName
+                        )}
                       </td>
                       <td>{SHOWCASE_CARD_KIND_LABELS[card.kind]}</td>
                       <td>

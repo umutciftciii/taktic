@@ -15,6 +15,7 @@ import {
   QuestionSystemField,
   QuestionType,
 } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 import type { ProviderInviteFormState } from './category-taxonomy';
 
 const optionQuestionTypes = new Set<QuestionType>(['SELECT', 'MULTI_SELECT']);
@@ -234,6 +235,8 @@ export async function providerInviteAction(
 
     return { kind: 'issued', invite };
   } catch (error) {
+    // A 401/403 from apiFetch is a redirect, not a failed invitation.
+    rethrowNextControlFlow(error);
     return { kind: 'error', message: inviteFailureMessage(error) };
   }
 }

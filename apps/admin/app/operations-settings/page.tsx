@@ -102,6 +102,13 @@ export default async function OperationsSettingsPage({
    * answer than an explanation.
    */
   const canToggleEngine = can('CAMPAIGN_ENGINE_TOGGLE');
+  // Each switch is gated by the permission its own PUT route asks for
+  // (route-permission-map.ts); without it the card keeps its Açık/Kapalı pill
+  // and history, and the control is simply not rendered.
+  const canWriteSettings = can('OPERATIONS_SETTINGS_WRITE');
+  const canToggleSchedulers = can('SCHEDULERS_WRITE');
+  const canToggleAutoPublish = can('MARKETPLACE_PUBLISH_WRITE');
+  const canToggleProviderReviews = can('PROVIDER_REVIEWS_SETTING_WRITE');
 
   // A rejected save carries the operator's own value back in the query, so the
   // form re-hydrates with what they typed rather than with what is stored.
@@ -155,6 +162,7 @@ export default async function OperationsSettingsPage({
             title="Kredi iadesi"
             subtitle="Müşteri teklifi bu süre içinde görüntülemezse teklif kredisi otomatik olarak hizmet verene iade edilir."
           >
+            {canWriteSettings ? (
             <form
               action={saveOperationsSettingsAction}
               className="compact-form"
@@ -186,6 +194,21 @@ export default async function OperationsSettingsPage({
                 </button>
               </div>
             </form>
+            ) : (
+              <dl className="info-grid" data-testid="operations-settings-readonly">
+                <div>
+                  <dt>Görüntülenmeyen teklif için kredi iade süresi</dt>
+                  <dd>{settings.unviewedOfferRefundWindowHours} saat</dd>
+                </div>
+                <div>
+                  <dt>İzin verilen aralık</dt>
+                  <dd>
+                    {settings.minUnviewedOfferRefundWindowHours}–{settings.maxUnviewedOfferRefundWindowHours} saat
+                    (varsayılan {settings.defaultUnviewedOfferRefundWindowHours})
+                  </dd>
+                </div>
+              </dl>
+            )}
           </SectionCard>
 
           <SectionCard
@@ -241,10 +264,16 @@ export default async function OperationsSettingsPage({
                   Yalnız bundan sonra gönderilen talepleri etkiler: onay bekleyen bir talep
                   kuyruğunda kalır, yayındaki bir talep geri çekilmez. Telefonu doğrulanmamış bir
                   talep açıkken de yayınlanmaz. Hizmet verenler yayındaki bir talebi bildirebilir;
-                  bildirimler <Link href="/requests/reports">Talep bildirimleri</Link> kuyruğuna düşer.
+                  bildirimler{' '}
+                  {can('REQUEST_REPORTS_READ') ? (
+                    <Link href="/requests/reports">Talep bildirimleri</Link>
+                  ) : (
+                    'Talep bildirimleri'
+                  )}{' '}
+                  kuyruğuna düşer.
                 </p>
               </div>
-              <AutoPublishToggle enabled={publish.enabled} />
+              {canToggleAutoPublish ? <AutoPublishToggle enabled={publish.enabled} /> : null}
             </div>
             <div className="scheduler-item-meta">
               <span
@@ -304,11 +333,16 @@ export default async function OperationsSettingsPage({
                   değerlendirme geldiğinde hizmet verene haber verilir. Ortalama puan, en az üç
                   değerlendirmesi olan hizmet verenler için gösterilir. Hizmet verenler uygunsuz bir
                   yorumu bildirebilir; bildirimler{' '}
-                  <Link href="/provider-reviews/reports">Değerlendirme bildirimleri</Link> kuyruğuna
+                  {can('PROVIDER_REVIEWS_READ') ? (
+                    <Link href="/provider-reviews/reports">Değerlendirme bildirimleri</Link>
+                  ) : (
+                    'Değerlendirme bildirimleri'
+                  )}{' '}
+                  kuyruğuna
                   düşer. Puanlar kredi, teklif sıralaması, paket ya da vitrin hakkını etkilemez.
                 </p>
               </div>
-              <ProviderReviewsToggle enabled={reviews.enabled} />
+              {canToggleProviderReviews ? <ProviderReviewsToggle enabled={reviews.enabled} /> : null}
             </div>
             <div className="scheduler-item-meta">
               <span
@@ -375,7 +409,9 @@ export default async function OperationsSettingsPage({
                   kampanya yoksa motor açık olsa da kimseye kredi verilmez.{' '}
                   <strong>Kapatmak</strong> yeni olay kaydını ve değerlendirmeyi durdurur; verilmiş
                   promosyonların teklif iadesi ve ödeme iadesinde geri alınması aynen sürer.
-                  Kampanyalar <Link href="/campaigns">Kampanyalar</Link> ekranından yönetilir.
+                  Kampanyalar{' '}
+                  {can('CAMPAIGNS_READ') ? <Link href="/campaigns">Kampanyalar</Link> : 'Kampanyalar'} ekranından
+                  yönetilir.
                 </p>
               </div>
               <span
@@ -447,7 +483,9 @@ export default async function OperationsSettingsPage({
                         <h3 className="scheduler-item-name">{copy.name}</h3>
                         <p className="scheduler-item-impact">{copy.impact}</p>
                       </div>
-                      <SchedulerToggle job={job.key} jobName={copy.name} enabled={job.enabled} />
+                      {canToggleSchedulers ? (
+                        <SchedulerToggle job={job.key} jobName={copy.name} enabled={job.enabled} />
+                      ) : null}
                     </div>
 
                     <div className="scheduler-item-meta">

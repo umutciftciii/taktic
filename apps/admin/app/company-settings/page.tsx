@@ -43,7 +43,10 @@ const OK_MESSAGES: Record<string, string> = {
 };
 
 export default async function CompanySettingsPage({ searchParams }: CompanySettingsPageProps) {
-  await requireAdmin('COMPANY_SETTINGS_READ');
+  const { can } = await requireAdmin('COMPANY_SETTINGS_READ');
+  // PUT /company-settings asks for COMPANY_SETTINGS_WRITE; a read-only role
+  // sees the stored values as text instead of a form it cannot submit.
+  const canWrite = can('COMPANY_SETTINGS_WRITE');
 
   const params = await searchParams;
   const errorMessage = (params.error ?? '').trim();
@@ -126,6 +129,7 @@ export default async function CompanySettingsPage({ searchParams }: CompanySetti
             title="Şirket bilgileri"
             subtitle="Yasal unvan ve destek adresi zorunludur; posta adresi isteğe bağlıdır ve boş bırakılırsa altbilgide o satır hiç görünmez."
           >
+            {canWrite ? (
             <form
               action={saveCompanySettingsAction}
               className="compact-form"
@@ -175,6 +179,24 @@ export default async function CompanySettingsPage({ searchParams }: CompanySetti
                 </button>
               </div>
             </form>
+            ) : (
+              <dl className="info-grid" data-testid="company-settings-readonly">
+                <div>
+                  <dt>Yasal unvan</dt>
+                  <dd>{settings.legalName || <span className="muted">—</span>}</dd>
+                </div>
+                <div>
+                  <dt>Destek e-postası</dt>
+                  <dd>{settings.supportEmail || <span className="muted">—</span>}</dd>
+                </div>
+                <div>
+                  <dt>Posta adresi</dt>
+                  <dd style={{ whiteSpace: 'pre-line' }}>
+                    {settings.postalAddress || <span className="muted">—</span>}
+                  </dd>
+                </div>
+              </dl>
+            )}
           </SectionCard>
         </div>
 

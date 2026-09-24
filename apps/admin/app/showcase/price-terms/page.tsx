@@ -41,7 +41,9 @@ type PriceTermsPageProps = {
  * itself rather than looked up from here.
  */
 export default async function ShowcasePriceTermsPage({ searchParams }: PriceTermsPageProps) {
-  await requireAdmin('SHOWCASE_TERMS_ACCEPTANCES_READ');
+  const { can } = await requireAdmin('SHOWCASE_TERMS_ACCEPTANCES_READ');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
+  const canOpenCards = can('SHOWCASE_CARDS_READ');
 
   const { providerId, cardId, termsVersion } = await searchParams;
 
@@ -114,17 +116,25 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
                 {acceptances.map((row) => (
                   <tr key={row.id}>
                     <td>
-                      <Link href={`/providers/${row.provider.id}`}>
-                        {row.provider.businessName}
-                      </Link>
+                      {canOpenProvider ? (
+                        <Link href={`/providers/${row.provider.id}`}>
+                          {row.provider.businessName}
+                        </Link>
+                      ) : (
+                        row.provider.businessName
+                      )}
                     </td>
                     <td>{row.scope === 'PACKAGE' ? 'Paket' : 'Kart'}</td>
                     <td>
                       {row.card ? (
                         <>
-                          <Link href={`/showcase/cards?cardId=${row.card.id}`}>
-                            {row.card.id.slice(-6)}
-                          </Link>
+                          {canOpenCards ? (
+                            <Link href={`/showcase/cards?cardId=${row.card.id}`}>
+                              {row.card.id.slice(-6)}
+                            </Link>
+                          ) : (
+                            row.card.id.slice(-6)
+                          )}
                           <div className="muted" style={{ fontSize: 12 }}>
                             {row.card.kind} · {row.card.status}
                           </div>

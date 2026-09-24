@@ -9,7 +9,7 @@ import {
   formatDateTime,
   requireAdmin,
 } from '../../../lib/api';
-import { formatLedgerReason, formatLedgerSource } from '../../../lib/finance-format';
+import { formatLedgerReason, formatLedgerSource, type LedgerSource } from '../../../lib/finance-format';
 import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
@@ -126,8 +126,25 @@ function buildApiQuery(params: {
   return apiQuery.toString();
 }
 
+/**
+ * A row's "related record" link, kept only when this session may open the
+ * screen it points at; otherwise the cell renders the same label as text. An
+ * unrecognised destination is dropped rather than guessed at.
+ */
+function gateLedgerSource(source: LedgerSource, can: (...names: string[]) => boolean): LedgerSource {
+  if (!source.href) return source;
+  const permission = source.href.startsWith('/campaigns/')
+    ? 'CAMPAIGNS_READ'
+    : source.href.startsWith('/offers/')
+      ? 'OFFERS_READ'
+      : source.href.startsWith('/package-purchases/')
+        ? 'PACKAGE_PURCHASES_READ'
+        : null;
+  return permission && can(permission) ? source : { ...source, href: null };
+}
+
 export default async function AdminCreditLedgerPage({ searchParams }: AdminCreditLedgerPageProps) {
-  await requireAdmin('FINANCE_LEDGER_READ');
+  const { can } = await requireAdmin('FINANCE_LEDGER_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
@@ -152,9 +169,13 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
         title="Kredi Hareketleri"
         subtitle="Hizmet verenlerin tüm kredi giriş, çıkış ve iade hareketleri."
         actions={
-          <Link className="btn btn-ghost btn-sm" href="/finance">
-            Finans Dashboard
-          </Link>
+          // The dashboard asks for FINANCE_READ, which the ledger's own
+          // permission does not imply.
+          can('FINANCE_READ') ? (
+            <Link className="btn btn-ghost btn-sm" href="/finance">
+              Finans Dashboard
+            </Link>
+          ) : undefined
         }
       />
 
@@ -269,7 +290,7 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
               </thead>
               <tbody>
                 {response.items.map((entry) => (
-                  <LedgerRow key={entry.id} entry={entry} />
+                  <LedgerRow key={entry.id} entry={entry} can={can} />
                 ))}
               </tbody>
             </table>
@@ -302,15 +323,19 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
   );
 }
 
-function LedgerRow({ entry }: { entry: CreditLedgerEntry }) {
+function LedgerRow({
+  entry,
+  can,
+}: {
+  entry: CreditLedgerEntry;
+  can: (...names: string[]) => boolean;
+}) {
   const amountClass = entry.amount > 0 ? 'badge badge-good' : entry.amount < 0 ? 'badge badge-bad' : 'badge badge-muted';
   const amountText = entry.amount > 0 ? `+${entry.amount}` : String(entry.amount);
   const reason = formatLedgerReason(entry.reason);
-  const source = formatLedgerSource(
-    entry.referenceType,
-    entry.referenceId,
-    entry.sourceNumber,
-    entry.campaign,
+  const source = gateLedgerSource(
+    formatLedgerSource(entry.referenceType, entry.referenceId, entry.sourceNumber, entry.campaign),
+    can,
   );
 
   return (

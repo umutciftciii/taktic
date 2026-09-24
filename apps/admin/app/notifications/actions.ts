@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, NotificationLogEntry } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 /**
  * Asks the API to re-send one failed notification.
@@ -33,7 +34,7 @@ export async function retryNotificationAction(formData: FormData) {
       { method: 'POST' },
     );
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -78,10 +79,4 @@ function extractApiMessage(error: unknown): string {
     /* fall through */
   }
   return raw || 'Beklenmeyen hata.';
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }

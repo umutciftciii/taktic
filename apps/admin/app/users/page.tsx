@@ -97,7 +97,7 @@ function buildPageHref(
 }
 
 export default async function AdminUsersPage({ searchParams }: AdminUsersPageProps) {
-  await requireAdmin('ADMIN_USERS_READ');
+  const { isSuperAdmin } = await requireAdmin('ADMIN_USERS_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
@@ -161,9 +161,12 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
         title="Admin Kullanıcıları"
         subtitle="Admin panel kullanıcılarını görüntüleyin; durum ve şifre bilgilerine göre filtreleyin."
         actions={
-          <Link className="btn btn-primary btn-sm" href="/users/new">
-            Yeni Admin Kullanıcısı
-          </Link>
+          // Creating a staff account is root-only (`POST /users`).
+          isSuperAdmin ? (
+            <Link className="btn btn-primary btn-sm" href="/users/new">
+              Yeni Admin Kullanıcısı
+            </Link>
+          ) : undefined
         }
       />
 

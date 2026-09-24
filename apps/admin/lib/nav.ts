@@ -88,7 +88,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: '/finance', label: 'Dashboard', exact: true, permission: 'FINANCE_READ' },
       { href: '/finance/credit-ledger', label: 'Kredi Hareketleri', permission: 'FINANCE_LEDGER_READ' },
-      { href: '/finance/manual-adjustments', label: 'Manuel İşlemler', permission: 'FINANCE_READ' },
+      { href: '/finance/manual-adjustments', label: 'Manuel İşlemler', permission: 'FINANCE_LEDGER_READ' },
       { href: '/finance/providers', label: 'Provider Finans Bakiyeleri', permission: 'FINANCE_READ' },
       { href: '/package-purchases', label: 'Paket Satın Almaları', permission: 'PACKAGE_PURCHASES_READ' },
       // CMP-006 PR-B: the package money-refund queue. Beside the purchases it

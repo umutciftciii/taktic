@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 /**
  * A person's decision on a held event (CMP-006 PR-C). The API re-checks the
@@ -31,7 +32,7 @@ export async function decideEligibilityAction(formData: FormData) {
         body: JSON.stringify({ decision, reason }),
       });
     } catch (error) {
-      if (isRedirectError(error)) throw error;
+      rethrowNextControlFlow(error);
       failure = extractApiMessage(error);
     }
   }
@@ -57,10 +58,4 @@ function extractApiMessage(error: unknown): string {
     /* fall through */
   }
   return error.message || 'Beklenmeyen hata.';
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }

@@ -1,3 +1,5 @@
+import { isLocalEnvironment } from '../../lib/local-environment';
+
 type LoginPageProps = {
   searchParams: Promise<{ error?: string; reason?: string }>;
 };
@@ -8,6 +10,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   // to know why. Without it, an idle timeout is indistinguishable from the
   // panel breaking.
   const sessionEnded = reason === 'session-expired';
+  // The seeded local account's address and password are a convenience for a
+  // developer's machine. Anywhere else they are a published credential, so
+  // they are shown (and prefilled) on APP_ENVIRONMENT=local only.
+  const showLocalHint = isLocalEnvironment();
 
   return (
     <main className="auth-page">
@@ -31,7 +37,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
           <label className="form-row">
             <span>E-posta</span>
-            <input name="email" type="email" defaultValue="admin@taktic.local" required autoComplete="email" />
+            <input name="email" type="email" defaultValue={showLocalHint ? 'admin@taktic.local' : undefined} required autoComplete="email" />
           </label>
           <label className="form-row">
             <span>Şifre</span>
@@ -49,9 +55,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </label>
           <button className="btn btn-primary btn-block" type="submit">Giriş Yap</button>
         </div>
-        <p className="muted" style={{ marginTop: 16, fontSize: 12 }}>
-          Yerel admin: <code>admin@taktic.local</code> / <code>ChangeMe123!</code>
-        </p>
+        {showLocalHint ? (
+          <p className="muted" style={{ marginTop: 16, fontSize: 12 }} data-testid="local-admin-hint">
+            Yerel admin: <code>admin@taktic.local</code> / <code>ChangeMe123!</code>
+          </p>
+        ) : null}
       </form>
     </main>
   );

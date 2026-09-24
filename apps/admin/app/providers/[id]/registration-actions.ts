@@ -1,6 +1,7 @@
 'use server';
 
 import { apiFetch } from '../../../lib/api';
+import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 
 /**
  * The one way the panel learns a raw registration number (CMP-006 PR-C): a
@@ -27,7 +28,8 @@ export async function revealBusinessRegistrationAction(
       `/providers/${encodeURIComponent(providerId)}/business-registration/raw`,
     );
     return { status: 'shown', registrationNumber: raw.registration.number, legacyTaxNumber: raw.legacy.taxNumber };
-  } catch {
+  } catch (error) {
+    rethrowNextControlFlow(error);
     return { status: 'error', message: 'Ham değer okunamadı. Yetkinizi kontrol edin.' };
   }
 }

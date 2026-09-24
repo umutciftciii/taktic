@@ -1,8 +1,8 @@
 import { formatMinorAsTurkishLiraInput } from '@taktic/shared';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import {
   apiFetch,
+  fetchOrNotFound,
   formatDateTime,
   formatPrice,
   AdminOfferPackage,
@@ -44,7 +44,12 @@ export default async function CreditPackageDetailPage({
   params,
   searchParams,
 }: CreditPackageDetailPageProps) {
-  await requireAdmin('CREDIT_PACKAGES_READ');
+  const { can } = await requireAdmin('CREDIT_PACKAGES_READ');
+  const canWrite = can('CREDIT_PACKAGES_WRITE');
+  const canChangeStatus = can('CREDIT_PACKAGES_STATUS');
+  // The sales summary is a second read with its own permission.
+  const canReadPurchases = can('PACKAGE_PURCHASES_READ');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const { id } = await params;
   const { error: rawError, ok: rawOk } = await searchParams;
   const errorMessage = (rawError ?? '').trim();
@@ -53,14 +58,11 @@ export default async function CreditPackageDetailPage({
 
   // Read through the admin listing, which carries every type and each
   // package's category scope. The public route returns only one-time packages.
+  // A 404/400 is a missing package; a 401/403 stays the redirect apiFetch made it.
   const [creditPackage, eligibleCategories] = await Promise.all([
-    apiFetch<AdminOfferPackage>(`/admin/offer-packages/${id}`).catch(() => null),
+    fetchOrNotFound(() => apiFetch<AdminOfferPackage>(`/admin/offer-packages/${id}`)),
     apiFetch<UnlimitedEligibleCategory[]>('/admin/offer-packages/unlimited-eligible-categories'),
   ]);
-
-  if (!creditPackage) {
-    notFound();
-  }
 
   const scopeIds = creditPackage.scopeCategories.map((scope) => scope.category.id);
   // A category that is in the scope but no longer eligible must still be
@@ -77,9 +79,9 @@ export default async function CreditPackageDetailPage({
     : 'TRY';
   const currencyOptions = Array.from(new Set([...CURRENCIES, creditPackage.currency]));
 
-  const purchases = await apiFetch<PackagePurchase[]>(
-    `/package-purchases?packageId=${encodeURIComponent(id)}`,
-  ).catch(() => [] as PackagePurchase[]);
+  const purchases = canReadPurchases
+    ? await apiFetch<PackagePurchase[]>(`/package-purchases?packageId=${encodeURIComponent(id)}`)
+    : [];
 
   const sortedPurchases = [...purchases].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const paidPurchases = sortedPurchases.filter((p) => p.status === 'PAID');
@@ -153,6 +155,7 @@ export default async function CreditPackageDetailPage({
             title="Paket bilgileri"
             subtitle="Provider satın alma akışında görünen alanlar. Değişiklikler mevcut satın almaları etkilemez (snapshot)."
           >
+            {canWrite ? (
             <form action={updateCreditPackageAction} className="compact-form">
               <input type="hidden" name="id" value={creditPackage.id} />
               <div className="compact-field-grid">
@@ -293,7 +296,18 @@ export default async function CreditPackageDetailPage({
                 </label>
                 <label className="field field-6">
                   <span>Durum</span>
-                  <select name="isActive" defaultValue={String(creditPackage.isActive)}>
+                  {/*
+                    The status is its own permission. The save posts one either
+                    way, so without it the current value goes back unchanged.
+                  */}
+                  {canChangeStatus ? null : (
+                    <input type="hidden" name="isActive" value={String(creditPackage.isActive)} />
+                  )}
+                  <select
+                    name={canChangeStatus ? 'isActive' : undefined}
+                    defaultValue={String(creditPackage.isActive)}
+                    disabled={!canChangeStatus}
+                  >
                     <option value="true">Aktif (satışa açık)</option>
                     <option value="false">Pasif (satışa kapalı)</option>
                   </select>
@@ -322,8 +336,50 @@ export default async function CreditPackageDetailPage({
                 </Link>
               </div>
             </form>
+            ) : (
+              <>
+                <dl className="info-grid" data-testid="credit-package-read-only">
+                  <div>
+                    <dt>İsim</dt>
+                    <dd>{creditPackage.name}</dd>
+                  </div>
+                  <div>
+                    <dt>Slug</dt>
+                    <dd>
+                      <code>{creditPackage.slug}</code>
+                    </dd>
+                  </div>
+                  {creditPackage.type === 'CATEGORY_UNLIMITED' ? (
+                    <>
+                      <div>
+                        <dt>Günlük teklif limiti</dt>
+                        <dd>{creditPackage.dailyOfferLimit ? creditPackage.dailyOfferLimit : 'Sınır yok'}</dd>
+                      </div>
+                      <div>
+                        <dt>Kapsam</dt>
+                        <dd>
+                          {creditPackage.scopeCategories.length > 0
+                            ? creditPackage.scopeCategories.map((scope) => scope.category.name).join(', ')
+                            : 'Kapsam tanımsız'}
+                        </dd>
+                      </div>
+                    </>
+                  ) : null}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <dt>Açıklama</dt>
+                    <dd>{creditPackage.description ?? '—'}</dd>
+                  </div>
+                </dl>
+                <div className="compact-actions">
+                  <Link className="btn btn-secondary btn-sm" href="/credit-packages">
+                    Listeye dön
+                  </Link>
+                </div>
+              </>
+            )}
           </SectionCard>
 
+          {canReadPurchases ? (
           <SectionCard
             title="Satış özeti"
             subtitle="Bu pakete bağlı satın alma kayıtlarından özet (snapshot değerleri)."
@@ -397,12 +453,16 @@ export default async function CreditPackageDetailPage({
                         <tr key={purchase.id}>
                           <td>{formatDateTime(purchase.createdAt)}</td>
                           <td>
-                            <Link
-                              className="cell-link"
-                              href={`/providers/${purchase.provider.id}`}
-                            >
-                              {purchase.provider.businessName}
-                            </Link>
+                            {canOpenProvider ? (
+                              <Link
+                                className="cell-link"
+                                href={`/providers/${purchase.provider.id}`}
+                              >
+                                {purchase.provider.businessName}
+                              </Link>
+                            ) : (
+                              purchase.provider.businessName
+                            )}
                           </td>
                           <td>
                             <span className={statusBadgeClass(purchase.status)}>
@@ -437,9 +497,11 @@ export default async function CreditPackageDetailPage({
               </>
             )}
           </SectionCard>
+          ) : null}
         </div>
 
         <aside className="admin-side-column">
+          {canChangeStatus ? (
           <div className="admin-action-panel">
             <h3>Durum</h3>
             <p>
@@ -471,6 +533,7 @@ export default async function CreditPackageDetailPage({
               </button>
             </form>
           </div>
+          ) : null}
 
           <div className="helper-card">
             <h4>Hatırlatmalar</h4>

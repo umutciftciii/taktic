@@ -12,6 +12,7 @@ import { ProviderInvitePanel } from '../provider-invite-panel';
 import {
   apiFetch,
   CATEGORY_ICON_KEYS,
+  fetchOrNotFound,
   Category,
   ProviderInviteList,
   Question,
@@ -74,11 +75,24 @@ type CategoryDetailPageProps = {
 };
 
 export default async function CategoryDetailPage({ params }: CategoryDetailPageProps) {
-  await requireAdmin('CATALOG_READ');
+  const { can } = await requireAdmin('CATALOG_READ');
   const { slug } = await params;
-  const category = await apiFetch<Category>(`/admin/categories/${slug}`);
+  // Each control below is offered only to a session the API would let through;
+  // the API still checks every one of them.
+  const canWriteCategory = can('CATEGORIES_WRITE');
+  const canChangeStatus = can('CATEGORIES_STATUS');
+  const canUpload = can('UPLOADS_WRITE');
+  // The question set is a second read with its own permission. Without it the
+  // page is the category, and the question sections are not rendered at all.
+  const canReadQuestions = can('QUESTIONS_READ');
+  const canWriteQuestions = canReadQuestions && can('QUESTIONS_WRITE');
+  const canReadInvites = can('PROVIDER_INVITES_READ');
+
+  const category = await fetchOrNotFound(() => apiFetch<Category>(`/admin/categories/${slug}`));
   const [questions, allCategories] = await Promise.all([
-    apiFetch<Question[]>(`/categories/${category.id}/questions`),
+    canReadQuestions
+      ? apiFetch<Question[]>(`/categories/${category.id}/questions`)
+      : Promise.resolve<Question[] | null>(null),
     apiFetch<Category[]>('/admin/categories'),
   ]);
 
@@ -91,12 +105,12 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
    * same reason, but its *past* invitations are still worth reading: they are
    * how an operator sees who was approached before the service was withdrawn.
    */
-  const invitable = category.kind === 'LEAF';
+  const invitable = category.kind === 'LEAF' && canReadInvites;
   const invites = invitable
     ? await apiFetch<ProviderInviteList>(`/categories/${category.id}/provider-invites`)
     : null;
 
-  const sortedQuestions = [...questions].sort((a, b) => {
+  const sortedQuestions = [...(questions ?? [])].sort((a, b) => {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
     return a.label.localeCompare(b.label, 'tr-TR');
   });
@@ -141,7 +155,7 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
         ) : (
           <span className="meta-pill">üst seviye</span>
         )}
-        <span className="meta-pill">{questions.length} soru</span>
+        {questions ? <span className="meta-pill">{questions.length} soru</span> : null}
         <span className="meta-pill">sıra {category.sortOrder}</span>
         {/*
           The supply reading, beside the publishing one and never instead of it.
@@ -163,6 +177,7 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
             title="Kategori bilgileri"
             subtitle="Müşteri akışında görünen temel alanlar ve ağaçtaki yeri."
           >
+            {canWriteCategory ? (
             <form action={updateCategoryAction} className="compact-form">
               <input type="hidden" name="id" value={category.id} />
               <div className="compact-field-grid">
@@ -192,7 +207,19 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 </label>
                 <label className="field field-4">
                   <span>Durum *</span>
-                  <select name="status" defaultValue={category.status}>
+                  {/*
+                    The status is its own permission. This form posts one either
+                    way, so without it the current value is sent unchanged and
+                    the select is shown but cannot be moved.
+                  */}
+                  {canChangeStatus ? null : (
+                    <input type="hidden" name="status" value={category.status} />
+                  )}
+                  <select
+                    name={canChangeStatus ? 'status' : undefined}
+                    defaultValue={category.status}
+                    disabled={!canChangeStatus}
+                  >
                     {CATEGORY_STATUSES.map((status) => (
                       <option key={status} value={status}>
                         {STATUS_LABELS[status]}
@@ -291,6 +318,7 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                   <textarea name="description" defaultValue={category.description ?? ''} />
                 </label>
                 <CategoryImageUploader
+                  canUpload={canUpload}
                   name="imageUrl"
                   label="Kart görseli"
                   variant="card"
@@ -298,6 +326,7 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                   helpText="Kategoriler listesindeki kart için kullanılır."
                 />
                 <CategoryImageUploader
+                  canUpload={canUpload}
                   name="coverImageUrl"
                   label="Kapak görseli"
                   variant="cover"
@@ -329,14 +358,19 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 </span>
               </div>
             </form>
+            ) : (
+              <CategoryReadOnlyDetails category={category} />
+            )}
           </SectionCard>
 
-          {isRouter ? (
+          {isRouter && questions ? (
             <SectionCard
               title="Yönlendirme hedefleri"
               subtitle="Yönlendirme sorusunun her seçeneği hangi hizmete gider."
             >
-              {routerQuestion ? (
+              {routerQuestion && !canWriteQuestions ? (
+                <RouterRulesReadOnly question={routerQuestion} targets={routableTargets} />
+              ) : routerQuestion ? (
                 <form action={replaceRouterRulesAction} className="compact-form">
                   <input type="hidden" name="id" value={routerQuestion.id} />
                   <input type="hidden" name="categorySlug" value={category.slug} />
@@ -383,13 +417,18 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 <div style={{ padding: 18 }}>
                   <EmptyState
                     title="Yönlendirme sorusu yok."
-                    description="Aşağıdan SELECT tipinde bir soru ekleyip “Yönlendirme sorusu” alanını Evet yapın."
+                    description={
+                      canWriteQuestions
+                        ? 'Aşağıdan SELECT tipinde bir soru ekleyip “Yönlendirme sorusu” alanını Evet yapın.'
+                        : undefined
+                    }
                   />
                 </div>
               )}
             </SectionCard>
           ) : null}
 
+          {questions ? (
           <SectionCard
             title="Soru seti"
             subtitle="Bu kategori için müşteriye sorulacak dinamik sorular. Yeni soruyu en alttan ekleyebilirsiniz."
@@ -400,7 +439,11 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 <div style={{ padding: 18 }}>
                   <EmptyState
                     title="Bu kategoride soru yok."
-                    description="Aşağıdaki “+ Yeni Soru Ekle” ile başlayabilirsiniz."
+                    description={
+                      canWriteQuestions
+                        ? 'Aşağıdaki “+ Yeni Soru Ekle” ile başlayabilirsiniz.'
+                        : undefined
+                    }
                   />
                 </div>
               ) : (
@@ -461,8 +504,9 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                             {question.isActive ? 'Aktif' : 'Pasif'}
                           </span>
                         </span>
-                        <span className="q-action">Düzenle</span>
+                        <span className="q-action">{canWriteQuestions ? 'Düzenle' : 'Görüntüle'}</span>
                       </summary>
+                      {canWriteQuestions ? (
                       <div className="question-edit-panel">
                         <form action={updateQuestionAction} className="compact-form compact-form-wide">
                           <input type="hidden" name="id" value={question.id} />
@@ -506,11 +550,17 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                           </button>
                         </form>
                       </div>
+                      ) : (
+                        <div className="question-edit-panel">
+                          <QuestionReadOnlyDetails question={question} />
+                        </div>
+                      )}
                     </details>
                   ))}
                 </div>
               )}
 
+              {canWriteQuestions ? (
               <details className="question-create-panel">
                 <summary>Yeni Soru Ekle</summary>
                 <div className="question-create-panel-body">
@@ -530,11 +580,14 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                   </form>
                 </div>
               </details>
+              ) : null}
             </div>
           </SectionCard>
+          ) : null}
         </div>
 
         <aside className="admin-side-column">
+          {canChangeStatus ? (
           <div
             className={
               category.status === 'ACTIVE' ? 'admin-action-panel is-warning' : 'admin-action-panel'
@@ -560,11 +613,14 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
               </button>
             </form>
           </div>
+          ) : null}
 
           {invites ? (
             <ProviderInvitePanel
               activeCount={invites.activeCount}
               canIssue={category.status !== 'INACTIVE'}
+              mayIssue={can('PROVIDER_INVITES_ISSUE')}
+              mayRevoke={can('PROVIDER_INVITES_REVOKE')}
               categoryId={category.id}
               categoryName={category.name}
               categorySlug={category.slug}
@@ -614,12 +670,14 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                       )}
                     </dd>
                   </div>
-                  <div>
-                    <dt>Soru sayısı</dt>
-                    <dd>
-                      <strong>{questions.length}</strong>
-                    </dd>
-                  </div>
+                  {questions ? (
+                    <div>
+                      <dt>Soru sayısı</dt>
+                      <dd>
+                        <strong>{questions.length}</strong>
+                      </dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>Geçerli davet</dt>
                     <dd data-testid="release-active-invites">
@@ -717,6 +775,135 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
         </aside>
       </div>
     </main>
+  );
+}
+
+/**
+ * What the category form shows, for a session that may read it but not save it.
+ * The pills above already carry name, slug, type, status, parent and order.
+ */
+function CategoryReadOnlyDetails({ category }: { category: Category }) {
+  return (
+    <dl className="info-grid" data-testid="category-read-only">
+      <div>
+        <dt>İsim</dt>
+        <dd>{category.name}</dd>
+      </div>
+      <div>
+        <dt>Slug</dt>
+        <dd>
+          <code>{category.slug}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Teklif kredisi</dt>
+        <dd>{category.kind === 'LEAF' ? (category.offerCreditCost ?? '—') : '—'}</dd>
+      </div>
+      <div>
+        <dt>Hizmet veren başvurusu</dt>
+        <dd>
+          {category.kind !== 'LEAF'
+            ? '—'
+            : category.status === 'ACTIVE' || category.providerEnrollmentOpen
+              ? 'Açık'
+              : 'Kapalı'}
+        </dd>
+      </div>
+      <div>
+        <dt>Limitsiz paket uygunluğu</dt>
+        <dd>{category.unlimitedPackageEligible ? 'Açık' : 'Kapalı'}</dd>
+      </div>
+      <div>
+        <dt>Fallback ikon anahtarı</dt>
+        <dd>{category.iconKey ?? '—'}</dd>
+      </div>
+      <div style={{ gridColumn: '1 / -1' }}>
+        <dt>Açıklama</dt>
+        <dd>{category.description ?? '—'}</dd>
+      </div>
+      <div>
+        <dt>Kart görseli</dt>
+        <dd>
+          {category.imageUrl ? (
+            <img src={category.imageUrl} alt="Kart görseli" className="cat-visual-preview-card" />
+          ) : (
+            '—'
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Kapak görseli</dt>
+        <dd>
+          {category.coverImageUrl ? (
+            <img src={category.coverImageUrl} alt="Kapak görseli" className="cat-visual-preview-cover" />
+          ) : (
+            '—'
+          )}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+/** The router's option → service map, for a session without QUESTIONS_WRITE. */
+function RouterRulesReadOnly({ question, targets }: { question: Question; targets: Category[] }) {
+  return (
+    <div style={{ padding: 18 }}>
+      <p className="help-text" style={{ marginBottom: 12 }}>
+        Yönlendirme sorusu: <strong>{question.label}</strong>.
+      </p>
+      <dl className="info-grid">
+        {(question.options ?? []).map((option) => {
+          const rule = (question.routerRules ?? []).find((entry) => entry.optionKey === option.key);
+          const target = rule
+            ? targets.find((candidate) => candidate.slug === rule.targetCategorySlug)
+            : undefined;
+
+          return (
+            <div key={option.key}>
+              <dt>{option.label}</dt>
+              <dd>{rule ? (target?.name ?? rule.targetCategorySlug) : '— (hedef yok)'}</dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
+  );
+}
+
+/** One question's settings, for a session without QUESTIONS_WRITE. */
+function QuestionReadOnlyDetails({ question }: { question: Question }) {
+  const condition = (question.conditions ?? [])[0];
+
+  return (
+    <dl className="info-grid">
+      <div>
+        <dt>Sistem alanı bağı</dt>
+        <dd>{question.systemField ? SYSTEM_FIELD_LABELS[question.systemField] : '—'}</dd>
+      </div>
+      <div>
+        <dt>Yardım metni</dt>
+        <dd>{question.helpText ?? '—'}</dd>
+      </div>
+      <div>
+        <dt>Seçenekler</dt>
+        <dd>
+          {(question.options ?? []).length > 0
+            ? (question.options ?? []).map((option) => option.label).join(', ')
+            : '—'}
+        </dd>
+      </div>
+      <div>
+        <dt>Koşul</dt>
+        <dd>
+          {condition
+            ? `${condition.sourceQuestionKey}: ${condition.expectedValues.join(', ')} (${
+                condition.matchMode === 'ALL' ? 'tamamı' : 'herhangi biri'
+              })`
+            : 'Her zaman görünür'}
+        </dd>
+      </div>
+    </dl>
   );
 }
 

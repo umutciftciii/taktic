@@ -114,7 +114,10 @@ function formatRangeDateForApi(value: string, endOfDay: boolean): string | undef
 export default async function AdminNotificationsPage({
   searchParams,
 }: AdminNotificationsPageProps) {
-  await requireAdmin('NOTIFICATION_LOGS_READ');
+  const { can } = await requireAdmin('NOTIFICATION_LOGS_READ');
+  // The retry route asks for its own permission; the row shows the button only
+  // when the API calls it retryable *and* this session may retry.
+  const canRetry = can('NOTIFICATION_RETRY');
 
   const params = await searchParams;
   const status = normalizeStatus(params.status);
@@ -323,7 +326,7 @@ export default async function AdminNotificationsPage({
               </thead>
               <tbody>
                 {response.items.map((entry) => (
-                  <NotificationRow key={entry.id} entry={entry} />
+                  <NotificationRow key={entry.id} entry={entry} canRetry={canRetry} />
                 ))}
               </tbody>
             </table>
@@ -362,7 +365,7 @@ export default async function AdminNotificationsPage({
   );
 }
 
-function NotificationRow({ entry }: { entry: NotificationLogEntry }) {
+function NotificationRow({ entry, canRetry }: { entry: NotificationLogEntry; canRetry: boolean }) {
   const outcomeAt = entry.sentAt ?? entry.failedAt;
 
   return (
@@ -398,7 +401,7 @@ function NotificationRow({ entry }: { entry: NotificationLogEntry }) {
       <td>
         <div className="inline-actions">
           {/* Only for rows the API itself calls retryable — see the API's rules. */}
-          {entry.retryable ? (
+          {entry.retryable && canRetry ? (
             <NotificationRetryButton id={entry.id} returnTo="/notifications" />
           ) : null}
           <Link className="btn btn-ghost btn-sm" href={`/notifications/${entry.id}`}>

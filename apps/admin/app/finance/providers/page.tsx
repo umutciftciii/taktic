@@ -92,7 +92,11 @@ function formatDateOrDash(value: string | null | undefined): string {
 export default async function AdminProviderFinancePage({
   searchParams,
 }: AdminProviderFinancePageProps) {
-  await requireAdmin('FINANCE_READ');
+  const { can } = await requireAdmin('FINANCE_READ');
+  // The provider credit screen, the ledger and the manual adjustments screen
+  // all sit behind FINANCE_LEDGER_READ — a FINANCE_READ-only role sees the
+  // balances without links that would land on /yetkisiz.
+  const canOpenLedger = can('FINANCE_LEDGER_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
@@ -124,9 +128,11 @@ export default async function AdminProviderFinancePage({
         subtitle="Hizmet verenlerin kredi bakiyesi, ödeme ve kredi hareketi özetleri."
         actions={
           <>
-            <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
-              Kredi Hareketleri
-            </Link>
+            {canOpenLedger ? (
+              <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
+                Kredi Hareketleri
+              </Link>
+            ) : null}
             <Link className="btn btn-ghost btn-sm" href="/finance">
               Finans Dashboard
             </Link>
@@ -225,7 +231,7 @@ export default async function AdminProviderFinancePage({
               </thead>
               <tbody>
                 {response.items.map((item) => (
-                  <ProviderFinanceRow key={item.provider.id} item={item} />
+                  <ProviderFinanceRow key={item.provider.id} item={item} canOpenLedger={canOpenLedger} />
                 ))}
               </tbody>
             </table>
@@ -267,7 +273,7 @@ export default async function AdminProviderFinancePage({
   );
 }
 
-function ProviderFinanceRow({ item }: { item: ProviderFinanceItem }) {
+function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem; canOpenLedger: boolean }) {
   const { provider } = item;
   const balanceClass =
     item.currentBalance > 0
@@ -290,9 +296,13 @@ function ProviderFinanceRow({ item }: { item: ProviderFinanceItem }) {
     <tr>
       <td>
         <div className="cell-stack">
-          <Link href={`/providers/${provider.id}/credits`}>
+          {canOpenLedger ? (
+            <Link href={`/providers/${provider.id}/credits`}>
+              <strong>{provider.businessName}</strong>
+            </Link>
+          ) : (
             <strong>{provider.businessName}</strong>
-          </Link>
+          )}
           {provider.phone || provider.email ? (
             <span className="cell-muted">
               {provider.phone}
@@ -326,6 +336,7 @@ function ProviderFinanceRow({ item }: { item: ProviderFinanceItem }) {
       <td>{formatDateOrDash(item.lastPaymentAt)}</td>
       <td>{formatDateOrDash(item.lastTransactionAt)}</td>
       <td className="col-actions">
+        {canOpenLedger ? (
         <div className="inline-actions">
           <Link
             className="btn btn-secondary btn-sm"
@@ -346,6 +357,9 @@ function ProviderFinanceRow({ item }: { item: ProviderFinanceItem }) {
             Manuel İşlemler
           </Link>
         </div>
+        ) : (
+          <span className="cell-muted">-</span>
+        )}
       </td>
     </tr>
   );

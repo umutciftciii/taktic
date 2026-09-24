@@ -162,11 +162,24 @@ export default async function ProviderDetailPage({
   const canReadBindings = can('PROVIDERS_READ');
   const canReadReviews = can('PROVIDER_REVIEWS_READ');
   const canReadEligibility = can('PROMOTION_ELIGIBILITY_REVIEW');
+  // Write surfaces and cross-links, each gated by the exact permission of the
+  // route (or target page) behind it. The API refuses regardless; this only
+  // keeps a control the account cannot use off the screen.
+  const canModerate = can('PROVIDERS_MODERATE');
+  const canWriteCategories = can('PROVIDER_CATEGORIES_WRITE');
+  const canIssueClaimInvite = can('PROVIDER_CLAIM_INVITE_ISSUE');
+  const canReadOffers = can('OFFERS_READ');
+  const canReadCredits = can('FINANCE_LEDGER_READ');
+  const canReadPackagePurchases = can('PACKAGE_PURCHASES_READ');
+  const canReadCatalog = can('CATALOG_READ');
+  const canReadNotifications = can('NOTIFICATION_LOGS_READ');
+  const canReadRequests = can('REQUESTS_READ');
   const [serviceCategories, categories, reviews, eligibility] = await Promise.all([
     canReadBindings
       ? apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`)
       : Promise.resolve(null),
-    canReadBindings ? listCatalogueForFilter() : Promise.resolve([]),
+    // Only the "add a category" list reads the catalogue.
+    canReadBindings && canWriteCategories ? listCatalogueForFilter() : Promise.resolve([]),
     // The operator's own route (PROVIDER_REVIEWS_READ), not the provider
     // panel's: that one is ownership-guarded. A failure hides the card rather
     // than the screen — the reviews are context here, not the subject.
@@ -242,8 +255,8 @@ export default async function ProviderDetailPage({
     <main className="provider-detail-page">
       <PageHeader
         breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Hizmet Verenler', href: '/providers' },
+          { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
+          { label: 'Hizmet Verenler', href: canReadBindings ? '/providers' : undefined },
           { label: provider.businessName },
         ]}
         title={provider.businessName}
@@ -258,28 +271,36 @@ export default async function ProviderDetailPage({
         }
         actions={
           <>
-            <ModerationDialog
-              providerId={provider.id}
-              status={provider.status}
-              moderationNote={provider.moderationNote}
-              rejectionReason={provider.rejectionReason}
-              action={updateProviderStatusAction}
-            />
-            <Link className="btn btn-secondary btn-sm" href={`/offers?providerId=${provider.id}`}>
-              Teklifler
-            </Link>
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={`/providers/${provider.id}/credits`}
-            >
-              Krediler
-            </Link>
-            <Link
-              className="btn btn-ghost btn-sm"
-              href={`/package-purchases?providerId=${provider.id}`}
-            >
-              Paket talepleri
-            </Link>
+            {canModerate ? (
+              <ModerationDialog
+                providerId={provider.id}
+                status={provider.status}
+                moderationNote={provider.moderationNote}
+                rejectionReason={provider.rejectionReason}
+                action={updateProviderStatusAction}
+              />
+            ) : null}
+            {canReadOffers ? (
+              <Link className="btn btn-secondary btn-sm" href={`/offers?providerId=${provider.id}`}>
+                Teklifler
+              </Link>
+            ) : null}
+            {canReadCredits ? (
+              <Link
+                className="btn btn-secondary btn-sm"
+                href={`/providers/${provider.id}/credits`}
+              >
+                Krediler
+              </Link>
+            ) : null}
+            {canReadPackagePurchases ? (
+              <Link
+                className="btn btn-ghost btn-sm"
+                href={`/package-purchases?providerId=${provider.id}`}
+              >
+                Paket talepleri
+              </Link>
+            ) : null}
           </>
         }
       />
@@ -288,20 +309,20 @@ export default async function ProviderDetailPage({
         <StatCard
           label="Kredi bakiyesi"
           value={creditBalance}
-          href={`/providers/${provider.id}/credits`}
+          href={canReadCredits ? `/providers/${provider.id}/credits` : undefined}
           tone={creditBalance > 0 ? 'neutral' : 'warning'}
         />
         <StatCard
           label="Açık teklif"
           value={openOffers}
-          href={`/offers?providerId=${provider.id}`}
+          href={canReadOffers ? `/offers?providerId=${provider.id}` : undefined}
           hint="Müşteri tarafından hâlâ değerlendirilebilir"
         />
         <StatCard label="Toplam teklif" value={totalOffers} />
         <StatCard
           label="Paket alımı"
           value={packagePurchases}
-          href={`/package-purchases?providerId=${provider.id}`}
+          href={canReadPackagePurchases ? `/package-purchases?providerId=${provider.id}` : undefined}
         />
       </section>
 
@@ -397,9 +418,13 @@ export default async function ProviderDetailPage({
                 {bindings.map((binding) => (
                   <li key={binding.id} data-testid={`provider-category-${binding.category.slug}`}>
                     <span className="provider-category-name">
-                      <Link href={`/categories/${binding.category.slug}`}>
-                        {binding.category.name}
-                      </Link>
+                      {canReadCatalog ? (
+                        <Link href={`/categories/${binding.category.slug}`}>
+                          {binding.category.name}
+                        </Link>
+                      ) : (
+                        <span>{binding.category.name}</span>
+                      )}
                       <span className={categoryStatusBadgeClass(binding.category.status)}>
                         {CATEGORY_STATUS_LABELS[binding.category.status]}
                       </span>
@@ -412,14 +437,16 @@ export default async function ProviderDetailPage({
                         <span className="badge badge-warn">Sayaca dahil değil</span>
                       )}
                     </span>
-                    <form action={removeProviderServiceCategoryAction}>
-                      <input type="hidden" name="id" value={provider.id} />
-                      <input type="hidden" name="categoryId" value={binding.categoryId} />
-                      <input type="hidden" name="categoryQuery" value={categoryQuery} />
-                      <button className="btn btn-ghost btn-sm" type="submit">
-                        Kaldır
-                      </button>
-                    </form>
+                    {canWriteCategories ? (
+                      <form action={removeProviderServiceCategoryAction}>
+                        <input type="hidden" name="id" value={provider.id} />
+                        <input type="hidden" name="categoryId" value={binding.categoryId} />
+                        <input type="hidden" name="categoryQuery" value={categoryQuery} />
+                        <button className="btn btn-ghost btn-sm" type="submit">
+                          Kaldır
+                        </button>
+                      </form>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -433,64 +460,68 @@ export default async function ProviderDetailPage({
             </p>
           ) : null}
 
-          <form className="admin-toolbar" method="get" style={{ marginTop: 16 }}>
-            <div className="admin-toolbar-field admin-toolbar-search">
-              <label htmlFor="provider-category-search">Kategori ara</label>
-              <input
-                id="provider-category-search"
-                name="categoryQuery"
-                type="search"
-                placeholder="Kategori adı veya slug"
-                defaultValue={categoryQuery}
-                autoComplete="off"
-                data-testid="provider-category-search"
-              />
-            </div>
-            <div className="admin-toolbar-actions">
-              <button className="btn btn-secondary btn-sm" type="submit">
-                Ara
-              </button>
-              {categoryQuery ? (
-                <Link className="btn btn-ghost btn-sm" href={`/providers/${provider.id}`}>
-                  Sıfırla
-                </Link>
-              ) : null}
-            </div>
-          </form>
-
-          <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
-            {suggestions.length === 0 ? (
-              <span className="muted">
-                {categoryQuery
-                  ? 'Bu aramayla eşleşen, bağlanabilir bir kategori yok.'
-                  : 'Bağlanabilecek başka kategori yok.'}
-              </span>
-            ) : (
-              suggestions.map((category) => (
-                <form
-                  action={addProviderServiceCategoryAction}
-                  key={category.id}
-                  data-testid={`provider-category-add-${category.slug}`}
-                >
-                  <input type="hidden" name="id" value={provider.id} />
-                  <input type="hidden" name="categoryId" value={category.id} />
-                  <input type="hidden" name="categoryQuery" value={categoryQuery} />
+          {canWriteCategories ? (
+            <>
+              <form className="admin-toolbar" method="get" style={{ marginTop: 16 }}>
+                <div className="admin-toolbar-field admin-toolbar-search">
+                  <label htmlFor="provider-category-search">Kategori ara</label>
+                  <input
+                    id="provider-category-search"
+                    name="categoryQuery"
+                    type="search"
+                    placeholder="Kategori adı veya slug"
+                    defaultValue={categoryQuery}
+                    autoComplete="off"
+                    data-testid="provider-category-search"
+                  />
+                </div>
+                <div className="admin-toolbar-actions">
                   <button className="btn btn-secondary btn-sm" type="submit">
-                    + {category.name}
-                    <span className={categoryStatusBadgeClass(category.status)}>
-                      {CATEGORY_STATUS_LABELS[category.status]}
-                    </span>
+                    Ara
                   </button>
-                </form>
-              ))
-            )}
-          </div>
+                  {categoryQuery ? (
+                    <Link className="btn btn-ghost btn-sm" href={`/providers/${provider.id}`}>
+                      Sıfırla
+                    </Link>
+                  ) : null}
+                </div>
+              </form>
 
-          {matches.length > suggestions.length ? (
-            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              {matches.length} sonuçtan ilk {suggestions.length} tanesi gösteriliyor. Aramayı
-              daraltın.
-            </p>
+              <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+                {suggestions.length === 0 ? (
+                  <span className="muted">
+                    {categoryQuery
+                      ? 'Bu aramayla eşleşen, bağlanabilir bir kategori yok.'
+                      : 'Bağlanabilecek başka kategori yok.'}
+                  </span>
+                ) : (
+                  suggestions.map((category) => (
+                    <form
+                      action={addProviderServiceCategoryAction}
+                      key={category.id}
+                      data-testid={`provider-category-add-${category.slug}`}
+                    >
+                      <input type="hidden" name="id" value={provider.id} />
+                      <input type="hidden" name="categoryId" value={category.id} />
+                      <input type="hidden" name="categoryQuery" value={categoryQuery} />
+                      <button className="btn btn-secondary btn-sm" type="submit">
+                        + {category.name}
+                        <span className={categoryStatusBadgeClass(category.status)}>
+                          {CATEGORY_STATUS_LABELS[category.status]}
+                        </span>
+                      </button>
+                    </form>
+                  ))
+                )}
+              </div>
+
+              {matches.length > suggestions.length ? (
+                <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  {matches.length} sonuçtan ilk {suggestions.length} tanesi gösteriliyor. Aramayı
+                  daraltın.
+                </p>
+              ) : null}
+            </>
           ) : null}
         </SectionCard>
         ) : null}
@@ -560,12 +591,14 @@ export default async function ProviderDetailPage({
               Başvuru sahiplenme şu anda kapalı.
             </p>
           ) : claim?.canInvite ? (
-            <form action={sendProviderClaimInviteAction} className="inline-actions">
-              <input type="hidden" name="id" value={provider.id} />
-              <button className="btn btn-secondary btn-sm" type="submit">
-                Claim daveti gönder
-              </button>
-            </form>
+            canIssueClaimInvite ? (
+              <form action={sendProviderClaimInviteAction} className="inline-actions">
+                <input type="hidden" name="id" value={provider.id} />
+                <button className="btn btn-secondary btn-sm" type="submit">
+                  Claim daveti gönder
+                </button>
+              </form>
+            ) : null
           ) : (
             <p className="muted" style={{ marginBottom: 0 }}>
               {(claim?.blockedCode && CLAIM_BLOCKED_LABELS[claim.blockedCode]) ??
@@ -576,9 +609,11 @@ export default async function ProviderDetailPage({
           <p className="muted" style={{ marginTop: 12, marginBottom: 0, fontSize: 12 }}>
             Bağlantı yalnızca başvurunun e-posta adresine gönderilir; bu ekranda hiçbir zaman
             gösterilmez.{' '}
-            <Link className="cell-link" href={`/notifications?providerId=${provider.id}`}>
-              Gönderim geçmişi
-            </Link>
+            {canReadNotifications ? (
+              <Link className="cell-link" href={`/notifications?providerId=${provider.id}`}>
+                Gönderim geçmişi
+              </Link>
+            ) : null}
           </p>
         </SectionCard>
 
@@ -633,7 +668,7 @@ export default async function ProviderDetailPage({
           title="Son teklifler"
           subtitle={totalOffers > 0 ? `Toplam ${totalOffers}` : undefined}
           actions={
-            totalOffers > 0 ? (
+            totalOffers > 0 && canReadOffers ? (
               <Link className="btn btn-ghost btn-sm" href={`/offers?providerId=${provider.id}`}>
                 Tümünü gör
               </Link>
@@ -674,9 +709,11 @@ export default async function ProviderDetailPage({
                         </span>
                       </td>
                       <td className="col-actions">
-                        <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
-                          Detay
-                        </Link>
+                        {canReadOffers ? (
+                          <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
+                            Detay
+                          </Link>
+                        ) : null}
                       </td>
                     </tr>
                   ))}
@@ -756,11 +793,17 @@ export default async function ProviderDetailPage({
                         )}
                       </td>
                       <td>
-                        <Link className="cell-link" href={`/requests/${item.request.id}`}>
+                        {canReadRequests ? (
+                          <Link className="cell-link" href={`/requests/${item.request.id}`}>
+                            <code className="display-number">
+                              {item.request.requestNumber ?? `#${item.request.id.slice(-8)}`}
+                            </code>
+                          </Link>
+                        ) : (
                           <code className="display-number">
                             {item.request.requestNumber ?? `#${item.request.id.slice(-8)}`}
                           </code>
-                        </Link>
+                        )}
                         <div className="cell-muted">{item.request.categoryName}</div>
                       </td>
                       <td>
@@ -792,7 +835,7 @@ export default async function ProviderDetailPage({
           title="Son paket alımları"
           subtitle={packagePurchases > 0 ? `Toplam ${packagePurchases}` : undefined}
           actions={
-            packagePurchases > 0 ? (
+            packagePurchases > 0 && canReadPackagePurchases ? (
               <Link
                 className="btn btn-ghost btn-sm"
                 href={`/package-purchases?providerId=${provider.id}`}
@@ -843,12 +886,14 @@ export default async function ProviderDetailPage({
                           )}
                         </td>
                         <td className="col-actions">
-                          <Link
-                            className="btn btn-secondary btn-sm"
-                            href={`/package-purchases/${purchase.id}`}
-                          >
-                            Detay
-                          </Link>
+                          {canReadPackagePurchases ? (
+                            <Link
+                              className="btn btn-secondary btn-sm"
+                              href={`/package-purchases/${purchase.id}`}
+                            >
+                              Detay
+                            </Link>
+                          ) : null}
                         </td>
                       </tr>
                     );

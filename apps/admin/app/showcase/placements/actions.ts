@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch } from '../../../lib/api';
+import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 
 /**
  * The three things an operator may do to a paid run.
@@ -34,6 +35,7 @@ export async function suspendShowcasePlacementAction(formData: FormData) {
       body: JSON.stringify({ note: readOptional(formData, 'note') }),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(`${target}?error=${errorCode(error)}`);
   }
 
@@ -52,6 +54,7 @@ export async function resumeShowcasePlacementAction(formData: FormData) {
       body: JSON.stringify({}),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(`${target}?error=${errorCode(error)}`);
   }
 
@@ -70,6 +73,7 @@ export async function cancelShowcasePlacementAction(formData: FormData) {
       body: JSON.stringify({ note: readOptional(formData, 'note') }),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(`${target}?error=${errorCode(error)}`);
   }
 

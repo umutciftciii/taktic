@@ -19,7 +19,7 @@ type RefundScanPageProps = {
  * changes nothing about who qualifies.
  */
 export default async function RefundScanPage({ searchParams }: RefundScanPageProps) {
-  await requireAdmin('OFFER_REFUND_SCAN_READ');
+  const { can } = await requireAdmin('OFFER_REFUND_SCAN_READ');
 
   const params = (await searchParams) ?? {};
   const limit = Math.min(readPositiveInt(params.limit, 100), 500);
@@ -37,7 +37,11 @@ export default async function RefundScanPage({ searchParams }: RefundScanPagePro
         </p>
       </header>
 
-      <RefundScanClient initialLimit={limit} initialScan={scan} />
+      <RefundScanClient
+        initialLimit={limit}
+        initialScan={scan}
+        canExecute={can('OFFER_REFUND_EXECUTE')}
+      />
     </main>
   );
 }

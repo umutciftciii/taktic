@@ -47,7 +47,9 @@ export default async function ShowcaseReviewPage({
   params,
   searchParams,
 }: ShowcaseReviewPageProps) {
-  await requireAdmin('SHOWCASE_REVIEW_READ');
+  const { can } = await requireAdmin('SHOWCASE_REVIEW_READ');
+  const canDecide = can('SHOWCASE_REVIEW_DECIDE');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const { versionId } = await params;
   const { error, approved, rejected } = await searchParams;
 
@@ -116,9 +118,13 @@ export default async function ShowcaseReviewPage({
           <div>
             <dt>İşletme</dt>
             <dd>
-              <Link href={`/providers/${version.provider.id}`}>
-                {version.provider.businessName}
-              </Link>
+              {canOpenProvider ? (
+                <Link href={`/providers/${version.provider.id}`}>
+                  {version.provider.businessName}
+                </Link>
+              ) : (
+                version.provider.businessName
+              )}
             </dd>
           </div>
           <div>
@@ -248,7 +254,7 @@ export default async function ShowcaseReviewPage({
         </SectionCard>
       ) : null}
 
-      {isPending ? (
+      {isPending && !canDecide ? null : isPending ? (
         <SectionCard
           title="Karar"
           subtitle="Onay bu sürümü kartın yayına hazır sürümü yapar. Ret, hizmet verenin okuyacağı bir gerekçe ister."
