@@ -3,7 +3,6 @@
 import type { RefObject } from 'react';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, navGroups } from '../lib/nav';
-import { logoutAction } from '../app/login/actions';
 import { LogoutButton } from '../app/session/logout-button';
 
 type TopbarProps = {
@@ -44,7 +43,7 @@ export function Topbar({ onToggleSidebar, sidebarOpen, sidebarId, toggleRef }: T
           )}
         </div>
 
-        <form action={logoutAction} className="admin-topbar-actions">
+        <form action="/logout" method="post" className="admin-topbar-actions">
           {/*
             Announces the logout to this panel's other tabs before the form
             posts; the server-side revoke inside the action is what actually

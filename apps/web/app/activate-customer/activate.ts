@@ -1,34 +1,31 @@
-'use server';
-
 import { safeRedirectPathOrNull } from '@taktic/shared';
-import { redirect } from 'next/navigation';
 import { persistSessionCookie } from '../session-cookie';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-export async function submitCustomerActivationAction(formData: FormData) {
+export async function submitCustomerActivation(formData: FormData): Promise<string> {
   const token = readFormString(formData, 'token').trim();
   const password = readFormString(formData, 'password');
   const passwordConfirm = readFormString(formData, 'passwordConfirm');
   // Posted back by the page's own hidden field, which only ever holds what
   // safeRedirectPathOrNull already approved on render — re-validated here
   // because a form field is as untrusted as any other request input. See
-  // login/actions.ts for the same check on the sign-in form.
+  // login/sign-in.ts for the same check on the sign-in form.
   const redirectTo = safeRedirectPathOrNull(readFormString(formData, 'redirectTo'));
 
   if (!token) {
-    redirect(`/activate-customer?${buildErrorParams({ error: 'invalid', redirectTo }).toString()}`);
+    return `/activate-customer?${buildErrorParams({ error: 'invalid', redirectTo }).toString()}`;
   }
 
   if (!password || password.length < 8) {
     const params = buildErrorParams({ token, error: 'password', redirectTo });
-    redirect(`/activate-customer?${params.toString()}`);
+    return `/activate-customer?${params.toString()}`;
   }
 
   if (password !== passwordConfirm) {
     const params = buildErrorParams({ token, error: 'mismatch', redirectTo });
-    redirect(`/activate-customer?${params.toString()}`);
+    return `/activate-customer?${params.toString()}`;
   }
 
   const response = await fetch(`${apiUrl}/auth/customer-activation`, {
@@ -44,7 +41,7 @@ export async function submitCustomerActivationAction(formData: FormData) {
     if (message) {
       params.set('errorMessage', message);
     }
-    redirect(`/activate-customer?${params.toString()}`);
+    return `/activate-customer?${params.toString()}`;
   }
 
   // Activation logs the customer in, so persist the session cookie the API
@@ -52,10 +49,10 @@ export async function submitCustomerActivationAction(formData: FormData) {
   // screen — that is the whole point of the claim flow.
   const session = await persistSessionCookie(response);
   if (session) {
-    redirect(redirectTo ?? '/requests/my');
+    return redirectTo ?? '/requests/my';
   }
 
-  redirect('/activate-customer?success=1');
+  return '/activate-customer?success=1';
 }
 
 function buildErrorParams(fields: {

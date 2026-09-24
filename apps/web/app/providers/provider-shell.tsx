@@ -24,7 +24,6 @@ import {
   IconStore,
 } from '../landing-icons';
 import { PanelDrawer } from '../panel-drawer';
-import { providerDashboardLogoutAction } from '../login/actions';
 import { LogoutButton } from '../session/logout-button';
 import { SessionGuard } from '../session/session-guard';
 
@@ -372,10 +371,11 @@ function ProviderUserMenu({
             Kredilerim
           </Link>
         ) : null}
-        <form action={providerDashboardLogoutAction}>
+        <form action="/logout" method="post">
+          <input type="hidden" name="after" value="home" />
           {/*
             Announces the logout to this application's other tabs before the
-            form posts; the server-side revoke inside the action is what
+            form posts; the server-side revoke in `/logout` is what
             actually ends the session.
           */}
           <LogoutButton className="pdash-user-link pdash-user-logout" testId="provider-logout">

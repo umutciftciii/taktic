@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import type { AuthUser } from '../lib/api';
 import { IconChevronDown } from './landing-icons';
-import { logoutAction } from './login/actions';
 import { StartChoiceModal } from './start-choice-modal';
 
 type SiteHeaderProps = {
@@ -115,7 +114,7 @@ function UserMenu({ user }: { user: AuthUser }) {
             Profilim
           </Link>
         ) : null}
-        <form action={logoutAction}>
+        <form action="/logout" method="post">
           <button type="submit" className="lp-user-link lp-user-logout" role="menuitem">
             Çıkış yap
           </button>

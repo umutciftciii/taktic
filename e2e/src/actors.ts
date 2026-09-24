@@ -61,7 +61,7 @@ export class Actor {
 
   /**
    * Signs in through the real form, so the session cookie under test is the one
-   * the login server action actually set — the single most common way a change
+   * the sign-in route actually set — the single most common way a change
    * to cookie flags or redirect handling breaks the product silently.
    */
   async loginToWeb(email: string, password: string, redirectTo?: string) {

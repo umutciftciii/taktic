@@ -11,10 +11,13 @@ import { unstable_isUnrecognizedActionError } from 'next/navigation';
  * heard of; Next answers 404 with `x-nextjs-action-not-found`, the client throws
  * `UnrecognizedActionError`, and — because a form `action={…}` has no catch
  * around it — the nearest error boundary renders "Bir şeyler ters gitti". That
- * is what the reported screens were: a stale tab, not a broken route. In a
- * production build the ids are a deterministic function of the source, so the
- * same tab keeps working across restarts and across rebuilds of unchanged code,
- * and this path is never taken.
+ * is what the reported screens were: a stale tab, not a broken route. A
+ * production build is no exception: the ids are salted with the build's own
+ * encryption key, which a clean build (a fresh container, an empty `.next`)
+ * draws anew, so a deploy of unchanged source still changes every id. The
+ * sign-in, sign-out and invite forms no longer depend on an id at all
+ * (@taktic/shared's form-post); this reload is the fallback for the panel's
+ * other actions.
  *
  * The recovery is a plain page load, which fetches the current ids. It is
  * deliberately not a retry: the submission is not replayed, nothing is

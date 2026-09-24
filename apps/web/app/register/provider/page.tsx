@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { AuthFrame } from '../../auth-frame';
-import { registerProviderAction } from '../actions';
 import { RoleSwitch } from '../role-switch';
 import { registerErrorMessage } from '../error-message';
 import { PasswordFields } from '../../password-criteria';
@@ -15,7 +14,8 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
   return (
     <AuthFrame tab="register" registerHref="/register/provider">
       <form
-        action={registerProviderAction}
+        action="/register/provider/submit"
+        method="post"
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         <h1 className="auth-screen-title">Hesap oluştur</h1>

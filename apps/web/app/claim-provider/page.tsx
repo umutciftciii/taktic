@@ -2,7 +2,6 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { CLAIM_TOKEN_COOKIE, isProviderClaimEnabled } from '../../lib/provider-claim';
 import { PasswordFields } from '../password-criteria';
-import { startClaimLoginAction, submitProviderClaimAction } from './actions';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -148,7 +147,7 @@ export default async function ClaimProviderPage({ searchParams }: ClaimPageProps
             Bu e-posta adresiyle bir hizmet veren hesabı zaten var. Devam etmek için giriş yapın;
             girişten sonra bu adım kaldığı yerden sürer.
           </p>
-          <form action={startClaimLoginAction}>
+          <form action="/claim-provider/login" method="post">
             <input type="hidden" name="token" value={token} />
             <button className="btn btn-primary" type="submit">
               Giriş yap ve devam et
@@ -162,7 +161,7 @@ export default async function ClaimProviderPage({ searchParams }: ClaimPageProps
           <p className="muted">
             Bu başvuru, giriş yapmış olduğunuz hizmet veren hesabına bağlanacak.
           </p>
-          <form action={submitProviderClaimAction}>
+          <form action="/claim-provider/submit" method="post">
             <input type="hidden" name="token" value={token} />
             <input type="hidden" name="needsPassword" value="false" />
             <button className="btn btn-primary" type="submit">
@@ -178,7 +177,7 @@ export default async function ClaimProviderPage({ searchParams }: ClaimPageProps
             Hizmet veren hesabınızı oluşturmak için bir şifre belirleyin. Hesabınız bu e-posta
             adresiyle açılacak.
           </p>
-          <form action={submitProviderClaimAction} className="auth-screen-fields">
+          <form action="/claim-provider/submit" method="post" className="auth-screen-fields">
             <input type="hidden" name="token" value={token} />
             <input type="hidden" name="needsPassword" value="true" />
             <PasswordFields

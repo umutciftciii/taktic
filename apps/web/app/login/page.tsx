@@ -1,7 +1,6 @@
 import { safeRedirectPathOrNull } from '@taktic/shared';
 import Link from 'next/link';
 import { AuthFrame } from '../auth-frame';
-import { loginAction } from './actions';
 
 type LoginPageProps = {
   searchParams: Promise<{
@@ -25,7 +24,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <AuthFrame tab="login">
-      <form action={loginAction} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/*
+        A plain HTML post to a fixed URL rather than a Server Action: a sign-in
+        form left open across a deploy has to keep working. See login/submit.
+      */}
+      <form
+        action="/login/submit"
+        method="post"
+        style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+      >
         <h1 className="auth-screen-title">Tekrar hoş geldin</h1>
         <p className="auth-screen-subtitle">
           Müşteri ve hizmet veren hesapları için giriş yapın.

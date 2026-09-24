@@ -1,13 +1,14 @@
-'use server';
-
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import { persistSessionCookie } from '../session-cookie';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const authCookieName = process.env.AUTH_COOKIE_NAME ?? 'taktic_session';
 
-export async function loginAction(formData: FormData) {
+/**
+ * The admin sign-in form's submission. Formerly the `loginAction` Server
+ * Action; it runs from the `/login/submit` route handler now, so a sign-in form
+ * left open across a deploy still reaches it (see @taktic/shared's form-post).
+ * It answers the path to send the browser to.
+ */
+export async function signIn(formData: FormData): Promise<string> {
   const email = readFormString(formData, 'email');
   const password = readFormString(formData, 'password');
   // An unticked checkbox posts nothing at all, which is the "no" this reads.
@@ -20,7 +21,7 @@ export async function loginAction(formData: FormData) {
   });
 
   if (!response.ok) {
-    redirect('/login?error=1');
+    return '/login?error=1';
   }
 
   // The API decided how long this session lives, whether its cookie survives
@@ -31,28 +32,7 @@ export async function loginAction(formData: FormData) {
   // session-cookie.ts.
   await persistSessionCookie(response);
 
-  redirect('/');
-}
-
-export async function logoutAction() {
-  const cookieStore = await cookies();
-
-  try {
-    // Revoking server-side is what makes "çıkış" mean it: the cookie may still
-    // exist in another tab or on another device, and it has to stop working.
-    await fetch(`${apiUrl}/auth/logout`, {
-      method: 'POST',
-      headers: { cookie: cookieStore.toString() },
-      cache: 'no-store',
-    });
-  } catch {
-    // The cookie still goes. Leaving an operator signed in on this browser
-    // because the API was briefly unreachable is the worse of the two outcomes,
-    // and the session's own idle and absolute clocks still end it.
-  }
-
-  cookieStore.delete(authCookieName);
-  redirect('/login');
+  return '/';
 }
 
 function readFormString(formData: FormData, key: string) {
