@@ -51,6 +51,11 @@ Yeni ya da güncellenmiş testler:
 - `e2e/tests/provider-package-purchase-detail.spec.ts` (WebKit testMatch'e eklendi): own 200; foreign/unknown/başka panel/`not-an-id` → 404, eşdeğer gövde, console hatası yok.
 - `e2e/tests/admin-campaign-lifecycle.spec.ts`: DRAFT'ta "Sonlandır" yok, "Taslağı kapat" var; ACTIVE'de tersi.
 
+## CI ilk koşu notu
+
+- Chromium işi testlere gelmeden web build'inde düştü: `next/font/google` build sırasında Google Fonts CSS'ini indirirken beklenmeyen bir yanıt aldı ve `loader.js:122` içinde `null` okudu. `layout.tsx` bu PR'da değişmedi, aynı koşudaki build işi geçti; hata geçici.
+- WebKit'te iki yeni test konsol assert'inde düştü: `page.goto` önceki sayfadan ayrılırken WebKit, iptal ettiği her `<Link>` prefetch'i için `Failed to fetch RSC payload … TypeError: Load failed` logluyor. Bunlar test edilen sayfanın hatası değil. Yalnız bu kalıp filtrelendi; diğer tüm console hataları testi düşürmeye devam ediyor. Yerelde WebKit ×3 tekrar 9/9, Chromium 3/3 geçti.
+
 ## Dış trafik ifadesinin düzeltilmesi
 
 CMP-007 raporundaki dış trafik ifadesi şöyle düzeltilmeli: **"iş sağlayıcısı çağrısı yok"**. Yani ödeme (Lemon Squeezy), e-posta (Resend) ve SMS sağlayıcılarına çağrı yapılmadı. Ağda görülen dış bağlantılar container açılışında `registry.npmjs.org` ve `checkpoint.prisma.io` içindi. Bunlar iş sağlayıcısı değil; "hiç dış trafik yok" demek doğru olmaz. Bu PR'ın DRAFT→ENDED yolu da hiçbir iş sağlayıcısını çağırmaz.

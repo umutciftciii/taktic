@@ -27,6 +27,13 @@ import { artifactsDir, primaryRuntime } from '../src/runtime';
  */
 
 const OPERATIONS_SETTINGS_ID = 'singleton';
+
+/**
+ * WebKit logs one of these for every `<Link>` prefetch that a navigation
+ * cancels on the page being left; they are not errors of the page under
+ * test and are the only console errors ignored.
+ */
+const ABORTED_PREFETCH = /^Failed to fetch RSC payload for \S+\. Falling back to browser navigation\. TypeError: Load failed$/;
 const WIDTHS = [320, 768, 1024, 1440] as const;
 const SCREENSHOT_DIR = resolve(artifactsDir, 'admin-campaign-channel');
 
@@ -188,7 +195,7 @@ test.describe('admin campaign channel', () => {
     const page = admin.page;
     const consoleErrors: string[] = [];
     page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text());
+      if (message.type() === 'error' && !ABORTED_PREFETCH.test(message.text())) consoleErrors.push(message.text());
     });
 
     try {

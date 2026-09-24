@@ -19,6 +19,14 @@ import { primaryRuntime } from '../src/runtime';
 
 const UNKNOWN_ID = 'c000000000000000000000000';
 
+/**
+ * WebKit logs one of these for every `<Link>` prefetch of the page being left
+ * that a `page.goto` cancels. They come from the previous document tearing
+ * down, not from the page under test, so they are the only console errors
+ * ignored; an error boundary or anything else still fails the test.
+ */
+const ABORTED_PREFETCH = /^Failed to fetch RSC payload for \S+\. Falling back to browser navigation\. TypeError: Load failed$/;
+
 /** Strings that only appear when a framework internal has reached the page. */
 const DEV_INTERNALS = ['nextjs-portal', 'webpack-internal', 'rsc://'];
 
@@ -50,8 +58,9 @@ async function expectQuiet404(page: Page, url: string) {
   const onConsole = (message: { type(): string; text(): string }) => {
     // The browser reports the document's own 404 as a failed resource; that
     // is the status this test asks for, not an error the page raised.
-    if (message.type() === 'error' && !/Failed to load resource: .*404/.test(message.text())) {
-      consoleErrors.push(message.text());
+    const text = message.text();
+    if (message.type() === 'error' && !/Failed to load resource: .*404/.test(text) && !ABORTED_PREFETCH.test(text)) {
+      consoleErrors.push(text);
     }
   };
   page.on('console', onConsole);
