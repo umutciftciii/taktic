@@ -97,6 +97,9 @@ test.describe('admin campaign lifecycle', () => {
       await expect(page.getByTestId('campaign-lifecycle-engine-off')).toContainText('Kampanya motoru kapalı — etkinleştirme yapılamaz');
       await expect(page.getByTestId('campaign-activate')).toBeDisabled();
       await expect(page.getByTestId('campaign-pause')).toHaveCount(0);
+      // A draft is closed, not "ended": no Sonlandır button, its own form instead.
+      await expect(page.getByTestId('campaign-end')).toHaveCount(0);
+      await expect(page.getByTestId('campaign-close-draft')).toBeEnabled();
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'DRAFT');
 
       // Forcing the form past the disabled button reaches the API, which
@@ -131,6 +134,7 @@ test.describe('admin campaign lifecycle', () => {
       await expect(page.getByTestId('campaign-activate')).toHaveCount(0);
       await expect(page.getByTestId('campaign-pause')).toBeVisible();
       await expect(page.getByTestId('campaign-end')).toBeVisible();
+      await expect(page.getByTestId('campaign-close-draft')).toHaveCount(0);
 
       // ---- pause, with a reason ----
       await page.getByTestId('campaign-lifecycle-reason').fill('E2E: bütçe kontrolü');

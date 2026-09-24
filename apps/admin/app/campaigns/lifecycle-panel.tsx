@@ -18,8 +18,10 @@ type CampaignLifecyclePanelProps = {
 /**
  * The lifecycle desk of one campaign (CMP-002 S2B2).
  *
- * Exactly the moves the API allows are offered: a DRAFT can be activated, an
- * ACTIVE campaign paused or ended (and a newer version activated in place of
+ * Exactly the moves the API allows are offered: a DRAFT can be activated or
+ * closed (BUG-OPS-002: "Taslağı kapat" — the `end` route, worded as what it
+ * is for a campaign that never ran, and never gated on the engine or the
+ * channel), an ACTIVE campaign paused or ended (and a newer version activated in place of
  * the running one), a PAUSED campaign resumed or ended, an ENDED campaign
  * nothing. Activation and resumption are shown disabled — with the sentence
  * that explains why — while the engine switch is off, because the API would
@@ -54,16 +56,19 @@ export function CampaignLifecyclePanel({
     <div className="admin-action-panel" data-testid="campaign-lifecycle-panel" data-status={status}>
       <h3>Yaşam döngüsü</h3>
       <p>
-        {status === 'DRAFT' && 'Taslak: motor açıkken bir sürüm etkinleştirilerek ACTIVE olur.'}
+        {status === 'DRAFT' && 'Taslak: motor açıkken bir sürüm etkinleştirilerek ACTIVE olur. Kullanılmayacaksa kapatılabilir.'}
         {status === 'ACTIVE' && `Etkin — motor sürüm ${activeVersion?.versionNumber ?? '?'} kuralını değerlendiriyor. Kural yerinde değiştirilemez; yeni revizyon kaydedip etkinleştirin.`}
         {status === 'PAUSED' && 'Duraklatıldı: yeni hak ediş üretilmez, mevcut promosyon lotları çalışmaya devam eder.'}
-        {status === 'ENDED' && 'Sona erdi: bu kampanya bir daha açılamaz; mevcut lotlar etkilenmez.'}
+        {status === 'ENDED' &&
+          (campaign.activeVersionId === null
+            ? 'Taslak kapatıldı: kampanya hiç etkinleşmedi ve bir daha açılamaz.'
+            : 'Sona erdi: bu kampanya bir daha açılamaz; mevcut lotlar etkilenmez.')}
       </p>
 
       {needsEngine && status !== 'ENDED' ? (
         <p data-testid="campaign-lifecycle-engine-off">
           <strong>Kampanya motoru kapalı — etkinleştirme yapılamaz.</strong> Etkinleştir ve devam ettir, motor açılana
-          kadar reddedilir. Duraklat ve sonlandır her zaman kullanılabilir.
+          kadar reddedilir. {status === 'DRAFT' ? 'Taslağı kapatmak' : 'Duraklat ve sonlandır'} her zaman kullanılabilir.
         </p>
       ) : null}
 
@@ -112,6 +117,25 @@ export function CampaignLifecyclePanel({
           >
             {status === 'DRAFT' ? `Sürüm ${activateVersion.versionNumber}’i etkinleştir` : status === 'PAUSED' ? `Sürüm ${activateVersion.versionNumber} ile devam ettir` : `Sürüm ${activateVersion.versionNumber}’e geç`}
           </button>
+        </form>
+      ) : null}
+
+      {status === 'DRAFT' ? (
+        <form action={submit} className="campaign-lifecycle-form" data-testid="campaign-close-draft-form">
+          <input type="hidden" name="campaignId" value={campaign.id} />
+          <p>
+            Taslağı kapatmak kampanyayı hiç etkinleştirmeden kalıcı olarak <strong>Sona erdi</strong> durumuna alır. Hiçbir sürüm
+            çalıştırılmaz; hak ediş, promosyon kredisi veya olay oluşmaz.
+          </p>
+          <label className="field">
+            <span>Gerekçe</span>
+            <textarea name="reason" minLength={3} maxLength={500} required placeholder="Taslak neden kapatılıyor?" data-testid="campaign-close-draft-reason" />
+          </label>
+          <div className="panel-row">
+            <button className="btn btn-danger btn-sm" type="submit" name="intent" value="close" disabled={pending} data-testid="campaign-close-draft">
+              Taslağı kapat
+            </button>
+          </div>
         </form>
       ) : null}
 

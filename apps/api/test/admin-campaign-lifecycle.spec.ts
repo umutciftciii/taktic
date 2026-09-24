@@ -8,7 +8,7 @@ import { createOfferPackage, createProviderProfile, createTestApp, createUser, l
 /**
  * CMP-002 S2B2 — the campaign lifecycle, SUPER_ADMIN only.
  *
- * DRAFT → ACTIVE, ACTIVE ⇄ PAUSED, ACTIVE/PAUSED → ENDED, ENDED terminal.
+ * DRAFT → ACTIVE, ACTIVE ⇄ PAUSED, DRAFT/ACTIVE/PAUSED → ENDED, ENDED terminal.
  * Activation moves `activeVersionId` to an existing immutable version and
  * writes an audit row; it is refused — with nothing written — while the
  * engine switch is off (`CAMPAIGN_ENGINE_DISABLED`), when a fact source the
@@ -206,11 +206,11 @@ describe('with the engine switch on', () => {
     expect(before.campaigns.find((row) => row.id === campaign.id)).toMatchObject({ status: CampaignStatus.ENDED, activeVersionId: currentVersion.id });
   });
 
-  it('invalid moves: pause/resume/end on a DRAFT, resume on ACTIVE, pause on PAUSED — 409 and nothing written', async () => {
+  it('invalid moves: pause/resume on a DRAFT, resume on ACTIVE, pause on PAUSED — 409 and nothing written', async () => {
     const { cookie } = await adminCookie();
     const { campaign, currentVersion } = await draft(cookie, K2);
     const draftState = await snapshot();
-    for (const verb of ['pause', 'resume', 'end'] as const) {
+    for (const verb of ['pause', 'resume'] as const) {
       expect((await transition(cookie, campaign.id, verb).expect(409)).body.code).toBe('CAMPAIGN_INVALID_TRANSITION');
     }
     expect(await snapshot()).toEqual(draftState);
@@ -391,5 +391,89 @@ describe('with the engine switch on', () => {
     expect(statuses.every((s) => s === 201 || s === 409)).toBe(true);
     expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.ACTIVATED } })).toBe(1);
     expect((await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).activeVersionId).toBe(currentVersion.id);
+  });
+});
+
+/**
+ * BUG-OPS-002 — a DRAFT closed by operations without ever running. The same
+ * `end` route, permission and ENDED audit action; no engine switch, no
+ * channel check, no `activeVersionId`, and nothing written outside the
+ * campaign row and its one ENDED audit row.
+ */
+describe('DRAFT → ENDED (closing a draft)', () => {
+  const MOBILE_K2 = { ...K2, channel: 'MOBILE' };
+
+  async function fullSnapshot(campaignId: string) {
+    return {
+      ...(await snapshot()),
+      versionRows: await ctx.prisma.campaignVersion.findMany({ where: { campaignId }, orderBy: { versionNumber: 'asc' } }),
+      pendingWork: await ctx.prisma.campaignTriggerEvent.count(),
+    };
+  }
+
+  for (const engineOn of [false, true]) {
+    it(`closes a MOBILE draft with the engine switch ${engineOn ? 'on' : 'off'}: status ENDED, one ENDED row, zero financial or event effect`, async () => {
+      await setEngineEnabled(ctx.prisma, engineOn);
+      const { admin, cookie } = await adminCookie();
+      const { campaign, currentVersion } = await draft(cookie, MOBILE_K2);
+      if (engineOn) {
+        // The draft cannot run: activation is refused on its channel.
+        const refused = await activate(cookie, campaign.id, currentVersion.versionNumber).expect(400);
+        expect(refused.body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'CHANNEL_SOURCE_UNAVAILABLE' })]));
+      }
+      const before = await fullSnapshot(campaign.id);
+      const auditBefore = await auditActions(campaign.id);
+
+      const closed = await transition(cookie, campaign.id, 'end', 'taslak kullanılmayacak').expect(201);
+
+      expect(closed.body.campaign).toMatchObject({ status: 'ENDED', activeVersionId: null, redemptionCount: 0, budgetConsumedCredits: 0 });
+      expect(closed.body.activeVersion).toBeNull();
+      expect(await auditActions(campaign.id)).toEqual([...auditBefore, CampaignAuditAction.ENDED]);
+      const ended = await ctx.prisma.campaignAuditLog.findFirstOrThrow({ where: { campaignId: campaign.id, action: CampaignAuditAction.ENDED } });
+      expect(ended).toMatchObject({ actorId: admin.id, campaignVersionId: null });
+      expect(ended.summary).toEqual({ reason: 'taslak kullanılmayacak', versionNumber: null, fromStatus: 'DRAFT' });
+
+      const after = await fullSnapshot(campaign.id);
+      // Only the status of this one campaign changed; versions, engine,
+      // counters, lots and ledger are exactly as before.
+      expect(after.campaigns).toEqual(before.campaigns.map((row) => (row.id === campaign.id ? { ...row, status: CampaignStatus.ENDED } : row)));
+      expect(after.versionRows).toEqual(before.versionRows);
+      expect(after.versions).toBe(before.versions);
+      expect(after.audit).toBe(before.audit + 1);
+      expect(after.engine).toEqual(before.engine);
+      expect(after.engine).toMatchObject({ triggerEvents: 0, redemptions: 0, lots: 0, consumptions: 0, providerCounters: 0, dailyCounters: 0, ledgerRows: 0, evaluationLogs: 0 });
+      expect(after.pendingWork).toBe(0);
+      expect((await ctx.prisma.operationsSettings.findUnique({ where: { id: 'singleton' } }))?.campaignEngineEnabled ?? false).toBe(engineOn);
+    });
+  }
+
+  it('a closed draft is terminal: activate, pause, resume, end and a new revision are all 409, nothing written', async () => {
+    await setEngineEnabled(ctx.prisma, true);
+    const { cookie } = await adminCookie();
+    const { campaign, currentVersion } = await draft(cookie, K2);
+    await transition(cookie, campaign.id, 'end', 'yanlış açıldı').expect(201);
+    const before = await snapshot();
+
+    for (const verb of ['pause', 'resume', 'end'] as const) {
+      const refused = await transition(cookie, campaign.id, verb).expect(409);
+      expect(refused.body).toMatchObject({ code: 'CAMPAIGN_INVALID_TRANSITION', from: 'ENDED' });
+    }
+    const activation = await activate(cookie, campaign.id, currentVersion.versionNumber).expect(409);
+    expect(activation.body).toMatchObject({ code: 'CAMPAIGN_INVALID_TRANSITION', from: 'ENDED', to: 'ACTIVE' });
+    expect((await request(ctx.server).post(`/admin/campaigns/${campaign.id}/versions`).set('Cookie', cookie).send({ definition: K2 }).expect(409)).body.code).toBe('CAMPAIGN_ENDED');
+    expect(await snapshot()).toEqual(before);
+    expect(before.campaigns.find((row) => row.id === campaign.id)).toMatchObject({ status: CampaignStatus.ENDED, activeVersionId: null });
+  });
+
+  it('the end route keeps its access contract for drafts: anonymous 401, CUSTOMER/PROVIDER 403, draft untouched', async () => {
+    const { cookie } = await adminCookie();
+    const { campaign } = await draft(cookie, K2);
+    const before = await snapshot();
+    await request(ctx.server).post(`/admin/campaigns/${campaign.id}/end`).send({ reason: 'yetkisiz' }).expect(401);
+    for (const role of [UserRole.CUSTOMER, UserRole.PROVIDER]) {
+      const other = await loginAs(ctx.prisma, (await createUser(ctx.prisma, { role })).id);
+      await transition(other, campaign.id, 'end').expect(403);
+    }
+    expect(await snapshot()).toEqual(before);
   });
 });

@@ -73,6 +73,7 @@ const OK_MESSAGES: Record<string, string> = {
   pause: 'Kampanya duraklatıldı. Yeni hak ediş üretilmez; mevcut promosyon lotları çalışmaya devam eder.',
   resume: 'Kampanya devam ettirildi.',
   end: 'Kampanya sonlandırıldı. Bu durum kalıcıdır.',
+  close: 'Taslak kapatıldı. Kampanya hiç etkinleşmedi; hak ediş, promosyon kredisi veya olay oluşmadı. Bu durum kalıcıdır.',
   revoke: 'Hak ediş geri alındı: kullanılmamış promosyon kredisi cüzdandan düşüldü, harcanan kısım kayda geçti; borç oluşmaz.',
   retry: 'Olay kuyruğa alındı. Değerlendirme işçisi bir sonraki turda sahiplenir; bu ekran kendisi değerlendirme yapmaz.',
 };
@@ -391,7 +392,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
               {data.audit.map((entry) => (
                 <li key={entry.id} className="campaign-audit-entry">
                   <div className="campaign-audit-head">
-                    <strong>{auditActionLabel(entry.action)}</strong>
+                    <strong>{auditActionLabel(entry)}</strong>
                     <span>{formatDateTime(entry.createdAt)}</span>
                   </div>
                   <div className="campaign-audit-meta">
@@ -436,8 +437,8 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
   );
 }
 
-function auditActionLabel(action: string): string {
-  switch (action) {
+function auditActionLabel(entry: CampaignAuditEntry): string {
+  switch (entry.action) {
     case 'AUTO_PAUSED':
       return 'Kampanya kendini duraklattı (geri alma eşiği)';
     case 'REDEMPTION_REVOKED':
@@ -457,9 +458,9 @@ function auditActionLabel(action: string): string {
     case 'RESUMED':
       return 'Kampanya devam ettirildi';
     case 'ENDED':
-      return 'Kampanya sonlandırıldı';
+      return entry.summary?.fromStatus === 'DRAFT' ? 'Taslak kapatıldı (hiç etkinleşmedi)' : 'Kampanya sonlandırıldı';
     default:
-      return action;
+      return entry.action;
   }
 }
 

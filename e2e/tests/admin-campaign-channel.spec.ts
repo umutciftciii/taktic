@@ -19,9 +19,21 @@ import { artifactsDir, primaryRuntime } from '../src/runtime';
  * activates. Nothing is granted anywhere. Finally the builder and the detail
  * fit at 320, 768, 1024 and 1440 without a horizontal scroll. The switch is
  * put back off in `finally`.
+ *
+ * BUG-OPS-002: a MOBILE draft that cannot be activated can be closed. The
+ * panel offers "Taslağı kapat" (not "Sonlandır"), the close lands the draft
+ * in ENDED with `activeVersionId` null, the audit trail says the draft was
+ * closed without ever running, and nothing of the engine was touched.
  */
 
 const OPERATIONS_SETTINGS_ID = 'singleton';
+
+/**
+ * WebKit logs one of these for every `<Link>` prefetch that a navigation
+ * cancels on the page being left; they are not errors of the page under
+ * test and are the only console errors ignored.
+ */
+const ABORTED_PREFETCH = /^Failed to fetch RSC payload for \S+\. Falling back to browser navigation\. TypeError: Load failed$/;
 const WIDTHS = [320, 768, 1024, 1440] as const;
 const SCREENSHOT_DIR = resolve(artifactsDir, 'admin-campaign-channel');
 
@@ -174,4 +186,126 @@ test.describe('admin campaign channel', () => {
       await admin.close();
     }
   });
+
+  test('a MOBILE draft refused with CHANNEL_SOURCE_UNAVAILABLE is closed as a draft: ENDED, audited, nothing granted', async ({ browser }) => {
+    const adminAccount = await createAdmin();
+    const key = `e2e-taslak-kapat-${Date.now().toString(36)}`;
+    const { campaign, version } = await seedMobileDraft(adminAccount.id, key);
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+    const page = admin.page;
+    const consoleErrors: string[] = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error' && !ABORTED_PREFETCH.test(message.text())) consoleErrors.push(message.text());
+    });
+
+    try {
+      await setEngine(true);
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin(`/campaigns/${campaign.id}`);
+      await assertNoErrorScreen(page);
+
+      // ---- the draft cannot run: activation is refused on its channel ----------
+      await expect(page.getByTestId('campaign-lifecycle-channel-unavailable')).toHaveAttribute('data-channel', 'MOBILE');
+      await expect(page.getByTestId('campaign-activate')).toBeDisabled();
+      await page.evaluate(() => {
+        const button = document.querySelector<HTMLButtonElement>('[data-testid="campaign-activate"]');
+        button?.closest('form')?.requestSubmit();
+      });
+      await expect(page.getByTestId('campaign-lifecycle-error')).toContainText('CHANNEL_SOURCE_UNAVAILABLE');
+      expect(await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).toMatchObject({ status: 'DRAFT', activeVersionId: null });
+
+      // ---- the panel offers closing the draft, not ending a running campaign ----
+      await expect(page.getByTestId('campaign-end')).toHaveCount(0);
+      await expect(page.getByTestId('campaign-pause')).toHaveCount(0);
+      const closeForm = page.getByTestId('campaign-close-draft-form');
+      await expect(closeForm).toContainText('hiç etkinleştirmeden');
+      await expect(page.getByTestId('campaign-close-draft')).toHaveText('Taslağı kapat');
+      await page.getByTestId('campaign-close-draft-reason').fill('E2E: mobil taslak kullanılmayacak');
+      await page.getByTestId('campaign-close-draft').click();
+      await expect(page).toHaveURL(/ok=close/);
+      await assertNoErrorScreen(page);
+
+      // ---- ENDED, audited as a closed draft; the panel offers nothing more -----
+      await expect(page.getByTestId('campaign-ok')).toContainText('Taslak kapatıldı');
+      await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'ENDED');
+      const panel = page.getByTestId('campaign-lifecycle-panel');
+      await expect(panel).toHaveAttribute('data-status', 'ENDED');
+      await expect(panel).toContainText('hiç etkinleşmedi');
+      for (const testId of ['campaign-activate', 'campaign-close-draft', 'campaign-pause', 'campaign-resume', 'campaign-end', 'campaign-form']) {
+        await expect(page.getByTestId(testId)).toHaveCount(0);
+      }
+      const audit = page.getByTestId('campaign-audit');
+      await expect(audit).toContainText('Taslak kapatıldı (hiç etkinleşmedi)');
+      await expect(audit).toContainText('gerekçe: E2E: mobil taslak kullanılmayacak');
+      await expect(audit).not.toContainText('Kampanya sonlandırıldı');
+
+      const stored = await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } });
+      expect(stored).toMatchObject({ status: 'ENDED', activeVersionId: null, currentVersionId: version.id, redemptionCount: 0, budgetConsumedCredits: 0 });
+      const rows = await prisma().campaignAuditLog.findMany({ where: { campaignId: campaign.id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+      expect(rows.map((row) => row.action)).toEqual(['CREATED', 'VERSION_CREATED', 'ENDED']);
+      expect(rows[2]).toMatchObject({ actorId: adminAccount.id, campaignVersionId: null });
+      expect(rows[2]!.summary).toEqual({ reason: 'E2E: mobil taslak kullanılmayacak', versionNumber: null, fromStatus: 'DRAFT' });
+      expect(await prisma().campaignVersion.count({ where: { campaignId: campaign.id } })).toBe(1);
+      expect(await prisma().campaignTriggerEvent.count({ where: { settledByCampaignId: campaign.id } })).toBe(0);
+      expect(await prisma().campaignRedemption.count({ where: { campaignId: campaign.id } })).toBe(0);
+      expect(await prisma().campaignEvaluationLog.count({ where: { campaignId: campaign.id } })).toBe(0);
+      expect(await prisma().promoCreditLot.count({ where: { redemption: { campaignId: campaign.id } } })).toBe(0);
+
+      // ---- the list says Sona erdi ---------------------------------------------
+      await admin.gotoAdmin('/campaigns');
+      await assertNoErrorScreen(page);
+      await expect(page.locator(`[data-testid="campaign-row"][data-campaign-key="${key}"]`).getByTestId('campaign-row-status')).toHaveText('Sona erdi');
+      expect(consoleErrors).toEqual([]);
+    } finally {
+      await setEngine(false);
+      await admin.close();
+    }
+  });
 });
+
+/** A MOBILE DRAFT with one stored version, written the way the create route writes it. */
+async function seedMobileDraft(adminUserId: string, key: string) {
+  const definition = {
+    schemaVersion: 1,
+    trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
+    conditions: { all: [{ type: 'FIRST_SUCCESSFUL_PAID_PURCHASE' }, { type: 'NO_PRIOR_REVOCATION' }] },
+    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+    limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000 },
+    window: { startAt: null, endAt: null },
+    stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
+    priority: 100,
+    channel: 'MOBILE',
+  };
+  const campaign = await prisma().campaign.create({ data: { key, name: `E2E taslak kapat ${key}`, status: 'DRAFT', createdById: adminUserId } });
+  const version = await prisma().campaignVersion.create({
+    data: {
+      campaignId: campaign.id,
+      versionNumber: 1,
+      trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
+      eligibilityFacts: [],
+      factSetKey: null,
+      definition,
+      benefitType: 'PROMO_CREDITS',
+      benefitCredits: 10,
+      benefitExpiresInDays: 30,
+      maxRedemptionsPerProvider: 1,
+      maxRedemptionsGlobal: 1000,
+      maxRedemptionsPerDay: null,
+      budgetCredits: 10000,
+      windowStartAt: null,
+      windowEndAt: null,
+      stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
+      priority: 100,
+      channel: 'MOBILE',
+      createdById: adminUserId,
+    },
+  });
+  await prisma().campaign.update({ where: { id: campaign.id }, data: { currentVersionId: version.id } });
+  await prisma().campaignAuditLog.createMany({
+    data: [
+      { campaignId: campaign.id, action: 'CREATED', actorId: adminUserId },
+      { campaignId: campaign.id, action: 'VERSION_CREATED', campaignVersionId: version.id, actorId: adminUserId, summary: { versionNumber: 1, channel: 'MOBILE' } },
+    ],
+  });
+  return { campaign, version };
+}

@@ -57,7 +57,9 @@ import { collectPackageSlugs, validateCampaignDefinition } from './rules/validat
  *    never what *runs*: the engine reads `activeVersionId`, which only
  *    activation moves.
  * 3. The lifecycle is DRAFT → ACTIVE ⇄ PAUSED → ENDED, ENDED terminal
- *    (CMP-001 §2.1). Activation and resumption are refused while the engine
+ *    (CMP-001 §2.1); a DRAFT may also be closed straight to ENDED without
+ *    ever running (BUG-OPS-002) — no `activeVersionId`, no engine switch or
+ *    channel check, nothing written beyond the status and its ENDED row. Activation and resumption are refused while the engine
  *    switch is off (`CAMPAIGN_ENGINE_DISABLED`) and are gated on the version
  *    being sound *now*: its definition re-parsed, its window not yet closed,
  *    its limits not below what the campaign already consumed
@@ -697,7 +699,12 @@ export class CampaignsService {
     return this.getForAdmin(campaignId);
   }
 
-  /** ACTIVE/PAUSED → ENDED. Terminal; always possible. */
+  /**
+   * DRAFT/ACTIVE/PAUSED → ENDED. Terminal; always possible. On a DRAFT it
+   * closes a campaign that never ran: the engine switch and the channel are
+   * not consulted, `activeVersionId` stays null and the ENDED row says
+   * `fromStatus: DRAFT`.
+   */
   async end(campaignId: string, reason: string, actorId: string) {
     await this.transition(campaignId, CampaignStatus.ENDED, reason, actorId);
     return this.getForAdmin(campaignId);
@@ -729,7 +736,11 @@ export class CampaignsService {
             action: TRANSITION_ACTIONS[to]!,
             campaignVersionId: campaign.activeVersionId,
             actorId,
-            summary: { reason: trimmed, versionNumber: campaign.activeVersion?.versionNumber ?? null },
+            summary: {
+              reason: trimmed,
+              versionNumber: campaign.activeVersion?.versionNumber ?? null,
+              fromStatus: campaign.status,
+            },
           },
         });
       },
@@ -1077,6 +1088,7 @@ export class CampaignsService {
 
 /** Allowed lifecycle moves (CMP-001 §2.1). Absent status → no move. */
 const TRANSITIONS: Readonly<Partial<Record<CampaignStatus, readonly CampaignStatus[]>>> = {
+  DRAFT: [CampaignStatus.ENDED],
   ACTIVE: [CampaignStatus.PAUSED, CampaignStatus.ENDED],
   PAUSED: [CampaignStatus.ACTIVE, CampaignStatus.ENDED],
 };
