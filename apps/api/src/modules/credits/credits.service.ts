@@ -6,12 +6,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AdminPermission,
   CreditTransactionType,
   OfferPackageType,
   Prisma,
   ServiceCategoryStatus,
 } from '@prisma/client';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
+import { assertDeltaPermissions } from '../auth/delta-permissions';
 import { readSpendablePromoLots } from './promo-credit-ledger';
 import { PACKAGE_PERIOD_DAYS } from '../entitlements/entitlement-period';
 import { CreateCreditPackageDto } from './dto/create-credit-package.dto';
@@ -129,7 +133,25 @@ export class CreditsService {
     }
   }
 
-  async updateCreditPackage(id: string, dto: UpdateCreditPackageDto) {
+  /**
+   * Edits a credit package. What the caller needs depends on what would change
+   * (BUG-RBAC-STATUS-001).
+   *
+   * The route admits a holder of CREDIT_PACKAGES_WRITE or
+   * CREDIT_PACKAGES_STATUS. Inside one serializable transaction the stored row
+   * (and its scope) is compared with the normalised request:
+   * - a business field or scope with a new value needs CREDIT_PACKAGES_WRITE;
+   * - an `isActive` with a new value needs CREDIT_PACKAGES_STATUS;
+   * - both need both.
+   * An unchanged value is not a change, and `isActive` is written only when it
+   * changes, so a stale echo from a form cannot switch a package back on or
+   * off.
+   */
+  async updateCreditPackage(
+    id: string,
+    dto: UpdateCreditPackageDto,
+    actor: Pick<AuthUser, 'role' | 'permissions'>,
+  ) {
     const existing = await this.prisma.offerCreditPackage.findUnique({
       where: { id },
       select: { id: true, type: true },
@@ -145,25 +167,69 @@ export class CreditsService {
         ? null
         : await this.readScopeSelection(existing.type, dto.scopeCategoryIds);
 
+    // The type never changes (it is not on the DTO), so the payload built from
+    // it here is the payload the transaction writes.
+    const { isActive: requestedIsActive, ...businessPayload } = creditPackageUpdatePayload(
+      dto,
+      existing.type,
+    );
+
     try {
-      return await this.prisma.offerCreditPackage.update({
-        where: { id },
-        data: {
-          ...creditPackageUpdatePayload(dto, existing.type),
-          ...(scopeCategoryIds === null
-            ? {}
-            : {
-                // Replaced wholesale. Every entitlement already sold carries its
-                // own frozen copy of the old scope, so rewriting this one cannot
-                // reach a period somebody has paid for.
-                scopeCategories: {
-                  deleteMany: {},
-                  create: scopeCategoryIds.map((categoryId) => ({ categoryId })),
-                },
-              }),
+      return await runSerializable(
+        this.prisma,
+        async (tx) => {
+          const current = await tx.offerCreditPackage.findUnique({
+            where: { id },
+            include: { scopeCategories: { select: { categoryId: true } } },
+          });
+          if (!current) {
+            throw new NotFoundException('Credit package not found');
+          }
+
+          const statusChanges =
+            requestedIsActive !== undefined && requestedIsActive !== current.isActive;
+          const fieldChanges = (Object.keys(businessPayload) as (keyof typeof businessPayload)[]).some(
+            (field) => businessPayload[field] !== current[field],
+          );
+          const scopeChanges =
+            scopeCategoryIds !== null &&
+            !sameMembers(
+              scopeCategoryIds,
+              current.scopeCategories.map((entry) => entry.categoryId),
+            );
+
+          assertDeltaPermissions(
+            actor,
+            { business: fieldChanges || scopeChanges, status: statusChanges },
+            {
+              write: AdminPermission.CREDIT_PACKAGES_WRITE,
+              status: AdminPermission.CREDIT_PACKAGES_STATUS,
+            },
+          );
+
+          return tx.offerCreditPackage.update({
+            where: { id },
+            data: {
+              ...businessPayload,
+              ...(statusChanges ? { isActive: requestedIsActive } : {}),
+              ...(scopeCategoryIds === null
+                ? {}
+                : {
+                    // Replaced wholesale. Every entitlement already sold
+                    // carries its own frozen copy of the old scope, so
+                    // rewriting this one cannot reach a period somebody has
+                    // paid for.
+                    scopeCategories: {
+                      deleteMany: {},
+                      create: scopeCategoryIds.map((categoryId) => ({ categoryId })),
+                    },
+                  }),
+            },
+            include: adminPackageInclude,
+          });
         },
-        include: adminPackageInclude,
-      });
+        { label: 'creditPackages.update' },
+      );
     } catch (error) {
       handleCreditPackageWriteError(error);
     }
@@ -493,6 +559,13 @@ function creditPackageUpdatePayload(dto: UpdateCreditPackageDto, type: OfferPack
         }
       : {}),
   };
+}
+
+/** Whether two id lists name the same set, order and duplicates ignored. */
+function sameMembers(left: readonly string[], right: readonly string[]): boolean {
+  const a = new Set(left);
+  const b = new Set(right);
+  return a.size === b.size && [...a].every((value) => b.has(value));
 }
 
 function typeSpecificPayload(type: OfferPackageType, dto: CreateCreditPackageDto) {

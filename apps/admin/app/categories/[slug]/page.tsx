@@ -208,12 +208,19 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
                 <label className="field field-4">
                   <span>Durum *</span>
                   {/*
-                    The status is its own permission. This form posts one either
-                    way, so without it the current value is sent unchanged and
-                    the select is shown but cannot be moved.
+                    The status is its own permission (CATEGORIES_STATUS). Without
+                    it the select is shown but cannot be moved, and the save does
+                    not send a status at all (`statusLocked`): the API would
+                    refuse a status that differs from the stored one, and a
+                    stale page must not turn an ordinary edit into a 403. The
+                    current value still rides along as `status` because the
+                    payload's enrollment and eligibility rules read it.
                   */}
                   {canChangeStatus ? null : (
-                    <input type="hidden" name="status" value={category.status} />
+                    <>
+                      <input type="hidden" name="status" value={category.status} />
+                      <input type="hidden" name="statusLocked" value="1" />
+                    </>
                   )}
                   <select
                     name={canChangeStatus ? 'status' : undefined}

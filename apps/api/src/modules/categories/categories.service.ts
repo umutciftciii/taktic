@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AdminPermission,
   Prisma,
   ProviderStatus,
   ServiceCategory,
@@ -16,6 +17,8 @@ import {
   ShowcasePlacementSuspendReason,
 } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
+import type { AuthUser } from '../auth/auth.types';
+import { assertDeltaPermissions } from '../auth/delta-permissions';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { activeProviderInviteFilter } from '../provider-invites/provider-invites.constants';
@@ -708,15 +711,42 @@ export class CategoriesService {
     }
   }
 
-  async updateCategory(id: string, dto: UpdateCategoryDto) {
+  /**
+   * Edits a category. What the caller needs depends on what would change
+   * (BUG-RBAC-STATUS-001).
+   *
+   * The route admits a holder of CATEGORIES_WRITE or CATEGORIES_STATUS. Here,
+   * inside one serializable transaction, the stored row is read and compared
+   * with the normalised request:
+   * - a business field with a new value needs CATEGORIES_WRITE;
+   * - a status with a new value needs CATEGORIES_STATUS;
+   * - both need both.
+   * A value sent back unchanged is not a change. The status is written only
+   * when it is a change, so a form that echoes a stale status cannot put it
+   * back: a stale echo either matches the row (and is not written) or differs
+   * from it (and is a status change that needs CATEGORIES_STATUS).
+   *
+   * A status change made here has the same effect on vitrin runs as one made
+   * on `PATCH /categories/:id/status` (see `applyStatusChange`). Before, a
+   * status sent on this route closed the shelf without suspending its
+   * placements.
+   */
+  async updateCategory(
+    id: string,
+    dto: UpdateCategoryDto,
+    actor: Pick<AuthUser, 'role' | 'permissions'>,
+  ) {
     const existing = await this.ensureCategoryExists(id);
 
     const imageUrl = normalizeCategoryImageUrl(dto.imageUrl, 'imageUrl');
     const coverImageUrl = normalizeCategoryImageUrl(dto.coverImageUrl, 'coverImageUrl');
     const iconKey = normalizeCategoryIconKey(dto.iconKey);
+    const name = dto.name !== undefined ? normalizeRequiredString(dto.name, 'Category name') : undefined;
+    const slug = dto.slug !== undefined ? normalizeSlug(dto.slug) : undefined;
+    const description = normalizeNullableString(dto.description);
+    const parentId = normalizeNullableString(dto.parentId);
 
     if (dto.parentId !== undefined) {
-      const parentId = normalizeNullableString(dto.parentId);
       if (parentId) {
         if (parentId === id) {
           throw new BadRequestException('Bir kategori kendi üst kategorisi olamaz');
@@ -730,42 +760,84 @@ export class CategoriesService {
       await this.assertKindChangeIsSafe(existing, dto.kind);
     }
 
-    const status = resolveRequestedStatus(dto);
-
-    assertEnrollmentFieldIsWritable(dto.providerEnrollmentOpen, {
-      kind: dto.kind ?? existing.kind,
-      status: status ?? existing.status,
-    });
+    const requestedStatus = resolveRequestedStatus(dto);
+    const now = new Date();
 
     try {
-      return await this.prisma.serviceCategory.update({
-        where: { id },
-        data: {
-          ...(dto.name !== undefined ? { name: normalizeRequiredString(dto.name, 'Category name') } : {}),
-          ...(dto.slug !== undefined ? { slug: normalizeSlug(dto.slug) } : {}),
-          ...(dto.description !== undefined
-            ? { description: normalizeNullableString(dto.description) }
-            : {}),
-          // Only written when the caller sends it. There is no branch that sets
-          // it to null: unpricing a category is not a supported operation.
-          ...(dto.offerCreditCost !== undefined
-            ? { offerCreditCost: dto.offerCreditCost }
-            : {}),
-          ...(dto.parentId !== undefined ? { parentId: normalizeNullableString(dto.parentId) } : {}),
-          ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
-          ...(status !== undefined ? { status, isActive: isActiveFor(status) } : {}),
-          ...(imageUrl !== undefined ? { imageUrl } : {}),
-          ...(coverImageUrl !== undefined ? { coverImageUrl } : {}),
-          ...(iconKey !== undefined ? { iconKey } : {}),
-          ...(dto.providerEnrollmentOpen !== undefined
-            ? { providerEnrollmentOpen: dto.providerEnrollmentOpen }
-            : {}),
-          ...(dto.unlimitedPackageEligible !== undefined
-            ? { unlimitedPackageEligible: dto.unlimitedPackageEligible }
-            : {}),
-          ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+      return await runSerializable(
+        this.prisma,
+        async (tx) => {
+          const current = await tx.serviceCategory.findUnique({ where: { id } });
+          if (!current) {
+            throw new NotFoundException('Category not found');
+          }
+
+          const statusChanges =
+            requestedStatus !== undefined && requestedStatus !== current.status;
+          const businessChanges =
+            (name !== undefined && name !== current.name) ||
+            (slug !== undefined && slug !== current.slug) ||
+            (description !== undefined && description !== current.description) ||
+            (dto.offerCreditCost !== undefined && dto.offerCreditCost !== current.offerCreditCost) ||
+            (parentId !== undefined && parentId !== current.parentId) ||
+            (dto.kind !== undefined && dto.kind !== current.kind) ||
+            (imageUrl !== undefined && imageUrl !== current.imageUrl) ||
+            (coverImageUrl !== undefined && coverImageUrl !== current.coverImageUrl) ||
+            (iconKey !== undefined && iconKey !== current.iconKey) ||
+            (dto.providerEnrollmentOpen !== undefined &&
+              dto.providerEnrollmentOpen !== current.providerEnrollmentOpen) ||
+            (dto.unlimitedPackageEligible !== undefined &&
+              dto.unlimitedPackageEligible !== current.unlimitedPackageEligible) ||
+            (dto.sortOrder !== undefined && dto.sortOrder !== current.sortOrder);
+
+          assertDeltaPermissions(
+            actor,
+            { business: businessChanges, status: statusChanges },
+            { write: AdminPermission.CATEGORIES_WRITE, status: AdminPermission.CATEGORIES_STATUS },
+          );
+
+          const resultingStatus = statusChanges ? requestedStatus! : current.status;
+          assertEnrollmentFieldIsWritable(dto.providerEnrollmentOpen, {
+            kind: dto.kind ?? current.kind,
+            status: resultingStatus,
+          });
+
+          const updated = await tx.serviceCategory.update({
+            where: { id },
+            data: {
+              ...(name !== undefined ? { name } : {}),
+              ...(slug !== undefined ? { slug } : {}),
+              ...(description !== undefined ? { description } : {}),
+              // Only written when the caller sends it. There is no branch that
+              // sets it to null: unpricing a category is not a supported
+              // operation.
+              ...(dto.offerCreditCost !== undefined ? { offerCreditCost: dto.offerCreditCost } : {}),
+              ...(dto.parentId !== undefined ? { parentId } : {}),
+              ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
+              ...(statusChanges
+                ? { status: resultingStatus, isActive: isActiveFor(resultingStatus) }
+                : {}),
+              ...(imageUrl !== undefined ? { imageUrl } : {}),
+              ...(coverImageUrl !== undefined ? { coverImageUrl } : {}),
+              ...(iconKey !== undefined ? { iconKey } : {}),
+              ...(dto.providerEnrollmentOpen !== undefined
+                ? { providerEnrollmentOpen: dto.providerEnrollmentOpen }
+                : {}),
+              ...(dto.unlimitedPackageEligible !== undefined
+                ? { unlimitedPackageEligible: dto.unlimitedPackageEligible }
+                : {}),
+              ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+            },
+          });
+
+          if (statusChanges) {
+            await this.applyStatusChange(tx, id, current.status, resultingStatus, now);
+          }
+
+          return updated;
         },
-      });
+        { label: 'categories.update' },
+      );
     } catch (error) {
       handleCategoryWriteError(error);
     }
@@ -804,31 +876,46 @@ export class CategoriesService {
           data: { status, isActive: isActiveFor(status) },
         });
 
-        if (isActiveFor(existing.status) && !isActiveFor(status)) {
-          await this.placements.suspendLiveFor(
-            tx,
-            { categoryId: id },
-            {
-              reason: ShowcasePlacementSuspendReason.CATEGORY_CLOSED,
-              actorUserId: null,
-              now,
-            },
-          );
-        }
-
-        if (!isActiveFor(existing.status) && isActiveFor(status)) {
-          await this.placements.resumeSuspendedFor(
-            tx,
-            { categoryId: id },
-            ShowcasePlacementSuspendReason.CATEGORY_CLOSED,
-            now,
-          );
-        }
+        await this.applyStatusChange(tx, id, existing.status, status, now);
 
         return updated;
       },
       { label: 'categories.updateStatus' },
     );
+  }
+
+  /**
+   * What a status change does to the vitrin runs on that shelf, the same for
+   * both routes that can change it. Closing suspends live runs with the clock
+   * stopped; reopening resumes the runs the closure suspended.
+   */
+  private async applyStatusChange(
+    tx: Prisma.TransactionClient,
+    id: string,
+    from: ServiceCategoryStatus,
+    to: ServiceCategoryStatus,
+    now: Date,
+  ) {
+    if (isActiveFor(from) && !isActiveFor(to)) {
+      await this.placements.suspendLiveFor(
+        tx,
+        { categoryId: id },
+        {
+          reason: ShowcasePlacementSuspendReason.CATEGORY_CLOSED,
+          actorUserId: null,
+          now,
+        },
+      );
+    }
+
+    if (!isActiveFor(from) && isActiveFor(to)) {
+      await this.placements.resumeSuspendedFor(
+        tx,
+        { categoryId: id },
+        ShowcasePlacementSuspendReason.CATEGORY_CLOSED,
+        now,
+      );
+    }
   }
 
   /**

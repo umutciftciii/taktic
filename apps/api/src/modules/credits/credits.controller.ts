@@ -17,7 +17,7 @@ import { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
-import { RequiresPermission } from '../auth/permissions.decorator';
+import { RequiresAnyPermission, RequiresPermission } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateCreditPackageDto } from './dto/create-credit-package.dto';
 import { ManualCreditTransactionDto } from './dto/manual-credit-transaction.dto';
@@ -83,9 +83,15 @@ export class CreditsController {
 
   @Patch('credit-packages/:id')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
-  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_WRITE)
-  updateCreditPackage(@Param('id') id: string, @Body() dto: UpdateCreditPackageDto) {
-    return this.creditsService.updateCreditPackage(id, dto);
+  // BUG-RBAC-STATUS-001: a holder of either gets in; the service requires
+  // WRITE for a business delta, STATUS for an `isActive` delta, both for both.
+  @RequiresAnyPermission(AdminPermission.CREDIT_PACKAGES_WRITE, AdminPermission.CREDIT_PACKAGES_STATUS)
+  updateCreditPackage(
+    @Param('id') id: string,
+    @Body() dto: UpdateCreditPackageDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.creditsService.updateCreditPackage(id, dto, user);
   }
 
   @Patch('credit-packages/:id/status')

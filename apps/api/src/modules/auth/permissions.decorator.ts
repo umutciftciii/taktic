@@ -41,3 +41,24 @@ export const STAFF_PERMISSIONS_KEY = 'requiredAdminPermissionsFromStaff';
  */
 export const RequiresPermissionFromStaff = (...permissions: AdminPermission[]) =>
   SetMetadata(STAFF_PERMISSIONS_KEY, permissions);
+
+export const REQUIRED_ANY_PERMISSIONS_KEY = 'requiredAnyAdminPermissions';
+
+/**
+ * A staff caller must hold **at least one** of these permissions to reach the
+ * handler. The handler then decides what the request needs.
+ *
+ * This exists for edit routes that carry two capabilities in one body
+ * (BUG-RBAC-STATUS-001). `PATCH /categories/:id` and
+ * `PATCH /credit-packages/:id` accept business fields (`*_WRITE`) and the
+ * status field (`*_STATUS`) together. What the caller needs depends on what
+ * the request would actually change. The guard cannot know that before the
+ * record is read, so it lets in a holder of either and the service enforces
+ * the exact set with `assertDeltaPermissions`: status delta ⇒ `*_STATUS`,
+ * business delta ⇒ `*_WRITE`, both ⇒ both.
+ *
+ * Never use it alone on a route whose service does not make that second
+ * check: on its own it is weaker than `@RequiresPermission`.
+ */
+export const RequiresAnyPermission = (...permissions: AdminPermission[]) =>
+  SetMetadata(REQUIRED_ANY_PERMISSIONS_KEY, permissions);

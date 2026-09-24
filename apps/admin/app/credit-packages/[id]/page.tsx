@@ -284,7 +284,7 @@ export default async function CreditPackageDetailPage({
                     name="priceAmount"
                     type="text"
                     inputMode="decimal"
-                    pattern="([0-9]{1,3}(\\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
+                    pattern="([0-9]{1,3}(\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
                     placeholder="Örn. 149,90"
                     required
                     defaultValue={formatMinorAsTurkishLiraInput(creditPackage.priceAmount)}
@@ -297,11 +297,13 @@ export default async function CreditPackageDetailPage({
                 <label className="field field-6">
                   <span>Durum</span>
                   {/*
-                    The status is its own permission. The save posts one either
-                    way, so without it the current value goes back unchanged.
+                    The status is its own permission (CREDIT_PACKAGES_STATUS).
+                    Without it the select is shown but cannot be moved, and the
+                    save does not send `isActive` at all (`statusLocked`), so a
+                    stale page cannot turn an ordinary edit into a 403.
                   */}
                   {canChangeStatus ? null : (
-                    <input type="hidden" name="isActive" value={String(creditPackage.isActive)} />
+                    <input type="hidden" name="statusLocked" value="1" />
                   )}
                   <select
                     name={canChangeStatus ? 'isActive' : undefined}

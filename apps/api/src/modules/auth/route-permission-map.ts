@@ -38,6 +38,15 @@ export type AdminRoutePermission = {
    * route's declared set to exactly `permission` + these.
    */
   alsoRequires?: readonly AdminPermission[];
+  /**
+   * Permissions that open the route **instead of** `permission`: the guard
+   * admits a holder of any one of `permission` and these
+   * (`@RequiresAnyPermission`). The service then demands the exact set the
+   * request's delta needs (BUG-RBAC-STATUS-001: the two edit routes whose body
+   * carries both business fields and the status). The map test holds the
+   * route's declared set to exactly `permission` + these.
+   */
+  orInstead?: readonly AdminPermission[];
 };
 
 export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
@@ -119,12 +128,15 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/categories/:categoryId/questions', permission: AdminPermission.QUESTIONS_READ },
   { method: 'POST', path: '/categories/:categoryId/questions', permission: AdminPermission.QUESTIONS_WRITE },
   { method: 'DELETE', path: '/categories/:id', permission: AdminPermission.CATEGORIES_DELETE },
-  { method: 'PATCH', path: '/categories/:id', permission: AdminPermission.CATEGORIES_WRITE },
+  // BUG-RBAC-STATUS-001: WRITE for a business-field delta, STATUS for a status
+  // delta, both for both. The guard admits either; the service checks the delta.
+  { method: 'PATCH', path: '/categories/:id', permission: AdminPermission.CATEGORIES_WRITE, orInstead: [AdminPermission.CATEGORIES_STATUS] },
   { method: 'PATCH', path: '/categories/:id/status', permission: AdminPermission.CATEGORIES_STATUS },
   { method: 'GET', path: '/company-settings', permission: AdminPermission.COMPANY_SETTINGS_READ },
   { method: 'PUT', path: '/company-settings', permission: AdminPermission.COMPANY_SETTINGS_WRITE },
   { method: 'POST', path: '/credit-packages', permission: AdminPermission.CREDIT_PACKAGES_WRITE },
-  { method: 'PATCH', path: '/credit-packages/:id', permission: AdminPermission.CREDIT_PACKAGES_WRITE },
+  // BUG-RBAC-STATUS-001: as `PATCH /categories/:id`, with `isActive` as the status.
+  { method: 'PATCH', path: '/credit-packages/:id', permission: AdminPermission.CREDIT_PACKAGES_WRITE, orInstead: [AdminPermission.CREDIT_PACKAGES_STATUS] },
   { method: 'PATCH', path: '/credit-packages/:id/status', permission: AdminPermission.CREDIT_PACKAGES_STATUS },
   { method: 'GET', path: '/customers', permission: AdminPermission.CUSTOMERS_READ },
   { method: 'GET', path: '/customers/:id', permission: AdminPermission.CUSTOMERS_READ },
