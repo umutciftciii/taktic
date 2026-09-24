@@ -137,38 +137,40 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
         {role.assignments.length === 0 ? (
           <EmptyState title="Bu rol henüz kimseye atanmamış" />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Hesap</th>
-                <th>Rol türü</th>
-                <th>Durum</th>
-                <th>Atanma</th>
-              </tr>
-            </thead>
-            <tbody>
-              {role.assignments.map((assignment) => (
-                <tr key={assignment.id}>
-                  <td>
-                    <Link href={`/users/${assignment.user.id}`}>
-                      {assignment.user.name ?? assignment.user.email ?? assignment.user.id}
-                    </Link>
-                  </td>
-                  <td>
-                    <span className={userRoleBadgeClass(assignment.user.role)}>
-                      {userRoleLabel(assignment.user.role)}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={assignment.user.isActive ? 'badge badge-good' : 'badge badge-muted'}>
-                      {assignment.user.isActive ? 'Aktif' : 'Pasif'}
-                    </span>
-                  </td>
-                  <td>{formatDateTime(assignment.assignedAt)}</td>
+          <div className="admin-table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Hesap</th>
+                  <th>Rol türü</th>
+                  <th>Durum</th>
+                  <th>Atanma</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {role.assignments.map((assignment) => (
+                  <tr key={assignment.id}>
+                    <td>
+                      <Link href={`/users/${assignment.user.id}`}>
+                        {assignment.user.name ?? assignment.user.email ?? assignment.user.id}
+                      </Link>
+                    </td>
+                    <td>
+                      <span className={userRoleBadgeClass(assignment.user.role)}>
+                        {userRoleLabel(assignment.user.role)}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={assignment.user.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+                        {assignment.user.isActive ? 'Aktif' : 'Pasif'}
+                      </span>
+                    </td>
+                    <td>{formatDateTime(assignment.assignedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </SectionCard>
     </>

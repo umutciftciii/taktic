@@ -7,9 +7,9 @@ export type FinanceSparklinePoint = {
 type Tone = 'success' | 'primary' | 'warning';
 
 const TONE_COLORS: Record<Tone, { stroke: string; fill: string }> = {
-  success: { stroke: '#16a34a', fill: 'rgba(22, 163, 74, 0.16)' },
-  primary: { stroke: '#2563eb', fill: 'rgba(37, 99, 235, 0.16)' },
-  warning: { stroke: '#d97706', fill: 'rgba(217, 119, 6, 0.16)' },
+  success: { stroke: '#0f6b45', fill: 'rgba(15, 107, 69, 0.16)' },
+  primary: { stroke: '#ec3013', fill: 'rgba(236, 48, 19, 0.16)' },
+  warning: { stroke: '#8a5a00', fill: 'rgba(138, 90, 0, 0.16)' },
 };
 
 const VIEW_WIDTH = 240;
