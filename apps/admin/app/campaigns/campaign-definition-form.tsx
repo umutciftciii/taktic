@@ -6,14 +6,17 @@ import { useFormStatus } from 'react-dom';
 import type { CampaignRuleError } from '../../lib/api';
 import {
   ARGUMENT_LABELS,
+  CAMPAIGN_CHANNEL_OPTIONS,
   CAMPAIGN_RULES_CATALOG,
   CAMPAIGN_TRIGGER_OPTIONS,
   ENUM_VALUE_LABELS,
   FACT_LABELS,
+  MOBILE_CHANNEL_WARNING,
   STACK_POLICY_LABEL,
   TRIGGER_LABELS,
   argumentSpecsOf,
   buildDefinition,
+  channelLabel,
   conditionOptionsFor,
   errorFieldOf,
   isEligibilityTrigger,
@@ -180,6 +183,38 @@ export function CampaignDefinitionForm({
             </label>
           ))}
         </div>
+      </fieldset>
+
+      <fieldset className="campaign-fieldset" data-testid="campaign-channel" data-channel={form.channel}>
+        <legend>Kanal</legend>
+        <p className="help-text">
+          Kanal, olayın kaynağından sunucuda belirlenir; istemcinin beyanı kullanılmaz. Kanal sürümün parçasıdır:
+          değiştirmek yeni bir sürüm kaydeder, çalışan sürüm yerinde değişmez.
+        </p>
+        <FieldErrors errors={fieldError('channel')} />
+        <div className="campaign-radio-list" role="radiogroup" aria-label="Kanal">
+          {CAMPAIGN_CHANNEL_OPTIONS.map((option) => (
+            <label key={option.value} className={`campaign-radio${form.channel === option.value ? ' is-selected' : ''}`}>
+              <input
+                type="radio"
+                name="channel-choice"
+                value={option.value}
+                checked={form.channel === option.value}
+                onChange={() => update('channel', option.value)}
+                data-testid={`campaign-channel-${option.value}`}
+              />
+              <span>
+                <strong>{option.label}</strong>
+                <small>{option.help}</small>
+              </span>
+            </label>
+          ))}
+        </div>
+        {form.channel === 'MOBILE' ? (
+          <div className="notice notice-warning" role="note" data-testid="campaign-channel-mobile-warning">
+            {MOBILE_CHANNEL_WARNING}
+          </div>
+        ) : null}
       </fieldset>
 
       {eligibility ? (
@@ -545,7 +580,7 @@ function ResultPanel({
   state,
   form,
 }: {
-  state: { status: string; errors: CampaignRuleError[]; summary: { conditionCount: number; factSetKey: string | null; benefitCredits: number; benefitExpiresInDays: number; trigger: string } | null; message: string | null };
+  state: { status: string; errors: CampaignRuleError[]; summary: { conditionCount: number; factSetKey: string | null; benefitCredits: number; benefitExpiresInDays: number; trigger: string; channel?: string } | null; message: string | null };
   form: CampaignForm;
 }) {
   if (state.status === 'idle') return null;
@@ -588,6 +623,8 @@ function ResultPanel({
               </dd>
             </>
           ) : null}
+          <dt>Kanal</dt>
+          <dd data-testid="campaign-result-channel">{channelLabel(summary.channel)}</dd>
           <dt>Koşul sayısı</dt>
           <dd>{summary.conditionCount}</dd>
           <dt>Fayda</dt>
@@ -615,6 +652,7 @@ const FIELD_TITLES: Record<string, string> = {
   credits: 'kredi',
   expiresInDays: 'son kullanma',
   priority: 'öncelik',
+  channel: 'kanal',
   maxRedemptionsPerProvider: 'hizmet veren başına limit',
   maxRedemptionsGlobal: 'toplam limit',
   maxRedemptionsPerDay: 'günlük limit',

@@ -14,11 +14,13 @@ import {
   CampaignTriggerEventStatus,
   Prisma,
   type CampaignBenefitType,
+  type CampaignChannel,
   type CampaignEligibilityFact,
   type CampaignEvaluationOutcome,
   type CampaignStackPolicy,
   type CampaignTrigger,
   type PromoCreditLotStatus,
+  type SourceChannel,
 } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -26,8 +28,9 @@ import { OPERATIONS_SETTINGS_ID } from '../operations-settings/operations-settin
 import { CampaignEngineSettingsService } from './campaign-engine-settings.service';
 import { CAMPAIGN_LIST_DEFAULT_LIMIT } from './dto/list-campaigns.dto';
 import { istanbulDay } from './engine/campaign-engine.repository';
+import { requiredSourceChannel } from './engine/campaign-channel';
 import { CampaignRevokeService } from './engine/campaign-revoke.service';
-import { type CampaignFactSource, FactSourceRegistry } from './engine/fact-source-registry';
+import { type CampaignFactSource, FactSourceRegistry, type RegistrableChannel } from './engine/fact-source-registry';
 import {
   CAMPAIGN_ACTIVATION_ERROR_MESSAGES,
   CAMPAIGN_RULE_ERROR_MESSAGES,
@@ -59,9 +62,13 @@ import { collectPackageSlugs, validateCampaignDefinition } from './rules/validat
  *    being sound *now*: its definition re-parsed, its window not yet closed,
  *    its limits not below what the campaign already consumed
  *    (`LIMIT_BELOW_CONSUMED`), and a booted PROVIDER-role writer registered
- *    for every fact source it depends on (`FACT_SOURCE_UNAVAILABLE`). All of
- *    it is judged inside the transaction that writes the state, and a
- *    refusal writes nothing. Pause and end are always possible.
+ *    for every fact source it depends on (`FACT_SOURCE_UNAVAILABLE`), and —
+ *    for a version targeting WEB or MOBILE (CMP-006 PR-D) — a registered
+ *    producer of that channel for every source that raises its events
+ *    (`CHANNEL_SOURCE_UNAVAILABLE`). All of it is judged inside the
+ *    transaction that writes the state, and a refusal writes nothing. Pause
+ *    and end are always possible. A version's channel is part of its
+ *    immutable snapshot: changing it means saving a new version.
  * 4. Nothing here grants anything. Activation writes `Campaign` and
  *    `CampaignAuditLog` and no other table; the engine switch is read, never
  *    written, through this module.
@@ -103,6 +110,7 @@ const DEFINITION_FIELDS = [
   'window',
   'stackPolicy',
   'priority',
+  'channel',
 ] as const;
 
 type ActorView = { id: string; name: string | null };
@@ -141,11 +149,27 @@ export type CampaignVersionSummaryView = {
   windowEndAt: Date | null;
   stackPolicy: CampaignStackPolicy;
   priority: number;
+  /** CMP-006 PR-D: WEB | MOBILE | ALL; every version written before the column is ALL. */
+  channel: CampaignChannel;
   createdAt: Date;
   createdBy: ActorView;
 };
 
 export type CampaignVersionView = CampaignVersionSummaryView & { definition: CampaignDefinition };
+
+/**
+ * CMP-006 PR-D. Whether the channel a version targets has a registered
+ * server-side producer for every source that raises its events — the same
+ * question the activation gate asks, answered for the panel so it can say
+ * why "activate" will be refused before anyone presses it. ALL is always
+ * available. The API still decides at activation; this is a reflection.
+ */
+export type CampaignChannelReadinessView = {
+  channel: CampaignChannel;
+  available: boolean;
+  /** The event sources with no producer of the targeted channel. */
+  missingSources: CampaignFactSource[];
+};
 
 export type CampaignAuditView = {
   id: string;
@@ -225,6 +249,8 @@ export type CampaignEvaluationEventView = {
   lastErrorAt: Date | null;
   settledByCampaignId: string | null;
   settledAt: Date | null;
+  /** CMP-006 PR-D: the server-derived channel of the act that raised the event; UNKNOWN when nobody could vouch. */
+  sourceChannel: SourceChannel;
   /** The newest evaluation log row of this event for this campaign. */
   lastOutcome: { outcome: CampaignEvaluationOutcome; reasonCode: string | null; evaluatedAt: Date } | null;
   /** RETRY_WAIT, or PROCESSING under a lease that has lapsed: what the retry route accepts. */
@@ -252,6 +278,7 @@ const versionSelect = {
   windowEndAt: true,
   stackPolicy: true,
   priority: true,
+  channel: true,
   createdAt: true,
   createdBy: actorSelect,
 } satisfies Prisma.CampaignVersionSelect;
@@ -456,6 +483,7 @@ export class CampaignsService {
         windowEndAt: definition.window.endAt ? new Date(definition.window.endAt) : null,
         stackPolicy: definition.stackPolicy as CampaignStackPolicy,
         priority: definition.priority,
+        channel: definition.channel as CampaignChannel,
         createdById: args.actorId,
       },
       select: { id: true },
@@ -479,6 +507,7 @@ export class CampaignsService {
           benefitCredits: definition.benefit.credits,
           benefitExpiresInDays: definition.benefit.expiresInDays,
           maxRedemptionsPerProvider: definition.limits.maxRedemptionsPerProvider,
+          channel: definition.channel,
           changedFields: changedFields(args.previous, definition),
         },
       },
@@ -544,12 +573,17 @@ export class CampaignsService {
       }),
     ]);
 
+    const currentVersion = row.currentVersion ? versionView(row.currentVersion) : null;
+    const activeVersion = row.activeVersion ? versionView(row.activeVersion) : null;
     return {
       engineEnabled,
       evaluationQueue,
       campaign: campaignView(row),
-      currentVersion: row.currentVersion ? versionView(row.currentVersion) : null,
-      activeVersion: row.activeVersion ? versionView(row.activeVersion) : null,
+      currentVersion,
+      activeVersion,
+      /** CMP-006 PR-D: channel readiness of the stored and the running version, as the gate would judge it now. */
+      currentVersionChannel: currentVersion ? this.channelReadiness(currentVersion) : null,
+      activeVersionChannel: activeVersion ? this.channelReadiness(activeVersion) : null,
       versions: versions.map(versionView),
       audit: audit satisfies CampaignAuditView[],
     };
@@ -628,6 +662,7 @@ export class CampaignsService {
               benefitCredits: version.benefitCredits,
               benefitExpiresInDays: version.benefitExpiresInDays,
               maxRedemptionsPerProvider: version.maxRedemptionsPerProvider,
+              channel: version.channel,
             },
           },
         });
@@ -792,6 +827,19 @@ export class CampaignsService {
       }
     }
 
+    // 3b. CMP-006 PR-D. A WEB/MOBILE version needs, for every source that
+    //     raises its events, a module that stamps that channel on the server.
+    //     Without one the version could never grant — it is refused rather
+    //     than left to run silently. ALL needs nothing.
+    const channel = this.channelReadiness({ channel: version.channel, definition });
+    if (!channel.available) {
+      errors.push({
+        path: 'channel',
+        code: 'CHANNEL_SOURCE_UNAVAILABLE',
+        message: `${CAMPAIGN_ACTIVATION_ERROR_MESSAGES.CHANNEL_SOURCE_UNAVAILABLE} (${channel.channel}: ${channel.missingSources.join(', ')})`,
+      });
+    }
+
     // 4. Limits against what the campaign has already consumed, cumulative
     //    across versions. Equal is allowed (no further grant, nothing wrong);
     //    below is refused.
@@ -830,6 +878,18 @@ export class CampaignsService {
     if (errors.length > 0) {
       throw activationRefused(errors);
     }
+  }
+
+  /** The gate's channel question (3b above), for the gate and for the panel. */
+  private channelReadiness(version: { channel: CampaignChannel; definition: CampaignDefinition }): CampaignChannelReadinessView {
+    const needed = requiredSourceChannel(version.channel) as RegistrableChannel | null;
+    if (needed === null) {
+      return { channel: version.channel, available: true, missingSources: [] };
+    }
+    const missingSources = eventSources(version.definition).filter(
+      (source) => !this.factSources.hasChannelProducer(source, needed),
+    );
+    return { channel: version.channel, available: missingSources.length === 0, missingSources };
   }
 
   // ───────────────────── operations desk (CMP-003 S3) ─────────────────────
@@ -1054,6 +1114,19 @@ function requiredFactSources(definition: CampaignDefinition): Array<{ path: stri
   return required;
 }
 
+/**
+ * The sources whose writes *raise* a version's events — its trigger, or, on
+ * the eligibility transition, each fact of the set (whichever lands last
+ * raises the event and lends it its channel). Proof conditions are read, not
+ * raised, so they carry no channel (CMP-006 PR-D).
+ */
+function eventSources(definition: CampaignDefinition): CampaignFactSource[] {
+  if (definition.trigger === 'PROVIDER_APPROVED' || definition.trigger === 'PACKAGE_PAYMENT_SUCCEEDED') {
+    return [definition.trigger];
+  }
+  return (definition.eligibility?.facts ?? []) as CampaignEligibilityFact[];
+}
+
 // ────────────────────────────── helpers ───────────────────────────────
 
 const redemptionSelect = {
@@ -1119,6 +1192,7 @@ const eventSelect = {
   lastErrorAt: true,
   settledByCampaignId: true,
   settledAt: true,
+  sourceChannel: true,
 } satisfies Prisma.CampaignTriggerEventSelect;
 
 type EventRow = Prisma.CampaignTriggerEventGetPayload<{ select: typeof eventSelect }>;

@@ -6,6 +6,7 @@ import {
   type CampaignTrigger,
   CampaignTriggerEventStatus,
   Prisma,
+  type SourceChannel,
 } from '@prisma/client';
 import { PRISMA_WRITE_CONFLICT_ERROR_CODE } from '../../../common/serializable-transaction';
 
@@ -64,6 +65,7 @@ export const activeVersionSelect = {
   windowStartAt: true,
   windowEndAt: true,
   priority: true,
+  channel: true,
 } satisfies Prisma.CampaignVersionSelect;
 
 export const candidateSelect = {
@@ -94,6 +96,7 @@ const eventSelect = {
   claimedAt: true,
   nextAttemptAt: true,
   lastErrorCode: true,
+  sourceChannel: true,
 } satisfies Prisma.CampaignTriggerEventSelect;
 
 /** How long a worker's claim on an event lasts before another worker may take it over. */
@@ -124,6 +127,8 @@ export class CampaignEngineRepository {
    * `evaluationCount` moved by one. Insert under a savepoint: a P2002 means
    * another transaction created it — visible to us if it committed before our
    * snapshot (re-read), otherwise the trigger transaction has to be replayed.
+   * `sourceChannel` is written on the create only (CMP-006 PR-D); an existing
+   * event keeps the channel it was born with.
    */
   async ensureTriggerEvent(
     tx: Prisma.TransactionClient,
@@ -133,6 +138,7 @@ export class CampaignEngineRepository {
       providerId: string;
       purchaseId: string | null;
       factSetKey: string | null;
+      sourceChannel: SourceChannel;
     },
   ): Promise<TriggerEventRow> {
     const existing = await tx.campaignTriggerEvent.findUnique({
@@ -192,6 +198,10 @@ export class CampaignEngineRepository {
    * PROCESSING or RETRY_WAIT event is left to its worker. The insert runs
    * under a savepoint: a P2002 means a concurrent transaction created it —
    * re-read if visible, otherwise replay the business transaction (P2034).
+   *
+   * `sourceChannel` (CMP-006 PR-D) is part of the create and of nothing
+   * else: the update path below does not name it, so a re-raise that derived
+   * another channel leaves the event exactly as it was born.
    */
   async ensurePendingEvent(
     tx: Prisma.TransactionClient,
@@ -201,6 +211,7 @@ export class CampaignEngineRepository {
       providerId: string;
       purchaseId: string | null;
       factSetKey: string | null;
+      sourceChannel: SourceChannel;
     },
     now: Date,
   ): Promise<{ id: string; status: CampaignTriggerEventStatus; created: boolean }> {
@@ -271,7 +282,7 @@ export class CampaignEngineRepository {
       )
       RETURNING "id", "triggerEventKey", "trigger", "providerId", "purchaseId", "factSetKey", "evaluationCount",
                 "settledByCampaignId", "settledRedemptionId", "status", "attemptCount", "leaseUntil", "claimedAt",
-                "nextAttemptAt", "lastErrorCode"
+                "nextAttemptAt", "lastErrorCode", "sourceChannel"
     `;
     const row = rows[0];
     return row ? (row as unknown as TriggerEventRow) : null;

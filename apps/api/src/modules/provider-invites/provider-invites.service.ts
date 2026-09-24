@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, SourceChannel } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { providerInviteUrl } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -242,6 +242,8 @@ export class ProviderInvitesService {
     dto: SubmitProviderInviteApplicationDto,
     user: AuthUser | null,
     meta: { ipAddress?: string | null; userAgent?: string | null } = {},
+    /** CMP-006 PR-D: the route's channel, never the request's; UNKNOWN when a caller cannot vouch. */
+    sourceChannel: SourceChannel = SourceChannel.UNKNOWN,
   ): Promise<{ success: true }> {
     const { token, ...application } = dto;
 
@@ -273,7 +275,7 @@ export class ProviderInvitesService {
         throw providerInviteAlreadyUsedException();
       }
 
-      const provider = await this.providers.createApplicationRecord(tx, payload, user);
+      const provider = await this.providers.createApplicationRecord(tx, payload, user, sourceChannel);
 
       return provider.id;
     });

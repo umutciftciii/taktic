@@ -1,5 +1,6 @@
 import { Body, Controller, Inject, Post, Req, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import { WEB_SURFACE_CHANNEL } from '../../common/web-surface-channel';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -43,7 +44,9 @@ export class ProviderPhoneVerificationController {
     @Body() dto: VerifyPhoneCodeDto,
     @Req() req: IncomingRequest,
   ) {
-    return this.phoneVerificationService.verifyAccountCode(user, dto.code, readMeta(req));
+    // The web application's OTP form is this route's client: WEB, from the
+    // route (CMP-006 PR-D) — nothing in the request names a channel.
+    return this.phoneVerificationService.verifyAccountCode(user, dto.code, readMeta(req), WEB_SURFACE_CHANNEL);
   }
 }
 

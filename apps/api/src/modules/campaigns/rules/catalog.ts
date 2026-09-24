@@ -8,8 +8,8 @@ import catalog from '@taktic/shared/campaign-rules.json';
  *
  * Everything the validator accepts is listed here: the three triggers, the
  * three status facts, the ten condition types with their fixed argument
- * shapes, the single benefit type, the four limits, the single stack policy
- * and the closed set of error codes. There is no per-campaign code anywhere:
+ * shapes, the single benefit type, the limits, the single stack policy, the
+ * three target channels and the closed set of error codes. There is no per-campaign code anywhere:
  * a campaign is a selection from this catalogue and nothing else.
  */
 
@@ -47,6 +47,8 @@ export const CAMPAIGN_LIMITS: Readonly<Record<string, Bounds & { required: boole
   catalog.limits;
 export const CAMPAIGN_STACK_POLICIES: readonly string[] = catalog.stackPolicies;
 export const CAMPAIGN_PRIORITY: Bounds & { default: number } = catalog.priority;
+/** CMP-006 PR-D: the channels a version may target; `default` is what an absent `channel` means. */
+export const CAMPAIGN_CHANNELS: { values: readonly string[]; default: string } = catalog.channels;
 export const CAMPAIGN_RULE_ERROR_CODE_LIST: readonly string[] = catalog.errorCodes;
 /** Refusals only activation can produce (CMP-001 §8.4, §10.4): the pure validator never emits them. */
 export const CAMPAIGN_ACTIVATION_ERROR_CODE_LIST: readonly string[] = catalog.activationErrorCodes;
@@ -56,3 +58,4 @@ export type CampaignFactCode = (typeof catalog.facts)[number];
 export type CampaignConditionCode = keyof typeof catalog.conditions;
 export type CampaignBenefitCode = (typeof catalog.benefit.types)[number];
 export type CampaignStackPolicyCode = (typeof catalog.stackPolicies)[number];
+export type CampaignChannelCode = (typeof catalog.channels.values)[number];

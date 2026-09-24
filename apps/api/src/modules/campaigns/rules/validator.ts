@@ -1,5 +1,6 @@
 import {
   CAMPAIGN_BENEFIT,
+  CAMPAIGN_CHANNELS,
   CAMPAIGN_CONDITIONS,
   CAMPAIGN_ELIGIBILITY_TRIGGER,
   CAMPAIGN_FACTS,
@@ -65,6 +66,7 @@ const TOP_LEVEL_FIELDS = new Set([
   'window',
   'stackPolicy',
   'priority',
+  'channel',
 ]);
 
 const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -146,6 +148,19 @@ export function validateCampaignDefinition(
     errors.add('priority', 'PRIORITY_INVALID');
   }
 
+  // CMP-006 PR-D. Absent means ALL — a definition stored before the field
+  // existed meant exactly that. Present, it must be one of the three names;
+  // nothing is coerced (no lower case, no null).
+  const channel =
+    input.channel === undefined
+      ? CAMPAIGN_CHANNELS.default
+      : typeof input.channel === 'string' && CAMPAIGN_CHANNELS.values.includes(input.channel)
+        ? input.channel
+        : null;
+  if (channel === null) {
+    errors.add('channel', 'CHANNEL_INVALID');
+  }
+
   if (
     errors.list.length > 0 ||
     trigger === null ||
@@ -154,7 +169,8 @@ export function validateCampaignDefinition(
     limits === null ||
     window === null ||
     stackPolicy === null ||
-    priority === null
+    priority === null ||
+    channel === null
   ) {
     return { ok: false, errors: errors.list };
   }
@@ -172,6 +188,7 @@ export function validateCampaignDefinition(
     window,
     stackPolicy,
     priority,
+    channel,
   };
 
   const summary: CampaignDefinitionSummary = {
@@ -184,6 +201,7 @@ export function validateCampaignDefinition(
     ),
     benefitCredits: benefit.credits,
     benefitExpiresInDays: benefit.expiresInDays,
+    channel,
   };
 
   return { ok: true, definition, summary };

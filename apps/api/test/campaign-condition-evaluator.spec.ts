@@ -53,6 +53,7 @@ function definition(all: CampaignDefinition['conditions']['all'], trigger = 'PAC
     limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: null },
     window: { startAt: null, endAt: null },
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
+    channel: 'ALL',
     priority: 100,
   };
 }

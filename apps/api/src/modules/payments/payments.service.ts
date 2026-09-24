@@ -6,7 +6,7 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { PackagePurchaseStatus, Prisma, UserRole } from '@prisma/client';
+import { PackagePurchaseStatus, Prisma, SourceChannel, UserRole } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { RequestMeta } from '../../common/request-meta';
@@ -98,6 +98,8 @@ export class PaymentsService {
     user: AuthUser,
     dto: CreateCheckoutSessionDto,
     meta: RequestMeta,
+    /** CMP-006 PR-D: the route's channel, stamped on the purchase row; UNKNOWN when a caller cannot vouch. */
+    channel: SourceChannel = SourceChannel.UNKNOWN,
   ) {
     // Stricter than ProviderAccessGuard on purpose. Buying credits is an act of
     // the account that owns the provider, not an administrative one: an admin
@@ -139,7 +141,7 @@ export class PaymentsService {
       providerId,
       dto,
       { provider: kind, reference },
-      { user, meta },
+      { user, meta, channel },
     );
 
     // `package` became nullable on the model when vitrin purchases joined this

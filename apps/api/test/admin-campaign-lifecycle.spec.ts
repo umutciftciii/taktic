@@ -168,7 +168,7 @@ describe('with the engine switch on', () => {
     expect(versionActivated.summary).toMatchObject({ versionNumber: 1, previousActiveVersionNumber: null, trigger: 'PACKAGE_PAYMENT_SUCCEEDED', benefitCredits: 10 });
     // The version row is bit-for-bit what was stored.
     const stored = await ctx.prisma.campaignVersion.findUniqueOrThrow({ where: { id: currentVersion.id } });
-    expect(stored.definition).toEqual(K2);
+    expect(stored.definition).toEqual({ ...K2, channel: 'ALL' });
     const after = await snapshot();
     expect(after.versions).toBe(before.versions);
     expect(after.engine).toEqual(before.engine);
@@ -377,7 +377,7 @@ describe('with the engine switch on', () => {
     expect(list.body.items[0]).toMatchObject({ status: 'ACTIVE', activeVersionId: currentVersion.id, redemptionCount: 0, budgetConsumedCredits: 0 });
     expect(list.body.items[0].activeVersion.versionNumber).toBe(1);
     const detail = await request(ctx.server).get(`/admin/campaigns/${campaign.id}`).set('Cookie', cookie).expect(200);
-    expect(detail.body.activeVersion.definition).toEqual(K2);
+    expect(detail.body.activeVersion.definition).toEqual({ ...K2, channel: 'ALL' });
   });
 
   it('two operators activating at once: one ACTIVATED row, one VERSION_ACTIVATED row', async () => {

@@ -1,4 +1,5 @@
 import {
+  type CampaignChannel,
   CampaignStatus,
   type CampaignEligibilityFact,
   type CampaignTrigger,
@@ -34,6 +35,8 @@ export type CampaignFixtureOptions = {
   windowEndAt?: Date | null;
   conditions?: Prisma.InputJsonValue[];
   createdById?: string;
+  /** CMP-006 PR-D: omitted = the definition has no channel and the column its default (ALL), like every pre-PR-D version. */
+  channel?: CampaignChannel;
 };
 
 export async function createCampaignFixture(prisma: PrismaClient, options: CampaignFixtureOptions = {}) {
@@ -66,6 +69,7 @@ export async function createCampaignFixture(prisma: PrismaClient, options: Campa
     },
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
     priority: options.priority ?? 100,
+    ...(options.channel ? { channel: options.channel } : {}),
   };
 
   const campaign = await prisma.campaign.create({
@@ -95,6 +99,7 @@ export async function createCampaignFixture(prisma: PrismaClient, options: Campa
       windowEndAt: options.windowEndAt ?? null,
       stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
       priority: definition.priority,
+      ...(options.channel ? { channel: options.channel } : {}),
       createdById,
     },
   });
