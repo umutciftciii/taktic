@@ -9,7 +9,9 @@ import {
   statusLabel,
   formatPrice,
   formatDateTime,
+  loadPackageRefundAvailability,
 } from '../../../../../lib/api';
+import { packageRefundRequestHref } from '../../../../../lib/package-refund';
 import { ProviderShell } from '../../../provider-shell';
 import { providerStatusBadgeClass } from '../../../provider-ui';
 import { Notice, noticeForStatus } from '../purchase-notice';
@@ -52,7 +54,14 @@ export default async function ProviderPackagePurchaseDetailPage({
     redirect(`/login?redirectTo=/providers/${id}/package-purchases/${purchaseId}`);
   }
 
-  const purchase = await apiFetch<PackagePurchase>(`/providers/${id}/package-purchases/${purchaseId}`);
+  // CMP-006 PR-B.1: whether to offer "İade talebi oluştur" is the API's
+  // answer alone — gate, ownership, terms evidence, the 14-day / credit /
+  // promo rules and "no open request". Nothing here recomputes any of it,
+  // and a failed read is simply no button.
+  const [purchase, refundAvailable] = await Promise.all([
+    apiFetch<PackagePurchase>(`/providers/${id}/package-purchases/${purchaseId}`),
+    loadPackageRefundAvailability(purchaseId),
+  ]);
 
   const timeline = buildTimeline(purchase);
   const notice = noticeForStatus(purchase.status, purchase.mockPaymentFailureReason);
@@ -208,6 +217,25 @@ export default async function ProviderPackagePurchaseDetailPage({
             <p className="pdash-info-banner-body">{notice.body}</p>
           </div>
         </div>
+      ) : null}
+
+      {refundAvailable ? (
+        <section className="pdash-detail-card" data-testid="purchase-refund-card">
+          <h2>İade</h2>
+          <p style={{ margin: 0, fontSize: 14, color: 'var(--text-2)', lineHeight: 1.5 }}>
+            Bu paket için iade talebi oluşturabilirsiniz. Talebiniz destek ekibimiz tarafından
+            incelenir; onaylanırsa ödeme iadesi ödeme sağlayıcısı üzerinden işlenir.
+          </p>
+          <div className="pdash-actions">
+            <Link
+              className="pdash-btn pdash-btn-secondary"
+              href={packageRefundRequestHref(purchase.id)}
+              data-testid="purchase-refund-cta"
+            >
+              İade talebi oluştur
+            </Link>
+          </div>
+        </section>
       ) : null}
 
       <div className="pdash-page-footer">

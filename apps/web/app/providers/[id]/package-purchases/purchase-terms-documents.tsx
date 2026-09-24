@@ -8,13 +8,18 @@ import type { PurchaseTerms } from '../../../../lib/api';
  * is not an approved contract and the screen must not let it pass for one.
  * (The API serves such a set only on a local stack or in tests; staging and
  * production refuse to open the gate without an approved one.)
+ *
+ * PR-B.1: the TEST set (`PURCHASE_TERMS_GATE=test`, local / tests / staging
+ * only) is labelled "Test ortamı — üretim sözleşmesi değildir" instead — it
+ * is not even a draft of the contract, only a text to exercise the flow.
  */
 export function PurchaseTermsDocuments({
   terms,
 }: {
   terms: Extract<PurchaseTerms, { required: true }>;
 }) {
-  const draft = terms.legalReviewStatus !== 'APPROVED';
+  const test = terms.testMode === true;
+  const draft = !test && terms.legalReviewStatus !== 'APPROVED';
 
   return (
     <section
@@ -26,6 +31,14 @@ export function PurchaseTermsDocuments({
       <h2 className="pdash-section-title">
         <span>Satın alma koşulları</span>
       </h2>
+      {test ? (
+        <p className="pdash-notice pdash-notice-warn" data-testid="purchase-terms-test-banner">
+          <span>
+            <strong>Test ortamı — üretim sözleşmesi değildir.</strong> Bu metinler yalnızca satın alma
+            ve iade akışlarını denemek içindir; verdiğiniz onay test kaydı olarak saklanır.
+          </span>
+        </p>
+      ) : null}
       {draft ? (
         <p className="pdash-notice pdash-notice-warn" data-testid="purchase-terms-draft-banner">
           <span>

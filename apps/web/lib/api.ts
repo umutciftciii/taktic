@@ -928,6 +928,12 @@ export type PurchaseTerms =
       documentKey: string;
       version: string;
       legalReviewStatus: 'PENDING' | 'APPROVED';
+      /**
+       * CMP-006 PR-B.1: true under `PURCHASE_TERMS_GATE=test` — the TEST
+       * document set, never served on production. The screen then says
+       * "Test ortamı — üretim sözleşmesi değildir".
+       */
+      testMode: boolean;
       documents: { key: string; title: string; text: string }[];
     };
 
@@ -1401,7 +1407,12 @@ export type ProviderPackageRefundRequest = {
   purchase: PackageRefundPurchaseSummary;
 };
 
-/** One purchase the support form may offer, with the rule it meets or does not. */
+/**
+ * One purchase the support form may offer. Since CMP-006 PR-B.1 the API lists
+ * only purchases a normal refund request can be opened for right now, so
+ * every item is selectable; `ticketSubject` is the subject the server will
+ * write, shown on the form as it is and never sent back.
+ */
 export type PackageRefundOption = {
   id: string;
   purchaseNumber: string | null;
@@ -1411,13 +1422,14 @@ export type PackageRefundOption = {
   currency: string;
   paidAt: string | null;
   windowEndsAt: string | null;
-  selectable: boolean;
-  notes: string[];
+  ticketSubject: string;
 };
 
 export type PackageRefundOptions = {
-  /** False with the flow closed, or with nothing bought under it. The topic is then not offered at all. */
+  /** False with the flow closed, or with nothing requestable. The refund type is then not offered at all. */
   available: boolean;
+  /** True under `PURCHASE_TERMS_GATE=test`: the form says it is a test environment. */
+  testMode: boolean;
   purchases: PackageRefundOption[];
 };
 
@@ -1429,7 +1441,22 @@ export async function loadPackageRefundOptions(): Promise<PackageRefundOptions> 
   try {
     return await apiFetch<PackageRefundOptions>('/support/package-refund/options');
   } catch {
-    return { available: false, purchases: [] };
+    return { available: false, testMode: false, purchases: [] };
+  }
+}
+
+/**
+ * CMP-006 PR-B.1. Whether the purchase page may offer "İade talebi oluştur"
+ * for this purchase — the API's answer alone, and `false` on any failure.
+ */
+export async function loadPackageRefundAvailability(purchaseId: string): Promise<boolean> {
+  try {
+    const answer = await apiFetch<{ available?: unknown }>(
+      `/support/package-refund/purchases/${encodeURIComponent(purchaseId)}/availability`,
+    );
+    return answer.available === true;
+  } catch {
+    return false;
   }
 }
 

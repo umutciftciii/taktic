@@ -97,7 +97,7 @@ describe('who reaches what', () => {
       .expect(404);
     await openRefundTicket(ctx, stranger.cookie, purchase.id).expect(404);
     const options = await request(ctx.server).get('/support/package-refund/options').set('Cookie', stranger.cookie);
-    expect(options.body).toEqual({ available: false, purchases: [] });
+    expect(options.body).toEqual({ available: false, testMode: false, purchases: [] });
     await request(ctx.server).get(`/admin/package-refund-requests/${refund.id}`).set('Cookie', stranger.cookie).expect(403);
 
     const unchanged = await ctx.prisma.packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } });

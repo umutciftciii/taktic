@@ -1,6 +1,5 @@
 import { PackageRefundRequestStatus, PackagePurchaseKind } from '@prisma/client';
 import { resolvePurchaseTermsGate } from '../purchase-terms/purchase-terms.config';
-import type { PackageRefundEligibility, PackageRefundReasonCode } from './package-refund-eligibility';
 
 /**
  * CMP-006 PR-B — the rules the refund-request flow shares between its
@@ -21,6 +20,20 @@ import type { PackageRefundEligibility, PackageRefundReasonCode } from './packag
 export function isPackageRefundFlowOpen(env: NodeJS.ProcessEnv = process.env): boolean {
   try {
     return resolvePurchaseTermsGate(env).enabled;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PR-B.1: whether the open flow runs on the TEST document set
+ * (`PURCHASE_TERMS_GATE=test`), so the provider's screens can say so. False
+ * whenever the flow is closed.
+ */
+export function isPurchaseTermsTestMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    const gate = resolvePurchaseTermsGate(env);
+    return gate.enabled && gate.terms.mode === 'test';
   } catch {
     return false;
   }
@@ -77,29 +90,3 @@ export const PACKAGE_REFUND_STATUS_LABELS: Record<PackageRefundRequestStatus, st
 /** Reason text lengths the CHECKs enforce, restated for the DTOs. */
 export const PACKAGE_REFUND_REASON_MIN = 10;
 export const PACKAGE_REFUND_REASON_MAX = 1000;
-
-/**
- * What the provider reads next to a purchase in the picker. Written for the
- * provider, not the operator: it states the rule their purchase meets or does
- * not, never an internal code or a decision.
- */
-const PROVIDER_NOTES: Partial<Record<PackageRefundReasonCode, string>> = {
-  PURCHASE_ALREADY_REFUNDED: 'Bu satın alma zaten iade edilmiş.',
-  PURCHASE_NOT_PAID: 'Bu satın alma ödenmiş durumda değil.',
-  PAYMENT_REVERSAL_RECORDED:
-    'Bu ödeme için ödeme sağlayıcısından bir iade kaydı zaten alındı.',
-  PURCHASE_KIND_NOT_COVERED: 'Bu paket türü kredi paketi iade politikasının kapsamında değil.',
-  PACKAGE_TYPE_NOT_COVERED: 'Dönemsel paketler normal iade kapsamında değil.',
-  REFUND_WINDOW_EXPIRED: 'Ödemenin üzerinden 14 günden fazla geçti.',
-  CREDIT_SPENT_SINCE_PAYMENT: 'Ödemeden sonra hesabınızda teklif kredisi kullanıldı.',
-  LINKED_PROMO_CONSUMED: 'Bu paketle gelen promosyon kredisinden kullanıldı.',
-};
-
-export function providerEligibilityNotes(eligibility: PackageRefundEligibility): string[] {
-  if (eligibility.recommendation === 'REFUNDABLE') {
-    return ['Normal iade koşullarını sağlıyor.'];
-  }
-  return eligibility.blockingCodes
-    .map((code) => PROVIDER_NOTES[code])
-    .filter((note): note is string => Boolean(note));
-}

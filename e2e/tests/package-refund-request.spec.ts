@@ -7,8 +7,9 @@ import { primaryRuntime, purchaseTermsRuntime, type Runtime } from '../src/runti
  * CMP-006 PR-B — a package refund request, from the provider's support form
  * to the operator's decision, on real screens.
  *
- * The purchase-terms runtime has the release gate open, so a package bought
- * there carries acceptance evidence — bought through the real consent box and
+ * The purchase-terms runtime has the release gate open (PURCHASE_TERMS_GATE=
+ * test since PR-B.1: the TEST document set), so a package bought there
+ * carries acceptance evidence — bought through the real consent box and
  * the in-app mock checkout, never a payment provider. Its payment is then
  * marked settled in the database: the settlement webhook itself is covered by
  * the API suite, and nothing here talks to Lemon Squeezy. The primary runtime
@@ -81,7 +82,7 @@ async function providerWithPaidPurchase(browser: Browser, runtime: Runtime, labe
 }
 
 test.describe('package refund request', () => {
-  test('provider opens it from support; an operator takes and approves it; nobody can mark it refunded', async ({
+  test('provider opens it from the purchase page; an operator takes and approves it; nobody can mark it refunded', async ({
     browser,
     browserName,
   }) => {
@@ -96,13 +97,30 @@ test.describe('package refund request', () => {
     try {
       expect(purchase.termsAcceptanceRequired).toBe(true);
 
-      // The provider's form: the topic, then the picker with their package.
-      await provider.gotoWeb('/destek/yeni');
+      // PR-B.1: Paket geçmişi → the purchase's page → "İade talebi oluştur".
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases`);
       await assertNoErrorScreen(provider.page);
-      await provider.page.getByTestId('support-topic').getByText('Paket ve kredi iadesi', { exact: true }).click();
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases/${purchase.id}`);
+      await assertNoErrorScreen(provider.page);
+      const cta = provider.page.getByTestId('purchase-refund-cta');
+      await expect(cta).toHaveText('İade talebi oluştur');
+      await cta.click();
+      await expect(provider.page).toHaveURL(
+        new RegExp(`/destek/yeni\\?type=PACKAGE_REFUND&purchaseId=${purchase.id}$`),
+      );
+
+      // The support form arrives on the refund type with this package chosen,
+      // the subject fixed by the server, and the test-environment warning.
+      await expect(provider.page.getByTestId('support-topic-refund')).toBeChecked();
+      await expect(provider.page.getByTestId('refund-test-environment')).toContainText(
+        'Test ortamı — üretim sözleşmesi değildir.',
+      );
       const option = provider.page.getByTestId('refund-purchase-option').filter({ hasText: packageName });
-      await expect(option).toHaveAttribute('data-selectable', 'true');
-      await option.click();
+      await expect(option.locator('input[type="radio"]')).toBeChecked();
+      await expect(provider.page.getByTestId('refund-fixed-subject-text')).toContainText(
+        `Paket ve kredi iadesi: ${packageName}`,
+      );
+      await expect(provider.page.getByTestId('support-subject-input')).toHaveCount(0);
       await provider.page.getByTestId('support-message-input').fill('Paketi yanlışlıkla aldım, kullanmadım.');
       await provider.page.getByRole('button', { name: 'İade talebini gönder' }).click();
 
@@ -112,8 +130,18 @@ test.describe('package refund request', () => {
       );
       await expect(provider.page.getByTestId('refund-status')).toHaveAttribute('data-status', 'SUBMITTED');
       await expect(provider.page.getByTestId('refund-withdraw')).toBeVisible();
+      const ticketPath = new URL(provider.page.url()).pathname;
 
       const refund = await prisma().packageRefundRequest.findFirstOrThrow({ where: { purchaseId: purchase.id } });
+      const ticket = await prisma().supportTicket.findUniqueOrThrow({ where: { id: refund.supportTicketId } });
+      expect(ticket.subject).toContain(packageName);
+
+      // With a request open, the purchase page no longer offers another one.
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases/${purchase.id}`);
+      await assertNoErrorScreen(provider.page);
+      await expect(provider.page.getByTestId('purchase-status')).toBeVisible();
+      await expect(provider.page.getByTestId('purchase-refund-cta')).toHaveCount(0);
+      await provider.gotoWeb(ticketPath);
       const acceptance = await prisma().purchaseTermsAcceptance.findUniqueOrThrow({ where: { purchaseId: purchase.id } });
 
       // The operator's queue and detail.
@@ -171,7 +199,10 @@ test.describe('package refund request', () => {
     }
   });
 
-  test('provider withdraws before review', async ({ browser, browserName }) => {
+  test('provider chooses the refund type and the package on the plain support form, then withdraws', async ({
+    browser,
+    browserName,
+  }) => {
     const { provider, purchase, packageName } = await providerWithPaidPurchase(
       browser,
       purchaseTermsRuntime,
@@ -179,8 +210,13 @@ test.describe('package refund request', () => {
     );
     try {
       await provider.gotoWeb('/destek/yeni');
+      await expect(provider.page.getByTestId('support-topic-general')).toBeChecked();
       await provider.page.getByTestId('support-topic').getByText('Paket ve kredi iadesi', { exact: true }).click();
+      // Only the provider's own requestable purchases are listed, none chosen yet.
+      await expect(provider.page.getByTestId('refund-purchase-option')).toHaveCount(1);
+      await expect(provider.page.getByTestId('refund-fixed-subject-text')).toContainText('Paket seçtiğinizde');
       await provider.page.getByTestId('refund-purchase-option').filter({ hasText: packageName }).click();
+      await expect(provider.page.getByTestId('refund-fixed-subject-text')).toContainText(packageName);
       await provider.page.getByTestId('support-message-input').fill('Vazgeçmeden önce açıyorum.');
       await provider.page.getByRole('button', { name: 'İade talebini gönder' }).click();
       await expect(provider.page).toHaveURL(/\?created=refund$/);
@@ -215,12 +251,15 @@ test.describe('package refund request', () => {
     const checkerActor = await Actor.open(browser, 'staff', purchaseTermsRuntime);
 
     try {
-      // The provider cannot pick it, and says why on the general topic instead.
-      await provider.gotoWeb('/destek/yeni');
-      await provider.page.getByTestId('support-topic').getByText('Paket ve kredi iadesi', { exact: true }).click();
-      await expect(provider.page.getByTestId('refund-purchase-option')).toHaveAttribute('data-selectable', 'false');
-      await expect(provider.page.getByTestId('refund-purchase-note')).toContainText('teklif kredisi kullanıldı');
-      await provider.page.getByTestId('support-topic').getByText('Genel', { exact: true }).click();
+      // Nothing is requestable any more: no button on the purchase, no refund
+      // type on the form — the provider writes on general support instead.
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases/${purchase.id}`);
+      await assertNoErrorScreen(provider.page);
+      await expect(provider.page.getByTestId('purchase-status')).toBeVisible();
+      await expect(provider.page.getByTestId('purchase-refund-cta')).toHaveCount(0);
+      await provider.gotoWeb(`/destek/yeni?type=PACKAGE_REFUND&purchaseId=${purchase.id}`);
+      await expect(provider.page.getByTestId('support-new-form')).toBeVisible();
+      await expect(provider.page.getByTestId('support-topic')).toHaveCount(0);
       await provider.page.getByTestId('support-subject-input').fill('Çift çekim');
       await provider.page.getByTestId('support-message-input').fill('Kartımdan iki kez çekildi, bir teklif de gönderdim.');
       await provider.page.getByRole('button', { name: 'Destek talebi oluştur' }).click();
@@ -263,10 +302,19 @@ test.describe('package refund request', () => {
     }
   });
 
-  test('gate closed: the support form is the general one, with no refund topic', async ({ browser, browserName }) => {
-    const { provider } = await providerWithPaidPurchase(browser, primaryRuntime, `kapali-${browserName}`);
+  test('gate closed: no button on the purchase, and the support form is the general one', async ({
+    browser,
+    browserName,
+  }) => {
+    const { provider, seeded, purchase } = await providerWithPaidPurchase(browser, primaryRuntime, `kapali-${browserName}`);
     try {
-      await provider.gotoWeb('/destek/yeni');
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases/${purchase.id}`);
+      await assertNoErrorScreen(provider.page);
+      await expect(provider.page.getByTestId('purchase-status')).toBeVisible();
+      await expect(provider.page.getByTestId('purchase-refund-card')).toHaveCount(0);
+      await expect(provider.page.getByText('İade talebi oluştur')).toHaveCount(0);
+
+      await provider.gotoWeb(`/destek/yeni?type=PACKAGE_REFUND&purchaseId=${purchase.id}`);
       await assertNoErrorScreen(provider.page);
       await expect(provider.page.getByTestId('support-new-form')).toBeVisible();
       await expect(provider.page.getByTestId('support-topic')).toHaveCount(0);
@@ -274,6 +322,48 @@ test.describe('package refund request', () => {
       await expect(provider.page.getByTestId('support-subject-input')).toBeVisible();
     } finally {
       await provider.close();
+    }
+  });
+
+  test('a spoofed purchase id in the query neither leaks the purchase nor opens anything', async ({
+    browser,
+    browserName,
+  }) => {
+    const victim = await providerWithPaidPurchase(browser, purchaseTermsRuntime, `kurban-${browserName}`);
+    const attacker = await providerWithPaidPurchase(browser, purchaseTermsRuntime, `saldirgan-${browserName}`);
+    try {
+      const before = {
+        tickets: await prisma().supportTicket.count(),
+        requests: await prisma().packageRefundRequest.count(),
+      };
+
+      // The attacker's own form, with the victim's purchase in the query.
+      await attacker.provider.gotoWeb(`/destek/yeni?type=PACKAGE_REFUND&purchaseId=${victim.purchase.id}`);
+      await assertNoErrorScreen(attacker.provider.page);
+      await expect(attacker.provider.page.getByTestId('support-topic-refund')).toBeChecked();
+      await expect(attacker.provider.page.getByTestId('refund-purchase-option')).toHaveCount(1);
+      await expect(
+        attacker.provider.page.getByTestId('refund-purchase-option').locator('input[type="radio"]'),
+      ).not.toBeChecked();
+      // The id itself is echoed by Next's router state (it is the attacker's own
+      // URL); what must not appear is anything the attacker did not already know.
+      const html = await attacker.provider.page.content();
+      expect(html).not.toContain(victim.packageName);
+      expect(html).not.toContain(victim.purchase.purchaseNumber ?? '∅');
+      await expect(attacker.provider.page.locator(`input[value="${victim.purchase.id}"]`)).toHaveCount(0);
+      expect(await attacker.provider.page.locator('body').innerText()).not.toContain(victim.purchase.id);
+      await expect(attacker.provider.page.getByTestId('support-submit')).toBeDisabled();
+
+      // Nor does the victim's purchase page open for them.
+      await attacker.provider.gotoWeb(`/providers/${victim.seeded.id}/package-purchases/${victim.purchase.id}`);
+      expect(await attacker.provider.page.content()).not.toContain(victim.packageName);
+      await expect(attacker.provider.page.getByTestId('purchase-refund-cta')).toHaveCount(0);
+
+      expect(await prisma().supportTicket.count()).toBe(before.tickets);
+      expect(await prisma().packageRefundRequest.count()).toBe(before.requests);
+    } finally {
+      await victim.provider.close();
+      await attacker.provider.close();
     }
   });
 });

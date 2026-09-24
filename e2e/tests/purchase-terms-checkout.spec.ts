@@ -7,8 +7,8 @@ import { primaryRuntime, purchaseTermsRuntime } from '../src/runtime';
  * CMP-006 PR-A — the purchase-terms consent at a credit-package checkout.
  *
  * Two stacks, one code base. The purchase-terms runtime's API has the release
- * gate open (with the draft text a test process may serve); the primary one
- * keeps it closed. The same credits screen therefore shows, side by side, the
+ * gate open as PURCHASE_TERMS_GATE=test (the TEST document set, PR-B.1); the
+ * primary one keeps it closed. The same credits screen therefore shows, side by side, the
  * separate, unticked, required box with the full text above it — and, with the
  * gate closed, exactly the form it always had.
  *
@@ -35,7 +35,7 @@ function packageCard(page: Page, name: string) {
 }
 
 test.describe('purchase-terms consent at checkout', () => {
-  test('gate open: the full draft text, an unticked required box, and the evidence row', async ({
+  test('gate open (test): the full TEST text under a test warning, an unticked required box, and the evidence row', async ({
     browser,
     browserName,
   }) => {
@@ -50,12 +50,13 @@ test.describe('purchase-terms consent at checkout', () => {
       await provider.gotoWeb(`/providers/${seeded.id}/credits`);
       await assertNoErrorScreen(provider.page);
 
-      // The text itself, labelled as the draft it is.
+      // The text itself, labelled as the test text it is.
       const documents = provider.page.getByTestId('purchase-terms-documents');
       await expect(documents).toBeVisible();
-      await expect(provider.page.getByTestId('purchase-terms-draft-banner')).toContainText(
-        'onaylanmış bir sözleşme değildir',
+      await expect(provider.page.getByTestId('purchase-terms-test-banner')).toContainText(
+        'Test ortamı — üretim sözleşmesi değildir.',
       );
+      await expect(provider.page.getByTestId('purchase-terms-draft-banner')).toHaveCount(0);
       for (const title of ['Mesafeli Satış Sözleşmesi', 'Ön Bilgilendirme Formu', 'Kredi Paketi İade Politikası']) {
         await expect(documents.locator('summary', { hasText: title })).toBeVisible();
       }
@@ -83,8 +84,10 @@ test.describe('purchase-terms consent at checkout', () => {
       expect(purchase.termsAcceptanceRequired).toBe(true);
       const acceptance = purchase.purchaseTermsAcceptance!;
       expect(acceptance.documentKey).toBe('PACKAGE_PURCHASE_TERMS');
+      expect(acceptance.documentVersion).toMatch(/^test-/);
+      expect(acceptance.documentTextSnapshot).toContain('TEST ORTAMI — ÜRETİM SÖZLEŞMESİ DEĞİLDİR');
       expect(acceptance.sourceChannel).toBe('WEB');
-      expect(acceptance.documentTextSnapshot).toContain('=== PAKET_IADE_POLITIKASI: Kredi Paketi İade Politikası ===');
+      expect(acceptance.documentTextSnapshot).toContain('=== PAKET_IADE_POLITIKASI: Kredi Paketi İade Politikası (Test) ===');
       const browserAgent = await provider.page.evaluate(() => navigator.userAgent);
       expect(acceptance.userAgent).toBe(browserAgent);
       expect(acceptance.clientIp).not.toBeNull();

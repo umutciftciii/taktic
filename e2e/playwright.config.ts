@@ -207,10 +207,11 @@ function apiServer(runtime: Runtime) {
       // override outside loopback, and refuses the sandbox provider entirely
       // under NODE_ENV=production, so no configuration here can reach Lemon
       // Squeezy.
-      // Closed on every runtime but the purchase-terms one (CMP-006 PR-A).
-      // Stated rather than left unset, so a developer's exported value cannot
-      // open it on a stack whose specs expect the unchanged checkout.
-      PURCHASE_TERMS_GATE: runtime.purchaseTermsGate ? 'on' : 'off',
+      // Closed on every runtime but the purchase-terms one (CMP-006 PR-A),
+      // which runs the TEST document set (PR-B.1). Stated rather than left
+      // unset, so a developer's exported value cannot open it on a stack
+      // whose specs expect the unchanged checkout.
+      PURCHASE_TERMS_GATE: runtime.purchaseTermsGate,
       PAYMENT_PROVIDER: runtime.paymentProvider,
       ...(runtime.paymentProvider === 'lemon-squeezy-test'
         ? {

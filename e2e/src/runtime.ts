@@ -50,6 +50,8 @@ export type ContactSharing =
 
 export type PaymentProviderKind = 'mock' | 'lemon-squeezy-test';
 
+export type PurchaseTermsGateMode = 'off' | 'on' | 'test';
+
 export type Runtime = {
   name: string;
   ports: RuntimePorts;
@@ -60,8 +62,11 @@ export type Runtime = {
   contactSharing: ContactSharing;
   providerClaim: boolean;
   paymentProvider: PaymentProviderKind;
-  /** CMP-006 PR-A: whether the API opens the purchase-terms release gate. */
-  purchaseTermsGate: boolean;
+  /**
+   * CMP-006 PR-A / PR-B.1: the API's PURCHASE_TERMS_GATE. `off` everywhere
+   * but the purchase-terms runtime, which runs `test` — the TEST document set.
+   */
+  purchaseTermsGate: PurchaseTermsGateMode;
 };
 
 /**
@@ -129,7 +134,7 @@ function buildRuntime(
   contactSharing: ContactSharing = { enabled: false },
   providerClaim = false,
   paymentProvider: PaymentProviderKind = 'mock',
-  purchaseTermsGate = false,
+  purchaseTermsGate: PurchaseTermsGateMode = 'off',
 ): Runtime {
   return {
     name,
@@ -237,7 +242,9 @@ export const lemonSqueezyRuntime = buildRuntime(
 );
 
 /**
- * The same code with PURCHASE_TERMS_GATE=on (CMP-006 PR-A).
+ * The same code with the purchase-terms gate open (CMP-006 PR-A), since
+ * PR-B.1 as PURCHASE_TERMS_GATE=test — the TEST document set, the mode a
+ * local stack and staging use to exercise the flow before RG-1.
  *
  * A sixth API, for the reason every extra stack exists: the gate is read from
  * the API's environment, so one process cannot represent both sides. The
@@ -247,8 +254,9 @@ export const lemonSqueezyRuntime = buildRuntime(
  * since CMP-006 PR-B: the package refund queue only has requests on it where
  * the gate is open, so the operator's screens are exercised here.
  *
- * NODE_ENV=test is what lets the API serve the draft text at all: on staging
- * or production the same flag refuses to boot without a legally approved set.
+ * NODE_ENV=test with no APP_ENVIRONMENT is what lets the API serve the TEST
+ * set here: on production the same value refuses to boot. The `on` side (the
+ * draft of the real documents) is covered by the API suite.
  */
 export const purchaseTermsRuntime = buildRuntime(
   'purchase-terms',
@@ -261,7 +269,7 @@ export const purchaseTermsRuntime = buildRuntime(
   { enabled: false },
   false,
   'mock',
-  true,
+  'test',
 );
 
 /**

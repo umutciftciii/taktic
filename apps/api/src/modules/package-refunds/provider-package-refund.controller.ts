@@ -22,10 +22,23 @@ export class ProviderPackageRefundController {
     @Inject(PackageRefundRequestsService) private readonly requests: PackageRefundRequestsService,
   ) {}
 
-  /** What the support form may offer. `available: false` with the flow closed. */
+  /**
+   * What the support form may offer: only the caller's purchases a normal
+   * refund request can be opened for now. `available: false` with the flow
+   * closed or nothing requestable.
+   */
   @Get('options')
   options(@CurrentUser() user: AuthUser) {
     return this.requests.providerOptions(user);
+  }
+
+  /**
+   * PR-B.1 — whether the purchase page may offer "İade talebi oluştur". The
+   * same `{ available: false }` for a foreign, invented or ineligible id.
+   */
+  @Get('purchases/:purchaseId/availability')
+  availability(@Param('purchaseId') purchaseId: string, @CurrentUser() user: AuthUser) {
+    return this.requests.providerPurchaseAvailability(user, purchaseId);
   }
 
   @Post('tickets/:ticketId/withdraw')

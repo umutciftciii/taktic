@@ -162,7 +162,7 @@ async function createRefundTicket(
       status: 'error',
       message:
         (await readApiMessage(response)) ??
-        'İade talebi gönderilemedi. Durumunuzu "Genel" konusuyla bize yazabilirsiniz.',
+        'İade talebi gönderilemedi. Durumunuzu "Genel destek" türüyle bize yazabilirsiniz.',
       ...kept,
     };
   }

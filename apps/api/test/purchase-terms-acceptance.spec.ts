@@ -15,6 +15,10 @@ import type {
 } from '../src/modules/payments/payment-provider.port';
 import { PURCHASE_TERMS_DOCUMENT_SET } from '../src/modules/purchase-terms/purchase-terms.documents';
 import {
+  PURCHASE_TERMS_TEST_DOCUMENT_SET,
+  PURCHASE_TERMS_TEST_NOTICE,
+} from '../src/modules/purchase-terms/purchase-terms.test-documents';
+import {
   buildPurchaseTermsSnapshot,
   sha256Hex,
 } from '../src/modules/purchase-terms/purchase-terms.snapshot';
@@ -161,6 +165,7 @@ describe('gate open: every new purchase is born with its acceptance', () => {
       documentKey: 'PACKAGE_PURCHASE_TERMS',
       version: TERMS.version,
       legalReviewStatus: 'PENDING',
+      testMode: false,
       documents: TERMS.documents.map(({ key, title, text }) => ({ key, title, text })),
     });
   });
@@ -312,6 +317,61 @@ describe('gate open: every new purchase is born with its acceptance', () => {
         expect(body, `leaked ${secret}`).not.toContain(secret);
       }
     }
+  });
+});
+
+describe('gate test (PR-B.1): the TEST set, with the same evidence as the real flow', () => {
+  const TEST_TERMS = PURCHASE_TERMS_TEST_DOCUMENT_SET;
+  beforeEach(() => {
+    process.env.PURCHASE_TERMS_GATE = 'test';
+  });
+
+  it('serves the TEST set, marked as test mode, every document opening with the test notice', async () => {
+    const { cookie } = await fixture();
+    const { body } = await request(ctx.server).get('/payments/purchase-terms').set('Cookie', cookie).expect(200);
+    expect(body).toMatchObject({
+      required: true,
+      documentKey: 'PACKAGE_PURCHASE_TERMS',
+      version: TEST_TERMS.version,
+      testMode: true,
+    });
+    expect(body.version).toMatch(/^test-/);
+    for (const document of body.documents) {
+      expect(document.text.startsWith(PURCHASE_TERMS_TEST_NOTICE)).toBe(true);
+    }
+  });
+
+  it('refuses the production draft’s version: only the served TEST version is accepted', async () => {
+    const { provider, pkg, cookie } = await fixture();
+    const response = await checkout(provider.id, cookie, { packageId: pkg.id, ...ACCEPTED }).expect(400);
+    expect(response.body.code).toBe('PURCHASE_TERMS_VERSION_STALE');
+    expect(await ctx.prisma.purchaseTermsAcceptance.count()).toBe(0);
+  });
+
+  it('writes the TEST snapshot, its digest, the client address, user agent and channel', async () => {
+    const { owner, provider, pkg, cookie } = await fixture();
+    const response = await checkout(provider.id, cookie, {
+      packageId: pkg.id,
+      termsAccepted: true,
+      termsVersion: TEST_TERMS.version,
+    }).expect(201);
+
+    const acceptance = await ctx.prisma.purchaseTermsAcceptance.findUniqueOrThrow({
+      where: { purchaseId: response.body.purchase.id },
+    });
+    expect(acceptance).toMatchObject({
+      userId: owner.id,
+      documentKey: 'PACKAGE_PURCHASE_TERMS',
+      documentVersion: TEST_TERMS.version,
+      documentSha256: TEST_TERMS.sha256,
+      documentTextSnapshot: buildPurchaseTermsSnapshot(TEST_TERMS),
+      userAgent: CANARY_UA,
+      sourceChannel: SourceChannel.WEB,
+    });
+    expect(sha256Hex(acceptance.documentTextSnapshot)).toBe(acceptance.documentSha256);
+    expect(acceptance.clientIp).toMatch(/127\.0\.0\.1|::1/);
+    const purchase = await ctx.prisma.packagePurchase.findUniqueOrThrow({ where: { id: response.body.purchase.id } });
+    expect(purchase).toMatchObject({ termsAcceptanceRequired: true, purchaseTermsAcceptanceId: acceptance.id });
   });
 });
 
@@ -551,6 +611,20 @@ describe('the database holds the invariants on its own', () => {
 describe('boot', () => {
   it('a process asked to open the gate with a malformed value does not start', async () => {
     process.env.PURCHASE_TERMS_GATE = 'evet';
-    await expect(createTestApp()).rejects.toThrow(/PURCHASE_TERMS_GATE must be "on" or "off"/);
+    await expect(createTestApp()).rejects.toThrow(/PURCHASE_TERMS_GATE must be "on", "test" or "off"/);
+  });
+
+  it('a production process asked for the TEST set does not start (PR-B.1)', async () => {
+    const originalEnvironment = process.env.APP_ENVIRONMENT;
+    process.env.PURCHASE_TERMS_GATE = 'test';
+    process.env.APP_ENVIRONMENT = 'production';
+    try {
+      await expect(createTestApp()).rejects.toThrow(
+        /PURCHASE_TERMS_GATE is "test" but .*never on production/,
+      );
+    } finally {
+      if (originalEnvironment === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = originalEnvironment;
+    }
   });
 });

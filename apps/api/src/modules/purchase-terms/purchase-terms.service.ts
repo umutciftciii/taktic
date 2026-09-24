@@ -61,6 +61,10 @@ export class PurchaseTermsService implements OnModuleInit {
       // PENDING is rendered as TASLAK by the web app. It can only be served
       // at all on a local stack or in tests (purchase-terms.config.ts).
       legalReviewStatus: terms.legalReviewStatus,
+      // PR-B.1: true only under PURCHASE_TERMS_GATE=test, which never runs on
+      // production. The web app then says "Test ortamı — üretim sözleşmesi
+      // değildir" above the text.
+      testMode: terms.mode === 'test',
       documents: terms.documents.map(({ key, title, text }) => ({ key, title, text })),
     };
   }

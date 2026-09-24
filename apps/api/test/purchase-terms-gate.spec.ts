@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   isDraftPurchaseTermsPermitted,
+  isTestPurchaseTermsPermitted,
   resolvePurchaseTermsGate,
   validatePurchaseTermsDocumentSet,
 } from '../src/modules/purchase-terms/purchase-terms.config';
+import {
+  PURCHASE_TERMS_TEST_DOCUMENT_SET,
+  PURCHASE_TERMS_TEST_NOTICE,
+} from '../src/modules/purchase-terms/purchase-terms.test-documents';
 import {
   PURCHASE_TERMS_DOCUMENT_SET,
   type PurchaseTermsDocumentSet,
@@ -93,10 +98,18 @@ describe('PURCHASE_TERMS_GATE', () => {
     }
   });
 
-  it('refuses a value that is neither on nor off', () => {
-    expect(() => resolvePurchaseTermsGate({ ...LOCAL, PURCHASE_TERMS_GATE: 'true' })).toThrow(
-      /PURCHASE_TERMS_GATE must be "on" or "off"/,
-    );
+  it('refuses a value that is not on, test or off', () => {
+    for (const value of ['true', 'TEST', 'on,test', 'staging']) {
+      expect(() => resolvePurchaseTermsGate({ ...LOCAL, PURCHASE_TERMS_GATE: value })).toThrow(
+        /PURCHASE_TERMS_GATE must be "on", "test" or "off"/,
+      );
+    }
+  });
+
+  it('"on" never serves a TEST set, even on a local stack', () => {
+    expect(() =>
+      resolvePurchaseTermsGate({ ...LOCAL, PURCHASE_TERMS_GATE: 'on' }, PURCHASE_TERMS_TEST_DOCUMENT_SET),
+    ).toThrow(/"on" serves only a PRODUCTION document set/);
   });
 
   it('opens onto the draft only on a local stack or in a test worker', () => {
@@ -196,5 +209,120 @@ describe('a corrupt or incomplete document set keeps the gate shut (fail-closed)
         }),
       ),
     ).toThrow(/approvedAt must be an ISO date.*reference must name the approval/);
+  });
+});
+
+describe('the TEST document set (PR-B.1)', () => {
+  const TEST_SET = PURCHASE_TERMS_TEST_DOCUMENT_SET;
+
+  it('is whole, marked TEST, versioned test-…, never approved', () => {
+    expect(validatePurchaseTermsDocumentSet(TEST_SET)).toEqual([]);
+    expect(TEST_SET.purpose).toBe('TEST');
+    expect(TEST_SET.version).toMatch(/^test-/);
+    expect(TEST_SET.legalReview.status).toBe('PENDING');
+    expect(sha256Hex(buildPurchaseTermsSnapshot(TEST_SET))).toBe(TEST_SET.sha256);
+  });
+
+  it('opens every document with the notice that it is not a production contract', () => {
+    expect(PURCHASE_TERMS_TEST_NOTICE).toContain('TEST ORTAMI — ÜRETİM SÖZLEŞMESİ DEĞİLDİR');
+    for (const document of TEST_SET.documents) {
+      expect(document.text.startsWith(PURCHASE_TERMS_TEST_NOTICE)).toBe(true);
+    }
+    for (const document of PURCHASE_TERMS_DOCUMENT_SET.documents) {
+      expect(document.text).not.toContain(PURCHASE_TERMS_TEST_NOTICE);
+    }
+  });
+
+  it('states the same refund rules the evaluation enforces', () => {
+    const policy = TEST_SET.documents.find((document) => document.key === 'PAKET_IADE_POLITIKASI')!;
+    expect(policy.text).toContain('on dört (14) gün');
+    expect(policy.text).toContain('herhangi bir teklif kredisi kullanılmışsa iade yapılmaz');
+    expect(policy.text).toContain('tek bir kredinin dahi kullanılmış olması');
+  });
+
+  it('a TEST set without the notice, or claiming approval, is refused', () => {
+    const unmarked = withDigest({
+      ...TEST_SET,
+      documents: TEST_SET.documents.map((document, index) =>
+        index === 0 ? { ...document, text: document.text.replace(PURCHASE_TERMS_TEST_NOTICE, 'Deneme metni.') } : document,
+      ),
+    });
+    expect(() => resolvePurchaseTermsGate({ ...LOCAL, PURCHASE_TERMS_GATE: 'test' }, undefined, unmarked)).toThrow(
+      /MESAFELI_SATIS_SOZLESMESI: a TEST document must start with the test notice/,
+    );
+
+    const claimsApproval = withDigest({
+      ...TEST_SET,
+      legalReview: { status: 'APPROVED', approvedAt: '2026-10-01', reference: 'Sahte' },
+    });
+    expect(() =>
+      resolvePurchaseTermsGate({ ...LOCAL, PURCHASE_TERMS_GATE: 'test' }, undefined, claimsApproval),
+    ).toThrow(/a TEST document set is never legally approved/);
+  });
+
+  it('a PRODUCTION set carrying the test notice is refused', () => {
+    const base = approved();
+    const smuggled = withDigest({
+      ...base,
+      documents: base.documents.map((document, index) =>
+        index === 2 ? { ...document, text: `${PURCHASE_TERMS_TEST_NOTICE}\n${document.text}` } : document,
+      ),
+    });
+    expect(() => resolvePurchaseTermsGate({ ...PRODUCTION, PURCHASE_TERMS_GATE: 'on' }, smuggled)).toThrow(
+      /must not carry the test notice/,
+    );
+  });
+
+  it('"test" never serves the PRODUCTION set', () => {
+    expect(() =>
+      resolvePurchaseTermsGate({ ...LOCAL, PURCHASE_TERMS_GATE: 'test' }, undefined, PURCHASE_TERMS_DOCUMENT_SET),
+    ).toThrow(/"test" serves only a TEST document set/);
+  });
+});
+
+describe('PURCHASE_TERMS_GATE=test — the environment matrix (PR-B.1)', () => {
+  it.each([
+    ['a local stack', LOCAL],
+    ['staging', STAGING],
+    ['a unit-test worker that declared nothing', { NODE_ENV: 'test' } as NodeJS.ProcessEnv],
+    ['staging on a development build', { APP_ENVIRONMENT: 'staging', NODE_ENV: 'development' } as NodeJS.ProcessEnv],
+  ])('opens onto the TEST set on %s', (_label, env) => {
+    const gate = resolvePurchaseTermsGate({ ...env, PURCHASE_TERMS_GATE: 'test' });
+    expect(gate.enabled).toBe(true);
+    if (gate.enabled) {
+      expect(gate.terms.mode).toBe('test');
+      expect(gate.terms.version).toBe(PURCHASE_TERMS_TEST_DOCUMENT_SET.version);
+      expect(gate.terms.sha256).toBe(sha256Hex(gate.terms.snapshot));
+      expect(gate.terms.snapshot).toContain(PURCHASE_TERMS_TEST_NOTICE);
+    }
+  });
+
+  it.each([
+    ['production', PRODUCTION],
+    ['APP_ENVIRONMENT=production alone', { APP_ENVIRONMENT: 'production' } as NodeJS.ProcessEnv],
+    ['APP_ENVIRONMENT=production in a test worker', { APP_ENVIRONMENT: 'production', NODE_ENV: 'test' } as NodeJS.ProcessEnv],
+    ['NODE_ENV=production calling itself staging', { APP_ENVIRONMENT: 'staging', NODE_ENV: 'production' } as NodeJS.ProcessEnv],
+    ['NODE_ENV=production calling itself local', { APP_ENVIRONMENT: 'local', NODE_ENV: 'production' } as NodeJS.ProcessEnv],
+    ['an undeclared environment', UNDECLARED],
+    ['an undeclared development build', { NODE_ENV: 'development' } as NodeJS.ProcessEnv],
+  ])('refuses to open — the process does not boot — on %s', (_label, env) => {
+    expect(isTestPurchaseTermsPermitted(env)).toBe(false);
+    expect(() => resolvePurchaseTermsGate({ ...env, PURCHASE_TERMS_GATE: 'test' })).toThrow(
+      /PURCHASE_TERMS_GATE is "test" but .*never on production or an undeclared environment/,
+    );
+  });
+
+  it('a misspelt environment is refused loudly, not read as "not production"', () => {
+    expect(() =>
+      resolvePurchaseTermsGate({ APP_ENVIRONMENT: 'prod', PURCHASE_TERMS_GATE: 'test' } as NodeJS.ProcessEnv),
+    ).toThrow(/APP_ENVIRONMENT must be one of/);
+  });
+
+  it('"on" keeps its own contract: the draft still only on local or in tests', () => {
+    const gate = resolvePurchaseTermsGate({ ...LOCAL, PURCHASE_TERMS_GATE: 'on' });
+    expect(gate.enabled && gate.terms.mode).toBe('on');
+    expect(() => resolvePurchaseTermsGate({ ...STAGING, PURCHASE_TERMS_GATE: 'on' })).toThrow(
+      /legalReview\.status is not APPROVED/,
+    );
   });
 });

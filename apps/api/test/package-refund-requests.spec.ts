@@ -95,9 +95,14 @@ async function counts() {
 }
 
 describe('provider: opening a refund ticket', () => {
-  it('lists only the caller’s own PAID purchases that carry evidence', async () => {
+  it('lists only the caller’s own purchases a normal request can be opened for', async () => {
     const mine = await providerWithPurchase();
     await paidPurchase(ctx.prisma, { providerId: mine.provider.id, userId: mine.owner.id, evidence: false });
+    await paidPurchase(ctx.prisma, {
+      providerId: mine.provider.id,
+      userId: mine.owner.id,
+      paidAt: new Date(Date.now() - PACKAGE_REFUND_WINDOW_MS - 1000),
+    });
     await providerWithPurchase(); // somebody else's
 
     const response = await request(ctx.server)
@@ -105,12 +110,26 @@ describe('provider: opening a refund ticket', () => {
       .set('Cookie', mine.cookie)
       .expect(200);
 
-    expect(response.body.available).toBe(true);
+    expect(response.body).toMatchObject({ available: true, testMode: false });
     expect(response.body.purchases.map((p: { id: string }) => p.id)).toEqual([mine.purchase.id]);
-    expect(response.body.purchases[0]).toMatchObject({ selectable: true, packageName: mine.purchase.packageNameSnapshot });
+    expect(response.body.purchases[0]).toMatchObject({
+      packageName: mine.purchase.packageNameSnapshot,
+      ticketSubject: `Paket ve kredi iadesi: ${mine.purchase.packageNameSnapshot} (${mine.purchase.purchaseNumber})`,
+    });
     expect(Object.keys(response.body.purchases[0]).sort()).toEqual(
-      ['creditAmount', 'currency', 'id', 'notes', 'packageName', 'paidAt', 'priceAmount', 'purchaseNumber', 'selectable', 'windowEndsAt'].sort(),
+      ['creditAmount', 'currency', 'id', 'packageName', 'paidAt', 'priceAmount', 'purchaseNumber', 'ticketSubject', 'windowEndsAt'].sort(),
     );
+  });
+
+  it('offers no refund type at all when nothing is requestable', async () => {
+    const account = await providerAccount(ctx);
+    await paidPurchase(ctx.prisma, { providerId: account.provider.id, userId: account.owner.id, evidence: false });
+
+    const response = await request(ctx.server)
+      .get('/support/package-refund/options')
+      .set('Cookie', account.cookie)
+      .expect(200);
+    expect(response.body).toEqual({ available: false, testMode: false, purchases: [] });
   });
 
   it('writes the ticket, its message, the SUBMITTED request and one audit row together — and moves no money', async () => {
@@ -180,7 +199,7 @@ describe('provider: opening a refund ticket', () => {
     expect(await ctx.prisma.supportTicket.count()).toBe(1);
 
     const options = await request(ctx.server).get('/support/package-refund/options').set('Cookie', fixture.cookie);
-    expect(options.body.purchases[0].selectable).toBe(false);
+    expect(options.body).toEqual({ available: false, testMode: false, purchases: [] });
   });
 
   it('two simultaneous submissions for one purchase open exactly one request', async () => {
@@ -203,7 +222,7 @@ describe('provider: opening a refund ticket', () => {
     expect(refused.body).toMatchObject({ code: 'PACKAGE_REFUND_NOT_ELIGIBLE', blockingCodes: ['REFUND_WINDOW_EXPIRED'] });
   });
 
-  it('any offer credit spent after payment blocks submission, and the picker says why', async () => {
+  it('any offer credit spent after payment blocks submission, and the picker leaves the purchase out', async () => {
     const fixture = await providerWithPurchase();
     await offerSpend(ctx.prisma, fixture.provider.id);
 
@@ -211,8 +230,7 @@ describe('provider: opening a refund ticket', () => {
     expect(refused.body.blockingCodes).toEqual(['CREDIT_SPENT_SINCE_PAYMENT']);
 
     const options = await request(ctx.server).get('/support/package-refund/options').set('Cookie', fixture.cookie);
-    expect(options.body.purchases[0].selectable).toBe(false);
-    expect(options.body.purchases[0].notes).toEqual(['Ödemeden sonra hesabınızda teklif kredisi kullanıldı.']);
+    expect(options.body).toEqual({ available: false, testMode: false, purchases: [] });
   });
 
   it('a consumed promo credit linked to the purchase blocks submission', async () => {
@@ -254,7 +272,7 @@ describe('fail-closed: gate closed or invalid, customer', () => {
     setGate();
 
     const options = await request(ctx.server).get('/support/package-refund/options').set('Cookie', fixture.cookie).expect(200);
-    expect(options.body).toEqual({ available: false, purchases: [] });
+    expect(options.body).toEqual({ available: false, testMode: false, purchases: [] });
 
     const refused = await openRefundTicket(ctx, fixture.cookie, fixture.purchase.id).expect(403);
     expect(refused.body.code).toBe('PACKAGE_REFUND_UNAVAILABLE');

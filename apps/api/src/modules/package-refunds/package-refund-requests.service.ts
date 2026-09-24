@@ -32,6 +32,7 @@ import {
 import { SUPPORT_TICKET_SUBJECT_MAX_LENGTH } from '../support-tickets/support-tickets.config';
 import {
   evaluatePackageRefundEligibility,
+  PACKAGE_REFUND_WINDOW_MS,
   type PackageRefundEligibility,
 } from './package-refund-eligibility';
 import { PackageRefundEligibilityService } from './package-refund-eligibility.service';
@@ -61,8 +62,8 @@ import {
 } from './package-refund-request.projection';
 import {
   isPackageRefundFlowOpen,
+  isPurchaseTermsTestMode,
   OPEN_REFUND_STATUSES,
-  providerEligibilityNotes,
   purchaseCarriesTermsEvidence,
   WITHDRAWABLE_STATUSES,
 } from './package-refund-request.rules';
@@ -130,26 +131,73 @@ export class PackageRefundRequestsService {
 
   /**
    * What the support form may offer: nothing at all with the flow closed, and
-   * otherwise the caller's own PAID credit-package purchases that were bought
-   * with evidence, each with whether it can be selected and why.
+   * otherwise only the caller's own purchases a normal refund request can be
+   * opened for *right now* (PR-B.1) — PAID credit packages bought with terms
+   * evidence, with no open request, that the canonical evaluation calls
+   * REFUNDABLE. `available` is false when that list is empty, and then the
+   * form offers no refund type at all.
+   *
+   * Each item carries the subject the ticket will get, so the form can show
+   * it without composing it: the subject is the server's, never the caller's.
+   * `testMode` is true only under `PURCHASE_TERMS_GATE=test`.
    */
   async providerOptions(user: AuthUser) {
+    const closed = { available: false as const, testMode: false, purchases: [] };
     if (!isPackageRefundFlowOpen()) {
-      return { available: false as const, purchases: [] };
+      return closed;
     }
 
     const provider = await this.ownProvider(user);
     if (!provider) {
-      return { available: false as const, purchases: [] };
+      return closed;
     }
 
+    const purchases = await this.requestablePurchases(provider.id, new Date());
+    return {
+      available: purchases.length > 0,
+      testMode: isPurchaseTermsTestMode(),
+      purchases,
+    };
+  }
+
+  /**
+   * PR-B.1 — whether the caller may open a normal refund request for this one
+   * purchase now: the same rules as {@link providerOptions}, for the "İade
+   * talebi oluştur" button on the purchase's own page. Answers a bare boolean
+   * and the same `false` for a closed flow, a customer, an invented id,
+   * another provider's purchase and an ineligible one of their own, so the
+   * answer tells nobody anything about a purchase that is not theirs.
+   */
+  async providerPurchaseAvailability(user: AuthUser, purchaseId: string) {
+    if (!isPackageRefundFlowOpen()) {
+      return { available: false };
+    }
+    const provider = await this.ownProvider(user);
+    if (!provider) {
+      return { available: false };
+    }
+    const purchases = await this.requestablePurchases(provider.id, new Date(), purchaseId);
+    return { available: purchases.length > 0 };
+  }
+
+  /**
+   * The provider's purchases a normal refund request can be opened for at
+   * `now`. The query narrows to the candidates — own, PAID credit packages
+   * with evidence, paid inside the window, no open request — and the
+   * canonical evaluation decides each one; the narrowing can only drop a
+   * purchase the evaluation would refuse anyway.
+   */
+  private async requestablePurchases(providerId: string, now: Date, onlyPurchaseId?: string) {
     const purchases = await this.prisma.packagePurchase.findMany({
       where: {
-        providerId: provider.id,
+        ...(onlyPurchaseId === undefined ? {} : { id: onlyPurchaseId }),
+        providerId,
         kind: PackagePurchaseKind.OFFER_PACKAGE,
         status: PackagePurchaseStatus.PAID,
         termsAcceptanceRequired: true,
         purchaseTermsAcceptanceId: { not: null },
+        paidAt: { gte: new Date(now.getTime() - PACKAGE_REFUND_WINDOW_MS) },
+        packageRefundRequests: { none: { status: { in: [...OPEN_REFUND_STATUSES] } } },
       },
       orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
       take: 50,
@@ -161,22 +209,15 @@ export class PackageRefundRequestsService {
         priceAmountSnapshot: true,
         currencySnapshot: true,
         paidAt: true,
-        packageRefundRequests: {
-          where: { status: { in: [...OPEN_REFUND_STATUSES] } },
-          select: { id: true },
-        },
       },
     });
 
-    const now = new Date();
     const items = [];
     for (const purchase of purchases) {
       const eligibility = await this.eligibility.evaluate(purchase.id, now);
-      const hasOpenRequest = purchase.packageRefundRequests.length > 0;
-      const notes = hasOpenRequest
-        ? ['Bu paket için açık bir iade talebiniz var.']
-        : providerEligibilityNotes(eligibility);
-
+      if (eligibility.recommendation !== 'REFUNDABLE') {
+        continue;
+      }
       items.push({
         id: purchase.id,
         purchaseNumber: purchase.purchaseNumber,
@@ -186,12 +227,10 @@ export class PackageRefundRequestsService {
         currency: purchase.currencySnapshot,
         paidAt: purchase.paidAt ? purchase.paidAt.toISOString() : null,
         windowEndsAt: eligibility.windowEndsAt,
-        selectable: !hasOpenRequest && eligibility.recommendation === 'REFUNDABLE',
-        notes,
+        ticketSubject: refundTicketSubject(purchase),
       });
     }
-
-    return { available: purchases.length > 0, purchases: items };
+    return items;
   }
 
   /**
