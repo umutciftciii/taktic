@@ -138,6 +138,11 @@ services:
       # a whole document set, and outside a local stack a legally approved one
       # (RG-1) — otherwise the API refuses to boot. See .env.example.
       PURCHASE_TERMS_GATE: ${PURCHASE_TERMS_GATE:-}
+      # CMP-006 PR-C: the promotion fingerprint key. Empty on a local stack
+      # (APP_ENVIRONMENT=local uses the development key); required elsewhere.
+      # Changing the key or its version is a migration, never a quiet edit.
+      PROMOTION_FINGERPRINT_KEY: ${PROMOTION_FINGERPRINT_KEY:-}
+      PROMOTION_FINGERPRINT_KEY_VERSION: ${PROMOTION_FINGERPRINT_KEY_VERSION:-}
       # Force polling-based file watching so tsx/chokidar reliably detect
       # host edits under the macOS bind mount. inotify events don't cross
       # the Docker Desktop VirtioFS/gRPC-FUSE boundary on macOS.

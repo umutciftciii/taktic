@@ -1,0 +1,210 @@
+# CMP-006 PR-C — Teslim raporu (kanonik işletme kaydı + promosyon fraud uygunluğu)
+
+Tarih: 2026-09-23 · Branch: `claude/cmp-006-business-registration-fraud-bb7092` · Taban: `main` @ `b4dc5f51` ·
+Tasarım: [`2026-09-23-cmp-006-pr-c-business-registration-promotion-eligibility-design.md`](../specs/2026-09-23-cmp-006-pr-c-business-registration-promotion-eligibility-design.md) ·
+Dry-run: [`2026-09-23-cmp-006-pr-c-migration-k-dryrun.txt`](2026-09-23-cmp-006-pr-c-migration-k-dryrun.txt)
+
+**Kampanya motoru anahtarı ve `PURCHASE_TERMS_GATE` kapalı kaldı; hiçbir kod onları açmaz. Gerçek checkout, Lemon,
+e-posta/SMS veya staging işlemi yapılmadı; yerel `taktic` verisine dokunulmadı (yalnız izole dry-run DB'si ve bu
+checkout'un test/e2e DB'leri). Kampanya DSL'i (`campaign-rules.json`) değişmedi. Merge ve yerel eşitleme yapılmadı.**
+
+## 1. Sayılarla
+
+| Ölçüm | Değer |
+| --- | --- |
+| Migration | **K** `20260923180000_add_business_registration_and_promotion_eligibility` — 77.; yalnız ekleme, **DML yok**, `taxType/taxNumber` dönüştürülmedi |
+| Yeni tablo | `ProviderBusinessRegistration`, `ProviderBusinessRegistrationChange`, `SensitiveDataAccessLog`, `CampaignRegistrationCounter`, `PromotionEligibilityHold`, `PromotionEligibilityReview` |
+| Yeni enum / değer | 4 enum · `CampaignTriggerEventStatus += HELD_FOR_REVIEW` · `CampaignEvaluationOutcome += PROMOTION_REVIEW_HELD, PROMOTION_INELIGIBLE` |
+| CHECK / tetikleyici | 6 CHECK · 5 tetikleyici (4 append-only + karar↔hold eşleşmesi) |
+| İzin | +2 (`PROVIDER_REGISTRATION_READ_SENSITIVE`, `PROMOTION_ELIGIBILITY_REVIEW`) → 80 → **82** |
+| Yeni rota | Admin 4 (route-map'te) · Sağlayıcı 2 (`GET/PUT /providers/me/business-registration`) · başvuru gövdeleri += kayıt çifti |
+| Yeni env | `PROMOTION_FINGERPRINT_KEY`, `PROMOTION_FINGERPRINT_KEY_VERSION` — local/test'te boş geçer, staging/prod'da zorunlu (boot reddi); compose + `.env.example` güncellendi |
+| Yeni API testi | **111** (kurallar/normalizasyon 13 blok · anahtar sözleşmesi 6 · karar matrisi 8 blok · HTTP kayıt/sızıntı/audit 24 · kapı/hold/karar/sayaç 25) |
+| Tam API paketi | **169 dosya / 3658 test** (PR-C.1 sonrası) |
+| Web / admin birim | web 355/355 (yeni 4) · admin 78/78 (yeni 4) |
+| E2E | Rev. 1: Chromium 301/302 (B7). **PR-C.1: Chromium 302/302, WebKit 131/131** — §7.4 |
+| typecheck | api (src + test), web, admin, e2e, shared temiz |
+
+## 2. Görev tanımının maddeleri
+
+| İstenen | Nerede / kanıt |
+| --- | --- |
+| Başvuru + şirket bilgileri ekranında tür + numara | `business-registration-fields.tsx` (açık ve davetli form), `/providers/[id]/edit` "İşletme kaydı" formu → `PUT /providers/me/business-registration` |
+| `NONE_DECLARED` numarasız; diğerleri zorunlu, normalize, türüyle | `business-registration.rules.ts` + DB CHECK `number_matches_type`; 13 kural bloğu + HTTP 400 kodları |
+| Eski `taxType/taxNumber` kör backfill yok, "belirsiz/eski kayıt" | dry-run §6 (0 satır, eski değer aynen); `registrationView` → `UNSPECIFIED`; **ek düzeltme:** profil kaydı artık eski vergi alanlarını sessizce silmiyor |
+| Başvuru, sağlayıcı ekranı, izinli admin detayında tutarlı | tek görünüm `BusinessRegistrationView`; web + admin `describeBusinessRegistration` |
+| Listelerde maskeli, ham yalnız hassas izinli detayda | sızıntı matrisi testi (public/owner/me/dashboard/staff/list/detail); ham yalnız `…/business-registration/raw` |
+| Her ham okumada audit, liste/public projeksiyonuna sızmaz | `SensitiveDataAccessLog` (aynı tx, değer yok, append-only); E2E: göster düğmesi yalnız izinli, tek okuma = tek satır |
+| `SOLE_PROPRIETOR_TR_ID` yüksek hassasiyet | TCKN sağlaması; sağlayıcıya da maskeli; log/e-posta/bildirim/audit/snapshot'ta ham yok (T-LEAK testleri) |
+| Tek kanonik sonuç `ELIGIBLE/REVIEW/INELIGIBLE`, DSL'e kural yok | `promotion-eligibility.ts` (saf) + reader; katalog değişmedi |
+| `NONE_DECLARED`/eksik/şüpheli → REVIEW | `REGISTRATION_NONE_DECLARED`, `REGISTRATION_UNSPECIFIED`, `REGISTRATION_SHARED` |
+| Aynı IP/cihaz tek başına INELIGIBLE değil | yalnız IP → iki sağlayıcı da grant (test); IP yalnız başka REVIEW varken gerekçe; cihaz verisi toplanmıyor |
+| IP sinyali ham değil sürümlü HMAC; RG-2 açık | `sessionIpFingerprint` `v1:<hex>`; snapshot'ta adres yok (test); tasarım §9 + S0 RG-2 notu |
+| Aynı kayıt farklı hesapta → gerekçeli REVIEW, sayaçta ham yok | `REGISTRATION_PROMOTION_CONSUMED` (diğer sağlayıcı id'siyle); sayaç kolonları dry-run §10 |
+| Sayaç yalnız gerçek grantte | aday savepoint'i içinde; limit reddi / motor hatası / REVIEW / INELIGIBLE → 0 (testler) |
+| Aynı provider ikinci intro yok | mevcut `maxRedemptionsPerProvider` + anahtar tekilliği; karar sonrası yeniden yükselme → grant sayısı 1, sayaç 1 |
+| REVIEW → `HELD_FOR_REVIEW`, worker almaz | `claimDueEvent` durum filtresi; zaman 30 gün ileri + yeniden yükselme → claim 0; retry rotası 409 |
+| Hold anındaki sonuç immutable snapshot | `PromotionEligibilityHold` (append-only tetikleyici), olay başına bir; karar sonrası kapı yeniden hesaplanmaz |
+| Dar admin aksiyonu, açık gerekçe | `POST /admin/promotion-eligibility/holds/:eventId/decision` (10–1000); admin kuyruk + detay + form |
+| Ayrı izinler, SUPER_ADMIN örtük | 2 yeni izin; `CAMPAIGNS_READ` kuyruğu açamaz (API 403 + E2E `/yetkisiz`) |
+| Karar auditli; ham veri audit özetinde yok | `PromotionEligibilityReview` (karar veren, zaman, gerekçe, hold); append-only |
+| Karar sonrası tek dönüş, çift grant yok | koşullu `HELD → PENDING` + unique; eşzamanlı iki karar → 201 + 409; karar + 4 eşzamanlı worker → 1 grant/1 lot/1 sayaç |
+
+## 3. Uygulama sırasında çıkan bulgular
+
+- **B1 — Mevcut motor testleri kapıya takıldı (beklenen).** Giriş tetikleyicili grant senaryoları kayıtsız,
+  doğrulanmamış sağlayıcılarla kuruluydu; kapı onları doğru olarak REVIEW/INELIGIBLE yaptı. Fixture'lar
+  `declareBusinessRegistration` / `makePromotionEligible` ile "doğrulanmış + kayıtlı" hâle getirildi; iddialar
+  değişmedi. **Ürün sonucu:** telefon doğrulamasını koşul olarak istemeyen bir giriş kampanyası artık telefonsuz
+  sağlayıcıya grant vermez (önkoşul).
+- **B2 — `PATCH /providers/:id` eski vergi alanlarını siliyordu.** Tam değiştirme + formun bu alanları göndermemesi.
+  Düzeltildi (alan yoksa değişmez); test var.
+- **B3 — `PHONE_SHARED` sinyali uygulanmadı.** `PhoneVerification.consumedAt` hem doğrulanan hem yenisiyle geçersizlenen
+  kodda doluyor; "güvenilir sinyal" değil (tasarım §0).
+- **B4 — `REGISTRATION_SHARED` iki hesabı birden incelemeye alır.** Aynı numarayı iki hesap beyan ettiyse, hiçbiri
+  henüz promosyon almamış olsa da ikisi de REVIEW olur — kasıtlı ("şüpheli işletme bilgisi").
+- **B5 — Sayaç geri alınmaz.** Revoke edilen bir grant sayaçta kalır (kampanya `redemptionCount` ile aynı ilke:
+  kümülatif). Bir sonraki hesapta REVIEW üretir, hard reject değil.
+- **B6 — Admin kuyruğu `admin/promotion-eligibility` altında**; `admin/campaigns/:id` onu yakalardı.
+- **B7 — Admin sağlayıcı detayı rol atanmış hiçbir ADMIN'e açılmıyordu (PR-0'dan kalan ürün hatası).** Rev. 1'deki
+  "kartı yalnız SUPER_ADMIN'e yükle" yaması geri alındı; kalıcı çözüm PR-C.1'de — §7.
+
+## 4. Değişmeyenler
+
+`PACKAGE_PAYMENT_SUCCEEDED` değerlendirmesi (kapı yok — test), `triggerEventKey` biçimleri, S2B1 grant primitive'i,
+S3 revoke, S4 net iade, PR-A kanıt, PR-B iade akışı, `Session` yazımı/retention'ı, `PurchaseTermsAcceptance.clientIp`
+erişimi, public projeksiyonlar.
+
+## 5. Açık kararlar / release kapıları
+
+- **RG-2 (açık, güncellendi):** tasarım §9 — kayıt numarası ve eski vergi numarası saklama süresi, TCKN işleme
+  dayanağı ve aydınlatma metni, `Session.ipAddress` süpürücüsü (bugün hiç silinmiyor), snapshot fingerprint'lerinin
+  saklama süresi, `SensitiveDataAccessLog` saklama süresi.
+- **RG-4 (açık):** staging/prod için `PROMOTION_FINGERPRINT_KEY` üretilmeli ve gizli tutulmalı; rotasyon bir migration'dır.
+  **Staging'e çıkmadan önce anahtar tanımlanmazsa API boot etmez.**
+- **Açık işler:** `PACKAGE_PAYMENT_SUCCEEDED` kapısı · Lemon ödeme kimliği sinyali · clawback/`unrecoveredCreditBenefit` ·
+  operatörün kaydı düzeltmesi/doğrulaması · VKN/MERSİS sağlaması · PR-D kanal.
+
+## 6. E2E ve CI
+
+- Yerel tam E2E (Chromium, `pnpm e2e`): **301 geçti / 1 hata** (8.8 dk). Hata yeni senaryodaydı ve B7'yi ortaya
+  çıkardı; düzeltme sonrası `pnpm e2e provider-business-registration` **2/2**. Diğer 300 senaryoya dokunan tek değişiklik
+  admin sağlayıcı detayındaki kart koşuludur (SUPER_ADMIN davranışı aynı).
+- CI (PR #108, `cb947b16`): **3/3 yeşil** — typecheck · lint · test · build ✅, e2e (chromium) ✅, e2e (webkit) ✅.
+  Merge ve yerel eşitleme yapılmadı; karar kullanıcıda.
+
+## 7. PR-C.1 — merge öncesi erişim ve E2E kapanışı
+
+### 7.1 301/302'nin kök nedeni
+
+| Soru | Cevap |
+| --- | --- |
+| Tekrar üretildi mi? | **Evet, deterministik.** Rev. 1 yaması geri alınıp admin yeniden derlendi; `pnpm e2e provider-business-registration` aynı adımda aynı hatayla düştü (`registration-masked` bulunamadı, sayfa `/yetkisiz`) |
+| Sınıf | **Ürün hatası** (flake, fixture veya ortam değil). PR-0'dan beri var; yeni senaryo onu ilk kez rol atanmış bir `ADMIN` ile açtığı için görüldü |
+| Mekanizma | Admin sağlayıcı detayı değerlendirme kartını sağlayıcı panelinin `GET /providers/:providerId/reviews` rotasından okuyordu. O rota `ProviderAccessGuard` (sahip + SUPER_ADMIN) ile korunuyor; 403, admin `apiFetch`'inde `/yetkisiz` yönlendirmesine dönüşüp **tüm sayfayı** götürüyordu. `PROVIDERS_READ` taşımayan hesapta kategori bağları okuması da aynı yoldan sayfayı düşürürdü |
+| Düzeltme | Üretim kodu: admin'e ait izinli rota `GET /provider-reviews/by-provider/:providerId` (**`PROVIDER_REVIEWS_READ`**, mevcut izin); sayfadaki her kart kendi iznine bağlandı; `ProviderAccessGuard`'a dokunulmadı |
+| Test beklentisi | Zayıflatılmadı; E2E artık `PROVIDERS_READ` **olmadan** yalnız inceleme rolüyle sayfayı açıyor, hold'dan sağlayıcıya geçişi de kapsıyor |
+
+### 7.2 Erişim sözleşmesi ve izinler
+
+Yeni izin **yok** (82 sabit). Fraud inceleme rolü yalnız mevcut izinlerden kurulur:
+`PROMOTION_ELIGIBILITY_REVIEW` (kuyruk, snapshot, karar) + `PROVIDERS_READ_DETAIL` (sağlayıcı detayı) +
+`PROVIDER_REVIEWS_READ` (müşteri değerlendirmeleri); ham kayıt için ayrıca `PROVIDER_REGISTRATION_READ_SENSITIVE`.
+`GET /admin/promotion-eligibility/holds` `providerId` ve `filter=all` alır (aynı rota, aynı izin) — sağlayıcı
+detayında "Promosyon uygunluğu" kartı.
+
+> **PR-C.2 ile düzeltildi — aşağıdaki tablo günceldir.** PR-C.1'de "yalnız hassas izin → ham kayıt 200" idi; bu artık
+> 403'tür (§8).
+
+| Hesap | Kuyruk / sağlayıcı hold'ları / hold / karar | Sağlayıcı detayı | Değerlendirmeler | Ham kayıt |
+| --- | --- | --- | --- | --- |
+| `SUPER_ADMIN` | 200 | 200 | 200 | 200 + audit |
+| İnceleme rolü | 200 | 200 (maskeli) | 200 | **403** |
+| Yalnız hassas izin | 403 | 403 | 403 | **403, audit yok** |
+| İnceleme + hassas | 200 | 200 (maskeli) | 200 | 200 + audit |
+| İzinsiz `ADMIN` | 403 | 403 | 403 | 403 |
+
+`promotion-eligibility-access.spec.ts` bu tabloyu (PR-C.2 sonrası 8 hesap × 7 rota, §8) doğrular; izinli ham 200'ler
+dışındaki **her** gövdede (liste, detay, kuyruk, karar, 403/404/409 hata gövdeleri) ham numara yok; audit satırı yalnız
+izinli 200'lerde ve okuma başına bir tane, satırlarda değer yok. Karar: yalnız inceleme rolü (ve SUPER_ADMIN) verebilir; iki inceleyicinin eşzamanlı kararı
+→ bir 201 + bir 409 (`ELIGIBILITY_DECISION_ALREADY_RECORDED` veya `CONCURRENT_MODIFICATION` — başarı sayılmaz), ardından
+üç eşzamanlı worker geçişi → **1 karar, 1 grant, 1 lot, sayaç 1**. Sağlayıcı panelinin rotası sahiplik korumalı kaldı
+(`PROVIDER_REVIEWS_READ` taşıyan personel orada 403).
+
+### 7.2a CI'da görülen API yarışı (`account-email-role-conflict`)
+
+`ce31243f`'nin CI verify işi, bu PR'ın dokunmadığı "iki eşzamanlı çapraz rol kayıt" testinde düştü
+(`CUSTOMER_IDENTITY_CONFLICT` ≠ `EMAIL_ROLE_CONFLICT`). Daha önce main CI'da da görülmüş, backlog'daki flake.
+Yeniden çalıştırılarak kapatılmadı:
+
+| Soru | Cevap |
+| --- | --- |
+| Sınıf | **Ürün yarışı** (test/fixture değil): kaybedene dönen kod zamanlamaya bağlıydı |
+| Mekanizma | `AuthService.register` önce çapraz rol ön kontrolünü, sonra genel iletişim kontrolünü yapıyor; iki okuma tek snapshot değil. Diğer rolün kaydı **ikisinin arasında** commit olursa ikinci okuma adresi görüp genel `CUSTOMER_IDENTITY_CONFLICT`'i döndürüyordu. Unique-ihlali dalı bu soruyu zaten yeniden soruyordu; ön kontrol dalı sormuyordu |
+| Yeniden üretim | Deterministik: yeni test pencereyi zorluyor (kazanan hesap iki okuma arasında yazılıyor); **düzeltmesiz 2/2 düşüyor**, aynı hata |
+| Düzeltme | Üretim kodu: iletişim kontrolü adres çakışmasıyla reddederse çapraz rol sorusu o an oradaki hesaba yeniden sorulur (unique-ihlali dalıyla aynı kural). Test beklentisi değişmedi |
+| Nihai invariant | Mevcut eşzamanlı testler (tam bir 201 + bir 409, 409'un kodu ve metni, hesap sayısı 1) aynen duruyor |
+
+### 7.3 Değişmeyenler
+
+Kampanya motoru ve `PURCHASE_TERMS_GATE` kapalı; fraud karar kuralları, HMAC biçimi, kayıt sayacı ve
+`HELD_FOR_REVIEW` yaşam döngüsü değişmedi. Lemon, gerçek e-posta/SMS, staging, `.env`, gerçek veri yok.
+
+### 7.4 Doğrulama
+
+| Kontrol | Sonuç |
+| --- | --- |
+| API tam paket | **169 dosya / 3658 test** (yeni: erişim matrisi 4 + yarış penceresi 2) |
+| Web / admin birim | 355/355 · 78/78 |
+| typecheck (api src+test, web, admin, e2e, shared) | temiz |
+| lint / build | temiz / başarılı (turbo, 4/4 paket) |
+| Tam Chromium E2E (`pnpm e2e`) | `ce31243f`: **302/302** (8.4 dk, `retries: 0`) · auth düzeltmesi sonrası: **302/302** (8.5 dk) |
+| Tam WebKit E2E (`pnpm e2e:webkit`, CI'daki WebKit projesi; `provider-business-registration` eklendi) | `ce31243f`: **131/131** (4.1 dk) · auth düzeltmesi sonrası: **131/131** (4.1 dk) |
+| CI | `ce31243f`: e2e chromium ✅ · e2e webkit ✅ · verify ❌ (§7.2a yarışı) · `5630b74d`: **3/3 yeşil** (verify ✅, e2e chromium ✅, e2e webkit ✅) |
+
+## 8. PR-C.2 — ham işletme kaydı için katmanlı yetki
+
+**Sorun:** PR-C.1'de `PROVIDER_REGISTRATION_READ_SENSITIVE` tek başına ham numarayı okuyabiliyordu; bu hesap sağlayıcı
+detayını, kuyruğu veya incelemeyi göremediği hâlde en hassas veriye doğrudan ulaşıyordu. Audit bir erişim yetkisi değildir.
+
+**Kural:** `GET /providers/:providerId/business-registration/raw` =
+`PROVIDER_REGISTRATION_READ_SENSITIVE` ∧ `PROMOTION_ELIGIBILITY_REVIEW` ∧ `PROVIDERS_READ_DETAIL`. `PermissionsGuard`
+zaten birleşik — yeni guard mantığı gerekmedi. **Tek bağlam: fraud incelemesi.** "Detay + hassas" alternatifi kabul
+edilmedi: üründe kayıt numarasını okuyan başka bir operasyon akışı yok (operatör yazma rotası da yok), bu yüzden
+"A ∧ (B ∨ C)" desteği eklenmedi. `PROVIDER_REVIEWS_READ` bağlamın parçası değil. `ProviderAccessGuard` değişmedi.
+Admin'deki "Ham değeri göster" düğmesi aynı kuralla gösterilir (yalnız kozmetik; zorlayan API).
+
+**Audit:** yalnız başarılı 200 okumasında. Ret guard'da, servis çalışmadan olur → 403'ler ve bilinmeyen sağlayıcı (404)
+satır üretmez; test her istekten önce/sonra sayar.
+
+**Rota haritası:** girdiye `alsoRequires` alanı eklendi; harita testi artık rotanın bildirdiği izin kümesinin **tam olarak**
+harita kümesine eşit olmasını ister (eksik veya fazla bağlam izni testi kırar).
+
+**Testler:**
+
+| Hesap | Kuyruk | Sağlayıcı hold'ları | Hold | Detay | Değerlendirmeler | Ham | Ham (bilinmeyen) | Audit |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| SUPER_ADMIN | 200 | 200 | 200 | 200 | 200 | **200** | 404 | 1 |
+| İnceleme rolü | 200 | 200 | 200 | 200 | 200 | 403 | 403 | 0 |
+| Yalnız hassas | 403 | 403 | 403 | 403 | 403 | **403** | 403 | **0** |
+| İnceleme + hassas | 200 | 200 | 200 | 200 | 200 | **200** | 404 | 1 |
+| İnceleme + detay + hassas (değerlendirme yok) | 200 | 200 | 200 | 200 | 403 | **200** | 404 | 1 |
+| İnceleme + hassas (detay yok) | 200 | 200 | 200 | 403 | 403 | 403 | 403 | 0 |
+| Detay + hassas (inceleme yok) | 403 | 403 | 403 | 200 | 403 | 403 | 403 | 0 |
+| İzinsiz ADMIN | 403 | 403 | 403 | 403 | 403 | 403 | 403 | 0 |
+
+İzinli ham okumalarda doğru maskesiz değer (`10000000146`) ve okuma başına tam bir audit satırı (okuyanın kimliğiyle);
+diğer tüm gövdelerde ham numara yok. `provider-business-registration.spec.ts` ayrıca beş eksik kombinasyonun (bağlamsız
+hassas, hassassız bağlam, yarım bağlamlar) 403'ünü ve gövdesini doğrular.
+
+Kampanya motoru, `PURCHASE_TERMS_GATE`, fraud kuralları, fingerprint ve kayıt sayacı değişmedi.
+
+### 8.1 Doğrulama
+
+| Kontrol | Sonuç |
+| --- | --- |
+| API tam paket | **169 dosya / 3658 test** |
+| Web / admin birim, typecheck, lint, build | 355/355 · 78/78 · temiz · başarılı |
+| Tam Chromium E2E | **302/302** (8.5 dk) |
+| Tam WebKit E2E | **131/131** (3.9 dk) |
+| CI (`3b20b6c6`) | **3/3 yeşil** (verify ✅, e2e chromium ✅, e2e webkit ✅) |

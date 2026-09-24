@@ -2,10 +2,12 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
-import { AdminPermission, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, UserRole } from '@prisma/client';
+import { AdminPermission, BusinessRegistrationType, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
+import type { NormalizedBusinessRegistration } from '../src/modules/business-registration/business-registration.rules';
+import { writeBusinessRegistration } from '../src/modules/business-registration/business-registration.writer';
 import { applyHttpSecurity } from '../src/common/http-security';
 import { SmsTransportUnavailableError } from '../src/modules/notifications/console-sms.adapter';
 import {
@@ -212,6 +214,14 @@ const TRUNCATED_TABLES = [
   // at redemptions, redemptions and logs at events, everything at the campaign.
   // S2B1: a consumption row references a lot and three ledger rows, so it
   // goes before both.
+  // CMP-006 PR-C, children first: a review points at a hold, a hold at an
+  // event; the counter at redemptions; the registration rows at providers.
+  'PromotionEligibilityReview',
+  'PromotionEligibilityHold',
+  'CampaignRegistrationCounter',
+  'SensitiveDataAccessLog',
+  'ProviderBusinessRegistrationChange',
+  'ProviderBusinessRegistration',
   'PromoCreditLotConsumption',
   'PromoCreditLot',
   'CampaignEvaluationLog',
@@ -1343,4 +1353,46 @@ export function listRegisteredRoutes(app: INestApplication): { method: string; p
   }
 
   return routes;
+}
+
+/**
+ * A declared canonical business registration for a provider (CMP-006 PR-C),
+ * written through the same writer the application and the provider's own
+ * route use — so the mask, the fingerprint and the history row are the real
+ * ones. Defaults to a TAX_NUMBER unique to this call.
+ */
+export async function declareBusinessRegistration(
+  prisma: PrismaClient,
+  providerId: string,
+  options: { type?: BusinessRegistrationType; number?: string | null; actorUserId?: string | null } = {},
+) {
+  const type = options.type ?? BusinessRegistrationType.TAX_NUMBER;
+  const declaration =
+    type === BusinessRegistrationType.NONE_DECLARED
+      ? { type, numberCanonical: null }
+      : { type, numberCanonical: options.number ?? `9${uniqueSuffix().padStart(9, '0').slice(-9)}` };
+  return prisma.$transaction((tx) =>
+    writeBusinessRegistration(tx, {
+      providerId,
+      declaration: declaration as NormalizedBusinessRegistration,
+      actorKind: 'PROVIDER',
+      actorUserId: options.actorUserId ?? null,
+    }),
+  );
+}
+
+/**
+ * A provider the promotion eligibility gate answers ELIGIBLE for: an owning
+ * account with both proofs, an approved profile and a declared registration of
+ * its own. Campaign specs whose subject is not the gate start from here.
+ */
+export async function makePromotionEligible(prisma: PrismaClient, providerId: string) {
+  const provider = await prisma.providerProfile.findUniqueOrThrow({ where: { id: providerId }, select: { userId: true } });
+  if (provider.userId) {
+    await prisma.user.update({
+      where: { id: provider.userId },
+      data: { emailVerifiedAt: new Date(), phoneVerifiedAt: new Date() },
+    });
+  }
+  await declareBusinessRegistration(prisma, providerId);
 }

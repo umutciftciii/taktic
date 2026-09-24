@@ -9,6 +9,8 @@ import type { AuthUser } from '../auth/auth.types';
 import { DismissProviderReviewReportDto } from './dto/dismiss-provider-review-report.dto';
 import { ModerateProviderReviewDto } from './dto/moderate-provider-review.dto';
 import { ProviderReviewModerationService } from './provider-review-moderation.service';
+import { REVIEW_LIST_DEFAULT_LIMIT, REVIEW_LIST_MAX_LIMIT } from './provider-reviews.constants';
+import { ProviderReviewsService } from './provider-reviews.service';
 
 const QUEUE_DEFAULT_LIMIT = 50;
 const QUEUE_MAX_LIMIT = 100;
@@ -25,7 +27,33 @@ export class AdminProviderReviewsController {
   constructor(
     @Inject(ProviderReviewModerationService)
     private readonly moderation: ProviderReviewModerationService,
+    @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
   ) {}
+
+  /**
+   * One provider's reviews, for the operator's provider page (CMP-006 PR-C.1).
+   *
+   * Its own route and its own permission rather than a widening of
+   * `GET /providers/:providerId/reviews`: that one is the provider panel's,
+   * guarded by ownership (`ProviderAccessGuard`), and adding staff to it would
+   * grant every staff account a read nobody assigned. Here the read is
+   * PROVIDER_REVIEWS_READ, the permission that already covers the review queue.
+   * Two segments, so the `:reviewId` route below cannot capture it.
+   */
+  @Get('by-provider/:providerId')
+  @RequiresPermission(AdminPermission.PROVIDER_REVIEWS_READ)
+  listForProvider(
+    @Param('providerId') providerId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsed = Number(limit);
+    return this.reviews.listForProvider(
+      providerId,
+      cursor?.trim() || null,
+      Number.isInteger(parsed) && parsed > 0 && parsed <= REVIEW_LIST_MAX_LIMIT ? parsed : REVIEW_LIST_DEFAULT_LIMIT,
+    );
+  }
 
   @Get('reports')
   @RequiresPermission(AdminPermission.PROVIDER_REVIEWS_READ)

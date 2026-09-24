@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { IsKnownTurkishLocation } from '../../locations/turkish-location.validator';
@@ -30,7 +31,7 @@ export class ProviderServiceAreaDto {
   neighborhood?: string | null;
 }
 
-export class CreateProviderDto {
+export class ProviderProfileFieldsDto {
   @IsString()
   @IsNotEmpty()
   businessName!: string;
@@ -81,4 +82,23 @@ export class CreateProviderDto {
   @ValidateNested({ each: true })
   @Type(() => ProviderServiceAreaDto)
   serviceAreas!: ProviderServiceAreaDto[];
+}
+
+/**
+ * An application: the profile fields plus the canonical business registration
+ * (CMP-006 PR-C). The pair is validated as a pair in the service
+ * (`requireValidBusinessRegistration`) so a refusal carries a closed code;
+ * here only its outer shape is. Absent from `UpdateProviderDto` on purpose —
+ * the registration changes through its own route, which writes its own history.
+ */
+export class CreateProviderDto extends ProviderProfileFieldsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  businessRegistrationType?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  businessRegistrationNumber?: string | null;
 }

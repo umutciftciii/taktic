@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getCurrentUser } from '../../../lib/api';
+import { BUSINESS_REGISTRATION_ERROR_MESSAGES } from '../../../lib/business-registration';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { isProviderClaimEnabled } from '../../../lib/provider-claim';
 import { IconArrowRight } from '../../landing-icons';
@@ -47,6 +48,7 @@ const SUBMIT_ERRORS: Record<string, string> = {
   account:
     'Bu hesapla hizmet veren başvurusu gönderilemiyor. Çıkış yapıp tekrar deneyin ya da mevcut hizmet veren panelinizi kullanın.',
   invalid: 'Başvuru gönderilemedi. Alanları kontrol edip tekrar deneyin.',
+  ...BUSINESS_REGISTRATION_ERROR_MESSAGES,
 };
 
 /**

@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { IsKnownTurkishLocation } from '../../locations/turkish-location.validator';
@@ -57,6 +58,17 @@ export class SubmitProviderInviteApplicationDto {
   @IsOptional()
   @IsString()
   taxNumber?: string | null;
+
+  /** CMP-006 PR-C, validated as a pair by the shared application checks. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  businessRegistrationType?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  businessRegistrationNumber?: string | null;
 
   @IsString()
   @IsNotEmpty()

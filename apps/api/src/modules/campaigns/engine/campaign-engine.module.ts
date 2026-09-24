@@ -7,6 +7,7 @@ import { CampaignEngineService } from './campaign-engine.service';
 import { CampaignEvaluationWorker } from './campaign-evaluation.worker';
 import { CampaignRevokeService } from './campaign-revoke.service';
 import { FactSourceRegistry } from './fact-source-registry';
+import { PromotionEligibilityReader } from './promotion-eligibility.reader';
 
 /**
  * The campaign engine and its one door (CMP-002 S2B2).
@@ -33,6 +34,7 @@ import { FactSourceRegistry } from './fact-source-registry';
     CampaignEngineRepository,
     CampaignFactReader,
     FactSourceRegistry,
+    PromotionEligibilityReader,
     CampaignEngineService,
     CampaignEngineHooks,
     CampaignEvaluationWorker,

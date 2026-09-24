@@ -167,6 +167,8 @@ export type CampaignEvaluationQueueView = {
   pending: number;
   processing: number;
   retryWait: number;
+  /** CMP-006 PR-C: waiting for a person's eligibility decision; never claimed by the worker. */
+  heldForReview: number;
   lastErrorCode: string | null;
   lastErrorAt: Date | null;
 };
@@ -557,7 +559,7 @@ export class CampaignsService {
     const [counts, lastError] = await Promise.all([
       this.prisma.campaignTriggerEvent.groupBy({
         by: ['status'],
-        where: { status: { in: ['PENDING', 'PROCESSING', 'RETRY_WAIT'] } },
+        where: { status: { in: ['PENDING', 'PROCESSING', 'RETRY_WAIT', 'HELD_FOR_REVIEW'] } },
         _count: { _all: true },
       }),
       this.prisma.campaignTriggerEvent.findFirst({
@@ -571,6 +573,7 @@ export class CampaignsService {
       pending: count('PENDING'),
       processing: count('PROCESSING'),
       retryWait: count('RETRY_WAIT'),
+      heldForReview: count('HELD_FOR_REVIEW'),
       lastErrorCode: lastError?.lastErrorCode ?? null,
       lastErrorAt: lastError?.lastErrorAt ?? null,
     };

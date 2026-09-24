@@ -15,6 +15,14 @@ const TRUNCATED_TABLES = [
   'ServiceRequestQuestionCondition',
   'Message',
   'MessageThread',
+  // CMP-006 PR-C: review → hold → trigger event; the registration rows and
+  // the sensitive-read log point at providers and accounts below.
+  'PromotionEligibilityReview',
+  'PromotionEligibilityHold',
+  'CampaignRegistrationCounter',
+  'SensitiveDataAccessLog',
+  'ProviderBusinessRegistrationChange',
+  'ProviderBusinessRegistration',
   // CMP-006 PR-B: the audit rows point at the request, the request at the
   // ticket, the purchase and the webhook event below.
   'PackageRefundRequestEvent',

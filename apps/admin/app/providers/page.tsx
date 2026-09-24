@@ -12,6 +12,7 @@ import {
 } from '../../lib/api';
 import { PageHeader } from '../../components/page-header';
 import { EmptyState } from '../../components/empty-state';
+import { describeBusinessRegistration } from '../../lib/business-registration';
 
 type RawSearchParams = {
   q?: string;
@@ -260,6 +261,10 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                         <div className="cell-stack">
                           <strong>{provider.businessName}</strong>
                           <span className="cell-muted">{provider.contactName}</span>
+                          {/* CMP-006 PR-C: masked; the list never carries a raw number. */}
+                          <span className="cell-muted" data-testid="provider-registration">
+                            {describeBusinessRegistration(provider.businessRegistration)}
+                          </span>
                         </div>
                       </td>
                       <td>

@@ -195,6 +195,8 @@ test.describe('provider application location', () => {
       await form.getByTestId('service-area-city').selectOption(wholeProvince);
       await form.getByTestId('service-area-add').click();
 
+      // CMP-006 PR-C: the registration type is a required choice; "none declared" is one.
+      await form.locator('select[name="businessRegistrationType"]').selectOption('NONE_DECLARED');
       await form.getByRole('button', { name: 'Başvuruyu Gönder' }).click();
       await expect(applicant.page).toHaveURL(/\/providers\/success$/);
       await assertNoErrorScreen(applicant.page);

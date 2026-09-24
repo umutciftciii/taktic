@@ -7,6 +7,7 @@ import {
   ProviderDashboard,
   ProviderEnrollmentCategory,
 } from '../../../lib/api';
+import { BUSINESS_REGISTRATION_ERROR_MESSAGES, isBusinessRegistrationErrorKey } from '../../../lib/business-registration';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { ProviderApplicationFields } from '../provider-application-fields';
 import { CategoryVisual } from '../../category-visual';
@@ -93,6 +94,13 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
           <div className="provider-apply-notice is-warning" role="alert">
             <span className="provider-apply-notice-icon" aria-hidden="true">!</span>
             <span>Geçerli bir e-posta adresi girin; başvurunuzu bu adrese bağlayacağız.</span>
+          </div>
+        ) : null}
+
+        {isBusinessRegistrationErrorKey(error) ? (
+          <div className="provider-apply-notice is-warning" role="alert">
+            <span className="provider-apply-notice-icon" aria-hidden="true">!</span>
+            <span>{BUSINESS_REGISTRATION_ERROR_MESSAGES[error]}</span>
           </div>
         ) : null}
 

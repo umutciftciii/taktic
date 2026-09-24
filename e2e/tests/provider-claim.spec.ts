@@ -66,6 +66,8 @@ async function submitApplication(
   await form.getByTestId('service-area-district').selectOption(values.district);
   await form.getByTestId('service-area-add').click();
 
+  // CMP-006 PR-C: the registration type is a required choice; "none declared" is one.
+  await form.locator('select[name="businessRegistrationType"]').selectOption('NONE_DECLARED');
   await form.getByRole('button', { name: 'Başvuruyu Gönder' }).click();
   await expect(actor.page).toHaveURL(/\/providers\/success$/);
   await assertNoErrorScreen(actor.page);
@@ -347,6 +349,8 @@ test.describe('provider claim', () => {
       await form.getByTestId('service-area-city').selectOption(values.city);
       await form.getByTestId('service-area-district').selectOption(values.district);
       await form.getByTestId('service-area-add').click();
+      // CMP-006 PR-C: the registration type is a required choice; "none declared" is one.
+      await form.locator('select[name="businessRegistrationType"]').selectOption('NONE_DECLARED');
       await form.getByRole('button', { name: 'Başvuruyu Gönder' }).click();
 
       await expect(applicant.page).toHaveURL(/\/providers\/success$/);

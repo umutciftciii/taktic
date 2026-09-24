@@ -2,6 +2,7 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { businessRegistrationErrorKey, readBusinessRegistration } from '../../../lib/business-registration';
 import { APPLY_HINT_COOKIE, isProviderClaimEnabled, maskEmail } from '../../../lib/provider-claim';
 import { readServiceAreas } from '../../../lib/service-area-payload';
 import { appCookieOptions } from '../../session-cookie';
@@ -30,6 +31,7 @@ export async function submitInvitedApplicationAction(formData: FormData) {
   }
 
   const email = readOptionalFormString(formData, 'email');
+  const registration = readBusinessRegistration(formData);
 
   // The session travels with the submission, like it does on the open form. An
   // invitation followed by a signed-in provider produces an application that
@@ -56,6 +58,8 @@ export async function submitInvitedApplicationAction(formData: FormData) {
       addressNote: readOptionalFormString(formData, 'addressNote'),
       description: readOptionalFormString(formData, 'description'),
       serviceAreas: readServiceAreas(formData),
+      businessRegistrationType: registration.type,
+      businessRegistrationNumber: registration.number,
     }),
   });
 
@@ -98,6 +102,12 @@ function inviteUrl(token: string, error: string): string {
 function failureCode(status: number, body: string): string {
   if (status === 409 && body.includes('PROVIDER_INVITE_ALREADY_USED')) {
     return 'used';
+  }
+
+  // CMP-006 PR-C: a refused business registration, by its closed code.
+  const registrationError = status === 400 ? businessRegistrationErrorKey(body) : null;
+  if (registrationError) {
+    return registrationError;
   }
 
   if (body.includes('PROVIDER_EMAIL_REQUIRED')) {

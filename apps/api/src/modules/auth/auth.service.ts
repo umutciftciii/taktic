@@ -292,7 +292,21 @@ export class AuthService {
     // two simultaneous registrations can both pass it — which is why the catch
     // below asks the same question again of the account that actually won.
     await assertEmailFreeForAccountKind(this.prisma, email, role);
-    await this.assertContactFree(email, phone);
+    try {
+      await this.assertContactFree(email, phone);
+    } catch (error) {
+      // The two reads above are not one snapshot: a cross-role registration
+      // for the same address can commit between them, and this second read
+      // would then answer with the generic identity refusal instead of the
+      // rule's own sentence. When the address is what collided, ask the
+      // cross-role question again of the account that is now there — the
+      // same re-read the unique-violation branch below does. (Seen as a CI
+      // race in account-email-role-conflict.spec.ts; CMP-006 PR-C.1.)
+      if (error instanceof AccountIdentityConflictException && error.field !== 'phone') {
+        await assertEmailFreeForAccountKind(this.prisma, email, role);
+      }
+      throw error;
+    }
 
     try {
       const user = await this.prisma.user.create({

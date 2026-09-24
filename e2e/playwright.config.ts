@@ -399,6 +399,9 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *   package-refund-request   radios hidden inside their labels, a card picker
  *                            with disabled options, and server-action forms on
  *                            both the provider's and the operator's side
+ *   provider-business-registration  a select that mounts and unmounts the
+ *                            number field, a useActionState reveal, and the
+ *                            eligibility decision form
  *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
@@ -414,7 +417,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|auth-session-cookie|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-business-registration|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

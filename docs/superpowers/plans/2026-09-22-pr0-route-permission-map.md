@@ -855,3 +855,81 @@ sayısı **tam olarak iki**.
 Sağlayıcı rotaları (`support/package-refund/*`, `@Roles(PROVIDER)`) ve `POST /support/tickets`'in yeni
 `topic` alanı admin rotası değildir; bu tabloya girmez. Admin destek talebi detayı (`SUPPORT_READ`) iade
 bloğunu ve iade zaman çizelgesi olaylarını yalnız `PACKAGE_REFUND_READ` sahibine döndürür.
+
+## 15. CMP-006 PR-C eklemesi (2026-09-23)
+
+İki yeni sabit izin, dört rota. İzin sayısı 80 → **82**. Tasarım:
+[`2026-09-23-cmp-006-pr-c-business-registration-promotion-eligibility-design.md`](../specs/2026-09-23-cmp-006-pr-c-business-registration-promotion-eligibility-design.md).
+
+`campaigns/eligibility/admin-promotion-eligibility.controller.ts` — sınıf düzeyi guard
+(`AuthGuard, AdminAccessGuard, PermissionsGuard`). `admin/campaigns/…` altında değil: orada `GET :id` yakalardı.
+
+| HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/admin/promotion-eligibility/holds` | `list` | Bekleyen / karar verilen uygunluk incelemeleri | `PROMOTION_ELIGIBILITY_REVIEW` | RİSK GEREKÇESİ (okuma) |
+| GET | `/admin/promotion-eligibility/holds/:eventId` | `get` | Hold snapshot'ı, aday kampanyalar, karar | `PROMOTION_ELIGIBILITY_REVIEW` | RİSK GEREKÇESİ (okuma) |
+| POST | `/admin/promotion-eligibility/holds/:eventId/decision` | `decide` | Gerekçeli `ELIGIBLE`/`INELIGIBLE`, bir kez | `PROMOTION_ELIGIBILITY_REVIEW` | PROMOSYON (dolaylı PARA) |
+
+`business-registration/business-registration.controller.ts` — metod düzeyi.
+
+| HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/providers/:providerId/business-registration/raw` | `readRaw` | Ham kayıt numarası + ham eski vergi numarası; her **başarılı** okuma `SensitiveDataAccessLog`; `no-store` | `PROVIDER_REGISTRATION_READ_SENSITIVE` **∧** `PROMOTION_ELIGIBILITY_REVIEW` **∧** `PROVIDERS_READ_DETAIL` (PR-C.2, §15.2) | KİŞİSEL VERİ (TCKN olabilir) |
+
+`GET/PUT /providers/me/business-registration` sağlayıcının kendi rotasıdır (`@Roles(PROVIDER)`), admin rotası
+değildir; bu tabloya girmez. Operatörün kanonik kaydı yazdığı bir rota **yoktur**. `PROVIDERS_READ_DETAIL` ve
+`PROVIDERS_READ` artık ham vergi/kayıt numarası taşımaz (maskeli; listede eski vergi numarası hiç yok).
+Mevcut `GET /admin/campaigns/:id/evaluation-events` (`CAMPAIGNS_READ`) `HELD_FOR_REVIEW` durumunu görür, snapshot'ı
+görmez; `POST …/retry` held event'i kabul etmez (409 `CAMPAIGN_EVENT_NOT_RETRYABLE`).
+
+### 15.1 CMP-006 PR-C.1 düzeltmesi (2026-09-23)
+
+İzin sayısı değişmez (**82**); yeni izin yok, mevcut izinler rotaya açıkça bağlandı.
+
+`provider-reviews/admin-provider-reviews.controller.ts` — sınıf düzeyi guard (`AuthGuard, AdminAccessGuard, PermissionsGuard`).
+
+| HTTP | Rota | Handler | Aksiyon | İzin | Hassasiyet |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/provider-reviews/by-provider/:providerId` | `listForProvider` | Bir sağlayıcının müşteri değerlendirmeleri (admin sağlayıcı detayı kartı) | `PROVIDER_REVIEWS_READ` | KİŞİSEL VERİ (yorum) |
+
+`GET /admin/promotion-eligibility/holds` artık `providerId` ve `filter=all` alır (aynı rota, aynı izin) — admin sağlayıcı
+detayındaki "Promosyon uygunluğu" kartı.
+
+**Neden:** admin sağlayıcı detayı değerlendirme kartını sağlayıcı panelinin `GET /providers/:providerId/reviews`
+rotasından okuyordu; o rota `ProviderAccessGuard` ile yalnız sahibe + `SUPER_ADMIN`'e açık ve `apiFetch` 403'ü
+`/yetkisiz`e çevirdiği için sayfa rol atanmış **hiçbir** `ADMIN`'e açılmıyordu. `ProviderAccessGuard` değiştirilmedi
+(personele toplu erişim verilmez); admin yüzeyi kendi izinli rotasını kullanır ve sayfadaki her kart kendi iznine
+bağlıdır (`PROVIDERS_READ` → kategori bağları, `PROVIDER_REVIEWS_READ` → değerlendirmeler,
+`PROMOTION_ELIGIBILITY_REVIEW` → uygunluk bağlamı, `PROVIDER_REGISTRATION_READ_SENSITIVE` → ham kayıt).
+
+**Fraud inceleme rolü (önerilen, yalnız mevcut izinler):** `PROMOTION_ELIGIBILITY_REVIEW` + `PROVIDERS_READ_DETAIL` +
+`PROVIDER_REVIEWS_READ`; ham kayıt gerekirse ayrıca `PROVIDER_REGISTRATION_READ_SENSITIVE`. Erişim tablosu §15.2'de
+(PR-C.1'deki "yalnız hassas izin → ham kayıt ✅" satırı PR-C.2 ile **kaldırıldı**).
+
+### 15.2 CMP-006 PR-C.2 — ham kayıt için katmanlı yetki (2026-09-24)
+
+İzin sayısı değişmez (**82**). `GET /providers/:providerId/business-registration/raw` artık üç izni birlikte ister:
+
+    PROVIDER_REGISTRATION_READ_SENSITIVE  ∧  PROMOTION_ELIGIBILITY_REVIEW  ∧  PROVIDERS_READ_DETAIL
+
+- `PermissionsGuard` birleşiktir; üç izni `@RequiresPermission` listesine yazmak kuralın tamamıdır. `SUPER_ADMIN` örtük geçer.
+- **Tek bağlam kabul edilir: fraud incelemesi.** "Detay + hassas" alternatifi kabul edilmedi — üründe kayıt numarasını
+  okuyan başka bir operasyon akışı (moderasyon, destek, finans, operatör yazımı) yok; `A ∧ (B ∨ C)` kimsenin istemediği bir
+  yol açardı. Böyle bir akış doğarsa guard'a VEYA desteği o akışla birlikte, gerekçesiyle eklenir.
+- `PROVIDER_REVIEWS_READ` bağlamın parçası değildir (müşteri yorumları numarayla ilgisiz); inceleme rolünde bulunur ama
+  ham okumanın şartı değildir.
+- Ret (403), bilinmeyen sağlayıcı (404) ve her hata gövdesi numarayı taşımaz; **audit satırı yalnız başarılı 200 okumasında**
+  yazılır (guard servis çalışmadan reddeder).
+- Rota haritası girdisi `alsoRequires` alanıyla bağlamı taşır; harita testi rotanın bildirdiği kümenin **tam olarak**
+  `permission + alsoRequires` olmasını ister.
+
+| Hesap | Kuyruk / hold / karar | Sağlayıcı detayı | Değerlendirmeler | Ham kayıt | Audit |
+| --- | --- | --- | --- | --- | --- |
+| `SUPER_ADMIN` | ✅ | ✅ | ✅ | ✅ | okuma başına 1 |
+| İnceleme rolü | ✅ | ✅ (maskeli) | ✅ | **403** | 0 |
+| Yalnız hassas izin | **403** | **403** | **403** | **403** | **0** |
+| İnceleme + hassas | ✅ | ✅ (maskeli) | ✅ | ✅ | okuma başına 1 |
+| (İnceleme + detay + hassas, değerlendirme izni yok) | ✅ | ✅ | 403 | ✅ | okuma başına 1 |
+| (İnceleme + hassas, detay yok) | ✅ | 403 | 403 | **403** | 0 |
+| (Detay + hassas, inceleme yok) | 403 | ✅ | 403 | **403** | 0 |
+| İzinsiz `ADMIN` | 403 | 403 | 403 | 403 | 0 |

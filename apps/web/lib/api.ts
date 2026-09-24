@@ -16,6 +16,7 @@ import type { SupportTicketStatus } from './formatters';
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { readMarketplacePublishPolicy } from './request-next-steps';
+import type { BusinessRegistrationView } from './business-registration';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -334,6 +335,11 @@ export type ProviderProfile = {
   addressNote?: string | null;
   description: string | null;
   status: ProviderStatus;
+  /** CMP-006 PR-C: type and masked number only; absent on the public shape. */
+  businessRegistration?: BusinessRegistrationView;
+  /** The unverified legacy tax pair, the number masked; absent on the public shape. */
+  taxType?: string | null;
+  taxNumberMasked?: string | null;
   user?: {
     id: string;
     email: string | null;

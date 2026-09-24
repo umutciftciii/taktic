@@ -5,6 +5,7 @@ import { CampaignEvaluationWorker } from '../src/modules/campaigns/engine/campai
 import { createCampaignFixture, engineWriteSnapshot } from './campaign-fixtures';
 import {
   createProviderProfile,
+  makePromotionEligible,
   createTestApp,
   createUser,
   loginAs,
@@ -159,9 +160,12 @@ describe('PUT /operations-settings/campaign-engine', () => {
 });
 
 describe('what the switch does and does not do', () => {
+  /** Both proofs and a registration on file, so the eligibility gate (CMP-006 PR-C) is not this spec's subject. */
   async function pendingProvider() {
     const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER, phone: `0555${uniqueSuffix().padStart(7, '0').slice(-7)}` });
-    return createProviderProfile(ctx.prisma, { userId: owner.id, status: ProviderStatus.PENDING_REVIEW });
+    const provider = await createProviderProfile(ctx.prisma, { userId: owner.id, status: ProviderStatus.PENDING_REVIEW });
+    await makePromotionEligible(ctx.prisma, provider.id);
+    return provider;
   }
   const approve = (cookie: string, providerId: string) =>
     request(ctx.server).patch(`/providers/${providerId}/status`).set('Cookie', cookie).send({ status: ProviderStatus.APPROVED }).expect(200);

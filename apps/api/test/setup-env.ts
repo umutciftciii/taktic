@@ -81,3 +81,8 @@ process.env.TURNSTILE_MODE = 'off';
 delete process.env.TURNSTILE_SECRET_KEY;
 delete process.env.TURNSTILE_EXPECTED_HOSTNAMES;
 delete process.env.TURNSTILE_SITEVERIFY_TIMEOUT_MS;
+// The promotion fingerprint key: the suite runs on the development key
+// (NODE_ENV=test permits it), so fingerprints are reproducible across runs
+// and a key exported in the developer's shell cannot change them.
+delete process.env.PROMOTION_FINGERPRINT_KEY;
+delete process.env.PROMOTION_FINGERPRINT_KEY_VERSION;

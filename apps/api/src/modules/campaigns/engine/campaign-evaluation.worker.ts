@@ -32,6 +32,9 @@ import { FactSourceRegistry } from './fact-source-registry';
  * Outcome → state:
  *   grant                       SETTLED (written by the engine's own settlement)
  *   evaluated, no grant         EVALUATED — a later raise of the key reopens it
+ *   eligibility gate: REVIEW    HELD_FOR_REVIEW — never claimed again; only a
+ *                               person's decision (ELIGIBLE → PENDING once,
+ *                               INELIGIBLE → EVALUATED) moves it (CMP-006 PR-C)
  *   ENGINE_ERROR                RETRY_WAIT, `nextAttemptAt` = now + backoff,
  *                               EvaluationLog{ENGINE_ERROR, reasonCode} (a closed
  *                               code, never the message), lastErrorCode
@@ -61,6 +64,7 @@ const evaluationCron = readCampaignEvaluationCron();
 export type WorkerEventOutcome =
   | 'SETTLED'
   | 'EVALUATED'
+  | 'HELD_FOR_REVIEW'
   | 'ELIGIBILITY_INCOMPLETE'
   | 'ENGINE_ERROR'
   | 'ENGINE_DISABLED'
@@ -193,7 +197,16 @@ export class CampaignEvaluationWorker implements OnModuleInit {
           }
           // EVALUATED: a grant's settlement already wrote SETTLED, inside the
           // engine, in this transaction, after the lease check above.
-          return result.granted ? 'SETTLED' : this.finish(tx, event, { status: 'EVALUATED' }, 'EVALUATED');
+          if (result.granted) {
+            return 'SETTLED';
+          }
+          // CMP-006 PR-C: the eligibility gate asked for a person. The hold
+          // snapshot is already written; the event leaves the queue until a
+          // PromotionEligibilityReview moves it (claimDueEvent never selects
+          // HELD_FOR_REVIEW, whatever its nextAttemptAt says).
+          return result.heldForReview
+            ? this.finish(tx, event, { status: 'HELD_FOR_REVIEW' }, 'HELD_FOR_REVIEW')
+            : this.finish(tx, event, { status: 'EVALUATED' }, 'EVALUATED');
         },
         { label: 'campaigns.evaluateEvent' },
       );

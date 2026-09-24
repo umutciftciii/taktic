@@ -287,7 +287,7 @@ export class CampaignEngineRepository {
     tx: Prisma.TransactionClient,
     event: { id: string; leaseUntil: Date | null },
     outcome:
-      | { status: 'EVALUATED' | 'PENDING' }
+      | { status: 'EVALUATED' | 'PENDING' | 'HELD_FOR_REVIEW' }
       | { status: 'RETRY_WAIT'; nextAttemptAt: Date; lastErrorCode: string; now: Date },
   ): Promise<boolean> {
     const result = await tx.campaignTriggerEvent.updateMany({
@@ -434,6 +434,38 @@ export class CampaignEngineRepository {
         : 'BUDGET_EXHAUSTED';
     }
     return null;
+  }
+
+  /**
+   * CMP-006 PR-C. One more introductory grant for this provider under its
+   * current business registration — type and versioned fingerprint, never the
+   * number. A provider with no registration, or NONE_DECLARED (granted only
+   * after a person said ELIGIBLE), has nothing to count against.
+   */
+  async countRegistrationGrant(tx: Prisma.TransactionClient, providerId: string, redemptionId: string) {
+    const registration = await tx.providerBusinessRegistration.findUnique({
+      where: { providerId },
+      select: { type: true, fingerprint: true, fingerprintVersion: true },
+    });
+    if (!registration?.fingerprint || !registration.fingerprintVersion) {
+      return;
+    }
+    const key = {
+      registrationType: registration.type,
+      fingerprint: registration.fingerprint,
+      fingerprintVersion: registration.fingerprintVersion,
+      providerId,
+    };
+    await this.ensureCounter(
+      () =>
+        tx.campaignRegistrationCounter.upsert({
+          where: { registrationType_fingerprint_fingerprintVersion_providerId: key },
+          create: { ...key, redemptionCount: 1, firstRedemptionId: redemptionId, lastRedemptionId: redemptionId },
+          update: { redemptionCount: { increment: 1 }, lastRedemptionId: redemptionId },
+          select: { id: true },
+        }),
+      'CampaignRegistrationCounter',
+    );
   }
 
   private async ensureCounter(upsert: () => Promise<unknown>, table: string) {

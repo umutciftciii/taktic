@@ -5,6 +5,8 @@ import { AdminCampaignsController } from './admin-campaigns.controller';
 import { CampaignEngineSettingsService } from './campaign-engine-settings.service';
 import { CampaignsService } from './campaigns.service';
 import { CampaignEngineModule } from './engine/campaign-engine.module';
+import { AdminPromotionEligibilityController } from './eligibility/admin-promotion-eligibility.controller';
+import { PromotionEligibilityReviewsService } from './eligibility/promotion-eligibility-reviews.service';
 
 /**
  * Campaign definitions, drafts and lifecycle for the super admin (CMP-002
@@ -15,7 +17,7 @@ import { CampaignEngineModule } from './engine/campaign-engine.module';
  */
 @Module({
   imports: [PrismaModule, AuthModule, CampaignEngineModule],
-  controllers: [AdminCampaignsController],
-  providers: [CampaignsService, CampaignEngineSettingsService],
+  controllers: [AdminCampaignsController, AdminPromotionEligibilityController],
+  providers: [CampaignsService, CampaignEngineSettingsService, PromotionEligibilityReviewsService],
 })
 export class CampaignsModule {}

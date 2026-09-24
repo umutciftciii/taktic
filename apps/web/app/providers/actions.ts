@@ -3,12 +3,18 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, ProviderProfile } from '../../lib/api';
+import { businessRegistrationErrorKey, readBusinessRegistration } from '../../lib/business-registration';
 import { APPLY_HINT_COOKIE, isProviderClaimEnabled, maskEmail } from '../../lib/provider-claim';
 import { readServiceAreas } from '../../lib/service-area-payload';
 import { appCookieOptions } from '../session-cookie';
 
 export async function createProviderAction(formData: FormData) {
-  const payload = providerPayload(formData);
+  const registration = readBusinessRegistration(formData);
+  const payload = {
+    ...providerPayload(formData),
+    businessRegistrationType: registration.type,
+    businessRegistrationNumber: registration.number,
+  };
 
   let provider: ProviderProfile;
   try {
@@ -17,6 +23,13 @@ export async function createProviderAction(formData: FormData) {
       body: JSON.stringify(payload),
     });
   } catch (error) {
+    // CMP-006 PR-C: a refused registration comes back as a closed code; the
+    // number itself is never put in the URL.
+    const registrationError = error instanceof ApiError && error.status === 400 ? businessRegistrationErrorKey(error.body) : null;
+    if (registrationError) {
+      redirect(`/providers/register?error=${registrationError}`);
+    }
+
     if (error instanceof ApiError && error.status === 400 && error.body.includes('EMAIL')) {
       redirect('/providers/register?error=email');
     }
@@ -91,4 +104,29 @@ function readFormString(formData: FormData, key: string) {
 function readOptionalFormString(formData: FormData, key: string) {
   const value = readFormString(formData, key).trim();
   return value ? value : null;
+}
+
+/**
+ * The provider replacing their own business registration (CMP-006 PR-C). Its
+ * own route and its own form: the profile save does not carry it. A refusal
+ * comes back as a closed code in the query string — never the number.
+ */
+export async function updateBusinessRegistrationAction(formData: FormData) {
+  const id = readFormString(formData, 'id');
+  const registration = readBusinessRegistration(formData);
+
+  try {
+    await apiFetch('/providers/me/business-registration', {
+      method: 'PUT',
+      body: JSON.stringify(registration),
+    });
+  } catch (error) {
+    const key = error instanceof ApiError && error.status === 400 ? businessRegistrationErrorKey(error.body) : null;
+    if (key) {
+      redirect(`/providers/${id}/edit?registrationError=${key}#isletme-kaydi`);
+    }
+    throw error;
+  }
+
+  redirect(`/providers/${id}?registration=saved`);
 }

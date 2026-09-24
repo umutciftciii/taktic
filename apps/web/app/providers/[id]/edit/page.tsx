@@ -10,16 +10,24 @@ import {
 import type { ProvinceWithDistricts } from '../../../../lib/locations';
 import { CityDistrictFields } from '../../city-district-fields';
 import { ServiceAreaFields } from '../../service-area-fields';
-import { updateProviderAction } from '../../actions';
+import {
+  BUSINESS_REGISTRATION_ERROR_MESSAGES,
+  describeBusinessRegistration,
+  isBusinessRegistrationErrorKey,
+} from '../../../../lib/business-registration';
+import { BusinessRegistrationFields } from '../../business-registration-fields';
+import { updateBusinessRegistrationAction, updateProviderAction } from '../../actions';
 import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
 
 type ProviderEditPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ registrationError?: string }>;
 };
 
-export default async function ProviderEditPage({ params }: ProviderEditPageProps) {
+export default async function ProviderEditPage({ params, searchParams }: ProviderEditPageProps) {
   const { id } = await params;
+  const registrationError = (await searchParams)?.registrationError;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/edit`);
@@ -198,6 +206,36 @@ export default async function ProviderEditPage({ params }: ProviderEditPageProps
           </button>
         </div>
       </form>
+
+      {/* CMP-006 PR-C. The owner only: an operator has no write route here. */}
+      {provider.visibility === 'owner' ? (
+        <form action={updateBusinessRegistrationAction} className="pdash-detail-card pdash-form" id="isletme-kaydi">
+          <input type="hidden" name="id" value={provider.id} />
+          <section className="pdash-form-section">
+            <h2>İşletme kaydı</h2>
+            <p className="pdash-form-hint">
+              Kayıtlı: <strong>{describeBusinessRegistration(provider.businessRegistration)}</strong>. Değiştirmek için
+              türü seçip numarayı yeniden girin; numara yalnızca son iki hanesiyle gösterilir.
+            </p>
+            {isBusinessRegistrationErrorKey(registrationError) ? (
+              <p className="pdash-form-hint" role="alert">
+                {BUSINESS_REGISTRATION_ERROR_MESSAGES[registrationError]}
+              </p>
+            ) : null}
+            <div className="pdash-form-grid">
+              <BusinessRegistrationFields
+                defaultType={provider.businessRegistration?.type ?? null}
+                classNames={{ field: 'pdash-form-row', label: '', input: '', help: 'pdash-form-hint' }}
+              />
+            </div>
+          </section>
+          <div className="pdash-form-foot">
+            <button className="pdash-btn pdash-btn-primary" type="submit">
+              İşletme kaydını kaydet
+            </button>
+          </div>
+        </form>
+      ) : null}
     </ProviderShell>
   );
 }
