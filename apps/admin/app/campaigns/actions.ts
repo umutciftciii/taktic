@@ -156,11 +156,13 @@ function isRedirectError(error: unknown): boolean {
 
 // ───────────────────────────── lifecycle (S2B2) ─────────────────────────────
 
-const LIFECYCLE_INTENTS = new Set(['activate', 'pause', 'resume', 'end']);
+const LIFECYCLE_INTENTS = new Set(['activate', 'pause', 'resume', 'end', 'close']);
 
 /**
  * Activate a version, pause, resume or end — each one POST to the matching
- * SUPER_ADMIN route, nothing decided here. A refusal comes back as the
+ * SUPER_ADMIN route, nothing decided here. `close` is the draft's own name
+ * for the same `end` route (BUG-OPS-002): a DRAFT closed without ever
+ * running, confirmed with its own sentence. A refusal comes back as the
  * action's state so the panel can show the API's sentence (and, for an
  * activation, the field-level reasons) beside the buttons; success redirects
  * to the detail with a one-word marker for the confirmation notice.
@@ -193,7 +195,8 @@ export async function campaignLifecycleAction(
       }
       await apiFetch(`${base}/versions/${versionNumber}/activate`, { method: 'POST', body: JSON.stringify({}) });
     } else {
-      await apiFetch(`${base}/${intent}`, { method: 'POST', body: JSON.stringify({ reason }) });
+      const verb = intent === 'close' ? 'end' : intent;
+      await apiFetch(`${base}/${verb}`, { method: 'POST', body: JSON.stringify({ reason }) });
     }
   } catch (error) {
     if (isRedirectError(error)) throw error;

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { IconArrowLeft } from '../../../../landing-icons';
 import {
   apiFetch,
+  fetchOrNotFound,
   getCurrentUser,
   PackagePurchase,
   PackagePurchaseStatus,
@@ -58,8 +59,17 @@ export default async function ProviderPackagePurchaseDetailPage({
   // answer alone — gate, ownership, terms evidence, the 14-day / credit /
   // promo rules and "no open request". Nothing here recomputes any of it,
   // and a failed read is simply no button.
+  //
+  // BUG-OPS-002: a purchase that is not this provider's (API 404), a provider
+  // panel that is not the viewer's (API 403) and an id that does not exist
+  // (API 404) all end in the same notFound() — one HTTP 404 page, nothing
+  // telling them apart — instead of the error boundary's 500.
   const [purchase, refundAvailable] = await Promise.all([
-    apiFetch<PackagePurchase>(`/providers/${id}/package-purchases/${purchaseId}`),
+    fetchOrNotFound(() =>
+      apiFetch<PackagePurchase>(
+        `/providers/${encodeURIComponent(id)}/package-purchases/${encodeURIComponent(purchaseId)}`,
+      ),
+    ),
     loadPackageRefundAvailability(purchaseId),
   ]);
 

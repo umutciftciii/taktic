@@ -3435,6 +3435,8 @@ export type CampaignAuditEntry = {
     triggerEventKey?: string;
     previousStatus?: string;
     attemptCount?: number;
+    /** BUG-OPS-002: on ENDED since then — DRAFT means a draft closed without ever running; absent on older rows. */
+    fromStatus?: CampaignStatus;
   } | null;
   createdAt: string;
 };
