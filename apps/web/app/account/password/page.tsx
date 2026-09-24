@@ -4,7 +4,6 @@ import { getAccountProfile, getCurrentUser } from '../../../lib/api';
 import { PASSWORD_MIN_LENGTH } from '../../../lib/password-policy';
 import { PasswordFields } from '../../password-criteria';
 import { CustomerShell } from '../../requests/customer-shell';
-import { changePasswordAction } from '../actions';
 
 /**
  * What each refusal means, in the customer's own language.
@@ -87,7 +86,7 @@ export default async function AccountPasswordPage({ searchParams }: AccountPassw
             <section className="cdash-detail-card" aria-labelledby="account-password-heading">
               <h2 id="account-password-heading">Şifreniz</h2>
 
-              <form action={changePasswordAction} className="cdash-account-form">
+              <form action="/account/password/submit" method="post" className="cdash-account-form">
                 <label className="field">
                   <span className="field-label">Mevcut şifre</span>
                   <input

@@ -2,7 +2,6 @@ import { formatDateTime, safeRedirectPathOrNull } from '@taktic/shared';
 import Link from 'next/link';
 import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
 import { PasswordFields } from '../password-criteria';
-import { submitCustomerActivationAction } from './actions';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -149,7 +148,11 @@ export default async function ActivateCustomerPage({ searchParams }: ActivateCus
 
   return (
     <main className="auth-screen">
-      <form className="auth-screen-card auth-screen-card-compact" action={submitCustomerActivationAction}>
+      <form
+        className="auth-screen-card auth-screen-card-compact"
+        action="/activate-customer/submit"
+        method="post"
+      >
         <img className="auth-brand-logo" src="/brand/logo.png" alt="TakTick" />
         <h1 className="auth-screen-title">Şifre belirleyin</h1>
         <p className="auth-screen-subtitle">

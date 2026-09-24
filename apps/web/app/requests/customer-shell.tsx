@@ -14,7 +14,6 @@ import {
   IconUsers,
 } from '../landing-icons';
 import { PanelDrawer } from '../panel-drawer';
-import { customerLogoutAction } from '../login/actions';
 import { loadUnreadMessageCount } from '../../lib/api';
 import { LogoutButton } from '../session/logout-button';
 import { SessionGuard } from '../session/session-guard';
@@ -249,12 +248,13 @@ function CustomerUserMenu({ user, display, initials }: CustomerUserMenuProps) {
         <Link className="cdash-user-link" href="/account/password" role="menuitem">
           Şifre Değiştir
         </Link>
-        <form action={customerLogoutAction}>
+        <form action="/logout" method="post">
+          <input type="hidden" name="after" value="home" />
           {/*
             The button announces the logout to this application's other tabs
             before the form posts, so a second tab does not sit on a signed-in
-            screen until its own next poll. The server-side revoke inside the
-            action is what actually ends the session.
+            screen until its own next poll. The server-side revoke in `/logout`
+            is what actually ends the session.
           */}
           <LogoutButton className="cdash-user-link cdash-user-logout" testId="customer-logout">
             Çıkış Yap

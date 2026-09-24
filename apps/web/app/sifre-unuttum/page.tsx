@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { AuthFrame } from '../auth-frame';
-import { requestPasswordResetAction } from './actions';
 
 type ForgotPasswordPageProps = {
   searchParams: Promise<{ sent?: string }>;
@@ -33,7 +32,8 @@ export default async function ForgotPasswordPage({ searchParams }: ForgotPasswor
   return (
     <AuthFrame tab="login">
       <form
-        action={requestPasswordResetAction}
+        action="/sifre-unuttum/submit"
+        method="post"
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         <h1 className="auth-screen-title">Şifrenizi mi unuttunuz?</h1>

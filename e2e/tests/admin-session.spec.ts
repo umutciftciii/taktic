@@ -24,11 +24,11 @@ import { primaryRuntime } from '../src/runtime';
  *    sign in, navigate, run a real admin action, sign out. If a route or an
  *    action manifest were wrong, this would fail.
  * 2. **What was the reported screen, then?** A Server Action is addressed by an
- *    id baked into the page that rendered its form, and `next dev` derives a
- *    fresh set on every compile. A tab left open across a restart posts an id
- *    the new process has never heard of, and Next answers 404 with
- *    `x-nextjs-action-not-found`. The last case makes that answer happen on
- *    purpose and checks the recovery: exactly one reload, and no loop.
+ *    id Next derives per build, and a tab left open across a rebuild posts an
+ *    id the new process has never heard of. The sign-in and sign-out forms no
+ *    longer depend on one — they post to fixed route handlers — and
+ *    stale-auth-forms.spec.ts checks them from exactly such a tab. The panel's
+ *    other actions keep lib/stale-action-recovery's one-reload fallback.
  */
 
 test.describe('admin session', () => {
@@ -81,68 +81,6 @@ test.describe('admin session', () => {
       await expect(admin.page).toHaveURL(/\/login/);
     } finally {
       await Promise.all([customer.close(), admin.close()]);
-    }
-  });
-
-  test('a stale Server Action id reloads the page once, and only once', async ({ browser }) => {
-    const adminAccount = await createAdmin();
-    const admin = await Actor.open(browser, 'admin', primaryRuntime);
-
-    try {
-      // Counted from the browser's side so the assertion is about real page
-      // loads, not about anything the application reports.
-      let loads = 0;
-      admin.page.on('load', () => {
-        loads += 1;
-      });
-
-      await admin.gotoAdmin('/login');
-      await expect(admin.page.locator('input[name="email"]')).toBeVisible();
-      const loadsBeforeSubmit = loads;
-
-      // Exactly the answer a dev server gives a tab holding ids from an
-      // earlier compile. Nothing is faked on the client: this is the real
-      // response, so the real UnrecognizedActionError is thrown by Next's own
-      // code and reaches the real error boundary.
-      let refusals = 0;
-      await admin.page.route(
-        (url) => url.pathname === '/login',
-        async (route, request) => {
-          if (request.method() !== 'POST' || !request.headers()['next-action']) {
-            return route.fallback();
-          }
-
-          refusals += 1;
-          return route.fulfill({
-            status: 404,
-            headers: { 'x-nextjs-action-not-found': '1', 'content-type': 'text/plain' },
-            body: 'Server action not found.',
-          });
-        },
-      );
-
-      await admin.page.locator('input[name="email"]').fill(adminAccount.email);
-      await admin.page.locator('input[name="password"]').fill(adminAccount.password);
-      await admin.page.getByRole('button', { name: 'Giriş Yap' }).click();
-
-      // One reload, and the usable form back — not the generic error screen.
-      await expect.poll(() => loads, { timeout: 15_000 }).toBe(loadsBeforeSubmit + 1);
-      await expect(admin.page.locator('input[name="email"]')).toBeVisible();
-      await assertNoErrorScreen(admin.page);
-      expect(refusals).toBe(1);
-
-      // And no loop. The reloaded page posts nothing by itself, so the refusal
-      // cannot recur; four seconds is far longer than the reload it just did.
-      await admin.page.waitForTimeout(4_000);
-      expect(loads).toBe(loadsBeforeSubmit + 1);
-      expect(refusals).toBe(1);
-
-      // The recovery is a page load, not a retry: the submission was never
-      // replayed, so nobody is signed in.
-      await admin.gotoAdmin('/requests');
-      await expect(admin.page).toHaveURL(/\/login/);
-    } finally {
-      await admin.close();
     }
   });
 });

@@ -1,7 +1,4 @@
-'use server';
-
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import { CLAIM_TOKEN_COOKIE } from '../../lib/provider-claim';
 import { appCookieOptions, persistSessionCookie } from '../session-cookie';
 
@@ -34,23 +31,23 @@ async function rememberToken(token: string) {
  * `redirectTo` names the claim screen and nothing else — the screen finds its
  * token again on its own.
  */
-export async function startClaimLoginAction(formData: FormData) {
+export async function startClaimLogin(formData: FormData): Promise<string> {
   const token = readFormString(formData, 'token').trim();
   if (token) {
     await rememberToken(token);
   }
 
-  redirect('/login?redirectTo=/claim-provider');
+  return '/login?redirectTo=/claim-provider';
 }
 
-export async function submitProviderClaimAction(formData: FormData) {
+export async function submitProviderClaim(formData: FormData): Promise<string> {
   const token = readFormString(formData, 'token').trim();
   const needsPassword = readFormString(formData, 'needsPassword') === 'true';
   const password = readFormString(formData, 'password');
   const passwordConfirm = readFormString(formData, 'passwordConfirm');
 
   if (!token) {
-    redirect('/claim-provider');
+    return '/claim-provider';
   }
 
   // Held before any refusal, so re-rendering the screen never needs the token
@@ -59,11 +56,11 @@ export async function submitProviderClaimAction(formData: FormData) {
 
   if (needsPassword) {
     if (password.length < 8) {
-      redirect('/claim-provider?error=password');
+      return '/claim-provider?error=password';
     }
 
     if (password !== passwordConfirm) {
-      redirect('/claim-provider?error=mismatch');
+      return '/claim-provider?error=mismatch';
     }
   }
 
@@ -83,7 +80,7 @@ export async function submitProviderClaimAction(formData: FormData) {
     // already neutral, and re-validating on the claim screen reproduces the
     // same state with the same wording — copying an API string into a URL is
     // how tokens and addresses leak into places nobody audits.
-    redirect('/claim-provider');
+    return '/claim-provider';
   }
 
   // The token is spent; nothing may still be holding it.
@@ -93,7 +90,7 @@ export async function submitProviderClaimAction(formData: FormData) {
   // on this origin with the API's own attributes. See session-cookie.ts.
   await persistSessionCookie(response);
 
-  redirect('/providers/me');
+  return '/providers/me';
 }
 
 function readFormString(formData: FormData, key: string) {

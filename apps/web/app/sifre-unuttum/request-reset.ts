@@ -1,6 +1,3 @@
-'use server';
-
-import { redirect } from 'next/navigation';
 import { apiUrl } from '../api-base';
 
 /**
@@ -12,7 +9,7 @@ import { apiUrl } from '../api-base';
  * Even a transport failure is reported as sent, because "we could not reach the
  * mail service for this address" is the same signal by another name.
  */
-export async function requestPasswordResetAction(formData: FormData) {
+export async function requestPasswordReset(formData: FormData): Promise<string> {
   const email = readFormString(formData, 'email').trim();
 
   if (email) {
@@ -28,7 +25,7 @@ export async function requestPasswordResetAction(formData: FormData) {
     }
   }
 
-  redirect('/sifre-unuttum?sent=1');
+  return '/sifre-unuttum?sent=1';
 }
 
 function readFormString(formData: FormData, key: string) {

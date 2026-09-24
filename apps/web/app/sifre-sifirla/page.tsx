@@ -4,7 +4,6 @@ import { AuthFrame } from '../auth-frame';
 import { apiUrl, readApiMessage } from '../api-base';
 import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
 import { PasswordFields } from '../password-criteria';
-import { confirmPasswordResetAction } from './actions';
 
 type ResetPasswordPageProps = {
   searchParams: Promise<{
@@ -95,7 +94,8 @@ export default async function ResetPasswordPage({ searchParams }: ResetPasswordP
   return (
     <AuthFrame tab="login">
       <form
-        action={confirmPasswordResetAction}
+        action="/sifre-sifirla/submit"
+        method="post"
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         <h1 className="auth-screen-title">Yeni şifre belirleyin</h1>

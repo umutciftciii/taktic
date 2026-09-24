@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { AuthFrame } from '../../auth-frame';
-import { registerCustomerAction } from '../actions';
 import { RoleSwitch } from '../role-switch';
 import { registerErrorMessage } from '../error-message';
 import { PasswordFields } from '../../password-criteria';
@@ -15,7 +14,8 @@ export default async function CustomerRegisterPage({ searchParams }: CustomerReg
   return (
     <AuthFrame tab="register" registerHref="/register/customer">
       <form
-        action={registerCustomerAction}
+        action="/register/customer/submit"
+        method="post"
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         <h1 className="auth-screen-title">Hesap oluştur</h1>

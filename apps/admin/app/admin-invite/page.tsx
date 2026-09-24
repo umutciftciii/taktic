@@ -2,7 +2,6 @@ import { formatDateTime } from '@taktic/shared';
 import Link from 'next/link';
 import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
 import { PasswordFields } from '../password-criteria';
-import { submitAdminInviteAction } from './actions';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -138,7 +137,7 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
 
   return (
     <main className="auth-page">
-      <form className="auth-card" action={submitAdminInviteAction}>
+      <form className="auth-card" action="/admin-invite/submit" method="post">
         <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
         <h1 className="auth-title">Şifre belirleyin</h1>
         <p className="muted">

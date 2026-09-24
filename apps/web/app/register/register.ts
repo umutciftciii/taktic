@@ -1,19 +1,16 @@
-'use server';
-
-import { redirect } from 'next/navigation';
 import { persistSessionCookie } from '../session-cookie';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-export async function registerCustomerAction(formData: FormData) {
-  await register('/auth/register-customer', formData, '/requests/my');
+export async function registerCustomer(formData: FormData): Promise<string> {
+  return register('/auth/register-customer', formData, '/requests/my');
 }
 
-export async function registerProviderAction(formData: FormData) {
-  await register('/auth/register-provider', formData, '/providers/register');
+export async function registerProvider(formData: FormData): Promise<string> {
+  return register('/auth/register-provider', formData, '/providers/register');
 }
 
-async function register(path: string, formData: FormData, redirectTo: string) {
+async function register(path: string, formData: FormData, redirectTo: string): Promise<string> {
   const response = await fetch(`${apiUrl}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -33,7 +30,7 @@ async function register(path: string, formData: FormData, redirectTo: string) {
     // a dead end: an activation link has just been mailed, so tell the visitor
     // to open it rather than showing "already registered".
     if (code === 'ACTIVATION_REQUIRED') {
-      redirect(`${redirectToForPath(path)}?notice=activation-sent`);
+      return `${redirectToForPath(path)}?notice=activation-sent`;
     }
 
     // EMAIL_ROLE_CONFLICT is a different refusal from an ordinary duplicate and
@@ -41,11 +38,11 @@ async function register(path: string, formData: FormData, redirectTo: string) {
     // visitor to the sign-in screen, where their password will not work,
     // because the address is not on an account of this kind at all.
     if (code === 'EMAIL_ROLE_CONFLICT') {
-      redirect(`${redirectToForPath(path)}?error=role-conflict`);
+      return `${redirectToForPath(path)}?error=role-conflict`;
     }
 
     const reason = response.status === 409 ? 'duplicate' : 'invalid';
-    redirect(`${redirectToForPath(path)}?error=${reason}`);
+    return `${redirectToForPath(path)}?error=${reason}`;
   }
 
   await response.json();
@@ -54,7 +51,7 @@ async function register(path: string, formData: FormData, redirectTo: string) {
   // guess at them. See session-cookie.ts.
   await persistSessionCookie(response);
 
-  redirect(redirectTo);
+  return redirectTo;
 }
 
 function redirectToForPath(path: string) {

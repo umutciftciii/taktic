@@ -1,5 +1,3 @@
-import { loginAction } from './actions';
-
 type LoginPageProps = {
   searchParams: Promise<{ error?: string; reason?: string }>;
 };
@@ -13,7 +11,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="auth-page">
-      <form className="auth-card" action={loginAction}>
+      {/*
+        A plain HTML post to a fixed URL rather than a Server Action: a sign-in
+        form left open across a deploy has to keep working. See login/submit.
+      */}
+      <form className="auth-card" action="/login/submit" method="post">
         <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
         <h1 className="auth-title">TakTic Admin</h1>
         <p className="muted">Yönetim paneline giriş yapın</p>

@@ -1,27 +1,24 @@
-'use server';
-
-import { redirect } from 'next/navigation';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-export async function submitAdminInviteAction(formData: FormData) {
+export async function submitAdminInvite(formData: FormData): Promise<string> {
   const token = readFormString(formData, 'token').trim();
   const password = readFormString(formData, 'password');
   const passwordConfirm = readFormString(formData, 'passwordConfirm');
 
   if (!token) {
-    redirect('/admin-invite?error=invalid');
+    return '/admin-invite?error=invalid';
   }
 
   if (!password || password.length < 8) {
     const params = new URLSearchParams({ token, error: 'password' });
-    redirect(`/admin-invite?${params.toString()}`);
+    return `/admin-invite?${params.toString()}`;
   }
 
   if (password !== passwordConfirm) {
     const params = new URLSearchParams({ token, error: 'mismatch' });
-    redirect(`/admin-invite?${params.toString()}`);
+    return `/admin-invite?${params.toString()}`;
   }
 
   const response = await fetch(`${apiUrl}/auth/admin-invite`, {
@@ -37,10 +34,10 @@ export async function submitAdminInviteAction(formData: FormData) {
     if (message) {
       params.set('errorMessage', message);
     }
-    redirect(`/admin-invite?${params.toString()}`);
+    return `/admin-invite?${params.toString()}`;
   }
 
-  redirect('/admin-invite?success=1');
+  return '/admin-invite?success=1';
 }
 
 async function safeReadErrorMessage(response: Response): Promise<string | null> {
