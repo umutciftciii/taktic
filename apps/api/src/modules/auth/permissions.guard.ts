@@ -4,7 +4,11 @@ import type { AdminPermission } from '@prisma/client';
 import { NOT_STAFF } from './admin-access.guard';
 import { hasPermission, isStaff } from './admin-permissions';
 import type { AuthUser } from './auth.types';
-import { REQUIRED_PERMISSIONS_KEY, STAFF_PERMISSIONS_KEY } from './permissions.decorator';
+import {
+  REQUIRED_ANY_PERMISSIONS_KEY,
+  REQUIRED_PERMISSIONS_KEY,
+  STAFF_PERMISSIONS_KEY,
+} from './permissions.decorator';
 
 /**
  * The lock on a single admin capability.
@@ -34,6 +38,23 @@ export class PermissionsGuard implements CanActivate {
     ]);
 
     if (!required || required.length === 0) {
+      // "At least one of": the edit routes whose body carries two
+      // capabilities. The service checks the exact set against the delta.
+      const anyOf = this.reflector.getAllAndOverride<AdminPermission[]>(
+        REQUIRED_ANY_PERMISSIONS_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+      if (anyOf && anyOf.length > 0) {
+        const principal = user ? { role: user.role, permissions: user.permissions ?? [] } : null;
+        if (!anyOf.some((permission) => hasPermission(principal, [permission]))) {
+          throw new ForbiddenException({
+            code: isStaff(principal) ? INSUFFICIENT_PERMISSION : NOT_STAFF,
+            message: 'Insufficient permission',
+          });
+        }
+        return true;
+      }
+
       // A route that only asks something of staff callers: a provider editing
       // their own record passes through untouched, and the service's ownership
       // rules — which this guard never replaces — still decide.

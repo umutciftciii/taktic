@@ -230,7 +230,7 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
                     name="priceAmount"
                     type="text"
                     inputMode="decimal"
-                    pattern="([0-9]{1,3}(\\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
+                    pattern="([0-9]{1,3}(\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
                     placeholder="Örn. 149,90"
                     required
                     defaultValue={draft.priceAmount}

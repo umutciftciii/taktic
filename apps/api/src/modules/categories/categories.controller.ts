@@ -17,7 +17,9 @@ import { AdminPermission } from '@prisma/client';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
-import { RequiresPermission } from '../auth/permissions.decorator';
+import { CurrentUser } from '../auth/auth.decorators';
+import type { AuthUser } from '../auth/auth.types';
+import { RequiresAnyPermission, RequiresPermission } from '../auth/permissions.decorator';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { ResolveRoutingDto } from './dto/resolve-routing.dto';
@@ -123,11 +125,21 @@ export class CategoriesController {
     return this.categoriesService.createCategory(dto);
   }
 
+  /**
+   * The edit route. A holder of CATEGORIES_WRITE or CATEGORIES_STATUS gets
+   * in. The service then requires the permission for each part the request
+   * would actually change: business fields need WRITE, a new status needs
+   * STATUS, both need both (BUG-RBAC-STATUS-001).
+   */
   @Patch(':id')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
-  @RequiresPermission(AdminPermission.CATEGORIES_WRITE)
-  updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
-    return this.categoriesService.updateCategory(id, dto);
+  @RequiresAnyPermission(AdminPermission.CATEGORIES_WRITE, AdminPermission.CATEGORIES_STATUS)
+  updateCategory(
+    @Param('id') id: string,
+    @Body() dto: UpdateCategoryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.categoriesService.updateCategory(id, dto, user);
   }
 
   @Patch(':id/status')

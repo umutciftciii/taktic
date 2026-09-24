@@ -8,6 +8,7 @@ import { ALL_ADMIN_PERMISSIONS } from '../src/modules/auth/admin-permissions';
 import { PermissionsGuard } from '../src/modules/auth/permissions.guard';
 import { ROLES_KEY } from '../src/modules/auth/auth.decorators';
 import {
+  REQUIRED_ANY_PERMISSIONS_KEY,
   REQUIRED_PERMISSIONS_KEY,
   STAFF_PERMISSIONS_KEY,
 } from '../src/modules/auth/permissions.decorator';
@@ -37,6 +38,8 @@ type DiscoveredRoute = {
   path: string;
   guards: string[];
   permissions: AdminPermission[];
+  /** `@RequiresAnyPermission`: the guard admits a holder of any one of these. */
+  anyPermissions: AdminPermission[];
   staffPermissions: AdminPermission[];
   roles: UserRole[];
 };
@@ -79,6 +82,8 @@ function discoverRoutes(container: ModulesContainer): DiscoveredRoute[] {
       const classGuards = names(Reflect.getMetadata(GUARDS_METADATA, controller));
       const classPermissions =
         (Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, controller) as AdminPermission[]) ?? [];
+      const classAnyPermissions =
+        (Reflect.getMetadata(REQUIRED_ANY_PERMISSIONS_KEY, controller) as AdminPermission[]) ?? [];
       const classStaffPermissions =
         (Reflect.getMetadata(STAFF_PERMISSIONS_KEY, controller) as AdminPermission[]) ?? [];
       const classRoles = (Reflect.getMetadata(ROLES_KEY, controller) as UserRole[]) ?? [];
@@ -96,6 +101,8 @@ function discoverRoutes(container: ModulesContainer): DiscoveredRoute[] {
         const methodGuards = names(Reflect.getMetadata(GUARDS_METADATA, handler));
         const methodPermissions =
           (Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, handler) as AdminPermission[]) ?? [];
+        const methodAnyPermissions =
+          (Reflect.getMetadata(REQUIRED_ANY_PERMISSIONS_KEY, handler) as AdminPermission[]) ?? [];
         const methodStaffPermissions =
           (Reflect.getMetadata(STAFF_PERMISSIONS_KEY, handler) as AdminPermission[]) ?? [];
         const methodRoles = (Reflect.getMetadata(ROLES_KEY, handler) as UserRole[]) ?? [];
@@ -109,6 +116,7 @@ function discoverRoutes(container: ModulesContainer): DiscoveredRoute[] {
           // A method's decorator overrides its class's, exactly as
           // `reflector.getAllAndOverride` resolves it at run time.
           permissions: methodPermissions.length > 0 ? methodPermissions : classPermissions,
+          anyPermissions: methodAnyPermissions.length > 0 ? methodAnyPermissions : classAnyPermissions,
           staffPermissions:
             methodStaffPermissions.length > 0 ? methodStaffPermissions : classStaffPermissions,
           roles: methodRoles.length > 0 ? methodRoles : classRoles,
@@ -133,7 +141,7 @@ describe('PR-0 route/permission map', () => {
 
     const unclassified = routes
       .filter((route) => route.guards.includes(PermissionsGuard.name))
-      .filter((route) => route.permissions.length > 0)
+      .filter((route) => route.permissions.length > 0 || route.anyPermissions.length > 0)
       .filter((route) => !mapped.has(key(route)))
       .map((route) => `${key(route)} (${route.controller}.${route.handler})`);
 
@@ -155,11 +163,11 @@ describe('PR-0 route/permission map', () => {
     for (const entry of ADMIN_ROUTE_PERMISSIONS) {
       const route = byKey.get(key(entry));
       if (!route) continue;
-      const declared = [...route.permissions, ...route.staffPermissions];
+      const declared = [...route.permissions, ...route.anyPermissions, ...route.staffPermissions];
       // Exactly the map's set — the named permission plus any context it
       // demands (PR-C.2). A route that quietly drops a context permission, or
       // gains one the map does not know about, fails here.
-      const expected = [entry.permission, ...(entry.alsoRequires ?? [])];
+      const expected = [entry.permission, ...(entry.alsoRequires ?? []), ...(entry.orInstead ?? [])];
       if ([...new Set(declared)].sort().join(',') !== [...new Set(expected)].sort().join(',')) {
         mismatched.push(`${key(entry)} → beklenen ${expected.join('+')}, bulunan ${declared.join(',') || '(yok)'}`);
       }
@@ -173,7 +181,7 @@ describe('PR-0 route/permission map', () => {
     // permission-guarded route without the access guard would be open to any
     // signed-in customer the moment its permission list was emptied.
     const missing = routes
-      .filter((route) => route.permissions.length > 0)
+      .filter((route) => route.permissions.length > 0 || route.anyPermissions.length > 0)
       .filter((route) => !route.guards.includes(AdminAccessGuard.name))
       .map((route) => `${key(route)} (${route.controller}.${route.handler})`);
 
@@ -192,6 +200,20 @@ describe('PR-0 route/permission map', () => {
         UserRole.SUPER_ADMIN,
       );
       expect(route!.permissions, `${key(root)} bir izne bağlanmamalı`).toEqual([]);
+    }
+  });
+
+  it('declares an "any of" route as such, never as a conjunction', () => {
+    // BUG-RBAC-STATUS-001: an `orInstead` entry is admitted on either
+    // permission and checked against its delta in the service. If the route
+    // said `@RequiresPermission(WRITE, STATUS)` instead, a status-only or
+    // write-only edit would be refused outright; if the map lost `orInstead`,
+    // the previous test would fail. This pins which of the two kinds it is.
+    const byKey = new Map(routes.map((route) => [key(route), route]));
+    for (const entry of ADMIN_ROUTE_PERMISSIONS.filter((item) => item.orInstead)) {
+      const route = byKey.get(key(entry));
+      expect(route?.anyPermissions.length, key(entry)).toBeGreaterThan(0);
+      expect(route?.permissions, key(entry)).toEqual([]);
     }
   });
 

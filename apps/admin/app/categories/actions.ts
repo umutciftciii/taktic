@@ -274,7 +274,9 @@ function categoryPayload(formData: FormData) {
     // Empty means "top level"; the API refuses a parent that is not a GROUP.
     parentId: readOptionalFormString(formData, 'parentId'),
     kind,
-    status,
+    // Not sent when the form had no status control (no CATEGORIES_STATUS):
+    // the status is then left as stored rather than echoed back.
+    ...(readFormString(formData, 'statusLocked') === '1' ? {} : { status }),
     sortOrder: readFormNumber(formData, 'sortOrder'),
     // Mandatory for a service, and only for a service. A group is a folder and
     // a router is a question — neither can ever be offered on, so neither has a

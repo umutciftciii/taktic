@@ -78,6 +78,9 @@ export async function createCreditPackageAction(formData: FormData) {
 export async function updateCreditPackageAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const draft = readDraft(formData);
+  // No status control on the form (no CREDIT_PACKAGES_STATUS): `isActive` is
+  // left as stored rather than sent.
+  const statusLocked = readFormString(formData, 'statusLocked') === '1';
 
   const validationError = validateDraft(draft);
   if (validationError) {
@@ -88,7 +91,7 @@ export async function updateCreditPackageAction(formData: FormData) {
   try {
     await apiFetch<OfferCreditPackage>(`/credit-packages/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(updatePayloadFromDraft(draft)),
+      body: JSON.stringify(updatePayloadFromDraft(draft, { statusLocked })),
     });
   } catch (error) {
     rethrowNextControlFlow(error);
@@ -265,8 +268,9 @@ function createPayloadFromDraft(draft: PackageDraft) {
 }
 
 /** The same, minus `type`, which is not editable. */
-function updatePayloadFromDraft(draft: PackageDraft) {
-  const { type: _type, ...rest } = createPayloadFromDraft(draft);
+function updatePayloadFromDraft(draft: PackageDraft, options: { statusLocked: boolean }) {
+  const { type: _type, isActive, ...shared } = createPayloadFromDraft(draft);
+  const rest = options.statusLocked ? shared : { ...shared, isActive };
 
   if (draft.type === 'CATEGORY_UNLIMITED') {
     return { ...rest, dailyOfferLimit: draft.dailyOfferLimit > 0 ? draft.dailyOfferLimit : null };
