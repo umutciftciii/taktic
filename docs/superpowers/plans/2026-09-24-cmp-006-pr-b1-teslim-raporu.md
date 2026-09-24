@@ -42,8 +42,8 @@ RG-1, RG-2, RG-3 yerinde.
 | typecheck + lint (api src+test, web, admin, shared, e2e) | temiz |
 | API | 170 dosya / **3700** test yeşil |
 | web / admin / shared | 363 / 78 / 168 yeşil |
-| E2E Chromium (yerel) | §4 |
-| E2E WebKit (yerel) | §4 |
+| E2E Chromium (yerel, tam suite) | **303/303** |
+| E2E WebKit (yerel) | **132/132** |
 | CI | PR üzerinde |
 
 ## 3. Yerel kabul testi (2026-09-24)
@@ -82,7 +82,12 @@ Branch kodu worktree'den ayrı süreçlerle koşuldu: API `:3011` (`APP_ENVIRONM
 
 ## 4. E2E
 
-(koşu sonuçları aşağıda güncellenir)
+- İlk Chromium koşusu 302/303: `support-tickets.spec.ts` anonim `/destek/yeni` yönlendirmesini
+  `/login?redirectTo=/destek/yeni` bekliyor; oturumsuz query'yi korumak için eklenen `encodeURIComponent` sorgusuz
+  yolu da kodluyordu (gerçek regresyon). Düzeltme: sorgu yoksa eski biçim, varsa kodlanmış. Sonra Chromium 303/303.
+- WebKit 132/132 (`package-refund-request` ve `purchase-terms-checkout` dahil).
+- Spoof testi: satın alma id'si Next router state'inde saldırganın kendi URL'si olarak yankılanır; test görünür metin,
+  paket adı, satın alma no ve radyo değerinde sızıntı olmadığını doğrular.
 
 ## 5. Açık / sonraki
 
