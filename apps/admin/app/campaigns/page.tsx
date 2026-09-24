@@ -28,7 +28,8 @@ type CampaignsPageProps = {
 };
 
 export default async function CampaignsPage({ searchParams }: CampaignsPageProps) {
-  await requireAdmin('CAMPAIGNS_READ');
+  const { can } = await requireAdmin('CAMPAIGNS_READ');
+  const canWrite = can('CAMPAIGNS_WRITE');
   const params = await searchParams;
   const query = new URLSearchParams({ limit: '25' });
   if (params.cursor) query.set('cursor', params.cursor);
@@ -42,14 +43,20 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
         title="Kampanyalar"
         subtitle="Tetikleyici, koşul, fayda ve limitten oluşan kampanyalar; durum ve çalışan sürüm."
         actions={
-          <Link className="btn btn-primary btn-sm" href="/campaigns/new" data-testid="campaign-new-link">
-            Yeni taslak
-          </Link>
+          canWrite ? (
+            <Link className="btn btn-primary btn-sm" href="/campaigns/new" data-testid="campaign-new-link">
+              Yeni taslak
+            </Link>
+          ) : undefined
         }
       />
 
       <div style={{ marginBottom: 12 }}>
-        <CampaignEngineNotice engineEnabled={data.engineEnabled} queue={data.evaluationQueue} />
+        <CampaignEngineNotice
+          engineEnabled={data.engineEnabled}
+          queue={data.evaluationQueue}
+          canOpenOperationsSettings={can('OPERATIONS_SETTINGS_READ')}
+        />
       </div>
 
       <div className="table-card">
@@ -68,9 +75,11 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
               title="Henüz kampanya yok"
               description="İlk taslağı oluşturun. Bir kampanya ancak motor açıkken etkinleştirilebilir."
               action={
-                <Link className="btn btn-primary btn-sm" href="/campaigns/new">
-                  Yeni taslak oluştur
-                </Link>
+                canWrite ? (
+                  <Link className="btn btn-primary btn-sm" href="/campaigns/new">
+                    Yeni taslak oluştur
+                  </Link>
+                ) : undefined
               }
             />
           </div>

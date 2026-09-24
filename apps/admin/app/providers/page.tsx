@@ -74,7 +74,10 @@ function toLower(value: string | null | undefined) {
 }
 
 export default async function AdminProvidersPage({ searchParams }: AdminProvidersPageProps) {
-  await requireAdmin('PROVIDERS_READ');
+  const { can } = await requireAdmin('PROVIDERS_READ');
+  const canReadProviderDetail = can('PROVIDERS_READ_DETAIL');
+  const canReadOffers = can('OFFERS_READ');
+  const canReadProviderCredits = can('FINANCE_LEDGER_READ');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);
@@ -360,24 +363,30 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                       </td>
                       <td className="col-actions">
                         <div className="inline-actions">
-                          <Link
-                            className="btn btn-secondary btn-sm"
-                            href={`/providers/${provider.id}`}
-                          >
-                            Detay
-                          </Link>
-                          <Link
-                            className="btn btn-ghost btn-sm"
-                            href={`/offers?providerId=${provider.id}`}
-                          >
-                            Teklifler
-                          </Link>
-                          <Link
-                            className="btn btn-ghost btn-sm"
-                            href={`/providers/${provider.id}/credits`}
-                          >
-                            Krediler
-                          </Link>
+                          {canReadProviderDetail ? (
+                            <Link
+                              className="btn btn-secondary btn-sm"
+                              href={`/providers/${provider.id}`}
+                            >
+                              Detay
+                            </Link>
+                          ) : null}
+                          {canReadOffers ? (
+                            <Link
+                              className="btn btn-ghost btn-sm"
+                              href={`/offers?providerId=${provider.id}`}
+                            >
+                              Teklifler
+                            </Link>
+                          ) : null}
+                          {canReadProviderCredits ? (
+                            <Link
+                              className="btn btn-ghost btn-sm"
+                              href={`/providers/${provider.id}/credits`}
+                            >
+                              Krediler
+                            </Link>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

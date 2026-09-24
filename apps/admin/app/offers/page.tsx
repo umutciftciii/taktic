@@ -86,7 +86,9 @@ function isIsoDate(value: string) {
 }
 
 export default async function AdminOffersPage({ searchParams }: AdminOffersPageProps) {
-  await requireAdmin('OFFERS_READ');
+  const { can } = await requireAdmin('OFFERS_READ');
+  const canReadRequests = can('REQUESTS_READ');
+  const canReadProviderDetail = can('PROVIDERS_READ_DETAIL');
   const params = (await searchParams) ?? {};
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);
@@ -368,9 +370,13 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
                         <code className="display-number">{offerRef}</code>
                       </td>
                       <td>
-                        <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+                        {canReadRequests ? (
+                          <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+                            <code className="display-number">{requestRef}</code>
+                          </Link>
+                        ) : (
                           <code className="display-number">{requestRef}</code>
-                        </Link>
+                        )}
                       </td>
                       <td>{formatDateTime(offer.submittedAt)}</td>
                       <td>
@@ -422,18 +428,22 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
                           <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
                             Detay
                           </Link>
-                          <Link
-                            className="btn btn-ghost btn-sm"
-                            href={`/requests/${offer.request.id}`}
-                          >
-                            Talep
-                          </Link>
-                          <Link
-                            className="btn btn-ghost btn-sm"
-                            href={`/providers/${offer.provider.id}`}
-                          >
-                            HV
-                          </Link>
+                          {canReadRequests ? (
+                            <Link
+                              className="btn btn-ghost btn-sm"
+                              href={`/requests/${offer.request.id}`}
+                            >
+                              Talep
+                            </Link>
+                          ) : null}
+                          {canReadProviderDetail ? (
+                            <Link
+                              className="btn btn-ghost btn-sm"
+                              href={`/providers/${offer.provider.id}`}
+                            >
+                              HV
+                            </Link>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

@@ -58,7 +58,10 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 export default async function ReviewDetailPage({ params, searchParams }: ReviewDetailPageProps) {
-  await requireAdmin('PROVIDER_REVIEWS_READ');
+  const { can } = await requireAdmin('PROVIDER_REVIEWS_READ');
+  const canModerate = can('PROVIDER_REVIEWS_MODERATE');
+  const canReadRequests = can('REQUESTS_READ');
+  const canReadProviderDetail = can('PROVIDERS_READ_DETAIL');
 
   const { reviewId } = await params;
   const { ok, error } = await searchParams;
@@ -75,7 +78,7 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
   return (
     <main className="request-detail-page">
       <p className="breadcrumbs">
-        <Link href="/">Dashboard</Link>
+        {can('DASHBOARD_READ') ? <Link href="/">Dashboard</Link> : <span>Dashboard</span>}
         <span aria-hidden="true">/</span>
         <Link href="/provider-reviews/reports">Değerlendirme bildirimleri</Link>
         <span aria-hidden="true">/</span>
@@ -142,12 +145,14 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
             <p className="cell-muted">Müşteri yorum yazmamış.</p>
           )}
 
-          <ReviewModerationForm
-            reviewId={review.id}
-            hasLiveComment={review.comment !== null && !review.commentRemoved}
-            removed={review.removed}
-            commentRemoved={review.commentRemoved}
-          />
+          {canModerate ? (
+            <ReviewModerationForm
+              reviewId={review.id}
+              hasLiveComment={review.comment !== null && !review.commentRemoved}
+              removed={review.removed}
+              commentRemoved={review.commentRemoved}
+            />
+          ) : null}
         </SectionCard>
 
         <SectionCard title="Talep" subtitle="Değerlendirilen iş.">
@@ -155,9 +160,13 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
             <div>
               <dt>Talep</dt>
               <dd>
-                <Link className="cell-link" href={`/requests/${review.request.id}`}>
+                {canReadRequests ? (
+                  <Link className="cell-link" href={`/requests/${review.request.id}`}>
+                    <code className="display-number">{requestRef}</code>
+                  </Link>
+                ) : (
                   <code className="display-number">{requestRef}</code>
-                </Link>
+                )}
               </dd>
             </div>
             <div>
@@ -182,9 +191,13 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
             <div>
               <dt>İşletme</dt>
               <dd>
-                <Link className="cell-link" href={`/providers/${review.provider.id}`}>
-                  {review.provider.businessName}
-                </Link>
+                {canReadProviderDetail ? (
+                  <Link className="cell-link" href={`/providers/${review.provider.id}`}>
+                    {review.provider.businessName}
+                  </Link>
+                ) : (
+                  review.provider.businessName
+                )}
               </dd>
             </div>
           </dl>
@@ -207,9 +220,13 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
                 >
                   <div className="report-item-head">
                     <span className="badge badge-muted">{reviewReasonLabel(report.reason)}</span>
-                    <Link className="cell-link" href={`/providers/${report.reporter.id}`}>
-                      {report.reporter.businessName}
-                    </Link>
+                    {canReadProviderDetail ? (
+                      <Link className="cell-link" href={`/providers/${report.reporter.id}`}>
+                        {report.reporter.businessName}
+                      </Link>
+                    ) : (
+                      <span>{report.reporter.businessName}</span>
+                    )}
                     <span className="cell-muted">{formatDateTime(report.createdAt)}</span>
                   </div>
                   {report.note ? (
@@ -244,7 +261,7 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
             </ul>
           )}
 
-          {openReport ? (
+          {openReport && canModerate ? (
             <div className="report-decisions" data-testid="review-report-decisions">
               <p className="report-decisions-intro">
                 Açık bir bildirim var. Yorumu ya da değerlendirmeyi kaldırmak bildirimi de kapatır;

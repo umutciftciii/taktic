@@ -4,6 +4,7 @@ import { parseTurkishLiraToMinor } from '@taktic/shared';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch } from '../../../lib/api';
+import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 
 /**
  * Maintaining the vitrin catalogue.
@@ -51,6 +52,7 @@ export async function createShowcasePackageAction(formData: FormData) {
       }),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(`/showcase/packages?error=${errorCode(error)}`);
   }
 
@@ -81,6 +83,7 @@ export async function updateShowcasePackageAction(formData: FormData) {
       }),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     redirect(`/showcase/packages?error=${errorCode(error)}`);
   }
 

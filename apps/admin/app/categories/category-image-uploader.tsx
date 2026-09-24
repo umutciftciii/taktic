@@ -10,6 +10,12 @@ type CategoryImageUploaderProps = {
   defaultValue?: string | null;
   variant?: Variant;
   helpText?: string;
+  /**
+   * Whether this session may upload a file (`UPLOADS_WRITE`). Without it the
+   * URL field — part of the category form — stays, but the upload button,
+   * which would only be refused, is not offered.
+   */
+  canUpload: boolean;
 };
 
 const ACCEPT = 'image/png,image/jpeg,image/webp';
@@ -20,6 +26,7 @@ export function CategoryImageUploader({
   defaultValue,
   variant = 'card',
   helpText,
+  canUpload,
 }: CategoryImageUploaderProps) {
   const [url, setUrl] = useState<string>(defaultValue ?? '');
   const [uploading, setUploading] = useState(false);
@@ -85,22 +92,26 @@ export function CategoryImageUploader({
         placeholder="https://cdn.example.com/categories/foo.png"
       />
       <div className="cat-uploader-actions">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ACCEPT}
-          onChange={handleFileChange}
-          disabled={uploading}
-          style={{ display: 'none' }}
-        />
-        <button
-          className="btn btn-secondary btn-sm"
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-        >
-          {uploading ? 'Yükleniyor…' : 'Dosya yükle'}
-        </button>
+        {canUpload ? (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT}
+              onChange={handleFileChange}
+              disabled={uploading}
+              style={{ display: 'none' }}
+            />
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              {uploading ? 'Yükleniyor…' : 'Dosya yükle'}
+            </button>
+          </>
+        ) : null}
         {url ? (
           <button
             className="btn btn-ghost btn-sm"

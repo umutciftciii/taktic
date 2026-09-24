@@ -33,6 +33,7 @@ import {
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { EmptyState } from '../../../components/empty-state';
+import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 import {
   cancelRequestAction,
   completeRequestAction,
@@ -91,43 +92,79 @@ export default async function RequestDetailPage({
   params,
   searchParams,
 }: RequestDetailPageProps) {
-  await requireAdmin('REQUESTS_READ');
+  const { can, isSuperAdmin } = await requireAdmin('REQUESTS_READ');
   const { id } = await params;
   const { statusError, reportError } = await searchParams;
   const request = await fetchOrNotFound(() =>
     apiFetch<ServiceRequest>(`/service-requests/${id}`),
   );
-  const [offers, reportsResult, reviewState] = await Promise.all([
-    apiFetch<Offer[]>(`/offers?requestId=${id}`).catch(() => [] as Offer[]),
+
+  // Each secondary block belongs to another permission. It is read only when
+  // the session holds that permission. Without it the block is not rendered
+  // and its endpoint is not called: REQUESTS_READ alone opens the request.
+  // Rendering "0 teklif" or "Kayıt yok" instead would state something about
+  // data this session was never allowed to read.
+  const canReadOffers = can('OFFERS_READ');
+  const canReadReports = can('REQUEST_REPORTS_READ');
+  const canReadContactReveal = can('CONTACT_REVEAL_READ');
+  const canChangeStatus = can('REQUESTS_STATUS');
+  const canRecalculateQuality = can('REQUESTS_QUALITY_RECALC');
+  const canResolveReports = can('REQUEST_REPORTS_RESOLVE');
+  const canReopenRequest = can('REQUESTS_REOPEN');
+  const canOpenProviders = can('PROVIDERS_READ_DETAIL');
+  const canOpenReviews = can('PROVIDER_REVIEWS_READ');
+  // Completing and cancelling are customer-or-SUPER_ADMIN routes
+  // (`@Roles(CUSTOMER, SUPER_ADMIN)`), not permissions. No role grants them.
+  // The customer's review is read on the customer's own route, which a
+  // SUPER_ADMIN may also read and nobody else.
+  const canRunLifecycle = isSuperAdmin;
+  const canReadReview = isSuperAdmin;
+
+  const [offers, reportsResult, reviewState, contactReveal] = await Promise.all([
+    canReadOffers ? apiFetch<Offer[]>(`/offers?requestId=${id}`) : Promise.resolve(null),
     // Operator-only: a reporter's note is shown here and nowhere the customer
     // or another provider can see. A failed load is kept apart from an empty
     // list: "no reports" must not be said about a request whose reports could
     // not be read, and no decision form may be offered on it.
-    apiFetch<RequestReport[]>(`/service-requests/${id}/reports`).then(
-      (reports) => ({ reports, failed: false as const }),
-      () => ({ reports: [] as RequestReport[], failed: true as const }),
-    ),
+    canReadReports
+      ? apiFetch<RequestReport[]>(`/service-requests/${id}/reports`).then(
+          (reports) => ({ reports, failed: false as const }),
+          (error: unknown) => {
+            rethrowNextControlFlow(error);
+            return { reports: [] as RequestReport[], failed: true as const };
+          },
+        )
+      : Promise.resolve({ reports: [] as RequestReport[], failed: false as const }),
     // The customer's review of the matched provider, read the way the
-    // customer's own screen reads it (a SUPER_ADMIN may look). Null hides
-    // the card rather than the screen; the review has its own page.
-    apiFetch<CustomerReviewState>(`/service-requests/${id}/review`).catch((error: unknown) => {
-      if (error instanceof ApiError) return null;
-      throw error;
-    }),
+    // customer's own screen reads it. Null hides the card rather than the
+    // screen; the review has its own page.
+    canReadReview
+      ? apiFetch<CustomerReviewState>(`/service-requests/${id}/review`).catch((error: unknown) => {
+          rethrowNextControlFlow(error);
+          if (error instanceof ApiError) return null;
+          throw error;
+        })
+      : Promise.resolve(null),
+    // Audit only: this panel reports whether contact details were opened and
+    // under which disclosure version. It renders no contact value. The
+    // operator already has the customer and provider panels for that, and
+    // this feature adds nothing to what they show.
+    canReadContactReveal
+      ? apiFetch<ContactRevealDetail>(`/service-requests/${id}/contact-reveal`).catch(
+          (error: unknown) => {
+            rethrowNextControlFlow(error);
+            return null;
+          },
+        )
+      : Promise.resolve(null),
   ]);
   const reports = reportsResult.reports;
   const reportsFailed = reportsResult.failed;
-  // Audit only: this panel reports whether contact details were opened and
-  // under which disclosure version. It renders no contact value — the operator
-  // already has the customer and provider panels for that, and this feature
-  // adds nothing to what they show.
-  const contactReveal = await apiFetch<ContactRevealDetail>(
-    `/service-requests/${id}/contact-reveal`,
-  ).catch(() => null);
-  const recentOffers = offers.slice(0, RECENT_OFFERS_LIMIT);
-  const matchedOffer = request.matchedOfferId
-    ? (offers.find((offer) => offer.id === request.matchedOfferId) ?? null)
-    : null;
+  const recentOffers = (offers ?? []).slice(0, RECENT_OFFERS_LIMIT);
+  const matchedOffer =
+    request.matchedOfferId && offers
+      ? (offers.find((offer) => offer.id === request.matchedOfferId) ?? null)
+      : null;
   const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
   const categoryName = request.category.name;
   const headerTitle = categoryName ? `${categoryName} Talebi` : 'Talep Detayı';
@@ -139,6 +176,7 @@ export default async function RequestDetailPage({
   // Derived, not stored: the request is down *because of a report* only when
   // it is REJECTED and some report's decision was the removal.
   const canReopen =
+    canReopenRequest &&
     !reportsFailed &&
     request.status === 'REJECTED' &&
     reports.some((report) => report.resolution === 'REQUEST_REMOVED');
@@ -169,17 +207,23 @@ export default async function RequestDetailPage({
           </span>
         }
         actions={
-          <div className="inline-actions">
-            <Link className="btn btn-secondary btn-sm" href={`/offers?requestId=${request.id}`}>
-              Teklifleri görüntüle
-            </Link>
-            <form action={recalculateRequestQualityAction} style={{ display: 'inline' }}>
-              <input type="hidden" name="id" value={request.id} />
-              <button className="btn btn-ghost btn-sm" type="submit">
-                Kaliteyi yeniden hesapla
-              </button>
-            </form>
-          </div>
+          canReadOffers || canRecalculateQuality ? (
+            <div className="inline-actions">
+              {canReadOffers ? (
+                <Link className="btn btn-secondary btn-sm" href={`/offers?requestId=${request.id}`}>
+                  Teklifleri görüntüle
+                </Link>
+              ) : null}
+              {canRecalculateQuality ? (
+                <form action={recalculateRequestQualityAction} style={{ display: 'inline' }}>
+                  <input type="hidden" name="id" value={request.id} />
+                  <button className="btn btn-ghost btn-sm" type="submit">
+                    Kaliteyi yeniden hesapla
+                  </button>
+                </form>
+              ) : null}
+            </div>
+          ) : undefined
         }
       />
 
@@ -225,46 +269,51 @@ export default async function RequestDetailPage({
               </>
             )}
           </p>
-          <div className="status-action-list">
-            <StatusQuickForm
-              requestId={request.id}
-              targetStatus="IN_REVIEW"
-              currentStatus={request.status}
-              label="İncelemeye al"
-              variant="secondary"
-            />
-            <StatusQuickForm
-              requestId={request.id}
-              targetStatus="APPROVED"
-              currentStatus={request.status}
-              label="Onayla"
-              variant="primary"
-            />
-          </div>
+          {canChangeStatus ? (
+            <div className="status-action-list">
+              <StatusQuickForm
+                requestId={request.id}
+                targetStatus="IN_REVIEW"
+                currentStatus={request.status}
+                label="İncelemeye al"
+                variant="secondary"
+              />
+              <StatusQuickForm
+                requestId={request.id}
+                targetStatus="APPROVED"
+                currentStatus={request.status}
+                label="Onayla"
+                variant="primary"
+              />
+            </div>
+          ) : null}
 
-          <div className="status-action-list">
-            <LifecycleForm
-              requestId={request.id}
-              action={completeRequestAction}
-              label="Hizmeti tamamlandı işaretle"
-              variant="primary"
-              disabled={request.status !== 'MATCHED'}
-              hint={
-                request.status === 'MATCHED'
-                  ? null
-                  : 'Yalnız eşleşmiş talep tamamlanabilir.'
-              }
-            />
-            <LifecycleForm
-              requestId={request.id}
-              action={cancelRequestAction}
-              label="İptal et"
-              variant="ghost"
-              disabled={isTerminalStatus(request.status)}
-              hint={isTerminalStatus(request.status) ? 'Talep kapanmış durumda.' : null}
-            />
-          </div>
+          {canRunLifecycle ? (
+            <div className="status-action-list">
+              <LifecycleForm
+                requestId={request.id}
+                action={completeRequestAction}
+                label="Hizmeti tamamlandı işaretle"
+                variant="primary"
+                disabled={request.status !== 'MATCHED'}
+                hint={
+                  request.status === 'MATCHED'
+                    ? null
+                    : 'Yalnız eşleşmiş talep tamamlanabilir.'
+                }
+              />
+              <LifecycleForm
+                requestId={request.id}
+                action={cancelRequestAction}
+                label="İptal et"
+                variant="ghost"
+                disabled={isTerminalStatus(request.status)}
+                hint={isTerminalStatus(request.status) ? 'Talep kapanmış durumda.' : null}
+              />
+            </div>
+          ) : null}
 
+          {canChangeStatus ? (
           <details
             className="status-reject-block"
             open={request.status === 'REJECTED'}
@@ -319,6 +368,7 @@ export default async function RequestDetailPage({
               )}
             </form>
           </details>
+          ) : null}
         </div>
 
         <div className="admin-action-panel request-offers-panel">
@@ -333,11 +383,15 @@ export default async function RequestDetailPage({
               <div>
                 <dt>Seçilen teklif</dt>
                 <dd>
-                  <Link href={`/offers/${request.matchedOfferId}`}>
-                    {matchedOffer
-                      ? matchedOffer.provider.businessName
-                      : `#${request.matchedOfferId.slice(-8)}`}
-                  </Link>
+                  {canReadOffers ? (
+                    <Link href={`/offers/${request.matchedOfferId}`}>
+                      {matchedOffer
+                        ? matchedOffer.provider.businessName
+                        : `#${request.matchedOfferId.slice(-8)}`}
+                    </Link>
+                  ) : (
+                    <span>#{request.matchedOfferId.slice(-8)}</span>
+                  )}
                 </dd>
               </div>
               <div>
@@ -367,6 +421,7 @@ export default async function RequestDetailPage({
                 is written once inside the accept transaction, and nothing in
                 the product may repeat, edit or undo it.
               */}
+              {canReadContactReveal ? (
               <div data-testid="contact-reveal-audit">
                 <dt>İletişim paylaşımı</dt>
                 <dd>
@@ -388,13 +443,15 @@ export default async function RequestDetailPage({
                   )}
                 </dd>
               </div>
+              ) : null}
             </dl>
           ) : (
             <p className="request-offers-empty">Bu talep henüz bir teklifle eşleşmedi.</p>
           )}
         </div>
 
-        <div className="admin-action-panel request-offers-panel">
+        {offers ? (
+        <div className="admin-action-panel request-offers-panel" data-testid="request-offers-panel">
           <div className="panel-head">
             <h3>İlgili Teklifler</h3>
             <span className="request-offers-count">Toplam {offers.length}</span>
@@ -438,6 +495,7 @@ export default async function RequestDetailPage({
             </Link>
           </div>
         </div>
+        ) : null}
 
         <div className="admin-action-panel request-meta-panel">
           <div className="panel-head">
@@ -488,10 +546,12 @@ export default async function RequestDetailPage({
               <dt>Güncellendi</dt>
               <dd>{formatDateTime(request.updatedAt)}</dd>
             </div>
-            <div>
-              <dt>Teklif sayısı</dt>
-              <dd>{offers.length}</dd>
-            </div>
+            {offers ? (
+              <div>
+                <dt>Teklif sayısı</dt>
+                <dd>{offers.length}</dd>
+              </div>
+            ) : null}
           </dl>
         </div>
       </div>
@@ -608,6 +668,7 @@ export default async function RequestDetailPage({
           </dl>
         </SectionCard>
 
+        {canReadReports ? (
         <SectionCard
           className="card-wide"
           id="bildirimler"
@@ -639,9 +700,13 @@ export default async function RequestDetailPage({
                 >
                   <div className="report-item-head">
                     <span className="badge badge-muted">{reportReasonLabel(report.reason)}</span>
-                    <Link className="cell-link" href={`/providers/${report.reporter.id}`}>
-                      {report.reporter.businessName}
-                    </Link>
+                    {canOpenProviders ? (
+                      <Link className="cell-link" href={`/providers/${report.reporter.id}`}>
+                        {report.reporter.businessName}
+                      </Link>
+                    ) : (
+                      <span>{report.reporter.businessName}</span>
+                    )}
                     <span className="cell-muted">{formatDateTime(report.createdAt)}</span>
                   </div>
                   {report.note ? (
@@ -680,7 +745,7 @@ export default async function RequestDetailPage({
             </ul>
           )}
 
-          {openReports.length > 0 ? (
+          {canResolveReports && openReports.length > 0 ? (
             <div className="report-decisions" data-testid="report-decisions">
               <p className="report-decisions-intro">
                 {openReports.length} açık bildirim var. Karar tüm açık bildirimleri birlikte
@@ -774,6 +839,7 @@ export default async function RequestDetailPage({
             </form>
           ) : null}
         </SectionCard>
+        ) : null}
 
         <SectionCard title="Müşteri" subtitle="İletişim bilgileri ve bağlı hesap.">
           <dl className="info-list">
@@ -904,6 +970,7 @@ export default async function RequestDetailPage({
           )}
         </SectionCard>
 
+        {canReadReview ? (
         <SectionCard
           title="Değerlendirme"
           subtitle="Müşterinin, kabul ettiği teklifin hizmet vereni hakkındaki değerlendirmesi."
@@ -937,10 +1004,12 @@ export default async function RequestDetailPage({
               <div>
                 <dt>Hizmet veren</dt>
                 <dd>
-                  {reviewState.provider ? (
+                  {reviewState.provider && canOpenProviders ? (
                     <Link className="cell-link" href={`/providers/${reviewState.provider.id}`}>
                       {reviewState.provider.businessName}
                     </Link>
+                  ) : reviewState.provider ? (
+                    reviewState.provider.businessName
                   ) : (
                     '—'
                   )}
@@ -950,14 +1019,16 @@ export default async function RequestDetailPage({
                 <dt>Tarih</dt>
                 <dd>{formatDateTime(reviewState.review.createdAt)}</dd>
               </div>
-              <div className="info-grid-full">
-                <dt>Detay</dt>
-                <dd>
-                  <Link className="btn btn-ghost btn-sm" href={`/provider-reviews/${reviewState.review.id}`}>
-                    Değerlendirmeyi aç
-                  </Link>
-                </dd>
-              </div>
+              {canOpenReviews ? (
+                <div className="info-grid-full">
+                  <dt>Detay</dt>
+                  <dd>
+                    <Link className="btn btn-ghost btn-sm" href={`/provider-reviews/${reviewState.review.id}`}>
+                      Değerlendirmeyi aç
+                    </Link>
+                  </dd>
+                </div>
+              ) : null}
             </dl>
           ) : (
             <p className="cell-muted" style={{ margin: 0 }} data-testid="request-review-none">
@@ -967,6 +1038,7 @@ export default async function RequestDetailPage({
             </p>
           )}
         </SectionCard>
+        ) : null}
       </div>
     </main>
   );

@@ -8,6 +8,8 @@ import {
   CreateAdminUserResponse,
   UpdateUserStatusResponse,
 } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import type { InviteLinkState } from './invite-link-state';
 
 export async function updateUserStatusAction(formData: FormData) {
   const userId = readFormString(formData, 'userId');
@@ -23,6 +25,9 @@ export async function updateUserStatusAction(formData: FormData) {
       body: JSON.stringify({ isActive }),
     });
   } catch (error) {
+    // A 401/403 is a navigation, not a message: `?statusError=NEXT_REDIRECT`
+    // is what swallowing it used to produce.
+    rethrowNextControlFlow(error);
     const message =
       error instanceof Error
         ? parseBackendMessage(error.message)
@@ -34,21 +39,21 @@ export async function updateUserStatusAction(formData: FormData) {
   revalidatePath(`/users/${userId}`);
 }
 
-export async function createAdminUserAction(formData: FormData) {
+export async function createAdminUserAction(
+  _previous: InviteLinkState,
+  formData: FormData,
+): Promise<InviteLinkState> {
   const name = readFormString(formData, 'name').trim();
   const email = readFormString(formData, 'email').trim().toLowerCase();
   const phone = readFormString(formData, 'phone').trim();
+  const values = { name, email, phone };
 
   if (name.length < 2) {
-    redirect(
-      `/users/new?error=${encodeURIComponent('Ad Soyad en az 2 karakter olmalıdır.')}`,
-    );
+    return { kind: 'error', message: 'Ad Soyad en az 2 karakter olmalıdır.', values };
   }
 
   if (!email || !email.includes('@')) {
-    redirect(
-      `/users/new?error=${encodeURIComponent('Geçerli bir e-posta adresi girin.')}`,
-    );
+    return { kind: 'error', message: 'Geçerli bir e-posta adresi girin.', values };
   }
 
   let result: CreateAdminUserResponse;
@@ -58,32 +63,31 @@ export async function createAdminUserAction(formData: FormData) {
       body: JSON.stringify({ name, email, phone: phone || undefined }),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     const message =
       error instanceof Error
         ? parseBackendMessage(error.message, 'Admin kullanıcısı oluşturulamadı.')
         : 'Admin kullanıcısı oluşturulamadı.';
-    const params = new URLSearchParams({ error: message });
-    if (name) params.set('name', name);
-    if (email) params.set('email', email);
-    if (phone) params.set('phone', phone);
-    redirect(`/users/new?${params.toString()}`);
+    return { kind: 'error', message, values };
   }
 
   revalidatePath('/users');
-  revalidatePath(`/users/${result.user.id}`);
-  const params = new URLSearchParams({
+  return {
+    kind: 'issued',
     inviteUrl: result.inviteUrl,
     expiresAt: result.expiresAt,
     userId: result.user.id,
-  });
-  redirect(`/users/new?${params.toString()}`);
+  };
 }
 
-export async function createAdminInviteLinkAction(formData: FormData) {
+export async function createAdminInviteLinkAction(
+  _previous: InviteLinkState,
+  formData: FormData,
+): Promise<InviteLinkState> {
   const userId = readFormString(formData, 'userId');
 
   if (!userId) {
-    return;
+    return { kind: 'error', message: 'Davet linki oluşturulamadı.' };
   }
 
   let result: AdminInviteLinkResponse;
@@ -93,19 +97,15 @@ export async function createAdminInviteLinkAction(formData: FormData) {
       body: JSON.stringify({}),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     const message =
       error instanceof Error
         ? parseBackendMessage(error.message, 'Davet linki oluşturulamadı.')
         : 'Davet linki oluşturulamadı.';
-    redirect(`/users/${userId}?inviteError=${encodeURIComponent(message)}`);
+    return { kind: 'error', message };
   }
 
-  revalidatePath(`/users/${userId}`);
-  const params = new URLSearchParams({
-    inviteUrl: result.inviteUrl,
-    inviteExpiresAt: result.expiresAt,
-  });
-  redirect(`/users/${userId}?${params.toString()}`);
+  return { kind: 'issued', inviteUrl: result.inviteUrl, expiresAt: result.expiresAt, userId };
 }
 
 function parseBackendMessage(raw: string, fallback = 'İşlem başarısız oldu.'): string {

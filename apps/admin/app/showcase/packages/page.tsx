@@ -103,7 +103,10 @@ function AdvancedSettings({ sortOrder }: { sortOrder: number }) {
  * setting the number is told which one they are setting.
  */
 export default async function ShowcasePackagesPage({ searchParams }: PackagesPageProps) {
-  await requireAdmin('SHOWCASE_PACKAGES_READ');
+  const { can } = await requireAdmin('SHOWCASE_PACKAGES_READ');
+  // Create and edit are both SHOWCASE_PACKAGES_WRITE. Without it the table
+  // above them already shows every value the forms would have carried.
+  const canWrite = can('SHOWCASE_PACKAGES_WRITE');
 
   const { error, created, saved } = await searchParams;
   const { packages } = await apiFetch<{ packages: ShowcasePackage[] }>(
@@ -124,9 +127,11 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
           the three that are actual jobs harder to find.
         */
         actions={
-          <Link className="btn btn-sm btn-secondary" href="/showcase/price-terms">
-            Metin onayları
-          </Link>
+          can('SHOWCASE_TERMS_ACCEPTANCES_READ') ? (
+            <Link className="btn btn-sm btn-secondary" href="/showcase/price-terms">
+              Metin onayları
+            </Link>
+          ) : undefined
         }
       />
 
@@ -154,7 +159,11 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
         {packages.length === 0 ? (
           <EmptyState
             title="Paket yok"
-            description="Henüz bir vitrin paketi tanımlanmadı. Aşağıdaki formla ilkini oluşturabilirsiniz."
+            description={
+              canWrite
+                ? 'Henüz bir vitrin paketi tanımlanmadı. Aşağıdaki formla ilkini oluşturabilirsiniz.'
+                : 'Henüz bir vitrin paketi tanımlanmadı.'
+            }
           />
         ) : (
           <div className="table-scroll showcase-table-scroll">
@@ -212,6 +221,8 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
         )}
       </SectionCard>
 
+      {canWrite ? (
+      <>
       <SectionCard
         title="Yeni paket"
         subtitle="Yayın bedeli TakTick'in tahsil ettiği yerleşim ücretidir; hizmet verenin müşterisinden aldığı hizmet bedeliyle ilgisi yoktur."
@@ -377,6 +388,8 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
           </form>
         </SectionCard>
       ))}
+      </>
+      ) : null}
     </>
   );
 }

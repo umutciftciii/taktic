@@ -28,7 +28,7 @@ import { SectionCard } from '../../../components/section-card';
  * read the scope, the price and the areas, and those are what the decision is.
  */
 export default async function ShowcaseReviewQueuePage() {
-  await requireAdmin('SHOWCASE_REVIEW_READ');
+  const { can } = await requireAdmin('SHOWCASE_REVIEW_READ');
 
   const versions = await apiFetch<ShowcaseVersionListEntry[]>('/admin/showcase/versions');
 
@@ -51,9 +51,11 @@ export default async function ShowcaseReviewQueuePage() {
           jobs the sidebar names.
         */
         actions={
-          <Link className="btn btn-sm btn-secondary" href="/showcase/cards">
-            Tüm vitrin kartları
-          </Link>
+          can('SHOWCASE_CARDS_READ') ? (
+            <Link className="btn btn-sm btn-secondary" href="/showcase/cards">
+              Tüm vitrin kartları
+            </Link>
+          ) : undefined
         }
         padded={false}
       >

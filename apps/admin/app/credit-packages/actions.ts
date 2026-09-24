@@ -9,6 +9,7 @@ import {
   OfferPackageType,
   apiFetch,
 } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 const ALLOWED_CURRENCIES = ['TRY', 'USD', 'EUR'] as const;
 type AllowedCurrency = (typeof ALLOWED_CURRENCIES)[number];
@@ -62,7 +63,7 @@ export async function createCreditPackageAction(formData: FormData) {
       body: JSON.stringify(createPayloadFromDraft(draft)),
     });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -90,7 +91,7 @@ export async function updateCreditPackageAction(formData: FormData) {
       body: JSON.stringify(updatePayloadFromDraft(draft)),
     });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -119,7 +120,7 @@ export async function updateCreditPackageStatusAction(formData: FormData) {
       body: JSON.stringify({ isActive }),
     });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -175,7 +176,7 @@ export async function moveCreditPackageAction(formData: FormData) {
               body: JSON.stringify({ sortOrder: current.sortOrder }),
             });
           } catch (innerError) {
-            if (isRedirectError(innerError)) throw innerError;
+            rethrowNextControlFlow(innerError);
             partialFailure = true;
             errorMessage = `Sıra takasının ikinci adımı başarısız oldu: ${extractApiMessage(innerError)}`;
           }
@@ -183,7 +184,7 @@ export async function moveCreditPackageAction(formData: FormData) {
       }
     }
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -364,12 +365,6 @@ function extractApiMessage(error: unknown): string {
     /* fall through */
   }
   return raw || 'Beklenmeyen hata.';
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }
 
 function readFormString(formData: FormData, key: string) {

@@ -1,8 +1,11 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { AdminPermission, UserRole } from '@prisma/client';
+import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { CurrentUser } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequiresPermission } from '../auth/permissions.decorator';
 import { ProviderAccessGuard } from '../auth/provider-access.guard';
 import { UpdateAutoRenewDto } from './dto/update-auto-renew.dto';
 import { EntitlementsService, assertProviderAccount } from './entitlements.service';
@@ -40,6 +43,22 @@ export class EntitlementsController {
     return user.role === UserRole.SUPER_ADMIN
       ? this.entitlements.listProviderEntitlementsForAdmin(providerId)
       : this.entitlements.listProviderEntitlements(providerId);
+  }
+
+  /**
+   * One provider's periods, read by staff (ADMIN-DESIGN-000, F4).
+   *
+   * The admin projection the SUPER_ADMIN branch above returns (purchase,
+   * renewal attempts, the payment provider's opaque reference, never a stored
+   * credential) on the permission that already reads purchases and their
+   * payment references. `ProviderAccessGuard` is not widened. The two write
+   * routes below stay the provider account's alone.
+   */
+  @Get('admin/providers/:providerId/entitlements')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PACKAGE_PURCHASES_READ)
+  listEntitlementsForAdmin(@Param('providerId') providerId: string) {
+    return this.entitlements.listProviderEntitlementsForAdmin(providerId);
   }
 
   /**

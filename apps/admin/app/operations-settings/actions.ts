@@ -11,6 +11,7 @@ import {
   SCHEDULER_JOB_KEYS,
   SchedulerSettings,
 } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 /**
  * Saves the operations settings.
@@ -36,7 +37,7 @@ export async function saveOperationsSettingsAction(formData: FormData) {
       body: JSON.stringify({ unviewedOfferRefundWindowHours: Number(raw) }),
     });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -81,7 +82,7 @@ export async function toggleSchedulerAction(formData: FormData) {
       { method: 'PUT', body: JSON.stringify({ enabled: enabled === 'true' }) },
     );
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -124,7 +125,7 @@ export async function toggleAutoPublishAction(formData: FormData) {
       body: JSON.stringify({ enabled: enabled === 'true' }),
     });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -170,7 +171,7 @@ export async function toggleProviderReviewsAction(formData: FormData) {
       body: JSON.stringify({ enabled: enabled === 'true' }),
     });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -225,7 +226,7 @@ export async function toggleCampaignEngineAction(formData: FormData) {
       body: JSON.stringify({ enabled: enabled === 'true' }),
     });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     errorMessage = extractApiMessage(error);
   }
 
@@ -290,10 +291,4 @@ function extractApiMessage(error: unknown): string {
     /* fall through */
   }
   return raw || 'Beklenmeyen hata.';
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }

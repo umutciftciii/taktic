@@ -261,6 +261,25 @@ export class CreditsService {
   }
 
   /**
+   * The staff read of one provider's credits (ADMIN-DESIGN-000, F4).
+   *
+   * The same balance and latest movements the provider's own route returns,
+   * always with the actor (as `/finance/credit-ledger` shows it), plus the
+   * few provider fields the screen labels itself with.
+   */
+  async getProviderCreditsForAdmin(providerId: string) {
+    const provider = await this.prisma.providerProfile.findUnique({
+      where: { id: providerId },
+      select: { id: true, businessName: true, status: true, city: true, district: true },
+    });
+    if (!provider) {
+      throw new NotFoundException('Provider not found');
+    }
+    const credits = await this.getProviderCredits(providerId, { includeActor: true });
+    return { ...credits, provider };
+  }
+
+  /**
    * The signed-in provider's own spendable promotion (CMP-004 S4).
    *
    * Resolved from the session's account and nothing else: the route takes no

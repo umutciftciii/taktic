@@ -52,7 +52,11 @@ function canonicalSort(packages: AdminOfferPackage[]) {
 export default async function AdminCreditPackagesPage({
   searchParams,
 }: AdminCreditPackagesPageProps) {
-  await requireAdmin('CREDIT_PACKAGES_READ');
+  const { can } = await requireAdmin('CREDIT_PACKAGES_READ');
+  // `/credit-packages/new` gates on CREDIT_PACKAGES_READ + WRITE; reordering is a
+  // PATCH (WRITE); the status toggle is its own permission.
+  const canWrite = can('CREDIT_PACKAGES_WRITE');
+  const canChangeStatus = can('CREDIT_PACKAGES_STATUS');
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatusFilter(params.status);
@@ -89,9 +93,11 @@ export default async function AdminCreditPackagesPage({
         title="Kredi Paketleri"
         subtitle="Hizmet verenlere satılan paketleri yönetin. Pasifleştirilen paketler yeni satışa kapanır, mevcut satın almaları etkilemez."
         actions={
-          <Link className="btn btn-primary btn-sm" href="/credit-packages/new">
-            Yeni Paket
-          </Link>
+          canWrite ? (
+            <Link className="btn btn-primary btn-sm" href="/credit-packages/new">
+              Yeni Paket
+            </Link>
+          ) : undefined
         }
       />
 
@@ -162,9 +168,11 @@ export default async function AdminCreditPackagesPage({
                 title="Henüz paket yok."
                 description="İlk paketinizi oluşturduğunuzda burada listelenecek."
                 action={
-                  <Link className="btn btn-primary btn-sm" href="/credit-packages/new">
-                    Yeni Paket
-                  </Link>
+                  canWrite ? (
+                    <Link className="btn btn-primary btn-sm" href="/credit-packages/new">
+                      Yeni Paket
+                    </Link>
+                  ) : undefined
                 }
               />
             ) : (
@@ -207,6 +215,8 @@ export default async function AdminCreditPackagesPage({
                           className="inline-actions"
                           style={{ justifyContent: 'flex-end', gap: 4, flexWrap: 'nowrap' }}
                         >
+                          {canWrite ? (
+                          <>
                           <form action={moveCreditPackageAction}>
                             <input type="hidden" name="id" value={pkg.id} />
                             <input type="hidden" name="direction" value="up" />
@@ -233,6 +243,8 @@ export default async function AdminCreditPackagesPage({
                               ↓
                             </button>
                           </form>
+                          </>
+                          ) : null}
                           <span
                             className="cell-muted"
                             style={{ minWidth: 22, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
@@ -298,8 +310,9 @@ export default async function AdminCreditPackagesPage({
                             className="btn btn-secondary btn-sm"
                             href={`/credit-packages/${pkg.id}`}
                           >
-                            Düzenle
+                            {canWrite ? 'Düzenle' : 'Görüntüle'}
                           </Link>
+                          {canChangeStatus ? (
                           <form action={updateCreditPackageStatusAction}>
                             <input type="hidden" name="id" value={pkg.id} />
                             <input type="hidden" name="isActive" value={String(!pkg.isActive)} />
@@ -313,6 +326,7 @@ export default async function AdminCreditPackagesPage({
                               {pkg.isActive ? 'Pasifleştir' : 'Aktifleştir'}
                             </button>
                           </form>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

@@ -24,21 +24,17 @@ import { SectionCard } from '../../../components/section-card';
 import { StatCard } from '../../../components/stat-card';
 import { customerVerificationBadges, verificationBadgeClass } from '../../../lib/customer-verification';
 import {
-  createCustomerActivationLinkAction,
   createCustomerNoteAction,
   updateCustomerStatusAction,
 } from '../actions';
-
-type SearchParams = {
-  activationUrl?: string;
-  activationExpiresAt?: string;
-  activationError?: string;
-};
+import { ActivationLinkForm } from './activation-link-form';
 
 type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<SearchParams>;
 };
+
+/** Which linked screens this session may open; a link it cannot follow is plain text. */
+type RowLinks = { requests: boolean; offers: boolean; providers: boolean };
 
 // apiFetch backend hatası geldiğinde body metnini Error.message'a koyar.
 // Backend NestJS NotFoundException JSON şekli: {"statusCode":404,...}.
@@ -54,18 +50,32 @@ function isBackendNotFound(error: unknown): boolean {
 
 export default async function AdminCustomerDetailPage({
   params,
-  searchParams,
 }: CustomerDetailPageProps) {
-  await requireAdmin('CUSTOMERS_READ');
+  const { can } = await requireAdmin('CUSTOMERS_READ');
+  // Notes are their own permission. Without it the card is not rendered and
+  // the notes endpoint is not called, so CUSTOMERS_READ alone opens the page.
+  const canReadNotes = can('CUSTOMER_NOTES_READ');
+  const canWriteNotes = can('CUSTOMER_NOTES_WRITE');
+  const canChangeStatus = can('CUSTOMERS_STATUS');
+  const canIssueActivationLink = can('CUSTOMER_ACTIVATION_LINK_ISSUE');
+  const canOpenRequests = can('REQUESTS_READ');
+  const canOpenOffers = can('OFFERS_READ');
+  const canOpenProviders = can('PROVIDERS_READ_DETAIL');
+  const links: RowLinks = {
+    requests: canOpenRequests,
+    offers: canOpenOffers,
+    providers: canOpenProviders,
+  };
   const { id } = await params;
-  const search = (await searchParams) ?? {};
 
   let response: CustomerDetailResponse;
-  let notesResponse: CustomerNotesResponse;
+  let notesResponse: CustomerNotesResponse | null;
   try {
     [response, notesResponse] = await Promise.all([
       apiFetch<CustomerDetailResponse>(`/customers/${id}`),
-      apiFetch<CustomerNotesResponse>(`/customers/${id}/notes`),
+      canReadNotes
+        ? apiFetch<CustomerNotesResponse>(`/customers/${id}/notes`)
+        : Promise.resolve(null),
     ]);
   } catch (error) {
     if (isBackendNotFound(error)) {
@@ -74,7 +84,7 @@ export default async function AdminCustomerDetailPage({
     throw error;
   }
   const { customer, metrics, recentRequests, recentOffers, acceptedOffers } = response;
-  const notes = notesResponse.items;
+  const notes = notesResponse?.items ?? [];
 
   const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
   // From the two account columns alone; a verified request of this customer
@@ -130,9 +140,7 @@ export default async function AdminCustomerDetailPage({
       <div className="provider-detail-card-grid">
         <CustomerActivationSection
           customer={customer}
-          activationUrl={search.activationUrl}
-          activationExpiresAt={search.activationExpiresAt}
-          activationError={search.activationError}
+          canIssue={canIssueActivationLink}
         />
 
         <SectionCard title="Profil & İletişim" className="card-wide">
@@ -169,6 +177,7 @@ export default async function AdminCustomerDetailPage({
                 ) : (
                   <span className="badge badge-bad">Pasif</span>
                 )}
+                {canChangeStatus ? (
                 <form action={updateCustomerStatusAction}>
                   <input type="hidden" name="customerId" value={customer.id} />
                   <input
@@ -185,6 +194,7 @@ export default async function AdminCustomerDetailPage({
                     {customer.isActive ? 'Pasifleştir' : 'Aktifleştir'}
                   </button>
                 </form>
+                ) : null}
               </div>
               <div
                 className="muted"
@@ -228,11 +238,13 @@ export default async function AdminCustomerDetailPage({
           </details>
         </SectionCard>
 
+        {canReadNotes ? (
         <SectionCard
           title="Müşteri Notları"
           subtitle={notes.length > 0 ? `Toplam ${notes.length}` : undefined}
           className="card-wide"
         >
+          {canWriteNotes ? (
           <form
             action={createCustomerNoteAction}
             style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}
@@ -253,6 +265,7 @@ export default async function AdminCustomerDetailPage({
               </button>
             </div>
           </form>
+          ) : null}
 
           {notes.length === 0 ? (
             <EmptyState title="Henüz müşteri notu yok." />
@@ -273,6 +286,7 @@ export default async function AdminCustomerDetailPage({
             </ul>
           )}
         </SectionCard>
+        ) : null}
 
         <SectionCard
           title="Talep geçmişi"
@@ -298,7 +312,7 @@ export default async function AdminCustomerDetailPage({
                 </thead>
                 <tbody>
                   {recentRequests.map((request) => (
-                    <CustomerRequestRow key={request.id} request={request} />
+                    <CustomerRequestRow key={request.id} request={request} links={links} />
                   ))}
                 </tbody>
               </table>
@@ -329,7 +343,7 @@ export default async function AdminCustomerDetailPage({
                 </thead>
                 <tbody>
                   {recentOffers.map((offer) => (
-                    <CustomerOfferRow key={offer.id} offer={offer} />
+                    <CustomerOfferRow key={offer.id} offer={offer} links={links} />
                   ))}
                 </tbody>
               </table>
@@ -364,7 +378,7 @@ export default async function AdminCustomerDetailPage({
                 </thead>
                 <tbody>
                   {acceptedOffers.map((offer) => (
-                    <CustomerOfferRow key={offer.id} offer={offer} />
+                    <CustomerOfferRow key={offer.id} offer={offer} links={links} />
                   ))}
                 </tbody>
               </table>
@@ -378,14 +392,10 @@ export default async function AdminCustomerDetailPage({
 
 function CustomerActivationSection({
   customer,
-  activationUrl,
-  activationExpiresAt,
-  activationError,
+  canIssue,
 }: {
   customer: CustomerDetailResponse['customer'];
-  activationUrl?: string;
-  activationExpiresAt?: string;
-  activationError?: string;
+  canIssue: boolean;
 }) {
   if (customer.customerOrigin !== 'AUTO_CREATED_REQUEST') {
     return null;
@@ -412,6 +422,12 @@ function CustomerActivationSection({
     );
   }
 
+  // Issuing is the only thing left to show. Without the permission there is
+  // nothing to offer, so the card is not rendered.
+  if (!canIssue) {
+    return null;
+  }
+
   return (
     <SectionCard title="Hesap aktivasyonu" className="card-wide">
       <div style={{ marginBottom: 12 }}>
@@ -420,62 +436,19 @@ function CustomerActivationSection({
           belirleme bağlantısı oluşturabilirsiniz. Bağlantıyı kopyalayıp WhatsApp / SMS / e-posta
           ile manuel olarak paylaşın.
         </p>
-        <form action={createCustomerActivationLinkAction}>
-          <input type="hidden" name="customerId" value={customer.id} />
-          <button type="submit" className="btn btn-primary btn-sm">
-            Aktivasyon linki oluştur
-          </button>
-        </form>
+        <ActivationLinkForm customerId={customer.id} />
       </div>
-
-      {activationError ? (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 10,
-            borderRadius: 8,
-            background: 'rgba(220, 38, 38, 0.08)',
-            border: '1px solid rgba(220, 38, 38, 0.25)',
-            color: 'rgb(153, 27, 27)',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          {activationError}
-        </div>
-      ) : null}
-
-      {activationUrl ? (
-        <div style={{ marginTop: 12 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
-            Aktivasyon bağlantısı oluşturuldu. Bu bağlantı 72 saat geçerlidir.
-          </div>
-          <code
-            style={{
-              display: 'block',
-              padding: 10,
-              background: 'var(--surface-soft, #f3f4f6)',
-              border: '1px solid var(--border, #e5e7eb)',
-              borderRadius: 8,
-              fontSize: 12,
-              lineHeight: 1.5,
-              wordBreak: 'break-all',
-            }}
-          >
-            {activationUrl}
-          </code>
-          {activationExpiresAt ? (
-            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-              Son geçerlilik: {formatDateTime(activationExpiresAt)}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </SectionCard>
   );
 }
 
-function CustomerRequestRow({ request }: { request: CustomerRecentRequest }) {
+function CustomerRequestRow({
+  request,
+  links,
+}: {
+  request: CustomerRecentRequest;
+  links: RowLinks;
+}) {
   const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
   return (
     <tr>
@@ -506,9 +479,11 @@ function CustomerRequestRow({ request }: { request: CustomerRecentRequest }) {
         )}
       </td>
       <td className="col-actions">
-        <Link className="btn btn-secondary btn-sm" href={`/requests/${request.id}`}>
-          Detay
-        </Link>
+        {links.requests ? (
+          <Link className="btn btn-secondary btn-sm" href={`/requests/${request.id}`}>
+            Detay
+          </Link>
+        ) : null}
       </td>
     </tr>
   );
@@ -543,7 +518,7 @@ function CustomerNoteItem({ note }: { note: CustomerNote }) {
   );
 }
 
-function CustomerOfferRow({ offer }: { offer: CustomerRecentOffer }) {
+function CustomerOfferRow({ offer, links }: { offer: CustomerRecentOffer; links: RowLinks }) {
   const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;
   const requestRef = offer.requestNumber ?? `#${offer.requestId.slice(-8)}`;
   return (
@@ -552,12 +527,20 @@ function CustomerOfferRow({ offer }: { offer: CustomerRecentOffer }) {
         <code className="display-number">{offerRef}</code>
       </td>
       <td>
-        <Link href={`/requests/${offer.requestId}`}>
+        {links.requests ? (
+          <Link href={`/requests/${offer.requestId}`}>
+            <code className="display-number">{requestRef}</code>
+          </Link>
+        ) : (
           <code className="display-number">{requestRef}</code>
-        </Link>
+        )}
       </td>
       <td>
-        <Link href={`/providers/${offer.providerId}`}>{offer.providerName}</Link>
+        {links.providers ? (
+          <Link href={`/providers/${offer.providerId}`}>{offer.providerName}</Link>
+        ) : (
+          offer.providerName
+        )}
       </td>
       <td>{formatPrice(offer.priceAmount, offer.currency)}</td>
       <td>
@@ -565,9 +548,11 @@ function CustomerOfferRow({ offer }: { offer: CustomerRecentOffer }) {
       </td>
       <td>{formatDateTime(offer.submittedAt)}</td>
       <td className="col-actions">
-        <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
-          Detay
-        </Link>
+        {links.offers ? (
+          <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
+            Detay
+          </Link>
+        ) : null}
       </td>
     </tr>
   );

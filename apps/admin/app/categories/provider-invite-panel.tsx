@@ -24,6 +24,12 @@ type ProviderInvitePanelProps = {
    * reopening it needs to know.
    */
   canIssue: boolean;
+  /**
+   * Whether this session holds PROVIDER_INVITES_ISSUE / PROVIDER_INVITES_REVOKE.
+   * Computed on the server; without one, its button is not rendered at all.
+   */
+  mayIssue: boolean;
+  mayRevoke: boolean;
   invites: ProviderInvite[];
   activeCount: number;
 };
@@ -49,6 +55,8 @@ export function ProviderInvitePanel({
   categorySlug,
   categoryName,
   canIssue,
+  mayIssue,
+  mayRevoke,
   invites,
   activeCount,
 }: ProviderInvitePanelProps) {
@@ -71,7 +79,7 @@ export function ProviderInvitePanel({
         sayfayı yeniledikten sonra bir daha gösterilemez, gerekirse yenisini üretin.
       </p>
 
-      {canIssue ? (
+      {!mayIssue ? null : canIssue ? (
         <form action={submit} className="panel-row">
           <input type="hidden" name="intent" value="issue" />
           <input type="hidden" name="categoryId" value={categoryId} />
@@ -129,7 +137,7 @@ export function ProviderInvitePanel({
                   {invite.createdBy?.name ? ` · ${invite.createdBy.name}` : ''}
                 </span>
               </span>
-              {invite.state === 'ACTIVE' ? (
+              {mayRevoke && invite.state === 'ACTIVE' ? (
                 <form action={submit}>
                   <input type="hidden" name="intent" value="revoke" />
                   <input type="hidden" name="categoryId" value={categoryId} />

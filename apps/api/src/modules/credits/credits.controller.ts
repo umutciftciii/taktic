@@ -130,6 +130,26 @@ export class CreditsController {
     });
   }
 
+  /**
+   * One provider's credits, read by staff (ADMIN-DESIGN-000, F4).
+   *
+   * The provider-facing routes above sit behind `ProviderAccessGuard`: the
+   * owning provider or a SUPER_ADMIN, nobody else. A staff account holding
+   * FINANCE_LEDGER_READ could therefore read every provider's credit movements
+   * on `/finance/credit-ledger` but not one provider's balance on its own
+   * screen. That guard is not widened to ADMIN; this is a separate read-only
+   * route on the permission the ledger already uses. It shows the same rows the
+   * ledger shows (actor included, as the ledger shows it) plus the provider's
+   * name, so the admin screen needs no second permission to label itself.
+   * Granting and deducting stay on their own permissions, below.
+   */
+  @Get('admin/providers/:providerId/credits')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.FINANCE_LEDGER_READ)
+  getProviderCreditsForAdmin(@Param('providerId') providerId: string) {
+    return this.creditsService.getProviderCreditsForAdmin(providerId);
+  }
+
   @Post('providers/:providerId/credits/grant')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CREDITS_GRANT)

@@ -14,7 +14,8 @@ import {
 } from '../category-taxonomy';
 
 export default async function NewCategoryPage() {
-  await requireAdmin('CATALOG_READ', 'CATEGORIES_WRITE');
+  const { can } = await requireAdmin('CATALOG_READ', 'CATEGORIES_WRITE');
+  const canUpload = can('UPLOADS_WRITE');
   const categories = await apiFetch<Category[]>('/admin/categories');
   // Only a GROUP can be a parent — a service is not a folder — so the picker
   // offers exactly what the API will accept.
@@ -110,12 +111,14 @@ export default async function NewCategoryPage() {
                   />
                 </label>
                 <CategoryImageUploader
+                  canUpload={canUpload}
                   name="imageUrl"
                   label="Kart görseli"
                   variant="card"
                   helpText="Kategoriler listesindeki kart için kullanılır."
                 />
                 <CategoryImageUploader
+                  canUpload={canUpload}
                   name="coverImageUrl"
                   label="Kapak görseli"
                   variant="cover"

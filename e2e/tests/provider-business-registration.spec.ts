@@ -193,7 +193,11 @@ test.describe('promotion eligibility queue', () => {
       await row.getByRole('link', { name: 'Detay' }).click();
       await expect(reviewer.page).toHaveURL(new RegExp(`/promotion-eligibility/${event.id}`));
       await expect(reviewer.page.getByTestId('eligibility-signals')).toContainText('İşletme kaydı beyan edilmedi');
-      await expect(reviewer.page.getByRole('link', { name: seeded.campaign.name })).toBeVisible();
+      // The candidate campaign is named, but not linked: this role cannot open
+      // /campaigns (no CAMPAIGNS_READ), and a link it cannot follow would land
+      // on /yetkisiz (ADMIN-DESIGN-000).
+      await expect(reviewer.page.getByText(seeded.campaign.name)).toBeVisible();
+      await expect(reviewer.page.getByRole('link', { name: seeded.campaign.name })).toHaveCount(0);
 
       // The provider link on the hold opens the provider page for this role
       // (PR-C.1: it used to send every role-based account to /yetkisiz), with

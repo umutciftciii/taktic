@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   formatDateTime,
   formatPrice,
   PackagePurchase,
@@ -15,15 +16,20 @@ type AdminPackagePurchaseDetailPageProps = {
 };
 
 export default async function AdminPackagePurchaseDetailPage({ params }: AdminPackagePurchaseDetailPageProps) {
-  await requireAdmin('PACKAGE_PURCHASES_READ');
+  const { can } = await requireAdmin('PACKAGE_PURCHASES_READ');
+  const canFixStatus = can('PACKAGE_PURCHASE_STATUS_WRITE');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
+  const canOpenCredits = can('FINANCE_LEDGER_READ');
   const { id } = await params;
-  const purchase = await apiFetch<PackagePurchase>(`/package-purchases/${id}`);
+  const purchase = await fetchOrNotFound(() =>
+    apiFetch<PackagePurchase>(`/package-purchases/${encodeURIComponent(id)}`),
+  );
   const purchaseRef = purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;
 
   return (
     <main>
       <p className="breadcrumbs">
-        <Link href="/">Dashboard</Link>
+        {can('DASHBOARD_READ') ? <Link href="/">Dashboard</Link> : <span>Dashboard</span>}
         <span aria-hidden="true">/</span>
         <Link href="/package-purchases">Paket talepleri</Link>
         <span aria-hidden="true">/</span>
@@ -38,14 +44,20 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
         </p>
       </header>
 
-      <div className="inline-actions" style={{ marginBottom: 18 }}>
-        <Link className="btn btn-secondary btn-sm" href={`/providers/${purchase.providerId}`}>
-          Hizmet vereni aç
-        </Link>
-        <Link className="btn btn-ghost btn-sm" href={`/providers/${purchase.providerId}/credits`}>
-          Kredi geçmişi
-        </Link>
-      </div>
+      {canOpenProvider || canOpenCredits ? (
+        <div className="inline-actions" style={{ marginBottom: 18 }}>
+          {canOpenProvider ? (
+            <Link className="btn btn-secondary btn-sm" href={`/providers/${purchase.providerId}`}>
+              Hizmet vereni aç
+            </Link>
+          ) : null}
+          {canOpenCredits ? (
+            <Link className="btn btn-ghost btn-sm" href={`/providers/${purchase.providerId}/credits`}>
+              Kredi geçmişi
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="detail-grid">
         <div className="stack">
@@ -166,7 +178,7 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
         </div>
 
         <div className="stack">
-          {purchase.status === 'PENDING' ? (
+          {purchase.status === 'PENDING' && !canFixStatus ? null : purchase.status === 'PENDING' ? (
             <section className="card" style={{ margin: 0 }}>
               <h2>Manuel düzeltme</h2>
               <div className="notice-warning">

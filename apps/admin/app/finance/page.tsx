@@ -13,7 +13,7 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../lib/api';
-import { formatLedgerReason, formatLedgerSource } from '../../lib/finance-format';
+import { formatLedgerReason, formatLedgerSource, type LedgerSource } from '../../lib/finance-format';
 import { EmptyState } from '../../components/empty-state';
 import {
   AnalyticsPeriod,
@@ -283,10 +283,38 @@ function pickPeak(
   return { bucket: peak, value: peakValue };
 }
 
+/**
+ * A ledger row's "related record" link, kept only when this session may open
+ * the screen it points at; otherwise the cell renders the same label as text.
+ * An unrecognised destination is dropped rather than guessed at.
+ */
+function gateLedgerSource(source: LedgerSource, can: (...names: string[]) => boolean): LedgerSource {
+  if (!source.href) return source;
+  const permission = source.href.startsWith('/campaigns/')
+    ? 'CAMPAIGNS_READ'
+    : source.href.startsWith('/offers/')
+      ? 'OFFERS_READ'
+      : source.href.startsWith('/package-purchases/')
+        ? 'PACKAGE_PURCHASES_READ'
+        : null;
+  return permission && can(permission) ? source : { ...source, href: null };
+}
+
 export default async function AdminFinanceDashboardPage({
   searchParams,
 }: AdminFinancePageProps) {
-  await requireAdmin('FINANCE_READ');
+  const { can } = await requireAdmin('FINANCE_READ');
+  // Every link below leads to a screen with its own gate; each is shown only
+  // when this session would get past it (the target page's requireAdmin).
+  const canOpenLedger = can('FINANCE_LEDGER_READ');
+  const canOpenPurchases = can('PACKAGE_PURCHASES_READ');
+  const canOpenRefundScan = can('OFFER_REFUND_SCAN_READ');
+  const canOpenManualAdjustments = can('FINANCE_LEDGER_READ');
+  const canOpenCreditPackages = can('CREDIT_PACKAGES_READ');
+  const canOpenProviders = can('PROVIDERS_READ');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
+  const purchasesHref = (status: string) =>
+    canOpenPurchases ? `/package-purchases?status=${status}` : undefined;
 
   const params = await searchParams;
   const period = normalizePeriod(params.period);
@@ -334,17 +362,25 @@ export default async function AdminFinanceDashboardPage({
         title="Finans"
         subtitle="Tahsilat, kredi hareketleri ve paket talep durumlarına dair özet."
         actions={
-          <>
-            <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
-              Kredi Hareketleri
-            </Link>
-            <Link className="btn btn-secondary btn-sm" href="/package-purchases">
-              Paket Satın Almaları
-            </Link>
-            <Link className="btn btn-ghost btn-sm" href="/refund-scan">
-              İade Taraması
-            </Link>
-          </>
+          canOpenLedger || canOpenPurchases || canOpenRefundScan ? (
+            <>
+              {canOpenLedger ? (
+                <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
+                  Kredi Hareketleri
+                </Link>
+              ) : null}
+              {canOpenPurchases ? (
+                <Link className="btn btn-secondary btn-sm" href="/package-purchases">
+                  Paket Satın Almaları
+                </Link>
+              ) : null}
+              {canOpenRefundScan ? (
+                <Link className="btn btn-ghost btn-sm" href="/refund-scan">
+                  İade Taraması
+                </Link>
+              ) : null}
+            </>
+          ) : undefined
         }
       />
 
@@ -577,35 +613,35 @@ export default async function AdminFinanceDashboardPage({
           <StatCard
             label="Ödenmiş"
             value={formatCount(packagePurchases.paidPackagePurchases)}
-            href="/package-purchases?status=PAID"
+            href={purchasesHref('PAID')}
             tone="success"
           />
           <StatCard
             label="Bekleyen"
             value={formatCount(packagePurchases.pendingPackagePurchases)}
-            href="/package-purchases?status=PENDING"
+            href={purchasesHref('PENDING')}
             tone={packagePurchases.pendingPackagePurchases > 0 ? 'warning' : 'neutral'}
           />
           <StatCard
             label="İptal"
             value={formatCount(packagePurchases.cancelledPackagePurchases)}
-            href="/package-purchases?status=CANCELLED"
+            href={purchasesHref('CANCELLED')}
           />
           <StatCard
             label="Başarısız"
             value={formatCount(packagePurchases.failedPackagePurchases)}
-            href="/package-purchases?status=FAILED"
+            href={purchasesHref('FAILED')}
             tone={packagePurchases.failedPackagePurchases > 0 ? 'error' : 'neutral'}
           />
           <StatCard
             label="Süresi dolmuş"
             value={formatCount(packagePurchases.expiredPackagePurchases)}
-            href="/package-purchases?status=EXPIRED"
+            href={purchasesHref('EXPIRED')}
           />
           <StatCard
             label="İade edilmiş"
             value={formatCount(packagePurchases.refundedPackagePurchases)}
-            href="/package-purchases?status=REFUNDED"
+            href={purchasesHref('REFUNDED')}
             tone={packagePurchases.refundedPackagePurchases > 0 ? 'warning' : 'neutral'}
           />
         </div>
@@ -638,18 +674,25 @@ export default async function AdminFinanceDashboardPage({
               <tbody>
                 {recentTransactions.map((transaction) => {
                   const reason = formatLedgerReason(transaction.reason);
-                  const source = formatLedgerSource(
-                    transaction.referenceType,
-                    transaction.referenceId,
-                    transaction.sourceNumber,
+                  const source = gateLedgerSource(
+                    formatLedgerSource(
+                      transaction.referenceType,
+                      transaction.referenceId,
+                      transaction.sourceNumber,
+                    ),
+                    can,
                   );
                   return (
                     <tr key={transaction.id}>
                       <td>{formatDateTime(transaction.createdAt)}</td>
                       <td>
-                        <Link href={`/providers/${transaction.providerId}/credits`}>
-                          {transaction.provider.businessName}
-                        </Link>
+                        {canOpenLedger ? (
+                          <Link href={`/providers/${transaction.providerId}/credits`}>
+                            {transaction.provider.businessName}
+                          </Link>
+                        ) : (
+                          transaction.provider.businessName
+                        )}
                       </td>
                       <td>{creditTxnTypeLabel(transaction.type)}</td>
                       <td className="col-num">
@@ -748,20 +791,32 @@ export default async function AdminFinanceDashboardPage({
                   return (
                   <tr key={purchase.id}>
                     <td>
-                      <Link href={`/package-purchases/${purchase.id}`}>
+                      {canOpenPurchases ? (
+                        <Link href={`/package-purchases/${purchase.id}`}>
+                          <code className="display-number">{purchaseRef}</code>
+                        </Link>
+                      ) : (
                         <code className="display-number">{purchaseRef}</code>
-                      </Link>
+                      )}
                     </td>
                     <td>{formatDateTime(purchase.createdAt)}</td>
                     <td>
-                      <Link href={`/providers/${purchase.providerId}`}>
-                        {purchase.provider.businessName}
-                      </Link>
+                      {canOpenProvider ? (
+                        <Link href={`/providers/${purchase.providerId}`}>
+                          {purchase.provider.businessName}
+                        </Link>
+                      ) : (
+                        purchase.provider.businessName
+                      )}
                     </td>
                     <td>
-                      <Link href={`/package-purchases/${purchase.id}`}>
-                        {purchase.packageNameSnapshot}
-                      </Link>
+                      {canOpenPurchases ? (
+                        <Link href={`/package-purchases/${purchase.id}`}>
+                          {purchase.packageNameSnapshot}
+                        </Link>
+                      ) : (
+                        purchase.packageNameSnapshot
+                      )}
                     </td>
                     <td className="col-num">{purchase.creditAmountSnapshot}</td>
                     <td className="col-num">
@@ -786,27 +841,39 @@ export default async function AdminFinanceDashboardPage({
 
       <SectionCard title="Hızlı bağlantılar" subtitle="Sık kullanılan finans ekranları.">
         <div className="inline-actions">
-          <Link className="btn btn-primary btn-sm" href="/finance/credit-ledger">
-            Kredi Hareketleri
-          </Link>
-          <Link className="btn btn-secondary btn-sm" href="/finance/manual-adjustments">
-            Manuel İşlemler
-          </Link>
+          {canOpenLedger ? (
+            <Link className="btn btn-primary btn-sm" href="/finance/credit-ledger">
+              Kredi Hareketleri
+            </Link>
+          ) : null}
+          {canOpenManualAdjustments ? (
+            <Link className="btn btn-secondary btn-sm" href="/finance/manual-adjustments">
+              Manuel İşlemler
+            </Link>
+          ) : null}
           <Link className="btn btn-secondary btn-sm" href="/finance/providers">
             Provider Finans Bakiyeleri
           </Link>
-          <Link className="btn btn-secondary btn-sm" href="/package-purchases">
-            Paket Satın Almaları
-          </Link>
-          <Link className="btn btn-secondary btn-sm" href="/refund-scan">
-            İade Taraması
-          </Link>
-          <Link className="btn btn-secondary btn-sm" href="/credit-packages">
-            Kredi Paketleri
-          </Link>
-          <Link className="btn btn-ghost btn-sm" href="/providers">
-            Hizmet Verenler
-          </Link>
+          {canOpenPurchases ? (
+            <Link className="btn btn-secondary btn-sm" href="/package-purchases">
+              Paket Satın Almaları
+            </Link>
+          ) : null}
+          {canOpenRefundScan ? (
+            <Link className="btn btn-secondary btn-sm" href="/refund-scan">
+              İade Taraması
+            </Link>
+          ) : null}
+          {canOpenCreditPackages ? (
+            <Link className="btn btn-secondary btn-sm" href="/credit-packages">
+              Kredi Paketleri
+            </Link>
+          ) : null}
+          {canOpenProviders ? (
+            <Link className="btn btn-ghost btn-sm" href="/providers">
+              Hizmet Verenler
+            </Link>
+          ) : null}
         </div>
       </SectionCard>
     </main>

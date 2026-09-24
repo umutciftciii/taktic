@@ -1,13 +1,14 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import {
   apiFetch,
   CustomerActivationLinkResponse,
   CustomerNote,
   UpdateCustomerStatusResponse,
 } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import type { ActivationLinkState } from './activation-link-state';
 
 export async function createCustomerNoteAction(formData: FormData) {
   const customerId = readFormString(formData, 'customerId');
@@ -42,11 +43,14 @@ export async function updateCustomerStatusAction(formData: FormData) {
   revalidatePath(`/customers/${customerId}`);
 }
 
-export async function createCustomerActivationLinkAction(formData: FormData) {
+export async function createCustomerActivationLinkAction(
+  _previous: ActivationLinkState,
+  formData: FormData,
+): Promise<ActivationLinkState> {
   const customerId = readFormString(formData, 'customerId');
 
   if (!customerId) {
-    return;
+    return { kind: 'error', message: 'Aktivasyon linki oluşturulamadı.' };
   }
 
   let result: CustomerActivationLinkResponse;
@@ -59,21 +63,18 @@ export async function createCustomerActivationLinkAction(formData: FormData) {
       },
     );
   } catch (error) {
+    // A 401/403 is a navigation (to /login or /yetkisiz), not a message.
+    rethrowNextControlFlow(error);
     const message =
       error instanceof Error
         ? parseBackendMessage(error.message)
         : 'Aktivasyon linki oluşturulamadı.';
-    redirect(
-      `/customers/${customerId}?activationError=${encodeURIComponent(message)}`,
-    );
+    return { kind: 'error', message };
   }
 
-  revalidatePath(`/customers/${customerId}`);
-  const params = new URLSearchParams({
-    activationUrl: result.activationUrl,
-    activationExpiresAt: result.expiresAt,
-  });
-  redirect(`/customers/${customerId}?${params.toString()}`);
+  // The link goes back in the action's state and nowhere else. It is not put
+  // in a redirect URL, a cookie or the page cache (see activation-link-form).
+  return { kind: 'issued', activationUrl: result.activationUrl, expiresAt: result.expiresAt };
 }
 
 function parseBackendMessage(raw: string): string {

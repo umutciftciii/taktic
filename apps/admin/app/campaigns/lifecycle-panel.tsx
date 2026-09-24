@@ -13,6 +13,11 @@ type CampaignLifecyclePanelProps = {
   currentVersion: CampaignVersionSummary | null;
   /** CMP-006 PR-D: the API's answer for the version "activate" would activate. */
   currentVersionChannel: CampaignChannelReadiness | null;
+  /**
+   * CAMPAIGNS_LIFECYCLE — decided on the server. Without it the panel still
+   * says what state the campaign is in, but offers no move.
+   */
+  canLifecycle: boolean;
 };
 
 /**
@@ -41,13 +46,15 @@ export function CampaignLifecyclePanel({
   activeVersion,
   currentVersion,
   currentVersionChannel,
+  canLifecycle,
 }: CampaignLifecyclePanelProps) {
   const [state, submit, pending] = useActionState(campaignLifecycleAction, IDLE_CAMPAIGN_LIFECYCLE_STATE);
   const status = campaign.status;
   // Offer "activate version N" only where it does something a plain resume
   // does not: a first activation, or a swap to a newer stored version.
   const newerVersionStored = currentVersion !== null && currentVersion.id !== activeVersion?.id;
-  const canActivate = status === 'DRAFT' || ((status === 'ACTIVE' || status === 'PAUSED') && newerVersionStored);
+  const canActivate =
+    canLifecycle && (status === 'DRAFT' || ((status === 'ACTIVE' || status === 'PAUSED') && newerVersionStored));
   const activateVersion = currentVersion;
   const needsEngine = !engineEnabled;
   const channelBlocked = canActivate && currentVersionChannel !== null && !currentVersionChannel.available;
@@ -65,7 +72,7 @@ export function CampaignLifecyclePanel({
             : 'Sona erdi: bu kampanya bir daha açılamaz; mevcut lotlar etkilenmez.')}
       </p>
 
-      {needsEngine && status !== 'ENDED' ? (
+      {canLifecycle && needsEngine && status !== 'ENDED' ? (
         <p data-testid="campaign-lifecycle-engine-off">
           <strong>Kampanya motoru kapalı — etkinleştirme yapılamaz.</strong> Etkinleştir ve devam ettir, motor açılana
           kadar reddedilir. {status === 'DRAFT' ? 'Taslağı kapatmak' : 'Duraklat ve sonlandır'} her zaman kullanılabilir.
@@ -120,7 +127,7 @@ export function CampaignLifecyclePanel({
         </form>
       ) : null}
 
-      {status === 'DRAFT' ? (
+      {canLifecycle && status === 'DRAFT' ? (
         <form action={submit} className="campaign-lifecycle-form" data-testid="campaign-close-draft-form">
           <input type="hidden" name="campaignId" value={campaign.id} />
           <p>
@@ -139,7 +146,7 @@ export function CampaignLifecyclePanel({
         </form>
       ) : null}
 
-      {status === 'ACTIVE' || status === 'PAUSED' ? (
+      {canLifecycle && (status === 'ACTIVE' || status === 'PAUSED') ? (
         <form action={submit} className="campaign-lifecycle-form">
           <input type="hidden" name="campaignId" value={campaign.id} />
           <label className="field">

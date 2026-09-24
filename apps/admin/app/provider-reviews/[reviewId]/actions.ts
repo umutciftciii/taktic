@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, type AdminReviewDetail } from '../../../lib/api';
+import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 
 /**
  * The operator's decision on one review: take the comment down, take the
@@ -44,6 +45,7 @@ export async function moderateReviewAction(formData: FormData) {
       }),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     if (apiErrorCode(error) === 'REVIEW_MODERATION_NOOP') {
       redirect(`${target}?error=noop`);
     }
@@ -66,6 +68,7 @@ export async function dismissReviewReportAction(formData: FormData) {
       body: JSON.stringify({ resolutionNote: readOptionalFormString(formData, 'resolutionNote') }),
     });
   } catch (error) {
+    rethrowNextControlFlow(error);
     if (apiErrorCode(error) === 'NO_OPEN_REVIEW_REPORT') {
       redirect(`${target}?error=noOpen`);
     }

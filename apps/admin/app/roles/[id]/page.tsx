@@ -7,7 +7,7 @@ import {
   formatDateTime,
   getAdminRole,
   listAdminPermissionCatalogue,
-  requireAdmin,
+  requireSuperAdmin,
   userRoleBadgeClass,
   userRoleLabel,
 } from '../../../lib/api';
@@ -32,7 +32,7 @@ const OK_MESSAGES: Record<string, string> = {
 };
 
 export default async function AdminRoleDetailPage({ params, searchParams }: RoleDetailPageProps) {
-  await requireAdmin();
+  await requireSuperAdmin();
   const [{ id }, { error, ok }] = await Promise.all([params, searchParams]);
   const [role, catalogue] = await Promise.all([
     fetchOrNotFound(() => getAdminRole(id)),

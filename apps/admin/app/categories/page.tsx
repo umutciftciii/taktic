@@ -33,7 +33,9 @@ function normalizeStatus(value: string | undefined): StatusFilter {
 }
 
 export default async function AdminCategoriesPage({ searchParams }: AdminCategoriesPageProps) {
-  await requireAdmin('CATALOG_READ');
+  const { can } = await requireAdmin('CATALOG_READ');
+  // `/categories/new` gates on both; a link it would refuse is not offered.
+  const canCreate = can('CATALOG_READ', 'CATEGORIES_WRITE');
   const { q: rawQuery, status: rawStatus } = await searchParams;
   const query = (rawQuery ?? '').trim();
   const status = normalizeStatus(rawStatus);
@@ -83,9 +85,11 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
         title="Kategoriler"
         subtitle="Hizmet talep akışında kullanılan kategori ağacını yönetin."
         actions={
-          <Link className="btn btn-primary btn-sm" href="/categories/new">
-            Yeni Kategori
-          </Link>
+          canCreate ? (
+            <Link className="btn btn-primary btn-sm" href="/categories/new">
+              Yeni Kategori
+            </Link>
+          ) : undefined
         }
       />
 
@@ -294,9 +298,11 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                 title="Henüz kategori yok."
                 description="İlk kategoriyi oluşturduğunuzda burada listelenecek."
                 action={
-                  <Link className="btn btn-primary btn-sm" href="/categories/new">
-                    Yeni Kategori
-                  </Link>
+                  canCreate ? (
+                    <Link className="btn btn-primary btn-sm" href="/categories/new">
+                      Yeni Kategori
+                    </Link>
+                  ) : undefined
                 }
               />
             ) : (

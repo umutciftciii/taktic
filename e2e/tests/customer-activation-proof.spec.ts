@@ -58,9 +58,14 @@ test.describe('customer activation and the e-mail proof', () => {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
       await admin.gotoAdmin(`/customers/${claimable.id}`);
       await admin.page.getByRole('button', { name: 'Aktivasyon linki oluştur' }).click();
-      await expect(admin.page).toHaveURL(/activationUrl=/);
+      // The link is shown in the page and never carried in the address bar:
+      // it is a live credential, and a URL leaks into history, logs and the
+      // next page's Referer.
+      const shownLink = admin.page.getByTestId('customer-activation-url');
+      await expect(shownLink).toBeVisible();
       await assertNoErrorScreen(admin.page);
-      const activationUrl = new URL(admin.page.url()).searchParams.get('activationUrl');
+      expect(admin.page.url(), 'the link is not in the address bar').not.toContain('activation');
+      const activationUrl = (await shownLink.textContent())?.trim();
       expect(activationUrl, 'the operator is shown the link').toBeTruthy();
 
       const token = await prisma().customerActivationToken.findFirstOrThrow({

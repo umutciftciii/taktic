@@ -47,7 +47,9 @@ const DONE_MESSAGES: Record<string, string> = {
  * text are not on this page.
  */
 export default async function PackageRefundDetailPage({ params, searchParams }: PageProps) {
-  await requireAdmin('PACKAGE_REFUND_READ');
+  // The action buttons need no gate here: `allowedActions` is computed by the
+  // API for this viewer's permissions (package-refund-requests.service.ts).
+  const { can } = await requireAdmin('PACKAGE_REFUND_READ');
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const refund = await fetchOrNotFound(() => apiFetch<PackageRefundDetail>(`/admin/package-refund-requests/${id}`));
   const actions = refund.allowedActions;
@@ -96,9 +98,13 @@ export default async function PackageRefundDetailPage({ params, searchParams }: 
           <div>
             <dt>Destek talebi</dt>
             <dd>
-              <Link href={`/support/${refund.supportTicket.id}`} data-testid="package-refund-ticket-link">
-                {refund.supportTicket.subject}
-              </Link>
+              {can('SUPPORT_READ') ? (
+                <Link href={`/support/${refund.supportTicket.id}`} data-testid="package-refund-ticket-link">
+                  {refund.supportTicket.subject}
+                </Link>
+              ) : (
+                refund.supportTicket.subject
+              )}
             </dd>
           </div>
           <div>

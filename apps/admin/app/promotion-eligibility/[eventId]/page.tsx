@@ -22,7 +22,11 @@ type PageProps = {
  * address or phone is stored — and the one decision it may receive.
  */
 export default async function PromotionEligibilityDetailPage({ params, searchParams }: PageProps) {
-  await requireAdmin('PROMOTION_ELIGIBILITY_REVIEW');
+  // The decision form needs no extra gate: its route asks for the same
+  // PROMOTION_ELIGIBILITY_REVIEW this screen already requires.
+  const { can } = await requireAdmin('PROMOTION_ELIGIBILITY_REVIEW');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
+  const canOpenCampaign = can('CAMPAIGNS_READ');
   const [{ eventId }, query] = await Promise.all([params, searchParams]);
   const hold = await fetchOrNotFound(() =>
     apiFetch<PromotionEligibilityHoldView>(`/admin/promotion-eligibility/holds/${encodeURIComponent(eventId)}`),
@@ -54,9 +58,13 @@ export default async function PromotionEligibilityDetailPage({ params, searchPar
           <dl className="meta-row">
             <dt>Hizmet veren</dt>
             <dd>
-              <Link className="cell-link" href={`/providers/${hold.provider.id}`}>
-                {hold.provider.businessName}
-              </Link>
+              {canOpenProvider ? (
+                <Link className="cell-link" href={`/providers/${hold.provider.id}`}>
+                  {hold.provider.businessName}
+                </Link>
+              ) : (
+                hold.provider.businessName
+              )}
             </dd>
             <dt>Tetikleyici</dt>
             <dd>{ELIGIBILITY_TRIGGER_LABELS[hold.trigger] ?? hold.trigger}</dd>
@@ -68,11 +76,17 @@ export default async function PromotionEligibilityDetailPage({ params, searchPar
             <dd>
               {(hold.candidateCampaigns ?? []).length === 0
                 ? '—'
-                : (hold.candidateCampaigns ?? []).map((campaign) => (
-                    <Link key={campaign.id} className="cell-link" href={`/campaigns/${campaign.id}`} style={{ marginRight: 8 }}>
-                      {campaign.name}
-                    </Link>
-                  ))}
+                : (hold.candidateCampaigns ?? []).map((campaign) =>
+                    canOpenCampaign ? (
+                      <Link key={campaign.id} className="cell-link" href={`/campaigns/${campaign.id}`} style={{ marginRight: 8 }}>
+                        {campaign.name}
+                      </Link>
+                    ) : (
+                      <span key={campaign.id} style={{ marginRight: 8 }}>
+                        {campaign.name}
+                      </span>
+                    ),
+                  )}
             </dd>
           </dl>
         </SectionCard>

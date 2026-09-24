@@ -6,7 +6,7 @@ import {
   formatDateTime,
   listAdminPermissionCatalogue,
   listAdminRoles,
-  requireAdmin,
+  requireSuperAdmin,
 } from '../../lib/api';
 import { createAdminRoleAction } from './actions';
 import { PermissionMatrix } from './permission-matrix';
@@ -20,12 +20,12 @@ type RolesPageProps = {
  *
  * There is no permission that opens this screen, and that is the point: the
  * authority to define authority is not part of the model it defines (RG-7
- * §12.1). `requireAdmin()` only establishes panel access; the API refuses a
- * non-super-admin on every call this page makes, so a staff account that
- * guesses the URL gets the "yetkiniz yok" page rather than an empty form.
+ * §12.1). `requireSuperAdmin()` sends any other staff account to the
+ * "yetkiniz yok" page before anything renders; the API refuses the same calls
+ * on its own, so the screen is not the only guard.
  */
 export default async function AdminRolesPage({ searchParams }: RolesPageProps) {
-  await requireAdmin();
+  await requireSuperAdmin();
   const [{ error, ok }, roles, catalogue] = await Promise.all([
     searchParams,
     listAdminRoles(),

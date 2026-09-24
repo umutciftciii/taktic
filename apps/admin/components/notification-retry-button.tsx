@@ -6,8 +6,10 @@ import { retryNotificationAction } from '../app/notifications/actions';
 /**
  * The "Yeniden gönder" control.
  *
- * Rendered only where the API says the row is retryable, and it carries no
- * decision of its own: the id is the entire payload, and the API re-checks
+ * Rendered only where the API says the row is retryable *and* the server page
+ * has decided this session holds NOTIFICATION_RETRY (the permission is never
+ * shipped to the client; the page simply does not render the button). It
+ * carries no decision of its own: the id is the entire payload, and the API re-checks
  * eligibility before it does anything.
  *
  * The double-submit guard is here rather than in the action because it has to

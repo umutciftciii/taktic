@@ -51,7 +51,9 @@ type LeadsPageProps = {
  * appears on the provider's own inbox.
  */
 export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps) {
-  await requireAdmin('SHOWCASE_LEADS_READ');
+  const { can } = await requireAdmin('SHOWCASE_LEADS_READ');
+  const canOpenRequest = can('REQUESTS_READ');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
 
   const { status, providerId } = await searchParams;
   const selected = STATUSES.find((candidate) => candidate === status) ?? null;
@@ -119,9 +121,13 @@ export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps
                 {leads.map((lead) => (
                   <tr key={lead.id}>
                     <td>
-                      <Link href={`/requests/${lead.request.id}`}>
-                        {lead.request.requestNumber ?? lead.request.id.slice(-6)}
-                      </Link>
+                      {canOpenRequest ? (
+                        <Link href={`/requests/${lead.request.id}`}>
+                          {lead.request.requestNumber ?? lead.request.id.slice(-6)}
+                        </Link>
+                      ) : (
+                        (lead.request.requestNumber ?? lead.request.id.slice(-6))
+                      )}
                       <div className="muted" style={{ fontSize: 12 }}>
                         {lead.request.category.name} · {lead.request.district},{' '}
                         {lead.request.city}
@@ -132,9 +138,13 @@ export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps
                       </div>
                     </td>
                     <td>
-                      <Link href={`/providers/${lead.provider.id}`}>
-                        {lead.provider.businessName}
-                      </Link>
+                      {canOpenProvider ? (
+                        <Link href={`/providers/${lead.provider.id}`}>
+                          {lead.provider.businessName}
+                        </Link>
+                      ) : (
+                        lead.provider.businessName
+                      )}
                       {/*
                         Whether the request is still reserved. It is the one
                         field that says at a glance if a released lead really did

@@ -17,8 +17,22 @@ const PUBLIC_PATHS = new Set([
   '/logout',
 ]);
 
+/*
+ * The session probe answers for itself. `SessionGuard` polls it with `fetch`
+ * and reads a 401 as "the session ended". Redirected to /login instead, the
+ * probe got the sign-in page's HTML with a 200, `response.json()` threw, and a
+ * tab whose cookie was gone never learned it had been signed out. The route
+ * already returns 401 when there is no cookie (app/api/session/route.ts), so
+ * it is let through here. This is the one exact path: every other `/api/*`
+ * route still needs the cookie.
+ */
+const SELF_AUTHENTICATING_PATHS = new Set(['/api/session']);
+
 export function middleware(request: NextRequest) {
-  if (PUBLIC_PATHS.has(request.nextUrl.pathname)) {
+  if (
+    PUBLIC_PATHS.has(request.nextUrl.pathname) ||
+    SELF_AUTHENTICATING_PATHS.has(request.nextUrl.pathname)
+  ) {
     return NextResponse.next();
   }
 

@@ -8,7 +8,9 @@ import { CampaignEngineNotice } from '../engine-notice';
 export const dynamic = 'force-dynamic';
 
 export default async function NewCampaignPage() {
-  await requireAdmin('CAMPAIGNS_WRITE');
+  // The engine badge below is read from the list route (CAMPAIGNS_READ), so
+  // the screen asks for both rather than redirecting halfway through.
+  const { can } = await requireAdmin('CAMPAIGNS_WRITE', 'CAMPAIGNS_READ');
   // Only for the badge: the list endpoint is the cheapest reader of the switch.
   const { engineEnabled } = await apiFetch<CampaignListResponse>('/admin/campaigns?limit=1');
 
@@ -21,7 +23,7 @@ export default async function NewCampaignPage() {
       />
 
       <div style={{ marginBottom: 12 }}>
-        <CampaignEngineNotice engineEnabled={engineEnabled} />
+        <CampaignEngineNotice engineEnabled={engineEnabled} canOpenOperationsSettings={can('OPERATIONS_SETTINGS_READ')} />
       </div>
 
       <div className="admin-module-layout">

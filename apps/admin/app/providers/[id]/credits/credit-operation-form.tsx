@@ -8,6 +8,14 @@ type CreditOperationFormProps = {
   providerId: string;
   currentBalance: number;
   action: (formData: FormData) => Promise<void> | void;
+  /**
+   * Which operations this session may perform: CREDITS_GRANT and
+   * CREDITS_DEDUCT, computed on the server. They are separate permissions, so
+   * each tab is offered only when its own permission is held. The caller does
+   * not render the form when neither is held.
+   */
+  canGrant: boolean;
+  canDeduct: boolean;
 };
 
 const REASON_MIN_LENGTH = 3;
@@ -16,8 +24,12 @@ export function CreditOperationForm({
   providerId,
   currentBalance,
   action,
+  canGrant,
+  canDeduct,
 }: CreditOperationFormProps) {
-  const [operationType, setOperationType] = useState<OperationType>('GRANT');
+  const [operationType, setOperationType] = useState<OperationType>(
+    canGrant ? 'GRANT' : 'DEDUCT',
+  );
   const [amountInput, setAmountInput] = useState('');
   const [reason, setReason] = useState('');
 
@@ -48,6 +60,7 @@ export function CreditOperationForm({
       <input type="hidden" name="providerId" value={providerId} />
       <input type="hidden" name="operationType" value={operationType} />
 
+      {canGrant && canDeduct ? (
       <div className="credit-operation-tabs" role="tablist" aria-label="İşlem tipi">
         <button
           type="button"
@@ -68,6 +81,7 @@ export function CreditOperationForm({
           Kredi düş
         </button>
       </div>
+      ) : null}
 
       <label className="form-row">
         <span>Tutar</span>

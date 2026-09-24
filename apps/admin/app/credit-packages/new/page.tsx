@@ -31,7 +31,9 @@ const PACKAGE_TYPES = [
 ] as const;
 
 export default async function NewCreditPackagePage({ searchParams }: NewCreditPackagePageProps) {
-  await requireAdmin('CREDIT_PACKAGES_WRITE');
+  // WRITE for the form, READ for the eligible-category list it is built from
+  // (`GET /admin/offer-packages/unlimited-eligible-categories`).
+  await requireAdmin('CREDIT_PACKAGES_READ', 'CREDIT_PACKAGES_WRITE');
   const params = await searchParams;
   const errorMessage = (params.error ?? '').trim();
   // The pool an unlimited scope may be drawn from. Empty until an admin marks

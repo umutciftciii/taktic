@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   apiFetch,
+  fetchOrNotFound,
   formatDateTime,
   formatPrice,
   requireAdmin,
@@ -61,12 +62,16 @@ export default async function ShowcasePlacementPage({
   params,
   searchParams,
 }: PlacementPageProps) {
-  await requireAdmin('SHOWCASE_PLACEMENTS_READ');
+  const { can } = await requireAdmin('SHOWCASE_PLACEMENTS_READ');
+  const canModerate = can('SHOWCASE_PLACEMENTS_MODERATE');
+  const canCancel = can('SHOWCASE_PLACEMENT_CANCEL');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
+  const canOpenReview = can('SHOWCASE_REVIEW_READ');
 
   const { placementId } = await params;
   const { error, suspended, resumed, cancelled } = await searchParams;
-  const placement = await apiFetch<ShowcasePlacement>(
-    `/admin/showcase/placements/${placementId}`,
+  const placement = await fetchOrNotFound(() =>
+    apiFetch<ShowcasePlacement>(`/admin/showcase/placements/${placementId}`),
   );
 
   const isAdminHold = placement.suspendReason === 'ADMIN_ACTION';
@@ -128,10 +133,12 @@ export default async function ShowcasePlacementPage({
           <div>
             <dt>İşletme</dt>
             <dd>
-              {placement.provider ? (
+              {placement.provider && canOpenProvider ? (
                 <Link href={`/providers/${placement.provider.id}`}>
                   {placement.provider.businessName}
                 </Link>
+              ) : placement.provider ? (
+                placement.provider.businessName
               ) : (
                 '—'
               )}
@@ -169,9 +176,13 @@ export default async function ShowcasePlacementPage({
           <div>
             <dt>Yayındaki sürüm</dt>
             <dd>
-              <Link href={`/showcase/reviews/${placement.version.id}`}>
-                v{placement.version.versionNumber}
-              </Link>
+              {canOpenReview ? (
+                <Link href={`/showcase/reviews/${placement.version.id}`}>
+                  v{placement.version.versionNumber}
+                </Link>
+              ) : (
+                `v${placement.version.versionNumber}`
+              )}
             </dd>
           </div>
           <div>
@@ -274,7 +285,11 @@ export default async function ShowcasePlacementPage({
                         : 'Sağlayıcı bölge daralttı'}
                     </td>
                     <td>
-                      <Link href={`/showcase/reviews/${change.toVersionId}`}>Yeni sürüm</Link>
+                      {canOpenReview ? (
+                        <Link href={`/showcase/reviews/${change.toVersionId}`}>Yeni sürüm</Link>
+                      ) : (
+                        'Yeni sürüm'
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -284,7 +299,7 @@ export default async function ShowcasePlacementPage({
         </SectionCard>
       ) : null}
 
-      {placement.status === 'ACTIVE' ? (
+      {placement.status === 'ACTIVE' && canModerate ? (
         <SectionCard
           title="Yayından kaldır"
           subtitle="Operatör kararıyla durdurmak süreyi durdurur: durdurma boyunca geçen süre, sürdürüldüğünde bitiş tarihine eklenir."
@@ -304,7 +319,7 @@ export default async function ShowcasePlacementPage({
         </SectionCard>
       ) : null}
 
-      {placement.status === 'SUSPENDED' ? (
+      {placement.status === 'SUSPENDED' && canModerate ? (
         <SectionCard
           title="Yayına al"
           subtitle={
@@ -330,7 +345,7 @@ export default async function ShowcasePlacementPage({
         </SectionCard>
       ) : null}
 
-      {isLive ? (
+      {isLive && canCancel ? (
         <SectionCard
           title="Yerleşimi iptal et"
           subtitle="Yerleşim sonlanır ve yayından kalkar. Para iadesi otomatik yapılmaz: ilgili satın alma manuel inceleme için işaretlenir ve kararı bir insan verir."

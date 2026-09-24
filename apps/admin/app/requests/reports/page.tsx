@@ -55,7 +55,9 @@ function queueHref(state: QueueState, cursor?: string | null): string {
 }
 
 export default async function RequestReportsQueuePage({ searchParams }: ReportQueuePageProps) {
-  await requireAdmin('REQUEST_REPORTS_READ');
+  const { can } = await requireAdmin('REQUEST_REPORTS_READ');
+  const canOpenRequests = can('REQUESTS_READ');
+  const canOpenProviders = can('PROVIDERS_READ_DETAIL');
 
   const params = await searchParams;
   const state = normalizeState(params.state);
@@ -140,9 +142,13 @@ export default async function RequestReportsQueuePage({ searchParams }: ReportQu
                     <tr key={item.request.id} data-testid="report-queue-row">
                       <td>
                         <div className="cell-stack">
-                          <Link className="cell-link" href={`/requests/${item.request.id}`}>
+                          {canOpenRequests ? (
+                            <Link className="cell-link" href={`/requests/${item.request.id}`}>
+                              <code className="display-number">{requestRef}</code>
+                            </Link>
+                          ) : (
                             <code className="display-number">{requestRef}</code>
-                          </Link>
+                          )}
                           <span className="cell-muted">
                             {formatDateTime(item.request.submittedAt)}
                           </span>
@@ -186,15 +192,19 @@ export default async function RequestReportsQueuePage({ searchParams }: ReportQu
                       </td>
                       <td>
                         <div className="cell-stack">
-                          {item.reporters.map((reporter) => (
-                            <Link
-                              className="cell-link"
-                              href={`/providers/${reporter.id}`}
-                              key={reporter.id}
-                            >
-                              {reporter.businessName}
-                            </Link>
-                          ))}
+                          {item.reporters.map((reporter) =>
+                            canOpenProviders ? (
+                              <Link
+                                className="cell-link"
+                                href={`/providers/${reporter.id}`}
+                                key={reporter.id}
+                              >
+                                {reporter.businessName}
+                              </Link>
+                            ) : (
+                              <span key={reporter.id}>{reporter.businessName}</span>
+                            ),
+                          )}
                         </div>
                       </td>
                       <td>

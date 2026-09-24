@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 /**
  * CMP-006 PR-B — the operator's refund actions.
@@ -76,7 +77,7 @@ export async function openPackageRefundRequestAction(formData: FormData) {
     });
     createdId = created.id;
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     failure = extractApiMessage(error);
   }
 
@@ -97,7 +98,7 @@ async function submit(id: string, path: string, body: Record<string, unknown>, d
   try {
     await apiFetch<unknown>(path, { method: 'POST', body: JSON.stringify(body) });
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     failure = extractApiMessage(error);
   }
 
@@ -126,10 +127,4 @@ function extractApiMessage(error: unknown): string {
     /* fall through */
   }
   return raw || 'Beklenmeyen hata.';
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }

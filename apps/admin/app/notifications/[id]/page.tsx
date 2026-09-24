@@ -25,19 +25,20 @@ export default async function NotificationDetailPage({
   params,
   searchParams,
 }: NotificationDetailPageProps) {
-  await requireAdmin('NOTIFICATION_LOGS_READ');
+  const { can } = await requireAdmin('NOTIFICATION_LOGS_READ');
+  const canRetry = can('NOTIFICATION_RETRY');
   const { id } = await params;
   const { retry, message } = await searchParams;
 
   const entry = await fetchOrNotFound(() =>
-    apiFetch<NotificationLogEntry>(`/notification-logs/${id}`),
+    apiFetch<NotificationLogEntry>(`/notification-logs/${encodeURIComponent(id)}`),
   );
 
   return (
     <main>
       <PageHeader
         breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
+          { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
           { label: 'Bildirim Geçmişi', href: '/notifications' },
           { label: 'Detay' },
         ]}
@@ -60,7 +61,7 @@ export default async function NotificationDetailPage({
               token render no control at all — there is nothing here to hide,
               because the CTA is never built for them.
             */}
-            {entry.retryable ? (
+            {entry.retryable && canRetry ? (
               <NotificationRetryButton id={entry.id} returnTo={`/notifications/${entry.id}`} />
             ) : null}
             <Link
@@ -179,9 +180,13 @@ export default async function NotificationDetailPage({
               <dt>Talep</dt>
               <dd>
                 {entry.requestId ? (
-                  <Link className="cell-link" href={`/requests/${entry.requestId}`}>
+                  can('REQUESTS_READ') ? (
+                    <Link className="cell-link" href={`/requests/${entry.requestId}`}>
+                      <code style={{ fontSize: 12 }}>{entry.requestId}</code>
+                    </Link>
+                  ) : (
                     <code style={{ fontSize: 12 }}>{entry.requestId}</code>
-                  </Link>
+                  )
                 ) : (
                   <span className="muted">-</span>
                 )}

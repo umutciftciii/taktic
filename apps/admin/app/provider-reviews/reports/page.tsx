@@ -53,7 +53,8 @@ function queueHref(state: QueueState, cursor?: string | null): string {
 }
 
 export default async function ReviewReportsQueuePage({ searchParams }: ReviewReportsQueuePageProps) {
-  await requireAdmin('PROVIDER_REVIEWS_READ');
+  const { can } = await requireAdmin('PROVIDER_REVIEWS_READ');
+  const canReadRequests = can('REQUESTS_READ');
 
   const params = await searchParams;
   const state = normalizeState(params.state);
@@ -72,7 +73,7 @@ export default async function ReviewReportsQueuePage({ searchParams }: ReviewRep
       <PageHeader
         title="Değerlendirme bildirimleri"
         subtitle="Hizmet verenlerin bildirdiği müşteri yorumları. Karar değerlendirme detayında verilir; en eski bildirim başta."
-        breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Değerlendirme bildirimleri' }]}
+        breadcrumbs={[{ label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined }, { label: 'Değerlendirme bildirimleri' }]}
       />
 
       <nav className="inline-actions report-queue-tabs" aria-label="Bildirim durumu">
@@ -160,9 +161,13 @@ export default async function ReviewReportsQueuePage({ searchParams }: ReviewRep
                       </td>
                       <td>
                         <div className="cell-stack">
-                          <Link className="cell-link" href={`/requests/${item.request.id}`}>
+                          {canReadRequests ? (
+                            <Link className="cell-link" href={`/requests/${item.request.id}`}>
+                              <code className="display-number">{requestRef}</code>
+                            </Link>
+                          ) : (
                             <code className="display-number">{requestRef}</code>
-                          </Link>
+                          )}
                           <span className="cell-muted">{item.request.categoryName}</span>
                         </div>
                       </td>

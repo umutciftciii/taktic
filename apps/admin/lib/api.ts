@@ -794,6 +794,21 @@ export type ProviderCredits = {
   transactions: ProviderCreditTransaction[];
 };
 
+/**
+ * `GET /admin/providers/:id/credits`, the staff read on FINANCE_LEDGER_READ
+ * (ADMIN-DESIGN-000). The same shape as the provider's own read, plus the
+ * provider's label so the screen needs no second permission to name itself.
+ */
+export type AdminProviderCredits = ProviderCredits & {
+  provider: {
+    id: string;
+    businessName: string;
+    status: ProviderProfile['status'];
+    city: string;
+    district: string;
+  };
+};
+
 export type PackagePurchaseStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'REFUNDED';
 
 /**
@@ -2123,6 +2138,23 @@ export async function requireAdmin(...required: AdminPermission[]): Promise<Admi
   }
 
   return { user, isSuperAdmin: access.isSuperAdmin, permissions: access.permissions, can };
+}
+
+/**
+ * Admits a SUPER_ADMIN and sends every other staff account to /yetkisiz.
+ *
+ * For the root screens (roles, creating staff accounts): their capabilities
+ * are not `AdminPermission` values, so `requireAdmin(permission)` cannot
+ * express them (RG-7 §12.1). The API refuses the same calls with
+ * `@Roles(SUPER_ADMIN)`; this makes the screen say so before it renders
+ * instead of after its first request.
+ */
+export async function requireSuperAdmin(): Promise<AdminSession> {
+  const session = await requireAdmin();
+  if (!session.isSuperAdmin) {
+    redirect('/yetkisiz');
+  }
+  return session;
 }
 
 /** One recorded change to an operations setting. */

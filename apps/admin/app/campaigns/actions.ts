@@ -9,6 +9,7 @@ import {
   type CampaignRuleError,
   type CampaignValidationResponse,
 } from '../../lib/api';
+import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 import type { CampaignFormState } from './form-state';
 import type { CampaignLifecycleState } from './lifecycle-state';
 
@@ -99,7 +100,7 @@ export async function campaignFormAction(
       target = `/campaigns/${revised.campaign.id}?ok=revised&v=${revised.currentVersion?.versionNumber ?? ''}`;
     }
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     failure = failureState(error);
   }
 
@@ -122,7 +123,7 @@ async function validateOnly(definition: unknown): Promise<CampaignFormState> {
       ? { status: 'valid', errors: [], summary: result.summary, message: null }
       : { status: 'invalid', errors: result.errors, summary: null, message: null };
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     return failureState(error);
   }
 }
@@ -146,12 +147,6 @@ function failureState(error: unknown): CampaignFormState {
     }
   }
   return { status: 'error', errors: [], summary: null, message: 'Beklenmeyen hata.' };
-}
-
-function isRedirectError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const digest = (error as { digest?: unknown }).digest;
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT');
 }
 
 // ───────────────────────────── lifecycle (S2B2) ─────────────────────────────
@@ -199,7 +194,7 @@ export async function campaignLifecycleAction(
       await apiFetch(`${base}/${verb}`, { method: 'POST', body: JSON.stringify({ reason }) });
     }
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     failure = lifecycleFailure(error);
   }
 
@@ -261,7 +256,7 @@ export async function campaignOperationAction(
       await apiFetch(`${base}/evaluation-events/${encodeURIComponent(targetId)}/retry`, { method: 'POST', body: JSON.stringify({}) });
     }
   } catch (error) {
-    if (isRedirectError(error)) throw error;
+    rethrowNextControlFlow(error);
     failure = lifecycleFailure(error);
   }
 

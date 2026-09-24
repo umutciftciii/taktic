@@ -79,7 +79,14 @@ const OK_MESSAGES: Record<string, string> = {
 };
 
 export default async function CampaignDetailPage({ params, searchParams }: CampaignDetailPageProps) {
-  await requireAdmin('CAMPAIGNS_READ');
+  const { can } = await requireAdmin('CAMPAIGNS_READ');
+  const canWrite = can('CAMPAIGNS_WRITE');
+  const canLifecycle = can('CAMPAIGNS_LIFECYCLE');
+  const canRevoke = can('CAMPAIGN_REDEMPTION_REVOKE');
+  const canRetry = can('CAMPAIGN_EVENT_RETRY');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
+  const canOpenOperationsSettings = can('OPERATIONS_SETTINGS_READ');
+  const canOpenLedger = can('FINANCE_LEDGER_READ');
   const { id } = await params;
   const query = await searchParams;
   const base = `/admin/campaigns/${encodeURIComponent(id)}`;
@@ -91,7 +98,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
   ]);
   const okMessage = query.ok ? (OK_MESSAGES[query.ok] ?? null) : null;
   const { campaign, currentVersion, activeVersion } = data;
-  const canRevise = campaign.status !== 'ENDED';
+  const canRevise = canWrite && campaign.status !== 'ENDED';
   const detailHref = (params: Record<string, string | undefined>) => {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries({ rcursor: query.rcursor, ecursor: query.ecursor, ...params })) {
@@ -125,7 +132,11 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
       ) : null}
 
       <div style={{ marginBottom: 12 }}>
-        <CampaignEngineNotice engineEnabled={data.engineEnabled} queue={data.evaluationQueue} />
+        <CampaignEngineNotice
+          engineEnabled={data.engineEnabled}
+          queue={data.evaluationQueue}
+          canOpenOperationsSettings={canOpenOperationsSettings}
+        />
       </div>
 
       <div className="admin-module-layout">
@@ -243,7 +254,11 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                           <span className={redemptionBadgeClass(row.status)}>{campaignRedemptionStatusLabel(row.status)}</span>
                         </td>
                         <td className="campaign-ops-wrap">
-                          <Link href={`/providers/${row.provider.id}`}>{row.provider.businessName}</Link>
+                          {canOpenProvider ? (
+                            <Link href={`/providers/${row.provider.id}`}>{row.provider.businessName}</Link>
+                          ) : (
+                            row.provider.businessName
+                          )}
                           <span className="campaign-ops-meta">{TRIGGER_LABELS[row.trigger as CampaignTrigger] ?? row.trigger}</span>
                         </td>
                         <td className="col-num">v{row.versionNumber}</td>
@@ -273,7 +288,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                             '—'
                           )}
                         </td>
-                        <td>{row.status === 'GRANTED' ? <RevokeRedemptionForm campaignId={campaign.id} redemptionId={row.id} /> : '—'}</td>
+                        <td>{canRevoke && row.status === 'GRANTED' ? <RevokeRedemptionForm campaignId={campaign.id} redemptionId={row.id} /> : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -356,9 +371,9 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                           )}
                         </td>
                         <td>
-                          {row.retryable && data.engineEnabled ? (
+                          {canRetry && row.retryable && data.engineEnabled ? (
                             <RetryEventButton campaignId={campaign.id} eventId={row.id} />
-                          ) : row.retryable ? (
+                          ) : canRetry && row.retryable ? (
                             <span className="campaign-ops-meta">motor kapalı — kuyruğa alınamaz</span>
                           ) : (
                             '—'
@@ -385,6 +400,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
             activeVersion={activeVersion}
             currentVersion={currentVersion}
             currentVersionChannel={data.currentVersionChannel}
+            canLifecycle={canLifecycle}
           />
 
           <SectionCard title="Denetim izi" subtitle="Kim, ne zaman, hangi sürümü.">
@@ -423,9 +439,18 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
             <h3>Bu ekranda yapılamayanlar</h3>
             <p>
               Motor anahtarı bu ekrandan değiştirilemez; yalnız{' '}
-              <Link href="/operations-settings#kampanya-motoru">Operasyon Ayarları</Link> ekranından, açık onayla açılıp
-              kapatılır. Hak edişler yalnız motor tarafından üretilir; promosyon satırları{' '}
-              <Link href="/finance/credit-ledger?type=CAMPAIGN_GRANT">kredi hareketlerinde</Link> kampanya adıyla görünür.
+              {canOpenOperationsSettings ? (
+                <Link href="/operations-settings#kampanya-motoru">Operasyon Ayarları</Link>
+              ) : (
+                'Operasyon Ayarları'
+              )}{' '}
+              ekranından, açık onayla açılıp kapatılır. Hak edişler yalnız motor tarafından üretilir; promosyon satırları{' '}
+              {canOpenLedger ? (
+                <Link href="/finance/credit-ledger?type=CAMPAIGN_GRANT">kredi hareketlerinde</Link>
+              ) : (
+                'kredi hareketlerinde'
+              )}{' '}
+              kampanya adıyla görünür.
             </p>
             <Link className="btn btn-secondary btn-sm" href="/campaigns">
               Listeye dön
