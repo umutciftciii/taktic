@@ -58,7 +58,7 @@ test.describe('admin session', () => {
       // ---- client-side navigation, then a hard load of the same route ----
       // Both matter: the first keeps the original document (and its action
       // ids) alive, the second replaces it.
-      await admin.page.getByRole('link', { name: 'Talepler' }).first().click();
+      await admin.page.locator('#admin-sidebar').getByRole('link', { name: 'Tüm talepler' }).click();
       await expect(admin.page).toHaveURL(/\/requests/);
       await assertNoErrorScreen(admin.page);
 

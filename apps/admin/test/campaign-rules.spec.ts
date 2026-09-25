@@ -180,8 +180,8 @@ describe('error → field', () => {
 });
 
 describe('the sidebar', () => {
-  it('lists Kampanyalar under Yönetim', () => {
-    const yonetim = navGroups.find((group) => group.title === 'Yönetim');
-    expect(yonetim?.items.find((entry) => entry.href === '/campaigns')?.label).toBe('Kampanyalar');
+  it('lists Kampanyalar under Operasyon, beside the operations switches', () => {
+    const operasyon = navGroups.find((group) => group.title === 'Operasyon');
+    expect(operasyon?.items.find((entry) => entry.href === '/campaigns')?.label).toBe('Kampanyalar');
   });
 });

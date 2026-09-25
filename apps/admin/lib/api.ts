@@ -2086,6 +2086,37 @@ export async function readAdminAccess(): Promise<{
 }
 
 /**
+ * Who is signed in — a name and an address, for the sidebar's account block.
+ *
+ * Identity only. What the session may do is `readAdminAccess`'s question and
+ * nobody else's; this does not look at a role or a permission, so it cannot
+ * become a second answer to it. Like `readAdminAccess` it never redirects and
+ * swallows every failure: the block then shows the role line alone.
+ */
+export async function readAdminIdentity(): Promise<{ name: string | null; email: string | null } | null> {
+  try {
+    const cookieHeader = (await cookies()).toString();
+    if (!cookieHeader) {
+      return null;
+    }
+
+    const response = await fetch(`${apiUrl}/auth/me`, {
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json', cookie: cookieHeader },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as Partial<AuthUser>;
+    return { name: body.name ?? null, email: body.email ?? null };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The operator's catalogue for a *filter* — draft categories included, and an
  * empty list rather than a refusal when this session may not see them.
  *

@@ -23,15 +23,17 @@ test.describe('admin RBAC', () => {
 
       const sidebar = admin.page.locator('#admin-sidebar');
       // Held: the dashboard and the customer queue.
-      await expect(sidebar.getByRole('link', { name: 'Dashboard', exact: true })).toBeVisible();
-      await expect(sidebar.getByRole('link', { name: 'Hizmet Alanlar' })).toBeVisible();
+      await expect(sidebar.getByRole('link', { name: 'Genel görünüm', exact: true })).toBeVisible();
+      await expect(sidebar.getByRole('link', { name: 'Hizmet alanlar' })).toBeVisible();
       // Not held: everything else, including the whole Finans group, which is
       // dropped rather than left as an empty heading.
-      await expect(sidebar.getByRole('link', { name: 'Teklifler' })).toHaveCount(0);
-      await expect(sidebar.getByRole('link', { name: 'Kredi Hareketleri' })).toHaveCount(0);
+      await expect(sidebar.getByRole('link', { name: 'Tüm teklifler' })).toHaveCount(0);
+      await expect(sidebar.getByRole('link', { name: 'Kredi hareketleri' })).toHaveCount(0);
       await expect(sidebar.getByText('Finans', { exact: true })).toHaveCount(0);
       // Root: no permission reveals it.
-      await expect(sidebar.getByRole('link', { name: 'Roller ve İzinler' })).toHaveCount(0);
+      await expect(sidebar.getByRole('link', { name: 'Roller ve izinler' })).toHaveCount(0);
+      // The account block counts what the role holds; it never claims more.
+      await expect(admin.page.getByTestId('admin-account-role')).toHaveText('Yetkili personel · 2 yetki');
 
       // A held page opens…
       await admin.gotoAdmin('/customers');

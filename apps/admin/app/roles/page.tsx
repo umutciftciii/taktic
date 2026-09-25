@@ -60,39 +60,41 @@ export default async function AdminRolesPage({ searchParams }: RolesPageProps) {
             description="Aşağıdaki formdan ilk rolü oluşturun; oluşturduktan sonra kullanıcı detayından atayabilirsiniz."
           />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Rol</th>
-                <th>Anahtar</th>
-                <th>İzin</th>
-                <th>Atanmış</th>
-                <th>Durum</th>
-                <th>Güncellenme</th>
-              </tr>
-            </thead>
-            <tbody>
-              {roles.map((role) => (
-                <tr key={role.id}>
-                  <td>
-                    <Link href={`/roles/${role.id}`}>{role.name}</Link>
-                    {role.description ? <div className="muted">{role.description}</div> : null}
-                  </td>
-                  <td>
-                    <code>{role.key}</code>
-                  </td>
-                  <td>{role.permissions.length}</td>
-                  <td>{role.activeAssignmentCount}</td>
-                  <td>
-                    <span className={role.isActive ? 'badge badge-good' : 'badge badge-muted'}>
-                      {role.isActive ? 'Aktif' : 'Pasif'}
-                    </span>
-                  </td>
-                  <td>{formatDateTime(role.updatedAt)}</td>
+          <div className="admin-table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Rol</th>
+                  <th>Anahtar</th>
+                  <th>İzin</th>
+                  <th>Atanmış</th>
+                  <th>Durum</th>
+                  <th>Güncellenme</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {roles.map((role) => (
+                  <tr key={role.id}>
+                    <td>
+                      <Link href={`/roles/${role.id}`}>{role.name}</Link>
+                      {role.description ? <div className="muted">{role.description}</div> : null}
+                    </td>
+                    <td>
+                      <code>{role.key}</code>
+                    </td>
+                    <td>{role.permissions.length}</td>
+                    <td>{role.activeAssignmentCount}</td>
+                    <td>
+                      <span className={role.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+                        {role.isActive ? 'Aktif' : 'Pasif'}
+                      </span>
+                    </td>
+                    <td>{formatDateTime(role.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </SectionCard>
 

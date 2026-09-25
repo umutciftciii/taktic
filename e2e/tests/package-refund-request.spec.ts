@@ -147,7 +147,7 @@ test.describe('package refund request', () => {
       // The operator's queue and detail.
       await signInStaff(admin, staff);
       await admin.gotoAdmin('/package-refunds');
-      await expect(admin.page.locator('#admin-sidebar').getByRole('link', { name: 'Paket İadeleri' })).toBeVisible();
+      await expect(admin.page.locator('#admin-sidebar').getByRole('link', { name: 'Paket iadeleri' })).toBeVisible();
       const row = admin.page.getByTestId('package-refund-row').filter({ hasText: seeded.businessName });
       await expect(row).toHaveAttribute('data-status', 'SUBMITTED');
       await row.getByRole('link', { name: 'Detay' }).click();
