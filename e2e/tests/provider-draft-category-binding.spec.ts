@@ -75,7 +75,7 @@ test.describe('binding a provider to a draft category', () => {
       // Found by searching, because the catalogue is longer than a page of
       // buttons and searching is how an operator actually reaches one row.
       await admin.page.getByTestId('provider-category-search').fill(service.name);
-      await admin.page.getByRole('button', { name: 'Ara' }).click();
+      await admin.page.getByRole('button', { name: 'Ara', exact: true }).click();
 
       const addButton = admin.page
         .getByTestId(`provider-category-add-${service.slug}`)
@@ -95,7 +95,7 @@ test.describe('binding a provider to a draft category', () => {
       // The API refusing one when it *is* asked for is pinned in
       // apps/api/test/provider-draft-category-binding.spec.ts.
       await admin.page.getByTestId('provider-category-search').fill(service.name);
-      await admin.page.getByRole('button', { name: 'Ara' }).click();
+      await admin.page.getByRole('button', { name: 'Ara', exact: true }).click();
       await expect(
         admin.page.getByTestId(`provider-category-add-${service.slug}`),
       ).toHaveCount(0);
@@ -140,7 +140,7 @@ test.describe('binding a provider to a draft category', () => {
       await admin.gotoAdmin(`/providers/${providerAccount.id}`);
 
       await admin.page.getByTestId('provider-category-search').fill(service.name);
-      await admin.page.getByRole('button', { name: 'Ara' }).click();
+      await admin.page.getByRole('button', { name: 'Ara', exact: true }).click();
       await admin.page
         .getByTestId(`provider-category-add-${service.slug}`)
         .getByRole('button')
