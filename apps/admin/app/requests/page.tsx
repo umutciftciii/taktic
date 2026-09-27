@@ -13,8 +13,52 @@ import {
   ServiceRequestStatus,
   statusBadgeClass,
 } from '../../lib/api';
-import { PageHeader } from '../../components/page-header';
+import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
+import { FilterBar, FilterField } from '../../components/filter-bar';
+import { InfoPopover } from '../../components/info-popover';
+import { PageHeader } from '../../components/page-header';
+import { Pagination } from '../../components/pagination';
+import { SavedViewTabs, type TabItem } from '../../components/tabs';
+import { buildHref, parsePage, type QueryParams } from '../../lib/list-query';
+import { formatCount, pageWindow } from '../../lib/pagination';
+
+/**
+ * Talepler (#2), design `requests` (ADMIN-DESIGN-001 Faz 3A).
+ *
+ * The API returns the whole list (`GET /service-requests` has no paging), and
+ * every filter is applied here, on the server, exactly as before. What the
+ * design adds on top is only presentation of data this page already holds:
+ * the saved views count their rows from the same list, and the table is cut
+ * into pages of 50 so a long list is not one enormous table.
+ *
+ * Not rendered: the design's "Excel'e aktar" and "Elle talep ekle". Neither
+ * has an API behind it (ADMIN-ACTIONS-006 and -007); a button that did nothing
+ * would be worse than none.
+ */
+
+const PATH = '/requests';
+const PAGE_SIZE = 50;
+
+/** The design's ⓘ, as written — it matches what this screen does. */
+const SCREEN_INFO =
+  'Müşterilerin doldurduğu hizmet talepleri burada. Yayında olan bir talebi hizmet verenler görür ve teklif verir. Senin işin: yayına girmemiş olanlara karar vermek, şikayet edilenleri incelemek ve kalite puanı düşük olanları gözden geçirmek.';
+
+/**
+ * The design's quality ⓘ, corrected to the API's real scoring
+ * (service-requests.service.ts): no photo and no phone-verification component,
+ * and the bands are 80 / 50, not 70 / 40.
+ */
+const QUALITY_INFO =
+  '100 üzerinden bir puan: müşteri formu ne kadar eksiksiz doldurdu — telefon ve ad, il/ilçe ve konum ayrıntısı, bütçe, tercih tarihi, aciliyet, en az birkaç cümlelik açıklama ve kategori sorularının yanıtları. 80 ve üzeri "Yüksek", 50–79 "Orta", 50\'nin altı "Düşük" sayılır. Puan talebi kendiliğinden gizlemez; yalnız dikkat çeker.';
+
+/**
+ * With auto-publish on, a submitted request is approved the moment it is
+ * submitted, so "Yeni Talep" stops being the moderation inbox. Said before the
+ * operator filters on it.
+ */
+const STATUS_INFO =
+  'Otomatik yayın açıkken yeni talepler bu kuyruğa düşmez; burada yalnız eski talepler ve doğrulama bekleyenler var.';
 
 type RawSearchParams = {
   q?: string;
@@ -24,6 +68,7 @@ type RawSearchParams = {
   city?: string;
   from?: string;
   to?: string;
+  page?: string;
 };
 
 type AdminRequestsPageProps = {
@@ -46,6 +91,12 @@ const statusFilters: Array<{ label: string; value: StatusFilter }> = [
   { label: 'Süresi Doldu', value: 'EXPIRED' },
 ];
 
+/**
+ * The saved views: the status filter's values an operator works through, in
+ * that order. Every other status stays one select away in the filter bar.
+ */
+const VIEW_STATUSES: ServiceRequestStatus[] = ['SUBMITTED', 'IN_REVIEW', 'APPROVED', 'MATCHED'];
+
 const qualityFilters: Array<{ label: string; value: QualityFilter }> = [
   { label: 'Tümü', value: 'all' },
   { label: 'Yüksek', value: 'HIGH' },
@@ -53,22 +104,24 @@ const qualityFilters: Array<{ label: string; value: QualityFilter }> = [
   { label: 'Düşük', value: 'LOW' },
 ];
 
+const COLUMNS: DataColumn[] = [
+  { key: 'no', label: 'Talep no' },
+  { key: 'submittedAt', label: 'Geldiği tarih' },
+  { key: 'category', label: 'Hizmet' },
+  { key: 'customer', label: 'Müşteri' },
+  { key: 'location', label: 'Konum' },
+  { key: 'budget', label: 'Bütçe' },
+  { key: 'quality', label: 'Kalite' },
+  { key: 'status', label: 'Durum' },
+  { key: 'offers', label: 'Teklif', align: 'end' },
+  { key: 'actions', label: 'İşlemler', srOnly: true },
+];
+
 function normalizeStatus(value: string | undefined): StatusFilter {
   const upper = value?.toUpperCase();
-  if (
-    upper === 'DRAFT' ||
-    upper === 'SUBMITTED' ||
-    upper === 'IN_REVIEW' ||
-    upper === 'APPROVED' ||
-    upper === 'MATCHED' ||
-    upper === 'COMPLETED' ||
-    upper === 'REJECTED' ||
-    upper === 'CANCELLED' ||
-    upper === 'EXPIRED'
-  ) {
-    return upper;
-  }
-  return 'all';
+  return statusFilters.some((filter) => filter.value === upper) && upper !== 'ALL'
+    ? (upper as ServiceRequestStatus)
+    : 'all';
 }
 
 function normalizeQuality(value: string | undefined): QualityFilter {
@@ -131,8 +184,11 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
   const quality = normalizeQuality(params.quality);
   const categorySlug = (params.category ?? '').trim();
   const cityFilter = (params.city ?? '').trim();
-  const fromDate = parseDateBoundary(params.from, 'start');
-  const toDate = parseDateBoundary(params.to, 'end');
+  const fromRaw = (params.from ?? '').trim();
+  const toRaw = (params.to ?? '').trim();
+  const fromDate = parseDateBoundary(fromRaw, 'start');
+  const toDate = parseDateBoundary(toRaw, 'end');
+  const page = parsePage(params.page);
 
   const [requests, categories] = await Promise.all([
     apiFetch<ServiceRequest[]>('/service-requests'),
@@ -142,8 +198,8 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
   const normalizedQuery = toLower(query);
   const normalizedCity = toLower(cityFilter);
 
-  const filtered = requests.filter((request) => {
-    if (status !== 'all' && request.status !== status) return false;
+  // Every filter except the status: the saved views count from this.
+  const matchingOtherFilters = requests.filter((request) => {
     if (quality !== 'all' && request.qualityLabel !== quality) return false;
     if (categorySlug && request.category.slug !== categorySlug) return false;
     if (normalizedCity && !toLower(request.city).includes(normalizedCity)) return false;
@@ -172,9 +228,15 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
     return true;
   });
 
-  const sortedCategories = [...categories].sort((a, b) =>
-    a.name.localeCompare(b.name, 'tr-TR'),
-  );
+  const filtered =
+    status === 'all'
+      ? matchingOtherFilters
+      : matchingOtherFilters.filter((request) => request.status === status);
+
+  const range = pageWindow({ page, pageSize: PAGE_SIZE, total: filtered.length });
+  const pageRows = filtered.slice(range.start > 0 ? range.start - 1 : 0, range.end);
+
+  const sortedCategories = [...categories].sort((a, b) => a.name.localeCompare(b.name, 'tr-TR'));
 
   const hasFilters =
     query.length > 0 ||
@@ -182,19 +244,59 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
     quality !== 'all' ||
     categorySlug.length > 0 ||
     cityFilter.length > 0 ||
-    Boolean(params.from?.trim()) ||
-    Boolean(params.to?.trim());
+    fromRaw.length > 0 ||
+    toRaw.length > 0;
+
+  const filterParams: QueryParams = {
+    q: query,
+    status: status === 'all' ? '' : status,
+    quality: quality === 'all' ? '' : quality,
+    category: categorySlug,
+    city: cityFilter,
+    from: fromRaw,
+    to: toRaw,
+  };
+
+  // Exact counts: the whole list is on this page already.
+  const views: TabItem[] = [
+    { key: '', label: 'Tümü', count: matchingOtherFilters.length, testId: 'request-view-all' },
+    ...VIEW_STATUSES.map((value) => ({
+      key: value,
+      label: requestStatusLabel(value),
+      count: matchingOtherFilters.filter((request) => request.status === value).length,
+      testId: `request-view-${value.toLowerCase()}`,
+    })),
+  ];
+
+  const summary =
+    requests.length === 0
+      ? 'Henüz talep yok'
+      : hasFilters
+        ? `${formatCount(requests.length)} talebin ${formatCount(filtered.length)} tanesi filtreye uyuyor`
+        : `${formatCount(requests.length)} talep · en yeni önce`;
 
   return (
     <main className="requests-page">
-      <PageHeader
-        title="Talepler"
-        subtitle="Müşteri taleplerini inceleyin, kalite ve moderasyon durumlarını yönetin."
+      <PageHeader title="Talepler" subtitle={summary} info={SCREEN_INFO} />
+
+      <SavedViewTabs
+        label="Talep görünümleri"
+        items={views}
+        active={status === 'all' ? '' : status}
+        path={PATH}
+        params={filterParams}
+        param="status"
+        testId="request-views"
       />
 
-      <form className="admin-toolbar request-toolbar" method="get" action="/requests">
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="request-search">Ara</label>
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        label="Talep filtreleri"
+        testId="request-filters"
+      >
+        <FilterField label="Ara" htmlFor="request-search" wide>
           <input
             id="request-search"
             name="q"
@@ -203,33 +305,33 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
             defaultValue={query}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="request-status">Durum</label>
-          {/*
-            With auto-publish on, a submitted request is approved the moment it
-            is submitted, so "Yeni Talep" stops being the moderation inbox. The
-            hint says what is left in it, before the operator filters on it.
-          */}
-          <p className="admin-hint" id="request-status-hint">
-            Otomatik yayın açıkken yeni talepler bu kuyruğa düşmez; burada yalnız eski talepler ve
-            doğrulama bekleyenler var.
-          </p>
-          <select
-            id="request-status"
-            name="status"
-            defaultValue={status}
-            aria-describedby="request-status-hint"
-          >
+        </FilterField>
+        <FilterField
+          label="Durum"
+          htmlFor="request-status"
+          info={
+            <InfoPopover label="Yeni talepler neden bu kuyrukta değil?" size="sm">
+              {STATUS_INFO}
+            </InfoPopover>
+          }
+        >
+          <select id="request-status" name="status" defaultValue={status}>
             {statusFilters.map((filter) => (
               <option key={filter.value} value={filter.value}>
                 {filter.label}
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="request-quality">Kalite</label>
+        </FilterField>
+        <FilterField
+          label="Kalite"
+          htmlFor="request-quality"
+          info={
+            <InfoPopover label="Talep kalitesi nedir?" size="sm">
+              {QUALITY_INFO}
+            </InfoPopover>
+          }
+        >
           <select id="request-quality" name="quality" defaultValue={quality}>
             {qualityFilters.map((filter) => (
               <option key={filter.value} value={filter.value}>
@@ -237,9 +339,8 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="request-category">Kategori</label>
+        </FilterField>
+        <FilterField label="Kategori" htmlFor="request-category">
           <select id="request-category" name="category" defaultValue={categorySlug}>
             <option value="">Tümü</option>
             {sortedCategories.map((category) => (
@@ -248,9 +349,8 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="request-city">Şehir</label>
+        </FilterField>
+        <FilterField label="Şehir" htmlFor="request-city">
           <input
             id="request-city"
             name="city"
@@ -259,196 +359,154 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
             defaultValue={cityFilter}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="request-from">Başlangıç</label>
-          <input
-            id="request-from"
-            name="from"
-            type="date"
-            defaultValue={params.from ?? ''}
+        </FilterField>
+        <FilterField label="Başlangıç" htmlFor="request-from">
+          <input id="request-from" name="from" type="date" defaultValue={fromRaw} />
+        </FilterField>
+        <FilterField label="Bitiş" htmlFor="request-to">
+          <input id="request-to" name="to" type="date" defaultValue={toRaw} />
+        </FilterField>
+      </FilterBar>
+
+      <div className="data-list-card">
+        {filtered.length === 0 ? (
+          requests.length === 0 ? (
+            <EmptyState
+              title="Henüz talep yok."
+              description="Müşteri talepleri geldikçe burada listelenecek."
+            />
+          ) : (
+            <EmptyState
+              title="Filtrelere uygun talep bulunamadı."
+              description="Aramayı daraltabilir veya filtreleri temizleyebilirsiniz."
+              action={
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
+                  Filtreleri temizle
+                </Link>
+              }
+            />
+          )
+        ) : (
+          <DataTable caption="Talepler" columns={COLUMNS} minWidth={1120} testId="request-table">
+            {pageRows.map((request) => (
+              <RequestRow key={request.id} request={request} canReadOffers={canReadOffers} />
+            ))}
+          </DataTable>
+        )}
+        {filtered.length > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={range.page}
+            pageSize={PAGE_SIZE}
+            total={filtered.length}
+            noun="talep"
+            summaryTestId="request-count"
           />
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
+function RequestRow({ request, canReadOffers }: { request: ServiceRequest; canReadOffers: boolean }) {
+  const offerCount =
+    typeof request.offersCount === 'number'
+      ? request.offersCount
+      : typeof request._count?.offers === 'number'
+        ? request._count.offers
+        : null;
+  const secondaryLocation = request.neighborhood || request.addressNote;
+  const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
+
+  return (
+    <tr data-testid="request-row" data-request-id={request.id}>
+      <td className="cell-nowrap">
+        <code className="display-number">{requestRef}</code>
+      </td>
+      <td>{formatDateTime(request.submittedAt)}</td>
+      <td>
+        <div className="cell-stack">
+          <strong>{request.category.name}</strong>
+          {request.category.slug ? <span className="cell-muted">{request.category.slug}</span> : null}
         </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="request-to">Bitiş</label>
-          <input
-            id="request-to"
-            name="to"
-            type="date"
-            defaultValue={params.to ?? ''}
-          />
+      </td>
+      <td>
+        <div className="cell-stack">
+          <strong>{request.customerName}</strong>
+          {request.customerPhone ? (
+            <a className="cell-link" href={`tel:${request.customerPhone}`}>
+              {request.customerPhone}
+            </a>
+          ) : null}
+          {request.customerEmail ? (
+            <a className="cell-link cell-muted cell-break" href={`mailto:${request.customerEmail}`}>
+              {request.customerEmail}
+            </a>
+          ) : null}
         </div>
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">
-            {filtered.length} / {requests.length} kayıt
+      </td>
+      <td>
+        <div className="cell-stack">
+          <span>
+            {request.city}/{request.district}
           </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/requests">
-              Sıfırla
+          {secondaryLocation ? <span className="cell-muted">{secondaryLocation}</span> : null}
+        </div>
+      </td>
+      <td>{formatBudgetRange(request.budgetMin, request.budgetMax)}</td>
+      <td>
+        <div className="quality-cell">
+          <span className={qualityBadgeClass(request.qualityLabel)}>
+            {request.qualityScore}/100 · {qualityLabel(request.qualityLabel)}
+          </span>
+          <div className="request-quality-bar request-quality-bar-sm" role="presentation">
+            <span
+              className={`request-quality-bar-fill request-quality-bar-fill-${request.qualityLabel.toLowerCase()}`}
+              style={{ width: `${Math.min(100, Math.max(0, request.qualityScore))}%` }}
+            />
+          </div>
+        </div>
+      </td>
+      <td>
+        <div className="cell-stack">
+          <span className={statusBadgeClass(request.status)}>{requestStatusLabel(request.status)}</span>
+          {lifecycleNotes(request).map((note) => (
+            <span className="cell-muted" key={note}>
+              {note}
+            </span>
+          ))}
+        </div>
+      </td>
+      <td className="is-num">
+        {offerCount === null ? (
+          <span className="cell-muted">—</span>
+        ) : offerCount === 0 ? (
+          <span className="cell-muted">0</span>
+        ) : (
+          <span className="badge badge-good">{offerCount}</span>
+        )}
+      </td>
+      <td className="col-actions">
+        <div className="inline-actions">
+          <Link
+            className="btn btn-secondary btn-sm"
+            href={`/requests/${request.id}`}
+            aria-label={`Aç: ${requestRef}`}
+          >
+            Aç
+          </Link>
+          {canReadOffers ? (
+            <Link
+              className="btn btn-ghost btn-sm"
+              href={`/offers?requestId=${request.id}`}
+              aria-label={`Teklifler: ${requestRef}`}
+            >
+              Teklifler
             </Link>
           ) : null}
         </div>
-      </form>
-
-      <div className="table-card request-list-card">
-        <div className="table-header">
-          <div className="table-header-text">
-            <h2>Talep listesi</h2>
-            <p className="table-header-sub">
-              Filtreler URL üzerinden paylaşılabilir.
-            </p>
-          </div>
-          <span className="admin-toolbar-summary">{filtered.length} kayıt</span>
-        </div>
-        {filtered.length === 0 ? (
-          <div style={{ padding: 18 }}>
-            {requests.length === 0 ? (
-              <EmptyState
-                title="Henüz talep yok."
-                description="Müşteri talepleri geldikçe burada listelenecek."
-              />
-            ) : (
-              <EmptyState
-                title="Filtrelere uygun talep bulunamadı."
-                description="Aramayı daraltabilir veya filtreleri temizleyebilirsiniz."
-                action={
-                  <Link className="btn btn-secondary btn-sm" href="/requests">
-                    Filtreleri temizle
-                  </Link>
-                }
-              />
-            )}
-          </div>
-        ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Talep No</th>
-                  <th>Gönderim</th>
-                  <th>Kategori</th>
-                  <th>Müşteri</th>
-                  <th>Konum</th>
-                  <th>Bütçe</th>
-                  <th>Kalite</th>
-                  <th>Durum</th>
-                  <th className="col-num">Teklif</th>
-                  <th className="col-actions">İşlem</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((request) => {
-                  const offerCount =
-                    typeof request.offersCount === 'number'
-                      ? request.offersCount
-                      : typeof request._count?.offers === 'number'
-                        ? request._count.offers
-                        : null;
-                  const secondaryLocation = request.neighborhood || request.addressNote;
-                  const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
-                  return (
-                    <tr key={request.id}>
-                      <td>
-                        <code className="display-number">{requestRef}</code>
-                      </td>
-                      <td>{formatDateTime(request.submittedAt)}</td>
-                      <td>
-                        <div className="cell-stack">
-                          <span>{request.category.name}</span>
-                          {request.category.slug ? (
-                            <span className="cell-muted">{request.category.slug}</span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <strong>{request.customerName}</strong>
-                          {request.customerPhone ? (
-                            <a className="cell-link" href={`tel:${request.customerPhone}`}>
-                              {request.customerPhone}
-                            </a>
-                          ) : null}
-                          {request.customerEmail ? (
-                            <a className="cell-link cell-muted" href={`mailto:${request.customerEmail}`}>
-                              {request.customerEmail}
-                            </a>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <span>
-                            {request.city}/{request.district}
-                          </span>
-                          {secondaryLocation ? (
-                            <span className="cell-muted">{secondaryLocation}</span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>{formatBudgetRange(request.budgetMin, request.budgetMax)}</td>
-                      <td>
-                        <div className="quality-cell">
-                          <span className={qualityBadgeClass(request.qualityLabel)}>
-                            {request.qualityScore}/100 · {qualityLabel(request.qualityLabel)}
-                          </span>
-                          <div
-                            className="request-quality-bar request-quality-bar-sm"
-                            role="presentation"
-                          >
-                            <span
-                              className={`request-quality-bar-fill request-quality-bar-fill-${request.qualityLabel.toLowerCase()}`}
-                              style={{ width: `${Math.min(100, Math.max(0, request.qualityScore))}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <span className={statusBadgeClass(request.status)}>
-                            {requestStatusLabel(request.status)}
-                          </span>
-                          {lifecycleNotes(request).map((note) => (
-                            <span className="cell-muted" key={note}>
-                              {note}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="col-num">
-                        {offerCount === null ? (
-                          <span className="cell-muted">—</span>
-                        ) : offerCount === 0 ? (
-                          <span className="cell-muted">0</span>
-                        ) : (
-                          <span className="badge badge-good">{offerCount}</span>
-                        )}
-                      </td>
-                      <td className="col-actions">
-                        <div className="inline-actions">
-                          <Link className="btn btn-secondary btn-sm" href={`/requests/${request.id}`}>
-                            Detay
-                          </Link>
-                          {canReadOffers ? (
-                            <Link
-                              className="btn btn-ghost btn-sm"
-                              href={`/offers?requestId=${request.id}`}
-                            >
-                              Teklifler
-                            </Link>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </main>
+      </td>
+    </tr>
   );
 }

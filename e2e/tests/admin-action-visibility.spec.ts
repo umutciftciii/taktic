@@ -61,7 +61,14 @@ test.describe('admin action visibility', () => {
       await expect(admin.page.getByTestId('request-status')).toBeVisible();
 
       // Offers, reports, the contact-sharing audit and the customer's review
-      // each belong to another permission: none is rendered.
+      // each belong to another permission: none is rendered — not the tab,
+      // and not the block behind a hand-typed ?tab= either.
+      const tabs = admin.page.getByRole('navigation', { name: 'Talep sekmeleri' });
+      await expect(tabs.getByRole('link')).toHaveText(['Talep bilgileri', 'Neler oldu']);
+      for (const tab of ['teklifler', 'sikayet']) {
+        await admin.gotoAdmin(`/requests/${request.id}?tab=${tab}`);
+        await expect(admin.page.getByTestId('request-panel-bilgiler'), tab).toBeVisible();
+      }
       await expect(admin.page.getByTestId('request-offers-panel')).toHaveCount(0);
       await expect(admin.page.locator('#bildirimler')).toHaveCount(0);
       await expect(admin.page.getByTestId('contact-reveal-audit')).toHaveCount(0);
@@ -100,7 +107,9 @@ test.describe('admin action visibility', () => {
       await admin.gotoAdmin(`/requests/${request.id}`);
       await expectOpen(admin.page, new RegExp(`/requests/${request.id}$`));
       await expect(admin.page.getByRole('button', { name: 'İncelemeye al' })).toBeVisible();
+      await admin.gotoAdmin(`/requests/${request.id}?tab=teklifler`);
       await expect(admin.page.getByTestId('request-offers-panel')).toBeVisible();
+      await admin.gotoAdmin(`/requests/${request.id}`);
       // Completing and cancelling are CUSTOMER / SUPER_ADMIN routes; no role
       // holds them, so no role is offered them.
       await expect(admin.page.getByRole('button', { name: 'İptal et' })).toHaveCount(0);
@@ -222,9 +231,12 @@ test.describe('admin action visibility', () => {
     try {
       await admin.gotoAdmin(`/requests/${request.id}`);
       await expectOpen(admin.page, new RegExp(`/requests/${request.id}$`));
-      await expect(admin.page.getByTestId('request-offers-panel')).toBeVisible();
-      await expect(admin.page.locator('#bildirimler')).toBeVisible();
       await expect(admin.page.getByRole('button', { name: 'İptal et' })).toBeVisible();
+      await admin.gotoAdmin(`/requests/${request.id}?tab=teklifler`);
+      await expect(admin.page.getByTestId('request-offers-panel')).toBeVisible();
+      await admin.gotoAdmin(`/requests/${request.id}?tab=sikayet`);
+      await expect(admin.page.locator('#bildirimler')).toBeVisible();
+      await admin.gotoAdmin(`/requests/${request.id}`);
       await expect(admin.page.getByRole('button', { name: 'Kaliteyi yeniden hesapla' })).toBeVisible();
 
       await admin.gotoAdmin(`/providers/${provider.id}/credits`);

@@ -1,4 +1,5 @@
 import { apiFetch, RefundScanResponse, requireAdmin } from '../../lib/api';
+import { PageHeader } from '../../components/page-header';
 import { RefundScanClient } from './refund-scan-client';
 
 type RefundScanPageProps = {
@@ -8,6 +9,8 @@ type RefundScanPageProps = {
 };
 
 /**
+ * İade kontrolü (#11), design `refund` (ADMIN-DESIGN-001 Faz 3A).
+ *
  * The `olderThanHours` control this screen used to carry is gone, and it is not
  * coming back as the configurable window.
  *
@@ -17,7 +20,20 @@ type RefundScanPageProps = {
  * window and refund offers whose customers still had the time they were
  * promised. The API accepts no such parameter; `limit` is a batch size and
  * changes nothing about who qualifies.
+ *
+ * The design's "Son tarama · 2 saat önce" figure is not drawn: the refund-scan
+ * endpoints do not report it, and the scheduler's last run lives in one API
+ * process's memory only.
  */
+
+/**
+ * The design's ⓘ, corrected on one point: "siz onaylayana kadar hiçbir kredi
+ * hareket etmez" holds for this screen, but the same rule also runs on a
+ * schedule when the job is switched on in the operations settings.
+ */
+const SCREEN_INFO =
+  'Müşterinin hiç açmadığı ve iade süresi dolan tekliflerde harcanan kredi hizmet verene geri verilir — verdiği teklif hiç görülmediyse karşılığını almamış sayılır. Bu ekran önce uygun teklifleri listeler; buradan başlatılan iade siz onaylamadan çalışmaz. Müşterinin gördüğü teklifler iade edilmez. Otomatik iade işi Operasyon ayarlarında açıksa aynı kural zamanlanmış olarak da çalışır.';
+
 export default async function RefundScanPage({ searchParams }: RefundScanPageProps) {
   const { can } = await requireAdmin('OFFER_REFUND_SCAN_READ');
 
@@ -27,20 +43,20 @@ export default async function RefundScanPage({ searchParams }: RefundScanPagePro
   const scan = await apiFetch<RefundScanResponse>(`/offers/refund-scan?${query.toString()}`);
 
   return (
-    <main>
-      <header className="page-header">
-        <h1 className="page-title">İade Taraması</h1>
-        <p className="page-subtitle">
-          İade süresi dolmuş ve hâlâ görüntülenmemiş teklifleri önizleyin ve iadeyi çalıştırın.
-          Her teklif kendi iade süresine göre değerlendirilir; görüntülenmiş tekliflerde kredi
-          iadesi yapılmaz.
-        </p>
-      </header>
+    <main className="refund-scan-page">
+      <PageHeader
+        title="İade kontrolü"
+        subtitle="İade süresi her teklifin verildiği andaki kurala göre hesaplanır; bu ekrandan süreyi değiştiremezsiniz. Süreyi Operasyon ayarları belirler; görüntülenmiş tekliflerde kredi iadesi yapılmaz."
+        info={SCREEN_INFO}
+      />
 
       <RefundScanClient
         initialLimit={limit}
         initialScan={scan}
         canExecute={can('OFFER_REFUND_EXECUTE')}
+        canOpenOffers={can('OFFERS_READ')}
+        canOpenRequests={can('REQUESTS_READ')}
+        canOpenProviders={can('PROVIDERS_READ_DETAIL')}
       />
     </main>
   );

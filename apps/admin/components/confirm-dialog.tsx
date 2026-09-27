@@ -21,6 +21,11 @@ type ConfirmDialogProps = {
   /** Submitted with the form, like any submit button's name/value. */
   name?: string;
   value?: string;
+  /**
+   * Keeps the trigger closed, e.g. while a client-side call the form starts is
+   * still running. A pending server action disables it on its own.
+   */
+  disabled?: boolean;
   testId?: string;
 };
 
@@ -52,6 +57,7 @@ export function ConfirmDialog({
   triggerClassName = 'btn btn-destructive',
   name,
   value,
+  disabled = false,
   testId,
 }: ConfirmDialogProps) {
   const id = useId();
@@ -64,6 +70,13 @@ export function ConfirmDialog({
 
   function open(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
+    // A required field left empty is the browser's to report, before anyone
+    // is asked to confirm a submission that would not go through anyway.
+    const form = triggerRef.current?.form;
+    if (form && !form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
     dialogRef.current?.showModal();
     // Explicitly, not through `autoFocus`: React writes that attribute only in
     // server-rendered markup, so a dialog rendered on the client would open
@@ -96,8 +109,8 @@ export function ConfirmDialog({
         name={name}
         value={value}
         onClick={open}
-        disabled={pending}
-        aria-disabled={pending}
+        disabled={pending || disabled}
+        aria-disabled={pending || disabled}
         aria-haspopup="dialog"
         data-testid={testId}
       >

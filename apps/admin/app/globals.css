@@ -5726,6 +5726,10 @@ button:disabled {
 /* ---- Tabs / SavedViewTabs ---- */
 
 .tabs {
+  /* The containing block for the counters' visually hidden text: without it an
+     `.sr-only` span in a tab scrolled out of view resolves against the page
+     and widens the whole document on a phone. */
+  position: relative;
   margin: 0 0 16px;
   border-bottom: 2px solid var(--text);
   overflow-x: auto;
@@ -6281,4 +6285,386 @@ button:disabled {
 
 .notification-recipient {
   font-size: 12px;
+}
+
+/* ==================================================================== */
+/* ---- ADMIN-DESIGN-001 Faz 3A: requests, offers, refund scan ---- */
+/* ==================================================================== */
+
+/* A list screen's pieces sit on one rhythm. */
+.requests-page .summary-strip,
+.offers-page .summary-strip,
+.refund-scan-page .summary-strip {
+  margin: 0 0 16px;
+}
+
+.offers-page .admin-filter-pins {
+  margin: 0 0 12px;
+}
+
+/* ---- DetailHeader: back link, summary card, strip ---- */
+
+.detail-header {
+  margin: 0 0 18px;
+}
+
+.detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--color-accent-700);
+  font-size: 13.5px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.detail-back:hover {
+  color: var(--color-accent-800);
+  text-decoration: underline;
+}
+
+.detail-card {
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.detail-card-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding: 20px 22px;
+}
+
+.detail-card-text {
+  display: grid;
+  gap: 8px;
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
+.detail-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.detail-card-badges .badge {
+  margin: 0;
+}
+
+.detail-card-meta {
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.detail-card-title {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.detail-card-subtitle {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.detail-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detail-card-actions form {
+  display: inline-flex;
+}
+
+/* The strip belongs to the card: one frame, a rule between them. */
+.detail-card > .summary-strip {
+  border: 0;
+  border-top: 1px solid var(--color-neutral-300);
+}
+
+/* ---- Detail tab panels ---- */
+
+.detail-panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.detail-panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .detail-panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-panel-grid > .is-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.detail-panel .section-card {
+  min-width: 0;
+  margin: 0;
+}
+
+.detail-panel .notice-success,
+.detail-panel .notice-warning,
+.detail-panel .notice-error {
+  margin: 0;
+}
+
+/* A paragraph of prose inside a card (what the customer wrote, the lifecycle). */
+.detail-prose {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-muted-note {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* ---- Lifecycle progress ("Bu talebe ne olacak") ---- */
+
+.lifecycle-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.lifecycle-progress-bar {
+  position: relative;
+  height: 8px;
+  background: var(--color-neutral-200);
+}
+
+.lifecycle-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--text);
+}
+
+.lifecycle-progress-label {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Operations list ("Yapabileceğin işlemler") ---- */
+
+.action-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.action-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.action-list-item:first-child {
+  padding-top: 0;
+}
+
+.action-list-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.action-list-text {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.action-list-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.action-list-desc,
+.action-list-when {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.action-list-when strong {
+  color: var(--text);
+}
+
+.action-list-item > form,
+.action-list-item > .btn {
+  flex: 0 0 auto;
+}
+
+/* ---- A form inside a detail card ---- */
+
+.detail-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.detail-form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.detail-form-field > span {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.detail-form-field textarea,
+.detail-form-field select,
+.detail-form-field input {
+  width: 100%;
+  min-width: 0;
+}
+
+.detail-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* A report quoted in the Şikayet tab: the design's red rule on the left. */
+.report-quote {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-neutral-100);
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Refund scan ---- */
+
+.refund-scan-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+
+.refund-scan-controls .detail-form-field {
+  flex: 0 1 160px;
+}
+
+.refund-scan-controls form {
+  display: inline-flex;
+}
+
+.refund-scan-stale {
+  margin: 0;
+  color: var(--color-warning);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.technical-id {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.technical-id code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+/* The status card on the request's first tab: its buttons sit in a row. */
+.detail-panel .status-action-list {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.detail-panel .status-action-btn {
+  width: auto;
+  justify-content: flex-start;
+}
+
+.detail-panel .status-verification-note {
+  margin: 12px 0 0;
+}
+
+.detail-panel .status-action-error {
+  margin: 0 0 12px;
+}
+
+.detail-panel .status-reject-block {
+  margin-top: 14px;
+}
+
+.detail-panel .kv-list + .kv-list,
+.detail-panel .detail-prose + .kv-list {
+  margin-top: 10px;
+}
+
+/* A success or refusal message between the header and the tabs. */
+.detail-notice {
+  margin: 0 0 14px;
+}
+
+.detail-card-links {
+  margin-top: 12px;
+}
+
+.offer-history-pending {
+  margin-top: 12px;
+}
+
+/* The refund scan's cards stack on the page's rhythm. */
+.refund-scan-page .section-card {
+  margin: 0 0 16px;
+}
+
+.refund-scan-page .refund-scan-controls + .detail-muted-note {
+  margin-top: 10px;
+}
+
+.refund-scan-page .refund-scan-stale,
+.refund-scan-page .notice-error {
+  margin-top: 10px;
 }

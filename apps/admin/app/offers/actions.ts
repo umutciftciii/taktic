@@ -36,7 +36,8 @@ export async function refundOfferCreditAction(formData: FormData) {
 
   revalidatePath('/offers');
   revalidatePath(`/offers/${id}`);
-  redirect(`/offers/${id}?refunded=1`);
+  // Back to the tab the refund form lives on.
+  redirect(`/offers/${id}?tab=kredi&refunded=1`);
 }
 
 function readFormString(formData: FormData, key: string) {

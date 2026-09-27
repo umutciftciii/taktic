@@ -201,8 +201,11 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
   - "Teklifler" sekmesi ancak `can('OFFERS_READ')` ile görünür.
   - "Şikayet" sekmesi ancak `can('REQUEST_REPORTS_READ')` ile görünür.
   - İletişim paylaşım kartı ancak `can('CONTACT_REVEAL_READ')` ile görünür.
-- **Render edilmeyenler (K11):** 7 gün uzat, teklifi kaldır, hatırlat, uyar, eşleşmeyi iptal et, Excel, elle talep ekle.
-- **API etkisi:** yok. Refund-scan istemci çağrıları aynen kalır.
+- **K11 (2026-09-28 kararı):** Faz 3A'da çalışan karşılığı olmayan eylem render edilmez; ADMIN-ACTIONS-001–007 ayrı ürün/backend/UI dilimlerinde teslim edilir.
+  - Kapsam: 7 gün uzat (001), teklifi kaldır (002), hatırlat (003), uyar (004), eşleşmeyi iptal et (005), Excel'e aktar (006), elle talep ekle (007).
+  - Bunlar iptal edilmiş özellik değildir. Mevcut API karşılıkları, gereken izinler, veri/bildirim etkileri, açık ürün kararları, uygulama sırası ve görev tanımları: `docs/superpowers/specs/2026-09-28-admin-actions-001-007-inventory.md`.
+  - Tasarım dönüşümü bu yedi işlevin backend kapsamını büyütmez; her biri kendi PR'ında, kendi izni ve testleriyle gelir. O PR'a kadar ekranda düğme, "yakında" etiketi ya da devre dışı yer tutucu yoktur.
+- **API etkisi:** yok. Refund-scan'in iki çağrısı (önizleme, çalıştırma) aynı uç, gövde ve izinle tarayıcıdan admin sunucu aksiyonlarına taşındı: derleme anında gömülen API adresi E2E'de erişilemiyordu ve 401/403'te ham gövde gösteriliyordu (envanter §3, F25).
 - **Test:**
   - `request-report-flow`, `marketplace-journey`, `offer-experience`, `offer-detail-hydration`, `offer-withdrawal`, `request-auto-publish`, `contact-sharing`.
   - Yeni: izni olmayan rolde yazma düğmelerinin yokluğu (`admin-rbac-permissions` genişletmesi). Tasarımın `?tab=` URL'leri için derin bağlantı testi.
@@ -354,7 +357,7 @@ Toplam: 3 (Dilim 1) + 1 (Dilim 2) + 6 + 7 + 10 + 8 + 6 + 6 + 7 + 1 = **55**. "So
 - SEO-004 (4 SEO ekranı).
 - ADMIN-DESIGN-000 (davranış düzeltmeleri).
 - F4 API işi.
-- K3 (arama ve zil), K8 "Sonrası" sütunu, K11 backend eylemleri, K12 dashboard veri kaynakları, vitrin kuyruk sayacı.
+- K3 (arama ve zil), K8 "Sonrası" sütunu, K11 backend eylemleri (talep/teklif ekranlarındakiler ADMIN-ACTIONS-001–007 olarak envanterde), K12 dashboard veri kaynakları, vitrin kuyruk sayacı.
 
 ## Karar soruları özeti
 

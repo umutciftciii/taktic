@@ -36,6 +36,11 @@ const STARTING_CREDITS = 10;
 
 test.describe('marketplace journey', () => {
   test('one request, two offers, exactly one winner', async ({ browser }) => {
+    // "No refund anywhere" is measured from here: the suite is serial, so
+    // nothing but this test writes to the ledger until it ends, and a refund
+    // an earlier spec made on purpose (admin-requests-offers) is not this
+    // flow's.
+    const refundsBefore = await countRefundTransactions();
     const location = uniqueLocation();
     const category = await createCategory(CATEGORY_COST);
     const customerAccount = await createCustomer();
@@ -181,7 +186,7 @@ test.describe('marketplace journey', () => {
       // ---- losing did not refund anything -------------------------------
       // Not because the offer lost — losing decides nothing — but because the
       // customer opened it. A read offer is settled, whatever it ended as.
-      expect(await countRefundTransactions()).toBe(0);
+      expect(await countRefundTransactions()).toBe(refundsBefore);
       expect(await creditBalance(secondProvider.id)).toBe(STARTING_CREDITS - CATEGORY_COST);
 
       // ---- no contact details leak in this phase ------------------------

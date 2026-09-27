@@ -98,7 +98,7 @@ export async function resolveReportsAction(formData: FormData) {
   // on the generic error page. The browser's `required` normally catches this
   // first; this is the guard for a submission that bypassed it.
   if (resolution === 'REQUEST_REMOVED' && !removalReason) {
-    redirect(`/requests/${id}?reportError=reasonRequired`);
+    redirect(reportErrorHref(id, 'reasonRequired'));
   }
 
   try {
@@ -113,10 +113,10 @@ export async function resolveReportsAction(formData: FormData) {
   } catch (error) {
     const code = conflictCode(error);
     if (code === 'REQUEST_NOT_REMOVABLE') {
-      redirect(`/requests/${id}?reportError=notRemovable`);
+      redirect(reportErrorHref(id, 'notRemovable'));
     }
     if (code === 'NO_OPEN_REPORTS') {
-      redirect(`/requests/${id}?reportError=noOpen`);
+      redirect(reportErrorHref(id, 'noOpen'));
     }
 
     throw error;
@@ -146,10 +146,10 @@ export async function reopenRequestAction(formData: FormData) {
   } catch (error) {
     const code = conflictCode(error);
     if (code === 'PHONE_NOT_VERIFIED') {
-      redirect(`/requests/${id}?statusError=phoneNotVerified`);
+      redirect(reportErrorHref(id, 'phoneNotVerified'));
     }
     if (code === 'REQUEST_NOT_REOPENABLE') {
-      redirect(`/requests/${id}?reportError=notReopenable`);
+      redirect(reportErrorHref(id, 'notReopenable'));
     }
 
     throw error;
@@ -169,6 +169,14 @@ export async function recalculateRequestQualityAction(formData: FormData) {
 
   revalidatePath('/requests');
   revalidatePath(`/requests/${id}`);
+}
+
+/**
+ * Report decisions and the reopen live on the request's "Şikayet" tab, so a
+ * refusal lands the operator back there, next to the form they just used.
+ */
+function reportErrorHref(id: string, reportError: string) {
+  return `/requests/${id}?tab=sikayet&reportError=${reportError}`;
 }
 
 function readFormString(formData: FormData, key: string) {
