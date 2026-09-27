@@ -137,7 +137,7 @@ test.describe('admin action visibility', () => {
       // The manual-operations list is the same ledger, so the same permission
       // opens its sidebar row and the page (F2).
       const sidebar = admin.page.locator('#admin-sidebar');
-      await expect(sidebar.getByRole('link', { name: 'Manuel İşlemler' })).toBeVisible();
+      await expect(sidebar.getByRole('link', { name: 'Elle kredi işlemleri' })).toBeVisible();
       await admin.gotoAdmin('/finance/manual-adjustments');
       await expectOpen(admin.page, /\/finance\/manual-adjustments$/);
     } finally {
@@ -184,7 +184,7 @@ test.describe('admin action visibility', () => {
       await admin.gotoAdmin('/finance');
       await expectOpen(admin.page, /\/finance$/);
       const sidebar = admin.page.locator('#admin-sidebar');
-      await expect(sidebar.getByRole('link', { name: 'Manuel İşlemler' })).toHaveCount(0);
+      await expect(sidebar.getByRole('link', { name: 'Elle kredi işlemleri' })).toHaveCount(0);
       await admin.gotoAdmin('/finance/manual-adjustments');
       await expect(admin.page).toHaveURL(/\/yetkisiz$/);
     } finally {
@@ -237,7 +237,7 @@ test.describe('admin action visibility', () => {
         await admin.gotoAdmin(path);
         await expectOpen(admin.page, new RegExp(`${path}$`));
       }
-      await expect(admin.page.locator('#admin-sidebar').getByRole('link', { name: 'Roller ve İzinler' })).toBeVisible();
+      await expect(admin.page.locator('#admin-sidebar').getByRole('link', { name: 'Roller ve izinler' })).toBeVisible();
     } finally {
       await admin.close();
     }

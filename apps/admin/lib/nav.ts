@@ -24,100 +24,174 @@ export type NavItem = {
   superAdminOnly?: boolean;
 };
 
+/** The inline icons the sidebar draws (components/nav-icon.tsx). */
+export type NavIconName =
+  | 'grid'
+  | 'file'
+  | 'tag'
+  | 'users'
+  | 'wallet'
+  | 'store'
+  | 'list'
+  | 'settings'
+  | 'shield';
+
 export type NavGroup = {
+  /** Stable id: the open/closed state and the DOM ids hang off it, not the title. */
+  key: string;
+  /** The group heading, and the first half of the top bar's "Grup / Sayfa". */
   title: string;
+  icon: NavIconName;
   items: NavItem[];
 };
 
+/**
+ * What one session is given: the dashboard row on its own, above the groups,
+ * and the groups themselves. `home` is null when the session cannot open the
+ * dashboard — the row is then simply absent, never an empty wrapper.
+ */
+export type NavMenu = {
+  home: NavItem | null;
+  groups: NavGroup[];
+};
+
+/**
+ * "Genel görünüm": a single top-level row, not a group. It has no heading, no
+ * fold and no siblings, so it is not modelled as a one-row group either — a
+ * group that is only there to hold it would be a ninth heading nobody can see.
+ */
+export const navHome: NavItem = { href: '/', label: 'Genel görünüm', exact: true, permission: 'DASHBOARD_READ' };
+export const NAV_HOME_ICON: NavIconName = 'grid';
+
+/**
+ * The sidebar, grouped by what an operator is looking at (ADMIN-DESIGN-001).
+ *
+ * Exactly eight groups, under the standalone `navHome` row: the design's own,
+ * with its "SEO ve adresler" group left out (SEO-004 has no screens yet) and its
+ * "Sistem" group split into Operasyon and Yönetim, so the five screens the
+ * design had no row for have a place (K1):
+ * Paket iadeleri under Finans, Vitrin kartları and Vitrin metin onayları under
+ * Vitrin, Kampanya uygunluk incelemesi under Operasyon and Roller ve izinler
+ * under Yönetim.
+ *
+ * Only the grouping and the wording moved. Every row's `permission` (or
+ * `superAdminOnly`) is the value it had before this change, and still equal to
+ * its page's `requireAdmin(...)` — test/access-boundaries.spec.ts reads every
+ * page.tsx to hold that.
+ *
+ * Not here on purpose: the design's "Eşleşmeler" row (K8) and any counter
+ * badge (K2) — neither has a source this panel may show yet.
+ */
 export const navGroups: NavGroup[] = [
   {
-    title: 'Genel',
-    items: [{ href: '/', label: 'Dashboard', exact: true, permission: 'DASHBOARD_READ' }],
-  },
-  {
-    title: 'Operasyon',
+    key: 'talepler',
+    title: 'Talepler',
+    icon: 'file',
     items: [
-      { href: '/requests', label: 'Talepler', permission: 'REQUESTS_READ' },
-      { href: '/requests/reports', label: 'Talep bildirimleri', permission: 'REQUEST_REPORTS_READ' },
-      // The other report queue: comments providers flagged on their reviews.
-      // Beside the request queue because an operator triages both the same
-      // way — read what was reported, decide, move on.
-      { href: '/provider-reviews/reports', label: 'Değerlendirme bildirimleri', permission: 'PROVIDER_REVIEWS_READ' },
-      { href: '/customers', label: 'Hizmet Alanlar', permission: 'CUSTOMERS_READ' },
-      { href: '/offers', label: 'Teklifler', permission: 'OFFERS_READ' },
-      { href: '/providers', label: 'Hizmet Verenler', permission: 'PROVIDERS_READ' },
-      { href: '/support', label: 'Destek Talepleri', permission: 'SUPPORT_READ' },
-      /*
-       * Vitrin, as three entries rather than five.
-       *
-       * It used to carry "Vitrin İncelemeleri", "Vitrin Kartları", "Vitrin
-       * Yerleşimleri", "Vitrin Talepleri" and "Vitrin Metin Onayları" — five
-       * rows in one sidebar, three of them named after tables. An operator
-       * opening the panel had to know what a "yerleşim" was before they could
-       * decide which row held the thing they were looking for.
-       *
-       * The three that are left are the three jobs: read what is waiting to be
-       * approved, look at what is on the air, and answer what customers sent.
-       * "Vitrin Kartları" (every card, in every state) is reachable from the
-       * review queue, and "Vitrin Metin Onayları" (the consent ledger) from the
-       * package catalogue — both are things an operator goes looking for while
-       * already inside vitrin, not places they navigate to cold.
-       */
-      { href: '/showcase/reviews', label: 'Kart incelemeleri', permission: 'SHOWCASE_REVIEW_READ' },
-      // The paid side of vitrin. Under Operasyon with the rest of it rather
-      // than under Finans: a run is something an operator suspends, resumes and
-      // investigates, and the money it represents is already visible on the
-      // purchase it came from.
-      { href: '/showcase/placements', label: 'Yayındaki kartlar', permission: 'SHOWCASE_PLACEMENTS_READ' },
-      { href: '/showcase/leads', label: 'Vitrin talepleri', permission: 'SHOWCASE_LEADS_READ' },
+      { href: '/requests', label: 'Tüm talepler', permission: 'REQUESTS_READ' },
+      { href: '/requests/reports', label: 'Şikayet edilen talepler', permission: 'REQUEST_REPORTS_READ' },
     ],
   },
   {
-    title: 'Katalog',
+    key: 'teklifler',
+    title: 'Teklifler',
+    icon: 'tag',
+    items: [{ href: '/offers', label: 'Tüm teklifler', permission: 'OFFERS_READ' }],
+  },
+  {
+    key: 'kisiler',
+    title: 'Kişiler',
+    icon: 'users',
     items: [
-      { href: '/categories', label: 'Kategoriler', permission: 'CATALOG_READ' },
-      // The vitrin catalogue is a catalogue: an operator maintains it the way
-      // they maintain credit packages, and it belongs beside them rather than
-      // with the runs it produces.
-      { href: '/showcase/packages', label: 'Paketler', permission: 'SHOWCASE_PACKAGES_READ' },
-      { href: '/credit-packages', label: 'Kredi Paketleri', permission: 'CREDIT_PACKAGES_READ' },
+      { href: '/providers', label: 'Hizmet verenler', permission: 'PROVIDERS_READ' },
+      { href: '/customers', label: 'Hizmet alanlar', permission: 'CUSTOMERS_READ' },
+      { href: '/support', label: 'Destek talepleri', permission: 'SUPPORT_READ' },
     ],
   },
   {
+    key: 'finans',
     title: 'Finans',
+    icon: 'wallet',
     items: [
-      { href: '/finance', label: 'Dashboard', exact: true, permission: 'FINANCE_READ' },
-      { href: '/finance/credit-ledger', label: 'Kredi Hareketleri', permission: 'FINANCE_LEDGER_READ' },
-      { href: '/finance/manual-adjustments', label: 'Manuel İşlemler', permission: 'FINANCE_LEDGER_READ' },
-      { href: '/finance/providers', label: 'Provider Finans Bakiyeleri', permission: 'FINANCE_READ' },
-      { href: '/package-purchases', label: 'Paket Satın Almaları', permission: 'PACKAGE_PURCHASES_READ' },
+      { href: '/finance', label: 'Finans özeti', exact: true, permission: 'FINANCE_READ' },
+      { href: '/finance/credit-ledger', label: 'Kredi hareketleri', permission: 'FINANCE_LEDGER_READ' },
+      // The design calls it "Elle kredi ekle / düş", but this screen only lists
+      // manual adjustments: the form lives on a provider's credit screen (K4).
+      // A row that promises a form it does not open would be the first thing an
+      // operator reports.
+      { href: '/finance/manual-adjustments', label: 'Elle kredi işlemleri', permission: 'FINANCE_LEDGER_READ' },
+      { href: '/finance/providers', label: 'İşletme bakiyeleri', permission: 'FINANCE_READ' },
+      { href: '/package-purchases', label: 'Paket satışları', permission: 'PACKAGE_PURCHASES_READ' },
       // CMP-006 PR-B: the package money-refund queue. Beside the purchases it
       // is about; its own permission, because reading purchases is not reading
       // who asked for their money back and why.
-      { href: '/package-refunds', label: 'Paket İadeleri', permission: 'PACKAGE_REFUND_READ' },
-      { href: '/refund-scan', label: 'İade Taraması', permission: 'OFFER_REFUND_SCAN_READ' },
+      { href: '/package-refunds', label: 'Paket iadeleri', permission: 'PACKAGE_REFUND_READ' },
+      { href: '/refund-scan', label: 'İade kontrolü', permission: 'OFFER_REFUND_SCAN_READ' },
     ],
   },
   {
-    title: 'Yönetim',
+    key: 'vitrin',
+    title: 'Vitrin',
+    icon: 'store',
     items: [
-      { href: '/users', label: 'Admin Kullanıcıları', permission: 'ADMIN_USERS_READ' },
-      // Root: defining authority is not part of the authority it defines, so
-      // there is no permission that could reveal this row (RG-7 §12.1).
-      { href: '/roles', label: 'Roller ve İzinler', superAdminOnly: true },
-      { href: '/company-settings', label: 'Şirket ve E-posta', permission: 'COMPANY_SETTINGS_READ' },
-      { href: '/operations-settings', label: 'Operasyon Ayarları', permission: 'OPERATIONS_SETTINGS_READ' },
-      // Campaign drafts (CMP-002 S1). Under Yönetim beside the operations
-      // switches rather than under Finans: in this slice a campaign is a
-      // definition an operator drafts, not money that moves — the engine
-      // that would move it is off and has no switch here.
+      { href: '/showcase/reviews', label: 'Onay bekleyen kartlar', permission: 'SHOWCASE_REVIEW_READ' },
+      { href: '/showcase/placements', label: 'Yayında olan kartlar', permission: 'SHOWCASE_PLACEMENTS_READ' },
+      { href: '/showcase/leads', label: 'Vitrinden gelen talepler', permission: 'SHOWCASE_LEADS_READ' },
+      // The comments providers flagged on their reviews: in the design's
+      // vitrin group, because a review is read on a provider's public card.
+      { href: '/provider-reviews/reports', label: 'Şikayet edilen yorumlar', permission: 'PROVIDER_REVIEWS_READ' },
+      // Every card in every state, and the consent ledger for the vitrin
+      // package texts. Both used to be reachable only from another vitrin
+      // screen; K1 gave them rows of their own.
+      { href: '/showcase/cards', label: 'Vitrin kartları', permission: 'SHOWCASE_CARDS_READ' },
+      { href: '/showcase/price-terms', label: 'Vitrin metin onayları', permission: 'SHOWCASE_TERMS_ACCEPTANCES_READ' },
+    ],
+  },
+  {
+    key: 'katalog',
+    title: 'Katalog',
+    icon: 'list',
+    items: [
+      { href: '/categories', label: 'Hizmet kategorileri', permission: 'CATALOG_READ' },
+      { href: '/showcase/packages', label: 'Vitrin paketleri', permission: 'SHOWCASE_PACKAGES_READ' },
+      { href: '/credit-packages', label: 'Kredi paketleri', permission: 'CREDIT_PACKAGES_READ' },
+    ],
+  },
+  {
+    key: 'operasyon',
+    title: 'Operasyon',
+    icon: 'settings',
+    items: [
+      { href: '/operations-settings', label: 'Operasyon ayarları', permission: 'OPERATIONS_SETTINGS_READ' },
       { href: '/campaigns', label: 'Kampanyalar', permission: 'CAMPAIGNS_READ' },
       // CMP-006 PR-C: events the promotion eligibility gate held for a person.
-      { href: '/promotion-eligibility', label: 'Uygunluk İncelemesi', permission: 'PROMOTION_ELIGIBILITY_REVIEW' },
-      { href: '/notifications', label: 'Bildirim Geçmişi', permission: 'NOTIFICATION_LOGS_READ' },
+      // Right under the campaigns whose benefits it holds back.
+      {
+        href: '/promotion-eligibility',
+        label: 'Kampanya uygunluk incelemesi',
+        permission: 'PROMOTION_ELIGIBILITY_REVIEW',
+      },
+      { href: '/notifications', label: 'Gönderilen bildirimler', permission: 'NOTIFICATION_LOGS_READ' },
+    ],
+  },
+  {
+    key: 'yonetim',
+    title: 'Yönetim',
+    icon: 'shield',
+    items: [
+      { href: '/users', label: 'Yönetici hesapları', permission: 'ADMIN_USERS_READ' },
+      // Root: defining authority is not part of the authority it defines, so
+      // there is no permission that could reveal this row (RG-7 §12.1).
+      { href: '/roles', label: 'Roller ve izinler', superAdminOnly: true },
+      { href: '/company-settings', label: 'Şirket ve e-posta bilgileri', permission: 'COMPANY_SETTINGS_READ' },
     ],
   },
 ];
+
+/** Every row the sidebar can show: the dashboard row, then each group's rows. */
+export function allNavItems(): NavItem[] {
+  return [navHome, ...navGroups.flatMap((group) => group.items)];
+}
 
 function matchesNavItem(item: NavItem, pathname: string): boolean {
   if (item.exact) {
@@ -133,21 +207,48 @@ function matchesNavItem(item: NavItem, pathname: string): boolean {
  * on `/requests/<id>`. When two rows both match — `/requests` and
  * `/requests/reports` on the report queue — only the more specific one wins,
  * otherwise the sidebar highlights two rows for one screen.
+ *
+ * Specificity is judged against the full list, not the session's filtered one:
+ * a session that holds `/requests` but not `/requests/reports` must not see
+ * "Tüm talepler" lit on a queue it was refused.
  */
 export function isNavItemActive(item: NavItem, pathname: string): boolean {
   if (!matchesNavItem(item, pathname)) {
     return false;
   }
 
-  return !navGroups.some((group) =>
-    group.items.some(
-      (other) =>
-        other !== item &&
-        other.href.length > item.href.length &&
-        other.href.startsWith(`${item.href}/`) &&
-        matchesNavItem(other, pathname),
-    ),
+  return !allNavItems().some(
+    (other) =>
+      other !== item &&
+      other.href.length > item.href.length &&
+      other.href.startsWith(`${item.href}/`) &&
+      matchesNavItem(other, pathname),
   );
+}
+
+/**
+ * The row the operator is on, looked up in the groups this session was given.
+ *
+ * The top bar's "Grup / Sayfa" comes from here. It takes the filtered groups
+ * rather than reading `navGroups` itself (F18): a label is not data, but a top
+ * bar that names a row the sidebar hides is still a map of what the session
+ * cannot open.
+ */
+export function findActiveNavEntry(
+  menu: NavMenu,
+  pathname: string,
+): { group: NavGroup | null; item: NavItem } | null {
+  if (menu.home && isNavItemActive(menu.home, pathname)) {
+    return { group: null, item: menu.home };
+  }
+  for (const group of menu.groups) {
+    for (const item of group.items) {
+      if (isNavItemActive(item, pathname)) {
+        return { group, item };
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -171,12 +272,22 @@ export function filterNavGroups(
   return groups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => {
-        if (item.superAdminOnly) {
-          return isSuperAdmin;
-        }
-        return !item.permission || can(item.permission);
-      }),
+      items: group.items.filter((item) => mayOpen(item, can, isSuperAdmin)),
     }))
     .filter((group) => group.items.length > 0);
+}
+
+function mayOpen(item: NavItem, can: (permission: string) => boolean, isSuperAdmin: boolean): boolean {
+  if (item.superAdminOnly) {
+    return isSuperAdmin;
+  }
+  return !item.permission || can(item.permission);
+}
+
+/** The whole menu for one session: `filterNavGroups` plus the dashboard row, by the same rule. */
+export function filterNavMenu(can: (permission: string) => boolean, isSuperAdmin = false): NavMenu {
+  return {
+    home: mayOpen(navHome, can, isSuperAdmin) ? navHome : null,
+    groups: filterNavGroups(navGroups, can, isSuperAdmin),
+  };
 }

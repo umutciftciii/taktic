@@ -28,25 +28,28 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
 
   return (
     <main>
-      <div className="table-card" style={{ padding: 28, textAlign: 'center' }}>
-        <h1 className="page-title" style={{ marginTop: 0 }}>Bir şeyler ters gitti</h1>
-        <p className="muted">
+      <section className="system-state" aria-labelledby="route-error-title">
+        <p className="system-state-kicker">Hata</p>
+        <h1 id="route-error-title" className="system-state-title">
+          Bir şeyler ters gitti
+        </h1>
+        <p className="system-state-body">
           İşlem tamamlanamadı. Tekrar deneyebilir veya dashboard'a dönebilirsiniz.
         </p>
         {error.digest ? (
-          <p className="muted" style={{ fontSize: 12 }}>
+          <p className="system-state-ref">
             Destek referansı: <code>{error.digest}</code>
           </p>
         ) : null}
-        <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 16 }}>
+        <div className="system-state-actions">
           <button className="btn btn-primary btn-sm" type="button" onClick={reset}>
             Tekrar dene
           </button>
-          <Link className="btn btn-ghost btn-sm" href="/">
+          <Link className="btn btn-secondary btn-sm" href="/">
             Dashboard
           </Link>
         </div>
-      </div>
+      </section>
     </main>
   );
 }

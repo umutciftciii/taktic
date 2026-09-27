@@ -1,3 +1,4 @@
+import { BrandMark } from '../../components/brand-mark';
 import { isLocalEnvironment } from '../../lib/local-environment';
 
 type LoginPageProps = {
@@ -22,9 +23,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         form left open across a deploy has to keep working. See login/submit.
       */}
       <form className="auth-card" action="/login/submit" method="post">
-        <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
-        <h1 className="auth-title">TakTic Admin</h1>
-        <p className="muted">Yönetim paneline giriş yapın</p>
+        <div className="auth-brand">
+          <BrandMark size="lg" />
+          <div className="auth-brand-text">
+            <h1 className="auth-title">TakTick Yönetim</h1>
+            <p className="auth-subtitle">Yönetim paneline giriş yapın</p>
+          </div>
+        </div>
         {error ? (
           <div className="error-message">Giriş başarısız. E-posta ve şifrenizi kontrol edin.</div>
         ) : null}
@@ -56,7 +61,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <button className="btn btn-primary btn-block" type="submit">Giriş Yap</button>
         </div>
         {showLocalHint ? (
-          <p className="muted" style={{ marginTop: 16, fontSize: 12 }} data-testid="local-admin-hint">
+          <p className="auth-footnote" data-testid="local-admin-hint">
             Yerel admin: <code>admin@taktic.local</code> / <code>ChangeMe123!</code>
           </p>
         ) : null}

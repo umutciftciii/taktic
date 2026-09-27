@@ -2,19 +2,29 @@
 
 import type { RefObject } from 'react';
 import { usePathname } from 'next/navigation';
-import { isNavItemActive, navGroups } from '../lib/nav';
+import { findActiveNavEntry, type NavMenu } from '../lib/nav';
 import { LogoutButton } from '../app/session/logout-button';
+import { NavIcon } from './nav-icon';
 
 type TopbarProps = {
+  /** The session's filtered sidebar; the "Grup / Sayfa" line is read from it (F18). */
+  menu: NavMenu;
   onToggleSidebar: () => void;
   sidebarOpen: boolean;
   sidebarId: string;
   toggleRef: RefObject<HTMLButtonElement | null>;
 };
 
-export function Topbar({ onToggleSidebar, sidebarOpen, sidebarId, toggleRef }: TopbarProps) {
+/**
+ * The 56px bar over every signed-in screen: where you are, and the way out.
+ *
+ * The design's search field and notification bell are not here (K3): neither
+ * has a source this panel may query on a session's behalf, and a control that
+ * does nothing is worse than no control.
+ */
+export function Topbar({ menu, onToggleSidebar, sidebarOpen, sidebarId, toggleRef }: TopbarProps) {
   const pathname = usePathname();
-  const current = findActive(pathname);
+  const current = findActiveNavEntry(menu, pathname);
 
   return (
     <header className="admin-topbar">
@@ -29,17 +39,25 @@ export function Topbar({ onToggleSidebar, sidebarOpen, sidebarId, toggleRef }: T
           aria-controls={sidebarId}
           aria-label={sidebarOpen ? 'Menüyü kapat' : 'Menüyü aç'}
         >
-          <span aria-hidden="true">☰</span>
+          <NavIcon name="menu" size={18} />
         </button>
 
-        <div className="admin-topbar-context">
+        <div className="admin-topbar-context" data-testid="admin-topbar-context">
           {current ? (
             <>
-              <span className="admin-topbar-eyebrow">{current.group}</span>
+              {/* The dashboard row belongs to no group, so it has no "Grup /". */}
+              {current.group ? (
+                <>
+                  <span className="admin-topbar-eyebrow">{current.group.title}</span>
+                  <span className="admin-topbar-sep" aria-hidden="true">
+                    /
+                  </span>
+                </>
+              ) : null}
               <span className="admin-topbar-title">{current.item.label}</span>
             </>
           ) : (
-            <span className="admin-topbar-title">TakTic Admin</span>
+            <span className="admin-topbar-title">TakTick Yönetim</span>
           )}
         </div>
 
@@ -49,22 +67,11 @@ export function Topbar({ onToggleSidebar, sidebarOpen, sidebarId, toggleRef }: T
             posts; the server-side revoke inside the action is what actually
             ends the session.
           */}
-          <LogoutButton className="btn btn-secondary btn-sm" testId="admin-logout">
+          <LogoutButton className="btn btn-secondary btn-sm admin-logout" testId="admin-logout">
             Çıkış
           </LogoutButton>
         </form>
       </div>
     </header>
   );
-}
-
-function findActive(pathname: string) {
-  for (const group of navGroups) {
-    for (const item of group.items) {
-      if (isNavItemActive(item, pathname)) {
-        return { group: group.title, item };
-      }
-    }
-  }
-  return null;
 }

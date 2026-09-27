@@ -11,8 +11,8 @@ export type FinanceTrendPoint = {
 type Tone = 'success' | 'primary';
 
 const TONE_COLORS: Record<Tone, { stroke: string; fill: string }> = {
-  success: { stroke: '#16a34a', fill: 'rgba(22, 163, 74, 0.12)' },
-  primary: { stroke: '#2563eb', fill: 'rgba(37, 99, 235, 0.12)' },
+  success: { stroke: '#0f6b45', fill: 'rgba(15, 107, 69, 0.12)' },
+  primary: { stroke: '#ec3013', fill: 'rgba(236, 48, 19, 0.12)' },
 };
 
 const VIEW_WIDTH = 720;
@@ -126,7 +126,7 @@ function FinanceTrendChart({
               x2={VIEW_WIDTH - PADDING_X}
               y1={PADDING_TOP + innerH * ratio}
               y2={PADDING_TOP + innerH * ratio}
-              stroke="#e5e7eb"
+              stroke="#eae7e7"
               strokeWidth={1}
               vectorEffect="non-scaling-stroke"
               strokeDasharray="3 5"
@@ -137,7 +137,7 @@ function FinanceTrendChart({
             x2={VIEW_WIDTH - PADDING_X}
             y1={baselineY}
             y2={baselineY}
-            stroke="#cbd5e1"
+            stroke="#bab6b6"
             strokeWidth={1}
             vectorEffect="non-scaling-stroke"
           />

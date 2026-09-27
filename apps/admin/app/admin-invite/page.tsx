@@ -1,5 +1,6 @@
 import { formatDateTime } from '@taktic/shared';
 import Link from 'next/link';
+import { BrandMark } from '../../components/brand-mark';
 import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
 import { PasswordFields } from '../password-criteria';
 
@@ -84,9 +85,13 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
     return (
       <main className="auth-page">
         <div className="auth-card">
-          <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
-          <h1 className="auth-title">Şifreniz oluşturuldu</h1>
-          <p className="muted">Admin paneline giriş yapabilirsiniz.</p>
+          <div className="auth-brand">
+            <BrandMark size="lg" />
+            <div className="auth-brand-text">
+              <h1 className="auth-title">Şifreniz oluşturuldu</h1>
+              <p className="auth-subtitle">Admin paneline giriş yapabilirsiniz.</p>
+            </div>
+          </div>
           <Link className="btn btn-primary btn-block" href="/login" style={{ marginTop: 16 }}>
             Giriş Yap
           </Link>
@@ -99,8 +104,12 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
     return (
       <main className="auth-page">
         <div className="auth-card">
-          <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
-          <h1 className="auth-title">Bağlantı geçersiz</h1>
+          <div className="auth-brand">
+            <BrandMark size="lg" />
+            <div className="auth-brand-text">
+              <h1 className="auth-title">Bağlantı geçersiz</h1>
+            </div>
+          </div>
           <p className="muted">
             Davet bağlantısı bulunamadı. Lütfen size gönderilen bağlantıyı kontrol edin.
           </p>
@@ -115,8 +124,12 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
     return (
       <main className="auth-page">
         <div className="auth-card">
-          <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
-          <h1 className="auth-title">Bağlantı geçersiz</h1>
+          <div className="auth-brand">
+            <BrandMark size="lg" />
+            <div className="auth-brand-text">
+              <h1 className="auth-title">Bağlantı geçersiz</h1>
+            </div>
+          </div>
           <p className="muted">{result.message}</p>
         </div>
       </main>
@@ -138,15 +151,19 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
   return (
     <main className="auth-page">
       <form className="auth-card" action="/admin-invite/submit" method="post">
-        <img className="admin-brand-logo" src="/brand/logo.png" alt="TakTick" />
-        <h1 className="auth-title">Şifre belirleyin</h1>
+        <div className="auth-brand">
+          <BrandMark size="lg" />
+          <div className="auth-brand-text">
+            <h1 className="auth-title">Şifre belirleyin</h1>
+          </div>
+        </div>
         <p className="muted">
           Merhaba {displayName}, TakTic admin panel hesabınız için şifre belirleyin.
         </p>
 
-        <div style={{ fontSize: 13, lineHeight: 1.5, color: '#475569', marginTop: 12 }}>
+        <div className="auth-meta">
           {user.email ? <div>E-posta: {user.email}</div> : null}
-          <div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>
+          <div className="auth-meta-note">
             Bağlantı son geçerlilik: {formatExpiry(expiresAt)}
           </div>
         </div>
@@ -166,7 +183,7 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
           </button>
         </div>
 
-        <p className="muted" style={{ marginTop: 16, fontSize: 12 }}>
+        <p className="auth-footnote">
           Zaten şifreniz var mı?{' '}
           <Link href="/login" style={{ textDecoration: 'underline' }}>
             Giriş yapın

@@ -40,6 +40,6 @@ describe('package refund labels', () => {
 
   it('puts the queue in the sidebar behind PACKAGE_REFUND_READ', () => {
     const item = navGroups.flatMap((group) => group.items).find((entry) => entry.href === '/package-refunds');
-    expect(item).toMatchObject({ label: 'Paket İadeleri', permission: 'PACKAGE_REFUND_READ' });
+    expect(item).toMatchObject({ label: 'Paket iadeleri', permission: 'PACKAGE_REFUND_READ' });
   });
 });

@@ -180,7 +180,7 @@ test.describe('promotion eligibility queue', () => {
 
     try {
       await reader.loginToAdmin(readerAccount.email, readerAccount.password);
-      await expect(reader.page.getByRole('link', { name: 'Uygunluk İncelemesi' })).toHaveCount(0);
+      await expect(reader.page.locator('#admin-sidebar').getByRole('link', { name: 'Kampanya uygunluk incelemesi' })).toHaveCount(0);
       await reader.gotoAdmin('/promotion-eligibility');
       await expect(reader.page).toHaveURL(/\/yetkisiz/);
 

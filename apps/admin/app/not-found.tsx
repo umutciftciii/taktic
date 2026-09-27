@@ -10,19 +10,18 @@ export default function NotFound() {
         title="Kayıt bulunamadı"
         subtitle="Aradığınız kayıt silinmiş olabilir ya da bağlantı hatalı."
       />
-      <div className="table-card">
-        <div style={{ padding: 18 }}>
-          <EmptyState
-            title="Bu sayfa mevcut değil."
-            description="Adresi kontrol edin veya listeye dönüp kaydı yeniden seçin."
-            action={
-              <Link className="btn btn-secondary btn-sm" href="/">
-                Dashboard'a dön
-              </Link>
-            }
-          />
-        </div>
-      </div>
+      <section className="system-state" aria-label="Sayfa bulunamadı">
+        <p className="system-state-kicker">404</p>
+        <EmptyState
+          title="Bu sayfa mevcut değil."
+          description="Adresi kontrol edin veya listeye dönüp kaydı yeniden seçin."
+          action={
+            <Link className="btn btn-secondary btn-sm" href="/">
+              Dashboard'a dön
+            </Link>
+          }
+        />
+      </section>
     </main>
   );
 }
