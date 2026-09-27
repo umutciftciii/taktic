@@ -66,7 +66,7 @@ test.describe('notification delivery history', () => {
       // ---- the admin reads the history ----------------------------------
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
       await admin.gotoAdmin(`/notifications?requestId=${requestId}`);
-      await expect(admin.page.getByRole('heading', { name: 'Bildirim Geçmişi' })).toBeVisible();
+      await expect(admin.page.getByRole('heading', { level: 1, name: 'Gönderilen bildirimler' })).toBeVisible();
       // Three sends belong to this request: the receipt mailed when it was
       // submitted, the verification code the screen above asked for, and the
       // failed attempt written just now.
@@ -106,7 +106,7 @@ test.describe('notification delivery history', () => {
       expect(listBody).not.toContain(values.customerEmail);
 
       // ---- the same holds on the detail screen --------------------------
-      await sentRows.first().getByRole('link', { name: 'Detay' }).click();
+      await sentRows.first().getByRole('link', { name: /^Aç/ }).click();
       await expect(admin.page.getByTestId('notification-masked-recipient')).toBeVisible();
       // And the detail screen spells the distinction out rather than leaving an
       // operator to infer it from a badge.

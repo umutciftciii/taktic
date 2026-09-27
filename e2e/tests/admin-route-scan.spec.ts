@@ -22,17 +22,16 @@ import { primaryRuntime, repoRoot } from '../src/runtime';
  *
  * The redesign changed the stylesheet every one of the 52 screens reads and
  * the frame every one of them sits in, while converting none of their content.
- * So each one is opened once, as a super admin, at 1440px and at 390px, and two
- * separate rules are enforced:
+ * So each one is opened once, as a super admin, at 1440px and at 390px — and
+ * the Faz 2 reference list, /notifications, at 320px as well — and two separate
+ * rules are enforced:
  *
  * 1. Shell overflow is a hard failure, on every route, with no allowlist:
  *    html, body, the shell, the sidebar, the top bar, the main column and the
  *    content column all sit inside the window.
  * 2. Content overflow — the page as a whole wider than the window because of
- *    something inside a screen — fails everywhere except the narrow list of
- *    (route, width) pairs in KNOWN_CONTENT_OVERFLOW below, which existed before
- *    this redesign and belong to Faz 2. Even there it fails once it grows past
- *    that pair's recorded ceiling.
+ *    something inside a screen — fails everywhere except the (route, width)
+ *    pairs in KNOWN_CONTENT_OVERFLOW below, which is empty since Faz 2.
  *
  * The route list is read from every page.tsx under apps/admin/app at run time, so a new screen
  * cannot slip past the scan: it fails until it is given a target here.
@@ -47,45 +46,23 @@ import { primaryRuntime, repoRoot } from '../src/runtime';
 type Target = { route: string; path: string | null; why?: string };
 
 /**
- * Content overflow that existed before ADMIN-DESIGN-001, per route and width —
- * nothing else is tolerated.
+ * Content overflow that is still tolerated, per route and width — nothing else
+ * is.
  *
- * Every entry is a screen whose own content has no scroll container: a data
- * table, a filter <select> as wide as its longest option, a stat card. The
- * same overflow is there on main with main's stylesheet (measured for the PR);
- * fixing it is Faz 2's shared list components, not this shell.
+ * Faz 1 recorded fourteen pairs here: thirteen screens at 390px and
+ * /finance/providers at 1440px, each one a table without a scroll container,
+ * a filter <select> as wide as its longest option or a stat card holding one
+ * unbreakable word. Faz 2 fixed all three causes where they start
+ * (apps/admin/app/globals.css, "Content overflow, fixed where it starts"), so
+ * the list is empty and every screen is held to the same rule as the shell:
+ * the page is never wider than the window.
  *
- * `observed` is the largest overflow seen on CI (Linux fonts, full-suite data,
- * run 36077058694), or locally where that was larger (noted on the entry). `ceiling` is what the scan accepts: observed × 1.25 + 40px.
- * The margin is there because the number is not a constant — it moves with the
- * data the suite happens to hold (the longest category name sets the <select>)
- * and with the platform's fonts (a Mac measures 25–50px less than CI on the
- * same screens). A tighter bound would fail on data, not on a regression; this
- * one still fails when a screen gets meaningfully wider than it was. It is a
- * guard against growth, not a precise baseline.
- *
- * 1440px carries a single entry: only /finance/providers overflows there.
+ * Should a pair ever have to come back, `observed` is the largest overflow seen
+ * on CI (Linux fonts, full-suite data) and the ceiling is observed × 1.25 +
+ * 40px — a guard against growth, not a licence. Raising a ceiling to make this
+ * pass is not a fix.
  */
-const KNOWN_CONTENT_OVERFLOW: Record<string, { width: number; observed: number }[]> = {
-  '/finance/providers': [
-    { width: 1440, observed: 5 },
-    { width: 390, observed: 795 },
-  ],
-  '/requests': [{ width: 390, observed: 31 }],
-  '/offers': [{ width: 390, observed: 31 }],
-  '/providers': [{ width: 390, observed: 31 }],
-  '/finance': [{ width: 390, observed: 291 }],
-  '/finance/credit-ledger': [{ width: 390, observed: 642 }],
-  '/finance/manual-adjustments': [{ width: 390, observed: 588 }],
-  '/notifications': [{ width: 390, observed: 705 }],
-  '/users': [{ width: 390, observed: 613 }],
-  '/providers/[id]/credits': [{ width: 390, observed: 325 }],
-  '/customers/[id]': [{ width: 390, observed: 455 }],
-  '/users/[id]': [{ width: 390, observed: 65 }],
-  // CI saw 53px, a local run 91px: the stat card's width follows the subject
-  // of whichever notification the scan opens. The larger one is recorded.
-  '/notifications/[id]': [{ width: 390, observed: 91 }],
-};
+const KNOWN_CONTENT_OVERFLOW: Record<string, { width: number; observed: number }[]> = {};
 
 function contentCeiling(route: string, width: number): number | null {
   const known = KNOWN_CONTENT_OVERFLOW[route]?.find((entry) => entry.width === width);
@@ -217,7 +194,7 @@ async function detailTargets(): Promise<Target[]> {
 }
 
 test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
-  test('all 52 signed-in screens render inside the shell at 1440px and 390px', async ({ browser }, testInfo) => {
+  test('all 52 signed-in screens render inside the shell at 1440px and 390px (and /notifications at 320px)', async ({ browser }, testInfo) => {
     test.setTimeout(600_000);
     const account = await createAdmin();
     const targets: Target[] = [...STATIC_ROUTES.map((route) => ({ route, path: route })), ...(await detailTargets())];
@@ -239,15 +216,21 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
 
     const results: Array<{ route: string; width: number } & Measurement> = [];
 
-    for (const viewport of [
-      { width: 1440, height: 900 },
-      { width: 390, height: 844 },
-    ]) {
+    // Every screen at the two widths Faz 1 set, and the Faz 2 reference list
+    // at the narrowest phone the panel supports.
+    const passes: Array<{ viewport: { width: number; height: number }; only?: string[] }> = [
+      { viewport: { width: 1440, height: 900 } },
+      { viewport: { width: 390, height: 844 } },
+      { viewport: { width: 320, height: 740 }, only: ['/notifications'] },
+    ];
+
+    for (const { viewport, only } of passes) {
       const admin = await Actor.open(browser, `scan-${viewport.width}`, primaryRuntime, { viewport });
       try {
         await admin.loginToAdmin(account.email, account.password);
         for (const target of targets) {
           if (!target.path) continue;
+          if (only && !only.includes(target.route)) continue;
           await admin.gotoAdmin(target.path);
           const label = `${target.route} @${viewport.width}`;
           await expect(admin.page, label).not.toHaveURL(/\/(yetkisiz|login)(\?|$)/);
@@ -275,7 +258,10 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
               }
               const box = element.getBoundingClientRect();
               // A closed phone drawer is parked off-screen to the left on purpose.
-              if (name === '#admin-sidebar' && box.right <= 0) continue;
+              // Same 1px tolerance as the rule below: at 320px the drawer is
+              // 86vw (275.2px) wide and WebKit parks its right edge a fraction
+              // of a pixel past 0.
+              if (name === '#admin-sidebar' && box.right <= 1) continue;
               if (box.left < -1 || box.right > limit + 1) {
                 shell.push(`${name} [${Math.round(box.left)}, ${Math.round(box.right)}]`);
               }
@@ -334,8 +320,8 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
     const summary = tolerated.map(
       (result) => `${describe(result)} ≤ ${contentCeiling(result.route, result.width)}`,
     );
-    console.log(`[admin-route-scan] known content overflow (Faz 2): ${summary.join(' | ') || 'none'}`);
-    testInfo.annotations.push({ type: 'known content overflow (Faz 2)', description: summary.join(' | ') || 'none' });
+    console.log(`[admin-route-scan] tolerated content overflow: ${summary.join(' | ') || 'none'}`);
+    testInfo.annotations.push({ type: 'tolerated content overflow', description: summary.join(' | ') || 'none' });
 
     expect.soft(unknown.map(describe), 'content overflow on a route/width not in KNOWN_CONTENT_OVERFLOW').toEqual([]);
     expect.soft(
