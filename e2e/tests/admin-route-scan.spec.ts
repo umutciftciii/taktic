@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import {
   createAdmin,
@@ -12,7 +14,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { seedCustomerRequest } from '../src/request-fixtures';
-import { primaryRuntime } from '../src/runtime';
+import { primaryRuntime, repoRoot } from '../src/runtime';
 
 /**
  * ADMIN-DESIGN-001 / Faz 1: every signed-in screen still renders inside the new
@@ -20,10 +22,20 @@ import { primaryRuntime } from '../src/runtime';
  *
  * The redesign changed the stylesheet every one of the 52 screens reads and
  * the frame every one of them sits in, while converting none of their content.
- * So each one is opened once, as a super admin, at 1440px and at 390px. On all
- * of them: it is not the error screen, the shell is around it, and no part of
- * the shell is wider than the window. The content's own overflow is reported
- * with the elements causing it (see below), not asserted.
+ * So each one is opened once, as a super admin, at 1440px and at 390px, and two
+ * separate rules are enforced:
+ *
+ * 1. Shell overflow is a hard failure, on every route, with no allowlist:
+ *    html, body, the shell, the sidebar, the top bar, the main column and the
+ *    content column all sit inside the window.
+ * 2. Content overflow — the page as a whole wider than the window because of
+ *    something inside a screen — fails everywhere except the narrow list of
+ *    (route, width) pairs in KNOWN_CONTENT_OVERFLOW below, which existed before
+ *    this redesign and belong to Faz 2. Even there it fails once it grows past
+ *    that pair's recorded ceiling.
+ *
+ * The route list is read from every page.tsx under apps/admin/app at run time, so a new screen
+ * cannot slip past the scan: it fails until it is given a target here.
  *
  * Detail screens need a record. The ones this spec can make cheaply are made
  * here; the rest use whatever the suite has already created in this database,
@@ -33,6 +45,77 @@ import { primaryRuntime } from '../src/runtime';
  */
 
 type Target = { route: string; path: string | null; why?: string };
+
+/**
+ * Content overflow that existed before ADMIN-DESIGN-001, per route and width —
+ * nothing else is tolerated.
+ *
+ * Every entry is a screen whose own content has no scroll container: a data
+ * table, a filter <select> as wide as its longest option, a stat card. The
+ * same overflow is there on main with main's stylesheet (measured for the PR);
+ * fixing it is Faz 2's shared list components, not this shell.
+ *
+ * `observed` is the largest overflow seen on CI (Linux fonts, full-suite data,
+ * run 36077058694), or locally where that was larger (noted on the entry). `ceiling` is what the scan accepts: observed × 1.25 + 40px.
+ * The margin is there because the number is not a constant — it moves with the
+ * data the suite happens to hold (the longest category name sets the <select>)
+ * and with the platform's fonts (a Mac measures 25–50px less than CI on the
+ * same screens). A tighter bound would fail on data, not on a regression; this
+ * one still fails when a screen gets meaningfully wider than it was. It is a
+ * guard against growth, not a precise baseline.
+ *
+ * 1440px carries a single entry: only /finance/providers overflows there.
+ */
+const KNOWN_CONTENT_OVERFLOW: Record<string, { width: number; observed: number }[]> = {
+  '/finance/providers': [
+    { width: 1440, observed: 5 },
+    { width: 390, observed: 795 },
+  ],
+  '/requests': [{ width: 390, observed: 31 }],
+  '/offers': [{ width: 390, observed: 31 }],
+  '/providers': [{ width: 390, observed: 31 }],
+  '/finance': [{ width: 390, observed: 291 }],
+  '/finance/credit-ledger': [{ width: 390, observed: 642 }],
+  '/finance/manual-adjustments': [{ width: 390, observed: 588 }],
+  '/notifications': [{ width: 390, observed: 705 }],
+  '/users': [{ width: 390, observed: 613 }],
+  '/providers/[id]/credits': [{ width: 390, observed: 325 }],
+  '/customers/[id]': [{ width: 390, observed: 455 }],
+  '/users/[id]': [{ width: 390, observed: 65 }],
+  // CI saw 53px, a local run 91px: the stat card's width follows the subject
+  // of whichever notification the scan opens. The larger one is recorded.
+  '/notifications/[id]': [{ width: 390, observed: 91 }],
+};
+
+function contentCeiling(route: string, width: number): number | null {
+  const known = KNOWN_CONTENT_OVERFLOW[route]?.find((entry) => entry.width === width);
+  return known ? Math.ceil(known.observed * 1.25) + 40 : null;
+}
+
+/** Reached without a session, or the refusal itself: outside the shell. */
+const OUTSIDE_THE_SHELL = ['/login', '/admin-invite', '/yetkisiz'];
+
+/** Every page.tsx under apps/admin/app, as a route pattern. */
+function routesOnDisk(dir = resolve(repoRoot, 'apps/admin/app'), prefix = ''): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      found.push(...routesOnDisk(resolve(dir, entry.name), `${prefix}/${entry.name}`));
+    } else if (entry.name === 'page.tsx') {
+      found.push(prefix === '' ? '/' : prefix);
+    }
+  }
+  return found;
+}
+
+type Measurement = {
+  /** Shell boxes outside the window: hard failures, no allowlist. */
+  shell: string[];
+  /** How much wider than the window the document is. */
+  overflow: number;
+  /** The content elements sticking out, outside any scroll container. */
+  culprits: string[];
+};
 
 
 const STATIC_ROUTES = [
@@ -139,6 +222,11 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
     const account = await createAdmin();
     const targets: Target[] = [...STATIC_ROUTES.map((route) => ({ route, path: route })), ...(await detailTargets())];
     expect(targets).toHaveLength(52);
+    // A new screen fails here until it has a target — and so is scanned.
+    const onDisk = routesOnDisk().filter((route) => !OUTSIDE_THE_SHELL.includes(route)).sort();
+    expect(onDisk, 'signed-in routes on disk vs. routes this scan opens').toEqual(
+      targets.map((target) => target.route).sort(),
+    );
 
     const skipped = targets.filter((target) => !target.path);
     console.log(`[admin-route-scan] opening ${targets.length - skipped.length}/52; skipped: ${skipped.map((target) => target.route).join(', ') || 'none'}`);
@@ -149,7 +237,7 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
       });
     }
 
-    const results: Array<{ route: string; width: number; overflow: number; culprits: string[] }> = [];
+    const results: Array<{ route: string; width: number } & Measurement> = [];
 
     for (const viewport of [
       { width: 1440, height: 900 },
@@ -167,32 +255,59 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
           await expect(admin.page.locator('.admin-shell'), label).toBeVisible();
           await expect(admin.page.locator('.admin-topbar'), label).toBeVisible();
           await expect(admin.page.getByRole('heading', { name: 'Kayıt bulunamadı' }), label).toHaveCount(0);
-          // The shell itself never sticks out, whatever the screen inside it does.
-          const shellRight = await admin.page.evaluate(() =>
-            ['.admin-topbar', '.admin-main', '#admin-sidebar'].map((selector) => {
-              const element = document.querySelector(selector);
-              if (!element) return 0;
-              const box = element.getBoundingClientRect();
-              // A closed phone drawer sits off-screen to the left by design.
-              return box.right <= 0 ? 0 : Math.round(box.right - window.innerWidth);
-            }),
-          );
-          expect(Math.max(...shellRight), `${label}: shell wider than the window`).toBeLessThanOrEqual(0);
-          const { overflow, culprits } = await admin.page.evaluate(() => {
+
+          const measured = await admin.page.evaluate((): Measurement => {
             const limit = window.innerWidth;
-            const found: string[] = [];
+            const shell: string[] = [];
+            const boxes: Array<[string, Element | null]> = [
+              ['html', document.documentElement],
+              ['body', document.body],
+              ['.admin-shell', document.querySelector('.admin-shell')],
+              ['#admin-sidebar', document.getElementById('admin-sidebar')],
+              ['.admin-topbar', document.querySelector('.admin-topbar')],
+              ['.admin-main', document.querySelector('.admin-main')],
+              ['.admin-content', document.querySelector('.admin-content')],
+            ];
+            for (const [name, element] of boxes) {
+              if (!element) {
+                shell.push(`${name} missing`);
+                continue;
+              }
+              const box = element.getBoundingClientRect();
+              // A closed phone drawer is parked off-screen to the left on purpose.
+              if (name === '#admin-sidebar' && box.right <= 0) continue;
+              if (box.left < -1 || box.right > limit + 1) {
+                shell.push(`${name} [${Math.round(box.left)}, ${Math.round(box.right)}]`);
+              }
+            }
+
+            const shellElements = new Set(boxes.map(([, element]) => element));
+            const culprits: string[] = [];
             for (const element of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+              if (shellElements.has(element)) continue;
               const box = element.getBoundingClientRect();
               if (box.width === 0 || box.right <= limit + 1) continue;
-              const parentStyle = element.parentElement ? getComputedStyle(element.parentElement) : null;
-              if (parentStyle && ['auto', 'scroll', 'hidden'].includes(parentStyle.overflowX)) continue;
+              // Anything inside its own horizontal scroll container is contained.
+              let contained = false;
+              for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+                if (shellElements.has(parent)) break;
+                if (['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(parent).overflowX)) {
+                  contained = true;
+                  break;
+                }
+              }
+              if (contained) continue;
               const cls = typeof element.className === 'string' ? element.className.trim().split(/\s+/).join('.') : '';
-              found.push(`${element.tagName.toLowerCase()}${cls ? `.${cls}` : ''} r=${Math.round(box.right)}`);
-              if (found.length >= 4) break;
+              culprits.push(`${element.tagName.toLowerCase()}${cls ? `.${cls}` : ''} r=${Math.round(box.right)}`);
+              if (culprits.length >= 4) break;
             }
-            return { overflow: document.documentElement.scrollWidth - limit, culprits: found };
+
+            return { shell, overflow: document.documentElement.scrollWidth - limit, culprits };
           });
-          results.push({ route: target.route, width: viewport.width, overflow, culprits });
+
+          // Rule 1: the shell never sticks out. Every route, both widths, no allowlist.
+          expect(measured.shell, `${label}: shell outside the window`).toEqual([]);
+          results.push({ route: target.route, width: viewport.width, ...measured });
         }
       } finally {
         await admin.close();
@@ -203,19 +318,29 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
       body: JSON.stringify(results, null, 2),
       contentType: 'application/json',
     });
-    // Content overflow: reported, not asserted, at either width. What sticks
-    // out is screen content with no scroll container of its own — a table, or
-    // a filter <select> as wide as its longest option — so the amount depends
-    // on the data the suite holds and on the platform's fonts (CI's Linux faces
-    // are wider than a Mac's). The same overflow exists on main with main's
-    // stylesheet, whose content column is 4px narrower than this one at 1440px.
-    // It is Faz 2's job (shared list components); the shell's own part is
-    // asserted above, on every screen, at both widths.
+
+    // Rule 2: content overflow — only on a known (route, width), and only up to
+    // its ceiling.
     const wide = results.filter((result) => result.overflow > 0);
-    const summary = wide.map(
-      (result) => `${result.route}@${result.width} +${result.overflow}px [${result.culprits.join(' ; ')}]`,
+    const describe = (result: (typeof results)[number]) =>
+      `${result.route}@${result.width} +${result.overflow}px [${result.culprits.join(' ; ')}]`;
+    const unknown = wide.filter((result) => contentCeiling(result.route, result.width) === null);
+    const grown = wide.filter((result) => {
+      const ceiling = contentCeiling(result.route, result.width);
+      return ceiling !== null && result.overflow > ceiling;
+    });
+    const tolerated = wide.filter((result) => !unknown.includes(result) && !grown.includes(result));
+
+    const summary = tolerated.map(
+      (result) => `${describe(result)} ≤ ${contentCeiling(result.route, result.width)}`,
     );
-    console.log(`[admin-route-scan] content overflow (Faz 2): ${summary.join(' | ') || 'none'}`);
-    testInfo.annotations.push({ type: 'content overflow (Faz 2)', description: summary.join(' | ') || 'none' });
+    console.log(`[admin-route-scan] known content overflow (Faz 2): ${summary.join(' | ') || 'none'}`);
+    testInfo.annotations.push({ type: 'known content overflow (Faz 2)', description: summary.join(' | ') || 'none' });
+
+    expect.soft(unknown.map(describe), 'content overflow on a route/width not in KNOWN_CONTENT_OVERFLOW').toEqual([]);
+    expect.soft(
+      grown.map((result) => `${describe(result)} > ceiling ${contentCeiling(result.route, result.width)}`),
+      'known content overflow grew past its ceiling',
+    ).toEqual([]);
   });
 });
