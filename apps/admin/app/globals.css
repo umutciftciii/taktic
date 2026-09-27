@@ -5511,3 +5511,774 @@ button:disabled {
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* ==================================================================== */
+/* ---- ADMIN-DESIGN-001 Faz 2: shared list / detail / form / feedback ---- */
+/* ==================================================================== */
+
+/*
+ * Content overflow, fixed where it starts.
+ *
+ * Faz 1's route scan found thirteen screens that widened the whole page on a
+ * 390px phone, and one (/finance/providers) that did so at 1440px. Every one of
+ * them traced back to one of three causes, each fixed here once instead of per
+ * screen:
+ */
+
+/*
+ * 1. A table with no scroll container. `.table-scroll` only scrolled inside a
+ *    `.table-card`; everywhere else (a `.section-card`, a bare `<main>`) a wide
+ *    table made the document wider instead. Several screens carried a scoped
+ *    copy of this rule (or a scroll class of their own), which stay and are
+ *    now redundant; the rule holds for every table wrapper, so the table keeps
+ *    its columns and scrolls sideways inside its own box.
+ *    `min-width: 0` lets the wrapper shrink when it is a flex or grid item.
+ */
+.table-scroll {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/*
+ * 2. A filter `<select>` as wide as its longest option. The field already
+ *    capped itself at the toolbar's width, but its select kept the flex
+ *    default `min-width: auto` — its widest option — and pushed past the field
+ *    on a phone once a category name was long enough. The select may now
+ *    shrink; the chosen option truncates instead of the page scrolling.
+ */
+.admin-toolbar-field > select,
+.admin-toolbar-field > input {
+  min-width: 0;
+}
+
+/*
+ * 3. A stat card's value as one unbreakable line (a masked recipient, a
+ *    template name). A grid item's automatic minimum is its content, so the
+ *    card grew past its column; it may now shrink and the value wraps.
+ */
+.stat-card {
+  min-width: 0;
+}
+
+.stat-card .metric,
+.stat-card-label {
+  overflow-wrap: anywhere;
+}
+
+/* ---- Utilities ---- */
+
+/* A cell line that may break anywhere (an e-mail address, an id). */
+.cell-break {
+  overflow-wrap: anywhere;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Filtrele: ink fill. */
+.btn-ink {
+  border: 1px solid var(--text);
+  background: var(--text);
+  color: #fff;
+}
+
+.btn-ink:hover {
+  border-color: var(--color-neutral-800);
+  background: var(--color-neutral-800);
+  color: #fff;
+}
+
+/* Temizle: a text button in the accent's text colour. */
+.btn-link {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-accent-700);
+}
+
+.btn-link:hover {
+  border-color: transparent;
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+
+/* The design's destructive button: white, neutral edge, red text. */
+.btn-destructive {
+  border: 1px solid var(--color-neutral-400);
+  background: var(--surface);
+  color: var(--color-accent-700);
+}
+
+.btn-destructive:hover {
+  border-color: var(--color-accent-700);
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+
+/* A pager direction that does not exist: in place, but closed. */
+.btn.is-disabled {
+  cursor: default;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* ---- PageHeader: title + ⓘ ---- */
+
+.page-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.page-title-row .page-title {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.page-title-row + .page-subtitle {
+  margin-top: 2px;
+}
+
+/* ---- InfoPopover ---- */
+
+.info-popover {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  vertical-align: middle;
+}
+
+.info-popover-trigger,
+.info-popover-trigger:hover {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  min-height: 0;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-neutral-400);
+  background: var(--surface);
+  color: var(--color-neutral-700);
+  font: 700 12px/1 var(--font-body);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.info-popover-trigger:hover {
+  border-color: var(--color-neutral-700);
+  background: var(--color-neutral-100);
+  color: var(--text);
+}
+
+.info-popover-trigger[aria-expanded='true'] {
+  border-color: var(--text);
+  background: var(--text);
+  color: #fff;
+}
+
+.info-popover.is-sm .info-popover-trigger {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
+
+.info-popover-panel {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  z-index: 40;
+  display: block;
+  width: min(420px, calc(100vw - 24px));
+  padding: 14px 16px;
+  background: var(--text);
+  box-shadow: var(--shadow-lg);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.55;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+}
+
+.info-popover-panel[hidden] {
+  display: none;
+}
+
+.info-popover.is-sm .info-popover-panel {
+  top: 24px;
+  width: min(340px, calc(100vw - 24px));
+}
+
+/* ---- Tabs / SavedViewTabs ---- */
+
+.tabs {
+  margin: 0 0 16px;
+  border-bottom: 2px solid var(--text);
+  overflow-x: auto;
+}
+
+.tabs-list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tabs-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  color: var(--color-neutral-700);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tabs-link:hover {
+  background: var(--color-neutral-200);
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* Inside the strip's own scroll box, so the ring is drawn inward. */
+.tabs-link:focus-visible {
+  outline-offset: -2px;
+}
+
+.tabs-link[aria-current='page'],
+.tabs-link[aria-current='page']:hover {
+  background: var(--text);
+  color: #fff;
+  font-weight: 700;
+}
+
+.tabs-count {
+  padding: 1px 6px;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.tabs-link[aria-current='page'] .tabs-count {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+/* ---- FilterBar ---- */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+}
+
+.filter-field {
+  display: flex;
+  flex: 1 1 160px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filter-field.is-wide {
+  flex: 2 1 240px;
+}
+
+.filter-field-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filter-field-label > label {
+  display: block;
+  color: var(--color-neutral-700);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.filter-field input,
+.filter-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.filter-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-bar-actions .btn-sm {
+  min-height: 38px;
+  padding: 8px 16px;
+}
+
+/* ---- DataTable (the design's list table) ---- */
+
+.data-list-card {
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.data-list-card > .empty-state {
+  border: 0;
+  box-shadow: none;
+  padding: 32px 20px;
+}
+
+/*
+ * The containing block for anything absolutely positioned inside the table —
+ * the visually hidden caption and header text above all. Without it they
+ * resolve against the page, not this scroller, and an `.sr-only` header at the
+ * far end of a wide table silently widens the whole document.
+ */
+.data-list-scroll {
+  position: relative;
+}
+
+.data-list-scroll:focus-visible {
+  outline-offset: -2px;
+}
+
+.data-list {
+  /* The design's list tables keep their columns (min-width 1000px there) and
+     scroll inside their box below that, rather than squeezing every cell. */
+  min-width: var(--data-list-min-width, 960px);
+}
+
+.data-list .badge {
+  white-space: nowrap;
+}
+
+.data-list th {
+  padding: 10px 16px;
+  border-bottom: 2px solid var(--text);
+  background: transparent;
+  color: var(--color-neutral-700);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  /* Two-word headers may wrap: kept on one line they alone held a nine-column
+     table wider than its box at 1440px. */
+  vertical-align: bottom;
+}
+
+.data-list td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--color-neutral-200);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.data-list tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.data-list .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-list .col-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Two buttons stack rather than widen the table past a 1440px window. */
+.data-list .col-actions .inline-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.data-list .cell-nowrap {
+  white-space: nowrap;
+}
+
+/* ---- Pagination ---- */
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-neutral-300);
+}
+
+.pagination-summary {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+}
+
+.pagination-links {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.pagination-links .is-next:not(.is-disabled) {
+  border-color: var(--text);
+}
+
+/* ---- SummaryStrip ---- */
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  margin: 0;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+}
+
+.summary-strip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 22px;
+  border-right: 1px solid var(--color-neutral-200);
+}
+
+.summary-strip dt {
+  color: var(--color-neutral-700);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.summary-strip dd {
+  margin: 0;
+}
+
+.summary-strip-value {
+  font-family: var(--font-heading);
+  font-size: 19px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.summary-strip-value.tone-success {
+  color: var(--color-success);
+}
+
+.summary-strip-value.tone-warning {
+  color: var(--color-warning);
+}
+
+.summary-strip-value.tone-danger {
+  color: var(--color-danger);
+}
+
+.summary-strip-note {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+
+/* ---- KeyValueList ---- */
+
+.kv-list {
+  display: grid;
+  margin: 0;
+}
+
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 34%) minmax(0, 1fr);
+  gap: 4px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-neutral-200);
+  font-size: 13.5px;
+}
+
+.kv-row:last-child {
+  border-bottom: 0;
+}
+
+.kv-row dt {
+  color: var(--color-neutral-700);
+  font-weight: 600;
+}
+
+.kv-row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .kv-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Timeline ("Neler oldu") ---- */
+
+.timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 4px 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.timeline-item:last-child {
+  border-bottom: 0;
+}
+
+.timeline-when {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-title {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.timeline-meta {
+  margin: 2px 0 0;
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+
+@media (max-width: 560px) {
+  .timeline-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Toggle (52×28 switch) ---- */
+
+.toggle,
+.toggle:hover {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.toggle-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 28px;
+  border: 1px solid var(--color-neutral-400);
+  background: var(--color-neutral-200);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: left 0.15s ease;
+}
+
+.toggle[aria-checked='true'] .toggle-track {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.toggle[aria-checked='true'] .toggle-knob {
+  left: 26px;
+}
+
+.toggle:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle-track,
+  .toggle-knob {
+    transition: none;
+  }
+}
+
+/* ---- ConfirmDialog ---- */
+
+.confirm-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-width: none;
+  padding: 0;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+}
+
+.confirm-dialog::backdrop {
+  background: rgba(32, 30, 29, 0.45);
+}
+
+.confirm-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 2px solid var(--text);
+}
+
+.confirm-dialog-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.confirm-dialog-close,
+.confirm-dialog-close:hover {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-height: 0;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-neutral-400);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.confirm-dialog-close:hover {
+  background: var(--color-neutral-200);
+}
+
+.confirm-dialog-body {
+  padding: 16px 20px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.confirm-dialog-body > :last-child {
+  margin-bottom: 0;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 20px 18px;
+}
+
+/* ---- StickyActionBar ---- */
+
+.sticky-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 24px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-neutral-300);
+  border-top: 2px solid var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.sticky-action-bar-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sticky-action-bar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sticky-action-bar-status.is-dirty::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.sticky-action-bar-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.sticky-action-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ---- /notifications (#46), the reference screen ---- */
+
+.notifications-page .notice {
+  margin-bottom: 12px;
+}
+
+.notification-recipient {
+  font-size: 12px;
+}

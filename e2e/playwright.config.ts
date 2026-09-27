@@ -404,6 +404,17 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *                            number field, a useActionState reveal, and the
  *                            eligibility decision form
  *
+ * And the shared admin list, for the layout and keyboard reasons at once:
+ *
+ *   admin-notifications-list  the Faz 2 reference list — an ⓘ disclosure
+ *                             closed by Esc and by a click outside, link tabs,
+ *                             a GET filter form, and a table that must scroll
+ *                             in its own box on a 320px phone
+ *   admin-form-components     ConfirmDialog (a native modal <dialog>, Esc,
+ *                             requestSubmit with a submitter) and
+ *                             StickyActionBar (beforeunload, popstate before
+ *                             the router, React's form reset)
+ *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
  * what keeps the existing CI job's browser download and wall clock unchanged;
@@ -418,7 +429,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|stale-auth-forms|auth-session-cookie|admin-shell|admin-route-scan|admin-rbac-permissions|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|stale-auth-forms|auth-session-cookie|admin-shell|admin-route-scan|admin-notifications-list|admin-form-components|admin-rbac-permissions|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

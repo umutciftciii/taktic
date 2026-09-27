@@ -64,42 +64,45 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
           description="Rolü olmayan bir yönetici hesabı giriş yapabilir ama panele giremez."
         />
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Rol</th>
-              <th>İzin</th>
-              <th>Durum</th>
-              <th>Atanma</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {live.map((assignment) => (
-              <tr key={assignment.id}>
-                <td>
-                  <Link href={`/roles/${assignment.role.id}`}>{assignment.role.name}</Link>
-                </td>
-                <td>{assignment.role.permissions.length}</td>
-                <td>
-                  <span className={assignment.role.isActive ? 'badge badge-good' : 'badge badge-muted'}>
-                    {assignment.role.isActive ? 'Aktif' : 'Rol pasif'}
-                  </span>
-                </td>
-                <td>{formatDateTime(assignment.assignedAt)}</td>
-                <td>
-                  <form action={revokeAdminRoleAction}>
-                    <input type="hidden" name="userId" value={userId} />
-                    <input type="hidden" name="roleId" value={assignment.role.id} />
-                    <button className="btn btn-danger btn-sm" type="submit">
-                      Geri al
-                    </button>
-                  </form>
-                </td>
+        // The table scrolls in its own box on a phone rather than widening the page.
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Rol</th>
+                <th>İzin</th>
+                <th>Durum</th>
+                <th>Atanma</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {live.map((assignment) => (
+                <tr key={assignment.id}>
+                  <td>
+                    <Link href={`/roles/${assignment.role.id}`}>{assignment.role.name}</Link>
+                  </td>
+                  <td>{assignment.role.permissions.length}</td>
+                  <td>
+                    <span className={assignment.role.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+                      {assignment.role.isActive ? 'Aktif' : 'Rol pasif'}
+                    </span>
+                  </td>
+                  <td>{formatDateTime(assignment.assignedAt)}</td>
+                  <td>
+                    <form action={revokeAdminRoleAction}>
+                      <input type="hidden" name="userId" value={userId} />
+                      <input type="hidden" name="roleId" value={assignment.role.id} />
+                      <button className="btn btn-danger btn-sm" type="submit">
+                        Geri al
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {assignable.length > 0 ? (

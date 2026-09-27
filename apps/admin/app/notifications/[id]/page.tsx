@@ -39,7 +39,7 @@ export default async function NotificationDetailPage({
       <PageHeader
         breadcrumbs={[
           { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
-          { label: 'Bildirim Geçmişi', href: '/notifications' },
+          { label: 'Gönderilen bildirimler', href: '/notifications' },
           { label: 'Detay' },
         ]}
         title={notificationTemplateLabel(entry.template)}

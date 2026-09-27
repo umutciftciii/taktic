@@ -295,7 +295,12 @@ function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem
   return (
     <tr>
       <td>
-        <div className="cell-stack">
+        {/*
+          May break anywhere: a business name without spaces or an e-mail
+          address is one unbreakable word, and one of those alone held this
+          column wide enough to push the table past a 1440px window.
+        */}
+        <div className="cell-stack cell-break">
           {canOpenLedger ? (
             <Link href={`/providers/${provider.id}/credits`}>
               <strong>{provider.businessName}</strong>
