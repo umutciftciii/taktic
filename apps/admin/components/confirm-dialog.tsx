@@ -59,11 +59,16 @@ export function ConfirmDialog({
   const bodyId = `${id}-body`;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const { pending } = useFormStatus();
 
   function open(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     dialogRef.current?.showModal();
+    // Explicitly, not through `autoFocus`: React writes that attribute only in
+    // server-rendered markup, so a dialog rendered on the client would open
+    // with focus on its first button (×) instead of on the safe choice.
+    cancelRef.current?.focus();
   }
 
   function close() {
@@ -120,7 +125,7 @@ export function ConfirmDialog({
           {consequence}
         </div>
         <div className="confirm-dialog-actions">
-          <button type="button" className="btn btn-secondary" onClick={close} autoFocus>
+          <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={close}>
             {cancelLabel}
           </button>
           <button

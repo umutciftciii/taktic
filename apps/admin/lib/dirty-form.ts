@@ -19,6 +19,56 @@ function isFrameworkField(name: string): boolean {
   return name.startsWith('$ACTION');
 }
 
+export type FormEntries = Array<[string, unknown]>;
+
+/** What `form` would submit right now, in submission order. */
+export function readEntries(form: HTMLFormElement): FormEntries {
+  return Array.from(new FormData(form).entries());
+}
+
+type FieldLike = {
+  name: string;
+  type?: string;
+  value?: string;
+  checked?: boolean;
+  multiple?: boolean;
+  options?: ArrayLike<{ value: string; selected: boolean }>;
+};
+
+const NOT_A_VALUE = new Set(['submit', 'button', 'reset', 'image', 'file']);
+
+/**
+ * Writes submitted entries back into a form's fields — the inverse of
+ * `readEntries` for everything a person can type or pick. Used when React has
+ * reset a form whose save did not land. Files cannot be written back (a file
+ * input only takes a user's choice), and React's own `$ACTION…` fields are
+ * left alone.
+ */
+export function applyEntries(form: { elements: ArrayLike<unknown> }, entries: FormEntries): void {
+  const values = new Map<string, string[]>();
+  for (const [name, value] of entries) {
+    if (typeof value !== 'string') continue;
+    values.set(name, [...(values.get(name) ?? []), value]);
+  }
+  const used = new Map<string, number>();
+
+  for (const element of Array.from(form.elements) as FieldLike[]) {
+    const name = element.name;
+    if (!name || isFrameworkField(name) || NOT_A_VALUE.has(element.type ?? '')) continue;
+    const list = values.get(name) ?? [];
+
+    if (element.type === 'checkbox' || element.type === 'radio') {
+      element.checked = list.includes(element.value ?? 'on');
+    } else if (element.options && element.multiple) {
+      for (const option of Array.from(element.options)) option.selected = list.includes(option.value);
+    } else {
+      const index = used.get(name) ?? 0;
+      used.set(name, index + 1);
+      element.value = list[index] ?? '';
+    }
+  }
+}
+
 /** A stable string for "what this form would submit", in submission order. */
 export function snapshotEntries(entries: Iterable<[string, unknown]>): string {
   const kept: Array<[string, string]> = [];

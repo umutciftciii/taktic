@@ -54,7 +54,10 @@ const SCREEN_INFO =
   'Platformun gönderdiği e-posta ve SMS denemelerinin kaydı. Bu liste silinemez ve düzenlenemez — neyin gönderildiğinin kanıtıdır. Yalnızca başarısız olan ve yeniden oluşturulabilen e-postalar tekrar gönderilebilir; şifre sıfırlama gibi tek kullanımlık bağlantı taşıyanlar gönderilemez, kullanıcının yeniden talep etmesi gerekir.';
 
 const COLUMNS: DataColumn[] = [
-  { key: 'createdAt', label: 'Oluşturulma' },
+  // The design's own name for this column. "Oluşturulma" is one unbreakable
+  // word that alone held the table 31px wider than its box at 1440px under the
+  // CI's DejaVu Sans; "Zaman" lets the column shrink to its dates.
+  { key: 'createdAt', label: 'Zaman' },
   { key: 'channel', label: 'Kanal' },
   { key: 'template', label: 'Şablon' },
   { key: 'recipient', label: 'Alıcı (maskeli)' },

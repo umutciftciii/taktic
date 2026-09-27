@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLeavingClick, snapshotEntries, type LinkClick } from '../lib/dirty-form';
+import { applyEntries, isLeavingClick, snapshotEntries, type LinkClick } from '../lib/dirty-form';
 
 /** ADMIN-DESIGN-001 Faz 2 — StickyActionBar's "unsaved changes" rules. */
 describe('dirty form snapshot', () => {
@@ -68,5 +68,49 @@ describe('leaving click', () => {
 
   it('treats _self as this tab', () => {
     expect(isLeavingClick({ ...base, target: '_self' })).toBe(true);
+  });
+});
+
+describe('writing submitted entries back', () => {
+  it('restores text, checkboxes, single and multiple selects, and repeated names in order', () => {
+    const title = { name: 'title', type: 'text', value: 'eski' };
+    const active = { name: 'active', type: 'checkbox', value: 'on', checked: true };
+    const kind = { name: 'kind', type: 'select-one', value: 'a', options: [{ value: 'a', selected: true }, { value: 'b', selected: false }] };
+    const tags = {
+      name: 'tags',
+      type: 'select-multiple',
+      multiple: true,
+      options: [
+        { value: 'x', selected: false },
+        { value: 'y', selected: true },
+      ],
+    };
+    const first = { name: 'line', type: 'text', value: '' };
+    const second = { name: 'line', type: 'text', value: '' };
+    const radioA = { name: 'r', type: 'radio', value: 'a', checked: true };
+    const radioB = { name: 'r', type: 'radio', value: 'b', checked: false };
+    const submit = { name: 'intent', type: 'submit', value: 'save' };
+    const action = { name: '$ACTION_ID_1', type: 'hidden', value: 'keep' };
+
+    applyEntries(
+      { elements: [title, active, kind, tags, first, second, radioA, radioB, submit, action] },
+      [
+        ['title', 'yeni'],
+        ['kind', 'b'],
+        ['tags', 'x'],
+        ['line', 'bir'],
+        ['line', 'iki'],
+        ['r', 'b'],
+      ],
+    );
+
+    expect(title.value).toBe('yeni');
+    expect(active.checked).toBe(false);
+    expect(kind.value).toBe('b');
+    expect(tags.options.map((option) => option.selected)).toEqual([true, false]);
+    expect([first.value, second.value]).toEqual(['bir', 'iki']);
+    expect([radioA.checked, radioB.checked]).toEqual([false, true]);
+    expect(submit.value).toBe('save');
+    expect(action.value).toBe('keep');
   });
 });
