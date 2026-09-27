@@ -3,7 +3,9 @@
 - **Tarih:** 2026-09-24
 - **Taban:** `main@1bda65da`
 - **Eşleme belgesi:** `docs/superpowers/specs/2026-09-24-admin-design-001-screen-mapping.md` (aşağıda "EB"). Route numaraları (#1–#55), bulgular (F1–F20) ve karar soruları (K1–K15) oradadır.
-- **Tasarım referansı:** `Taktick Tasarım Projesi (1).zip` → `design_handoff_taktick_admin/`. Depoya kopyalanmaz. Her dilim PR'ı, referans aldığı ekranın prototip anahtarını ve ekran görüntüsü adını belirtir.
+- **Tasarım referansı:** `Taktick Tasarım Projesi (2).zip` (2026-09-28 revizyonu) → `design_handoff_taktick_admin/`. Depoya kopyalanmaz. Her dilim PR'ı, referans aldığı ekranın prototip anahtarını ve ekran görüntüsü adını belirtir.
+  - Prototip ve stiller (1) ile aynıdır; yalnız ekran görüntüleri 54 tam sayfa, 1440px görüntüyle yenilendi.
+  - Numaralar paket (2)'ninkidir; eşleme EB §1.5'te. Bu belgedeki eski (1) numaraları 2026-09-28'de güncellendi.
 
 ## 0. Değişmez kurallar (her dilim için)
 
@@ -111,7 +113,7 @@ Yok.
 - Metin tabanlı seçiciler (menü etiketi değişiyor) aynı PR'da güncellenir. Tam liste için `grep -rn "Dashboard\|Talep bildirimleri\|Provider Finans" e2e/tests` çalıştırılır.
 
 ### Görsel kabul kriteri
-Aşağıdakilerde `01-genel-gorunum.png` ve `26-giris.png`, `27-sifre-belirleme-davet.png` ile yan yana karşılaştırma yapılır:
+Aşağıdakilerde `01-genel-gorunum.png`, `02-menu-daraltilmis.png` ve giriş hâlleri `49`–`54` (`49-giris.png` … `54-sifre-olusturuldu.png`) ile yan yana karşılaştırma yapılır:
 - Menü genişliği 256/64px, üst bar 56px.
 - Aktif satır `#fff2ef` zemin + 3px kırmızı iç çizgi.
 - Grup başlığı 12px/700/uppercase ve Türkçe "İ" doğru.
@@ -169,7 +171,7 @@ Yok.
 - Referans ekran olarak `/notifications` (#46) bu dilimde yeni bileşenlerle kurulur: salt okunur, düşük riskli ve `notification-history.spec.ts` kapsamı var. `NotificationRetryButton` `can('NOTIFICATION_RETRY')` kapısına alınır. Bu, desenin uçtan uca kanıtıdır.
 
 ### Görsel kabul kriteri
-- `/notifications`, README "15–22 ortak liste" tanımı ve `list:notifications` sütun setiyle karşılaştırılır.
+- `/notifications`, README "15–22 ortak liste" tanımı ve `list:notifications` sütun setiyle (paket 2: `46-gonderilen-bildirimler.png`) karşılaştırılır.
 - 320px genişlikte sayfa yatay kaymaz, yalnız tablo kayar.
 
 ### Geri dönüş riski
@@ -189,12 +191,12 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
 
 | Route | Tasarım | Aksiyon kapıları | Onay diyaloğu |
 | --- | --- | --- | --- |
-| `/requests` | `requests`, `02-talepler.png` | — | — |
-| `/requests/[id]` | `requestDetail` (4 sekme), `03`, `04` | `REQUESTS_STATUS`, `REQUESTS_QUALITY_RECALC`, `REQUEST_REPORTS_RESOLVE`, `REQUESTS_REOPEN`; tamamla/iptal yalnız `isSuperAdmin` (F6) | Reddet, Talebi kaldır, İptal |
-| `/requests/reports` | `list:complaints` | — | — |
-| `/offers` | `offers`, `07` | — | — |
-| `/offers/[id]` | `offerDetail`, `08` | `OFFERS_STATUS`, `OFFER_REFUND_MANUAL` | Kabul et (diğer teklifleri kapatır), Krediyi iade et |
-| `/refund-scan` | `refund`, `16` | "Taramayı çalıştır" `OFFER_REFUND_EXECUTE` | Toplu iade onayı ("N teklifin iadesini onayla") |
+| `/requests` | `requests`, `03-talepler.png` | — | — |
+| `/requests/[id]` | `requestDetail` (4 sekme), `04`–`07` | `REQUESTS_STATUS`, `REQUESTS_QUALITY_RECALC`, `REQUEST_REPORTS_RESOLVE`, `REQUESTS_REOPEN`; tamamla/iptal yalnız `isSuperAdmin` (F6) | Reddet, Talebi kaldır, İptal |
+| `/requests/reports` | `list:complaints`, `08` | — | — |
+| `/offers` | `offers`, `09` | — | — |
+| `/offers/[id]` | `offerDetail` (4 sekme), `10`–`13` | `OFFERS_STATUS`, `OFFER_REFUND_MANUAL` | Kabul et (diğer teklifleri kapatır), Krediyi iade et |
+| `/refund-scan` | `refund`, `30` | "Taramayı çalıştır" `OFFER_REFUND_EXECUTE` | Toplu iade onayı ("N teklifin iadesini onayla") |
 
 - **Sekmeler:** talep detayında "Talep bilgileri · Teklifler · Şikayet · Neler oldu" sekmeleri; bugünkü tüm bölümler bunlara dağıtılır. "Durum yönetimi" formları özet kartının eylem alanına ve "Talep bilgileri" sekmesine taşınır.
 - **İzin etkisi:**
@@ -209,13 +211,37 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
 - **Test:**
   - `request-report-flow`, `marketplace-journey`, `offer-experience`, `offer-detail-hydration`, `offer-withdrawal`, `request-auto-publish`, `contact-sharing`.
   - Yeni: izni olmayan rolde yazma düğmelerinin yokluğu (`admin-rbac-permissions` genişletmesi). Tasarımın `?tab=` URL'leri için derin bağlantı testi.
-- **Görsel kabul:** `02`, `03`, `04`, `07`, `08`, `16`.
+- **Görsel kabul:** `03`–`13` ve `30` (paket 2). Karşılaştırma ve sapmalar aşağıdaki "Faz 3A görsel karşılaştırma" bölümünde.
 - **Geri dönüş riski:** Yüksek (6 yazma formu yer değiştiriyor). Revert tek PR.
+
+#### Faz 3A görsel karşılaştırma (paket 2, 2026-09-28)
+
+Karşılaştırma, PR #118'in 1440px Chromium görüntüleriyle yapıldı. "Uygulandı", tasarımın yerleşimi ve içeriğinin gerçek veriyle kurulduğu anlamına gelir. Sapmaların gerekçeleri:
+
+- **D:** veri ya da API yok.
+- **K11:** ADMIN-ACTIONS kapsamında.
+- **K7:** mevcut bilgi korunuyor.
+- **İzin:** yetki kuralı gereği.
+
+| Görüntü | Uygulandı | Sapma ve gerekçe |
+| --- | --- | --- |
+| `03-talepler` | Başlık + ⓘ + özet; filtre çubuğu (Ara, Kalite ⓘ, Hizmet=Kategori, Şehir, tarih); tablo sütunları ve sırası; kalite çubuğu; "Aç"; "N kaydın a–b arası" + Önceki/Sonraki | **K11:** Excel ve Elle talep ekle yok. **K7:** Durum filtresi ve kayıtlı görünümler (README'de var, görüntüde yok) korunuyor; Başlangıç/Bitiş gün alanı, tasarımdaki "Son 30 gün" hazır seçimi yerine. Durum rozetleri mevcut sözlük ("Onaylandı"); tasarımın insan dili ("Yayında", "Teklif bekliyor") ayrı metin kararı. **K6:** telefon listede tam gösteriliyor, tasarımda maskeli |
+| `04-talep-detayi-bilgiler` | Geri bağlantısı; özet kartı (rozetler, künye, 27px "Kategori · İlçe, İl", müşteri satırı); 5 hücreli şerit; 4 sekme; "Müşteri ne istiyor", "Kalite puanı neden N" (ⓘ), "Adres ve erişim", "Bu talebe ne olacak" (ilerleme çubuğu) | **İzin, K7:** tasarımda olmayan "Durum yönetimi" kartı (incelemeye al, onayla, tamamla, iptal, reddet) ve Eşleşme, Müşteri, Kayıt bilgileri, Kategori soruları, Değerlendirme kartları; 3 kolon yerine 2 kolon. **K11:** "Süreyi 7 gün uzat" (001). Başlık eylemleri: "Şikayeti kapat" → Şikayet sekmesindeki "Uygun bulundu"; "Yayından kaldır" → Durum yönetimindeki "Talebi reddet". **D:** fotoğraf yok. Kalite kırılımı API'nin 10 başlığı (tasarımda 4) |
+| `05-talep-detayi-teklifler` | "Bu talebe gelen teklifler" tablosu: Hizmet veren, Teklif, Ne zaman gelebilir (`estimatedStartDate`), Verildiği zaman, Durum; sağ üstte durum cümlesi | **D:** "4,8 puan · 128 iş" alt satırı yok; yerine konum. Ek: Teklif no ve "Aç". Sekme sayacı rozet, parantez değil (ortak `Tabs`) |
+| `06-talep-detayi-sikayet` | "Karar bekliyor" rozeti, bildiren + zaman, sol kırmızı çizgili alıntı, karar formu, alt açıklama | Gerçek iki karar "Uygun bulundu" ve "Talebi kaldır" (onaylı). Tasarımdaki "Haklı bul, krediyi geri ver" API'de talebi kaldırır, tüm açık tekliflerin kredisini iade eder (EB §1.5). "Önce müşteriyle görüş" bir işlem değil |
+| `07-talep-detayi-neler-oldu` | Zaman + olay + yapan, en yeni başta | Olaylar yalnız kayıttaki zamanlardan ve oturumun okuyabildiği kayıtlardan. "Talep kendiliğinden yayına girdi · otomatik yayın" ayrımı kayıtta yok (D) |
+| `08-sikayet-edilen-talepler` | Başlık + ⓘ (gerçeğe göre düzeltildi); tablo: Talep (+kategori/konum), Şikayeti eden, Gerekçe, Bildirim zamanı, Durum, "Aç" (Şikayet sekmesine); cursor sayfalama | **D:** Harcanan kredi sütunu yok; Ara ve Tarih filtresi yok (API yalnız `state` ve `cursor` alıyor); "Kararı bekleyenleri sırayla aç" yok. Açık/Çözülen kayıtlı görünümleri eklendi |
+| `09-teklifler` | Başlık + ⓘ + özet; tablo sütunları (Teklif no, Talep, Hizmet veren, Teklif, Harcanan kredi, Verildiği zaman, Durum, Aç) | **D:** "ortalama · eşleşme oranı" özeti yok. **K7:** 4 sayı şeridi, 9 filtre + sabitleyiciler, müşteri/konum/iade sinyali sütunları ve kayıtlı görünümler korunuyor |
+| `10-teklif-detayi-islemler` | Özet kartı, 5 hücreli şerit, 4 sekme, "Hizmet verenin teklifi", "Yapabileceğin işlemler" (ad, açıklama, "Ne zaman:", düğme) | **K11:** 002–005 yok. Çalışan işlemler: Krediyi iade et (forma götürür), Kabul et, Kısa listeye al, Reddet. "Dahil olanlar / geçerlilik" alanları sistemde yok; mesaj, garanti, iç not, tahmini tarihler gösteriliyor |
+| `11-teklif-detayi-ilgili-talep` | Talep ve müşteri bilgileri; "Aynı talebe gelen diğer teklifler" tablosu | **D:** talep açıklaması ve bütçe teklif yanıtında yok; "Talebin tamamını aç" bağlantısı var |
+| `12-teklif-detayi-kredi-iade` | "Bu teklifin kredi hikâyesi"; iade sebebi seçimi + açıklama + "N krediyi iade et" | Sebep listesi API'nin 6 operasyon kodu (tasarımdaki 5 örnek değil). Önceki/sonraki bakiye cümlesi yok (D); kredi işlem kimlikleri ve politika durumu gösteriliyor. İade onaylı |
+| `13-teklif-detayi-neler-oldu` | Zaman çizelgesi | Olmamış adımlar "Henüz olmayanlar" satırında |
+| `30-iade-kontrolu` | Başlık + ⓘ + süre notu; sayı kartları; "Tarama sonucu" + "Onaylamadan hiçbir kredi hareket etmez"; "Yeniden tara"; "N teklifin iadesini onayla" (onaylı) | **D:** "Taranan teklif" ve "Son tarama" yok (API vermiyor; son çalışma yalnız süreç belleğinde); yerine "Atlanan" ve "Yeni tekliflerin iade süresi". Tablo ham id'lerle, izin varsa bağlantılı (D: işletme/talep adı yok). Limit alanı ve 7 atlanma nedeni korunuyor |
 
 ### 3B — Kişiler ve destek (#7, #8, #9, #10, #12, #13, #14)
 
 - **Tasarım karşılıkları:**
-  - `list:customers` (`09`), `customerDetail` (`10`), `list:support`, `providers` (`05`), `providerDetail` (`06`).
+  - `list:customers` (`19`), `customerDetail` (`20`–`23`), `list:support` (`24`), `providers` (`15`), `providerDetail` (`16`–`18`).
   - `/support/[id]` ve `/providers/[id]/credits` için şablon kullanılır.
 - **Aksiyon kapıları:**
   - Müşteri: `CUSTOMER_NOTES_WRITE`, `CUSTOMERS_STATUS`, `CUSTOMER_ACTIVATION_LINK_ISSUE`; notlar sekmesi `CUSTOMER_NOTES_READ` (F7).
@@ -233,7 +259,7 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
 ### 3C — Vitrin ve değerlendirmeler (#15–#24)
 
 - **Tasarım karşılıkları:**
-  - `list:reviewReports`, `list:cardReviews` (`17`), `list:placements`, `list:leads`, `list:showcasePackages`.
+  - `list:reviewReports` (`34`), `list:cardReviews` (`31`), `list:placements` (`32`), `list:leads` (`33`), `list:showcasePackages` (`36`).
   - Şablon kullananlar: `/provider-reviews/[reviewId]`, `/showcase/reviews/[versionId]`, `/showcase/placements/[placementId]`, `/showcase/cards`, `/showcase/price-terms`.
 - **Aksiyon kapıları:** `PROVIDER_REVIEWS_MODERATE`, `SHOWCASE_REVIEW_DECIDE`, `SHOWCASE_PACKAGES_WRITE`, `SHOWCASE_PLACEMENTS_MODERATE`, `SHOWCASE_PLACEMENT_CANCEL`.
 - **Onay diyaloğu:** değerlendirmeyi kaldır (müşteriye e-posta gider), sürümü reddet, yerleşimi iptal et (geri alınamaz, iade yok).
@@ -245,7 +271,7 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
 ### 3D — Finans, paketler ve iadeler (#25–#32)
 
 - **Tasarım karşılıkları:**
-  - `finance` (`11`), `list:ledger` (`14`), `manual` (`15`), `list:balances`, `list:purchases`.
+  - `finance` (`25`), `list:ledger` (`26`), `manual` (`27`), `list:balances` (`28`), `list:purchases` (`29`).
   - Şablon kullananlar: `/package-purchases/[id]`, `/package-refunds`, `/package-refunds/[id]`.
 - **Aksiyon kapıları:**
   - `PACKAGE_PURCHASE_STATUS_WRITE`.
@@ -262,7 +288,7 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
 
 ### 3E — Kampanyalar, uygunluk ve operasyon ayarları (#33–#37, #45)
 
-- **Tasarım karşılıkları:** `campaigns` (`13`), `settings` (`12`). Şablon kullananlar: `/campaigns/new`, `/campaigns/[id]`, `/promotion-eligibility*`.
+- **Tasarım karşılıkları:** `campaigns` (`45`), `settings` (`44`). Şablon kullananlar: `/campaigns/new`, `/campaigns/[id]`, `/promotion-eligibility*`.
 - **Aksiyon kapıları:**
   - Kampanya: `CAMPAIGNS_WRITE` (yeni taslak, revizyon), `CAMPAIGNS_LIFECYCLE` (etkinleştir, durdur, sürdür, bitir, taslağı kapat), `CAMPAIGN_REDEMPTION_REVOKE`, `CAMPAIGN_EVENT_RETRY`.
   - Operasyon ayarları: `OPERATIONS_SETTINGS_WRITE`, `SCHEDULERS_WRITE`, `MARKETPLACE_PUBLISH_WRITE`, `PROVIDER_REVIEWS_SETTING_WRITE`, `CAMPAIGN_ENGINE_TOGGLE` (mevcut).
@@ -277,7 +303,7 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
 
 ### 3F — Katalog (#38–#43)
 
-- **Tasarım karşılıkları:** `list:categories` (`18`), `list:creditPackages`. Formlar şablonla kurulur.
+- **Tasarım karşılıkları:** `list:categories` (`35`), `list:creditPackages` (`37`). Formlar şablonla kurulur.
 - **Aksiyon kapıları:**
   - Kategori: `CATEGORIES_WRITE`, `CATEGORIES_STATUS`, `UPLOADS_WRITE`.
   - Soru: `QUESTIONS_WRITE` (soru seti editörü `QUESTIONS_READ` yoksa gizli, F8).
@@ -291,7 +317,7 @@ Her alt dilim ayrı PR'dır ve sırası risk/bağımlılığa göredir. Her PR'd
 
 (#46 `/notifications` Dilim 2'de yapıldı.)
 
-- **Tasarım karşılıkları:** `company` (`25`), `list:admins`. Şablon kullananlar: `/notifications/[id]`, `/users/new`, `/users/[id]`, `/roles`, `/roles/[id]`.
+- **Tasarım karşılıkları:** `company` (`48`), `list:admins` (`47`). Şablon kullananlar: `/notifications/[id]`, `/users/new`, `/users/[id]`, `/roles`, `/roles/[id]`.
 - **Aksiyon kapıları:**
   - `COMPANY_SETTINGS_WRITE`, `NOTIFICATION_RETRY`, `ADMIN_USERS_STATUS`.
   - Kök yetkiler (`/users/new`, davet bağlantısı, rol atama, `/roles*`) yalnız `isSuperAdmin` ile (F10, F11).
@@ -329,7 +355,7 @@ En sona bırakıldı, çünkü K2 ve K12 kararlarına bağlı.
   - Kontrast: `#7d7979` üzerindeki 11px başlık için WCAG AA hesabı; yetersizse `#605d5d`.
   - `role="switch"`/`aria-checked`, `aria-modal`, `aria-expanded`.
   - `@axe-core/playwright` eklenmesi bir bağımlılık kararıdır. Eklenmezse manuel denetim listesi PR'a eklenir.
-- **Görsel kabul:** 27 referans görüntüye karşı ekran başına yan yana karşılaştırma tablosu. Sapmalar gerekçeli listelenir: gerçek veri, D öğesi ya da izin.
+- **Görsel kabul:** paket (2)'nin 54 tam sayfa görüntüsüne karşı ekran başına yan yana karşılaştırma tablosu (SEO `38`–`43` hariç). Sapmalar gerekçeli listelenir: gerçek veri, D öğesi ya da izin.
 - **Yüklenme (K10):** onay gelirse `loading.tsx` iskeletleri eklenir; E2E zamanlaması ve `form-post` akışları yeniden koşulur.
 - **Geri dönüş riski:** Düşük (test ve iskelet).
 

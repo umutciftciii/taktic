@@ -156,6 +156,7 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       await expect(tabs.getByRole('link', { name: /^Teklifler/ })).toHaveAttribute('aria-current', 'page');
       await expect(page.getByTestId('request-offer-row')).toHaveCount(1);
       await expect(page.getByTestId('request-offer-row')).toContainText(provider.businessName);
+      await expect(page.getByTestId('request-offers-panel').getByRole('columnheader', { name: 'Ne zaman gelebilir' })).toHaveCount(1);
       await page.screenshot({ path: shot(testInfo, 'request-detail-teklifler-1440'), fullPage: false });
 
       await tabs.getByRole('link', { name: /^Şikayet/ }).click();
@@ -356,12 +357,22 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       await tabs.getByRole('link', { name: 'Teklif ve işlemler' }).click();
       await expect(page.getByTestId('offer-action-refund')).toHaveCount(0);
 
+      // ---- the related request, with every offer it received -------------
+      await tabs.getByRole('link', { name: 'İlgili talep' }).click();
+      await expect(page).toHaveURL(new RegExp(`${path}\\?tab=talep$`));
+      await expect(page.getByTestId('offer-siblings')).toContainText('Bu talebe başka teklif gelmedi.');
+      await page.screenshot({ path: shot(testInfo, 'offer-detail-talep-1440'), fullPage: false });
+
       // ---- Back / Forward and the history tab -----------------------------
       await tabs.getByRole('link', { name: 'Neler oldu' }).click();
       await expect(page.getByTestId('offer-history')).toContainText('Kredi iadesi yapıldı');
       await page.goBack();
+      await expect(page).toHaveURL(new RegExp(`${path}\\?tab=talep$`));
+      await expect(page.getByTestId('offer-siblings')).toBeVisible();
+      await page.goBack();
       await expect(page).toHaveURL(new RegExp(`${path}$`));
       await expect(page.getByTestId('offer-panel-islemler')).toBeVisible();
+      await page.goForward();
       await page.goForward();
       await expect(page).toHaveURL(new RegExp(`${path}\\?tab=gecmis$`));
       await expect(page.getByTestId('offer-history')).toBeVisible();
@@ -494,6 +505,16 @@ test.describe('Faz 3A permissions: sections and actions follow /admin/me/permiss
       await expect(row).toHaveCount(1);
       // No REQUESTS_READ: the request number is text, not a link to a page it cannot open.
       await expect(row.getByRole('link', { name: /^Talebi aç/ })).toHaveCount(0);
+      await expect(row.getByRole('link', { name: /^Aç:/ })).toHaveCount(0);
+
+      // With it, the row's "Aç" goes straight to the decision.
+      await decider.gotoAdmin('/requests/reports');
+      await decider.page
+        .locator(`[data-testid="report-queue-row"][data-request-id="${request.id}"]`)
+        .getByRole('link', { name: /^Aç:/ })
+        .click();
+      await expect(decider.page).toHaveURL(new RegExp(`/requests/${request.id}\\?tab=sikayet$`));
+      await expect(decider.page.getByTestId('report-decisions')).toBeVisible();
     } finally {
       await decider.close();
       await queueOnly.close();
@@ -626,6 +647,13 @@ test.describe('Faz 3A lists and layout', () => {
       await admin.gotoAdmin('/requests/reports');
       const reportViews = page.getByRole('navigation', { name: 'Bildirim durumu' });
       await expect(reportViews.getByRole('link', { name: /^Açık/ })).toHaveAttribute('aria-current', 'page');
+      // At 1440px the whole queue — "Aç" included — fits its box, as in the design.
+      expect(
+        await page.evaluate(() => {
+          const scroller = document.querySelector('.data-list-scroll');
+          return scroller ? scroller.scrollWidth - scroller.clientWidth : -1;
+        }),
+      ).toBe(0);
       await page.screenshot({ path: shot(testInfo, 'request-reports-1440'), fullPage: false });
       await reportViews.getByRole('link', { name: /^Çözülen/ }).click();
       await expect(page).toHaveURL(/\/requests\/reports\?state=resolved$/);

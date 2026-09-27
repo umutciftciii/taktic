@@ -15,6 +15,7 @@ import {
   statusLabel,
 } from '../../../lib/api';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailHeader } from '../../../components/detail-header';
 import { InfoPopover } from '../../../components/info-popover';
 import { KeyValueList } from '../../../components/key-value-list';
@@ -56,6 +57,14 @@ type OfferDetailPageProps = {
 
 type TabKey = '' | 'talep' | 'kredi' | 'gecmis';
 const TAB_KEYS: readonly TabKey[] = ['', 'talep', 'kredi', 'gecmis'];
+
+const SIBLING_COLUMNS: DataColumn[] = [
+  { key: 'provider', label: 'Hizmet veren' },
+  { key: 'price', label: 'Teklif', align: 'end' },
+  { key: 'submittedAt', label: 'Verildiği zaman' },
+  { key: 'status', label: 'Durum' },
+  { key: 'actions', label: 'İşlemler', srOnly: true },
+];
 
 /** The statuses the offer status endpoint refuses to move an offer out of. */
 const CLOSED_OFFER_STATUSES: ReadonlySet<OfferStatus> = new Set(['WITHDRAWN', 'CANCELLED', 'EXPIRED']);
@@ -113,6 +122,11 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
   const activeTab = resolveTab<TabKey>(search.tab, TAB_KEYS, '');
 
   const offer = await fetchOrNotFound(() => apiFetch<Offer>(`/offers/${id}`));
+  // The design's "Aynı talebe gelen diğer teklifler": the list read this
+  // screen's own permission (OFFERS_READ) already opens, made only when the
+  // tab that shows it is open.
+  const siblingOffers =
+    activeTab === 'talep' ? await apiFetch<Offer[]>(`/offers?requestId=${offer.request.id}`) : null;
 
   const customerName = offer.request.customerName;
   const isRefunded = Boolean(offer.creditRefundedAt);
@@ -322,78 +336,124 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
 
       {activeTab === 'talep' ? (
         <div className="detail-panel" data-testid="offer-panel-talep">
-          <SectionCard title="Teklifin verildiği talep ve müşteri">
-            <KeyValueList
-              items={[
-                {
-                  label: 'Talep no',
-                  value: canReadRequests ? (
-                    <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+          <div className="detail-panel-grid">
+            <SectionCard title="Teklifin verildiği talep ve müşteri">
+              <KeyValueList
+                items={[
+                  {
+                    label: 'Talep no',
+                    value: canReadRequests ? (
+                      <Link className="cell-link" href={`/requests/${offer.request.id}`}>
+                        <code>{requestRef}</code>
+                      </Link>
+                    ) : (
                       <code>{requestRef}</code>
-                    </Link>
-                  ) : (
-                    <code>{requestRef}</code>
-                  ),
-                },
-                { label: 'Kategori', value: offer.request.category.name },
-                {
-                  label: 'Konum',
-                  value: `${offer.request.city}/${offer.request.district}${
-                    offer.request.neighborhood ? ` · ${offer.request.neighborhood}` : ''
-                  }`,
-                },
-                {
-                  label: 'Talep durumu',
-                  value: (
-                    <span className={statusBadgeClass(offer.request.status)}>{statusLabel(offer.request.status)}</span>
-                  ),
-                },
-                { label: 'Kalite', value: `${offer.request.qualityScore}/100` },
-                { label: 'Müşteri', value: customerName || null },
-                {
-                  label: 'Telefon',
-                  value: offer.request.customerPhone ? (
-                    <a className="cell-link" href={`tel:${offer.request.customerPhone}`}>
-                      {offer.request.customerPhone}
-                    </a>
-                  ) : null,
-                },
-                {
-                  label: 'E-posta',
-                  value: offer.request.customerEmail ? (
-                    <a className="cell-link" href={`mailto:${offer.request.customerEmail}`}>
-                      {offer.request.customerEmail}
-                    </a>
-                  ) : null,
-                },
-                ...(offer.request.customer
-                  ? [
-                      {
-                        label: 'Kullanıcı hesabı',
-                        value: (
-                          <span className="muted">
-                            {offer.request.customer.name ??
-                              offer.request.customer.email ??
-                              offer.request.customer.phone ??
-                              offer.request.customer.id}
-                          </span>
-                        ),
-                      },
-                    ]
-                  : []),
-              ]}
-            />
-            <div className="inline-actions detail-card-links">
-              {canReadRequests ? (
-                <Link className="btn btn-secondary btn-sm" href={`/requests/${offer.request.id}`}>
-                  Talebin tamamını aç
+                    ),
+                  },
+                  { label: 'Kategori', value: offer.request.category.name },
+                  {
+                    label: 'Konum',
+                    value: `${offer.request.city}/${offer.request.district}${
+                      offer.request.neighborhood ? ` · ${offer.request.neighborhood}` : ''
+                    }`,
+                  },
+                  {
+                    label: 'Talep durumu',
+                    value: (
+                      <span className={statusBadgeClass(offer.request.status)}>{statusLabel(offer.request.status)}</span>
+                    ),
+                  },
+                  { label: 'Kalite', value: `${offer.request.qualityScore}/100` },
+                  { label: 'Müşteri', value: customerName || null },
+                  {
+                    label: 'Telefon',
+                    value: offer.request.customerPhone ? (
+                      <a className="cell-link" href={`tel:${offer.request.customerPhone}`}>
+                        {offer.request.customerPhone}
+                      </a>
+                    ) : null,
+                  },
+                  {
+                    label: 'E-posta',
+                    value: offer.request.customerEmail ? (
+                      <a className="cell-link" href={`mailto:${offer.request.customerEmail}`}>
+                        {offer.request.customerEmail}
+                      </a>
+                    ) : null,
+                  },
+                  ...(offer.request.customer
+                    ? [
+                        {
+                          label: 'Kullanıcı hesabı',
+                          value: (
+                            <span className="muted">
+                              {offer.request.customer.name ??
+                                offer.request.customer.email ??
+                                offer.request.customer.phone ??
+                                offer.request.customer.id}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+              <div className="inline-actions detail-card-links">
+                {canReadRequests ? (
+                  <Link className="btn btn-secondary btn-sm" href={`/requests/${offer.request.id}`}>
+                    Talebin tamamını aç
+                  </Link>
+                ) : null}
+                <Link className="btn btn-ghost btn-sm" href={`/offers?requestId=${offer.request.id}`}>
+                  Teklif listesinde aç
                 </Link>
-              ) : null}
-              <Link className="btn btn-ghost btn-sm" href={`/offers?requestId=${offer.request.id}`}>
-                Aynı talebe gelen diğer teklifler
-              </Link>
-            </div>
-          </SectionCard>
+              </div>
+            </SectionCard>
+            {siblingOffers ? (
+              <SectionCard
+                title="Aynı talebe gelen diğer teklifler"
+                subtitle={`Bu talebe toplam ${siblingOffers.length} teklif geldi.`}
+                padded={siblingOffers.length <= 1}
+              >
+                <div data-testid="offer-siblings">
+                  {siblingOffers.length <= 1 ? (
+                    <p className="detail-muted-note">Bu talebe başka teklif gelmedi.</p>
+                  ) : (
+                    <DataTable caption="Aynı talebe gelen teklifler" columns={SIBLING_COLUMNS} minWidth={640}>
+                      {siblingOffers.map((sibling) => (
+                        <tr key={sibling.id} data-testid="offer-sibling-row">
+                          <td>
+                            <div className="cell-stack">
+                              <strong>{sibling.provider.businessName}</strong>
+                              {sibling.id === offer.id ? <span className="cell-muted">Bu teklif</span> : null}
+                            </div>
+                          </td>
+                          <td className="is-num cell-nowrap">
+                            <strong>{formatPrice(sibling.priceAmount, sibling.currency)}</strong>
+                          </td>
+                          <td>{formatDateTime(sibling.submittedAt)}</td>
+                          <td>
+                            <span className={statusBadgeClass(sibling.status)}>{statusLabel(sibling.status)}</span>
+                          </td>
+                          <td className="col-actions">
+                            {sibling.id === offer.id ? null : (
+                              <Link
+                                className="btn btn-secondary btn-sm"
+                                href={`/offers/${sibling.id}`}
+                                aria-label={`Aç: ${sibling.provider.businessName} teklifi`}
+                              >
+                                Aç
+                              </Link>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </DataTable>
+                  )}
+                </div>
+              </SectionCard>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

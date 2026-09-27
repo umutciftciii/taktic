@@ -6409,6 +6409,7 @@ button:disabled {
 .detail-panel-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: 16px;
   min-width: 0;
 }
@@ -6667,4 +6668,9 @@ button:disabled {
 .refund-scan-page .refund-scan-stale,
 .refund-scan-page .notice-error {
   margin-top: 10px;
+}
+
+/* The design's detail cards: a 2px ink rule under the card's own header. */
+.detail-panel .section-card-header {
+  border-bottom: 2px solid var(--text);
 }

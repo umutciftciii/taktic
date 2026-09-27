@@ -6,6 +6,7 @@ import {
   type CustomerReviewState,
   fetchOrNotFound,
   formatBudgetRange,
+  formatDate,
   formatDateRange,
   formatDateTime,
   formatPrice,
@@ -114,6 +115,8 @@ const OFFER_COLUMNS: DataColumn[] = [
   { key: 'provider', label: 'Hizmet veren' },
   { key: 'no', label: 'Teklif no' },
   { key: 'price', label: 'Teklif', align: 'end' },
+  // The design's "Ne zaman gelebilir": the provider's own estimated start.
+  { key: 'start', label: 'Ne zaman gelebilir' },
   { key: 'submittedAt', label: 'Verildiği zaman' },
   { key: 'status', label: 'Durum' },
   { key: 'actions', label: 'İşlemler', srOnly: true },
@@ -592,7 +595,7 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
               {offers.length === 0 ? (
                 <p className="request-offers-empty">Bu talebe henüz teklif verilmemiş.</p>
               ) : (
-                <DataTable caption="Bu talebe gelen teklifler" columns={OFFER_COLUMNS} minWidth={760}>
+                <DataTable caption="Bu talebe gelen teklifler" columns={OFFER_COLUMNS} minWidth={860}>
                   {offers.map((offer) => {
                     const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;
                     return (
@@ -610,6 +613,13 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
                         </td>
                         <td className="is-num cell-nowrap">
                           <strong>{formatPrice(offer.priceAmount, offer.currency)}</strong>
+                        </td>
+                        <td>
+                          {offer.estimatedStartDate ? (
+                            formatDate(offer.estimatedStartDate)
+                          ) : (
+                            <span className="cell-muted">Belirtilmedi</span>
+                          )}
                         </td>
                         <td>{formatDateTime(offer.submittedAt)}</td>
                         <td>

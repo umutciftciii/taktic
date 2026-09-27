@@ -58,16 +58,16 @@ type ReportQueuePageProps = {
   searchParams: Promise<{ state?: string; cursor?: string }>;
 };
 
+/** In the design's order (`08-sikayet-edilen-talepler`), with this queue's own count and excerpt. */
 const COLUMNS: DataColumn[] = [
   { key: 'request', label: 'Talep' },
-  { key: 'category', label: 'Kategori' },
-  { key: 'location', label: 'Konum' },
-  { key: 'status', label: 'Durum' },
+  { key: 'reporters', label: 'Şikayeti eden' },
+  { key: 'reasons', label: 'Gerekçe' },
   { key: 'firstReportedAt', label: 'İlk bildirim' },
   { key: 'count', label: 'Bildirim', align: 'end' },
-  { key: 'reasons', label: 'Gerekçe' },
-  { key: 'reporters', label: 'Şikayeti eden' },
+  { key: 'status', label: 'Durum' },
   { key: 'excerpt', label: 'Açıklama' },
+  { key: 'actions', label: 'İşlemler', srOnly: true },
 ];
 
 function normalizeState(value: string | undefined): QueueState {
@@ -132,7 +132,7 @@ export default async function RequestReportsQueuePage({ searchParams }: ReportQu
             }
           />
         ) : (
-          <DataTable caption="Şikayet edilen talepler" columns={COLUMNS} minWidth={1180} testId="report-queue">
+          <DataTable caption="Şikayet edilen talepler" columns={COLUMNS} minWidth={1080} testId="report-queue">
             {queue.items.map((item) => (
               <QueueRow
                 key={item.request.id}
@@ -191,43 +191,10 @@ function QueueRow({
           ) : (
             <code className="display-number">{requestRef}</code>
           )}
-          <span className="cell-muted">{formatDateTime(item.request.submittedAt)}</span>
-        </div>
-      </td>
-      <td>{item.request.categoryName}</td>
-      <td>
-        {item.request.city}/{item.request.district}
-      </td>
-      <td>
-        <div className="cell-stack">
-          <span className={statusBadgeClass(item.request.status)}>
-            {requestStatusLabel(item.request.status)}
+          <span>
+            {item.request.categoryName} · {item.request.city}/{item.request.district}
           </span>
-          {item.reopened ? (
-            <span className="badge badge-warn" data-testid="report-reopened">
-              Kaldırıldı → geri açıldı
-            </span>
-          ) : item.lastResolution && state === 'resolved' ? (
-            <span className="cell-muted">
-              {reportResolutionLabel(item.lastResolution.resolution)} ·{' '}
-              {formatDateTime(item.lastResolution.resolvedAt)}
-            </span>
-          ) : null}
-        </div>
-      </td>
-      <td>{formatDateTime(item.firstReportedAt)}</td>
-      <td className="is-num">
-        <span className="badge badge-warn" data-testid="report-count">
-          {item.reportCount}
-        </span>
-      </td>
-      <td>
-        <div className="badge-row">
-          {item.reasons.map((reason) => (
-            <span className="badge badge-muted" key={reason}>
-              {reportReasonLabel(reason)}
-            </span>
-          ))}
+          <span className="cell-muted">{formatDateTime(item.request.submittedAt)}</span>
         </div>
       </td>
       <td>
@@ -244,11 +211,53 @@ function QueueRow({
         </div>
       </td>
       <td>
+        <div className="badge-row">
+          {item.reasons.map((reason) => (
+            <span className="badge badge-muted" key={reason}>
+              {reportReasonLabel(reason)}
+            </span>
+          ))}
+        </div>
+      </td>
+      <td>{formatDateTime(item.firstReportedAt)}</td>
+      <td className="is-num">
+        <span className="badge badge-warn" data-testid="report-count">
+          {item.reportCount}
+        </span>
+      </td>
+      <td>
+        <div className="cell-stack">
+          <span className={statusBadgeClass(item.request.status)}>{requestStatusLabel(item.request.status)}</span>
+          {item.reopened ? (
+            <span className="badge badge-warn" data-testid="report-reopened">
+              Kaldırıldı → geri açıldı
+            </span>
+          ) : item.lastResolution && state === 'resolved' ? (
+            <span className="cell-muted">
+              {reportResolutionLabel(item.lastResolution.resolution)} ·{' '}
+              {formatDateTime(item.lastResolution.resolvedAt)}
+            </span>
+          ) : null}
+        </div>
+      </td>
+      <td>
         {item.request.descriptionExcerpt ? (
           <span className="report-queue-excerpt">{item.request.descriptionExcerpt}</span>
         ) : (
           <span className="cell-muted">—</span>
         )}
+      </td>
+      <td className="col-actions">
+        {/* The design's "Aç": to the Şikayet tab, where the decision is taken. */}
+        {canOpenRequests ? (
+          <Link
+            className="btn btn-secondary btn-sm"
+            href={`/requests/${item.request.id}?tab=sikayet`}
+            aria-label={`Aç: ${requestRef}`}
+          >
+            Aç
+          </Link>
+        ) : null}
       </td>
     </tr>
   );

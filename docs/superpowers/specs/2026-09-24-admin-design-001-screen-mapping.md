@@ -4,6 +4,10 @@
 - **Taban:** `main@1bda65da`
 - **Kapsam:** yalnız analiz. Bu belge ve eşlik eden uygulama planı (`docs/superpowers/plans/2026-09-24-admin-design-001-implementation-plan.md`) dışında hiçbir dosya değişmedi.
 - **Tasarım kaynağı:** kullanıcının verdiği `Taktick Tasarım Projesi (1).zip` (1.290.790 bayt, 34 dosya). Arşiv salt-okunur incelendi ve depoya **kopyalanmadı**. Bu belgede yalnız dosya adları, token değerleri ve ekran/sütun adları geçer.
+- **Revize paket (2026-09-28):** `Taktick Tasarım Projesi (2).zip` (12.552.298 bayt, 61 dosya). **Güncel referans budur.**
+  - Prototip (`TakTick Admin Paneli.dc.html`), `support.js`, Modernist `styles.css`, `mark-white.png` ve `github.md`, (1) ile bayt bayt aynı. Tasarımın içeriği ve bu belgedeki bulgular değişmedi.
+  - Değişen yalnız ekran görüntüleri ve README'nin ekran görüntüsü bölümü: 27 dar önizleme yerine 54 tam sayfa, 1440px genişlik; her ekran, sekme, modal ve 6 giriş hâli ayrı dosyada.
+  - Eşleme §1.5'te; eski numaralar geçersiz.
 
 Etiketler:
 - **[DOĞRULANDI]** kaynağı okuyarak teyit edildi.
@@ -24,7 +28,8 @@ Etiketler:
 | `design/_ds/modernist-…/styles.css` | 10.555 | Modernist tasarım sistemi token'ları ve bileşen sınıfları |
 | `design/_ds/modernist-…/_ds_bundle.js` | 303 | Boş paket (sistem yalnız stil) |
 | `design/assets/mark-white.png` | 136.508 | Beyaz TakTick markası. Her zaman `#ec3013` karo üstünde kullanılır |
-| `screenshots/01…27-*.png` | 24–46 KB | 27 referans görüntü. Dar önizleme genişliğinde alınmış; README'ye göre **ölçü kaynağı değil** |
+| `screenshots/01…27-*.png` | 24–46 KB | Paket (1): 27 referans görüntü, dar önizleme genişliğinde. **Paket (2) ile geçersiz**; §1.5 |
+| `screenshots/01…54-*.png` (paket 2) | 1440 × 1617 | 54 tam sayfa görüntü, 1440px. Yapışkan menü/üst bar sabitlenmiş, sol menüde tüm gruplar açık. Kesin ölçü için README ve prototip esastır; yerleşim ve içerik için görüntüler kullanılabilir. 49–54'teki "Giriş ekranı durumları" şeridi yalnız prototipte gezinmek içindir, uygulanmaz |
 
 Dış bağımlılıklar:
 - **Google Fonts:** Archivo 400/500/600/700/800.
@@ -127,6 +132,69 @@ Dış bağımlılıklar:
 - **34 içerik ekranı** (17 özel + 17 ortak liste düzeni).
 - **6 kimlik doğrulama hâli** ve **2 modal**.
 - **1 yer tutucu** (`soon`): 11 liste ekranının "Aç" eylemi buraya düşüyor. Bu ekranların detay sayfası tasarımda yok.
+
+### 1.5 Ekran görüntüsü eşlemesi (paket 2, 2026-09-28)
+
+Dilim PR'ları görsel kabulde bu numaraları kullanır. "Paket 1" sütunu, önceki belgelerde ve PR'larda geçen eski numaradır.
+
+| Görüntü (paket 2) | Prototip anahtarı / hâl | Route | Paket 1 | Dilim |
+| --- | --- | --- | --- | --- |
+| `01-genel-gorunum` | `dashboard` | `/` | `01` | 3H (kabuk: 1) |
+| `02-menu-daraltilmis` | kabuk, ikon modu | — | yok | 1 |
+| `03-talepler` | `requests` | `/requests` | `02` | 3A |
+| `04-talep-detayi-bilgiler` | `requestDetail` · Talep bilgileri | `/requests/[id]` | `03` | 3A |
+| `05-talep-detayi-teklifler` | `requestDetail` · Teklifler | `/requests/[id]?tab=teklifler` | `04` | 3A |
+| `06-talep-detayi-sikayet` | `requestDetail` · Şikayet | `/requests/[id]?tab=sikayet` | yok | 3A |
+| `07-talep-detayi-neler-oldu` | `requestDetail` · Neler oldu | `/requests/[id]?tab=gecmis` | yok | 3A |
+| `08-sikayet-edilen-talepler` | `list:complaints` | `/requests/reports` | yok | 3A |
+| `09-teklifler` | `offers` | `/offers` | `07` | 3A |
+| `10-teklif-detayi-islemler` | `offerDetail` · Teklif ve işlemler | `/offers/[id]` | `08` | 3A |
+| `11-teklif-detayi-ilgili-talep` | `offerDetail` · İlgili talep | `/offers/[id]?tab=talep` | yok | 3A |
+| `12-teklif-detayi-kredi-iade` | `offerDetail` · Kredi ve iade | `/offers/[id]?tab=kredi` | yok | 3A |
+| `13-teklif-detayi-neler-oldu` | `offerDetail` · Neler oldu | `/offers/[id]?tab=gecmis` | yok | 3A |
+| `14-eslesmeler` | `list:matches` | yok (K8) | yok | — |
+| `15-hizmet-verenler` | `providers` | `/providers` | `05` | 3B |
+| `16`–`18-hizmet-veren-detayi-*` | `providerDetail` · 3 sekme | `/providers/[id]` | `06` | 3B |
+| `19-hizmet-alanlar` | `list:customers` | `/customers` | `09` | 3B |
+| `20`–`23-hizmet-alan-detayi-*` | `customerDetail` · 4 sekme | `/customers/[id]` | `10` | 3B |
+| `24-destek-talepleri` | `list:support` | `/support` | yok | 3B |
+| `25-finans-ozeti` | `finance` | `/finance` | `11` | 3D |
+| `26-kredi-hareketleri` | `list:ledger` | `/finance/credit-ledger` | `14` | 3D |
+| `27-elle-kredi-ekle-dus` | `manual` | `/finance/manual-adjustments` | `15` | 3D |
+| `28-isletme-bakiyeleri` | `list:balances` | `/finance/providers` | yok | 3D |
+| `29-paket-satislari` | `list:purchases` | `/package-purchases` | yok | 3D |
+| `30-iade-kontrolu` | `refund` | `/refund-scan` | `16` | 3A |
+| `31-vitrin-onay-bekleyen-kartlar` | `list:cardReviews` | `/showcase/reviews` | `17` | 3C |
+| `32-vitrin-yayinda-olan-kartlar` | `list:placements` | `/showcase/placements` | yok | 3C |
+| `33-vitrinden-gelen-talepler` | `list:leads` | `/showcase/leads` | yok | 3C |
+| `34-sikayet-edilen-yorumlar` | `list:reviewReports` | `/provider-reviews/reports` | yok | 3C |
+| `35-hizmet-kategorileri` | `list:categories` | `/categories` | `18` | 3F |
+| `36-vitrin-paketleri` | `list:showcasePackages` | `/showcase/packages` | yok | 3C |
+| `37-kredi-paketleri` | `list:creditPackages` | `/credit-packages` | yok | 3F |
+| `38`–`43` (SEO, slug, yönlendirme + 2 pencere) | `seoOverview`, `list:seoIndex`, `slugs`, `redirects` | yok (SEO-004) | `19`–`24` | — |
+| `44-operasyon-ayarlari` | `settings` | `/operations-settings` | `12` | 3E |
+| `45-kampanyalar` | `campaigns` | `/campaigns` | `13` | 3E |
+| `46-gonderilen-bildirimler` | `list:notifications` | `/notifications` | yok | 2 |
+| `47-yonetici-hesaplari` | `list:admins` | `/users` | yok | 3G |
+| `48-sirket-ve-eposta-bilgileri` | `company` | `/company-settings` | `25` | 3G |
+| `49-giris` · `50-giris-oturum-sonlandi` · `51-giris-hatali` | `login` hâlleri | `/login` | `26` | 1 |
+| `52-sifre-belirleme-davet` · `53-davet-baglantisi-gecersiz` · `54-sifre-olusturuldu` | `login` hâlleri | `/admin-invite` | `27` | 1 |
+
+Tam sayfa görüntülerde görülen ve bu belgedeki bulguları değiştirmeyen notlar:
+- Görüntülerdeki sayaç rozetleri, zil ve arama, prototipin temsili verisidir. K2 ve K3 kararları geçerli.
+- Görüntüdeki eylem düğmeleri, API karşılığı olduğu anlamına gelmez. Üç gruba ayrılır:
+  - **K11 / ADMIN-ACTIONS-001–007:**
+    - `04` "Süreyi 7 gün uzat" (001).
+    - `10` "Teklifi müşteriden kaldır / Müşteriye hatırlatma gönder / Hizmet vereni uyar / Eşleşmeyi iptal et" (002–005).
+    - `03` "Excel'e aktar / Elle talep ekle" (006, 007).
+  - **Mevcut kararlara eşlenenler:**
+    - `04` "Şikayeti kapat" ve `06` "Reddet ve kapat" → "Uygun bulundu".
+    - `04` "Yayından kaldır" → "Talebi reddet"; `06`'da → "Talebi kaldır".
+    - `06` "Haklı bul, krediyi geri ver": gerçek karşılığı yok. API'de şikayeti haklı bulmak **talebi kaldırır** ve tüm açık tekliflerin kredisini iade eder; yalnız şikayet edenin kredisini geri vermez. Tek teklife iade `/offers/[id]` → Krediyi iade et'tir.
+  - **Karşılığı olmayan, backlog'da da bulunmayanlar:**
+    - `06` "Önce müşteriyle görüş" (bir işlem değil).
+    - `08` "Kararı bekleyenleri sırayla aç".
+    - Bunlar render edilmez. İstenirse ayrı iş kalemi açılır.
 
 ---
 
