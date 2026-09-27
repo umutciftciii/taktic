@@ -42,6 +42,7 @@ import { Tabs, type TabItem } from '../../../components/tabs';
 import { Timeline, type TimelineItem } from '../../../components/timeline';
 import { resolveTab } from '../../../lib/list-query';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
+import { isInModeration, moderationMove } from '../../../lib/request-moderation';
 import {
   cancelRequestAction,
   completeRequestAction,
@@ -817,8 +818,8 @@ function StatusCard({
         )}
       </p>
 
-      {canChangeStatus ? (
-        <div className="status-action-list">
+      {canChangeStatus && isInModeration(request.status) ? (
+        <div className="status-action-list" data-testid="request-moderation-actions">
           <StatusQuickForm
             requestId={request.id}
             targetStatus="IN_REVIEW"
@@ -834,6 +835,15 @@ function StatusCard({
             variant="primary"
           />
         </div>
+      ) : canChangeStatus ? (
+        // Out of the moderation queue: no move is offered, and the screen says
+        // why (lib/request-moderation.ts). Rejecting and cancelling keep their
+        // own rules below.
+        <p className="status-reject-note" role="note" data-testid="request-moderation-closed">
+          Talep “{requestStatusLabel(request.status)}” durumunda; inceleme ve onay geçişleri yalnız yeni, incelemede
+          ya da onaylı (yayında) taleplere uygulanır.
+          {request.status === 'REJECTED' ? ' Bildirim sonucu kaldırılan talep Şikayet sekmesinden geri açılır.' : ''}
+        </p>
       ) : null}
 
       {canRunLifecycle ? (
@@ -1457,7 +1467,9 @@ type StatusQuickFormProps = {
 };
 
 function StatusQuickForm({ requestId, targetStatus, currentStatus, label, variant }: StatusQuickFormProps) {
-  const isCurrent = currentStatus === targetStatus;
+  const move = moderationMove(currentStatus, targetStatus);
+  if (move === 'hidden') return null;
+  const isCurrent = move === 'current';
   const buttonClass = isCurrent
     ? 'btn btn-sm status-action-btn is-current'
     : `btn btn-${variant} btn-sm status-action-btn`;

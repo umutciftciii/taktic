@@ -180,7 +180,7 @@ Bunlar ADMIN-DESIGN-001 planının §0 kurallarının devamıdır.
   - Talep CANCELLED olur ve yeniden teklife **açılmaz**.
 - **İstenmeyen yol:** `PATCH /offers/:id/status` ACCEPTED bir teklifi REJECTED ya da SHORTLISTED yapabilir.
   - Talep MATCHED kalır ve `matchedOfferId` artık kabul edilmemiş teklifi gösterir.
-  - Faz 3A bu durumda onay diyaloğuyla uyarır, ama engellemez. Bkz. §3 F22.
+  - Faz 3A ekranı bu iki işlemi ACCEPTED teklifte artık sunmuyor (PR #118 inceleme düzeltmesi). API hâlâ kabul ediyor; koruyucu kural ayrı backend işidir (§3.1, API-GUARD-OFFER-001). Bkz. §3 F22.
 - **İletişim paylaşımı:** `ContactRevealEvent` talep başına tektir (unique) ve kabul işleminin içinde yazılır. Açılmış iletişim bilgisi teknik olarak "geri kapatılamaz", çünkü iki taraf zaten gördü.
 
 **Gereken izin:** yeni `MATCHES_CANCEL`. Yıkıcı ve geri alınamaz olduğu için rol tasarımında yalnız kıdemli personele verilmesi önerilir.
@@ -205,7 +205,7 @@ Bunlar ADMIN-DESIGN-001 planının §0 kurallarının devamıdır.
 **Görev tanımı:**
 - API:
   - Tek serializable işlemde `POST /service-requests/:id/cancel-match { reason, note, reopen, refund }`.
-  - Bu uç F22'yi de kapatır: `PATCH /offers/:id/status` ACCEPTED teklifte 409 döner.
+  - F22'nin koruyucu kuralı (ACCEPTED teklifte reddet/kısa listeye 409) bu özelliği **beklemez**: ayrı ve önce gelen API-GUARD-OFFER-001'dir (§3.1). Eşleşmeyi iptal etmek, o kural yerleştikten sonra açılan tek meşru yol olur.
 - UI: teklif detayında yıkıcı satır + diyalog. Diyalog; talebin ne olacağını, kimin kredisinin iade edileceğini, iletişim bilgisinin zaten paylaşılmış olduğunu ve geri alınamazlığı yazar.
 - Test: API yarış ve geri alma testleri, E2E tam akış (müşteri ve hizmet veren ekranları).
 
@@ -281,13 +281,60 @@ Bu PR'da API'ye dokunulmadı. Aşağıdakiler ekranda doğru gösterildi, ama k�
 | # | Bulgu | Faz 3A'da ne yapıldı | Bağlandığı iş |
 | --- | --- | --- | --- |
 | F21 | `PATCH /offers/:id/status` iznin yanında `ensureCustomerCanAccessRequest` uygular (`offers.service.ts:794-810`). ADMIN rolündeki personel `OFFERS_STATUS` taşısa bile müşteri hesabına bağlı talepte 403 alır; bugün yeni taleplerin hepsi müşteri hesabına bağlanıyor | Durum işlemleri yalnız API'nin kabul edeceği yerde render edilir; yoksa ekran nedenini yazar | Ayrı karar: izin tek başına yetsin mi? (F5/F6 benzeri) |
-| F22 | Reddet / kısa listeye al, ACCEPTED teklifte de çalışır; talep MATCHED kalır ve `matchedOfferId` kabul edilmemiş teklifi gösterir | İşlem korunur, ama onay diyaloğu tutarsızlığı açıkça yazar | ADMIN-ACTIONS-005 (ACCEPTED'da 409) |
+| F22 | Reddet / kısa listeye al, ACCEPTED teklifte de çalışır; talep MATCHED kalır ve `matchedOfferId` kabul edilmemiş teklifi gösterir. Eşzamanlı kabul + reddet de aynı sonucu üretir (§3.1) | Ekran ACCEPTED teklifte iki işlemi **sunmuyor**; nedenini yazıyor. API davranışı değişmedi | API-GUARD-OFFER-001 (ayrı backend işi). ADMIN-ACTIONS-005'ten bağımsız |
 | F23 | Admin kabulü iletişim paylaşımı onayını taşıyamaz. Paylaşım açıkken, talepte onay kayıtlı değilse kabul `CONTACT_DISCLOSURE_REQUIRED` ile reddedilir ve ekran genel hata sınırına düşer | Kabul diyaloğu bu koşulu yazar | Ayrı düzeltme: hata eşleme veya admin kabul kuralı |
-| F24 | `PATCH /service-requests/:id/status` CANCELLED'ı teklif ve kredi zinciri olmadan yazar; APPROVED'a durum kontrolü yoktur. Örneğin kapanmış bir talep "Onayla" ile yeniden onaylanabilir | Davranış değişmedi; "Onayla" mevcut kuralla gösterilir | Ayrı düzeltme (durum makinesi) |
+| F24 | `PATCH /service-requests/:id/status` IN_REVIEW ve APPROVED hedefinde kaynak durumu denetlemiyor; CANCELLED'ı teklif ve kredi zinciri olmadan yazıyor. Eşleşmiş, tamamlanmış, reddedilmiş, iptal edilmiş, süresi dolmuş ya da taslak talep yeniden onaylanabiliyor (§3.1) | Ekran "İncelemeye al / Onayla"yı yalnız SUBMITTED, IN_REVIEW, APPROVED'da sunuyor (`apps/admin/lib/request-moderation.ts`); dışında nedenini yazıyor. API davranışı değişmedi | API-GUARD-REQUEST-001 (ayrı backend işi) |
 | F25 | İade taraması istemcisi API'yi tarayıcıdan, derleme anında gömülen adresle çağırıyordu. E2E'de (yerel + CI) erişilemez; 401/403'te ham gövde gösterir | Aynı uçlar ve gövdeyle admin sunucu aksiyonlarına taşındı (`app/refund-scan/actions.ts`) | Kapandı |
 | F26 | İade taraması çalıştırma sonucu tablosu hiç görünmüyordu: sonuç yazıldıktan hemen sonra önizleme yenilemesi onu siliyordu | Düzeltildi: sonuç kalır, önizleme ayrıca yenilenir | Kapandı |
 
 ---
+
+### 3.1 Doğrudan API kanıtı ve ayrı backend işleri (PR #118 inceleme bulguları 1–2)
+
+Faz 3A'daki düzeltmeler **yalnız arayüz korumasıdır**; güvenlik ya da veri bütünlüğü düzeltmesi değildir. Aynı tutarsızlık, arayüzü atlayan doğrudan API isteğiyle bugün de yaratılabiliyor.
+
+**Kanıt.** 2026-09-28'de, `main@25e4ec4d` API kodu üzerinde, API test altyapısında (`apps/api/test/harness`) geçici bir sonda koşuldu. Sonda repoya eklenmedi. Oturum SUPER_ADMIN, iletişim paylaşımı kapalı.
+
+| İstek | Başlangıç | HTTP | Sonuç |
+| --- | --- | --- | --- |
+| `PATCH /offers/:id/status {REJECTED}` | Teklif ACCEPTED, talep MATCHED | 200 | Teklif REJECTED, talep MATCHED, `matchedOfferId` aynı teklif |
+| `PATCH /offers/:id/status {SHORTLISTED}` | Aynı | 200 | Teklif SHORTLISTED, talep MATCHED, `matchedOfferId` aynı teklif |
+| Aynı teklife eşzamanlı `{ACCEPTED}` + `{REJECTED}` (12 deneme) | Teklif SUBMITTED, talep APPROVED | İkisi de 200 | 2/12 denemede teklif REJECTED + talep MATCHED ona bağlı. Arayüzde düğme olmasa da yarış yolu açık |
+| `PATCH /service-requests/:id/status {APPROVED}` | MATCHED | 200 | Talep APPROVED; `matchedOfferId` ve kabul edilen teklif duruyor; yayın bildirimleri (müşteri + eşleşen hizmet verenler) kuyruğa 3 kayıt |
+| Aynı `{APPROVED}` | COMPLETED, CANCELLED, EXPIRED, REJECTED, DRAFT | 200 | Talep APPROVED, 14 günlük süre yeniden başlar, yayın bildirimleri kuyruğa girer. REJECTED'te kapatılan teklifler kapalı kalır |
+| `PATCH /service-requests/:id/status {IN_REVIEW}` | MATCHED, COMPLETED, CANCELLED, EXPIRED, REJECTED, DRAFT | 200 | Talep IN_REVIEW; MATCHED/COMPLETED'ta `matchedOfferId` ve ACCEPTED teklif kalır |
+
+**Kök neden:**
+- Teklif: `OffersService.updateRequestOfferAction` (`offers.service.ts`) reddet/kısa listeyi `updateMany({ where: { status: { notIn: CUSTOMER_UNACTIONABLE_OFFER_STATUSES } } })` ile yazıyor. Bu küme yalnız WITHDRAWN, CANCELLED, EXPIRED'dir; ACCEPTED dahil değil. Kabul işlemi serializable, reddet değil. Aynı yol müşterinin kendi teklif işlemlerinde de kullanılıyor.
+- Talep: `ServiceRequestsService.updateServiceRequestStatus` yalnız hedefi denetliyor (`nonModerationStatuses`: MATCHED, COMPLETED, EXPIRED). IN_REVIEW ve APPROVED için kaynak durum kuralı yok.
+
+#### API-GUARD-OFFER-001 — Kabul edilmiş teklifin durumunu koru (öneri, ayrı PR)
+
+- **Kapsam:**
+  - `updateRequestOfferAction`'da REJECT ve SHORTLIST için `where.status` kümesine ACCEPTED eklenir. Koşullu güncelleme 0 satır bulursa mevcut `ConflictException` döner.
+  - Okuma öncesi erken 409 ve makine kodu eklenir (ör. `OFFER_ALREADY_ACCEPTED`).
+  - Hem admin ucunu (`PATCH /offers/:id/status`) hem müşteri ucunu kapsar.
+- **Regresyon testleri (API vitest):**
+  - ACCEPTED teklifte REJECT ve SHORTLIST → 409, veri değişmez.
+  - Eşzamanlı ACCEPT + REJECT → sonuç her zaman tutarlıdır (ya ACCEPTED + MATCHED, ya REJECTED + APPROVED). `barrier` ile gerçek çakışma, en az 20 deneme.
+  - `admin-offer-status.spec.ts` ve müşteri teklif uçları.
+- **Migration:** gerekmez.
+- **Kalan risk (düzeltmeye kadar):** doğrudan API çağrısı ve yarış, eşleşmesi bozuk talep üretebilir. Ekran bu iki işlemi sunmadığı için olağan kullanımda tetiklenmez. Mevcut tutarsız kayıtlar için ön kontrol sorgusu: `ServiceRequest.status = MATCHED` ve eşleşen teklif `status ≠ ACCEPTED`.
+- **ADMIN-ACTIONS-005'ten ayrı:** bu bir koruyucu kural, ürün kararı beklemez. Eşleşmeyi iptal etmek ayrı özellik olarak kalır.
+
+#### API-GUARD-REQUEST-001 — Moderasyon geçişlerine kaynak durum kuralı (öneri, ayrı PR)
+
+- **Kapsam:**
+  - `updateServiceRequestStatus`'ta IN_REVIEW ve APPROVED yalnız SUBMITTED, IN_REVIEW, APPROVED'dan kabul edilir; diğerlerinden makine kodlu 409 (ör. `REQUEST_NOT_IN_MODERATION`).
+  - Kontrol, transaction içindeki `current` okumasına da uygulanır; eşzamanlı kabul ile yarışmaz.
+  - REJECTED'ten dönüş yalnız `POST /reopen` (REQUESTS_REOPEN) yolunda kalır.
+  - Açık karar: CANCELLED hedefi bu uçta kalsın mı? Bugün teklif ve kredi zinciri olmadan yazıyor; yaşam döngüsü iptali ayrı bir uç.
+- **Regresyon testleri:**
+  - Her kaynak × hedef matrisi (9 × 2).
+  - Telefon kapısı ve yayın kuyruğu testleri (`request-publish-outbox`, `request-phone-verification-pending`).
+  - Admin E2E'si zaten aynı kümeyi sunuyor (`admin-requests-offers.spec.ts`).
+- **Migration:** gerekmez.
+- **Kalan risk (düzeltmeye kadar):** doğrudan istekle eşleşmiş ya da kapanmış talep yeniden yayına alınabilir ve müşteriye/hizmet verenlere yayın e-postası gider. Ekran bu geçişleri sunmuyor.
 
 ## 4. Önerilen uygulama sırası
 
@@ -298,7 +345,9 @@ Sıra; risk, bağımlılık ve kişisel veri kararlarına göredir. Her satır a
 3. **ADMIN-ACTIONS-001 Süre uzat.** Migration + zamanlayıcı sorgusu. Yayın süresi kolonu, 005'in "yeniden aç" seçeneği için de temel olur.
 4. **ADMIN-ACTIONS-002 Teklifi kaldır.** Neden enum'u + müşteri okumaları. 005'in "diğer teklifler" kısmının deseni.
 5. **ADMIN-ACTIONS-004 Uyar.** Yeni model; otomatik askı kararı gerekir. 3B (hizmet veren detayı) ile aynı döneme denk getirilmesi önerilir.
-6. **ADMIN-ACTIONS-005 Eşleşmeyi iptal et.** **Ön koşul:** 001 ve 002'nin desenleri + ayrı spec. F22'yi de kapatır.
+6. **ADMIN-ACTIONS-005 Eşleşmeyi iptal et.** **Ön koşul:** 001 ve 002'nin desenleri + ayrı spec + API-GUARD-OFFER-001.
+
+API-GUARD-OFFER-001 ve API-GUARD-REQUEST-001 bu sıranın dışındadır. Ürün kararı beklemeyen koruyucu kurallardır ve ilk fırsatta, tercihen ADMIN-ACTIONS dilimlerinden önce yapılmaları önerilir.
 7. **ADMIN-ACTIONS-007 Elle talep ekle.** **Ön koşul:** kimlik ve hesap kararları (AUTH-REG, REQ-UX-010). En geniş kesişim.
 
 Her dilim başlamadan önce ilgili "Açık ürün kararları" yanıtlanır. Yanıtsız karar varsa dilim başlamaz.

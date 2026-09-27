@@ -45,7 +45,13 @@ import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
  * out. `PATCH /offers/:id/status` lets a staff account act on a request with no
  * customer account, and only a super admin on one that has a customer account
  * (`ensureCustomerCanAccessRequest`); it refuses withdrawn, cancelled and
- * expired offers; and it accepts only on an approved, unmatched request. A
+ * expired offers; and it accepts only on an approved, unmatched request.
+ *
+ * One more is the screen's own guard, stricter than the API: an ACCEPTED offer
+ * is offered no shortlist and no reject. The API would take either and leave
+ * the request MATCHED to an offer that is no longer accepted; the API-side
+ * guard is a separate backend item, and cancelling a match is
+ * ADMIN-ACTIONS-005. A
  * button the API is certain to refuse would only lead to an error screen, so
  * the screen says why instead. The API still decides every case.
  */
@@ -125,8 +131,10 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
   // The design's "Aynı talebe gelen diğer teklifler": the list read this
   // screen's own permission (OFFERS_READ) already opens, made only when the
   // tab that shows it is open.
-  const siblingOffers =
+  const requestOffers =
     activeTab === 'talep' ? await apiFetch<Offer[]>(`/offers?requestId=${offer.request.id}`) : null;
+  // "Diğer": every offer on the request except this one.
+  const siblingOffers = requestOffers ? requestOffers.filter((other) => other.id !== offer.id) : null;
 
   const customerName = offer.request.customerName;
   const isRefunded = Boolean(offer.creditRefundedAt);
@@ -412,21 +420,18 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
             {siblingOffers ? (
               <SectionCard
                 title="Aynı talebe gelen diğer teklifler"
-                subtitle={`Bu talebe toplam ${siblingOffers.length} teklif geldi.`}
-                padded={siblingOffers.length <= 1}
+                subtitle={`${siblingOffers.length} diğer teklif · talebe gelen toplam teklif: ${requestOffers?.length ?? 0}`}
+                padded={siblingOffers.length === 0}
               >
                 <div data-testid="offer-siblings">
-                  {siblingOffers.length <= 1 ? (
+                  {siblingOffers.length === 0 ? (
                     <p className="detail-muted-note">Bu talebe başka teklif gelmedi.</p>
                   ) : (
-                    <DataTable caption="Aynı talebe gelen teklifler" columns={SIBLING_COLUMNS} minWidth={640}>
+                    <DataTable caption="Aynı talebe gelen diğer teklifler" columns={SIBLING_COLUMNS} minWidth={640}>
                       {siblingOffers.map((sibling) => (
-                        <tr key={sibling.id} data-testid="offer-sibling-row">
+                        <tr key={sibling.id} data-testid="offer-sibling-row" data-offer-id={sibling.id}>
                           <td>
-                            <div className="cell-stack">
-                              <strong>{sibling.provider.businessName}</strong>
-                              {sibling.id === offer.id ? <span className="cell-muted">Bu teklif</span> : null}
-                            </div>
+                            <strong>{sibling.provider.businessName}</strong>
                           </td>
                           <td className="is-num cell-nowrap">
                             <strong>{formatPrice(sibling.priceAmount, sibling.currency)}</strong>
@@ -436,15 +441,13 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                             <span className={statusBadgeClass(sibling.status)}>{statusLabel(sibling.status)}</span>
                           </td>
                           <td className="col-actions">
-                            {sibling.id === offer.id ? null : (
-                              <Link
-                                className="btn btn-secondary btn-sm"
-                                href={`/offers/${sibling.id}`}
-                                aria-label={`Aç: ${sibling.provider.businessName} teklifi`}
-                              >
-                                Aç
-                              </Link>
-                            )}
+                            <Link
+                              className="btn btn-secondary btn-sm"
+                              href={`/offers/${sibling.id}`}
+                              aria-label={`Aç: ${sibling.provider.businessName} teklifi`}
+                            >
+                              Aç
+                            </Link>
                           </td>
                         </tr>
                       ))}
@@ -691,12 +694,6 @@ function OperationsList({
   const refundBlockNote = isSuperAdmin
     ? ' Kararınız müşteri adına kaydedildiği için bu teklif, müşteri görmemiş olsa bile otomatik iade kapsamından çıkar.'
     : '';
-  const acceptedWarning = (
-    <p>
-      <strong>Dikkat: bu teklif kabul edilmiş.</strong> Durumunu değiştirmek talebin eşleşmesini kaldırmaz: talep
-      “Eşleşti” olarak bu teklife bağlı kalır ve kayıt tutarsız olur. Eşleşmeyi iptal eden bir işlem henüz yok.
-    </p>
-  );
 
   const notes: string[] = [];
   if (canUpdateStatus && !apiLetsSessionDecide) {
@@ -705,7 +702,14 @@ function OperationsList({
     );
   } else if (canUpdateStatus && offerIsClosed) {
     notes.push(`Teklif “${statusLabel(offer.status)}” durumunda; durumu artık değiştirilemez.`);
-  } else if (canOfferStatusActions && !isAccepted && offer.request.status !== 'APPROVED') {
+  } else if (canOfferStatusActions && isAccepted) {
+    // `PATCH /offers/:id/status` would take a shortlist or a reject on an
+    // accepted offer and leave the request MATCHED to it; until a real
+    // match cancellation exists (ADMIN-ACTIONS-005), neither is offered.
+    notes.push(
+      'Bu teklif kabul edildi ve talep bu teklifle eşleşti. Kabul edilmiş teklifin durumu buradan değiştirilemez; eşleşmeyi iptal etmek ayrı bir işlemdir ve henüz yok.',
+    );
+  } else if (canOfferStatusActions && offer.request.status !== 'APPROVED') {
     notes.push('Kabul yalnız yayındaki (onaylı ve henüz eşleşmemiş) bir talepte mümkün.');
   }
 
@@ -767,7 +771,7 @@ function OperationsList({
     );
   }
 
-  if (canOfferStatusActions && offer.status !== 'SHORTLISTED') {
+  if (canOfferStatusActions && !isAccepted && offer.status !== 'SHORTLISTED') {
     rows.push(
       <ActionRow
         key="shortlist"
@@ -778,27 +782,15 @@ function OperationsList({
         <form action={updateOfferStatusAction}>
           <input type="hidden" name="id" value={offer.id} />
           <input type="hidden" name="status" value="SHORTLISTED" />
-          {isAccepted ? (
-            <ConfirmDialog
-              triggerLabel="Kısa listeye al"
-              triggerClassName="btn btn-secondary btn-sm"
-              tone="primary"
-              title="Kabul edilmiş teklif kısa listeye alınsın mı?"
-              consequence={acceptedWarning}
-              confirmLabel="Yine de kısa listeye al"
-              testId="offer-shortlist"
-            />
-          ) : (
-            <button className="btn btn-secondary btn-sm" type="submit" data-testid="offer-shortlist">
-              Kısa listeye al
-            </button>
-          )}
+          <button className="btn btn-secondary btn-sm" type="submit" data-testid="offer-shortlist">
+            Kısa listeye al
+          </button>
         </form>
       </ActionRow>,
     );
   }
 
-  if (canOfferStatusActions && offer.status !== 'REJECTED') {
+  if (canOfferStatusActions && !isAccepted && offer.status !== 'REJECTED') {
     rows.push(
       <ActionRow
         key="reject"
@@ -816,7 +808,6 @@ function OperationsList({
             title="Teklif müşteri adına reddedilsin mi?"
             consequence={
               <>
-                {isAccepted ? acceptedWarning : null}
                 <p>
                   Teklif reddedilir ve hizmet verene “teklifiniz seçilmedi” e-postası gider. Harcanan kredi bu işlemle
                   iade edilmez.{refundBlockNote}

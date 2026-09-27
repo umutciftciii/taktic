@@ -238,6 +238,11 @@ Karşılaştırma, PR #118'in 1440px Chromium görüntüleriyle yapıldı. "Uygu
 | `13-teklif-detayi-neler-oldu` | Zaman çizelgesi | Olmamış adımlar "Henüz olmayanlar" satırında |
 | `30-iade-kontrolu` | Başlık + ⓘ + süre notu; sayı kartları; "Tarama sonucu" + "Onaylamadan hiçbir kredi hareket etmez"; "Yeniden tara"; "N teklifin iadesini onayla" (onaylı) | **D:** "Taranan teklif" ve "Son tarama" yok (API vermiyor; son çalışma yalnız süreç belleğinde); yerine "Atlanan" ve "Yeni tekliflerin iade süresi". Tablo ham id'lerle, izin varsa bağlantılı (D: işletme/talep adı yok). Limit alanı ve 7 atlanma nedeni korunuyor |
 
+İnceleme düzeltmeleri (PR #118, 2026-09-28). Üçü de yalnız arayüz koruması; API kuralları ayrı işlerdir (envanter §3.1: API-GUARD-OFFER-001, API-GUARD-REQUEST-001):
+- `10`: kabul edilmiş teklifte "Reddet" ve "Kısa listeye al" sunulmaz; ekran nedenini yazar.
+- `04`: "İncelemeye al / Onayla" yalnız SUBMITTED, IN_REVIEW ve APPROVED taleplerde sunulur.
+- `11`: "diğer teklifler" mevcut teklifi içermez; toplam ayrıca "toplam" diye etiketlenir.
+
 ### 3B — Kişiler ve destek (#7, #8, #9, #10, #12, #13, #14)
 
 - **Tasarım karşılıkları:**

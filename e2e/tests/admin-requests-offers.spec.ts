@@ -720,3 +720,149 @@ test.describe('Faz 3A lists and layout', () => {
     }
   });
 });
+
+/**
+ * PR #118 review fixes. Each is the screen's own guard; the API still accepts
+ * the same moves when called directly, which the PR reports as a separate
+ * backend item rather than claiming it fixed here.
+ */
+test.describe('Faz 3A review: moves the screen no longer offers', () => {
+  const MODERATION_BUTTONS = ['İncelemeye al', 'Onayla'];
+
+  async function expectNoModerationMoves(page: Page, label: string) {
+    for (const name of MODERATION_BUTTONS) {
+      await expect(page.getByRole('button', { name, exact: true, includeHidden: true }), `${label}: ${name}`).toHaveCount(0);
+    }
+    await expect(page.getByTestId('request-moderation-closed'), label).toBeVisible();
+  }
+
+  /** An accepted offer on a request no customer account owns: the one a staff account may decide on. */
+  async function seedGuestMatch() {
+    const scene = await seedScene({ customerOwned: false });
+    await prisma().offer.update({ where: { id: scene.offer.id }, data: { status: 'ACCEPTED', acceptedAt: new Date() } });
+    await prisma().serviceRequest.update({
+      where: { id: scene.request.id },
+      data: { status: 'MATCHED', matchedOfferId: scene.offer.id, matchedAt: new Date() },
+    });
+    return scene;
+  }
+
+  test('an accepted offer is offered neither a reject nor a shortlist; a live one still is', async ({ browser }) => {
+    const matched = await seedMatchedRequest();
+    const guestMatch = await seedGuestMatch();
+    const guestLive = await seedScene({ customerOwned: false });
+    const admin = await openAs(browser, 'super');
+    const staff = await openAs(browser, ['OFFERS_READ', 'OFFERS_STATUS']);
+
+    try {
+      for (const [actor, offerId, label] of [
+        [admin, matched.offer.id, 'super admin'],
+        [staff, guestMatch.offer.id, 'staff with OFFERS_STATUS'],
+      ] as const) {
+        await actor.gotoAdmin(`/offers/${offerId}`);
+        await assertNoErrorScreen(actor.page);
+        for (const testId of ['offer-reject', 'offer-shortlist', 'offer-accept']) {
+          await expect(actor.page.getByTestId(testId), `${label}: ${testId}`).toHaveCount(0);
+        }
+        await expect(actor.page.getByTestId('offer-actions-note'), label).toContainText(
+          'Kabul edilmiş teklifin durumu buradan değiştirilemez',
+        );
+        expect((await prisma().offer.findUniqueOrThrow({ where: { id: offerId } })).status).toBe('ACCEPTED');
+      }
+
+      // The same staff account, on a live offer of a guest request: the move
+      // the API allows is offered, and it goes through.
+      await staff.gotoAdmin(`/offers/${guestLive.offer.id}`);
+      await expect(staff.page.getByTestId('offer-reject')).toBeVisible();
+      await staff.page.getByTestId('offer-shortlist').click();
+      await expect(staff.page.getByText('Teklif durumu güncellendi.')).toBeVisible();
+      await expect
+        .poll(async () => (await prisma().offer.findUniqueOrThrow({ where: { id: guestLive.offer.id } })).status)
+        .toBe('SHORTLISTED');
+      await assertNoErrorScreen(staff.page);
+    } finally {
+      await admin.close();
+      await staff.close();
+    }
+  });
+
+  test('moderation is offered only inside the queue: SUBMITTED, IN_REVIEW, APPROVED', async ({ browser }) => {
+    const admin = await openAs(browser, 'super');
+    const staff = await openAs(browser, ['REQUESTS_READ', 'REQUESTS_STATUS']);
+    const reader = await openAs(browser, ['REQUESTS_READ']);
+
+    try {
+      // ---- every status outside the queue: no move, and a reason ----------
+      const matched = await seedMatchedRequest();
+      await admin.gotoAdmin(`/requests/${matched.request.id}`);
+      await expectNoModerationMoves(admin.page, 'MATCHED (super admin)');
+      await staff.gotoAdmin(`/requests/${matched.request.id}`);
+      await expectNoModerationMoves(staff.page, 'MATCHED (staff)');
+
+      for (const status of ['DRAFT', 'COMPLETED', 'REJECTED', 'CANCELLED', 'EXPIRED'] as const) {
+        const { request } = await seedScene();
+        await prisma().serviceRequest.update({ where: { id: request.id }, data: { status } });
+        await admin.gotoAdmin(`/requests/${request.id}`);
+        await assertNoErrorScreen(admin.page);
+        await expectNoModerationMoves(admin.page, status);
+        expect((await prisma().serviceRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe(status);
+      }
+
+      // ---- inside the queue: the moves work, the current one is closed ----
+      const { request } = await seedScene();
+      await prisma().serviceRequest.update({ where: { id: request.id }, data: { status: 'SUBMITTED', approvedAt: null } });
+      await staff.gotoAdmin(`/requests/${request.id}`);
+      const moves = staff.page.getByTestId('request-moderation-actions');
+      await moves.getByRole('button', { name: 'İncelemeye al' }).click();
+      await expect(staff.page.getByTestId('request-status')).toHaveText('İncelemede');
+      await expect(moves.getByRole('button', { name: /^İncelemeye al/ })).toBeDisabled();
+      await moves.getByRole('button', { name: 'Onayla' }).click();
+      await expect(staff.page.getByTestId('request-status')).toHaveText('Onaylandı');
+      await expect(moves.getByRole('button', { name: /^Onayla/ })).toBeDisabled();
+      await expect(moves.getByRole('button', { name: 'İncelemeye al' })).toBeEnabled();
+      await expect(staff.page.getByTestId('request-moderation-closed')).toHaveCount(0);
+
+      // ---- no REQUESTS_STATUS: neither the moves nor the note --------------
+      await reader.gotoAdmin(`/requests/${request.id}`);
+      await expect(reader.page.getByTestId('request-moderation-actions')).toHaveCount(0);
+      await expect(reader.page.getByTestId('request-moderation-closed')).toHaveCount(0);
+    } finally {
+      await admin.close();
+      await staff.close();
+      await reader.close();
+    }
+  });
+
+  test('"Aynı talebe gelen diğer teklifler" lists the others only, and says so', async ({ browser }) => {
+    const scene = await seedScene();
+    const second = await createProvider({ categoryId: scene.category.id, location: scene.location, credits: STARTING_CREDITS });
+    const other = await seedOffer({ requestId: scene.request.id, providerId: second.id, priceAmount: 210_000 });
+    const lone = await seedScene();
+    const reader = await openAs(browser, ['OFFERS_READ']);
+
+    try {
+      await reader.gotoAdmin(`/offers/${scene.offer.id}?tab=talep`);
+      const card = reader.page.getByTestId('offer-siblings');
+      const rows = card.getByTestId('offer-sibling-row');
+      await expect(rows).toHaveCount(1);
+      await expect(rows).toHaveAttribute('data-offer-id', other.id);
+      await expect(rows).toContainText(second.businessName);
+      await expect(rows).not.toContainText(scene.provider.businessName);
+      await expect(reader.page.getByText('1 diğer teklif · talebe gelen toplam teklif: 2')).toBeVisible();
+      await rows.getByRole('link', { name: /^Aç:/ }).click();
+      await expect(reader.page).toHaveURL(new RegExp(`/offers/${other.id}$`));
+
+      // From the other side, the first offer is the "other" one.
+      await reader.gotoAdmin(`/offers/${other.id}?tab=talep`);
+      await expect(reader.page.getByTestId('offer-sibling-row')).toHaveAttribute('data-offer-id', scene.offer.id);
+
+      // A request with a single offer: the empty state, and the true count.
+      await reader.gotoAdmin(`/offers/${lone.offer.id}?tab=talep`);
+      await expect(reader.page.getByTestId('offer-siblings')).toContainText('Bu talebe başka teklif gelmedi.');
+      await expect(reader.page.getByTestId('offer-sibling-row')).toHaveCount(0);
+      await expect(reader.page.getByText('0 diğer teklif · talebe gelen toplam teklif: 1')).toBeVisible();
+    } finally {
+      await reader.close();
+    }
+  });
+});
