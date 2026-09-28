@@ -159,24 +159,43 @@ export type ServiceRequestCreationContext = {
   ) => Promise<void>;
 };
 
-const moderatedStatuses = new Set<ServiceRequestStatus>([
+/**
+ * The only statuses the moderation endpoint writes: the three answers of the
+ * moderation screen. Every other status belongs to a path with rules of its
+ * own, and written from here it skipped them:
+ *
+ * - DRAFT and SUBMITTED are the customer's — a draft becomes SUBMITTED by being
+ *   posted. Written by an operator they reopened what another rule closed:
+ *   REJECTED or EXPIRED → SUBMITTED → APPROVED put a closed request back on the
+ *   market through the one source the IN_REVIEW/APPROVED guard trusts, and
+ *   MATCHED or COMPLETED → SUBMITTED left an accepted offer attached to a
+ *   request the removal cascade would then close as if no contract existed.
+ * - CANCELLED belongs to POST /service-requests/:id/cancel, which refuses a
+ *   finished request and closes the vitrin lead with it.
+ * - MATCHED belongs to the offer-accept cascade, EXPIRED to the expiry
+ *   scheduler, and COMPLETED to the dedicated lifecycle endpoint — each of
+ *   them writes timestamps and runs invariants the moderation screen knows
+ *   nothing about.
+ *
+ * Refused before anything is read or written, whatever the request's state.
+ */
+const moderationTargetStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.IN_REVIEW,
   ServiceRequestStatus.APPROVED,
   ServiceRequestStatus.REJECTED,
 ]);
 
-/**
- * Lifecycle states the moderation endpoint must never write.
- *
- * MATCHED belongs to the offer-accept cascade, EXPIRED to the expiry scheduler,
- * and COMPLETED to the dedicated lifecycle endpoint — each of them writes
- * timestamps and runs invariants the moderation dropdown knows nothing about.
- */
-const nonModerationStatuses = new Set<ServiceRequestStatus>([
-  ServiceRequestStatus.MATCHED,
-  ServiceRequestStatus.COMPLETED,
-  ServiceRequestStatus.EXPIRED,
-]);
+/** Machine-readable code for a status the moderation endpoint never writes. */
+export const REQUEST_STATUS_NOT_MODERATION_TARGET_CODE = 'REQUEST_STATUS_NOT_MODERATION_TARGET';
+
+function notModerationTargetException(to: ServiceRequestStatus) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: REQUEST_STATUS_NOT_MODERATION_TARGET_CODE,
+    message: `${to} bir moderasyon durumu değildir; moderasyon yalnız incelemeye alır, onaylar veya reddeder. İptal için iptal ucunu kullanın.`,
+  });
+}
 
 /**
  * The moderation targets that put a request (back) on the review/publish path,
@@ -805,6 +824,10 @@ export class ServiceRequestsService {
       allowAdditionalSources?: readonly ServiceRequestStatus[];
     } = {},
   ) {
+    if (!moderationTargetStatuses.has(dto.status)) {
+      throw notModerationTargetException(dto.status);
+    }
+
     const existing = await this.ensureRequestExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
@@ -826,17 +849,10 @@ export class ServiceRequestsService {
       });
     }
 
-    if (nonModerationStatuses.has(dto.status)) {
-      throw new ConflictException(
-        `${dto.status} is not a moderation status and cannot be set from here`,
-      );
-    }
-
     if (dto.status === ServiceRequestStatus.REJECTED && !rejectionReason) {
       throw new BadRequestException('Rejection reason is required when status is REJECTED');
     }
 
-    const shouldModerate = moderatedStatuses.has(dto.status);
     const now = new Date();
 
     const { request, publishes } = await runSerializable(
@@ -907,13 +923,14 @@ export class ServiceRequestsService {
           });
           updated = await tx.serviceRequest.findUniqueOrThrow({ where: { id }, include });
         } else {
+          // IN_REVIEW or APPROVED, already moved by the guarded write above.
           updated = await tx.serviceRequest.update({
             where: { id },
             data: {
               status: dto.status,
               moderationNote,
               rejectionReason: null,
-              ...(shouldModerate ? { moderatedAt: now } : {}),
+              moderatedAt: now,
               // Written in the same statement that sets APPROVED, so the status and
               // the clock the expiry/reminder jobs run on can never disagree.
               //
@@ -924,7 +941,6 @@ export class ServiceRequestsService {
               // APPROVED, and erasing it would destroy the record of when the request
               // went live.
               ...(dto.status === ServiceRequestStatus.APPROVED ? { approvedAt: now } : {}),
-              ...(dto.status === ServiceRequestStatus.CANCELLED ? { cancelledAt: now } : {}),
             },
             include,
           });
@@ -995,7 +1011,10 @@ export class ServiceRequestsService {
    * refund the helper refuses throws, which rolls the status, the lead and
    * every other offer back with it. A MATCHED request is not removable: its
    * accepted offer is a contract the customer already entered, and the
-   * lifecycle cancel endpoint is the door for that.
+   * lifecycle cancel endpoint is the door for that. The same holds for a
+   * request that still carries `matchedOfferId` under an open status — a row
+   * the moderation endpoint could leave behind before it stopped writing
+   * SUBMITTED — so the gate reads the match as well as the status.
    */
   async rejectRequestInTransaction(
     tx: Prisma.TransactionClient,
@@ -1009,7 +1028,11 @@ export class ServiceRequestsService {
   ): Promise<{ cancelledOfferIds: string[]; refundedOfferIds: string[] }> {
     const { requestId, now } = input;
     const moved = await tx.serviceRequest.updateMany({
-      where: { id: requestId, status: { in: [...ServiceRequestsService.REMOVABLE_STATUSES] } },
+      where: {
+        id: requestId,
+        status: { in: [...ServiceRequestsService.REMOVABLE_STATUSES] },
+        matchedOfferId: null,
+      },
       data: {
         status: ServiceRequestStatus.REJECTED,
         rejectionReason: input.rejectionReason,
