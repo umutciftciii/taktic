@@ -10,9 +10,69 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A merge into main used to re-run the whole suite on a commit whose tree
+  # the pull request had already tested — every one of the last 30 merges
+  # landed exactly the tree its PR run checked out, on exactly the base it was
+  # checked out on. This job, on pushes only, proves that from GitHub's records
+  # (see .github/scripts/post-merge-gate.mjs) and answers `reuse=true` only
+  # when every link holds. Anything else — a direct push, a base that moved, a
+  # different tree, a PR run that is missing, pending, failed or incomplete,
+  # an API error, this job failing — leaves `reuse` unset or false, and the
+  # three jobs below run in full. When they are not run they show as skipped,
+  # never as passed, and this job's summary links the PR run that tested the
+  # tree. Pull requests never run this job: all three jobs always run there.
+  post-merge-gate:
+    name: post-merge gate (reuse PR result only for an identical tree)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      reuse: ${{ steps.decide.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - id: decide
+        name: Compare this push with the PR run that tested it
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/post-merge-gate.mjs
+
+  # Pull requests only: records which merge commit this run tests, for the
+  # gate above to find once the PR is merged. The run's API record carries the
+  # PR head, not the merge commit, so the SHA goes into an artifact's name.
+  # It also runs the gate's own tests, so a change to the gate is proven by the
+  # same pull request that makes it.
+  pr-evidence:
+    name: record tested merge commit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+      - name: Test the post-merge gate
+        run: node --test .github/scripts/post-merge-gate.test.mjs
+      - name: Record the merge commit under test
+        run: git rev-parse HEAD | tee tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-tested-commit-${{ github.sha }}
+          path: tested-commit.txt
+          retention-days: 14
+
   verify:
     name: typecheck · lint · test · build
     runs-on: ubuntu-latest
+    needs: post-merge-gate
+    # `!cancelled()` so that a skipped gate (every pull request) does not skip
+    # this job; `!= 'true'` so that only a proven reuse does.
+    if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
 
     services:
       # Integration tests need a real PostgreSQL: they exercise Serializable
@@ -119,6 +179,8 @@ jobs:
   e2e:
     name: e2e (chromium)
     runs-on: ubuntu-latest
+    needs: post-merge-gate
+    if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
 
     # A separate job, not extra steps on `verify`: it needs a browser and boots
     # six application processes, so keeping it apart means a type error still
@@ -220,6 +282,8 @@ jobs:
   e2e-webkit:
     name: e2e (webkit · sign-in and mobile shells)
     runs-on: ubuntu-latest
+    needs: post-merge-gate
+    if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
 
     # Its own job rather than a second project on the one above, for the reason
     # that one is Chromium-only: a second engine over the whole suite would
