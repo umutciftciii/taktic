@@ -248,6 +248,11 @@ main@4e1d1c98 entegrasyonu (PR #118, 2026-09-28):
 - **`10`:** REJECTED teklifte de durum işlemi sunulmaz (API 409 verir); ekran nedenini yazar.
 - **`04`, "İptal et" diyaloğu:** metin ADMIN-ACTIONS-005 risk raporu §1–§3'e göre düzeltildi. Açık teklifler kapanmaz, kredi iadesi yapılmaz; görülmemiş teklifler otomatik iade kuralıyla süresi dolunca yine iade edilebilir. Eşleşmiş talepte kabul edilen teklif kalır, iletişim ve mesajlaşma kapanır, kimseye bildirim gitmez. Davranış değişmedi; K2–K5 ürün kararı olarak açık.
 
+Merge öncesi düzeltmeler (PR #118, head `624f3e06` sonrası):
+- **Ret/kaldırma kullanılamadığında yönlendirme:** "Eşleşmiş veya kapanmış talep için İptal et kullanın" kaldırıldı. Neden, durum başına yazılıyor (`removalUnavailableReason`, `apps/admin/lib/request-moderation.ts`). Kapanmış talep için iptal de yok. Eşleşmiş talep için iptal ret karşılığı olarak sunulmuyor; K2–K5 riskiyle anlatılıyor. Taslak için yalnız iptal var. `notRemovable` ve `notModerationTarget` bantları iptale yönlendirmiyor. Ret düğmesi API ile aynı koşulda (eşleşme dahil) açılıyor.
+- **İptal diyaloğu:** talebin gerçek teklif listesinden sayıyor: kabul edilen dışında açık kalan ve kabul anında reddedilen teklifler. İptal hiçbirine dokunmuyor; E2E onaydan sonra veritabanında doğruluyor.
+- **Görüntüler:** `2026-09-28-admin-design-001-faz-3a-screens/pre-merge-409/` (Chromium 1440, WebKit 320). Üst klasördeki görüntüler head `b79f968a`'ya aittir.
+
 ### 3B — Kişiler ve destek (#7, #8, #9, #10, #12, #13, #14)
 
 - **Tasarım karşılıkları:**

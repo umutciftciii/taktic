@@ -64,13 +64,15 @@ export type RequestStatusErrorKey =
 
 export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string> = {
   phoneNotVerified:
-    'Durum değiştirilmedi. Telefon doğrulaması zorunlu olduğu için doğrulanmamış bir talep onaylanamaz. Müşteri numarasını doğruladıktan sonra tekrar deneyin; açık (yayında, incelemede, yeni) bir talep reddedilebilir, kapanmamış bir talep iptal edilebilir.',
+    'Durum değiştirilmedi. Telefon doğrulaması zorunlu olduğu için doğrulanmamış bir talep onaylanamaz. Müşteri numarasını doğruladıktan sonra tekrar deneyin. Talep yayına alınmayacaksa, açık (yeni, incelemede, yayında) ve eşleşmemiş talep gerekçeyle reddedilebilir.',
+  // The page appends the current status's reason (removalUnavailableReason),
+  // so this sentence names no alternative of its own.
   notRemovable:
-    "Durum değiştirilmedi. Bu talep mevcut durumundan reddedilemez; eşleşmiş veya kapanmış talep için 'İptal et' kullanın.",
+    'Talep reddedilmedi. Ret yalnız açık (yeni, incelemede, yayında) ve bir teklifle eşleşmemiş talebe uygulanır; talep bu sayfa açıldıktan sonra değişmiş olabilir.',
   transitionNotAllowed:
     'Durum değiştirilmedi. Talep artık inceleme kuyruğunda değil: eşleşmiş, kapanmış ya da reddedilmiş olabilir. İncelemeye alma ve onay yalnız yeni, incelemedeki veya onaylı ve eşleşmemiş talebe uygulanır. Yukarıda talebin güncel durumu görünüyor.',
   notModerationTarget:
-    "Durum değiştirilmedi. Bu durum moderasyonla yazılmaz; moderasyon yalnız incelemeye alır, onaylar veya reddeder. Talebi kapatmak için 'İptal et' kullanılır.",
+    'Durum değiştirilmedi. İstenen durum moderasyonla yazılmaz; moderasyon yalnız incelemeye alır, onaylar veya reddeder. Talep değişmedi.',
   notCancellable:
     'Talep iptal edilmedi. Talep bu sayfa açıldıktan sonra kapandı (tamamlandı, reddedildi, süresi doldu ya da zaten iptal edildi); kapanmış talep iptal edilemez. Teklifler ve krediler değişmedi.',
   notCompletable:

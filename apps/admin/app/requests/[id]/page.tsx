@@ -26,7 +26,6 @@ import {
   reviewStateBadgeClass,
   reviewStateLabel,
   ServiceRequest,
-  type ServiceRequestStatus,
   statusBadgeClass,
   statusLabel,
   urgencyLabel,
@@ -43,7 +42,12 @@ import { Tabs, type TabItem } from '../../../components/tabs';
 import { Timeline, type TimelineItem } from '../../../components/timeline';
 import { resolveTab } from '../../../lib/list-query';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
-import { isInModeration, moderationMove } from '../../../lib/request-moderation';
+import {
+  isInModeration,
+  isRemovable,
+  moderationMove,
+  removalUnavailableReason,
+} from '../../../lib/request-moderation';
 import { requestStatusErrorMessage } from '../../../lib/status-conflicts';
 import {
   cancelRequestAction,
@@ -87,17 +91,10 @@ type RequestDetailPageProps = {
 
 type TabKey = '' | 'teklifler' | 'sikayet' | 'gecmis';
 
-/**
- * The statuses a report can take a request down from. A matched request is
- * out of the marketplace already and has a provider on it; removing it is the
- * lifecycle's "İptal et", not a report decision. The API enforces the same
- * list (REQUEST_NOT_REMOVABLE); this only decides whether the button is live.
- */
-const REMOVABLE_STATUSES: ReadonlySet<string> = new Set(['APPROVED', 'IN_REVIEW', 'SUBMITTED']);
-
 const REPORT_ERROR_MESSAGES: Record<string, string> = {
+  // Followed on the page by the current status's reason (removalUnavailableReason).
   notRemovable:
-    'Talep kaldırılmadı. Talep eşleşmiş ya da zaten kapanmış durumda; eşleşmiş talep için "İptal et" kullanın.',
+    'Talep kaldırılmadı. Kaldırma yalnız açık (yeni, incelemede, yayında) ve bir teklifle eşleşmemiş talebe uygulanır; talep bu sayfa açıldıktan sonra değişmiş olabilir.',
   noOpen: 'Karar kaydedilmedi. Bu talebin açık bildirimi kalmamış; sayfa yenilendi.',
   reasonRequired: 'Talebi kaldırmak için gerekçe seçilmelidir.',
   notReopenable:
@@ -249,7 +246,9 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
 
   // Both the moderation "Reddet" and a report's "Talebi kaldır" arrive at
   // the same API gate, so one flag governs both forms.
-  const canRemove = REMOVABLE_STATUSES.has(request.status);
+  // Mirrors the API's removal rule, match included (PR #120); the API decides.
+  const canRemove = isRemovable(request.status, request.matchedOfferId);
+  const removalBlockedReason = removalUnavailableReason(request.status, request.matchedOfferId);
   // Derived, not stored: the request is down *because of a report* only when
   // it is REJECTED and some report's decision was the removal.
   const canReopen =
@@ -386,6 +385,8 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
               canChangeStatus={canChangeStatus}
               canRunLifecycle={canRunLifecycle}
               canRemove={canRemove}
+              removalBlockedReason={removalBlockedReason}
+              offers={offers}
             />
             <MatchCard
               request={request}
@@ -657,6 +658,7 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
             {reportErrorMessage ? (
               <div className="status-action-error" role="alert" data-testid="report-error">
                 {reportErrorMessage}
+                {reportError === 'notRemovable' && removalBlockedReason ? ` ${removalBlockedReason}` : null}
               </div>
             ) : null}
 
@@ -720,7 +722,12 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
             )}
 
             {canResolveReports && !reportsFailed && openReports.length > 0 ? (
-              <ReportDecisions requestId={request.id} openCount={openReports.length} canRemove={canRemove} />
+              <ReportDecisions
+                  requestId={request.id}
+                  openCount={openReports.length}
+                  canRemove={canRemove}
+                  removalBlockedReason={removalBlockedReason}
+                />
             ) : null}
 
             {canReopen ? (
@@ -779,14 +786,20 @@ function StatusCard({
   canChangeStatus,
   canRunLifecycle,
   canRemove,
+  removalBlockedReason,
+  offers,
 }: {
   request: ServiceRequest;
   statusError: string | undefined;
   canChangeStatus: boolean;
   canRunLifecycle: boolean;
   canRemove: boolean;
+  removalBlockedReason: string | null;
+  offers: Offer[] | null;
 }) {
   const statusErrorMessage = requestStatusErrorMessage(statusError);
+  // A refused rejection says why in terms of the request as it is now.
+  const statusErrorDetail = statusError === 'notRemovable' ? removalBlockedReason : null;
 
   return (
     <SectionCard
@@ -798,6 +811,7 @@ function StatusCard({
       {statusErrorMessage ? (
         <div className="status-action-error" role="alert" data-testid="status-error">
           {statusErrorMessage}
+          {statusErrorDetail ? ` ${statusErrorDetail}` : null}
         </div>
       ) : null}
 
@@ -808,8 +822,8 @@ function StatusCard({
         ) : (
           <>
             Doğrulanmadı. Telefon doğrulaması zorunlu hale getirildiğinde bu talep onaylanamaz ve hizmet verenlere
-            gösterilmez. Reddetme yalnız açık (yayında, incelemede, yeni) talep için mümkündür ve aktif teklifleri
-            kapatıp kredileri iade eder; kapanmamış bir talep iptal edilebilir.
+            gösterilmez. Reddetme yalnız açık (yeni, incelemede, yayında) ve eşleşmemiş talep için mümkündür; aktif
+            teklifleri kapatıp kredilerini iade eder.
           </>
         )}
       </p>
@@ -873,7 +887,7 @@ function StatusCard({
                 triggerLabel="İptal et"
                 triggerClassName="btn btn-destructive btn-sm status-action-btn"
                 title="Talep iptal edilsin mi?"
-                consequence={<CancelConsequence status={request.status} />}
+                consequence={<CancelConsequence request={request} offers={offers} />}
                 confirmLabel="Evet, iptal et"
                 testId="request-cancel"
               />
@@ -946,13 +960,11 @@ function StatusCard({
                 {request.status === 'REJECTED' ? 'Talep zaten reddedildi' : 'Talebi reddet'}
               </button>
             )}
-            {canRemove ? null : (
+            {removalBlockedReason ? (
               <p className="status-reject-note" role="note" data-testid="status-reject-hint">
-                {request.status === 'REJECTED'
-                  ? 'Talep zaten reddedilmiş; yayında değil.'
-                  : "Eşleşmiş veya kapanmış talep için 'İptal et' kullanın."}
+                {removalBlockedReason}
               </p>
-            )}
+            ) : null}
           </form>
         </details>
       ) : null}
@@ -971,32 +983,61 @@ function StatusCard({
  * The automatic refund reads no offer or request status (unviewed-offer-refund
  * service), so an offer the customer never opened still gets its credit back
  * when its window closes; that is the one credit movement a cancel does not
- * stop.
+ * stop. That includes the competitors an acceptance rejected
+ * (COMPETITOR_ACCEPTED writes no refund block); the accepted offer itself is
+ * viewed or refund-blocked and never comes back.
+ *
+ * On a matched request the acceptance normally closed every other live offer,
+ * but the cancel does not rely on it: whatever is still open (an old row)
+ * stays open, and the dialog counts it from the request's own offer list.
  */
-function CancelConsequence({ status }: { status: ServiceRequestStatus }) {
-  const matched = status === 'MATCHED';
+function CancelConsequence({ request, offers }: { request: ServiceRequest; offers: Offer[] | null }) {
+  const matched = request.status === 'MATCHED';
+  const others = offers?.filter((offer) => offer.id !== request.matchedOfferId) ?? null;
+  const liveOthers = others?.filter((offer) => LIVE_OFFER_STATUSES.has(offer.status)).length ?? null;
+  const rejectedOthers = others?.filter((offer) => offer.status === 'REJECTED').length ?? null;
 
   return (
     <>
       <p>
         Talep “İptal edildi” durumuna geçer ve hizmet verenlere gösterilmez. Vitrinden geldiyse işletmeyle açılan kayıt
-        da kapanır.
+        da kapanır. İptal hiçbir teklifin durumunu değiştirmez ve kredi iade etmez.
       </p>
       {matched ? (
-        <p>
-          Kabul edilen teklif “kabul edildi” olarak kalır ve kredisi iade edilmez. İletişim bilgileri ve mesajlaşma iki
-          taraf için de kapanır; iletişim paylaşımı kaydı denetim için saklanır.
-        </p>
+        <>
+          <p>
+            Kabul edilen teklif “kabul edildi” olarak kalır ve kredisi iade edilmez. İletişim bilgileri ve mesajlaşma iki
+            taraf için de kapanır; iletişim paylaşımı kaydı denetim için saklanır.
+          </p>
+          <p data-testid="request-cancel-other-offers">
+            {liveOthers === null
+              ? 'Kabul anında reddedilen diğer teklifler reddedilmiş kalır. Kabul edilen dışında hâlâ açık bir teklif varsa (eski kayıt) o da açık kalır ve kredisi iade edilmez.'
+              : liveOthers > 0
+                ? `Bu talepte kabul edilen dışında ${liveOthers} açık teklif var (gönderildi, görüntülendi ya da kısa listede). İptal bunları kapatmaz: açık kalırlar ve kredileri bu işlemle iade edilmez.`
+                : 'Kabul edilen dışında açık teklif yok.'}
+            {rejectedOthers
+              ? ` ${rejectedOthers} teklif kabul anında reddedilmişti; iptal onların durumunu ve kredisini değiştirmez.`
+              : ''}
+          </p>
+        </>
       ) : (
-        <p>
-          Açık teklifler (gönderildi, görüntülendi, kısa listede) kapatılmaz ve bu işlem kredi iade etmez. Müşterinin hiç
-          görmediği teklifler, otomatik iade kapsamındaysa süresi dolunca yine iade edilir; görülmüş tekliflerin kredisi
-          iade edilmez. Açık teklifleri kapatıp kredilerini iade eden işlem “Talebi reddet”tir.
+        <p data-testid="request-cancel-other-offers">
+          {liveOthers === null
+            ? 'Açık teklifler (gönderildi, görüntülendi, kısa listede) kapatılmaz; açık kalırlar.'
+            : liveOthers > 0
+              ? `Bu talepteki ${liveOthers} açık teklif (gönderildi, görüntülendi, kısa listede) kapatılmaz; açık kalırlar.`
+              : 'Bu talepte açık teklif yok.'}{' '}
+          Açık teklifleri kapatıp kredilerini iade eden işlem “Talebi reddet”tir.
         </p>
       )}
       <p>
+        Kredi hareketi olarak yalnız otomatik iade kuralı işlemeye devam eder: müşterinin hiç görmediği teklifler (reddedilmiş
+        olanlar dahil), kural kapsamındaysa süresi dolunca iptalden bağımsız olarak iade edilir. Görülmüş tekliflerin
+        {matched ? ' ve kabul edilen teklifin' : ''} kredisi iade edilmez.
+      </p>
+      <p>
         Müşteriye ya da hizmet verenlere{matched ? ', kabul edilen teklifin sahibi dahil,' : ''} e-posta veya bildirim
-        gönderilmez. İptal geri alınamaz.
+        gönderilmez. İptal geri alınamaz. Bunlar bugünkü davranıştır; değişip değişmeyeceği ürün kararı bekliyor.
       </p>
     </>
   );
@@ -1286,10 +1327,12 @@ function ReportDecisions({
   requestId,
   openCount,
   canRemove,
+  removalBlockedReason,
 }: {
   requestId: string;
   openCount: number;
   canRemove: boolean;
+  removalBlockedReason: string | null;
 }) {
   return (
     <div className="report-decisions" data-testid="report-decisions">
@@ -1366,12 +1409,11 @@ function ReportDecisions({
               testId="report-remove"
             />
           </fieldset>
-          {canRemove ? null : (
-            <p className="report-decision-hint" role="note">
-              Bu talep mevcut durumundan kaldırılamaz; eşleşmiş talep için &apos;İptal et&apos; kullanın, kapanmış
-              talep zaten yayında değil.
+          {removalBlockedReason ? (
+            <p className="report-decision-hint" role="note" data-testid="report-remove-hint">
+              {removalBlockedReason}
             </p>
-          )}
+          ) : null}
         </form>
       </details>
     </div>
@@ -1479,6 +1521,9 @@ function QualityBreakdownItem({
     </div>
   );
 }
+
+/** Offers still in play: what an acceptance or a rejection cascade would close. */
+const LIVE_OFFER_STATUSES: ReadonlySet<string> = new Set(['SUBMITTED', 'VIEWED', 'SHORTLISTED']);
 
 function isTerminalStatus(status: string) {
   return status === 'COMPLETED' || status === 'CANCELLED' || status === 'EXPIRED' || status === 'REJECTED';

@@ -1,6 +1,8 @@
 # ADMIN-ACTIONS-005 — Eşleşmiş talepte CANCELLED: risk ve ürün kararı raporu
 
 **Tarih:** 2026-09-28 · **Durum:** karar bekliyor · **Kapsam:** yalnız analiz — bu rapor davranış değiştirmez.
+
+> **Güncelleme (2026-09-28, main@4e1d1c98):** §1'deki moderasyon kapısı (`PATCH …/status {CANCELLED}`) ve §5'teki DRAFT/SUBMITTED açığı PR #120 (API-GUARD-REQUEST-002) ile kapandı; bu satırlar **tarihsel kanıttır**. K1 ve K6 böylece "tek kapı: `POST /:id/cancel`" yönünde çözüldü. `/cancel` kapısının davranışı (§1 ikinci satır, §2, §3) değişmedi; **K2–K5 açık**. Admin "İptal et" diyaloğu bugünkü davranışı anlatır ve bu kararlar verilmeden farklı bir sonuç vaat etmez (PR #118).
 **İlgili PR:** API-GUARD-OFFER-001 / API-GUARD-REQUEST-001 (bu raporla aynı dal). O PR CANCELLED hedefine **dokunmaz**.
 
 ## 1. Bugün CANCELLED'a giden üç kapı

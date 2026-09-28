@@ -63,4 +63,13 @@ describe('request status conflicts', () => {
       expect(message).not.toContain('her durumda');
     }
   });
+
+  // A refused rejection or a non-moderation status used to send the operator
+  // to "İptal et". A closed request cannot be cancelled, and a matched one's
+  // cancel leaves K2–K5 open; no refusal may offer it as the way out.
+  it.each(Object.keys(REQUEST_STATUS_ERROR_MESSAGES))('%s does not steer the operator to "İptal et"', (key) => {
+    const message = requestStatusErrorMessage(key) ?? '';
+    expect(message).not.toMatch(/İptal et/);
+    expect(message).not.toMatch(/iptal edilebilir|iptal için|kapatmak için/i);
+  });
 });
