@@ -195,6 +195,44 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     requestsUrl: `${WEB}/providers/p1/requests`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'request-cancelled-customer': {
+    fullName: 'Deniz Yılmaz',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    cancelledAt: '2026-09-05T11:12:00.000Z',
+    cancelledBy: 'STAFF',
+    matched: '1',
+    newRequestUrl: `${WEB}/categories`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'request-cancelled-winner': {
+    fullName: 'Murat Şahin',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    city: 'Ankara',
+    district: 'Çankaya',
+    offerAmountMinor: '240000',
+    refundedCredits: '3',
+    withheld: '',
+    closed: '1',
+    offerUrl: `${WEB}/providers/p1/offers/o1`,
+    requestsUrl: `${WEB}/providers/p1/requests`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'request-cancelled-offer': {
+    fullName: 'Murat Şahin',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    city: 'Ankara',
+    district: 'Çankaya',
+    offerAmountMinor: '240000',
+    refundedCredits: '3',
+    withheld: '',
+    closed: '1',
+    offerUrl: `${WEB}/providers/p1/offers/o1`,
+    requestsUrl: `${WEB}/providers/p1/requests`,
+    accountUrl: `${WEB}/providers/me`,
+  },
   'package-purchase-confirmation': {
     fullName: 'Murat Şahin',
     packageName: 'Başlangıç Paketi',
@@ -566,7 +604,7 @@ describe('transactional e-mail rendering', () => {
     // Twenty-eight before vitrin's four, then the seven of the run's life,
     // then the two of a request report, then the four of a provider review,
     // then the provider's mailbox proof (AUTH-PROVIDER-CONTACT-001).
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(47);
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(50);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -798,6 +836,9 @@ describe('transactional e-mail rendering', () => {
       'request-expiring': 'Talebiniz için süre dolmak üzere',
       'request-expired-customer': 'Talebinizin süresi doldu — #T-90412',
       'request-expired-provider': 'Teklif verdiğiniz talebin süresi doldu — #T-90412',
+      'request-cancelled-customer': 'Talebiniz iptal edildi — #T-90412',
+      'request-cancelled-winner': 'Kabul edilen teklifinizin talebi iptal edildi — #T-90412',
+      'request-cancelled-offer': 'Teklif verdiğiniz talep iptal edildi — #T-90412',
       'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
       'request-removed': 'Talebiniz yayından kaldırıldı',
       'request-report-new-for-support': 'Yeni talep bildirimi — #T-90412',

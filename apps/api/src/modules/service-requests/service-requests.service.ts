@@ -18,7 +18,7 @@ import {
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { normalizePhoneNumber } from '../phone-verification/phone.util';
-import { CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -35,7 +35,12 @@ import { MarketplacePublishSettingsService } from '../operations-settings/market
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { refundOfferCreditInTransaction } from '../offers/offers.service';
-import { REQUEST_REMOVED_REFUND_REASON } from '../offers/refund-policy';
+import { REQUEST_CANCELLED_REFUND_REASON, REQUEST_REMOVED_REFUND_REASON } from '../offers/refund-policy';
+import { hasPermission } from '../auth/admin-permissions';
+import {
+  enqueueRequestCancellationNotices,
+  RequestCancellationOutbox,
+} from '../notifications/request-cancellation-outbox.service';
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import { RequestDraftsService } from '../request-drafts/request-drafts.service';
@@ -265,6 +270,74 @@ const terminalStatuses = new Set<ServiceRequestStatus>([
   ServiceRequestStatus.REJECTED,
 ]);
 
+/** The shortest reason a withheld winner refund may carry. */
+export const CANCEL_WITHHOLD_REASON_MIN_LENGTH = 10;
+
+function cancelStateChangedException() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: 'REQUEST_CANCEL_STATE_CHANGED',
+    message: 'Talep bu sayfa açıldıktan sonra değişti; iptal uygulanmadı.',
+  });
+}
+
+/** Offers still in play: a cancel closes them. */
+export const CANCEL_CLOSED_OFFER_STATUSES: ReadonlySet<OfferStatus> = new Set([
+  OfferStatus.SUBMITTED,
+  OfferStatus.VIEWED,
+  OfferStatus.SHORTLISTED,
+]);
+
+/**
+ * What a cancel does to an offer that is not the accepted one — the
+ * "kazanamayan" set, fixed here and pinned by request-cancellation.spec.ts
+ * (K4, PR #118). The same rule before and after an acceptance, and whatever
+ * was decided about the winner's credit.
+ *
+ * - SUBMITTED, VIEWED, SHORTLISTED: still in play. Closed (CANCELLED) and their
+ *   spent credit refunded.
+ * - REJECTED, for any reason — by the acceptance's cascade
+ *   (COMPETITOR_ACCEPTED) or by hand (the customer, or an operator on their
+ *   behalf): the rejection stays on the record, the offer stays REJECTED, and
+ *   its spent credit is refunded. The request the credit was spent on was
+ *   called off, so no rejection "used" it.
+ * - WITHDRAWN (the provider took it back) and EXPIRED: their own policies
+ *   decide their credit; a cancel neither closes nor refunds them.
+ * - CANCELLED (already closed by an earlier cascade): untouched.
+ * - ACCEPTED on an offer that is not the request's match cannot exist (one
+ *   accepted per request); untouched if it ever did.
+ *
+ * "Refunded" always means: a one-time credit was spent and has not already
+ * come back (see isRefundableOneTimeSpend) — through the same
+ * `refundOfferCreditInTransaction` every other refund uses, so an offer
+ * already refunded by the unviewed worker or by hand is never paid again.
+ */
+export function cancelLoserOfferRule(offer: { status: OfferStatus }): { close: boolean; refund: boolean } {
+  if (CANCEL_CLOSED_OFFER_STATUSES.has(offer.status)) {
+    return { close: true, refund: true };
+  }
+  if (offer.status === OfferStatus.REJECTED) {
+    return { close: false, refund: true };
+  }
+  return { close: false, refund: false };
+}
+
+/** A one-time credit was spent on this offer and has not come back yet. */
+function isRefundableOneTimeSpend(offer: {
+  entitlementSource: OfferEntitlementSource | null;
+  creditSpentTransactionId: string | null;
+  creditCost: number;
+  creditRefundedTransactionId: string | null;
+}): boolean {
+  return (
+    offer.entitlementSource === OfferEntitlementSource.ONE_TIME_CREDIT &&
+    offer.creditSpentTransactionId !== null &&
+    offer.creditCost > 0 &&
+    offer.creditRefundedTransactionId === null
+  );
+}
+
 @Injectable()
 export class ServiceRequestsService {
   private readonly logger = new Logger(ServiceRequestsService.name);
@@ -283,6 +356,7 @@ export class ServiceRequestsService {
     private readonly publishSettings: MarketplacePublishSettingsService,
     @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
     @Inject(ReviewInvitationOutbox) private readonly reviewInvitations: ReviewInvitationOutbox,
+    @Inject(RequestCancellationOutbox) private readonly cancellationNotices: RequestCancellationOutbox,
   ) {}
 
   /**
@@ -798,6 +872,21 @@ export class ServiceRequestsService {
         customer: {
           select: { id: true, email: true, phone: true, name: true },
         },
+        // The cancellation record (PR #118), for the admin detail only: who
+        // cancelled, what was decided about the winner's credit and why.
+        cancellation: {
+          select: {
+            actorKind: true,
+            actor: { select: { id: true, name: true, email: true, role: true } },
+            previousStatus: true,
+            acceptedOfferId: true,
+            winnerRefundDecision: true,
+            withholdReason: true,
+            closedOfferIds: true,
+            refundedOfferIds: true,
+            createdAt: true,
+          },
+        },
         answers: {
           orderBy: { createdAt: 'asc' },
         },
@@ -999,7 +1088,8 @@ export class ServiceRequestsService {
    * offers CANCELLED and every one-time credit they spent returned — all in
    * the caller's transaction, so none of it exists without the rest.
    *
-   * The one writer of Offer.CANCELLED in the product. Both the moderation
+   * One of the two writers of Offer.CANCELLED (the other is
+   * cancelServiceRequest). Both the moderation
    * screen's "Reddet" and a report's "Talebi kaldır" arrive here.
    *
    * Idempotent by construction rather than by flag. The conditional status
@@ -1046,7 +1136,7 @@ export class ServiceRequestsService {
         error: 'Conflict',
         code: 'REQUEST_NOT_REMOVABLE',
         message:
-          'Bu talep mevcut durumundan kaldırılamaz; eşleşmiş talep için iptal kullanın, kapanmış talep zaten yayında değil.',
+          'Bu talep mevcut durumundan kaldırılamaz: eşleşmiş talep reddedilmez, kapanmış talep zaten yayında değil.',
       });
     }
 
@@ -1218,48 +1308,245 @@ export class ServiceRequestsService {
     return this.getLifecycleProjection(id);
   }
 
-  /** Cancels a request that has not finished yet. Customer (owner) or admin. */
-  async cancelServiceRequest(id: string, user: AuthUser) {
-    const request = await this.getRequestForLifecycleAction(id, user);
+  /**
+   * Cancels a request that has not finished yet (PR #118 cancellation contract).
+   *
+   * Who:
+   * - the owning customer, until an offer is accepted — a matched request is
+   *   refused with 409 REQUEST_MATCHED_NOT_CANCELLABLE_BY_CUSTOMER;
+   * - an operator holding REQUESTS_CANCEL (the guard checks it; this method
+   *   checks it again) or a SUPER_ADMIN, a matched request included.
+   *
+   * What, in one Serializable transaction:
+   * - the request moves to CANCELLED through a write conditional on the exact
+   *   status and match this transaction read (for a customer: on there being
+   *   no match), so an acceptance and a cancel racing each other cannot both
+   *   win — the loser matches nothing, or loses the serialization check and is
+   *   replayed against the winner's state, and gets a 409 with nothing written;
+   * - the vitrin lead closes;
+   * - the accepted offer, if any, moves to CANCELLED (its `acceptedAt` stays as
+   *   the record of the acceptance, `matchedOfferId` stays as the record of the
+   *   match) and its spent credit comes back unless `winnerRefund` is
+   *   WITHHOLD — which only the withhold endpoint passes;
+   * - every losing offer (see {@link cancelLoserOfferRule}) is closed and/or
+   *   refunded, whatever was decided for the winner;
+   * - the cancellation audit row and the notices it owes.
+   *
+   * No refund is paid twice: each goes through `refundOfferCreditInTransaction`,
+   * whose conditional update and the ledger's one-refund-per-offer index refuse
+   * an offer already refunded by the unviewed worker or by hand, and an offer
+   * already refunded is not a candidate in the first place.
+   */
+  async cancelServiceRequest(
+    id: string,
+    user: AuthUser,
+    options: {
+      expectedMatchedOfferId?: string;
+      winnerRefund?: 'REFUND' | 'WITHHOLD';
+      withholdReason?: string;
+    } = {},
+  ) {
+    const actorKind = this.cancelActorKind(user);
+    const winnerRefund = options.winnerRefund ?? 'REFUND';
+    const withholdReason = winnerRefund === 'WITHHOLD' ? options.withholdReason?.trim() ?? '' : null;
 
-    if (terminalStatuses.has(request.status)) {
-      throw new ConflictException(`A ${request.status} request can no longer be cancelled`);
+    if (winnerRefund === 'WITHHOLD') {
+      if (actorKind !== ServiceRequestCancelActor.STAFF || !this.userHolds(user, AdminPermission.REQUESTS_CANCEL_WITHOUT_REFUND)) {
+        throw new ForbiddenException('Cancelling without the winner refund needs REQUESTS_CANCEL_WITHOUT_REFUND');
+      }
+      if (!withholdReason || withholdReason.length < CANCEL_WITHHOLD_REASON_MIN_LENGTH) {
+        throw new BadRequestException({
+          statusCode: HttpStatus.BAD_REQUEST,
+          error: 'Bad Request',
+          code: 'CANCEL_WITHHOLD_REASON_REQUIRED',
+          message: `Kredi iadesiz iptal için en az ${CANCEL_WITHHOLD_REASON_MIN_LENGTH} karakterlik gerekçe zorunludur.`,
+        });
+      }
     }
+
+    const request = await this.getRequestForLifecycleAction(id, user, { allowStaff: true });
+    this.assertCancellable(request, actorKind, options.expectedMatchedOfferId, winnerRefund);
 
     const now = new Date();
 
     await runSerializable(
       this.prisma,
       async (tx) => {
-        const updated = await tx.serviceRequest.updateMany({
-          where: { id, status: { notIn: [...terminalStatuses] } },
+        // Re-read under the transaction: the checks above were a fast answer;
+        // these decide.
+        const current = await tx.serviceRequest.findUniqueOrThrow({
+          where: { id },
+          select: { status: true, matchedOfferId: true, customerId: true },
+        });
+        this.assertCancellable(current, actorKind, options.expectedMatchedOfferId, winnerRefund);
+
+        const moved = await tx.serviceRequest.updateMany({
+          where: { id, status: current.status, matchedOfferId: current.matchedOfferId },
           data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
         });
-
-        if (updated.count !== 1) {
-          throw new ConflictException('This request can no longer be cancelled');
+        if (moved.count !== 1) {
+          throw cancelStateChangedException();
         }
 
-        // The lead goes with it, for the reason a refusal closes one: a clock
-        // running against a business over a cancelled request measures nothing
-        // and asks the customer a question they have already answered.
-        await this.showcaseLeads.closeForRequest(
-          tx,
-          id,
-          ShowcaseLeadCloseReason.CUSTOMER_CANCELLED,
-          now,
-        );
+        await this.showcaseLeads.closeForRequest(tx, id, ShowcaseLeadCloseReason.CUSTOMER_CANCELLED, now);
+
+        const acceptedOfferId = current.matchedOfferId;
+        const offers = await tx.offer.findMany({
+          where: { requestId: id },
+          orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            providerId: true,
+            status: true,
+            creditCost: true,
+            entitlementSource: true,
+            creditSpentTransactionId: true,
+            creditRefundedTransactionId: true,
+          },
+        });
+
+        const closedOfferIds: string[] = [];
+        const refundedOfferIds: string[] = [];
+        let winnerRefundDecision: CancelWinnerRefundDecision = CancelWinnerRefundDecision.NOT_MATCHED;
+
+        for (const offer of offers) {
+          const isWinner = offer.id === acceptedOfferId;
+          const rule = isWinner
+            ? { close: offer.status === OfferStatus.ACCEPTED, refund: winnerRefund === 'REFUND' }
+            : cancelLoserOfferRule(offer);
+
+          if (rule.close) {
+            const closed = await tx.offer.updateMany({
+              where: { id: offer.id, status: offer.status },
+              data: { status: OfferStatus.CANCELLED, cancelledAt: now },
+            });
+            if (closed.count !== 1) {
+              throw new ConflictException('An offer on this request changed while it was being cancelled');
+            }
+            closedOfferIds.push(offer.id);
+          }
+
+          const refundable = rule.refund && isRefundableOneTimeSpend(offer);
+          if (refundable) {
+            // In full, viewed or not: the request was called off, so nobody
+            // bought the outcome the credit was spent on. Throws on any guard
+            // failure, which rolls the whole cancel back.
+            await refundOfferCreditInTransaction(
+              tx,
+              {
+                id: offer.id,
+                providerId: offer.providerId,
+                creditCost: offer.creditCost,
+                creditSpentTransactionId: offer.creditSpentTransactionId,
+              },
+              REQUEST_CANCELLED_REFUND_REASON,
+              // The operator's id for a staff cancel; NULL for a customer's own,
+              // which is nobody's discretionary decision about money.
+              { enforceUnviewedPolicy: false, createdById: actorKind === ServiceRequestCancelActor.STAFF ? user.id : null },
+            );
+            refundedOfferIds.push(offer.id);
+          }
+
+          if (isWinner) {
+            winnerRefundDecision =
+              winnerRefund === 'WITHHOLD'
+                ? CancelWinnerRefundDecision.WITHHELD
+                : refundable
+                  ? CancelWinnerRefundDecision.REFUNDED
+                  : CancelWinnerRefundDecision.NOTHING_TO_REFUND;
+          }
+        }
+
+        // A matched request whose accepted offer row is somehow gone still
+        // records the decision it was given.
+        if (acceptedOfferId && winnerRefundDecision === CancelWinnerRefundDecision.NOT_MATCHED) {
+          winnerRefundDecision =
+            winnerRefund === 'WITHHOLD'
+              ? CancelWinnerRefundDecision.WITHHELD
+              : CancelWinnerRefundDecision.NOTHING_TO_REFUND;
+        }
+
+        await tx.serviceRequestCancellation.create({
+          data: {
+            requestId: id,
+            actorKind,
+            actorUserId: user.id,
+            previousStatus: current.status,
+            acceptedOfferId,
+            winnerRefundDecision,
+            withholdReason: winnerRefundDecision === CancelWinnerRefundDecision.WITHHELD ? withholdReason : null,
+            closedOfferIds,
+            refundedOfferIds,
+          },
+        });
+
+        await enqueueRequestCancellationNotices(tx, id);
       },
       { label: 'serviceRequests.cancel' },
     );
 
+    this.cancellationNotices.deliverSoon();
+
     return this.getLifecycleProjection(id);
   }
 
-  private async getRequestForLifecycleAction(id: string, user: AuthUser) {
+  private cancelActorKind(user: AuthUser): ServiceRequestCancelActor {
+    if (user.role === UserRole.CUSTOMER) {
+      return ServiceRequestCancelActor.CUSTOMER;
+    }
+    // The guard already required REQUESTS_CANCEL of staff; asked again here so
+    // the rule holds for any caller of this method, not only the route.
+    if (this.userHolds(user, AdminPermission.REQUESTS_CANCEL)) {
+      return ServiceRequestCancelActor.STAFF;
+    }
+    throw new ForbiddenException('Service request access denied');
+  }
+
+  private userHolds(user: AuthUser, permission: AdminPermission): boolean {
+    return hasPermission({ role: user.role, permissions: user.permissions ?? [] }, [permission]);
+  }
+
+  /** The rules a cancel is checked against, before and inside the transaction. */
+  private assertCancellable(
+    request: { status: ServiceRequestStatus; matchedOfferId: string | null },
+    actorKind: ServiceRequestCancelActor,
+    expectedMatchedOfferId: string | undefined,
+    winnerRefund: 'REFUND' | 'WITHHOLD',
+  ) {
+    if (terminalStatuses.has(request.status)) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'REQUEST_NOT_CANCELLABLE',
+        message: 'Kapanmış talep iptal edilemez.',
+      });
+    }
+    const matched = request.matchedOfferId !== null || request.status === ServiceRequestStatus.MATCHED;
+    if (actorKind === ServiceRequestCancelActor.CUSTOMER && matched) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'REQUEST_MATCHED_NOT_CANCELLABLE_BY_CUSTOMER',
+        message: 'Bir teklif kabul edildiği için talep artık müşteri tarafından iptal edilemez.',
+      });
+    }
+    if (expectedMatchedOfferId !== undefined && (request.matchedOfferId ?? '') !== expectedMatchedOfferId) {
+      throw cancelStateChangedException();
+    }
+    if (winnerRefund === 'WITHHOLD' && !request.matchedOfferId) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'REQUEST_NOT_MATCHED',
+        message: 'Eşleşmemiş talepte kazanan teklif yoktur; iadesiz iptal uygulanmaz.',
+      });
+    }
+  }
+
+  private async getRequestForLifecycleAction(id: string, user: AuthUser, options: { allowStaff?: boolean } = {}) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      select: { id: true, status: true, customerId: true },
+      select: { id: true, status: true, customerId: true, matchedOfferId: true },
     });
 
     if (!request) {
@@ -1267,6 +1554,12 @@ export class ServiceRequestsService {
     }
 
     if (user.role === UserRole.SUPER_ADMIN) {
+      return request;
+    }
+
+    // Cancel only: an operator whose REQUESTS_CANCEL the guard and
+    // cancelActorKind have both checked. Completing stays SUPER_ADMIN's.
+    if (options.allowStaff && user.role === UserRole.ADMIN) {
       return request;
     }
 

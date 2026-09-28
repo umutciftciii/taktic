@@ -23,6 +23,17 @@ export const UNVIEWED_OFFER_REFUND_REASON = 'UNVIEWED_OFFER_48H';
 export const REQUEST_REMOVED_REFUND_REASON = 'REQUEST_REMOVED';
 
 /**
+ * The request was cancelled — by its customer before any offer was accepted,
+ * or by an operator, a matched request included. The offers it closed (and the
+ * accepted one, unless an operator withheld that refund with a reason) get
+ * their spent credit back in full, viewed or not: nobody bought a delivered
+ * outcome from a request that was called off.
+ *
+ * Written by exactly one place, `ServiceRequestsService.cancelServiceRequest`.
+ */
+export const REQUEST_CANCELLED_REFUND_REASON = 'REQUEST_CANCELLED';
+
+/**
  * The window the platform uses when no operator has chosen one.
  *
  * Not "the" window any more — a super admin sets it from the operations
@@ -443,6 +454,7 @@ const REFUND_REASON_LABELS: Record<string, string> = {
   NO_REFUND_SCHEDULE: 'İade zamanı kayıtlı değil',
   [MANUAL_REFUND_REASON_PREFIX]: 'Yönetici kredi iadesi',
   [REQUEST_REMOVED_REFUND_REASON]: 'Talep yayından kaldırıldı — kredi iadesi',
+  [REQUEST_CANCELLED_REFUND_REASON]: 'Talep iptal edildi — kredi iadesi',
   WAITING_VIEW_WINDOW: 'Görüntülenme bekleniyor',
 };
 
@@ -460,4 +472,5 @@ const REFUND_DETAILS: Record<string, string> = {
     'Bu teklif için iade zamanı kayıtlı değil; otomatik iade yapılmaz. Lütfen destek ile iletişime geçin.',
   [REQUEST_REMOVED_REFUND_REASON]:
     'Talep platform tarafından yayından kaldırıldı; harcanan teklif krediniz iade edildi.',
+  [REQUEST_CANCELLED_REFUND_REASON]: 'Talep iptal edildi; harcanan teklif krediniz iade edildi.',
 };

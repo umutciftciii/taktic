@@ -6558,6 +6558,9 @@ body.has-drawer-open {
 .report-dialog { width: 480px; }
 .report-dialog h2,
 .report-dialog p { margin: 0; }
+/* The customer's own cancel (PR #118): the same frame, the answer at the bottom. */
+.customer-cancel-form { display: grid; gap: var(--space-4); }
+.report-dialog-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: flex-end; }
 
 /* The return screen after payment: one statement, one action. */
 .vitrin-return {

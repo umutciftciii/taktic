@@ -124,3 +124,42 @@ function readFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === 'string' ? value : '';
 }
+
+/**
+ * The customer cancels their own request (PR #118 contract). Allowed until an
+ * offer is accepted; the API refuses a matched request with 409 and writes
+ * nothing, and this lands the customer back on the page with the reason.
+ *
+ * The customer is never offered a choice about anyone's credit: the API closes
+ * the live offers and gives their credit back on its own, and a matched
+ * request — the only kind with a winner — is not theirs to cancel.
+ */
+export async function cancelOwnRequestAction(formData: FormData) {
+  const requestId = readFormString(formData, 'requestId');
+  let outcome: 'cancelled' | 'matched' | 'closed' = 'cancelled';
+
+  try {
+    await apiFetch<CustomerServiceRequest>(`/service-requests/${requestId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 409) {
+      throw error;
+    }
+    outcome = readErrorCode(error.body) === 'REQUEST_MATCHED_NOT_CANCELLABLE_BY_CUSTOMER' ? 'matched' : 'closed';
+  }
+
+  revalidatePath('/requests/my');
+  revalidatePath(`/requests/${requestId}/offers`);
+  redirect(`/requests/${requestId}/offers?cancel=${outcome}`);
+}
+
+function readErrorCode(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown };
+    return typeof parsed.code === 'string' ? parsed.code : null;
+  } catch {
+    return null;
+  }
+}

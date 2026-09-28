@@ -2,16 +2,30 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { apiFetch, Offer, OfferStatus } from '../../lib/api';
+import { apiFetch, Offer, OfferStatus, readConflict } from '../../lib/api';
+import { offerStatusErrorKey } from '../../lib/status-conflicts';
 
 export async function updateOfferStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const status = readFormString(formData, 'status') as OfferStatus;
 
-  await apiFetch<Offer>(`/offers/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  });
+  try {
+    await apiFetch<Offer>(`/offers/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  } catch (error) {
+    // Every 409 here is a state conflict and nothing was written: the offer
+    // was already decided (OFFER_ACTION_NOT_ALLOWED, PR #119), the request
+    // moved on, or an acceptance lacked the customer's disclosure consent. The
+    // operator lands back on the operations list with the reason.
+    const conflict = readConflict(error);
+    if (conflict) {
+      redirect(`/offers/${id}?statusError=${offerStatusErrorKey(conflict.code)}`);
+    }
+
+    throw error;
+  }
 
   revalidatePath('/offers');
   revalidatePath(`/offers/${id}`);
@@ -36,7 +50,8 @@ export async function refundOfferCreditAction(formData: FormData) {
 
   revalidatePath('/offers');
   revalidatePath(`/offers/${id}`);
-  redirect(`/offers/${id}?refunded=1`);
+  // Back to the tab the refund form lives on.
+  redirect(`/offers/${id}?tab=kredi&refunded=1`);
 }
 
 function readFormString(formData: FormData, key: string) {

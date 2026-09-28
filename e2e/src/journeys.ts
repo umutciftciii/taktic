@@ -552,7 +552,8 @@ export async function resolveReports(
   resolution: 'DISMISSED' | 'REQUEST_REMOVED',
   removalReason: RequestReportReason = 'SPAM',
 ): Promise<void> {
-  await admin.gotoAdmin(`/requests/${requestId}`);
+  // The decisions live on the request's "Şikayet" tab (ADMIN-DESIGN-001 Faz 3A).
+  await admin.gotoAdmin(`/requests/${requestId}?tab=sikayet`);
   await expect(admin.page.getByTestId('report-decisions')).toBeVisible();
 
   if (resolution === 'DISMISSED') {
@@ -563,7 +564,11 @@ export async function resolveReports(
       .getByRole('group', { name: 'Talebi kaldır' })
       .locator('select[name="removalReason"]')
       .selectOption(removalReason);
+    // A removal asks first, and says what it will do, before anything moves.
     await admin.page.getByTestId('report-remove').click();
+    const dialog = admin.page.getByRole('dialog', { name: 'Talep kaldırılsın mı?' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Evet, talebi kaldır' }).click();
     await expect(admin.page.getByTestId('request-status')).toHaveText('Reddedildi');
     await expect(admin.page.getByTestId('report-decisions')).toHaveCount(0);
   }
@@ -578,7 +583,7 @@ export async function resolveReports(
  * reason `approveRequest` does both.
  */
 export async function reopenRequest(admin: Actor, requestId: string): Promise<void> {
-  await admin.gotoAdmin(`/requests/${requestId}`);
+  await admin.gotoAdmin(`/requests/${requestId}?tab=sikayet`);
   await admin.page.getByTestId('report-reopen').click();
   await expect(admin.page.getByTestId('request-status')).toHaveText('Onaylandı');
   await expect(admin.page.getByTestId('report-reopen')).toHaveCount(0);

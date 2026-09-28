@@ -1252,6 +1252,43 @@ export class TransactionalMailService {
           : null;
       }
 
+      case 'request-cancelled-customer': {
+        const cancellation = await loadCancellation(this.prisma, source.ids[0]);
+        const email = cancellation?.request.customerEmail?.trim();
+        // Composed only while the request is still what the notice says.
+        if (!cancellation || !email || cancellation.request.status !== ServiceRequestStatus.CANCELLED) {
+          return null;
+        }
+
+        return { to: email, data: requestCancelledCustomerData(cancellation) };
+      }
+
+      case 'request-cancelled-winner':
+      case 'request-cancelled-offer': {
+        const offer = await loadCancelledOffer(this.prisma, source.ids[0]);
+        if (!offer) {
+          return null;
+        }
+        const cancellation = await loadCancellation(this.prisma, offer.requestId);
+        if (!cancellation || cancellation.request.status !== ServiceRequestStatus.CANCELLED) {
+          return null;
+        }
+
+        // Membership is re-read from the audit row the cancel wrote, never
+        // assumed from the key: the winner notice is the accepted offer's
+        // alone, and the other notice reaches only an offer the cancel
+        // actually closed or refunded.
+        const isWinner = cancellation.acceptedOfferId === offer.id;
+        const affected =
+          cancellation.closedOfferIds.includes(offer.id) || cancellation.refundedOfferIds.includes(offer.id);
+        if (source.template === 'request-cancelled-winner' ? !isWinner : isWinner || !affected) {
+          return null;
+        }
+
+        const recipient = recipientFor(offer.provider);
+        return recipient ? { to: recipient, data: requestCancelledOfferData(cancellation, offer) } : null;
+      }
+
       case 'offer-received': {
         const offer = await loadOffer(this.prisma, source.ids[0]);
         // An offer the provider has since withdrawn is not news the customer
@@ -2581,6 +2618,96 @@ function requestReportNewForSupportData(report: {
   };
 }
 
+function loadCancellation(prisma: PrismaService, requestId: string) {
+  return prisma.serviceRequestCancellation.findUnique({
+    where: { requestId },
+    select: {
+      actorKind: true,
+      acceptedOfferId: true,
+      winnerRefundDecision: true,
+      closedOfferIds: true,
+      refundedOfferIds: true,
+      createdAt: true,
+      request: {
+        select: {
+          id: true,
+          requestNumber: true,
+          status: true,
+          customerName: true,
+          customerEmail: true,
+          city: true,
+          district: true,
+          cancelledAt: true,
+          category: { select: { name: true } },
+        },
+      },
+    },
+  });
+}
+
+function loadCancelledOffer(prisma: PrismaService, offerId: string) {
+  return prisma.offer.findUnique({
+    where: { id: offerId },
+    select: {
+      id: true,
+      requestId: true,
+      providerId: true,
+      priceAmount: true,
+      creditCost: true,
+      provider: {
+        select: { userId: true, contactName: true, email: true, user: { select: { email: true } } },
+      },
+    },
+  });
+}
+
+type LoadedCancellation = NonNullable<Awaited<ReturnType<typeof loadCancellation>>>;
+type LoadedCancelledOffer = NonNullable<Awaited<ReturnType<typeof loadCancelledOffer>>>;
+
+/** The customer's confirmation: their own request and who cancelled it — nothing about providers or money. */
+function requestCancelledCustomerData(cancellation: LoadedCancellation): MailData {
+  const request = cancellation.request;
+  return {
+    fullName: request.customerName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    cancelledAt: (request.cancelledAt ?? cancellation.createdAt).toISOString(),
+    cancelledBy: cancellation.actorKind,
+    matched: cancellation.acceptedOfferId ? '1' : '',
+    newRequestUrl: customerNewRequestUrl(),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+/**
+ * A provider's notice. Only what is theirs or was already on the discovery
+ * card: the request's number, category, city and district, their own offer
+ * amount and what happened to their own credit. No customer name or contact,
+ * no other provider, and never the operator's reason for withholding a refund.
+ */
+function requestCancelledOfferData(
+  cancellation: LoadedCancellation,
+  offer: LoadedCancelledOffer,
+): MailData {
+  const request = cancellation.request;
+  const refunded = cancellation.refundedOfferIds.includes(offer.id);
+  return {
+    fullName: offer.provider.contactName,
+    requestNumber: request.requestNumber,
+    categoryName: request.category.name,
+    city: request.city,
+    district: request.district,
+    offerAmountMinor: String(offer.priceAmount),
+    refundedCredits: refunded ? String(offer.creditCost) : null,
+    withheld:
+      cancellation.acceptedOfferId === offer.id && cancellation.winnerRefundDecision === 'WITHHELD' ? '1' : '',
+    closed: cancellation.closedOfferIds.includes(offer.id) ? '1' : '',
+    offerUrl: providerOfferUrl(offer.providerId, offer.id),
+    requestsUrl: providerRequestsUrl(offer.providerId),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
 function requestExpiredCustomerData(request: LoadedRequest): MailData {
   return {
     fullName: request.customerName,
@@ -2945,6 +3072,12 @@ const RETRY_DEDUPE_PREFIXES = {
   // rebuild the same way.
   'request-expired-customer': 'request-expired-customer',
   'request-expired-provider': 'request-expired-provider',
+  // A cancellation's three notices: one per request for the customer, one per
+  // offer for the providers. Rebuilt from the cancellation audit row, which is
+  // permanent, so the outbox can always deliver what the cancel enqueued.
+  'request-cancelled-customer': 'request-cancelled-customer',
+  'request-cancelled-winner': 'request-cancelled-winner',
+  'request-cancelled-offer': 'request-cancelled-offer',
   // The support-ticket family is reproducible in full: every one of them is
   // composed from a ticket, a message or a status-change row, all of which are
   // permanent — this product deletes none of the three — and none of them
@@ -3033,6 +3166,9 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'request-expired-customer': 1,
   /** The request and the provider: one notice per bidder, not one per expiry. */
   'request-expired-provider': 2,
+  'request-cancelled-customer': 1,
+  'request-cancelled-winner': 1,
+  'request-cancelled-offer': 1,
   'support-ticket-created': 1,
   'support-ticket-new-for-support': 1,
   'support-ticket-customer-reply': 1,

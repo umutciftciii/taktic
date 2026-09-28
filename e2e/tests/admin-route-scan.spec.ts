@@ -23,8 +23,8 @@ import { primaryRuntime, repoRoot } from '../src/runtime';
  * The redesign changed the stylesheet every one of the 52 screens reads and
  * the frame every one of them sits in, while converting none of their content.
  * So each one is opened once, as a super admin, at 1440px and at 390px — and
- * the Faz 2 reference list, /notifications, at 320px as well — and two separate
- * rules are enforced:
+ * every screen a Faz 2/3 slice converted (CONVERTED_ROUTES) at 320px as well —
+ * and two separate rules are enforced:
  *
  * 1. Shell overflow is a hard failure, on every route, with no allowlist:
  *    html, body, the shell, the sidebar, the top bar, the main column and the
@@ -94,6 +94,17 @@ type Measurement = {
   culprits: string[];
 };
 
+
+/** Screens a Faz 2/3 slice has converted; each is scanned at 320px as well. */
+const CONVERTED_ROUTES = [
+  '/notifications',
+  '/requests',
+  '/requests/[id]',
+  '/requests/reports',
+  '/offers',
+  '/offers/[id]',
+  '/refund-scan',
+];
 
 const STATIC_ROUTES = [
   '/',
@@ -194,7 +205,7 @@ async function detailTargets(): Promise<Target[]> {
 }
 
 test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
-  test('all 52 signed-in screens render inside the shell at 1440px and 390px (and /notifications at 320px)', async ({ browser }, testInfo) => {
+  test('all 52 signed-in screens render inside the shell at 1440px and 390px (and the converted screens at 320px)', async ({ browser }, testInfo) => {
     test.setTimeout(600_000);
     const account = await createAdmin();
     const targets: Target[] = [...STATIC_ROUTES.map((route) => ({ route, path: route })), ...(await detailTargets())];
@@ -216,12 +227,13 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
 
     const results: Array<{ route: string; width: number } & Measurement> = [];
 
-    // Every screen at the two widths Faz 1 set, and the Faz 2 reference list
-    // at the narrowest phone the panel supports.
+    // Every screen at the two widths Faz 1 set, and each screen a later slice
+    // converted — the Faz 2 reference list, the six Faz 3A screens — at the
+    // narrowest phone the panel supports.
     const passes: Array<{ viewport: { width: number; height: number }; only?: string[] }> = [
       { viewport: { width: 1440, height: 900 } },
       { viewport: { width: 390, height: 844 } },
-      { viewport: { width: 320, height: 740 }, only: ['/notifications'] },
+      { viewport: { width: 320, height: 740 }, only: CONVERTED_ROUTES },
     ];
 
     for (const { viewport, only } of passes) {

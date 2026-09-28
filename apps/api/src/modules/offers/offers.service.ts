@@ -449,6 +449,18 @@ export class OffersService {
   ) {
     const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId, user);
 
+    // An offer a request cascade closed (removal or cancel) lost a race with
+    // that cascade, or is read from a stale screen: a state conflict, 409 —
+    // the same answer the loser of an acceptance/cancel race gets from the
+    // conditional writes below. Withdrawn and expired offers keep their 400.
+    if (existingOffer.status === OfferStatus.CANCELLED) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'OFFER_CLOSED',
+        message: 'Bu teklif, talep kapatıldığı için kapatıldı; işlem yapılamaz.',
+      });
+    }
     if (isCustomerUnactionable(existingOffer.status)) {
       throw new BadRequestException('This offer cannot be acted on');
     }

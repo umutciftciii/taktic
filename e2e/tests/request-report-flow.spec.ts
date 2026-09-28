@@ -55,9 +55,7 @@ const CLOSURE_NOTICE = 'Talep yayından kaldırıldı. Harcanan teklif krediniz 
 
 /** The operator's queue row for one request. */
 function queueRow(page: Page, requestId: string) {
-  return page
-    .getByTestId('report-queue-row')
-    .filter({ has: page.locator(`a[href="/requests/${requestId}"]`) });
+  return page.locator(`[data-testid="report-queue-row"][data-request-id="${requestId}"]`);
 }
 
 /**

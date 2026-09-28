@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { Badge, badgeClass } from '../components/badge';
 import { ConfirmDialog } from '../components/confirm-dialog';
 import { DataTable } from '../components/data-table';
+import { DetailHeader } from '../components/detail-header';
 import { EmptyState } from '../components/empty-state';
 import { FilterBar, FilterField } from '../components/filter-bar';
 import { InfoPopover } from '../components/info-popover';
@@ -236,6 +237,42 @@ describe('ConfirmDialog', () => {
     // Neither dialog button can submit the form on its own.
     expect(markup.match(/type="submit"/g)).toHaveLength(1);
     expect(markup).toContain('Kullanıcı bir daha giriş yapamaz.');
+  });
+
+  it('keeps its trigger closed while the screen says so (Faz 3A: a client call in flight)', () => {
+    const markup = html(
+      <form>
+        <ConfirmDialog triggerLabel="İadeyi onayla" title="?" consequence="." confirmLabel="Evet" disabled />
+      </form>,
+    );
+    const trigger = markup.match(/<button type="submit"[^>]*>İadeyi onayla<\/button>/)?.[0] ?? '';
+    expect(trigger).toContain('disabled=""');
+    expect(trigger).toContain('aria-disabled="true"');
+  });
+});
+
+describe('DetailHeader (Faz 3A)', () => {
+  it('draws the way back, the card and the strip, and nothing it was not given', () => {
+    const markup = html(
+      <DetailHeader
+        back={{ href: '/requests', label: 'Tüm talepler' }}
+        badges={<span className="badge">Onaylandı</span>}
+        meta="TL-1 · 19 Eyl"
+        title="Kombi servisi · Kadıköy, İstanbul"
+        facts={[{ label: 'Talep kalitesi', value: '82 / 100' }]}
+        factsLabel="Talep özeti"
+      />,
+    );
+    expect(markup).toContain('<a class="detail-back" href="/requests">');
+    expect(markup).toContain('<h1 class="detail-card-title">Kombi servisi · Kadıköy, İstanbul</h1>');
+    expect(markup).toContain('<dl class="summary-strip" aria-label="Talep özeti">');
+    // No actions and no subtitle were given: no empty boxes for them.
+    expect(markup).not.toContain('detail-card-actions');
+    expect(markup).not.toContain('detail-card-subtitle');
+
+    const bare = html(<DetailHeader back={{ href: '/offers', label: 'Tüm teklifler' }} title="T" facts={[]} />);
+    expect(bare).not.toContain('summary-strip');
+    expect(bare).not.toContain('detail-card-badges');
   });
 });
 

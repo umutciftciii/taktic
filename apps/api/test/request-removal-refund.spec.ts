@@ -428,8 +428,8 @@ describe('a removed request is closed on every door', () => {
       .post(`/service-requests/${req.id}/offers/${offerId}/action`)
       .set('Cookie', customerCookie)
       .send({ action: 'ACCEPT', contactDisclosureAccepted: true })
-      .expect(400);
-    expect(accept.body.message).toBe('This offer cannot be acted on');
+      .expect(409);
+    expect(accept.body.code).toBe('OFFER_CLOSED');
 
     // The provider cannot withdraw it either: it is already closed.
     const withdraw = await request(ctx.server)

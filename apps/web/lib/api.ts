@@ -389,7 +389,7 @@ export type ProviderRequestAnswer = {
 export type ExistingOfferSummary = {
   id: string;
   status: OfferStatus;
-  /** Set exactly when `status` is CANCELLED: the platform took the request down. */
+  /** Set exactly when `status` is CANCELLED: the request was taken down or cancelled. */
   cancelledAt: string | null;
   priceAmount: number;
   creditCost: number;
@@ -524,7 +524,7 @@ export type ProviderOffer = {
   acceptedAt: string | null;
   rejectedAt: string | null;
   withdrawnAt: string | null;
-  /** Set exactly when `status` is CANCELLED: the platform took the request down. */
+  /** Set exactly when `status` is CANCELLED: the request was taken down or cancelled. */
   cancelledAt: string | null;
   request: {
     id: string;

@@ -410,6 +410,10 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *                             closed by Esc and by a click outside, link tabs,
  *                             a GET filter form, and a table that must scroll
  *                             in its own box on a 320px phone
+ *   admin-requests-offers     the Faz 3A screens — URL tabs followed by the
+ *                             browser's Back and Forward, ConfirmDialog in front
+ *                             of real server actions and of the refund scan's
+ *                             client call, and six screens at 320px
  *   admin-form-components     ConfirmDialog (a native modal <dialog>, Esc,
  *                             requestSubmit with a submitter) and
  *                             StickyActionBar (beforeunload, popstate before
@@ -429,7 +433,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|stale-auth-forms|auth-session-cookie|admin-shell|admin-route-scan|admin-notifications-list|admin-form-components|admin-rbac-permissions|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|stale-auth-forms|auth-session-cookie|admin-shell|admin-route-scan|admin-notifications-list|admin-requests-offers|admin-form-components|admin-rbac-permissions|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

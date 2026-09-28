@@ -25,6 +25,7 @@ import { CustomerShell } from '../../customer-shell';
 import { IconArrowLeft, IconCheck, IconMail, IconPhone } from '../../../landing-icons';
 import { ReviewStars } from '../../../review-stars';
 import { statusPillClass } from '../../../status-pill';
+import { CancelRequestDialog } from './cancel-request-dialog';
 import { completeRequestAction } from './actions';
 import { PhoneVerificationCard } from './phone-verification-card';
 import { readTurnstileWebConfig } from '../../../../lib/turnstile';
@@ -35,10 +36,24 @@ type RequestOffersPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
+/** Open, unmatched statuses: the only ones a customer may cancel from. */
+const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<string> = new Set(['SUBMITTED', 'IN_REVIEW', 'APPROVED']);
+const CUSTOMER_LIVE_OFFER_STATUSES: ReadonlySet<string> = new Set(['SUBMITTED', 'VIEWED', 'SHORTLISTED']);
+
+const CANCEL_OUTCOME_MESSAGES: Record<string, { tone: 'success' | 'error'; text: string }> = {
+  cancelled: { tone: 'success', text: 'Talebiniz iptal edildi. Teklif veren hizmet verenlere bilgi verildi.' },
+  matched: {
+    tone: 'error',
+    text: 'Talebiniz iptal edilmedi: bir teklifi kabul ettiğiniz için talep artık sizin tarafınızdan iptal edilemez. Destek ekibimizle iletişime geçebilirsiniz.',
+  },
+  closed: { tone: 'error', text: 'Talebiniz iptal edilmedi: talep zaten kapanmış.' },
+};
+
 export default async function RequestOffersPage({ params, searchParams }: RequestOffersPageProps) {
   const { id } = await params;
   const query = (await searchParams) ?? {};
   const verificationState = typeof query.verification === 'string' ? query.verification : null;
+  const cancelOutcome = typeof query.cancel === 'string' ? query.cancel : null;
 
   const user = await getCurrentUser();
   if (!user || user.role !== 'CUSTOMER') {
@@ -93,6 +108,15 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
 
   return (
     <CustomerShell user={user} active="offers">
+      {cancelOutcome && CANCEL_OUTCOME_MESSAGES[cancelOutcome] ? (
+        <div
+          className={`cdash-notice ${CANCEL_OUTCOME_MESSAGES[cancelOutcome]!.tone === 'success' ? '' : 'cdash-notice-error'}`}
+          role="status"
+          data-testid="customer-cancel-outcome"
+        >
+          {CANCEL_OUTCOME_MESSAGES[cancelOutcome]!.text}
+        </div>
+      ) : null}
       <Link className="cdash-page-back" href="/requests/my">
         <IconArrowLeft size={14} />
         <span>Taleplerime dön</span>
@@ -160,6 +184,21 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
               state={verificationState}
               turnstile={readTurnstileWebConfig()}
             />
+          ) : null}
+
+          {/*
+            The customer may cancel their own request until an offer is
+            accepted (PR #118). Once matched there is no cancel here at all;
+            the API would refuse it with 409 anyway.
+          */}
+          {summary && CUSTOMER_CANCELLABLE_STATUSES.has(summary.status) ? (
+            <div style={{ marginTop: 16 }} data-testid="customer-cancel-area">
+              <CancelRequestDialog
+                requestId={id}
+                liveOfferCount={offers.filter((offer) => CUSTOMER_LIVE_OFFER_STATUSES.has(offer.status)).length}
+                hasEmail={Boolean(summary.customerEmail)}
+              />
+            </div>
           ) : null}
 
           {summary?.status === 'MATCHED' ? (

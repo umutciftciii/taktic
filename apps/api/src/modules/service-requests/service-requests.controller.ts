@@ -5,10 +5,11 @@ import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { PermissionsGuard } from '../auth/permissions.guard';
-import { RequiresPermission } from '../auth/permissions.decorator';
+import { RequiresPermission, RequiresPermissionFromStaff } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto';
 import { getDraftTokenFromRequest } from '../request-drafts/request-draft.cookie';
+import { CancelServiceRequestDto, WithholdWinnerRefundCancelDto } from './dto/cancel-service-request.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { ServiceRequestThrottlerGuard } from './service-request.throttler';
@@ -134,11 +135,44 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.completeServiceRequest(id, user);
   }
 
+  /**
+   * The owning customer (until an offer is accepted), a SUPER_ADMIN, or an
+   * operator holding REQUESTS_CANCEL. Always gives the winning offer's credit
+   * back; there is no switch for that in this body.
+   */
   @Post(':id/cancel')
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles(UserRole.CUSTOMER, UserRole.SUPER_ADMIN)
-  cancelServiceRequest(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.serviceRequestsService.cancelServiceRequest(id, user);
+  @UseGuards(AuthGuard, RolesGuard, PermissionsGuard)
+  @Roles(UserRole.CUSTOMER, UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @RequiresPermissionFromStaff(AdminPermission.REQUESTS_CANCEL)
+  cancelServiceRequest(
+    @Param('id') id: string,
+    @Body() dto: CancelServiceRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.serviceRequestsService.cancelServiceRequest(id, user, {
+      expectedMatchedOfferId: dto.expectedMatchedOfferId,
+      winnerRefund: 'REFUND',
+    });
+  }
+
+  /**
+   * Cancels a matched request and keeps the winning offer's credit spent.
+   * Staff only, needs both permissions, and a reason the audit keeps. Every
+   * losing offer is still closed and refunded.
+   */
+  @Post(':id/cancel/withhold-winner-refund')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.REQUESTS_CANCEL_WITHOUT_REFUND, AdminPermission.REQUESTS_CANCEL)
+  cancelWithholdingWinnerRefund(
+    @Param('id') id: string,
+    @Body() dto: WithholdWinnerRefundCancelDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.serviceRequestsService.cancelServiceRequest(id, user, {
+      expectedMatchedOfferId: dto.expectedMatchedOfferId,
+      winnerRefund: 'WITHHOLD',
+      withholdReason: dto.reason,
+    });
   }
 
   @Post(':id/recalculate-quality')

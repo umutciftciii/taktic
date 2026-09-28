@@ -10,6 +10,7 @@ import { NotificationPort } from './notification.port';
 import { RequestExpiryOutbox } from './request-expiry-outbox.service';
 import { RequestPublishOutbox } from './request-publish-outbox.service';
 import { PackageRefundNotificationOutbox } from './package-refund-notification-outbox.service';
+import { RequestCancellationOutbox } from './request-cancellation-outbox.service';
 import { ReviewInvitationOutbox } from './review-invitation-outbox.service';
 import { ShowcaseLifecycleOutbox } from './showcase-lifecycle-outbox.service';
 import { isNotificationOutboxEnabled } from './notification-outbox';
@@ -74,6 +75,7 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     // CMP-006 PR-B: the package refund status notices, enqueued inside each
     // refund transition, swept by the same lifecycle tick.
     PackageRefundNotificationOutbox,
+    RequestCancellationOutbox,
   ],
   exports: [
     NotificationPort,
@@ -86,6 +88,7 @@ const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : Consol
     RequestPublishOutbox,
     ReviewInvitationOutbox,
     PackageRefundNotificationOutbox,
+    RequestCancellationOutbox,
   ],
 })
 export class NotificationsModule {}

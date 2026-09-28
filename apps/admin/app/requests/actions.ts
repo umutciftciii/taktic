@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { ApiError, apiFetch, ServiceRequest, ServiceRequestStatus } from '../../lib/api';
+import { ApiError, apiFetch, readConflict, ServiceRequest, ServiceRequestStatus } from '../../lib/api';
+import { requestModerationErrorKey, type RequestStatusErrorKey } from '../../lib/status-conflicts';
 
 export async function updateRequestStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
@@ -18,18 +19,15 @@ export async function updateRequestStatusAction(formData: FormData) {
       }),
     });
   } catch (error) {
-    // Refusing to approve a request whose phone is not verified, or to reject
-    // one that is already matched or closed, is a rule the moderator has to
-    // act on, not a crash. It lands back on the request with an explanation
-    // instead of the generic error boundary — the request was not modified.
-    // Only these two codes are handled; anything else still surfaces as an
-    // error.
-    const code = conflictCode(error);
-    if (code === 'PHONE_NOT_VERIFIED') {
-      redirect(`/requests/${id}?statusError=phoneNotVerified`);
-    }
-    if (code === 'REQUEST_NOT_REMOVABLE') {
-      redirect(`/requests/${id}?statusError=notRemovable`);
+    // Refusing to approve a request whose phone is not verified, to reject one
+    // that is already matched or closed, or to move one that has left the
+    // moderation queue (PR #119/#120) is a rule the moderator has to act on,
+    // not a crash. It lands back on the request with an explanation instead
+    // of the generic error boundary — the request was not modified. Only the
+    // coded refusals are handled; anything else still surfaces as an error.
+    const key = requestModerationErrorKey(conflictCode(error));
+    if (key) {
+      redirect(statusErrorHref(id, key));
     }
 
     throw error;
@@ -41,16 +39,12 @@ export async function updateRequestStatusAction(formData: FormData) {
 
 /** The machine-readable code from a 409, when the API sent one. */
 function conflictCode(error: unknown): string | null {
-  if (!(error instanceof ApiError) || error.status !== 409) {
-    return null;
-  }
+  return readConflict(error)?.code ?? null;
+}
 
-  try {
-    const parsed = JSON.parse(error.body) as { code?: unknown };
-    return typeof parsed.code === 'string' ? parsed.code : null;
-  } catch {
-    return null;
-  }
+/** Status refusals land on the "Durum yönetimi" card of the first tab. */
+function statusErrorHref(id: string, statusError: RequestStatusErrorKey) {
+  return `/requests/${id}?statusError=${statusError}`;
 }
 
 /**
@@ -62,19 +56,76 @@ function conflictCode(error: unknown): string | null {
 export async function completeRequestAction(formData: FormData) {
   const id = readFormString(formData, 'id');
 
-  await apiFetch<ServiceRequest>(`/service-requests/${id}/complete`, { method: 'POST' });
+  try {
+    await apiFetch<ServiceRequest>(`/service-requests/${id}/complete`, { method: 'POST' });
+  } catch (error) {
+    // The endpoint's only 409 — coded or not — is "not MATCHED any more".
+    if (readConflict(error)) {
+      redirect(statusErrorHref(id, 'notCompletable'));
+    }
+
+    throw error;
+  }
 
   revalidatePath('/requests');
   revalidatePath(`/requests/${id}`);
 }
 
+/**
+ * The operations cancel (PR #118). `winnerRefund` is written by the cancel
+ * form's own hidden field; only the exact value `withhold` goes to the
+ * withhold endpoint — anything else, a missing field included, is the default
+ * cancel, which gives the winner's credit back. The API holds the same line:
+ * `/cancel` has no refund switch at all.
+ */
 export async function cancelRequestAction(formData: FormData) {
   const id = readFormString(formData, 'id');
+  const expectedMatchedOfferId = readFormString(formData, 'expectedMatchedOfferId');
+  const withhold = readFormString(formData, 'winnerRefund') === 'withhold';
+  const withholdReason = readOptionalFormString(formData, 'withholdReason');
 
-  await apiFetch<ServiceRequest>(`/service-requests/${id}/cancel`, { method: 'POST' });
+  if (withhold && (!withholdReason || withholdReason.length < 10)) {
+    redirect(statusErrorHref(id, 'withholdReasonRequired'));
+  }
+
+  try {
+    if (withhold) {
+      await apiFetch<ServiceRequest>(`/service-requests/${id}/cancel/withhold-winner-refund`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: withholdReason, expectedMatchedOfferId }),
+      });
+    } else {
+      await apiFetch<ServiceRequest>(`/service-requests/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ expectedMatchedOfferId }),
+      });
+    }
+  } catch (error) {
+    const conflict = readConflict(error);
+    if (conflict) {
+      // The request moved after the page was drawn (a match appeared or ended),
+      // or it closed. Nothing was written either way.
+      redirect(statusErrorHref(id, conflict.code === 'REQUEST_CANCEL_STATE_CHANGED' ? 'cancelStateChanged' : 'notCancellable'));
+    }
+    if (isBadRequestCode(error, 'CANCEL_WITHHOLD_REASON_REQUIRED')) {
+      redirect(statusErrorHref(id, 'withholdReasonRequired'));
+    }
+
+    throw error;
+  }
 
   revalidatePath('/requests');
   revalidatePath(`/requests/${id}`);
+  redirect(`/requests/${id}?cancelled=1`);
+}
+
+function isBadRequestCode(error: unknown, code: string): boolean {
+  if (!(error instanceof ApiError) || error.status !== 400) return false;
+  try {
+    return (JSON.parse(error.body) as { code?: unknown }).code === code;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -98,7 +149,7 @@ export async function resolveReportsAction(formData: FormData) {
   // on the generic error page. The browser's `required` normally catches this
   // first; this is the guard for a submission that bypassed it.
   if (resolution === 'REQUEST_REMOVED' && !removalReason) {
-    redirect(`/requests/${id}?reportError=reasonRequired`);
+    redirect(reportErrorHref(id, 'reasonRequired'));
   }
 
   try {
@@ -113,10 +164,10 @@ export async function resolveReportsAction(formData: FormData) {
   } catch (error) {
     const code = conflictCode(error);
     if (code === 'REQUEST_NOT_REMOVABLE') {
-      redirect(`/requests/${id}?reportError=notRemovable`);
+      redirect(reportErrorHref(id, 'notRemovable'));
     }
     if (code === 'NO_OPEN_REPORTS') {
-      redirect(`/requests/${id}?reportError=noOpen`);
+      redirect(reportErrorHref(id, 'noOpen'));
     }
 
     throw error;
@@ -146,10 +197,13 @@ export async function reopenRequestAction(formData: FormData) {
   } catch (error) {
     const code = conflictCode(error);
     if (code === 'PHONE_NOT_VERIFIED') {
-      redirect(`/requests/${id}?statusError=phoneNotVerified`);
+      redirect(reportErrorHref(id, 'phoneNotVerified'));
     }
-    if (code === 'REQUEST_NOT_REOPENABLE') {
-      redirect(`/requests/${id}?reportError=notReopenable`);
+    // REQUEST_STATUS_TRANSITION_NOT_ALLOWED: the request stopped being a
+    // removed, unmatched REJECTED row between the check and the write — the
+    // same answer as "not reopenable".
+    if (code === 'REQUEST_NOT_REOPENABLE' || code === 'REQUEST_STATUS_TRANSITION_NOT_ALLOWED') {
+      redirect(reportErrorHref(id, 'notReopenable'));
     }
 
     throw error;
@@ -169,6 +223,14 @@ export async function recalculateRequestQualityAction(formData: FormData) {
 
   revalidatePath('/requests');
   revalidatePath(`/requests/${id}`);
+}
+
+/**
+ * Report decisions and the reopen live on the request's "Şikayet" tab, so a
+ * refusal lands the operator back there, next to the form they just used.
+ */
+function reportErrorHref(id: string, reportError: string) {
+  return `/requests/${id}?tab=sikayet&reportError=${reportError}`;
 }
 
 function readFormString(formData: FormData, key: string) {

@@ -73,7 +73,11 @@ import {
   offerNotWithdrawableException,
   WITHDRAWABLE_OFFER_STATUSES,
 } from '../offers/offer-transitions';
-import { REQUEST_REMOVED_REFUND_REASON, calculateRefundEligibility } from '../offers/refund-policy';
+import {
+  REQUEST_CANCELLED_REFUND_REASON,
+  REQUEST_REMOVED_REFUND_REASON,
+  calculateRefundEligibility,
+} from '../offers/refund-policy';
 import {
   isClaimableProviderStatus,
   isProviderClaimEnabled,
@@ -2697,20 +2701,35 @@ function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
  * What a provider is told about an offer the platform closed, and nothing
  * about why the request went.
  *
- * `CANCELLED` has one writer — `ServiceRequestsService.rejectRequestInTransaction`
- * — so a cancelled offer always means "the request was taken off the market".
- * Whether the credit came back is read from the refund reason the same
- * cascade wrote, never inferred: a period-package or vitrin-lead offer closes
- * with no ledger row and must not be told one exists.
+ * `CANCELLED` has two writers: `rejectRequestInTransaction` (the request was
+ * taken off the market) and `cancelServiceRequest` (the request was
+ * cancelled). Which one it was is read from what they wrote — the refund
+ * reason each cascade stamps, the acceptance the offer carries, or the
+ * request's own status when the caller loaded it — never inferred. Whether the
+ * credit came back is likewise read from the refund reason: a period-package or
+ * vitrin-lead offer closes with no ledger row and must not be told one exists,
+ * and an accepted offer whose refund an operator withheld is told so.
  */
 function closureNoticeFor(offer: {
   status: OfferStatus;
   creditRefundReason?: string | null;
+  acceptedAt?: Date | string | null;
+  request?: { status?: ServiceRequestStatus } | null;
 }): string | null {
   if (offer.status !== OfferStatus.CANCELLED) return null;
-  return offer.creditRefundReason === REQUEST_REMOVED_REFUND_REASON
-    ? 'Talep yayından kaldırıldı. Harcanan teklif krediniz iade edildi.'
-    : 'Talep yayından kaldırıldı.';
+  if (offer.creditRefundReason === REQUEST_CANCELLED_REFUND_REASON) {
+    return 'Talep iptal edildi. Harcanan teklif krediniz iade edildi.';
+  }
+  if (offer.creditRefundReason === REQUEST_REMOVED_REFUND_REASON) {
+    return 'Talep yayından kaldırıldı. Harcanan teklif krediniz iade edildi.';
+  }
+  // Only a cancel closes an accepted offer; a removal never meets one.
+  if (offer.acceptedAt) {
+    return offer.creditRefundReason
+      ? 'Talep iptal edildi.'
+      : 'Talep iptal edildi. Bu teklif için harcanan kredi iade edilmedi.';
+  }
+  return offer.request?.status === ServiceRequestStatus.CANCELLED ? 'Talep iptal edildi.' : 'Talep yayından kaldırıldı.';
 }
 
 type RefundPolicyOfferShape = {

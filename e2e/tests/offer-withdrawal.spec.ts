@@ -35,6 +35,11 @@ const STARTING_CREDITS = 10;
 
 test.describe('offer withdrawal', () => {
   test('the provider withdraws, the customer stops seeing a live offer', async ({ browser }) => {
+    // "No refund anywhere" is measured from here: the suite is serial, so
+    // nothing but this test writes to the ledger until it ends, and a refund
+    // an earlier spec made on purpose (admin-requests-offers) is not this
+    // flow's.
+    const refundsBefore = await countRefundTransactions();
     const location = uniqueLocation();
     const category = await createCategory(CATEGORY_COST);
     const customerAccount = await createCustomer();
@@ -158,7 +163,7 @@ test.describe('offer withdrawal', () => {
       });
       expect(afterMatch.status).toBe('WITHDRAWN');
       expect(afterMatch.rejectionReason).toBeNull();
-      expect(await countRefundTransactions()).toBe(0);
+      expect(await countRefundTransactions()).toBe(refundsBefore);
     } finally {
       await Promise.all([customer.close(), admin.close(), leaving.close(), staying.close()]);
     }
@@ -217,9 +222,13 @@ test.describe('an admin decision on the customer’s behalf', () => {
 
       // The admin rejects on the customer's behalf, from the admin panel's own
       // status control — the production path an operator takes.
+      // One operation per row since ADMIN-DESIGN-001 Faz 3A, and a rejection
+      // asks first.
       await admin.gotoAdmin(`/offers/${offerId}`);
-      await admin.page.locator('select[name="status"]').selectOption('REJECTED');
-      await admin.page.getByRole('button', { name: 'Durumu Kaydet' }).click();
+      await admin.page.getByTestId('offer-reject').click();
+      const dialog = admin.page.getByRole('dialog', { name: 'Teklif müşteri adına reddedilsin mi?' });
+      await expect(dialog).toContainText('otomatik iade kapsamından çıkar');
+      await dialog.getByRole('button', { name: 'Evet, reddet' }).click();
       await expect(admin.page.getByText('Teklif durumu güncellendi.')).toBeVisible();
       await assertNoErrorScreen(admin.page);
 
