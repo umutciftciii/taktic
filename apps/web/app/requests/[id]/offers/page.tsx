@@ -196,6 +196,7 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
               <CancelRequestDialog
                 requestId={id}
                 liveOfferCount={offers.filter((offer) => CUSTOMER_LIVE_OFFER_STATUSES.has(offer.status)).length}
+                hasEmail={Boolean(summary.customerEmail)}
               />
             </div>
           ) : null}

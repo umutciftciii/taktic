@@ -1120,6 +1120,7 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       await expect(page.getByTestId('status-reject-hint')).toContainText('Eşleşmeyi sonlandıran işlem');
       await expect(page.getByTestId('status-reject-hint')).not.toContainText(OLD_CANCEL_HINT);
 
+      await expect(page.getByTestId('match-state')).toContainText('Aktif');
       const refundWinner = page.getByTestId('request-cancel-refund-winner');
       await expect(refundWinner).toBeChecked();
       await expect(refundWinner).toBeEnabled();
@@ -1130,8 +1131,8 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       const others = page.getByTestId('request-cancel-other-offers');
       await expect(others).toContainText('Kabul edilen dışında 1 açık teklif');
       // Named "rejected because another was accepted" only on the record's word.
-      await expect(others).toContainText('Başka teklif kabul edildiği için reddedilmiş 1 teklifin kredisi iade edilir');
-      await expect(others).toContainText('Tek tek reddedilmiş 1 teklif olduğu gibi kalır');
+      await expect(others).toContainText('Başka teklif kabul edildiği için reddedilmiş 1 teklifin harcanan kredisi iade edilir');
+      await expect(others).toContainText('Elle reddedilmiş 1 teklifin de harcanan kredisi iade edilir');
       await expect(others).not.toContainText('kabul anında reddedilmiş');
       await capture(page, testInfo, 'request-cancel-dialog-matched');
 
@@ -1139,6 +1140,9 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       await expect(page.getByTestId('request-status')).toHaveText('İptal Edildi');
       await expect(page.getByTestId('request-cancelled-notice')).toBeVisible();
       await expect(page.getByTestId('request-cancellation-decision')).toHaveText('Kazanan teklifin kredisi iade edildi');
+      // The historical match pointer is shown as an ended match, never a live one.
+      await expect(page.getByTestId('match-state')).toContainText('Sona erdi · talep iptal edildi');
+      await expect(page.getByTestId('match-state')).not.toContainText('Aktif');
       await assertNoErrorScreen(page);
       await capture(page, testInfo, 'request-cancellation-record', page.getByTestId('request-cancellation'));
 
@@ -1155,25 +1159,27 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       expect(await countRefundTransactions(winnerProviderId)).toBe(1);
       expect(await countRefundTransactions(straggler.id)).toBe(1);
       expect(await countRefundTransactions(loser.id)).toBe(1);
-      expect(await countRefundTransactions(declined.id)).toBe(0);
+      // K4: the offer the customer declined by hand gets its credit back too.
+      expect(await countRefundTransactions(declined.id)).toBe(1);
       const closed = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: matched.request.id } });
       expect(closed.status).toBe('CANCELLED');
       expect(closed.matchedOfferId).toBe(matched.offer.id);
-      // Notices: the customer, the winner and the two affected offers (the
-      // straggler closed and refunded, the competitor refunded) — not the offer
-      // the customer declined by hand, which the cancel left alone.
+      // Notices: the customer, the winner and the three affected offers (the
+      // straggler closed and refunded, the competitor and the hand-declined
+      // offer refunded).
       const notices = () =>
         prisma().notificationLog.findMany({
           where: { requestId: matched.request.id, template: { startsWith: 'request-cancelled' } },
           select: { template: true, dedupeKey: true },
         });
-      await expect.poll(async () => (await notices()).length).toBe(4);
+      await expect.poll(async () => (await notices()).length).toBe(5);
       const keys = (await notices()).map((row) => row.dedupeKey).sort();
       expect(keys).toEqual(
         [
           `request-cancelled-customer:${matched.request.id}`,
           `request-cancelled-offer:${liveOffer.id}`,
           `request-cancelled-offer:${lostOffer.id}`,
+          `request-cancelled-offer:${declinedOffer.id}`,
           `request-cancelled-winner:${matched.offer.id}`,
         ].sort(),
       );
@@ -1285,7 +1291,8 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       await page.getByTestId('customer-cancel-request').click();
       const dialog = page.getByTestId('customer-cancel-dialog');
       await expect(dialog).toBeVisible();
-      await expect(dialog).toContainText('Gelen 1 teklif kapatılır');
+      await expect(page.getByTestId('customer-cancel-offers')).toContainText('Açık 1 teklif kapatılır');
+      await expect(dialog).toContainText('İptal teyidi, talebinizde kayıtlı e-posta adresine gönderilir');
       await expect(dialog).not.toContainText('kredi');
       await capture(page, testInfo, 'customer-cancel-dialog');
       await dialog.getByRole('button', { name: 'Vazgeç' }).click();
@@ -1300,6 +1307,25 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       expect((await prisma().serviceRequest.findUniqueOrThrow({ where: { id: open.request.id } })).status).toBe('CANCELLED');
       expect((await prisma().offer.findUniqueOrThrow({ where: { id: open.offer.id } })).status).toBe('CANCELLED');
       expect(await countRefundTransactions(open.provider.id)).toBe(1);
+
+      // ---- a request with no offer: the dialog says so, and promises nothing --
+      const empty = await seedCustomerRequest({
+        customerId: open.customer.id,
+        categoryId: open.category.id,
+        location: open.location,
+        content: 'full',
+      });
+      await customer.gotoWeb(`/requests/${empty.id}/offers`);
+      await page.getByTestId('customer-cancel-request').click();
+      const emptyDialog = page.getByTestId('customer-cancel-dialog');
+      await expect(page.getByTestId('customer-cancel-offers')).toContainText(
+        'Bu talepte şu anda açık teklif yok; iptalden sonra da yeni teklif gelmez.',
+      );
+      await expect(emptyDialog).not.toContainText('Teklif veren olursa');
+      await capture(page, testInfo, 'customer-cancel-dialog-no-offers');
+      await emptyDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(emptyDialog).toBeHidden();
+      expect((await prisma().serviceRequest.findUniqueOrThrow({ where: { id: empty.id } })).status).toBe('APPROVED');
 
       // ---- a request that matched while the page was open: 409, explained --
       const stale = await seedScene();

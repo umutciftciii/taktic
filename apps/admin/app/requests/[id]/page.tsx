@@ -1095,12 +1095,36 @@ function MatchCard({
   canReadContactReveal: boolean;
   contactReveal: ContactRevealDetail | null;
 }) {
+  // `matchedOfferId` outlives the match on purpose: a cancel keeps it as the
+  // record of which offer was accepted (PR #118). Only MATCHED and COMPLETED
+  // are a live (or delivered) match; on any other status the card says the
+  // match has ended, so the historical pointer is never read as a current one.
+  const matchLive = request.status === 'MATCHED' || request.status === 'COMPLETED';
   return (
-    <SectionCard title="Eşleşme" subtitle="Müşterinin kabul ettiği teklif ve iletişim paylaşımı.">
+    <SectionCard
+      title="Eşleşme"
+      subtitle={
+        request.matchedOfferId && !matchLive
+          ? 'Tarihsel kayıt: bu eşleşme sona erdi. İletişim paylaşımı ve mesajlaşma kapalı.'
+          : 'Müşterinin kabul ettiği teklif ve iletişim paylaşımı.'
+      }
+    >
       {request.matchedOfferId ? (
         <dl className="kv-list">
+          <div className="kv-row" data-testid="match-state">
+            <dt>Eşleşme durumu</dt>
+            <dd>
+              {matchLive ? (
+                <span className="badge badge-good">{request.status === 'COMPLETED' ? 'Tamamlandı' : 'Aktif'}</span>
+              ) : (
+                <span className="badge badge-bad">
+                  {request.status === 'CANCELLED' ? 'Sona erdi · talep iptal edildi' : 'Sona erdi'}
+                </span>
+              )}
+            </dd>
+          </div>
           <div className="kv-row">
-            <dt>Seçilen teklif</dt>
+            <dt>Kabul edilen teklif</dt>
             <dd>
               {canReadOffers ? (
                 <Link className="cell-link" href={`/offers/${request.matchedOfferId}`}>

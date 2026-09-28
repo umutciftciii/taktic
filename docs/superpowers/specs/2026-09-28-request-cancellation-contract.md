@@ -30,21 +30,27 @@ Bu belge `POST /service-requests/:id/cancel` ve `POST /service-requests/:id/canc
 - İadesiz iptal yalnız `/cancel/withhold-winner-refund` ucundan yapılır. Bu uç `REQUESTS_CANCEL_WITHOUT_REFUND` + `REQUESTS_CANCEL` izinlerini ve en az 10 karakter gerekçe ister.
 - `/cancel` gövdesinde iade anahtarı yoktur. `forbidNonWhitelisted` nedeniyle `refundWinner` gibi bir alan 400 alır. Eksik alan hiçbir zaman "iadesiz" sayılmaz.
 
-**Kazanamayan teklifler** (`cancelLoserOfferRule`):
+**Kazanamayan teklifler (K4)** — `cancelLoserOfferRule`. Kural kabul öncesi ve eşleşmiş talepte aynıdır; kazanan için verilen karardan (iade ya da iadesiz) bağımsızdır.
 
 | Teklif durumu | Kapatılır (CANCELLED) | Kredi iade edilir |
 | --- | --- | --- |
 | SUBMITTED, VIEWED, SHORTLISTED | ✅ | ✅ |
-| REJECTED + `COMPETITOR_ACCEPTED` (yalnız eşleşmiş talepte) | ❌ (REJECTED kalır) | ✅ |
-| REJECTED, gerekçesiz (elle ret) | ❌ | ❌ |
-| WITHDRAWN, EXPIRED, CANCELLED | ❌ | ❌ |
+| REJECTED, ret gerekçesi fark etmez: `COMPETITOR_ACCEPTED`, müşterinin elle reddi ya da personelin müşteri adına reddi (otomatik iadesi engellenmiş olsa da) | ❌ (REJECTED kalır, ret kaydı korunur) | ✅ |
+| WITHDRAWN, EXPIRED | ❌ | ❌ (kendi politikaları; bu karar değiştirmez) |
+| CANCELLED (önceki bir kaskadla kapanmış) | ❌ | ❌ |
 
 - "İade edilir", tek seferlik kredi harcanmış ve henüz iade edilmemiş demektir. Dönemsel paket ya da vitrin teklifi kapanır, ledger satırı yazılmaz.
 - Çift ödeme engellenir. Bunu sağlayan üç katman: aday filtresi, `refundOfferCreditInTransaction`'ın koşullu güncellemesi ve ledger'daki teklif başına tek iade indeksi. Testlerde kapsanan durumlar: tekrar iptal, sonradan koşan otomatik iade ve otomatik iadeyle eşzamanlı yarış.
 
-## 4. Kayıtlar
+## 4. Kayıtlar (K2)
 
-- Kabul edilmiş teklif CANCELLED olur (`cancelledAt`). `acceptedAt` kabulün izi olarak kalır, `ServiceRequest.matchedOfferId` eşleşmenin izi olarak kalır.
+- Kabul edilmiş teklif CANCELLED olur (`cancelledAt`). `acceptedAt` kabulün izi olarak kalır, `ServiceRequest.matchedOfferId` ve `matchedAt` eşleşmenin izi olarak kalır.
+- **Ürün sonucu:** Kazanan hizmet veren teklifini "Kapatıldı" olarak görür, kazanılanlar sekmesinden çıkar ve iş kapsamı gizlenir. Müşteri eşleşme kartını ve iletişim bilgisini görmez. Admin "Eşleşme" kartı "Sona erdi · talep iptal edildi" rozetini gösterir. Kabul edilmiş teklif sayımlarına artık girmez; müşteri listesindeki "kabul edilen teklif" sayısı ve hizmet veren kazanma oranı buna dahildir.
+- **Tarihsel `matchedOfferId` aktif eşleşme sayılmaz:**
+  - API: iletişim paylaşımı, mesajlaşma, eşleşme bildirimi ve değerlendirme daveti durumun MATCHED ya da COMPLETED olmasını şart koşar.
+  - Müşteri web: süreç adımı ve eşleşme kartı durumdan hesaplanır.
+  - Hizmet veren: teklif durumundan hesaplanır.
+  - Admin: eşleşme kartı durumdan hesaplanır.
 - `Offer_one_accepted_per_request` yuvası boşalır. Talep terminal olduğu için yeniden eşleşme mümkün değildir.
 - İletişim paylaşımı ve mesajlaşma, talep MATCHED olmadığı için kapanır. `ContactRevealEvent` denetim kaydı olarak kalır.
 - `ServiceRequestCancellation` satırında şunlar tutulur:
@@ -57,7 +63,7 @@ Bu belge `POST /service-requests/:id/cancel` ve `POST /service-requests/:id/canc
 
   `requestId` UNIQUE'tir.
 
-## 5. Bildirimler
+## 5. Bildirimler (K5)
 
 Bildirimler iptal işleminin içinde niyet (`NotificationLog` PENDING) olarak yazılır ve commit'ten sonra gönderilir. Teslim edilemeyenleri lifecycle tick'i süpürür. Tekilleştirme `(template, dedupeKey)` ile yapılır.
 
@@ -65,7 +71,13 @@ Bildirimler iptal işleminin içinde niyet (`NotificationLog` PENDING) olarak ya
 | --- | --- | --- |
 | `request-cancelled-customer` | müşteri (`customerEmail`) | `request-cancelled-customer:<requestId>` |
 | `request-cancelled-winner` | kazanan hizmet veren | `request-cancelled-winner:<offerId>` |
-| `request-cancelled-offer` | iptalin kapattığı ya da iade ettiği diğer teklifin sahibi | `request-cancelled-offer:<offerId>` |
+| `request-cancelled-offer` | iptalin kapattığı ya da kredisini iade ettiği her diğer teklifin sahibi (elle reddedilmiş, yeni iade edilen teklif dahil) | `request-cancelled-offer:<offerId>` |
+
+**Kime gitmez:**
+- WITHDRAWN ve EXPIRED teklif sahipleri.
+- Önceden kapanmış teklif sahipleri.
+- Kredisi daha önce iade edilmiş ve iptalin hiçbir şey değiştirmediği reddedilmiş teklif sahipleri.
+- E-posta adresi olmayan müşteri.
 
 - Hizmet veren bildirimlerinde müşteri adı, e-postası ya da telefonu yer almaz.
 - Diğer hizmet verenlerden, kazanan olup olmadığından söz edilmez.
@@ -74,7 +86,7 @@ Bildirimler iptal işleminin içinde niyet (`NotificationLog` PENDING) olarak ya
 ## 6. Veri etkisi ve bilinen sınırlar
 
 - Migration `20260928160000_add_request_cancellation_contract` yalnız ekleme yapar: 2 izin değeri, 2 enum, 1 tablo. DML ve backfill yok.
-- Bu sözleşmeden önce iptal edilmiş talepler dokunulmadan kalır. Bunlarda denetim satırı yoktur ve kabul edilmiş teklifler ACCEPTED görünebilir.
+- Bu sözleşmeden önce iptal edilmiş talepler dokunulmadan kalır. Ortak yerel veritabanında (2026-09-28, salt okunur sayım) iptal edilmiş talep sayısı 0; CANCELLED talep + ACCEPTED teklif sayısı 0. Staging ve üretim sayımı bilinmiyor; deploy öncesi aynı sorgu çalıştırılmalı. Bunlarda denetim satırı yoktur ve kabul edilmiş teklifler ACCEPTED görünebilir.
   - Sayım için salt okunur sorgu:
 
     ```sql

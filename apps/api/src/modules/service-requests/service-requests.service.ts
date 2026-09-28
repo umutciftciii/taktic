@@ -18,7 +18,7 @@ import {
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { normalizePhoneNumber } from '../phone-verification/phone.util';
-import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferRejectionReason, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -291,36 +291,33 @@ export const CANCEL_CLOSED_OFFER_STATUSES: ReadonlySet<OfferStatus> = new Set([
 
 /**
  * What a cancel does to an offer that is not the accepted one — the
- * "kazanamayan" set, fixed here and pinned by request-cancellation.spec.ts.
+ * "kazanamayan" set, fixed here and pinned by request-cancellation.spec.ts
+ * (K4, PR #118). The same rule before and after an acceptance, and whatever
+ * was decided about the winner's credit.
  *
  * - SUBMITTED, VIEWED, SHORTLISTED: still in play. Closed (CANCELLED) and their
- *   spent credit refunded — before or after an acceptance alike.
- * - REJECTED with COMPETITOR_ACCEPTED, on a matched request: lost only because
- *   the acceptance this cancel ends picked someone else. Stays REJECTED (that
- *   decision happened) but the credit is refunded.
- * - REJECTED by hand (no reason): the customer or an operator decided on that
- *   offer on its own merits. Neither closed nor refunded — the same as the
- *   removal cascade, which leaves a decided offer alone.
- * - WITHDRAWN (the provider took it back), EXPIRED, CANCELLED (already closed
- *   by an earlier cascade): ended on their own terms; untouched.
+ *   spent credit refunded.
+ * - REJECTED, for any reason — by the acceptance's cascade
+ *   (COMPETITOR_ACCEPTED) or by hand (the customer, or an operator on their
+ *   behalf): the rejection stays on the record, the offer stays REJECTED, and
+ *   its spent credit is refunded. The request the credit was spent on was
+ *   called off, so no rejection "used" it.
+ * - WITHDRAWN (the provider took it back) and EXPIRED: their own policies
+ *   decide their credit; a cancel neither closes nor refunds them.
+ * - CANCELLED (already closed by an earlier cascade): untouched.
  * - ACCEPTED on an offer that is not the request's match cannot exist (one
  *   accepted per request); untouched if it ever did.
  *
  * "Refunded" always means: a one-time credit was spent and has not already
- * come back (see isRefundableOneTimeSpend).
+ * come back (see isRefundableOneTimeSpend) — through the same
+ * `refundOfferCreditInTransaction` every other refund uses, so an offer
+ * already refunded by the unviewed worker or by hand is never paid again.
  */
-export function cancelLoserOfferRule(
-  offer: { status: OfferStatus; rejectionReason: OfferRejectionReason | null },
-  context: { matched: boolean },
-): { close: boolean; refund: boolean } {
+export function cancelLoserOfferRule(offer: { status: OfferStatus }): { close: boolean; refund: boolean } {
   if (CANCEL_CLOSED_OFFER_STATUSES.has(offer.status)) {
     return { close: true, refund: true };
   }
-  if (
-    context.matched &&
-    offer.status === OfferStatus.REJECTED &&
-    offer.rejectionReason === OfferRejectionReason.COMPETITOR_ACCEPTED
-  ) {
+  if (offer.status === OfferStatus.REJECTED) {
     return { close: false, refund: true };
   }
   return { close: false, refund: false };
@@ -1401,7 +1398,6 @@ export class ServiceRequestsService {
             id: true,
             providerId: true,
             status: true,
-            rejectionReason: true,
             creditCost: true,
             entitlementSource: true,
             creditSpentTransactionId: true,
@@ -1417,7 +1413,7 @@ export class ServiceRequestsService {
           const isWinner = offer.id === acceptedOfferId;
           const rule = isWinner
             ? { close: offer.status === OfferStatus.ACCEPTED, refund: winnerRefund === 'REFUND' }
-            : cancelLoserOfferRule(offer, { matched: acceptedOfferId !== null });
+            : cancelLoserOfferRule(offer);
 
           if (rule.close) {
             const closed = await tx.offer.updateMany({

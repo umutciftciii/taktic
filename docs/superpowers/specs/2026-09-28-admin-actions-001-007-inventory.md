@@ -172,6 +172,16 @@ Bunlar ADMIN-DESIGN-001 planının §0 kurallarının devamıdır.
 
 ### ADMIN-ACTIONS-005 — Eşleşmeyi iptal et
 
+> **Durum (2026-09-28, PR #118):** Eşleşmeyi talebi kapatarak sonlandırma artık var: yetkili operasyonun "İptal et" işlemi (`REQUESTS_CANCEL`). K1–K5 kararlaştırıldı; tam kapsam `2026-09-28-request-cancellation-contract.md` belgesinde.
+>
+> **K4 kesin kapsamı:**
+> - Kazanamayan tekliflerden açık olanlar (SUBMITTED, VIEWED, SHORTLISTED) kapanır.
+> - Reddedilmiş olanlar REJECTED kalır; ret gerekçesi fark etmez, elle ret dahil.
+> - Bu tekliflerin harcanmış ve henüz iade edilmemiş tek seferlik kredisi iade edilir. Bu, kabul öncesi ve eşleşmiş talepte aynıdır ve kazanan kararından bağımsızdır.
+> - WITHDRAWN ve EXPIRED kendi politikalarında kalır.
+>
+> Bu bölümün geri kalanı, talebi kapatmadan eşleşmeyi çözüp talebi yeniden açan ayrı bir özelliktir ve hâlâ açıktır.
+
 **Bugün var olan:** Özellik olarak yok, bilinçli olarak engellenmiş (`offer-transitions.ts:79-81`). Mevcut yollar:
 
 - **Talep yaşam döngüsü iptali** (`POST /service-requests/:id/cancel`):
@@ -332,7 +342,7 @@ Bu PR'da API'ye dokunulmadı. Aşağıdakiler ekranda doğru gösterildi, ama k�
   - `updateServiceRequestStatus`'ta IN_REVIEW ve APPROVED yalnız SUBMITTED, IN_REVIEW, APPROVED'dan kabul edilir; diğerlerinden makine kodlu 409 (ör. `REQUEST_NOT_IN_MODERATION`).
   - Kontrol, transaction içindeki `current` okumasına da uygulanır; eşzamanlı kabul ile yarışmaz.
   - REJECTED'ten dönüş yalnız `POST /reopen` (REQUESTS_REOPEN) yolunda kalır.
-  - Açık karar: CANCELLED hedefi bu uçta kalsın mı? (O gün teklif ve kredi zinciri olmadan yazıyordu. PR #120 ile kaldırıldı: moderasyon ucu CANCELLED'ı 409 ile reddediyor, iptalin tek kapısı `POST /:id/cancel`. O kapının teklif, kredi ve bildirim sonuçları ADMIN-ACTIONS-005 raporunun K2–K5'i olarak açık.)
+  - Açık karar: CANCELLED hedefi bu uçta kalsın mı? (O gün teklif ve kredi zinciri olmadan yazıyordu. PR #120 ile kaldırıldı: moderasyon ucu CANCELLED'ı 409 ile reddediyor, iptalin tek kapısı `POST /:id/cancel`. O kapının teklif, kredi ve bildirim sonuçları PR #118 iptal sözleşmesiyle kararlaştırıldı.)
 - **Regresyon testleri:**
   - Her kaynak × hedef matrisi (9 × 2).
   - Telefon kapısı ve yayın kuyruğu testleri (`request-publish-outbox`, `request-phone-verification-pending`).
@@ -349,7 +359,7 @@ Sıra; risk, bağımlılık ve kişisel veri kararlarına göredir. Her satır a
 3. **ADMIN-ACTIONS-001 Süre uzat.** Migration + zamanlayıcı sorgusu. Yayın süresi kolonu, 005'in "yeniden aç" seçeneği için de temel olur.
 4. **ADMIN-ACTIONS-002 Teklifi kaldır.** Neden enum'u + müşteri okumaları. 005'in "diğer teklifler" kısmının deseni.
 5. **ADMIN-ACTIONS-004 Uyar.** Yeni model; otomatik askı kararı gerekir. 3B (hizmet veren detayı) ile aynı döneme denk getirilmesi önerilir.
-6. **ADMIN-ACTIONS-005 Eşleşmeyi iptal et.** **Ön koşul:** 001 ve 002'nin desenleri + ayrı spec + API-GUARD-OFFER-001.
+6. **ADMIN-ACTIONS-005 Eşleşmeyi çöz ve talebi yeniden aç.** Talebi kapatarak sonlandırma PR #118 ile teslim edildi (iptal sözleşmesi). Kalan kısım: talebi kapatmadan eşleşmeyi çözmek. **Ön koşul:** 001 ve 002'nin desenleri, ayrı spec.
 
 API-GUARD-OFFER-001 ve API-GUARD-REQUEST-001/002 bu sıranın dışındaydı ve PR #119/#120 ile tamamlandı.
 7. **ADMIN-ACTIONS-007 Elle talep ekle.** **Ön koşul:** kimlik ve hesap kararları (AUTH-REG, REQ-UX-010). En geniş kesişim.

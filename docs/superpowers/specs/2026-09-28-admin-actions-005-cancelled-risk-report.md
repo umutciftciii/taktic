@@ -6,7 +6,7 @@
 > - **K1:** Müşteri kabul edilene kadar iptal edebilir. Operasyonda iptal `REQUESTS_CANCEL` izniyle yapılır, eşleşmiş talep dahil.
 > - **K2:** Kabul edilmiş teklif CANCELLED olur; `acceptedAt` ve `matchedOfferId` iz olarak kalır.
 > - **K3:** Kazananın kredisi varsayılan olarak iade edilir. İadesiz iptal ayrı izin ve gerekçe ister.
-> - **K4:** Açık teklifler kapanır ve kredileri iade edilir.
+> - **K4:** Kazanamayan tekliflerden açık olanlar kapanır; reddedilmiş olanlar (elle ret dahil) REJECTED kalır. Hepsinin harcanmış ve henüz iade edilmemiş kredisi iade edilir. Kural kabul öncesi ve eşleşmiş talepte aynıdır, kazanan kararından bağımsızdır. WITHDRAWN ve EXPIRED değişmez.
 > - **K5:** Müşteriye, kazanana ve etkilenen diğer teklif sahiplerine bildirim gider.
 >
 > Bu raporun §1–§3 tabloları **tarihsel kanıttır** (PR #118 öncesi davranış).

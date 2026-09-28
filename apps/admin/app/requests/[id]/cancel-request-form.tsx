@@ -11,9 +11,9 @@ export const WITHHOLD_REASON_MIN_LENGTH = 10;
 export type CancelOfferCounts = {
   /** SUBMITTED / VIEWED / SHORTLISTED offers other than the accepted one: closed and refunded. */
   live: number;
-  /** REJECTED because another offer was accepted (COMPETITOR_ACCEPTED): refunded. */
+  /** REJECTED because another offer was accepted (COMPETITOR_ACCEPTED): stays REJECTED, refunded. */
   competitorRejected: number;
-  /** REJECTED with no such evidence (decided by hand): left as they are. */
+  /** REJECTED with no such evidence (decided by hand): stays REJECTED, refunded too (K4). */
   otherRejected: number;
   /** The accepted offer spent a one-time credit that has not come back. */
   winnerRefundable: boolean;
@@ -133,23 +133,22 @@ function CancelConsequence({
       ) : null}
       <p data-testid="request-cancel-other-offers">
         {counts === null
-          ? `Açık teklifler (gönderildi, görüntülendi, kısa listede) kapatılır ve harcanan kredileri iade edilir.${
-              matched ? ' Başka teklif kabul edildiği için reddedilmiş tekliflerin kredisi de iade edilir; elle reddedilmiş teklifler olduğu gibi kalır.' : ''
-            }`
+          ? 'Açık teklifler (gönderildi, görüntülendi, kısa listede) kapatılır ve harcanan kredileri iade edilir. Reddedilmiş tekliflerin (elle reddedilenler dahil) durumu değişmez, harcanan kredileri de iade edilir.'
           : counts.live > 0
             ? `${matched ? 'Kabul edilen dışında ' : ''}${counts.live} açık teklif (gönderildi, görüntülendi, kısa listede) kapatılır ve harcanan kredileri iade edilir.`
             : matched
               ? 'Kabul edilen dışında açık teklif yok.'
               : 'Bu talepte açık teklif yok.'}
         {counts && matched && counts.competitorRejected > 0
-          ? ` Başka teklif kabul edildiği için reddedilmiş ${counts.competitorRejected} teklifin kredisi iade edilir; durumları değişmez.`
+          ? ` Başka teklif kabul edildiği için reddedilmiş ${counts.competitorRejected} teklifin harcanan kredisi iade edilir; durumları değişmez.`
           : ''}
         {counts && counts.otherRejected > 0
-          ? ` Tek tek reddedilmiş ${counts.otherRejected} teklif olduğu gibi kalır; kredileri iade edilmez.`
+          ? ` Elle reddedilmiş ${counts.otherRejected} teklifin de harcanan kredisi iade edilir; durumları değişmez.`
           : ''}
       </p>
       <p>
-        Daha önce iade edilmiş hiçbir kredi ikinci kez iade edilmez. Müşteriye iptal teyidi, kapanan ya da iadesi yapılan
+        Geri çekilmiş ve süresi dolmuş tekliflere dokunulmaz. Daha önce iade edilmiş hiçbir kredi ikinci kez iade
+        edilmez. Müşteriye iptal teyidi, kapanan ya da iadesi yapılan
         tekliflerin sahiplerine sonuç bildirimi gider; bildirimlerde iletişim bilgisi ya da gerekçe yer almaz.
       </p>
     </>

@@ -369,18 +369,16 @@ describe('keeping the winner’s credit is an explicit, audited exception', () =
 });
 
 describe('which offers a cancel closes and refunds', () => {
-  it('pins the losing-offer rule', () => {
-    const matched = { matched: true };
-    const open = { matched: false };
+  it('pins the losing-offer rule (K4)', () => {
     for (const status of [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED]) {
-      expect(cancelLoserOfferRule({ status, rejectionReason: null }, matched)).toEqual({ close: true, refund: true });
-      expect(cancelLoserOfferRule({ status, rejectionReason: null }, open)).toEqual({ close: true, refund: true });
+      expect(cancelLoserOfferRule({ status }), status).toEqual({ close: true, refund: true });
     }
-    const competitor = { status: OfferStatus.REJECTED, rejectionReason: OfferRejectionReason.COMPETITOR_ACCEPTED };
-    expect(cancelLoserOfferRule(competitor, matched)).toEqual({ close: false, refund: true });
-    expect(cancelLoserOfferRule(competitor, open)).toEqual({ close: false, refund: false });
-    for (const status of [OfferStatus.REJECTED, OfferStatus.WITHDRAWN, OfferStatus.EXPIRED, OfferStatus.CANCELLED, OfferStatus.ACCEPTED]) {
-      expect(cancelLoserOfferRule({ status, rejectionReason: null }, matched), status).toEqual({ close: false, refund: false });
+    // Any rejection — by the acceptance's cascade or by hand — keeps its
+    // status and gets its credit back.
+    expect(cancelLoserOfferRule({ status: OfferStatus.REJECTED })).toEqual({ close: false, refund: true });
+    // Withdrawn and expired keep their own policies; closed and accepted are not losers.
+    for (const status of [OfferStatus.WITHDRAWN, OfferStatus.EXPIRED, OfferStatus.CANCELLED, OfferStatus.ACCEPTED]) {
+      expect(cancelLoserOfferRule({ status }), status).toEqual({ close: false, refund: false });
     }
   });
 
@@ -393,6 +391,7 @@ describe('which offers a cancel closes and refunds', () => {
       viewed: await addOffer(category.id, serviceRequest.id),
       shortlisted: await addOffer(category.id, serviceRequest.id),
       handRejected: await addOffer(category.id, serviceRequest.id),
+      operatorRejected: await addOffer(category.id, serviceRequest.id),
       competitor: await addOffer(category.id, serviceRequest.id),
       withdrawn: await addOffer(category.id, serviceRequest.id),
       expired: await addOffer(category.id, serviceRequest.id),
@@ -423,6 +422,14 @@ describe('which offers a cancel closes and refunds', () => {
     await set(offers.viewed.offerId, { status: OfferStatus.VIEWED, viewedAt: new Date(), rejectedAt: null, rejectionReason: null });
     await set(offers.shortlisted.offerId, { status: OfferStatus.SHORTLISTED, rejectedAt: null, rejectionReason: null });
     await set(offers.withdrawn.offerId, { status: OfferStatus.WITHDRAWN, withdrawnAt: new Date(), rejectionReason: null });
+    // Rejected by an operator on the customer's behalf: the automatic refund
+    // is blocked for it, but the cancel refunds it all the same.
+    await set(offers.operatorRejected.offerId, {
+      status: OfferStatus.REJECTED,
+      rejectionReason: null,
+      refundBlockedAt: new Date(),
+      refundBlockedReason: 'ADMIN_CUSTOMER_DECISION',
+    });
     await set(offers.expired.offerId, { status: OfferStatus.EXPIRED, rejectionReason: null });
     await set(offers.packageSpend.offerId, {
       status: OfferStatus.SUBMITTED,
@@ -450,8 +457,11 @@ describe('which offers a cancel closes and refunds', () => {
     }
     expect(await status(offers.competitor.offerId)).toBe(OfferStatus.REJECTED);
     expect(await refundCount(offers.competitor.offerId)).toBe(1);
-    expect(await status(offers.handRejected.offerId)).toBe(OfferStatus.REJECTED);
-    expect(await refundCount(offers.handRejected.offerId)).toBe(0);
+    // K4: a hand rejection keeps its status and its credit comes back.
+    for (const key of ['handRejected', 'operatorRejected'] as const) {
+      expect(await status(offers[key].offerId), key).toBe(OfferStatus.REJECTED);
+      expect(await refundCount(offers[key].offerId), key).toBe(1);
+    }
     expect(await status(offers.withdrawn.offerId)).toBe(OfferStatus.WITHDRAWN);
     expect(await refundCount(offers.withdrawn.offerId)).toBe(0);
     expect(await status(offers.expired.offerId)).toBe(OfferStatus.EXPIRED);
@@ -461,6 +471,77 @@ describe('which offers a cancel closes and refunds', () => {
     // A period-package offer closes with no ledger row.
     expect(await status(offers.packageSpend.offerId)).toBe(OfferStatus.CANCELLED);
     expect(await refundCount(offers.packageSpend.offerId)).toBe(0);
+  });
+
+  it('refunds a hand-rejected offer on an unmatched request too, and a second cancel pays nothing', async () => {
+    const { category, serviceRequest, customerCookie } = await openRequest();
+    const rejected = await addOffer(category.id, serviceRequest.id);
+    const live = await addOffer(category.id, serviceRequest.id);
+    await request(ctx.server)
+      .post(actionUrl(serviceRequest.id, rejected.offerId))
+      .set('Cookie', customerCookie)
+      .send({ action: 'REJECT' })
+      .expect(201);
+    const before = await currentCreditBalance(ctx.prisma, rejected.provider.id);
+
+    await cancel(serviceRequest.id, customerCookie).expect(201);
+
+    const stored = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: rejected.offerId } });
+    expect(stored.status).toBe(OfferStatus.REJECTED);
+    expect(await cancelRefunds(rejected.offerId)).toHaveLength(1);
+    expect(await cancelRefunds(live.offerId)).toHaveLength(1);
+    expect(await currentCreditBalance(ctx.prisma, rejected.provider.id)).toBe(before + CATEGORY_COST);
+    const audit = await ctx.prisma.serviceRequestCancellation.findUniqueOrThrow({ where: { requestId: serviceRequest.id } });
+    expect([...audit.refundedOfferIds].sort()).toEqual([rejected.offerId, live.offerId].sort());
+    expect(audit.closedOfferIds).toEqual([live.offerId]);
+
+    const after = await snapshot(serviceRequest.id);
+    await cancel(serviceRequest.id, customerCookie).expect(409);
+    await ctx.app.get(UnviewedOfferRefundService).execute({});
+    expect(await snapshot(serviceRequest.id)).toEqual(after);
+  });
+
+  it('refunds losers the same way whether the winner is refunded or withheld', async () => {
+    const operator = await staff([AdminPermission.REQUESTS_CANCEL, AdminPermission.REQUESTS_CANCEL_WITHOUT_REFUND]);
+    for (const withhold of [false, true]) {
+      const fixture = await openRequest();
+      const winner = await addOffer(fixture.category.id, fixture.serviceRequest.id);
+      const declined = await addOffer(fixture.category.id, fixture.serviceRequest.id);
+      const competitor = await addOffer(fixture.category.id, fixture.serviceRequest.id);
+      await request(ctx.server)
+        .post(actionUrl(fixture.serviceRequest.id, declined.offerId))
+        .set('Cookie', fixture.customerCookie)
+        .send({ action: 'REJECT' })
+        .expect(201);
+      await request(ctx.server)
+        .post(actionUrl(fixture.serviceRequest.id, winner.offerId))
+        .set('Cookie', fixture.customerCookie)
+        .send(ACCEPT_OFFER)
+        .expect(201);
+
+      if (withhold) {
+        await cancelWithholding(fixture.serviceRequest.id, operator.cookie, {
+          reason: 'Kazanan hizmet veren işi reddetti.',
+          expectedMatchedOfferId: winner.offerId,
+        }).expect(201);
+      } else {
+        await cancel(fixture.serviceRequest.id, operator.cookie, { expectedMatchedOfferId: winner.offerId }).expect(201);
+      }
+
+      expect(await cancelRefunds(winner.offerId), `withhold=${withhold}`).toHaveLength(withhold ? 0 : 1);
+      expect(await cancelRefunds(declined.offerId), `withhold=${withhold}`).toHaveLength(1);
+      expect(await cancelRefunds(competitor.offerId), `withhold=${withhold}`).toHaveLength(1);
+      // The newly refunded hand-rejected offer's owner is notified too.
+      const keys = (
+        await ctx.prisma.notificationLog.findMany({
+          where: { requestId: fixture.serviceRequest.id, template: 'request-cancelled-offer' },
+          select: { dedupeKey: true },
+        })
+      ).map((row) => row.dedupeKey);
+      expect(keys.sort(), `withhold=${withhold}`).toEqual(
+        [`request-cancelled-offer:${declined.offerId}`, `request-cancelled-offer:${competitor.offerId}`].sort(),
+      );
+    }
   });
 
   it('pays nothing twice: a repeat cancel, a later worker run and a race with the worker', async () => {
@@ -475,10 +556,18 @@ describe('which offers a cancel closes and refunds', () => {
     await ctx.app.get(UnviewedOfferRefundService).execute({});
     expect(await snapshot(first.serviceRequest.id)).toEqual(after);
 
-    // Race with the worker on an unviewed, eligible offer, several times over.
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    // Race with the worker on an unviewed, eligible offer, several times over —
+    // a live one on even attempts, a rejected one (rejected without being
+    // opened, so the worker also wants it) on odd ones.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const { category, serviceRequest, customerCookie } = await openRequest();
       const offer = await addOffer(category.id, serviceRequest.id);
+      if (attempt % 2 === 1) {
+        await ctx.prisma.offer.update({
+          where: { id: offer.offerId },
+          data: { status: OfferStatus.REJECTED, rejectedAt: new Date() },
+        });
+      }
       await backdateOfferSubmission(ctx.prisma, offer.offerId, 72);
       const [cancelResponse] = await Promise.all([
         cancel(serviceRequest.id, customerCookie),
@@ -525,6 +614,55 @@ describe('an acceptance and a customer cancel racing each other', () => {
       }
     }
     expect(acceptWins + cancelWins).toBe(12);
+  });
+});
+
+describe('the historical match is never read as a live one', () => {
+  it('shows the customer and both providers an ended match after an operations cancel', async () => {
+    const { serviceRequest, winner, loser, customerCookie } = await matchedRequest();
+    const winnerOwner = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: winner.provider.id },
+      select: { userId: true },
+    });
+    const loserOwner = await ctx.prisma.providerProfile.findUniqueOrThrow({
+      where: { id: loser.provider.id },
+      select: { userId: true },
+    });
+    const winnerCookie = await loginAs(ctx.prisma, winnerOwner.userId!);
+    const loserCookie = await loginAs(ctx.prisma, loserOwner.userId!);
+
+    await cancel(serviceRequest.id, await superAdminCookie()).expect(201);
+
+    // The row keeps the pointer as history…
+    expect((await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: serviceRequest.id } })).matchedOfferId).toBe(
+      winner.offerId,
+    );
+
+    // …the customer's own reads say cancelled and open no contact.
+    const mine = await request(ctx.server).get(`/service-requests/my/${serviceRequest.id}`).set('Cookie', customerCookie).expect(200);
+    expect(mine.body.status).toBe(ServiceRequestStatus.CANCELLED);
+    await request(ctx.server).get(`/service-requests/${serviceRequest.id}/matched-contact`).set('Cookie', customerCookie).expect(404);
+
+    // …the winner's offer reads closed, with no work brief, no contact and the right notice.
+    const won = await request(ctx.server)
+      .get(`/providers/${winner.provider.id}/offers/${winner.offerId}`)
+      .set('Cookie', winnerCookie)
+      .expect(200);
+    expect(won.body.status).toBe(OfferStatus.CANCELLED);
+    expect(won.body.acceptedWorkScope ?? null).toBeNull();
+    expect(won.body.closureNotice).toBe('Talep iptal edildi. Harcanan teklif krediniz iade edildi.');
+    await request(ctx.server)
+      .get(`/providers/${winner.provider.id}/offers/${winner.offerId}/matched-contact`)
+      .set('Cookie', winnerCookie)
+      .expect(404);
+
+    // …and the competitor's stays rejected, never re-labelled as anything live.
+    const lost = await request(ctx.server)
+      .get(`/providers/${loser.provider.id}/offers/${loser.offerId}`)
+      .set('Cookie', loserCookie)
+      .expect(200);
+    expect(lost.body.status).toBe(OfferStatus.REJECTED);
+    expect(lost.body.closureNotice).toBeNull();
   });
 });
 

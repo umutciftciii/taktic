@@ -10,7 +10,16 @@ import { cancelOwnRequestAction } from './actions';
  * after the report dialog's precedent: nothing is posted until the customer
  * confirms, and Esc or "Vazgeç" leaves the request as it is.
  */
-export function CancelRequestDialog({ requestId, liveOfferCount }: { requestId: string; liveOfferCount: number }) {
+export function CancelRequestDialog({
+  requestId,
+  liveOfferCount,
+  hasEmail,
+}: {
+  requestId: string;
+  liveOfferCount: number;
+  /** Whether the request carries an address the confirmation can go to. */
+  hasEmail: boolean;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
 
   return (
@@ -37,11 +46,11 @@ export function CancelRequestDialog({ requestId, liveOfferCount }: { requestId: 
             Talebiniz hizmet verenlere artık gösterilmez ve yeni teklif alamaz. İptal geri alınamaz; ihtiyacınız sürerse
             yeni bir talep oluşturabilirsiniz.
           </p>
-          <p>
+          <p data-testid="customer-cancel-offers">
             {liveOfferCount > 0
-              ? `Gelen ${liveOfferCount} teklif kapatılır; teklif veren hizmet verenlere talebin iptal edildiği bildirilir.`
-              : 'Teklif veren olursa, talebin iptal edildiği kendilerine bildirilir.'}{' '}
-            Size de iptal teyidi e-postası gönderilir.
+              ? `Açık ${liveOfferCount} teklif kapatılır; teklif veren hizmet verenlere talebin iptal edildiği bildirilir.`
+              : 'Bu talepte şu anda açık teklif yok; iptalden sonra da yeni teklif gelmez.'}{' '}
+            {hasEmail ? 'İptal teyidi, talebinizde kayıtlı e-posta adresine gönderilir.' : 'İptal sonucu bu sayfada görünür.'}
           </p>
           <div className="report-dialog-actions">
             <button type="button" className="cdash-btn cdash-btn-secondary" onClick={() => dialog.current?.close()}>
