@@ -179,6 +179,49 @@ const nonModerationStatuses = new Set<ServiceRequestStatus>([
 ]);
 
 /**
+ * The moderation targets that put a request (back) on the review/publish path,
+ * and the only states they may start from.
+ *
+ * IN_REVIEW and APPROVED are the two "keep going" answers of the moderation
+ * screen. Written over a MATCHED, COMPLETED, REJECTED, CANCELLED or EXPIRED
+ * request they would reopen something another rule closed — a matched request
+ * published again with its match still attached, a refused request back on the
+ * market without the removal being undone, an expired one given a fresh
+ * window — and over a DRAFT they would skip submission. So both targets are
+ * accepted only from the three states that are still in moderation's hands,
+ * and only while no offer has been accepted.
+ *
+ * The check is made by the write itself (see `updateServiceRequestStatus`),
+ * inside the same Serializable transaction as the fan-out booking, so a status
+ * that changes underneath the save refuses it rather than being overwritten.
+ */
+const reviewTargetStatuses = new Set<ServiceRequestStatus>([
+  ServiceRequestStatus.IN_REVIEW,
+  ServiceRequestStatus.APPROVED,
+]);
+
+const reviewSourceStatuses = [
+  ServiceRequestStatus.SUBMITTED,
+  ServiceRequestStatus.IN_REVIEW,
+  ServiceRequestStatus.APPROVED,
+] as const;
+
+/** Machine-readable code for a moderation save the request's state no longer allows. */
+export const REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE = 'REQUEST_STATUS_TRANSITION_NOT_ALLOWED';
+
+function requestTransitionNotAllowedException(
+  from: ServiceRequestStatus,
+  to: ServiceRequestStatus,
+) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE,
+    message: `${from} durumundaki talep ${to} durumuna alınamaz; yalnız yeni, incelemedeki veya yayındaki talep incelemeye alınabilir ya da onaylanabilir.`,
+  });
+}
+
+/**
  * Whether a moderation save is the one that takes a marketplace request live:
  * a move *into* APPROVED (not a re-save of it) on a request no single vitrin
  * business holds.
@@ -753,6 +796,14 @@ export class ServiceRequestsService {
     id: string,
     dto: UpdateServiceRequestStatusDto,
     user?: AuthUser | null,
+    options: {
+      /**
+       * Extra source states the caller has already justified. Only
+       * {@link reopenAfterRemoval} passes one (REJECTED, for a request a report
+       * took down); the moderation endpoint never does.
+       */
+      allowAdditionalSources?: readonly ServiceRequestStatus[];
+    } = {},
   ) {
     const existing = await this.ensureRequestExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
@@ -799,8 +850,34 @@ export class ServiceRequestsService {
         // on an already-live row must not book its fan-out a second time.
         const current = await tx.serviceRequest.findUniqueOrThrow({
           where: { id },
-          select: { status: true, directShowcaseProviderId: true },
+          select: { status: true, directShowcaseProviderId: true, matchedOfferId: true },
         });
+
+        if (reviewTargetStatuses.has(dto.status)) {
+          const allowedSources: ServiceRequestStatus[] = [
+            ...reviewSourceStatuses,
+            ...(options.allowAdditionalSources ?? []),
+          ];
+
+          if (!allowedSources.includes(current.status) || current.matchedOfferId !== null) {
+            throw requestTransitionNotAllowedException(current.status, dto.status);
+          }
+
+          // The guard, as a write: conditional on exactly the status (and the
+          // absence of a match) this transaction just read, so if anything
+          // moved the row since — an acceptance, a removal, the expiry job —
+          // the save either matches nothing here or loses the serialization
+          // check and is replayed against the new state. Either way it is
+          // refused before the fan-out below is booked.
+          const guarded = await tx.serviceRequest.updateMany({
+            where: { id, status: current.status, matchedOfferId: null },
+            data: { status: dto.status },
+          });
+
+          if (guarded.count !== 1) {
+            throw requestTransitionNotAllowedException(current.status, dto.status);
+          }
+        }
 
         const include = {
           category: {
@@ -1063,10 +1140,15 @@ export class ServiceRequestsService {
       });
     }
 
+    // REJECTED is not a source the moderation endpoint accepts for APPROVED;
+    // this path has proven, above, that the rejection was a report's removal,
+    // and the transaction still re-checks that the request is REJECTED at the
+    // moment it writes.
     return this.updateServiceRequestStatus(
       id,
       { status: ServiceRequestStatus.APPROVED, moderationNote, rejectionReason: null },
       user,
+      { allowAdditionalSources: [ServiceRequestStatus.REJECTED] },
     );
   }
 

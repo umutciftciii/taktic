@@ -306,9 +306,9 @@ describe('admin offer status — acceptance', () => {
 
     ctx.notifications.clear();
 
-    // The canonical refusal, unchanged: the request transition is the guard, so
-    // the second acceptance loses against it rather than against anything this
-    // endpoint added.
+    // The canonical refusal: the first acceptance's cascade already closed this
+    // offer, and a decided offer takes no further action (the request
+    // transition would refuse it next). Nothing this endpoint adds is involved.
     await request(ctx.server)
       .patch(statusUrl(other.offerId))
       .set('Cookie', cookie)
