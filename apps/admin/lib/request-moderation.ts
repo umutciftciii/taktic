@@ -16,10 +16,12 @@
  *   through moderation.
  * - CANCELLED, EXPIRED: closed.
  *
- * This is the screen's rule, not the API's. `PATCH /service-requests/:id/status`
- * checks no source status for IN_REVIEW or APPROVED today, so a direct call can
- * still make every one of these moves; the guard belongs in the API and is a
- * separate backend item (docs/superpowers/specs/2026-09-28-admin-actions-001-007-inventory.md §3).
+ * The API enforces the same rule since API-GUARD-REQUEST-001 (PR #119):
+ * `PATCH /service-requests/:id/status` accepts IN_REVIEW and APPROVED only
+ * from these three states with no accepted offer, and refuses anything else
+ * with 409 REQUEST_STATUS_TRANSITION_NOT_ALLOWED. This list only decides which
+ * buttons are drawn; a row that moved after the page was drawn is refused by
+ * the API and explained on the screen (lib/status-conflicts.ts).
  */
 
 export type ModerationTarget = 'IN_REVIEW' | 'APPROVED';

@@ -26,6 +26,7 @@ import {
   reviewStateBadgeClass,
   reviewStateLabel,
   ServiceRequest,
+  type ServiceRequestStatus,
   statusBadgeClass,
   statusLabel,
   urgencyLabel,
@@ -43,6 +44,7 @@ import { Timeline, type TimelineItem } from '../../../components/timeline';
 import { resolveTab } from '../../../lib/list-query';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 import { isInModeration, moderationMove } from '../../../lib/request-moderation';
+import { requestStatusErrorMessage } from '../../../lib/status-conflicts';
 import {
   cancelRequestAction,
   completeRequestAction,
@@ -784,6 +786,8 @@ function StatusCard({
   canRunLifecycle: boolean;
   canRemove: boolean;
 }) {
+  const statusErrorMessage = requestStatusErrorMessage(statusError);
+
   return (
     <SectionCard
       className="is-wide status-action-panel"
@@ -791,17 +795,9 @@ function StatusCard({
       title="Durum yönetimi"
       subtitle={`İnceleme geçişleri anında uygulanır. Reddetme için gerekçe zorunludur. Eşleşme, tamamlanma ve süre dolumu buradan yazılamaz: süre dolumunu yalnızca zamanlayıcı yazar ve onaydan ${REQUEST_OPEN_DAYS} gün sonra uygular.`}
     >
-      {statusError === 'phoneNotVerified' ? (
+      {statusErrorMessage ? (
         <div className="status-action-error" role="alert" data-testid="status-error">
-          <strong>Durum değiştirilmedi.</strong> Telefon doğrulaması zorunlu olduğu için doğrulanmamış bir talep
-          onaylanamaz. Müşteri numarasını doğruladıktan sonra tekrar deneyin; açık (yayında, incelemede, yeni) bir
-          talep reddedilebilir, iptal her durumda mümkündür.
-        </div>
-      ) : null}
-      {statusError === 'notRemovable' ? (
-        <div className="status-action-error" role="alert" data-testid="status-error">
-          <strong>Durum değiştirilmedi.</strong> Bu talep mevcut durumundan reddedilemez; eşleşmiş veya kapanmış
-          talep için &apos;İptal et&apos; kullanın.
+          {statusErrorMessage}
         </div>
       ) : null}
 
@@ -813,7 +809,7 @@ function StatusCard({
           <>
             Doğrulanmadı. Telefon doğrulaması zorunlu hale getirildiğinde bu talep onaylanamaz ve hizmet verenlere
             gösterilmez. Reddetme yalnız açık (yayında, incelemede, yeni) talep için mümkündür ve aktif teklifleri
-            kapatıp kredileri iade eder; iptal her durumda mümkündür.
+            kapatıp kredileri iade eder; kapanmamış bir talep iptal edilebilir.
           </>
         )}
       </p>
@@ -877,19 +873,7 @@ function StatusCard({
                 triggerLabel="İptal et"
                 triggerClassName="btn btn-destructive btn-sm status-action-btn"
                 title="Talep iptal edilsin mi?"
-                consequence={
-                  <>
-                    <p>
-                      Talep “İptal edildi” durumuna geçer ve hizmet verenlere gösterilmez. Vitrinden geldiyse
-                      işletmeyle açılan kayıt da kapanır.
-                    </p>
-                    <p>
-                      Teklifler olduğu gibi kalır: harcanan krediler iade edilmez
-                      {request.status === 'MATCHED' ? ' ve kabul edilen teklif kabul edilmiş olarak kalır' : ''}.
-                      Müşteriye ya da hizmet verenlere e-posta gönderilmez.
-                    </p>
-                  </>
-                }
+                consequence={<CancelConsequence status={request.status} />}
                 confirmLabel="Evet, iptal et"
                 testId="request-cancel"
               />
@@ -973,6 +957,48 @@ function StatusCard({
         </details>
       ) : null}
     </SectionCard>
+  );
+}
+
+/**
+ * What `POST /service-requests/:id/cancel` really does, per the ADMIN-ACTIONS-005
+ * risk report (docs/superpowers/specs/2026-09-28-admin-actions-005-cancelled-risk-report.md
+ * §1–§3): the status and the vitrin lead change, nothing else does. Offers,
+ * credits and the match are left as they are and nobody is told — K2–K5 there
+ * are open product decisions, so the dialog describes today's behaviour
+ * instead of promising a different one.
+ *
+ * The automatic refund reads no offer or request status (unviewed-offer-refund
+ * service), so an offer the customer never opened still gets its credit back
+ * when its window closes; that is the one credit movement a cancel does not
+ * stop.
+ */
+function CancelConsequence({ status }: { status: ServiceRequestStatus }) {
+  const matched = status === 'MATCHED';
+
+  return (
+    <>
+      <p>
+        Talep “İptal edildi” durumuna geçer ve hizmet verenlere gösterilmez. Vitrinden geldiyse işletmeyle açılan kayıt
+        da kapanır.
+      </p>
+      {matched ? (
+        <p>
+          Kabul edilen teklif “kabul edildi” olarak kalır ve kredisi iade edilmez. İletişim bilgileri ve mesajlaşma iki
+          taraf için de kapanır; iletişim paylaşımı kaydı denetim için saklanır.
+        </p>
+      ) : (
+        <p>
+          Açık teklifler (gönderildi, görüntülendi, kısa listede) kapatılmaz ve bu işlem kredi iade etmez. Müşterinin hiç
+          görmediği teklifler, otomatik iade kapsamındaysa süresi dolunca yine iade edilir; görülmüş tekliflerin kredisi
+          iade edilmez. Açık teklifleri kapatıp kredilerini iade eden işlem “Talebi reddet”tir.
+        </p>
+      )}
+      <p>
+        Müşteriye ya da hizmet verenlere{matched ? ', kabul edilen teklifin sahibi dahil,' : ''} e-posta veya bildirim
+        gönderilmez. İptal geri alınamaz.
+      </p>
+    </>
   );
 }
 

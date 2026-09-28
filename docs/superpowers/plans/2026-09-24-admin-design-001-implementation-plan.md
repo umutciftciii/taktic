@@ -238,10 +238,15 @@ Karşılaştırma, PR #118'in 1440px Chromium görüntüleriyle yapıldı. "Uygu
 | `13-teklif-detayi-neler-oldu` | Zaman çizelgesi | Olmamış adımlar "Henüz olmayanlar" satırında |
 | `30-iade-kontrolu` | Başlık + ⓘ + süre notu; sayı kartları; "Tarama sonucu" + "Onaylamadan hiçbir kredi hareket etmez"; "Yeniden tara"; "N teklifin iadesini onayla" (onaylı) | **D:** "Taranan teklif" ve "Son tarama" yok (API vermiyor; son çalışma yalnız süreç belleğinde); yerine "Atlanan" ve "Yeni tekliflerin iade süresi". Tablo ham id'lerle, izin varsa bağlantılı (D: işletme/talep adı yok). Limit alanı ve 7 atlanma nedeni korunuyor |
 
-İnceleme düzeltmeleri (PR #118, 2026-09-28). Üçü de yalnız arayüz koruması; API kuralları ayrı işlerdir (envanter §3.1: API-GUARD-OFFER-001, API-GUARD-REQUEST-001):
+İnceleme düzeltmeleri (PR #118, 2026-09-28). Üçü de arayüz koruması; aynı kurallar artık API'de de var (PR #119 API-GUARD-OFFER-001 + API-GUARD-REQUEST-001, PR #120 API-GUARD-REQUEST-002):
 - `10`: kabul edilmiş teklifte "Reddet" ve "Kısa listeye al" sunulmaz; ekran nedenini yazar.
 - `04`: "İncelemeye al / Onayla" yalnız SUBMITTED, IN_REVIEW ve APPROVED taleplerde sunulur.
 - `11`: "diğer teklifler" mevcut teklifi içermez; toplam ayrıca "toplam" diye etiketlenir.
+
+main@4e1d1c98 entegrasyonu (PR #118, 2026-09-28):
+- **409 eşleme.** Durum yazımlarının 409'ları işlem bağlamında açıklanır, genel hata sınırına düşmez (`apps/admin/lib/status-conflicts.ts`). Talep: `REQUEST_STATUS_TRANSITION_NOT_ALLOWED`, `REQUEST_STATUS_NOT_MODERATION_TARGET`, `PHONE_NOT_VERIFIED`, `REQUEST_NOT_REMOVABLE` ve `/cancel`, `/complete` uçlarının kodsuz 409'u → "Durum yönetimi" kartındaki bant (`?statusError=`). Geri açma yolunda `REQUEST_STATUS_TRANSITION_NOT_ALLOWED` → Şikayet sekmesindeki "geri açılamaz" bandı. Teklif: `OFFER_ACTION_NOT_ALLOWED`, `CONTACT_DISCLOSURE_REQUIRED` ve diğer 409'lar → işlem listesinin üstündeki bant. Tasarımda karşılığı yok; mevcut `status-action-error` bandı kullanıldı.
+- **`10`:** REJECTED teklifte de durum işlemi sunulmaz (API 409 verir); ekran nedenini yazar.
+- **`04`, "İptal et" diyaloğu:** metin ADMIN-ACTIONS-005 risk raporu §1–§3'e göre düzeltildi. Açık teklifler kapanmaz, kredi iadesi yapılmaz; görülmemiş teklifler otomatik iade kuralıyla süresi dolunca yine iade edilebilir. Eşleşmiş talepte kabul edilen teklif kalır, iletişim ve mesajlaşma kapanır, kimseye bildirim gitmez. Davranış değişmedi; K2–K5 ürün kararı olarak açık.
 
 ### 3B — Kişiler ve destek (#7, #8, #9, #10, #12, #13, #14)
 

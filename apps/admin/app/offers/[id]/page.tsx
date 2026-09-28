@@ -14,6 +14,7 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
+import { offerStatusErrorMessage } from '../../../lib/status-conflicts';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailHeader } from '../../../components/detail-header';
@@ -47,18 +48,21 @@ import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
  * (`ensureCustomerCanAccessRequest`); it refuses withdrawn, cancelled and
  * expired offers; and it accepts only on an approved, unmatched request.
  *
- * One more is the screen's own guard, stricter than the API: an ACCEPTED offer
- * is offered no shortlist and no reject. The API would take either and leave
- * the request MATCHED to an offer that is no longer accepted; the API-side
- * guard is a separate backend item, and cancelling a match is
- * ADMIN-ACTIONS-005. A
- * button the API is certain to refuse would only lead to an error screen, so
- * the screen says why instead. The API still decides every case.
+ * A decided offer is offered nothing either: since API-GUARD-OFFER-001
+ * (PR #119) the endpoint moves an offer only out of SUBMITTED, VIEWED or
+ * SHORTLISTED, and refuses an ACCEPTED or REJECTED one with 409
+ * OFFER_ACTION_NOT_ALLOWED. Cancelling a match is ADMIN-ACTIONS-005 and does
+ * not exist yet. A button the API is certain to refuse would only lead to a
+ * refusal, so the screen says why instead.
+ *
+ * The API still decides every case. When the row moved after the page was
+ * drawn, the 409 lands back here as `?statusError=` (lib/status-conflicts.ts)
+ * next to the operations, never on the error boundary.
  */
 
 type OfferDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ tab?: string; refunded?: string; statusSaved?: string }>;
+  searchParams?: Promise<{ tab?: string; refunded?: string; statusSaved?: string; statusError?: string }>;
 };
 
 type TabKey = '' | 'talep' | 'kredi' | 'gecmis';
@@ -74,6 +78,12 @@ const SIBLING_COLUMNS: DataColumn[] = [
 
 /** The statuses the offer status endpoint refuses to move an offer out of. */
 const CLOSED_OFFER_STATUSES: ReadonlySet<OfferStatus> = new Set(['WITHDRAWN', 'CANCELLED', 'EXPIRED']);
+
+/**
+ * Decided offers: open in the product's sense, but the status endpoint refuses
+ * every move out of them (409 OFFER_ACTION_NOT_ALLOWED, PR #119).
+ */
+const DECIDED_OFFER_STATUSES: ReadonlySet<OfferStatus> = new Set(['ACCEPTED', 'REJECTED']);
 
 /**
  * The operations reasons a manual refund may be filed under. Mirrors
@@ -125,6 +135,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
   const search = (await searchParams) ?? {};
   const justRefunded = search.refunded === '1';
   const justStatusSaved = search.statusSaved === '1';
+  const statusErrorText = offerStatusErrorMessage(search.statusError);
   const activeTab = resolveTab<TabKey>(search.tab, TAB_KEYS, '');
 
   const offer = await fetchOrNotFound(() => apiFetch<Offer>(`/offers/${id}`));
@@ -147,7 +158,8 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
   // comment). The permission is the route's; the rest is the API's own rule.
   const apiLetsSessionDecide = isSuperAdmin || offer.request.customer === null;
   const offerIsClosed = CLOSED_OFFER_STATUSES.has(offer.status);
-  const canOfferStatusActions = canUpdateStatus && apiLetsSessionDecide && !offerIsClosed;
+  const canOfferStatusActions =
+    canUpdateStatus && apiLetsSessionDecide && !offerIsClosed && !DECIDED_OFFER_STATUSES.has(offer.status);
   const canRefundHere = canManualRefund && !isRefunded && Boolean(offer.creditSpentTransactionId);
 
   const tabs: TabItem[] = [
@@ -283,6 +295,11 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                 </InfoPopover>
               }
             >
+              {statusErrorText ? (
+                <div className="status-action-error" role="alert" data-testid="offer-status-error">
+                  {statusErrorText}
+                </div>
+              ) : null}
               <OperationsList
                 offer={offer}
                 isSuperAdmin={isSuperAdmin}
@@ -702,13 +719,14 @@ function OperationsList({
     );
   } else if (canUpdateStatus && offerIsClosed) {
     notes.push(`Teklif “${statusLabel(offer.status)}” durumunda; durumu artık değiştirilemez.`);
-  } else if (canOfferStatusActions && isAccepted) {
-    // `PATCH /offers/:id/status` would take a shortlist or a reject on an
-    // accepted offer and leave the request MATCHED to it; until a real
-    // match cancellation exists (ADMIN-ACTIONS-005), neither is offered.
+  } else if (canUpdateStatus && isAccepted) {
+    // The API refuses any move out of ACCEPTED (OFFER_ACTION_NOT_ALLOWED);
+    // cancelling the match is ADMIN-ACTIONS-005 and does not exist yet.
     notes.push(
       'Bu teklif kabul edildi ve talep bu teklifle eşleşti. Kabul edilmiş teklifin durumu buradan değiştirilemez; eşleşmeyi iptal etmek ayrı bir işlemdir ve henüz yok.',
     );
+  } else if (canUpdateStatus && offer.status === 'REJECTED') {
+    notes.push('Bu teklif reddedildi. Reddedilmiş teklif yeniden açılamaz, kısa listeye alınamaz ve kabul edilemez.');
   } else if (canOfferStatusActions && offer.request.status !== 'APPROVED') {
     notes.push('Kabul yalnız yayındaki (onaylı ve henüz eşleşmemiş) bir talepte mümkün.');
   }

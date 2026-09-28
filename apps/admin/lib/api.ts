@@ -1955,6 +1955,18 @@ function readErrorCode(body: string): string | null {
   }
 }
 
+/**
+ * A 409 from the API, with its machine code when it sent one (`code: null`
+ * for a bare 409). Null for anything that is not a 409.
+ */
+export function readConflict(error: unknown): { code: string | null } | null {
+  if (!(error instanceof ApiError) || error.status !== 409) {
+    return null;
+  }
+
+  return { code: readErrorCode(error.body) };
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const cookieHeader = (await cookies()).toString();
   const response = await fetch(`${apiUrl}${path}`, {

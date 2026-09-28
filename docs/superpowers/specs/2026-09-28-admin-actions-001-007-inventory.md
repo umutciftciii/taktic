@@ -180,7 +180,7 @@ Bunlar ADMIN-DESIGN-001 planının §0 kurallarının devamıdır.
   - Talep CANCELLED olur ve yeniden teklife **açılmaz**.
 - **İstenmeyen yol:** `PATCH /offers/:id/status` ACCEPTED bir teklifi REJECTED ya da SHORTLISTED yapabilir.
   - Talep MATCHED kalır ve `matchedOfferId` artık kabul edilmemiş teklifi gösterir.
-  - Faz 3A ekranı bu iki işlemi ACCEPTED teklifte artık sunmuyor (PR #118 inceleme düzeltmesi). API hâlâ kabul ediyor; koruyucu kural ayrı backend işidir (§3.1, API-GUARD-OFFER-001). Bkz. §3 F22.
+  - Faz 3A ekranı bu iki işlemi ACCEPTED teklifte sunmuyor (PR #118 inceleme düzeltmesi). API de artık reddediyor: 409 `OFFER_ACTION_NOT_ALLOWED` (API-GUARD-OFFER-001, PR #119). Bkz. §3 F22.
 - **İletişim paylaşımı:** `ContactRevealEvent` talep başına tektir (unique) ve kabul işleminin içinde yazılır. Açılmış iletişim bilgisi teknik olarak "geri kapatılamaz", çünkü iki taraf zaten gördü.
 
 **Gereken izin:** yeni `MATCHES_CANCEL`. Yıkıcı ve geri alınamaz olduğu için rol tasarımında yalnız kıdemli personele verilmesi önerilir.
@@ -281,15 +281,17 @@ Bu PR'da API'ye dokunulmadı. Aşağıdakiler ekranda doğru gösterildi, ama k�
 | # | Bulgu | Faz 3A'da ne yapıldı | Bağlandığı iş |
 | --- | --- | --- | --- |
 | F21 | `PATCH /offers/:id/status` iznin yanında `ensureCustomerCanAccessRequest` uygular (`offers.service.ts:794-810`). ADMIN rolündeki personel `OFFERS_STATUS` taşısa bile müşteri hesabına bağlı talepte 403 alır; bugün yeni taleplerin hepsi müşteri hesabına bağlanıyor | Durum işlemleri yalnız API'nin kabul edeceği yerde render edilir; yoksa ekran nedenini yazar | Ayrı karar: izin tek başına yetsin mi? (F5/F6 benzeri) |
-| F22 | Reddet / kısa listeye al, ACCEPTED teklifte de çalışır; talep MATCHED kalır ve `matchedOfferId` kabul edilmemiş teklifi gösterir. Eşzamanlı kabul + reddet de aynı sonucu üretir (§3.1) | Ekran ACCEPTED teklifte iki işlemi **sunmuyor**; nedenini yazıyor. API davranışı değişmedi | API-GUARD-OFFER-001 (ayrı backend işi). ADMIN-ACTIONS-005'ten bağımsız |
-| F23 | Admin kabulü iletişim paylaşımı onayını taşıyamaz. Paylaşım açıkken, talepte onay kayıtlı değilse kabul `CONTACT_DISCLOSURE_REQUIRED` ile reddedilir ve ekran genel hata sınırına düşer | Kabul diyaloğu bu koşulu yazar | Ayrı düzeltme: hata eşleme veya admin kabul kuralı |
-| F24 | `PATCH /service-requests/:id/status` IN_REVIEW ve APPROVED hedefinde kaynak durumu denetlemiyor; CANCELLED'ı teklif ve kredi zinciri olmadan yazıyor. Eşleşmiş, tamamlanmış, reddedilmiş, iptal edilmiş, süresi dolmuş ya da taslak talep yeniden onaylanabiliyor (§3.1) | Ekran "İncelemeye al / Onayla"yı yalnız SUBMITTED, IN_REVIEW, APPROVED'da sunuyor (`apps/admin/lib/request-moderation.ts`); dışında nedenini yazıyor. API davranışı değişmedi | API-GUARD-REQUEST-001 (ayrı backend işi) |
+| F22 | Reddet / kısa listeye al, ACCEPTED teklifte de çalışır; talep MATCHED kalır ve `matchedOfferId` kabul edilmemiş teklifi gösterir. Eşzamanlı kabul + reddet de aynı sonucu üretir (§3.1) | Ekran ACCEPTED ve REJECTED teklifte hiçbir durum işlemi sunmuyor; nedenini yazıyor. Sayfa açıkken durum değişirse API'nin 409'u işlem listesinin üstünde açıklanır | **Kapandı:** API-GUARD-OFFER-001 (PR #119, 409 `OFFER_ACTION_NOT_ALLOWED`) |
+| F23 | Admin kabulü iletişim paylaşımı onayını taşıyamaz. Paylaşım açıkken, talepte onay kayıtlı değilse kabul `CONTACT_DISCLOSURE_REQUIRED` ile reddedilir ve ekran genel hata sınırına düşer | Kabul diyaloğu bu koşulu yazar; 409 artık işlem listesinin üstünde açıklanır (`?statusError=disclosureRequired`), genel hata sınırına düşmez | Hata eşleme kapandı. Açık ürün kararı: admin kabulü müşteri onayını taşıyabilsin mi |
+| F24 | `PATCH /service-requests/:id/status` IN_REVIEW ve APPROVED hedefinde kaynak durumu denetlemiyor; CANCELLED'ı teklif ve kredi zinciri olmadan yazıyor. Eşleşmiş, tamamlanmış, reddedilmiş, iptal edilmiş, süresi dolmuş ya da taslak talep yeniden onaylanabiliyor (§3.1) | Ekran "İncelemeye al / Onayla"yı yalnız SUBMITTED, IN_REVIEW, APPROVED'da sunuyor (`apps/admin/lib/request-moderation.ts`); dışında nedenini yazıyor. Sayfa açıkken durum değişirse 409 "Durum yönetimi" kartında açıklanır | **Kapandı:** API-GUARD-REQUEST-001 (PR #119, 409 `REQUEST_STATUS_TRANSITION_NOT_ALLOWED`) ve API-GUARD-REQUEST-002 (PR #120, CANCELLED/DRAFT/SUBMITTED hedefleri 409 `REQUEST_STATUS_NOT_MODERATION_TARGET`) |
 | F25 | İade taraması istemcisi API'yi tarayıcıdan, derleme anında gömülen adresle çağırıyordu. E2E'de (yerel + CI) erişilemez; 401/403'te ham gövde gösterir | Aynı uçlar ve gövdeyle admin sunucu aksiyonlarına taşındı (`app/refund-scan/actions.ts`) | Kapandı |
 | F26 | İade taraması çalıştırma sonucu tablosu hiç görünmüyordu: sonuç yazıldıktan hemen sonra önizleme yenilemesi onu siliyordu | Düzeltildi: sonuç kalır, önizleme ayrıca yenilenir | Kapandı |
 
 ---
 
 ### 3.1 Doğrudan API kanıtı ve ayrı backend işleri (PR #118 inceleme bulguları 1–2)
+
+> **Durum (2026-09-28, main@4e1d1c98):** aşağıdaki iki öneri PR #119 (API-GUARD-OFFER-001 + API-GUARD-REQUEST-001) ve PR #120 (API-GUARD-REQUEST-002) ile uygulandı. Kod adları önerilenden farklıdır: `OFFER_ACTION_NOT_ALLOWED`, `REQUEST_STATUS_TRANSITION_NOT_ALLOWED`, `REQUEST_STATUS_NOT_MODERATION_TARGET`. Admin ekranları bu kodları işlem bağlamında açıklar (`apps/admin/lib/status-conflicts.ts`). Kanıt tablosu tarihsel kayıt olarak bırakıldı.
 
 Faz 3A'daki düzeltmeler **yalnız arayüz korumasıdır**; güvenlik ya da veri bütünlüğü düzeltmesi değildir. Aynı tutarsızlık, arayüzü atlayan doğrudan API isteğiyle bugün de yaratılabiliyor.
 
@@ -347,7 +349,7 @@ Sıra; risk, bağımlılık ve kişisel veri kararlarına göredir. Her satır a
 5. **ADMIN-ACTIONS-004 Uyar.** Yeni model; otomatik askı kararı gerekir. 3B (hizmet veren detayı) ile aynı döneme denk getirilmesi önerilir.
 6. **ADMIN-ACTIONS-005 Eşleşmeyi iptal et.** **Ön koşul:** 001 ve 002'nin desenleri + ayrı spec + API-GUARD-OFFER-001.
 
-API-GUARD-OFFER-001 ve API-GUARD-REQUEST-001 bu sıranın dışındadır. Ürün kararı beklemeyen koruyucu kurallardır ve ilk fırsatta, tercihen ADMIN-ACTIONS dilimlerinden önce yapılmaları önerilir.
+API-GUARD-OFFER-001 ve API-GUARD-REQUEST-001/002 bu sıranın dışındaydı ve PR #119/#120 ile tamamlandı.
 7. **ADMIN-ACTIONS-007 Elle talep ekle.** **Ön koşul:** kimlik ve hesap kararları (AUTH-REG, REQ-UX-010). En geniş kesişim.
 
 Her dilim başlamadan önce ilgili "Açık ürün kararları" yanıtlanır. Yanıtsız karar varsa dilim başlamaz.
