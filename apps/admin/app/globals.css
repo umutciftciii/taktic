@@ -6830,3 +6830,8 @@ button:disabled {
 .providers-page .filter-field:not(.is-wide) {
   max-width: 240px;
 }
+
+.credit-operation-form .help-text.is-error {
+  color: var(--color-accent-700);
+  font-weight: 600;
+}

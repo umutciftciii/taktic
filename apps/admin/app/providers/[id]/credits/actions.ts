@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { ApiError, apiFetch, ProviderCreditTransaction } from '../../../../lib/api';
+import { creditAmountProblemMessage, parseCreditAmount } from '../../../../lib/credit-amount';
 import { rethrowNextControlFlow } from '../../../../lib/next-control-flow';
 import type { CreditOperationState, CreditOperationType } from './credit-operation-state';
 
@@ -24,10 +25,20 @@ export async function submitCreditOperationAction(
   _previous: CreditOperationState,
   formData: FormData,
 ): Promise<CreditOperationState> {
-  const providerId = readFormString(formData, 'providerId');
+  const providerId = readFormString(formData, 'providerId').trim();
   const operation: CreditOperationType =
     readFormString(formData, 'operationType') === 'DEDUCT' ? 'DEDUCT' : 'GRANT';
-  const payload = creditPayload(formData);
+  // The same reading the form's preview and confirmation used, done again
+  // here because an action can be called without the form: "1e2" or "2.5"
+  // is refused before anything reaches the API, so nothing is recorded.
+  const amount = parseCreditAmount(formData.get('amount'));
+  if (!amount.ok) {
+    return { kind: 'error', message: `İşlem yapılmadı: ${creditAmountProblemMessage(amount.problem)}`, at: Date.now() };
+  }
+  if (!providerId) {
+    return { kind: 'error', message: 'Hizmet veren bulunamadı; işlem yapılmadı.', at: Date.now() };
+  }
+  const payload = { amount: amount.value, reason: readFormString(formData, 'reason').trim() };
 
   let transaction: ProviderCreditTransaction;
   try {
@@ -45,7 +56,8 @@ export async function submitCreditOperationAction(
   return {
     kind: 'done',
     operation,
-    amount: payload.amount,
+    // What the ledger recorded, which is the validated amount that was sent.
+    amount: Math.abs(transaction.amount),
     balanceAfter: transaction.balanceAfter,
     at: Date.now(),
   };
@@ -67,19 +79,7 @@ function refusalMessage(error: unknown): string {
   return 'İşlem yapılamadı. Lütfen tekrar deneyin; kredi hareketi oluşmadı.';
 }
 
-function creditPayload(formData: FormData) {
-  return {
-    amount: readFormNumber(formData, 'amount'),
-    reason: readFormString(formData, 'reason').trim(),
-  };
-}
-
 function readFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === 'string' ? value : '';
-}
-
-function readFormNumber(formData: FormData, key: string) {
-  const value = Number(readFormString(formData, key));
-  return Number.isFinite(value) ? value : 0;
 }

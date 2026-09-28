@@ -310,6 +310,28 @@ describe('manual credit writes keep their own permissions', () => {
     expect(read.body.transactions[0].createdBy).toMatchObject({ id: admin.id });
   });
 
+  it('refuses an amount that is not a positive integer and records nothing', async () => {
+    const provider = await createProviderProfile(ctx.prisma);
+    await grantCredits(ctx.prisma, provider.id, 5);
+    const session = await sessionWith([
+      AdminPermission.FINANCE_LEDGER_READ,
+      AdminPermission.CREDITS_GRANT,
+      AdminPermission.CREDITS_DEDUCT,
+    ]);
+
+    for (const amount of [2.5, 0, -3, '1e2', '100', null]) {
+      for (const path of ['grant', 'deduct']) {
+        const response = await request(ctx.server)
+          .post(`/providers/${provider.id}/credits/${path}`)
+          .set('Cookie', session)
+          .send({ amount, reason: 'Faz 3B tutar sözleşmesi' });
+        expect(response.status, `${path} ${JSON.stringify(amount)}`).toBe(400);
+      }
+    }
+    expect(await ctx.prisma.providerCreditTransaction.count({ where: { providerId: provider.id } })).toBe(1);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(5);
+  });
+
   it('refuses both writes to a ledger reader holding neither', async () => {
     const provider = await createProviderProfile(ctx.prisma);
     const session = await sessionWith([AdminPermission.FINANCE_LEDGER_READ]);

@@ -117,10 +117,39 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await expect(page.getByRole('heading', { name: 'İşlem geçmişi' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Manuel kredi işlemi' })).toBeVisible();
 
-      // Grant: straight through, recorded under this staff account.
       const form = page.getByTestId('credit-operation-form');
-      await form.getByTestId('credit-operation-amount').fill('12');
+      const amountInput = form.getByTestId('credit-operation-amount');
+      const previewTotal = form.locator('.balance-preview-row.is-total .balance-preview-value');
+      const staffRows = () =>
+        prisma().providerCreditTransaction.count({ where: { providerId: provider.id, createdById: staffId } });
+
+      // One reading of the amount (PR #122 review): "1e2" and "2.5" are not
+      // amounts — not in the preview, not in the confirmation, not on submit.
+      await form.getByTestId('credit-operation-reason').fill('Faz 3B E2E: geçersiz tutar');
+      for (const typed of ['1e2', '2.5', '2,5']) {
+        await amountInput.fill(typed);
+        await expect(form.getByTestId('credit-operation-amount-invalid'), typed).toContainText('üslü gösterim');
+        await expect(previewTotal, typed).toHaveText('40');
+        await expect(form.getByTestId('credit-operation-grant'), typed).toBeDisabled();
+      }
+      // The server action reads the value the same way when the form's own
+      // checks are bypassed: "1e2" reaches it and is refused, nothing recorded.
+      await page.evaluate(() => {
+        const formEl = document.querySelector<HTMLFormElement>('[data-testid="credit-operation-form"]')!;
+        const input = formEl.querySelector<HTMLInputElement>('input[name="amount"]')!;
+        input.value = '1e2';
+        formEl.noValidate = true;
+        formEl.requestSubmit();
+      });
+      await expect(page.getByTestId('credit-operation-error')).toContainText('İşlem yapılmadı: Tutar yalnız rakamlardan');
+      expect(await creditBalance(provider.id)).toBe(40);
+      expect(await staffRows()).toBe(0);
+
+      // Grant: preview → recorded movement → new balance, one number throughout.
+      await amountInput.fill('12');
+      await expect(form.getByTestId('credit-operation-amount-invalid')).toHaveCount(0);
       await form.getByTestId('credit-operation-reason').fill('Faz 3B E2E: ekleme');
+      await expect(previewTotal).toHaveText('52');
       await form.getByTestId('credit-operation-grant').click();
       await expect(page.getByTestId('credit-operation-done')).toHaveText('12 kredi eklendi. Yeni bakiye 52.');
       expect(await creditBalance(provider.id)).toBe(52);
@@ -131,6 +160,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await form.getByRole('tab', { name: 'Kredi düş' }).click();
       await form.getByTestId('credit-operation-amount').fill('5');
       await form.getByTestId('credit-operation-reason').fill('Faz 3B E2E: düşme');
+      await expect(previewTotal).toHaveText('47');
       await form.getByTestId('credit-operation-deduct').click();
       const dialog = page.getByTestId('credit-operation-deduct-dialog');
       await expect(dialog).toBeVisible();
@@ -148,11 +178,13 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       const rows = await prisma().providerCreditTransaction.findMany({
         where: { providerId: provider.id, createdById: staffId },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { type: true, amount: true, reason: true },
+        select: { type: true, amount: true, balanceAfter: true, reason: true },
       });
+      // The recorded movements are the previewed and confirmed amounts, and
+      // their balances the previewed balances.
       expect(rows).toEqual([
-        { type: 'ADMIN_GRANT', amount: 12, reason: 'Faz 3B E2E: ekleme' },
-        { type: 'ADMIN_DEDUCT', amount: -5, reason: 'Faz 3B E2E: düşme' },
+        { type: 'ADMIN_GRANT', amount: 12, balanceAfter: 52, reason: 'Faz 3B E2E: ekleme' },
+        { type: 'ADMIN_DEDUCT', amount: -5, balanceAfter: 47, reason: 'Faz 3B E2E: düşme' },
       ]);
 
       // A refusal: the balance moved underneath the open screen. The server

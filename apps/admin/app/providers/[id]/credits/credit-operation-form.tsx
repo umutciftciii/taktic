@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react';
 import { ConfirmDialog } from '../../../../components/confirm-dialog';
+import { CREDIT_AMOUNT_MAX, creditAmountProblemMessage, parseCreditAmount } from '../../../../lib/credit-amount';
 import { submitCreditOperationAction } from './actions';
 import {
   CREDIT_OPERATION_IDLE,
@@ -55,14 +56,21 @@ export function CreditOperationForm({
     }
   }, [doneAt]);
 
-  const parsedAmount = Number.parseInt(amountInput, 10);
-  const hasAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
+  // The one reading of the typed amount (lib/credit-amount.ts). The preview,
+  // the confirmation and the server action all use it, so "1e2" cannot be
+  // previewed as 1 and sent as 100: it is not an amount anywhere.
+  const amount = parseCreditAmount(amountInput);
+  const hasAmount = amount.ok;
+  const parsedAmount = amount.ok ? amount.value : 0;
+  const amountProblem = !amount.ok && amount.problem !== 'empty' ? creditAmountProblemMessage(amount.problem) : null;
   const signedDelta = hasAmount ? (operationType === 'GRANT' ? parsedAmount : -parsedAmount) : 0;
   const previewBalance = currentBalance + signedDelta;
   const overdraft = operationType === 'DEDUCT' && hasAmount && parsedAmount > currentBalance;
+  // The balance lives in the same integer column as the amount.
+  const overflow = operationType === 'GRANT' && hasAmount && previewBalance > CREDIT_AMOUNT_MAX;
 
   const reasonValid = reason.trim().length >= REASON_MIN_LENGTH;
-  const submitDisabled = !hasAmount || !reasonValid || overdraft || pending;
+  const submitDisabled = !hasAmount || !reasonValid || overdraft || overflow || pending;
 
   const isDeduct = operationType === 'DEDUCT';
 
@@ -96,18 +104,30 @@ export function CreditOperationForm({
 
       <label className="form-row">
         <span>Tutar</span>
+        {/*
+          Text, not type="number": a number field accepts "1e2" and "2.5" and
+          reports its value differently per browser. The digits rule is the
+          form's own and the server's (lib/credit-amount.ts).
+        */}
         <input
           name="amount"
-          type="number"
-          min={1}
-          step={1}
+          type="text"
           inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="off"
           required
           value={amountInput}
           onChange={(event) => setAmountInput(event.target.value)}
           placeholder="Örn. 50"
+          aria-invalid={amountProblem ? true : undefined}
+          aria-describedby={amountProblem ? 'credit-operation-amount-problem' : undefined}
           data-testid="credit-operation-amount"
         />
+        {amountProblem ? (
+          <p className="help-text is-error" id="credit-operation-amount-problem" data-testid="credit-operation-amount-invalid">
+            {amountProblem}
+          </p>
+        ) : null}
       </label>
 
       <label className="form-row">
@@ -144,6 +164,9 @@ export function CreditOperationForm({
             {hasAmount ? previewBalance : currentBalance}
           </span>
         </div>
+        {overflow ? (
+          <p className="balance-preview-warning">Bu ekleme bakiyeyi kaydedilebilecek en büyük değerin üstüne çıkarır.</p>
+        ) : null}
         {overdraft ? (
           <p className="balance-preview-warning">
             Bu düşüş mevcut bakiyeyi aşıyor. İşlem sunucu tarafında reddedilir.
@@ -170,7 +193,7 @@ export function CreditOperationForm({
           consequence={
             <>
               <p>
-                {hasAmount ? parsedAmount : 0} kredi {businessName} bakiyesinden düşülür: bakiye{' '}
+                {parsedAmount} kredi {businessName} bakiyesinden düşülür: bakiye{' '}
                 {currentBalance} → {previewBalance}.
               </p>
               <p>
