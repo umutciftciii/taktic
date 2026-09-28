@@ -2,25 +2,34 @@ import {
   AdminPermission,
   CreditTransactionType,
   OfferStatus,
+  ServiceCategoryKind,
   ServiceRequestStatus,
+  ShowcaseLeadStatus,
   UserRole,
 } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { OFFER_ACTION_NOT_ALLOWED_CODE } from '../src/modules/offers/offer-transitions';
-import { REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE } from '../src/modules/service-requests/service-requests.service';
+import {
+  REQUEST_STATUS_NOT_MODERATION_TARGET_CODE,
+  REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE,
+} from '../src/modules/service-requests/service-requests.service';
 import {
   ACCEPT_OFFER,
   createAdminWithPermissions,
   createApprovedRequest,
+  createApprovedShowcaseCard,
   createCategory,
   createDiscoverableProvider,
+  createLiveShowcasePlacement,
+  createShowcasePackage,
   createTestApp,
   createUser,
   grantCredits,
   loginAs,
   offerPayload,
   resetDatabase,
+  showcaseLeadPayload,
   uniqueSuffix,
   type TestContext,
 } from './harness';
@@ -132,7 +141,7 @@ function requestStatusUrl(requestId: string) {
  * so "nothing changed" is a single equality rather than a list of spot checks.
  */
 async function sideEffectSnapshot(requestId: string) {
-  const [serviceRequest, offers, ledger, reveals, notifications] = await Promise.all([
+  const [serviceRequest, offers, ledger, reveals, notifications, showcaseLeads] = await Promise.all([
     ctx.prisma.serviceRequest.findUniqueOrThrow({
       where: { id: requestId },
       select: {
@@ -142,6 +151,7 @@ async function sideEffectSnapshot(requestId: string) {
         approvedAt: true,
         moderatedAt: true,
         moderationNote: true,
+        rejectionReason: true,
         cancelledAt: true,
       },
     }),
@@ -168,6 +178,10 @@ async function sideEffectSnapshot(requestId: string) {
       orderBy: { id: 'asc' },
       select: { id: true, template: true, status: true },
     }),
+    ctx.prisma.showcaseLead.findMany({
+      where: { requestId },
+      select: { id: true, status: true, closedAt: true, closeReason: true },
+    }),
   ]);
 
   return {
@@ -176,6 +190,7 @@ async function sideEffectSnapshot(requestId: string) {
     ledger,
     reveals,
     notifications,
+    showcaseLeads,
     sent: ctx.notifications.sent.length,
   };
 }
@@ -794,5 +809,378 @@ describe('moderation status — IN_REVIEW and APPROVED only from open states', (
         where: { requestId: serviceRequest.id, template: 'request-published' },
       }),
     ).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// API-GUARD-REQUEST-002
+// ---------------------------------------------------------------------------
+
+/**
+ * The moderation endpoint writes three targets and no others: IN_REVIEW,
+ * APPROVED and REJECTED. DRAFT, SUBMITTED and CANCELLED used to be written
+ * over any state, which opened two detours around the guards above:
+ *
+ * - REJECTED / EXPIRED → SUBMITTED → APPROVED put a closed request back on the
+ *   market through the one door (SUBMITTED) the IN_REVIEW/APPROVED guard
+ *   trusts;
+ * - MATCHED / COMPLETED → SUBMITTED or DRAFT (or CANCELLED) moved a request
+ *   with an accepted offer still attached, and from SUBMITTED the removal
+ *   cascade would then close it as if no contract existed.
+ *
+ * A request is cancelled through POST /service-requests/:id/cancel, which is
+ * left exactly as it is; a customer's draft becomes SUBMITTED by being posted,
+ * never by an operator.
+ */
+describe('moderation status — only IN_REVIEW, APPROVED and REJECTED are targets', () => {
+  async function requestIn(status: ServiceRequestStatus) {
+    const category = await createCategory(ctx.prisma, `Boya ${uniqueSuffix()}`);
+    await createDiscoverableProvider(ctx.prisma, { categoryId: category.id });
+    const created = await createApprovedRequest(ctx.prisma, { categoryId: category.id });
+
+    return ctx.prisma.serviceRequest.update({
+      where: { id: created.id },
+      data: {
+        status,
+        approvedAt: status === ServiceRequestStatus.APPROVED ? new Date() : null,
+        rejectionReason: status === ServiceRequestStatus.REJECTED ? 'Elle reddedildi' : null,
+      },
+    });
+  }
+
+  async function patchStatus(requestId: string, cookie: string, body: Record<string, unknown>) {
+    return request(ctx.server).patch(requestStatusUrl(requestId)).set('Cookie', cookie).send(body);
+  }
+
+  async function publishedCount(requestId: string) {
+    return ctx.prisma.notificationLog.count({
+      where: { requestId, template: 'request-published' },
+    });
+  }
+
+  const forbiddenTargets = [
+    ServiceRequestStatus.DRAFT,
+    ServiceRequestStatus.SUBMITTED,
+    ServiceRequestStatus.CANCELLED,
+  ];
+  const everySource = Object.values(ServiceRequestStatus);
+
+  for (const target of forbiddenTargets) {
+    it.each(everySource)(`${target} from %s is a 409 with no side effect`, async (source) => {
+      const serviceRequest = await requestIn(source);
+      const cookie = await superAdminCookie();
+      const before = await sideEffectSnapshot(serviceRequest.id);
+
+      const response = await patchStatus(serviceRequest.id, cookie, {
+        status: target,
+        moderationNote: 'deneme',
+        rejectionReason: 'deneme',
+      });
+
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+      expect(await sideEffectSnapshot(serviceRequest.id)).toEqual(before);
+    });
+  }
+
+  it('the lifecycle-only targets answer with the same code', async () => {
+    const serviceRequest = await requestIn(ServiceRequestStatus.APPROVED);
+    const cookie = await superAdminCookie();
+    const before = await sideEffectSnapshot(serviceRequest.id);
+
+    for (const status of [
+      ServiceRequestStatus.MATCHED,
+      ServiceRequestStatus.COMPLETED,
+      ServiceRequestStatus.EXPIRED,
+    ]) {
+      const response = await patchStatus(serviceRequest.id, cookie, { status });
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+    }
+
+    // Not an enum member at all is still the validator's 400.
+    await patchStatus(serviceRequest.id, cookie, { status: 'REOPENED' }).then((r) =>
+      expect(r.status).toBe(400),
+    );
+    expect(await sideEffectSnapshot(serviceRequest.id)).toEqual(before);
+  });
+
+  it('an ADMIN account with REQUESTS_STATUS meets the same refusal', async () => {
+    const serviceRequest = await requestIn(ServiceRequestStatus.REJECTED);
+    const before = await sideEffectSnapshot(serviceRequest.id);
+    const { admin } = await createAdminWithPermissions(ctx.prisma, [
+      AdminPermission.REQUESTS_STATUS,
+    ]);
+
+    const response = await patchStatus(serviceRequest.id, await loginAs(ctx.prisma, admin.id), {
+      status: ServiceRequestStatus.SUBMITTED,
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+    expect(await sideEffectSnapshot(serviceRequest.id)).toEqual(before);
+  });
+
+  it.each([ServiceRequestStatus.REJECTED, ServiceRequestStatus.EXPIRED])(
+    '%s → SUBMITTED → APPROVED no longer republishes a closed request',
+    async (closed) => {
+      const serviceRequest = await requestIn(closed);
+      const cookie = await superAdminCookie();
+      const before = await sideEffectSnapshot(serviceRequest.id);
+
+      const resubmit = await patchStatus(serviceRequest.id, cookie, {
+        status: ServiceRequestStatus.SUBMITTED,
+      });
+      expect(resubmit.status).toBe(409);
+      expect(resubmit.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+
+      // The second hop is refused on its own, too: the request never left `closed`.
+      for (const status of [ServiceRequestStatus.IN_REVIEW, ServiceRequestStatus.APPROVED]) {
+        const approve = await patchStatus(serviceRequest.id, cookie, { status });
+        expect(approve.status).toBe(409);
+        expect(approve.body.code).toBe(REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE);
+      }
+
+      expect(await sideEffectSnapshot(serviceRequest.id)).toEqual(before);
+      expect(await publishedCount(serviceRequest.id)).toBe(0);
+    },
+  );
+
+  async function matchedMarketplace() {
+    const market = await marketplace();
+    const winner = await addOffer(market.category.id, market.serviceRequest.id);
+    const loser = await addOffer(market.category.id, market.serviceRequest.id);
+
+    await request(ctx.server)
+      .post(customerActionUrl(market.serviceRequest.id, winner.offerId))
+      .set('Cookie', market.customerCookie)
+      .send(ACCEPT_OFFER)
+      .expect(201);
+
+    return { ...market, winner, loser };
+  }
+
+  it.each(['MATCHED', 'COMPLETED'] as const)(
+    'a %s request keeps its match against every moderation target',
+    async (state) => {
+      const { serviceRequest, customerCookie, winner } = await matchedMarketplace();
+      if (state === 'COMPLETED') {
+        await request(ctx.server)
+          .post(`/service-requests/${serviceRequest.id}/complete`)
+          .set('Cookie', customerCookie)
+          .expect(201);
+      }
+      ctx.notifications.clear();
+      const before = await sideEffectSnapshot(serviceRequest.id);
+      expect(before.serviceRequest.status).toBe(state);
+      expect(before.serviceRequest.matchedOfferId).toBe(winner.offerId);
+      const cookie = await superAdminCookie();
+
+      for (const status of forbiddenTargets) {
+        const response = await patchStatus(serviceRequest.id, cookie, { status });
+        expect(response.status).toBe(409);
+        expect(response.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+      }
+      for (const status of [ServiceRequestStatus.IN_REVIEW, ServiceRequestStatus.APPROVED]) {
+        const response = await patchStatus(serviceRequest.id, cookie, { status });
+        expect(response.status).toBe(409);
+        expect(response.body.code).toBe(REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE);
+      }
+      const rejected = await patchStatus(serviceRequest.id, cookie, {
+        status: ServiceRequestStatus.REJECTED,
+        rejectionReason: 'Kaldırıldı',
+      });
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.code).toBe('REQUEST_NOT_REMOVABLE');
+
+      expect(await sideEffectSnapshot(serviceRequest.id)).toEqual(before);
+    },
+  );
+
+  it('a request still carrying a match is not removable from an open state either', async () => {
+    // The row the SUBMITTED detour used to leave behind: status back in
+    // moderation's hands, accepted offer and match still attached. Written
+    // directly, because the API no longer produces it — rows written before
+    // this change may still look like this.
+    const { serviceRequest, winner } = await matchedMarketplace();
+    await ctx.prisma.serviceRequest.update({
+      where: { id: serviceRequest.id },
+      data: { status: ServiceRequestStatus.SUBMITTED },
+    });
+    ctx.notifications.clear();
+    const before = await sideEffectSnapshot(serviceRequest.id);
+    expect(before.serviceRequest.matchedOfferId).toBe(winner.offerId);
+    const cookie = await superAdminCookie();
+
+    const rejected = await patchStatus(serviceRequest.id, cookie, {
+      status: ServiceRequestStatus.REJECTED,
+      rejectionReason: 'Kaldırıldı',
+    });
+    expect(rejected.status).toBe(409);
+    expect(rejected.body.code).toBe('REQUEST_NOT_REMOVABLE');
+    for (const status of [ServiceRequestStatus.IN_REVIEW, ServiceRequestStatus.APPROVED]) {
+      const response = await patchStatus(serviceRequest.id, cookie, { status });
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe(REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE);
+    }
+
+    // The accepted offer is untouched: not cancelled, no credit given back.
+    expect(await sideEffectSnapshot(serviceRequest.id)).toEqual(before);
+    const accepted = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: winner.offerId } });
+    expect(accepted.status).toBe(OfferStatus.ACCEPTED);
+  });
+
+  it('an open request with live offers is not touched by a refused target', async () => {
+    const { serviceRequest, category } = await marketplace();
+    await addOffer(category.id, serviceRequest.id);
+    await addOffer(category.id, serviceRequest.id);
+    ctx.notifications.clear();
+    const before = await sideEffectSnapshot(serviceRequest.id);
+    const cookie = await superAdminCookie();
+
+    for (const status of forbiddenTargets) {
+      const response = await patchStatus(serviceRequest.id, cookie, { status });
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+    }
+
+    expect(await sideEffectSnapshot(serviceRequest.id)).toEqual(before);
+    expect(before.offers.every((offer) => offer.status === OfferStatus.SUBMITTED)).toBe(true);
+  });
+
+  it('REJECTED from an open request still closes its offers and gives the credits back', async () => {
+    const { serviceRequest, category } = await marketplace();
+    const one = await addOffer(category.id, serviceRequest.id);
+    const two = await addOffer(category.id, serviceRequest.id);
+
+    const response = await patchStatus(serviceRequest.id, await superAdminCookie(), {
+      status: ServiceRequestStatus.REJECTED,
+      rejectionReason: 'Uygunsuz içerik',
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe(ServiceRequestStatus.REJECTED);
+
+    const offers = await ctx.prisma.offer.findMany({
+      where: { id: { in: [one.offerId, two.offerId] } },
+    });
+    expect(offers.map((offer) => offer.status)).toEqual([
+      OfferStatus.CANCELLED,
+      OfferStatus.CANCELLED,
+    ]);
+    expect(offers.every((offer) => offer.creditRefundedTransactionId !== null)).toBe(true);
+    expect(
+      await ctx.prisma.providerCreditTransaction.count({
+        where: { type: CreditTransactionType.OFFER_REFUND },
+      }),
+    ).toBe(2);
+  });
+
+  it('a request a report took down is still reopened by its own door', async () => {
+    const category = await createCategory(ctx.prisma, `Çatı ${uniqueSuffix()}`);
+    await createDiscoverableProvider(ctx.prisma, { categoryId: category.id });
+    const serviceRequest = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      approvedAt: new Date(),
+    });
+    const reporterUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const reporter = await createDiscoverableProvider(ctx.prisma, {
+      categoryId: category.id,
+      userId: reporterUser.id,
+    });
+    await request(ctx.server)
+      .post(`/providers/${reporter.id}/requests/${serviceRequest.id}/reports`)
+      .set('Cookie', await loginAs(ctx.prisma, reporterUser.id))
+      .send({ reason: 'SPAM' })
+      .expect(201);
+    const cookie = await superAdminCookie();
+    await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/reports/resolve`)
+      .set('Cookie', cookie)
+      .send({ resolution: 'REQUEST_REMOVED', removalReason: 'SPAM' })
+      .expect(201);
+
+    // The moderation detour stays shut for it…
+    const resubmit = await patchStatus(serviceRequest.id, cookie, {
+      status: ServiceRequestStatus.SUBMITTED,
+    });
+    expect(resubmit.status).toBe(409);
+    expect(resubmit.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+
+    // …and the reopen, which proves the removal was a report's, still works.
+    const reopened = await request(ctx.server)
+      .post(`/service-requests/${serviceRequest.id}/reopen`)
+      .set('Cookie', cookie)
+      .send({})
+      .expect(201);
+    expect(reopened.body.status).toBe(ServiceRequestStatus.APPROVED);
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: serviceRequest.id },
+    });
+    expect(stored.status).toBe(ServiceRequestStatus.APPROVED);
+    expect(stored.rejectionReason).toBeNull();
+  });
+
+  it('a vitrin lead is cancelled by the lifecycle endpoint, never by moderation', async () => {
+    const category = await createCategory(ctx.prisma, `Klima ${uniqueSuffix()}`, {
+      kind: ServiceCategoryKind.LEAF,
+      offerCreditCost: 2,
+    });
+    const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const owner = await createDiscoverableProvider(ctx.prisma, {
+      userId: ownerUser.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+    const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: owner.id,
+      categoryId: category.id,
+    });
+    const pkg = await createShowcasePackage(ctx.prisma);
+    await createLiveShowcasePlacement(ctx, {
+      providerId: owner.id,
+      cardId: card.id,
+      versionId: version.id,
+      packageId: pkg.id,
+    });
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    await ctx.prisma.user.update({
+      where: { id: customer.id },
+      data: { phoneVerifiedAt: new Date() },
+    });
+    const customerCookie = await loginAs(ctx.prisma, customer.id);
+    await request(ctx.server)
+      .post(`/showcase/cards/${card.id}/leads`)
+      .set('Cookie', customerCookie)
+      .send({
+        ...showcaseLeadPayload(category.slug),
+        customerName: undefined,
+        customerPhone: undefined,
+        customerEmail: undefined,
+      })
+      .expect(201);
+    const lead = await ctx.prisma.showcaseLead.findFirstOrThrow({});
+    expect(lead.status).toBe(ShowcaseLeadStatus.OPEN);
+    const before = await sideEffectSnapshot(lead.requestId);
+    const cookie = await superAdminCookie();
+
+    const refused = await patchStatus(lead.requestId, cookie, {
+      status: ServiceRequestStatus.CANCELLED,
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.code).toBe(REQUEST_STATUS_NOT_MODERATION_TARGET_CODE);
+    expect(await sideEffectSnapshot(lead.requestId)).toEqual(before);
+
+    await request(ctx.server)
+      .post(`/service-requests/${lead.requestId}/cancel`)
+      .set('Cookie', cookie)
+      .expect(201);
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: lead.requestId },
+    });
+    expect(stored.status).toBe(ServiceRequestStatus.CANCELLED);
+    expect(stored.cancelledAt).not.toBeNull();
+    const closed = await ctx.prisma.showcaseLead.findUniqueOrThrow({ where: { id: lead.id } });
+    expect(closed.status).not.toBe(ShowcaseLeadStatus.OPEN);
+    expect(closed.closeReason).toBe('CUSTOMER_CANCELLED');
   });
 });
