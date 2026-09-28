@@ -28,6 +28,49 @@ export const CUSTOMER_UNACTIONABLE_OFFER_STATUSES = [
   OfferStatus.EXPIRED,
 ] as const;
 
+/**
+ * The only states a customer action (accept, shortlist, reject) may start from.
+ *
+ * Everything else is an outcome that has already been decided: ACCEPTED is the
+ * match the request points at, REJECTED is a closed offer and a message the
+ * provider already received, and the three unactionable states belong to
+ * others. Moving an ACCEPTED offer to REJECTED or SHORTLISTED used to leave a
+ * MATCHED request pointing at an offer that was no longer accepted; moving a
+ * REJECTED one back to SHORTLISTED or ACCEPTED reopened an offer whose provider
+ * had been told it lost.
+ *
+ * Every write on the action path carries this list in its own `where` clause,
+ * so it is the row as the database holds it at write time — not a read taken
+ * earlier — that decides. Of an acceptance and a rejection racing on one offer
+ * the first to commit wins and the other matches nothing.
+ */
+export const CUSTOMER_ACTIONABLE_OFFER_STATUSES = [
+  OfferStatus.SUBMITTED,
+  OfferStatus.VIEWED,
+  OfferStatus.SHORTLISTED,
+] as const;
+
+/** Machine-readable code for an action on an offer that has already been decided. */
+export const OFFER_ACTION_NOT_ALLOWED_CODE = 'OFFER_ACTION_NOT_ALLOWED';
+
+/**
+ * The refusal for an action on an offer that is already ACCEPTED or REJECTED.
+ *
+ * A 409, not a 400: the request is well-formed and would have been valid a
+ * moment earlier — the offer's state is what makes it impossible.
+ */
+export function offerActionNotAllowedException(status: OfferStatus) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ACTION_NOT_ALLOWED_CODE,
+    message:
+      status === OfferStatus.ACCEPTED
+        ? 'Bu teklif kabul edildi; artık reddedilemez veya kısa listeye alınamaz.'
+        : 'Bu teklif için karar verildi; bu işlem artık yapılamaz.',
+  });
+}
+
 /** Machine-readable code the web app maps onto a readable refusal. */
 export const OFFER_NOT_WITHDRAWABLE_CODE = 'OFFER_NOT_WITHDRAWABLE';
 
