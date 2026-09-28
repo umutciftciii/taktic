@@ -34,8 +34,10 @@ import { CustomerOfferActionDto } from './dto/customer-offer-action.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import {
   ADMIN_OFFER_ACTIONS,
+  CUSTOMER_ACTIONABLE_OFFER_STATUSES,
   CUSTOMER_UNACTIONABLE_OFFER_STATUSES,
   isAdminSettableOfferStatus,
+  offerActionNotAllowedException,
   offerStatusNotSettableException,
 } from './offer-transitions';
 import {
@@ -447,15 +449,27 @@ export class OffersService {
   ) {
     const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId, user);
 
-    if (
-      existingOffer.status === OfferStatus.WITHDRAWN ||
-      existingOffer.status === OfferStatus.CANCELLED ||
-      existingOffer.status === OfferStatus.EXPIRED
-    ) {
+    if (isCustomerUnactionable(existingOffer.status)) {
       throw new BadRequestException('This offer cannot be acted on');
     }
 
     const status = customerActionToStatus(dto.action);
+
+    // Rejecting an offer that is already rejected is the one repeat that
+    // answers 200: the decision the caller asked for is the one on file. It
+    // writes nothing and sends nothing — `rejectedAt`, the admin refund block
+    // and the "not selected" message all belong to the first rejection.
+    if (existingOffer.status === OfferStatus.REJECTED && status === OfferStatus.REJECTED) {
+      return this.withProviderReviewSummary(toCustomerOfferDetail(existingOffer));
+    }
+
+    // A fast answer for the common stale screen, and nothing more: the read
+    // above was taken outside any transaction. What actually refuses a
+    // decided offer is the status list every write below carries in its own
+    // `where` clause.
+    if (!isCustomerActionable(existingOffer.status)) {
+      throw offerActionNotAllowedException(existingOffer.status);
+    }
 
     // Acting on an offer implies having read it — but only when it is the
     // customer acting. A SUPER_ADMIN reaches this same method through the admin
@@ -509,13 +523,15 @@ export class OffersService {
     const now = new Date();
 
     // Conditional, because the status read above is already stale by the time
-    // this runs: the provider may have withdrawn the offer in between. The
-    // clause repeats the guard rather than trusting the read, so a withdrawal
-    // and a shortlist/reject cannot both land.
+    // this runs: the provider may have withdrawn the offer, or an acceptance
+    // may have matched the request to it, in between. The clause repeats the
+    // guard rather than trusting the read, so a withdrawal or an acceptance
+    // and a shortlist/reject cannot both land — Postgres re-evaluates it
+    // against the committed row once any competing writer lets go of it.
     const updated = await this.prisma.offer.updateMany({
       where: {
         id: offerId,
-        status: { notIn: [...CUSTOMER_UNACTIONABLE_OFFER_STATUSES] },
+        status: { in: [...CUSTOMER_ACTIONABLE_OFFER_STATUSES] },
       },
       data: {
         status,
@@ -533,6 +549,27 @@ export class OffersService {
     });
 
     if (updated.count !== 1) {
+      // Classify the refusal from the row as it is now. Nothing was written,
+      // so there is nothing to undo whichever branch applies.
+      const current = await this.prisma.offer.findUnique({
+        where: { id: offerId },
+        select: { status: true },
+      });
+
+      if (current?.status === OfferStatus.REJECTED && status === OfferStatus.REJECTED) {
+        // A concurrent rejection of the same offer got there first: the same
+        // idempotent answer as a sequential repeat, and no second message.
+        const offer = await this.prisma.offer.findUniqueOrThrow({
+          where: { id: offerId },
+          include: customerOfferInclude,
+        });
+        return this.withProviderReviewSummary(toCustomerOfferDetail(offer));
+      }
+
+      if (current?.status === OfferStatus.ACCEPTED || current?.status === OfferStatus.REJECTED) {
+        throw offerActionNotAllowedException(current.status);
+      }
+
       throw new ConflictException('This offer can no longer be acted on');
     }
 
@@ -641,12 +678,14 @@ export class OffersService {
 
         // Conditional for the same reason the request transition above is: a
         // provider may be withdrawing this very offer in a parallel Serializable
-        // transaction. Only one of the two clauses can match, so the request can
-        // never end up matched to an offer its provider had already pulled.
+        // transaction, or the customer or an admin may be rejecting it. Only
+        // one of the clauses can match, so the request can never end up
+        // matched to an offer that was pulled or rejected — the loser's
+        // transaction, request transition included, rolls back whole.
         const acceptedUpdate = await tx.offer.updateMany({
           where: {
             id: offerId,
-            status: { notIn: [...CUSTOMER_UNACTIONABLE_OFFER_STATUSES] },
+            status: { in: [...CUSTOMER_ACTIONABLE_OFFER_STATUSES] },
           },
           data: {
             status: OfferStatus.ACCEPTED,
@@ -659,6 +698,16 @@ export class OffersService {
         });
 
         if (acceptedUpdate.count !== 1) {
+          // Thrown from inside the transaction, so the request transition
+          // above is rolled back with it: no MATCHED request is left pointing
+          // at an offer that was not accepted.
+          const current = await tx.offer.findUnique({
+            where: { id: offerId },
+            select: { status: true },
+          });
+          if (current?.status === OfferStatus.ACCEPTED || current?.status === OfferStatus.REJECTED) {
+            throw offerActionNotAllowedException(current.status);
+          }
           throw new ConflictException('This offer can no longer be accepted');
         }
 
@@ -1232,6 +1281,14 @@ function toCustomerOfferDetail(
     acceptedAt: offer.acceptedAt,
     rejectedAt: offer.rejectedAt,
   };
+}
+
+function isCustomerActionable(status: OfferStatus) {
+  return (CUSTOMER_ACTIONABLE_OFFER_STATUSES as readonly OfferStatus[]).includes(status);
+}
+
+function isCustomerUnactionable(status: OfferStatus) {
+  return (CUSTOMER_UNACTIONABLE_OFFER_STATUSES as readonly OfferStatus[]).includes(status);
 }
 
 function customerActionToStatus(action: CustomerOfferActionDto['action']) {
