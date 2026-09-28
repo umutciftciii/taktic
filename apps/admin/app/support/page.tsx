@@ -11,20 +11,23 @@ import {
   supportTicketStatusLabel,
   type SupportTicketListEntry,
   type SupportTicketListResponse,
-  type SupportTicketStatus,
 } from '../../lib/api';
 import {
   OPEN_SUPPORT_TICKETS_FILTER,
   OPEN_SUPPORT_TICKET_STATUSES,
-  buildSupportListHref,
   isOpenSupportTicketFilter,
   parseRequesterRoleFilter,
   parseStatusFilter,
   statusFilterValue,
 } from '../../lib/support-ticket-filter';
+import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
+import { FilterBar, FilterField } from '../../components/filter-bar';
 import { PageHeader } from '../../components/page-header';
-import { SectionCard } from '../../components/section-card';
+import { Pagination } from '../../components/pagination';
+import { SavedViewTabs, type TabItem } from '../../components/tabs';
+import { buildHref, type QueryParams } from '../../lib/list-query';
+import { formatCount } from '../../lib/pagination';
 
 /**
  * The support queue — one queue, both sides of the marketplace.
@@ -49,12 +52,30 @@ import { SectionCard } from '../../components/section-card';
  * rows on this screen are the same set of tickets rather than two lists that
  * happen to overlap.
  *
- * The table below carries `support-table-scroll` as well as `table-scroll`.
- * `.table-scroll` only gets its `overflow-x` inside a `.table-card`, and this
- * table lives in a `.section-card` — so without the extra class the six columns
- * widen the document itself on a 320px phone instead of scrolling inside their
- * own box.
+ * ADMIN-DESIGN-001 Faz 3B (paket 2 `24-destek-talepleri`): the design's list
+ * template — saved views with the API's own per-status counts, the shared
+ * filter bar, the shared table (which scrolls inside its own box on a phone)
+ * and the shared page footer. Not rendered: the design's Ara and Tarih filters
+ * (the API takes neither), its "Kategori" column and "Bekleme süresi" (the list
+ * answer carries no topic and no who-spoke-last), and "Kapanmış talepleri
+ * göster" as a button — the "Kapatıldı" view is that list.
  */
+
+const PATH = '/support';
+
+/** The design's ⓘ, fitted to what this queue is and is not. */
+const SCREEN_INFO =
+  'Hizmet alanların ve hizmet verenlerin panellerinden açtığı destek talepleri, tek kuyrukta. Yanıt yazmak, durumu değiştirmek ya da bir paket iadesi isteği açmak için talebi açın. Buradan talep oluşturulamaz, silinemez ve başkasına devredilemez.';
+
+const COLUMNS: DataColumn[] = [
+  { key: 'subject', label: 'Konu' },
+  { key: 'requester', label: 'Gönderen' },
+  { key: 'role', label: 'Talep sahibi' },
+  { key: 'created', label: 'Geldiği zaman' },
+  { key: 'activity', label: 'Son hareket' },
+  { key: 'status', label: 'Durum' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -81,9 +102,9 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
   const params = await searchParams;
   const statuses = parseStatusFilter(params.status);
   const requesterRole = parseRequesterRoleFilter(params.requesterRole);
-  // Canonical order for the select: `?status=IN_PROGRESS,OPEN` is the same
-  // filter as `?status=OPEN,IN_PROGRESS`, and the option below should be the
-  // one shown as chosen either way rather than the box silently reading "Tümü".
+  // Canonical order: `?status=IN_PROGRESS,OPEN` is the same filter as
+  // `?status=OPEN,IN_PROGRESS`, and the select and the saved view below should
+  // show it as chosen either way rather than silently reading "Tümü".
   const selectedFilter = isOpenSupportTicketFilter(statuses)
     ? OPEN_SUPPORT_TICKETS_FILTER
     : statusFilterValue(statuses);
@@ -99,32 +120,72 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
     `/admin/support/tickets?${apiQuery.toString()}`,
   );
 
-  // The backlog's own count, so the option below says the same number the
-  // dashboard card does.
+  // The backlog's own count, so the view below says the same number the
+  // dashboard card does. The API scopes these counts to the chosen desk.
   const openTicketCount = OPEN_SUPPORT_TICKET_STATUSES.reduce(
     (total, status) => total + (response.statusCounts[status] ?? 0),
     0,
   );
+  const allTicketCount = SUPPORT_TICKET_STATUSES.reduce(
+    (total, status) => total + (response.statusCounts[status] ?? 0),
+    0,
+  );
+  const hasFilters = statuses.length > 0 || requesterRole !== null;
 
-  const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
-  const endIndex = Math.min(response.page * response.pageSize, response.total);
+  const filterParams: QueryParams = {
+    status: selectedFilter,
+    requesterRole: requesterRole ?? '',
+  };
+
+  // Exact counts from the API (`statusCounts`, within the chosen desk). A
+  // status set that is not one of these views still filters the list; it is
+  // simply not one of the tabs.
+  const views: TabItem[] = [
+    { key: '', label: 'Tümü', count: allTicketCount, testId: 'support-view-all' },
+    { key: OPEN_SUPPORT_TICKETS_FILTER, label: 'Açık + İşlemde', count: openTicketCount, testId: 'support-view-backlog' },
+    ...SUPPORT_TICKET_STATUSES.map((value) => ({
+      key: value,
+      label: supportTicketStatusLabel(value),
+      count: response.statusCounts[value] ?? 0,
+      testId: `support-view-${value.toLowerCase()}`,
+    })),
+  ];
+
+  const summary =
+    allTicketCount === 0 && !requesterRole
+      ? 'Henüz destek talebi açılmadı'
+      : openTicketCount === 0
+        ? 'Cevap bekleyen talep yok'
+        : `${formatCount(openTicketCount)} talep açık veya işlemde · son hareketi en yeni olan önce`;
 
   return (
-    <main>
-      <PageHeader
-        title="Destek Talepleri"
-        subtitle="Hizmet alanların ve hizmet verenlerin açtığı destek talepleri, tek kuyrukta. Yanıtlamak ve durumunu değiştirmek için bir talebi açın."
+    <main className="support-page">
+      <PageHeader title="Destek talepleri" subtitle={summary} info={SCREEN_INFO} />
+
+      <SavedViewTabs
+        label="Destek görünümleri"
+        items={views}
+        active={selectedFilter}
+        path={PATH}
+        params={filterParams}
+        param="status"
+        testId="support-views"
       />
 
-      <form className="admin-toolbar" method="get" action="/support">
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        label="Destek filtreleri"
+        testId="support-filters"
+      >
         {/*
           The desk filter comes first because it splits the queue in two, where
           the status filter narrows whichever half is on screen — and because
           reading them left to right then says what the list is: "hizmet
           verenlerin açık talepleri".
         */}
-        <div className="admin-toolbar-field">
-          <label htmlFor="support-requester-role">Talep sahibi</label>
+        <FilterField label="Talep sahibi" htmlFor="support-requester-role">
           <select
             id="support-requester-role"
             name="requesterRole"
@@ -134,132 +195,82 @@ export default async function AdminSupportPage({ searchParams }: AdminSupportPag
             <option value="">Tümü</option>
             {SUPPORT_TICKET_REQUESTER_ROLES.map((value) => (
               <option key={value} value={value}>
-                {`${supportTicketRequesterRoleLabel(value)} (${
-                  response.requesterRoleCounts[value] ?? 0
-                })`}
+                {`${supportTicketRequesterRoleLabel(value)} (${response.requesterRoleCounts[value] ?? 0})`}
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="support-status">Durum</label>
+        </FilterField>
+        <FilterField label="Durum" htmlFor="support-status">
           <select id="support-status" name="status" defaultValue={selectedFilter}>
             <option value="">Tümü</option>
             {/*
               The backlog, as one option. It is where the dashboard card points,
               so an operator who arrives from there finds the filter reflecting
               the link they followed rather than silently reading "Tümü" and
-              resetting the moment they press Uygula.
+              resetting the moment they press Filtrele.
             */}
-            <option value={OPEN_SUPPORT_TICKETS_FILTER}>
-              {`Açık + İşlemde (${openTicketCount})`}
-            </option>
+            <option value={OPEN_SUPPORT_TICKETS_FILTER}>{`Açık + İşlemde (${openTicketCount})`}</option>
             {SUPPORT_TICKET_STATUSES.map((value) => (
               <option key={value} value={value}>
                 {`${supportTicketStatusLabel(value)} (${response.statusCounts[value] ?? 0})`}
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-actions">
-          <span
-            className="admin-toolbar-summary"
-            data-testid="support-ticket-count"
-            data-total={response.total}
-          >
-            {response.total === 0
-              ? '0 talep'
-              : `${startIndex}-${endIndex} / ${response.total} talep`}
-          </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {statuses.length || requesterRole ? (
-            <Link className="btn btn-ghost btn-sm" href="/support">
-              Temizle
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
 
-      <SectionCard
-        title="Talepler"
-        subtitle={`Sayfa ${response.page} · ${response.pageSize} talep/sayfa · son hareket önce`}
-        padded={false}
-      >
+      <div className="data-list-card">
+        <span
+          className="sr-only"
+          data-testid="support-ticket-count"
+          data-total={response.total}
+        >
+          {response.total} talep
+        </span>
         {response.items.length === 0 ? (
           <EmptyState
             title={
-              statuses.length || requesterRole
+              hasFilters
                 ? isOpenSupportTicketFilter(statuses) && !requesterRole
                   ? 'Bekleyen destek talebi yok.'
                   : 'Bu filtreyle destek talebi bulunamadı.'
-                : 'Henüz destek talebi açılmadı.'
+                : response.total > 0
+                  ? 'Bu sayfada destek talebi yok.'
+                  : 'Henüz destek talebi açılmadı.'
             }
             description={
-              statuses.length || requesterRole
+              hasFilters
                 ? 'Filtreleri temizleyerek tüm talepleri görebilirsiniz.'
                 : 'Bir hizmet alan veya hizmet veren panelinden destek talebi açtığında burada görünür.'
             }
             action={
-              statuses.length || requesterRole ? (
-                <Link className="btn btn-secondary btn-sm" href="/support">
-                  Filtreyi temizle
+              hasFilters || response.total > 0 ? (
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
+                  {hasFilters ? 'Filtreyi temizle' : 'İlk sayfaya dön'}
                 </Link>
               ) : null
             }
           />
         ) : (
-          <div className="table-scroll support-table-scroll">
-            <table className="data-table" data-testid="support-ticket-table">
-              <thead>
-                <tr>
-                  <th>Durum</th>
-                  <th>Talep sahibi</th>
-                  <th>Konu</th>
-                  <th>Kim</th>
-                  <th>Son hareket</th>
-                  <th>Oluşturulma</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {response.items.map((ticket) => (
-                  <SupportTicketRow key={ticket.id} ticket={ticket} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable caption="Destek talepleri" columns={COLUMNS} minWidth={900} testId="support-ticket-table">
+            {response.items.map((ticket) => (
+              <SupportTicketRow key={ticket.id} ticket={ticket} />
+            ))}
+          </DataTable>
         )}
-      </SectionCard>
-
-      {response.total > response.pageSize ? (
-        <nav className="inline-actions" style={{ marginTop: 16, justifyContent: 'space-between' }}>
-          {response.page > 1 ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildSupportListHref(statuses, response.page - 1, requesterRole)}
-            >
-              ← Önceki
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span className="muted" style={{ fontSize: 13 }}>
-            Sayfa {response.page}
-          </span>
-          {response.hasNextPage ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildSupportListHref(statuses, response.page + 1, requesterRole)}
-            >
-              Sonraki →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="talep"
+            summaryTestId="support-page-summary"
+          />
+        ) : null}
+      </div>
     </main>
   );
 }
@@ -272,16 +283,31 @@ function SupportTicketRow({ ticket }: { ticket: SupportTicketListEntry }) {
       data-requester-role={ticket.requesterRole}
     >
       <td>
-        <span className={supportTicketStatusBadgeClass(ticket.status)}>
-          {supportTicketStatusLabel(ticket.status)}
-        </span>
+        <div className="cell-stack">
+          <strong className="cell-break" data-testid="support-ticket-subject">
+            {ticket.subject}
+          </strong>
+          <span className="cell-muted">
+            <code>#{ticket.id.slice(-8)}</code>
+          </span>
+        </div>
+      </td>
+      <td>
+        {/*
+          The name where there is one, the address otherwise. An account created
+          for a guest request has no name until somebody fills one in, and
+          printing an invented placeholder would make the two cases
+          indistinguishable.
+        */}
+        <div className="cell-stack">
+          <span>{ticket.requester.name ?? <span className="cell-muted">İsimsiz hesap</span>}</span>
+          {ticket.requester.email ? <span className="cell-muted cell-break">{ticket.requester.email}</span> : null}
+        </div>
       </td>
       {/*
         Which desk, in its own column and as a badge rather than as a word
         tucked under the name. The queue is scanned rather than read, and the
-        rules an operator is about to apply — what the ticket can be about, what
-        the answer may say — depend on this before they depend on anything else
-        in the row.
+        rules an operator is about to apply depend on this first.
       */}
       <td>
         <span
@@ -291,29 +317,17 @@ function SupportTicketRow({ ticket }: { ticket: SupportTicketListEntry }) {
           {supportTicketRequesterRoleLabel(ticket.requesterRole)}
         </span>
       </td>
-      <td data-testid="support-ticket-subject">{ticket.subject}</td>
-      <td>
-        {/*
-          The name where there is one, the address otherwise. An account created
-          for a guest request has no name until somebody fills one in, and
-          printing an invented placeholder would make the two cases
-          indistinguishable.
-        */}
-        <div>{ticket.requester.name ?? <span className="cell-muted">İsimsiz hesap</span>}</div>
-        {ticket.requester.email ? (
-          <div className="cell-muted" style={{ fontSize: 12 }}>
-            {ticket.requester.email}
-          </div>
-        ) : null}
-      </td>
-      <td>{formatDateTime(ticket.lastActivityAt)}</td>
       <td>{formatDateTime(ticket.createdAt)}</td>
+      <td>{formatDateTime(ticket.lastActivityAt)}</td>
       <td>
-        <div className="inline-actions">
-          <Link className="btn btn-ghost btn-sm" href={`/support/${ticket.id}`}>
-            Detay
-          </Link>
-        </div>
+        <span className={supportTicketStatusBadgeClass(ticket.status)}>
+          {supportTicketStatusLabel(ticket.status)}
+        </span>
+      </td>
+      <td className="col-actions">
+        <Link className="btn btn-secondary btn-sm" href={`/support/${ticket.id}`} aria-label={`Aç: ${ticket.subject}`}>
+          Aç
+        </Link>
       </td>
     </tr>
   );

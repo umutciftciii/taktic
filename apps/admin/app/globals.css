@@ -3175,116 +3175,7 @@ button:disabled {
   }
 }
 
-/* Moderation dialog */
-
-.moderation-dialog {
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--text);
-  max-width: 560px;
-  width: calc(100% - 32px);
-  box-shadow: 0 24px 60px rgba(45, 43, 43, 0.32);
-}
-
-.moderation-dialog::backdrop {
-  background: rgba(45, 43, 43, 0.45);
-}
-
-.moderation-dialog-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.moderation-dialog-header h3 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.moderation-dialog-subtitle {
-  margin: 4px 0 0;
-  font-size: 13px;
-}
-
-.moderation-dialog-close {
-  appearance: none;
-  background: none;
-  border: 0;
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  color: var(--muted);
-  padding: 4px 10px;
-  border-radius: var(--radius-md);
-}
-
-.moderation-dialog-close:hover {
-  background: var(--bg);
-  color: var(--text);
-}
-
-.moderation-dialog-body {
-  padding: 18px 20px 20px;
-  display: grid;
-  gap: 18px;
-}
-
-.moderation-dialog-section {
-  display: grid;
-  gap: 10px;
-}
-
-.moderation-dialog-section-title {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
-.moderation-dialog-quick {
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.moderation-dialog-hint {
-  margin: 0;
-  font-size: 12px;
-}
-
-.moderation-dialog-divider {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: 0;
-}
-
-.moderation-dialog-form {
-  display: grid;
-  gap: 12px;
-}
-
-.moderation-dialog-actions {
-  justify-content: flex-end;
-}
-
-.moderation-dialog-required {
-  margin-left: 8px;
-}
-
 /* Credit operations (provider credit admin page) */
-
-.credit-ops-page .page-header .page-subtitle {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
 
 .credit-ops-grid {
   display: grid;
@@ -6714,4 +6605,228 @@ button:disabled {
 
 .status-cancel-check input:disabled + span {
   color: var(--muted);
+}
+
+/* ---- ADMIN-DESIGN-001 Faz 3B: people and support ---- */
+
+/* The support ticket: the conversation wide, the controls beside it. */
+.support-detail-layout {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.support-detail-main,
+.support-detail-side {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .support-detail-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  }
+}
+
+.support-refund-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A card title with its ⓘ beside it. */
+.section-title-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Customer notes: the design's grey note cards, newest first. */
+.customer-note-form {
+  margin: 0 0 16px;
+}
+
+.customer-note-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.customer-note {
+  padding: 12px 16px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--color-neutral-100);
+  min-width: 0;
+}
+
+.customer-note-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.customer-note-head time {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+
+.customer-note-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Hesap erişimi: the issued link, in the design's ruled grey block. */
+.customer-access-lead {
+  margin: 0 0 14px;
+}
+
+.activation-link {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.activation-link .notice {
+  margin: 0;
+}
+
+.activation-link-block {
+  display: grid;
+  gap: 6px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--text);
+  background: var(--color-neutral-100);
+  min-width: 0;
+}
+
+.activation-link-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.activation-link-url {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.activation-link-meta {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+
+.activation-link .detail-form-actions form {
+  display: inline-flex;
+}
+
+/* Provider detail */
+.provider-status-form-wrap {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+.provider-claim-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.provider-credit-balance {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.provider-credit-balance strong {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+/* Değerlendirmeler: the design's review cards, two to a row where there is room. */
+.review-card-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 1100px) {
+  .review-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.review-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.review-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 12.5px;
+}
+
+.review-card-head .badge {
+  margin-left: auto;
+}
+
+.review-card-rating {
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.review-card-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.review-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+/* Credits page: the header card and the strip replace the stat grid. */
+.credit-ops-page .detail-header {
+  margin-bottom: 16px;
+}
+
+.credit-operation-form .notice {
+  margin: 0;
+}
+
+/* Many filters wrap onto a second row; a field there keeps its size rather
+   than stretching across the whole bar. */
+.customers-page .filter-field:not(.is-wide),
+.providers-page .filter-field:not(.is-wide) {
+  max-width: 240px;
 }

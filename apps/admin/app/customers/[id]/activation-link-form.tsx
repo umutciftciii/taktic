@@ -1,7 +1,7 @@
 'use client';
 
 import { formatDateTime } from '@taktic/shared';
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { createCustomerActivationLinkAction } from '../actions';
 import { ACTIVATION_LINK_IDLE } from '../activation-link-state';
 
@@ -15,6 +15,10 @@ import { ACTIVATION_LINK_IDLE } from '../activation-link-state';
  * only in this component's action state. It is shown in the response to the
  * button press and is gone after a navigation or a refresh.
  *
+ * "Bağlantıyı kopyala" writes that same string to the operator's clipboard and
+ * nowhere else — no request, no URL, no log. Issuing again replaces the link:
+ * the API marks every unused earlier link as used.
+ *
  * It still works without JavaScript: `useActionState` forms submit normally
  * and React renders the returned state on the server.
  */
@@ -23,58 +27,65 @@ export function ActivationLinkForm({ customerId }: { customerId: string }) {
     createCustomerActivationLinkAction,
     ACTIVATION_LINK_IDLE,
   );
+  const [copied, setCopied] = useState<string | null>(null);
+  const issued = state.kind === 'issued';
+
+  async function copy(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(url);
+    } catch {
+      setCopied(null);
+    }
+  }
 
   return (
-    <>
-      <form action={submit}>
-        <input type="hidden" name="customerId" value={customerId} />
-        <button type="submit" className="btn btn-primary btn-sm" disabled={pending}>
-          Aktivasyon linki oluştur
-        </button>
-      </form>
-
+    <div className="activation-link">
       {state.kind === 'error' ? (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 10,
-            borderRadius: 8,
-            background: 'rgba(220, 38, 38, 0.08)',
-            border: '1px solid rgba(220, 38, 38, 0.25)',
-            color: 'rgb(153, 27, 27)',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
+        <div className="notice notice-error" role="alert" data-testid="customer-activation-error">
           {state.message}
         </div>
       ) : null}
 
-      {state.kind === 'issued' ? (
-        <div style={{ marginTop: 12 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
-            Aktivasyon bağlantısı oluşturuldu. Bu bağlantı 72 saat geçerlidir.
-          </div>
-          <code
-            data-testid="customer-activation-url"
-            style={{
-              display: 'block',
-              padding: 10,
-              background: 'var(--surface-soft, #f3f4f6)',
-              border: '1px solid var(--border, #e5e7eb)',
-              borderRadius: 8,
-              fontSize: 12,
-              lineHeight: 1.5,
-              wordBreak: 'break-all',
-            }}
-          >
+      {issued ? (
+        <div className="activation-link-block" data-testid="customer-activation-block">
+          <p className="activation-link-title">Oluşturulan bağlantı · 72 saat geçerli</p>
+          <code className="activation-link-url" data-testid="customer-activation-url">
             {state.activationUrl}
           </code>
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-            Son geçerlilik: {formatDateTime(state.expiresAt)}
-          </div>
+          <p className="activation-link-meta">
+            Son geçerlilik: {formatDateTime(state.expiresAt)} · bu ekrandan ayrılınca bir daha
+            gösterilmez
+          </p>
         </div>
       ) : null}
-    </>
+
+      <div className="detail-form-actions">
+        {issued ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => copy(state.activationUrl)}
+            data-testid="customer-activation-copy"
+          >
+            {copied === state.activationUrl ? 'Kopyalandı' : 'Bağlantıyı kopyala'}
+          </button>
+        ) : null}
+        <form action={submit}>
+          <input type="hidden" name="customerId" value={customerId} />
+          <button
+            type="submit"
+            className={issued ? 'btn btn-link btn-sm' : 'btn btn-primary btn-sm'}
+            disabled={pending}
+            data-testid="customer-activation-issue"
+          >
+            {issued ? 'Yeni bağlantı oluştur' : 'Şifre belirleme bağlantısı oluştur'}
+          </button>
+        </form>
+      </div>
+      {issued ? (
+        <p className="detail-muted-note">Yeni bağlantı oluşturmak bu bağlantıyı geçersiz kılar.</p>
+      ) : null}
+    </div>
   );
 }

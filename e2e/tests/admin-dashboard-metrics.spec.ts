@@ -180,7 +180,7 @@ test.describe('admin dashboard metric cards', () => {
       await expect(admin.page).toHaveURL(/\/support\?status=OPEN(,|%2C)IN_PROGRESS$/);
       await assertNoErrorScreen(admin.page);
 
-      // The filter reflects the link that was followed, so pressing Uygula
+      // The filter reflects the link that was followed, so pressing Filtrele
       // keeps the operator where they are instead of resetting to "Tümü".
       await expect(admin.page.locator('#support-status')).toHaveValue('OPEN,IN_PROGRESS');
 

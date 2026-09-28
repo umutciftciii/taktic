@@ -136,6 +136,77 @@ describe('the provider-owner routes are not widened', () => {
   });
 });
 
+describe('actors outside the staff permissions (ADMIN-DESIGN-001 Faz 3B)', () => {
+  it('keeps a provider owner to its own record: no staff read, no other provider, no write at all', async () => {
+    const ownerA = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const providerA = await createProviderProfile(ctx.prisma, { userId: ownerA.id });
+    const ownerB = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const providerB = await createProviderProfile(ctx.prisma, { userId: ownerB.id });
+    await grantCredits(ctx.prisma, providerA.id, 10);
+    await grantCredits(ctx.prisma, providerB.id, 10);
+    const session = await loginAs(ctx.prisma, ownerA.id);
+    const body = { amount: 3, reason: 'Faz 3B çapraz deneme' };
+
+    const reads = await Promise.all([
+      request(ctx.server).get(`/providers/${providerB.id}/credits`).set('Cookie', session),
+      request(ctx.server).get(`/providers/${providerB.id}/entitlements`).set('Cookie', session),
+      request(ctx.server).get(`/admin/providers/${providerB.id}/credits`).set('Cookie', session),
+      request(ctx.server).get(`/admin/providers/${providerB.id}/entitlements`).set('Cookie', session),
+    ]);
+    for (const response of reads) {
+      expect(response.status).toBe(403);
+    }
+
+    for (const providerId of [providerA.id, providerB.id]) {
+      for (const path of ['grant', 'deduct']) {
+        const response = await request(ctx.server)
+          .post(`/providers/${providerId}/credits/${path}`)
+          .set('Cookie', session)
+          .send(body);
+        expect(response.status, `${path} on ${providerId}`).toBe(403);
+      }
+    }
+
+    // Its own record through its own route is untouched by this slice.
+    const own = await request(ctx.server).get(`/providers/${providerA.id}/credits`).set('Cookie', session);
+    expect(own.status).toBe(200);
+    expect(await currentCreditBalance(ctx.prisma, providerA.id)).toBe(10);
+    expect(await currentCreditBalance(ctx.prisma, providerB.id)).toBe(10);
+  });
+
+  it('refuses a customer every credit read and write, staff route or provider route', async () => {
+    const provider = await createProviderProfile(ctx.prisma);
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const session = await loginAs(ctx.prisma, customer.id);
+    const body = { amount: 1, reason: 'Faz 3B müşteri denemesi' };
+
+    const responses = await Promise.all([
+      request(ctx.server).get(`/providers/${provider.id}/credits`).set('Cookie', session),
+      request(ctx.server).get(`/admin/providers/${provider.id}/credits`).set('Cookie', session),
+      request(ctx.server).get(`/admin/providers/${provider.id}/entitlements`).set('Cookie', session),
+      request(ctx.server).post(`/providers/${provider.id}/credits/grant`).set('Cookie', session).send(body),
+      request(ctx.server).post(`/providers/${provider.id}/credits/deduct`).set('Cookie', session).send(body),
+    ]);
+    for (const response of responses) {
+      expect(response.status).toBe(403);
+    }
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);
+  });
+
+  it('refuses an anonymous caller with 401 and writes nothing', async () => {
+    const provider = await createProviderProfile(ctx.prisma);
+
+    const read = await request(ctx.server).get(`/admin/providers/${provider.id}/credits`);
+    const write = await request(ctx.server)
+      .post(`/providers/${provider.id}/credits/grant`)
+      .send({ amount: 1, reason: 'anonim' });
+
+    expect(read.status).toBe(401);
+    expect(write.status).toBe(401);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);
+  });
+});
+
 describe('GET /admin/providers/:providerId/entitlements', () => {
   it('answers a staff account holding PACKAGE_PURCHASES_READ', async () => {
     const provider = await createProviderProfile(ctx.prisma);
@@ -191,6 +262,52 @@ describe('manual credit writes keep their own permissions', () => {
     expect(grantByDeduct.status).toBe(403);
     // 10 + 2 − 2: the two refusals moved nothing.
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(10);
+  });
+
+  it('records each staff write with its actor, type and reason, and an overdraft writes nothing', async () => {
+    const provider = await createProviderProfile(ctx.prisma);
+    await grantCredits(ctx.prisma, provider.id, 5);
+    const { admin } = await createAdminWithPermissions(ctx.prisma, [
+      AdminPermission.FINANCE_LEDGER_READ,
+      AdminPermission.CREDITS_GRANT,
+      AdminPermission.CREDITS_DEDUCT,
+    ]);
+    const session = await loginAs(ctx.prisma, admin.id);
+
+    const granted = await request(ctx.server)
+      .post(`/providers/${provider.id}/credits/grant`)
+      .set('Cookie', session)
+      .send({ amount: 7, reason: 'Faz 3B denetim: ekleme' });
+    const deducted = await request(ctx.server)
+      .post(`/providers/${provider.id}/credits/deduct`)
+      .set('Cookie', session)
+      .send({ amount: 4, reason: 'Faz 3B denetim: düşme' });
+    const overdraft = await request(ctx.server)
+      .post(`/providers/${provider.id}/credits/deduct`)
+      .set('Cookie', session)
+      .send({ amount: 100, reason: 'Faz 3B denetim: fazla düşme' });
+
+    expect(granted.status).toBe(201);
+    expect(deducted.status).toBe(201);
+    expect(overdraft.status).toBe(400);
+
+    const rows = await ctx.prisma.providerCreditTransaction.findMany({
+      where: { providerId: provider.id, type: { in: ['ADMIN_GRANT', 'ADMIN_DEDUCT'] }, createdById: admin.id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { type: true, amount: true, balanceAfter: true, reason: true, createdById: true },
+    });
+    expect(rows).toEqual([
+      { type: 'ADMIN_GRANT', amount: 7, balanceAfter: 12, reason: 'Faz 3B denetim: ekleme', createdById: admin.id },
+      { type: 'ADMIN_DEDUCT', amount: -4, balanceAfter: 8, reason: 'Faz 3B denetim: düşme', createdById: admin.id },
+    ]);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(8);
+
+    // The staff read shows the same rows with the actor, as the ledger does.
+    const read = await request(ctx.server)
+      .get(`/admin/providers/${provider.id}/credits`)
+      .set('Cookie', session);
+    expect(read.status).toBe(200);
+    expect(read.body.transactions[0].createdBy).toMatchObject({ id: admin.id });
   });
 
   it('refuses both writes to a ledger reader holding neither', async () => {

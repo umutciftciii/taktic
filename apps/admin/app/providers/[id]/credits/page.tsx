@@ -10,13 +10,25 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../../../lib/api';
-import { PageHeader } from '../../../../components/page-header';
+import { DetailHeader } from '../../../../components/detail-header';
 import { SectionCard } from '../../../../components/section-card';
-import { StatCard } from '../../../../components/stat-card';
-import { submitCreditOperationAction } from './actions';
+import type { SummaryItem } from '../../../../components/summary-strip';
 import { CreditOperationForm } from './credit-operation-form';
 import { TransactionsPanel } from './transactions-panel';
 
+/**
+ * Hizmet veren kredileri (#14), the detail template (ADMIN-DESIGN-001 Faz 3B;
+ * the design's `manual` form and `providerDetail` credit tab, paket 2 `17`,
+ * `27`).
+ *
+ * F4, as it stands: the page is FINANCE_LEDGER_READ and reads only staff
+ * routes — `GET /admin/providers/:id/credits` on FINANCE_LEDGER_READ and
+ * `…/entitlements` on PACKAGE_PURCHASES_READ (ADMIN-DESIGN-000). The provider
+ * routes behind ProviderAccessGuard (owner or SUPER_ADMIN) are not called
+ * and not widened. Granting and deducting are CREDITS_GRANT and
+ * CREDITS_DEDUCT, each offered only when held and each refused by the API
+ * otherwise (apps/api/test/admin-provider-credits-read.spec.ts).
+ */
 const PROVIDER_PACKAGE_TYPE_LABEL: Record<string, string> = {
   ONE_TIME_CREDITS: 'Tek seferlik kredi',
   MONTHLY_QUOTA: 'Aylık kota',
@@ -64,31 +76,37 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
     .filter((t) => t.type === 'ADMIN_DEDUCT')
     .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
-  const listedHint = 'Listelenen işlemler içinde';
+  const listedHint = transactions.length >= 20 ? 'Son 20 hareket içinde' : 'Listelenen hareketler içinde';
+  const canReadProviders = can('PROVIDERS_READ');
+
+  const facts: SummaryItem[] = [
+    {
+      label: 'Mevcut bakiye',
+      value: String(credits.balance),
+      tone: credits.balance > 0 ? 'neutral' : 'warning',
+      testId: 'credits-fact-balance',
+    },
+    { label: 'İşlem sayısı', value: String(transactions.length), note: listedHint },
+    { label: 'Elle ekleme', value: String(totalGrant), note: listedHint },
+    { label: 'Elle düşme', value: String(totalDeduct), note: listedHint },
+  ];
 
   return (
     <main className="credit-ops-page">
-      <PageHeader
-        breadcrumbs={[
-          { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
-          { label: 'Hizmet Verenler', href: can('PROVIDERS_READ') ? '/providers' : undefined },
-          { label: provider.businessName, href: canOpenProvider ? `/providers/${id}` : undefined },
-          { label: 'Krediler' },
-        ]}
-        title="Hizmet Veren Kredileri"
-        subtitle={
-          <>
-            <strong>{provider.businessName}</strong>
-            <span className="muted">
-              {' · '}
-              <span className={statusBadgeClass(provider.status)}>
-                {statusLabel(provider.status)}
-              </span>
-              {' · '}
-              {provider.city}/{provider.district}
-            </span>
-          </>
+      <DetailHeader
+        back={
+          canOpenProvider
+            ? { href: `/providers/${id}`, label: provider.businessName }
+            : canReadProviders
+              ? { href: '/providers', label: 'Hizmet verenler' }
+              : null
         }
+        badges={
+          <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>
+        }
+        meta="Hizmet veren kredileri"
+        title={provider.businessName}
+        subtitle={`${provider.city}/${provider.district}`}
         actions={
           <>
             {canOpenProvider ? (
@@ -103,18 +121,10 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
             ) : null}
           </>
         }
+        facts={facts}
+        factsLabel="Kredi özeti"
+        testId="credits-header"
       />
-
-      <section className="stat-grid">
-        <StatCard
-          label="Mevcut bakiye"
-          value={credits.balance}
-          tone={credits.balance > 0 ? 'neutral' : 'warning'}
-        />
-        <StatCard label="İşlem sayısı" value={transactions.length} hint={listedHint} />
-        <StatCard label="Manuel ekleme" value={totalGrant} hint={listedHint} />
-        <StatCard label="Manuel düşme" value={totalDeduct} hint={listedHint} />
-      </section>
 
       {entitlements ? (
       <SectionCard
@@ -251,8 +261,8 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
             >
               <CreditOperationForm
                 providerId={id}
+                businessName={provider.businessName}
                 currentBalance={credits.balance}
-                action={submitCreditOperationAction}
                 canGrant={canGrant}
                 canDeduct={canDeduct}
               />
@@ -273,6 +283,10 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
                 &quot;—&quot; olarak görünür.
               </li>
               <li>Negatif bakiyeye düşüren işlemler sunucu tarafında reddedilir.</li>
+              <li>
+                Kayıtlar silinmez ve düzenlenmez; yanlış bir hareket ancak ters yönde yeni bir işlemle
+                dengelenir. Kredi düşme önce onay ister.
+              </li>
             </ul>
           </SectionCard>
         </div>

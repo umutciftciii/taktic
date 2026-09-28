@@ -14,10 +14,49 @@ import {
   formatDateTime,
   requireAdmin,
 } from '../../lib/api';
+import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
+import { FilterBar, FilterField } from '../../components/filter-bar';
 import { PageHeader } from '../../components/page-header';
-import { SectionCard } from '../../components/section-card';
+import { Pagination } from '../../components/pagination';
 import { provenChannels } from '../../lib/customer-verification';
+import { buildHref, type QueryParams } from '../../lib/list-query';
+import { formatCount } from '../../lib/pagination';
+
+/**
+ * Hizmet alanlar (#7), design `list:customers` (ADMIN-DESIGN-001 Faz 3B,
+ * paket 2 `19-hizmet-alanlar`).
+ *
+ * The API pages, sorts and filters this list itself (`GET /customers`), so the
+ * screen only lays out what it is given: the shared filter bar over the same
+ * query names as before, the shared table, and the shared page footer with
+ * the API's own total. Nothing here is counted or guessed on the page.
+ *
+ * Not rendered: the design's "Excel'e aktar" (no export API) and its Durum
+ * filter (the list API has no active/passive filter). The design's masked
+ * telephone and e-mail are not applied either: this list has always shown
+ * them in full to CUSTOMERS_READ, and masking is a separate decision (K6).
+ */
+
+const PATH = '/customers';
+
+/** The design's ⓘ, fitted to what this screen actually shows. */
+const SCREEN_INFO =
+  'Platformda hesabı olan müşteriler: kendi kaydolanlar ve talep formundan otomatik oluşturulanlar. Doğrulama sütunu yalnız hesabın kendisinde kanıtlanmış e-posta ve telefonu gösterir. Bir müşteriyi açınca talepleri, aldığı teklifler, notlar ve hesap işlemleri görünür.';
+
+const COLUMNS: DataColumn[] = [
+  { key: 'customer', label: 'Müşteri' },
+  { key: 'phone', label: 'Telefon' },
+  { key: 'email', label: 'E-posta' },
+  { key: 'verification', label: 'Doğrulama' },
+  { key: 'city', label: 'Şehir' },
+  { key: 'requests', label: 'Talep', align: 'end' },
+  { key: 'offers', label: 'Teklif', align: 'end' },
+  { key: 'accepted', label: 'Kabul', align: 'end' },
+  { key: 'lastRequest', label: 'Son talep' },
+  { key: 'status', label: 'Durum' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_SORT_BY: CustomerSortField = 'lastRequestAt';
@@ -80,26 +119,6 @@ function normalizePageSize(value: string | undefined): number {
   return Math.min(parsed, 100);
 }
 
-function buildQueryString(params: Record<string, string | number | undefined>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === '' || value === null) continue;
-    query.set(key, String(value));
-  }
-  const str = query.toString();
-  return str ? `?${str}` : '';
-}
-
-function buildPageHref(
-  baseParams: Record<string, string | number | undefined>,
-  page: number,
-): string {
-  const params = { ...baseParams };
-  if (page <= 1) delete params.page;
-  else params.page = page;
-  return `/customers${buildQueryString(params)}`;
-}
-
 export default async function AdminCustomersPage({ searchParams }: AdminCustomersPageProps) {
   await requireAdmin('CUSTOMERS_READ');
 
@@ -139,7 +158,9 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
       sortDir !== DEFAULT_SORT_DIR,
   );
 
-  const baseParams: Record<string, string | number | undefined> = {
+  // The same query names as before, so every link and bookmark still opens
+  // the same list; the defaults are written as no parameter.
+  const filterParams: QueryParams = {
     q,
     city,
     lastRequestFrom,
@@ -150,40 +171,36 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
     pageSize: pageSize !== DEFAULT_PAGE_SIZE ? pageSize : undefined,
   };
 
-  const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
-  const endIndex = Math.min(response.page * response.pageSize, response.total);
+  const summary =
+    response.total === 0
+      ? hasFilters
+        ? 'Filtreye uyan müşteri yok'
+        : 'Henüz kayıtlı müşteri yok'
+      : hasFilters
+        ? `${formatCount(response.total)} müşteri filtreye uyuyor`
+        : `${formatCount(response.total)} kayıtlı müşteri · son talebi en yeni olan önce`;
 
   return (
     <main className="customers-page">
-      <PageHeader
-        title="Hizmet Alanlar"
-        subtitle="Kayıtlı müşterileri inceleyin, talep ve teklif geçmişlerini takip edin."
-      />
+      <PageHeader title="Hizmet alanlar" subtitle={summary} info={SCREEN_INFO} />
 
       {response.meta.anonymousRequestCount > 0 ? (
-        <div
-          className="notice"
-          role="status"
-          style={{
-            marginBottom: 16,
-            padding: '10px 14px',
-            border: '1px solid var(--border, #e5e7eb)',
-            borderRadius: 8,
-            background: 'var(--muted-bg, #f9fafb)',
-            fontSize: 13,
-          }}
-        >
-          <strong>Müşteri hesabına bağlanmamış eski talepler var</strong>
-          <div className="muted" style={{ marginTop: 4 }}>
-            {response.meta.anonymousRequestCount} eski talep henüz müşteri
-            hesabıyla eşleşmemiş. Backfill/onarım scripti çalıştırılmalı.
-          </div>
+        <div className="notice notice-warning detail-notice" role="status" data-testid="customers-anonymous-notice">
+          <strong>Müşteri hesabına bağlanmamış eski talepler var.</strong>{' '}
+          {response.meta.anonymousRequestCount} eski talep henüz müşteri hesabıyla eşleşmemiş.
+          Backfill/onarım scripti çalıştırılmalı.
         </div>
       ) : null}
 
-      <form className="admin-toolbar" method="get" action="/customers">
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="customer-search">Ara</label>
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        label="Müşteri filtreleri"
+        preserve={{ pageSize: filterParams.pageSize }}
+        testId="customer-filters"
+      >
+        <FilterField label="Ara" htmlFor="customer-search" wide>
           <input
             id="customer-search"
             name="q"
@@ -192,9 +209,8 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
             defaultValue={q}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="customer-city">Şehir</label>
+        </FilterField>
+        <FilterField label="Şehir" htmlFor="customer-city">
           <input
             id="customer-city"
             name="city"
@@ -203,27 +219,14 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
             defaultValue={city}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="customer-from">Son talep (başlangıç)</label>
-          <input
-            id="customer-from"
-            name="lastRequestFrom"
-            type="date"
-            defaultValue={lastRequestFrom}
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="customer-to">Son talep (bitiş)</label>
-          <input
-            id="customer-to"
-            name="lastRequestTo"
-            type="date"
-            defaultValue={lastRequestTo}
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="customer-origin">Müşteri tipi</label>
+        </FilterField>
+        <FilterField label="Son talep (başlangıç)" htmlFor="customer-from">
+          <input id="customer-from" name="lastRequestFrom" type="date" defaultValue={lastRequestFrom} />
+        </FilterField>
+        <FilterField label="Son talep (bitiş)" htmlFor="customer-to">
+          <input id="customer-to" name="lastRequestTo" type="date" defaultValue={lastRequestTo} />
+        </FilterField>
+        <FilterField label="Müşteri tipi" htmlFor="customer-origin">
           <select id="customer-origin" name="customerOrigin" defaultValue={customerOrigin}>
             <option value="">Tümü</option>
             {CUSTOMER_ORIGIN_VALUES.map((origin) => (
@@ -232,9 +235,8 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="customer-sort">Sıralama</label>
+        </FilterField>
+        <FilterField label="Sıralama" htmlFor="customer-sort">
           <select id="customer-sort" name="sortBy" defaultValue={sortBy}>
             {CUSTOMER_SORT_FIELDS.map((field) => (
               <option key={field} value={field}>
@@ -242,115 +244,58 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="customer-dir">Yön</label>
+        </FilterField>
+        <FilterField label="Yön" htmlFor="customer-dir">
           <select id="customer-dir" name="sortDir" defaultValue={sortDir}>
             <option value="desc">Azalan</option>
             <option value="asc">Artan</option>
           </select>
-        </div>
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">
-            {response.total === 0
-              ? '0 müşteri'
-              : `${startIndex}-${endIndex} / ${response.total} müşteri`}
-          </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/customers">
-              Temizle
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
 
-      <SectionCard
-        title="Müşteri listesi"
-        subtitle={`Sayfa ${response.page} · ${response.pageSize} müşteri/sayfa`}
-        padded={false}
-      >
+      <div className="data-list-card">
         {response.items.length === 0 ? (
           <EmptyState
             title={
               hasFilters
                 ? 'Filtreye uygun müşteri bulunamadı.'
-                : 'Henüz kayıtlı müşteri yok.'
+                : response.total > 0
+                  ? 'Bu sayfada müşteri yok.'
+                  : 'Henüz kayıtlı müşteri yok.'
             }
             description={
               hasFilters
                 ? 'Aramayı daraltabilir veya filtreleri temizleyebilirsiniz.'
-                : 'Kayıtlı müşteriler eklendikçe burada listelenecek.'
+                : 'Bir müşteri kayıt olduğunda ya da ilk talebini gönderdiğinde burada listelenir.'
             }
             action={
-              hasFilters ? (
-                <Link className="btn btn-secondary btn-sm" href="/customers">
-                  Filtreleri temizle
+              hasFilters || response.total > 0 ? (
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
+                  {hasFilters ? 'Filtreleri temizle' : 'İlk sayfaya dön'}
                 </Link>
               ) : null
             }
           />
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Müşteri</th>
-                  <th>Telefon</th>
-                  <th>E-posta</th>
-                  <th>Doğrulama</th>
-                  <th>Şehir</th>
-                  <th className="col-num">Talep</th>
-                  <th className="col-num">Teklif</th>
-                  <th className="col-num">Kabul</th>
-                  <th>Son Talep</th>
-                  <th>Kayıt Tarihi</th>
-                  <th>Durum</th>
-                  <th className="col-actions">İşlem</th>
-                </tr>
-              </thead>
-              <tbody>
-                {response.items.map((customer) => (
-                  <CustomerRow key={customer.id} customer={customer} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable caption="Hizmet alanlar" columns={COLUMNS} minWidth={1060} testId="customer-table">
+            {response.items.map((customer) => (
+              <CustomerRow key={customer.id} customer={customer} />
+            ))}
+          </DataTable>
         )}
-      </SectionCard>
-
-      {response.total > response.pageSize ? (
-        <nav
-          className="inline-actions"
-          style={{ marginTop: 16, justifyContent: 'space-between' }}
-        >
-          {response.page > 1 ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page - 1)}
-            >
-              ← Önceki
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span className="muted" style={{ fontSize: 13 }}>
-            Sayfa {response.page}
-          </span>
-          {response.hasNextPage ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page + 1)}
-            >
-              Sonraki →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="müşteri"
+            summaryTestId="customer-count"
+          />
+        ) : null}
+      </div>
     </main>
   );
 }
@@ -359,60 +304,51 @@ function CustomerRow({ customer }: { customer: CustomerSummary }) {
   const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
 
   return (
-    <tr>
+    <tr data-testid="customer-row" data-customer-id={customer.id}>
       <td>
         <div className="cell-stack">
           <Link href={`/customers/${customer.id}`}>
             <strong>{displayName}</strong>
           </Link>
+          <span className="cell-muted">Kayıt: {formatDate(customer.createdAt)}</span>
           <span className={customerOriginBadgeClass(customer.customerOrigin)}>
             {customerOriginLabel(customer.customerOrigin)}
           </span>
         </div>
       </td>
-      <td>
+      <td className="cell-nowrap">
         {customer.phone ? (
           <a className="cell-link" href={`tel:${customer.phone}`}>
             {customer.phone}
           </a>
         ) : (
-          <span className="cell-muted">-</span>
+          <span className="cell-muted">—</span>
         )}
       </td>
       <td>
         {customer.email ? (
-          <a className="cell-link cell-muted" href={`mailto:${customer.email}`}>
+          <a className="cell-link cell-muted cell-break" href={`mailto:${customer.email}`}>
             {customer.email}
           </a>
         ) : (
-          <span className="cell-muted">-</span>
+          <span className="cell-muted">—</span>
         )}
       </td>
       <td>
         <CustomerVerificationCell customer={customer} />
       </td>
-      <td>
-        {customer.lastRequestCity ? (
-          customer.lastRequestCity
-        ) : (
-          <span className="cell-muted">-</span>
-        )}
-      </td>
-      <td className="col-num">
+      <td>{customer.lastRequestCity ? customer.lastRequestCity : <span className="cell-muted">—</span>}</td>
+      <td className="is-num">
         {customer.requestCount === 0 ? (
           <span className="cell-muted">0</span>
         ) : (
           <strong>{customer.requestCount}</strong>
         )}
       </td>
-      <td className="col-num">
-        {customer.offerCount === 0 ? (
-          <span className="cell-muted">0</span>
-        ) : (
-          customer.offerCount
-        )}
+      <td className="is-num">
+        {customer.offerCount === 0 ? <span className="cell-muted">0</span> : customer.offerCount}
       </td>
-      <td className="col-num">
+      <td className="is-num">
         {customer.acceptedOfferCount === 0 ? (
           <span className="cell-muted">0</span>
         ) : (
@@ -426,7 +362,6 @@ function CustomerRow({ customer }: { customer: CustomerSummary }) {
           <span className="cell-muted">Henüz talep yok</span>
         )}
       </td>
-      <td>{formatDate(customer.createdAt)}</td>
       <td>
         {customer.isActive ? (
           <span className="badge badge-good">Aktif</span>
@@ -435,11 +370,13 @@ function CustomerRow({ customer }: { customer: CustomerSummary }) {
         )}
       </td>
       <td className="col-actions">
-        <div className="inline-actions">
-          <Link className="btn btn-secondary btn-sm" href={`/customers/${customer.id}`}>
-            Detay
-          </Link>
-        </div>
+        <Link
+          className="btn btn-secondary btn-sm"
+          href={`/customers/${customer.id}`}
+          aria-label={`Aç: ${displayName}`}
+        >
+          Aç
+        </Link>
       </td>
     </tr>
   );

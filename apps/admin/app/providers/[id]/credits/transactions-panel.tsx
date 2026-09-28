@@ -200,13 +200,12 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
             <thead>
               <tr>
                 <th>Tarih</th>
-                <th>Tip</th>
-                <th className="col-num">Tutar</th>
-                <th className="col-num">Önceki</th>
-                <th className="col-num">Sonraki</th>
-                <th>Sebep</th>
+                <th>Ne oldu</th>
+                <th>İlgili kayıt</th>
                 <th>Yapan</th>
-                <th>Kaynak</th>
+                <th className="col-num">Mevcut</th>
+                <th className="col-num">Değişim</th>
+                <th className="col-num">Kalan</th>
               </tr>
             </thead>
             <tbody>
@@ -218,34 +217,29 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
                 const isManualType =
                   transaction.type === 'ADMIN_GRANT' || transaction.type === 'ADMIN_DEDUCT';
                 return (
-                  <tr key={transaction.id}>
-                    <td>{formatDateTime(transaction.createdAt)}</td>
+                  <tr key={transaction.id} data-testid="credit-transaction-row" data-type={transaction.type}>
+                    <td className="cell-nowrap">{formatDateTime(transaction.createdAt)}</td>
                     <td>
-                      <span className={typeBadgeClass(transaction.type)}>
-                        {typeLabel(transaction.type)}
-                      </span>
-                    </td>
-                    <td className="col-num">
-                      <span
-                        className={`transaction-amount${
-                          isPositive ? ' is-positive' : ' is-negative'
-                        }`}
-                      >
-                        {formatAmount(transaction.amount)}
-                      </span>
-                    </td>
-                    <td className="col-num">{previousBalance}</td>
-                    <td className="col-num">
-                      <strong>{transaction.balanceAfter}</strong>
+                      <div className="cell-stack">
+                        <span className={typeBadgeClass(transaction.type)}>{typeLabel(transaction.type)}</span>
+                        {reason ? (
+                          <>
+                            <span>{reason.label}</span>
+                            {reason.note ? (
+                              <span className="cell-muted" style={{ fontSize: 12 }}>
+                                Not: {reason.note}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </div>
                     </td>
                     <td>
-                      {reason ? (
+                      {source ? (
                         <div className="cell-stack">
-                          <span>{reason.label}</span>
-                          {reason.note ? (
-                            <span className="cell-muted" style={{ fontSize: 12 }}>
-                              Not: {reason.note}
-                            </span>
+                          <span>{source.label}</span>
+                          {source.referenceId ? (
+                            <code className="cell-muted transaction-reference-id">{source.referenceId}</code>
                           ) : null}
                         </div>
                       ) : (
@@ -255,9 +249,7 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
                     <td>
                       {transaction.createdBy ? (
                         <div className="cell-stack">
-                          <span>
-                            {transaction.createdBy.name ?? transaction.createdBy.email ?? 'Yönetici'}
-                          </span>
+                          <span>{transaction.createdBy.name ?? transaction.createdBy.email ?? 'Yönetici'}</span>
                           {transaction.createdBy.name && transaction.createdBy.email ? (
                             <span className="cell-muted">{transaction.createdBy.email}</span>
                           ) : null}
@@ -273,19 +265,14 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
                         <span className="cell-muted">Sistem</span>
                       )}
                     </td>
-                    <td>
-                      {source ? (
-                        <div className="cell-stack">
-                          <span>{source.label}</span>
-                          {source.referenceId ? (
-                            <code className="cell-muted transaction-reference-id">
-                              {source.referenceId}
-                            </code>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span className="cell-muted">—</span>
-                      )}
+                    <td className="col-num">{previousBalance}</td>
+                    <td className="col-num">
+                      <span className={`transaction-amount${isPositive ? ' is-positive' : ' is-negative'}`}>
+                        {formatAmount(transaction.amount)}
+                      </span>
+                    </td>
+                    <td className="col-num">
+                      <strong>{transaction.balanceAfter}</strong>
                     </td>
                   </tr>
                 );

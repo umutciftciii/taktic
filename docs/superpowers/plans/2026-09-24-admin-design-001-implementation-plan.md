@@ -272,11 +272,44 @@ Merge öncesi düzeltmeler (PR #118, head `624f3e06` sonrası):
   - Krediler: `CREDITS_GRANT` ve `CREDITS_DEDUCT` sekme bazında.
 - **Onay diyaloğu:** hesabı pasife al, hizmet vereni askıya al/reddet, kategori kaldır, kredi düş.
 - **Hizmet veren detay sekmeleri:** "İşletme bilgileri · Kredi hareketleri · Değerlendirmeler".
-  - "Kredi hareketleri" sekmesi F4 çözülmeden **yalnız `isSuperAdmin`** için render edilir. Değilse sekme yok, "Krediler" bağlantısı da yok.
+  - "Kredi hareketleri" sekmesi `can('FINANCE_LEDGER_READ')` ile render edilir (aşağıdaki F4 satırı). Yoksa sekme de "Krediler" bağlantısı da yok; `?tab=kredi` ilk sekmeye düşer.
   - "Belgeler" kartı ve "kazanma oranı" metrikleri render edilmez (D).
-- **API etkisi:** yok (F4 ayrı).
+- **API etkisi (gerçekleşen, 2026-09-29):** API kodu değişmedi; F4 bu PR'da test kapsamıyla kapatıldı.
+  - Plandaki "yok (F4 ayrı)" satırı yazıldığında `ProviderAccessGuard` ADMIN personelini kredi okumasında 403'e düşürüyordu. ADMIN-DESIGN-000 (PR #114) ayrı ve salt okunur iki personel ucu ekledi: `GET /admin/providers/:id/credits` (`FINANCE_LEDGER_READ`) ve `…/entitlements` (`PACKAGE_PURCHASES_READ`). Sahip rotaları (`/providers/:id/credits|entitlements`) genişletilmedi. `/providers/[id]/credits` ve yeni "Kredi hareketleri" sekmesi yalnız bu personel uçlarını okur.
+  - Yazma yolları zaten kendi izinleriyle açıktı: `POST /providers/:id/credits/grant` → `CREDITS_GRANT`, `…/deduct` → `CREDITS_DEDUCT` (`AdminAccessGuard` + `PermissionsGuard`), biri diğerini açmaz.
+  - Bu PR'ın eklediği kanıt: API testi (`admin-provider-credits-read.spec.ts`) — sahip başka sağlayıcıyı iki rotadan da okuyamaz, kendisininkine ve başkasınınkine kredi ekleyip düşemez; müşteri her kredi rotasında 403, anonim 401; personel yazısı `createdById`, tür ve gerekçeyle kaydolur, eksiye düşme 400 ve satır yazmaz. E2E (`admin-people-support-screens.spec.ts`) — `SUPER_ADMIN` olmayan personel gerçek Next ekranında okur, ekler, düşmeyi iptal eder (yazı yok), onaylar, sunucu reddinde form korunur; `FINANCE_LEDGER_READ` olmayan personelde sekme/bağlantı yok ve sayfa `/yetkisiz`.
+  - Migration, Prisma, env ve compose değişmedi.
 - **Test:** `admin-customer-verification`, `customer-activation-proof`, `provider-support-tickets`, `provider-claim`, `provider-business-registration`, `provider-draft-category-binding`, `package-refund-request`.
 - **Geri dönüş riski:** Orta-yüksek (ham kayıt no gösterimi ve denetim kaydı korunmalı).
+
+#### Faz 3B görsel karşılaştırma (paket 2, 2026-09-29)
+
+Karşılaştırma, bu PR'ın 1440×1617 Chromium görüntüleriyle yapıldı (`2026-09-29-admin-design-001-faz-3b-screens/`; WebKit 320 örnekleri aynı klasörde). Gerekçe kısaltmaları 3A ile aynı (D, K7, K11, İzin). `/support/[id]` ve `/providers/[id]/credits` tasarımda ekranı olmayan B sınıfıdır; detay şablonuyla kuruldu.
+
+| Görüntü | Uygulandı | Sapma ve gerekçe |
+| --- | --- | --- |
+| `15-hizmet-verenler` | Başlık + ⓘ + "N işletme · M başvuru karar bekliyor"; kayıtlı görünümler (Tümü, İnceleme bekliyor, Onaylandı, Askıya alındı, Reddedildi) sayfadaki listeden tam sayaçla; filtre çubuğu; tablo: İşletme (+yetkili, maskeli kayıt no, kayıt tarihi) · İletişim · Çalıştığı bölgeler · Hizmetler · Durum (+hesap satırı) · Kredi · Açık teklif · "Aç"; 50'lik sayfalama | **D:** "Elle işletme ekle" yok (operatör oluşturma API'si yok). **K7:** Paket sütunu, Teklifler/Krediler satır bağlantıları korunuyor. Durum dili mevcut sözlük ("Onaylandı"), 3A ile aynı karar. "Kendi hesabı yok" sahiplik filtresinde, görünüm değil (görünümler tek parametreye, `status`'a bağlı) |
+| `16-hizmet-veren-detayi-bilgiler` | Geri bağlantısı (izin varsa); özet kartı (durum + hesap rozeti, kayıt tarihi, 27px ad, yetkili · telefon · bölgeler); 5 hücreli şerit; sekmeler; "İşletme bilgileri" satırları; "İş almasını durdur" (onaylı) | **D:** "Belgeler" kartı, "Bu ay verdiği teklif", "Kazanma oranı", "Açık şikayet" yok; yerine Açık teklif, Toplam teklif, Paket alımı. **D:** "Profili düzenle" yok (operatör düzenleme API'si yok). "Kredi ekle" yerine "Krediler" bağlantısı (form kredi ekranında, K4). **K7:** Durum yönetimi (tam form), Hizmet kategorileri, Bölgeler, Sahiplik, İşletme kaydı, Promosyon uygunluğu aynı sekmede. **İzin:** her kart ve düğme kendi izninde |
+| `17-hizmet-veren-detayi-kredi` | "Kredi hareketleri" + ⓘ + "Bugünkü bakiye N kredi"; tablo: Tarih · Ne oldu · İlgili kayıt · Yapan · Mevcut · Değişim · Kalan; 6 çip + arama | **İzin:** sekme `FINANCE_LEDGER_READ` ile (F4 satırı). Son 20 hareket (personel ucunun sınırı), altta kredi ekranına bağlantı. "Yapan" sütunu ek (denetim) |
+| `18-hizmet-veren-detayi-degerlendirmeler` | Puan + tarih + durum rozeti + yorum kartları, iki kolon | **D:** müşteri adı değerlendirme yanıtında yok; yerine talep no ve kategori. Rozet: şikayet varsa karar durumu, yoksa "Yayında" (uç yalnız yayındakileri döndürür). "Detay" bağlantısı korunuyor |
+| — (`16`'da yok) | "Teklifler ve paketler" sekmesi: Son teklifler, Son paket alımları | **K7:** tasarımın düşürdüğü iki tablo |
+| `19-hizmet-alanlar` | Başlık + ⓘ + özet; filtre çubuğu; tablo: Müşteri (+"Kayıt:" + tür) · Telefon · E-posta · Doğrulama · Şehir · Talep · Teklif · Kabul · Son talep · Durum · "Aç"; API sayfalaması "N kaydın a–b arası" | **D:** "Excel'e aktar" ve Durum filtresi yok (API'de yok). **K7:** Son talep tarih aralığı, Müşteri tipi, Sıralama/Yön korunuyor ("Son 30 gün" hazır seçimi yerine). **K6:** telefon/e-posta tam gösteriliyor, tasarımda maskeli |
+| `20-hizmet-alan-detayi-profil` | Özet kartı (Aktif/Pasif hesap + tür rozeti, kayıt tarihi, ad, iletişim satırı); "Not ekle", "Hesabı pasife al" (onaylı); 5 hücreli şerit; 4 sekme; "Profil ve iletişim" satırları + doğrulama rozetleri; "Hesap erişimi" + ⓘ, bağlantı bloğu, "Bağlantıyı kopyala", "Yeni bağlantı oluştur" | "Şifre belirleme bağlantısı oluştur" başlıkta değil, Hesap erişimi kartında: tek seferlik bağlantı yalnız düğmenin yanında gösterilir, URL/log/önbelleğe girmez. Son oluşturulan bağlantı kalıcı gösterilmez (güvenlik). **D:** "Talep başına", "Eşleşme oranı" notları yok (türetilmiş metrik uydurulmadı) |
+| `21-hizmet-alan-detayi-talepler` | "Açtığı talepler" + toplam; Talep no · Hizmet · Konum · Kalite · Durum · Tarih · Teklif · "Aç" | API son 10 talebi döndürür; "Son 10 kayıt · toplam N" yazılır. Kalite puan sayısı değil etiket (yanıtta puan yok, D) |
+| `22-hizmet-alan-detayi-teklifler` | "Aldığı teklifler" + "N teklifin K tanesini kabul etti"; Teklif no · Talep · Hizmet veren · Tutar · Durum · Tarih · "Aç" | **K7:** "Kabul ettiği teklifler" tablosu aynı sekmede |
+| `23-hizmet-alan-detayi-notlar` | "Operasyon notları"; metin alanı + "Notu ekle"; gri not kartları (yazan + zaman) | **İzin (F7):** sekme `CUSTOMER_NOTES_READ`, form `CUSTOMER_NOTES_WRITE`; izin yoksa yalnız bu sekme gizlenir |
+| `24-destek-talepleri` | Başlık + ⓘ + "N talep açık veya işlemde"; kayıtlı görünümler (Tümü, Açık + İşlemde, 4 durum) API'nin masa kapsamlı sayaçlarıyla; filtre çubuğu (Talep sahibi, Durum); tablo: Konu (+kısa no) · Gönderen · Talep sahibi · Geldiği zaman · Son hareket · Durum · "Aç"; sayfalama | **D:** Ara, Tarih filtresi, "Kategori" ve "Bekleme süresi" yok (liste API'si almıyor/döndürmüyor). "Kapanmış talepleri göster" düğmesi yerine "Kapatıldı" görünümü |
+| — (`/support/[id]`, şablon) | Özet kartı (masa + durum rozeti, kısa no, konu, talep sahibi); 5 hücreli şerit; Yazışma + Yanıtla solda, Durum + Talep sahibi + Paket ve kredi iadesi sağda; "Talebi kapat" onaylı | N2 düzeltildi: "Hesabı görüntüle" `/users/:id` (yalnız personel, müşteri için 404) yerine hizmet alanda `/customers/:id` (`CUSTOMERS_READ`); hizmet verende bağlantı yok (yanıtta profil kimliği yok, D) |
+| — (`/providers/[id]/credits`, şablon) | Özet kartı + 4 hücreli şerit; Dönemsel paketler; İşlem geçmişi; Manuel kredi işlemi; Denetim notu | Düşme onaylı (önce/sonra bakiye); sonuç ve ret form üstünde, ret'te girilenler korunur |
+
+Onay diyalogları ve gerçek etkileri (metinler API koduna göre yazıldı):
+- **Hesabı pasife al:** giriş reddedilir, açık oturum bir sonraki istekte düşer, bu telefon/e-postayla misafir talep açılamaz; talepler, teklifler, notlar değişmez.
+- **Askıya al / reddet / onaydan çıkarma:** onaysız işletme talep göremez ve teklif veremez; onaylıyken yayındaki vitrin kartları hemen kalkar (ödenmiş süre işler); DRAFT/REJECTED/SUSPENDED'da kullanılmamış claim bağlantıları geçersiz olur; teklif, kredi, geçmiş silinmez; e-posta gitmez.
+- **Kategori bağını kaldır:** bu kategorideki talepler işletmeye gösterilmez, hazırlık sayacında sayılmaz; verilmiş teklifler değişmez.
+- **Kredi düş:** önce → sonra bakiye; satır gerekçe ve işlemi yapanla kalıcı; yanlış düşme ancak ters işlemle dengelenir.
+- **Destek talebini kapat:** kalıcı; iki taraf da yazamaz, yeniden açılamaz; talep sahibine durum e-postası gider.
+
+StickyActionBar bu dilimde kullanılmadı (ekranlardaki formlar tek alanlı eylem formları); Faz 2 entegrasyon kabul kriteri bu PR'a düşmedi.
 
 ### 3C — Vitrin ve değerlendirmeler (#15–#24)
 
@@ -404,7 +437,7 @@ Toplam: 3 (Dilim 1) + 1 (Dilim 2) + 6 + 7 + 10 + 8 + 6 + 6 + 7 + 1 = **55**. "So
 **Programın dışında kalan ve ayrı iş kalemi olanlar:**
 - SEO-004 (4 SEO ekranı).
 - ADMIN-DESIGN-000 (davranış düzeltmeleri).
-- F4 API işi.
+- ~~F4 API işi.~~ PR #114 personel okuma uçlarıyla kapandı; Faz 3B testlerle doğruladı (bkz. 3B "API etkisi").
 - K3 (arama ve zil), K8 "Sonrası" sütunu, K11 backend eylemleri (talep/teklif ekranlarındakiler ADMIN-ACTIONS-001–007 olarak envanterde), K12 dashboard veri kaynakları, vitrin kuyruk sayacı.
 
 ## Karar soruları özeti

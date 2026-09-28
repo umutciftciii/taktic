@@ -104,6 +104,13 @@ const CONVERTED_ROUTES = [
   '/offers',
   '/offers/[id]',
   '/refund-scan',
+  '/customers',
+  '/customers/[id]',
+  '/support',
+  '/support/[id]',
+  '/providers',
+  '/providers/[id]',
+  '/providers/[id]/credits',
 ];
 
 const STATIC_ROUTES = [

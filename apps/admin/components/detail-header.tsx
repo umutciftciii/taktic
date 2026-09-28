@@ -3,8 +3,12 @@ import type { ReactNode } from 'react';
 import { SummaryStrip, type SummaryItem } from './summary-strip';
 
 type DetailHeaderProps = {
-  /** "‹ Tüm talepler": where the list this record came from lives. */
-  back: { href: string; label: string };
+  /**
+   * "‹ Tüm talepler": where the list this record came from lives. Omitted when
+   * the session may not open that list — a link that ends on /yetkisiz is not
+   * a way back.
+   */
+  back?: { href: string; label: string } | null;
   /** Status badges, first on the card. */
   badges?: ReactNode;
   /** The record's number and when it was made ("TL-24817 · 19 Eyl 14:32'de geldi"). */
@@ -42,9 +46,11 @@ export function DetailHeader({
 }: DetailHeaderProps) {
   return (
     <header className="detail-header" data-testid={testId}>
-      <Link className="detail-back" href={back.href}>
-        <span aria-hidden="true">‹</span> {back.label}
-      </Link>
+      {back ? (
+        <Link className="detail-back" href={back.href}>
+          <span aria-hidden="true">‹</span> {back.label}
+        </Link>
+      ) : null}
       <section className="detail-card">
         <div className="detail-card-main">
           <div className="detail-card-text">

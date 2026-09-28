@@ -9,6 +9,7 @@ import {
   CustomerRecentRequest,
   customerOriginBadgeClass,
   customerOriginLabel,
+  formatDate,
   formatDateTime,
   formatPrice,
   qualityBadgeClass,
@@ -18,23 +19,93 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
+import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { DataTable, type DataColumn } from '../../../components/data-table';
+import { DetailHeader } from '../../../components/detail-header';
 import { EmptyState } from '../../../components/empty-state';
-import { PageHeader } from '../../../components/page-header';
+import { InfoPopover } from '../../../components/info-popover';
+import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
-import { StatCard } from '../../../components/stat-card';
+import type { SummaryItem } from '../../../components/summary-strip';
+import { Tabs, type TabItem } from '../../../components/tabs';
 import { customerVerificationBadges, verificationBadgeClass } from '../../../lib/customer-verification';
-import {
-  createCustomerNoteAction,
-  updateCustomerStatusAction,
-} from '../actions';
+import { resolveTab } from '../../../lib/list-query';
+import { createCustomerNoteAction, updateCustomerStatusAction } from '../actions';
 import { ActivationLinkForm } from './activation-link-form';
+
+/**
+ * Hizmet alan detayı (#8), design `customerDetail` (ADMIN-DESIGN-001 Faz 3B,
+ * paket 2 `20`–`23`).
+ *
+ * The design's four tabs over the data this screen already read: the profile
+ * and account access, the request history, the offers received, and the notes.
+ * Every section keeps the permission it had:
+ *
+ * - The page itself is CUSTOMERS_READ.
+ * - Notes are CUSTOMER_NOTES_READ (F7). Without it the Notlar tab is not
+ *   drawn, `?tab=notlar` falls back to the profile, and the notes endpoint is
+ *   never called — the rest of the customer stays readable.
+ * - Adding a note is CUSTOMER_NOTES_WRITE, the account status CUSTOMERS_STATUS,
+ *   the password link CUSTOMER_ACTIVATION_LINK_ISSUE. A control whose
+ *   permission is missing is not rendered; the API refuses regardless.
+ *
+ * Passivating is the one destructive action here, and it asks first, saying
+ * what it does (see PASSIVATE_CONSEQUENCE).
+ */
 
 type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 };
+
+type TabKey = '' | 'talepler' | 'teklifler' | 'notlar';
+const TAB_KEYS: readonly TabKey[] = ['', 'talepler', 'teklifler', 'notlar'];
 
 /** Which linked screens this session may open; a link it cannot follow is plain text. */
 type RowLinks = { requests: boolean; offers: boolean; providers: boolean };
+
+/** The design's ⓘ on "Hesap erişimi", fitted to how the link really works. */
+const ACCESS_INFO =
+  'Talep formundan otomatik oluşturulan hesabın şifresi yoktur; müşteri panele giremez. Buradan oluşturulan bağlantıyla müşteri şifresini belirler. Bağlantı 72 saat geçerlidir, yalnız bu ekranda bir kez gösterilir ve e-postayla gönderilmez: siz paylaşırsınız. Yeni bağlantı, kullanılmamış eski bağlantıları geçersiz kılar.';
+
+/**
+ * What `PATCH /customers/:id/status { isActive: false }` does, and what it
+ * leaves alone (customers.service.ts `updateStatus`, auth.service.ts,
+ * request-identity.service.ts).
+ */
+const PASSIVATE_CONSEQUENCE = (
+  <>
+    <p>
+      Müşteri bir daha giriş yapamaz; açık oturumu bir sonraki isteğinde reddedilir. Bu telefon
+      veya e-postayla misafir olarak yeni talep de gönderilemez.
+    </p>
+    <p>
+      Mevcut talepleri, teklifleri ve notları silinmez, durumları değişmez. Hesap buradan yeniden
+      etkinleştirilebilir.
+    </p>
+  </>
+);
+
+const REQUEST_COLUMNS: DataColumn[] = [
+  { key: 'no', label: 'Talep no' },
+  { key: 'category', label: 'Hizmet' },
+  { key: 'location', label: 'Konum' },
+  { key: 'quality', label: 'Kalite' },
+  { key: 'status', label: 'Durum' },
+  { key: 'date', label: 'Tarih' },
+  { key: 'offers', label: 'Teklif', align: 'end' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
+
+const OFFER_COLUMNS: DataColumn[] = [
+  { key: 'no', label: 'Teklif no' },
+  { key: 'request', label: 'Talep' },
+  { key: 'provider', label: 'Hizmet veren' },
+  { key: 'price', label: 'Tutar', align: 'end' },
+  { key: 'status', label: 'Durum' },
+  { key: 'date', label: 'Tarih' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 // apiFetch backend hatası geldiğinde body metnini Error.message'a koyar.
 // Backend NestJS NotFoundException JSON şekli: {"statusCode":404,...}.
@@ -48,31 +119,38 @@ function isBackendNotFound(error: unknown): boolean {
   }
 }
 
+/** "Son 10 · toplam 14", or just the total when every row is on screen. */
+function shownOfTotal(shown: number, total: number): string {
+  return shown < total ? `Son ${shown} kayıt · toplam ${total}` : `Toplam ${total}`;
+}
+
 export default async function AdminCustomerDetailPage({
   params,
+  searchParams,
 }: CustomerDetailPageProps) {
   const { can } = await requireAdmin('CUSTOMERS_READ');
-  // Notes are their own permission. Without it the card is not rendered and
-  // the notes endpoint is not called, so CUSTOMERS_READ alone opens the page.
   const canReadNotes = can('CUSTOMER_NOTES_READ');
   const canWriteNotes = can('CUSTOMER_NOTES_WRITE');
   const canChangeStatus = can('CUSTOMERS_STATUS');
   const canIssueActivationLink = can('CUSTOMER_ACTIVATION_LINK_ISSUE');
-  const canOpenRequests = can('REQUESTS_READ');
-  const canOpenOffers = can('OFFERS_READ');
-  const canOpenProviders = can('PROVIDERS_READ_DETAIL');
   const links: RowLinks = {
-    requests: canOpenRequests,
-    offers: canOpenOffers,
-    providers: canOpenProviders,
+    requests: can('REQUESTS_READ'),
+    offers: can('OFFERS_READ'),
+    providers: can('PROVIDERS_READ_DETAIL'),
   };
-  const { id } = await params;
+  const [{ id }, search] = await Promise.all([params, searchParams]);
+  // A tab the session may not open is not a tab at all: `?tab=notlar`
+  // without CUSTOMER_NOTES_READ opens the profile, never an empty panel.
+  const tabKeys = canReadNotes ? TAB_KEYS : TAB_KEYS.filter((key) => key !== 'notlar');
+  const activeTab = resolveTab<TabKey>(search.tab, tabKeys, '');
 
   let response: CustomerDetailResponse;
   let notesResponse: CustomerNotesResponse | null;
   try {
     [response, notesResponse] = await Promise.all([
       apiFetch<CustomerDetailResponse>(`/customers/${id}`),
+      // Read only under its own permission: without it the notes endpoint is
+      // not called, so CUSTOMERS_READ alone still opens the page (F7).
       canReadNotes
         ? apiFetch<CustomerNotesResponse>(`/customers/${id}/notes`)
         : Promise.resolve(null),
@@ -85,312 +163,359 @@ export default async function AdminCustomerDetailPage({
   }
   const { customer, metrics, recentRequests, recentOffers, acceptedOffers } = response;
   const notes = notesResponse?.items ?? [];
+  const path = `/customers/${customer.id}`;
 
   const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
   // From the two account columns alone; a verified request of this customer
   // is not an account proof (see lib/customer-verification.ts).
   const [emailProof, phoneProof] = customerVerificationBadges(customer);
-  const subtitleParts: string[] = [];
-  if (customer.phone) subtitleParts.push(customer.phone);
-  if (customer.email) subtitleParts.push(customer.email);
+  const latestRequest = recentRequests[0] ?? null;
+  const location = latestRequest
+    ? `${latestRequest.city}${latestRequest.district ? `, ${latestRequest.district}` : ''}`
+    : null;
+
+  const tabs: TabItem[] = [
+    { key: '', label: 'Profil ve iletişim', testId: 'customer-tab-profil' },
+    { key: 'talepler', label: 'Talep geçmişi', count: metrics.requestCount, testId: 'customer-tab-talepler' },
+    { key: 'teklifler', label: 'Aldığı teklifler', count: metrics.offerCount, testId: 'customer-tab-teklifler' },
+    ...(canReadNotes
+      ? [{ key: 'notlar', label: 'Notlar', count: notes.length, testId: 'customer-tab-notlar' }]
+      : []),
+  ];
+
+  const facts: SummaryItem[] = [
+    { label: 'Talep sayısı', value: String(metrics.requestCount), testId: 'customer-fact-requests' },
+    { label: 'Aldığı teklif', value: String(metrics.offerCount) },
+    {
+      label: 'Kabul ettiği teklif',
+      value: String(metrics.acceptedOfferCount),
+      tone: metrics.acceptedOfferCount > 0 ? 'success' : 'neutral',
+    },
+    {
+      label: 'Son talep',
+      value: metrics.lastRequestAt ? formatDateTime(metrics.lastRequestAt) : '—',
+      note: latestRequest
+        ? `${latestRequest.categoryName} · ${latestRequest.district || latestRequest.city}`
+        : 'Henüz talep yok',
+    },
+    {
+      label: 'Hesap',
+      value: customer.isActive ? 'Aktif' : 'Pasif',
+      note: customer.hasPassword ? 'Şifre belirlenmiş' : 'Şifre belirlenmemiş',
+      tone: customer.isActive ? (customer.hasPassword ? 'success' : 'warning') : 'danger',
+      testId: 'customer-fact-account',
+    },
+  ];
 
   return (
     <main className="customer-detail-page">
-      <PageHeader
-        breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Hizmet Alanlar', href: '/customers' },
-          { label: displayName },
-        ]}
-        title={displayName}
-        subtitle={
+      <DetailHeader
+        back={{ href: '/customers', label: 'Hizmet alanlar' }}
+        badges={
           <>
             {customer.isActive ? (
-              <span className="badge badge-good">Aktif</span>
+              <span className="badge badge-good" data-testid="customer-status">
+                Aktif hesap
+              </span>
             ) : (
-              <span className="badge badge-bad">Pasif</span>
+              <span className="badge badge-bad" data-testid="customer-status">
+                Pasif hesap
+              </span>
             )}
-            {subtitleParts.length > 0 ? (
-              <span className="muted"> · {subtitleParts.join(' · ')}</span>
-            ) : null}
+            <span className={customerOriginBadgeClass(customer.customerOrigin)}>
+              {customerOriginLabel(customer.customerOrigin)}
+            </span>
           </>
         }
+        meta={<>{formatDate(customer.createdAt)} tarihinden beri kayıtlı</>}
+        title={displayName}
+        subtitle={[
+          customer.phone ?? 'telefon kayıtlı değil',
+          customer.email ?? 'e-posta kayıtlı değil',
+          location,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
         actions={
-          <Link className="btn btn-ghost btn-sm" href="/customers">
-            ← Listeye dön
-          </Link>
+          <>
+            {canReadNotes && canWriteNotes ? (
+              <Link className="btn btn-secondary btn-sm" href={`${path}?tab=notlar#not-ekle`}>
+                Not ekle
+              </Link>
+            ) : null}
+            {canChangeStatus ? <CustomerStatusAction customerId={customer.id} isActive={customer.isActive} /> : null}
+          </>
         }
+        facts={facts}
+        factsLabel="Müşteri özeti"
+        testId="customer-header"
       />
 
-      <section className="stat-grid">
-        <StatCard label="Talep sayısı" value={metrics.requestCount} />
-        <StatCard label="Teklif sayısı" value={metrics.offerCount} />
-        <StatCard
-          label="Kabul edilen teklif"
-          value={metrics.acceptedOfferCount}
-          tone={metrics.acceptedOfferCount > 0 ? 'success' : 'neutral'}
-        />
-        <StatCard
-          label="Son talep"
-          value={metrics.lastRequestAt ? formatDateTime(metrics.lastRequestAt) : '—'}
-          hint={metrics.lastRequestAt ? undefined : 'Henüz talep yok'}
-        />
-      </section>
+      <Tabs label="Müşteri sekmeleri" items={tabs} active={activeTab} path={path} testId="customer-tabs" />
 
-      <div className="provider-detail-card-grid">
-        <CustomerActivationSection
-          customer={customer}
-          canIssue={canIssueActivationLink}
-        />
+      {activeTab === '' ? (
+        <div className="detail-panel" data-testid="customer-panel-profil">
+          <div className="detail-panel-grid">
+            <SectionCard title="Profil ve iletişim">
+              <KeyValueList
+                items={[
+                  { label: 'Ad soyad', value: customer.name },
+                  {
+                    label: 'Telefon',
+                    value: (
+                      <>
+                        {customer.phone ? (
+                          <a className="cell-link" href={`tel:${customer.phone}`}>
+                            {customer.phone}
+                          </a>
+                        ) : (
+                          'Kayıtlı değil'
+                        )}
+                        <VerificationLine channel="phone" proof={phoneProof} />
+                      </>
+                    ),
+                  },
+                  {
+                    label: 'E-posta',
+                    value: (
+                      <>
+                        {customer.email ? (
+                          <a className="cell-link cell-break" href={`mailto:${customer.email}`}>
+                            {customer.email}
+                          </a>
+                        ) : (
+                          'Kayıtlı değil'
+                        )}
+                        <VerificationLine channel="email" proof={emailProof} />
+                      </>
+                    ),
+                  },
+                  {
+                    label: 'Şehir',
+                    value: location ? (
+                      <>
+                        {location}
+                        <div className="cell-muted">Son talebinden</div>
+                      </>
+                    ) : null,
+                  },
+                  { label: 'Kayıt tarihi', value: formatDateTime(customer.createdAt) },
+                  {
+                    label: 'Son giriş',
+                    value: customer.lastLoginAt ? (
+                      formatDateTime(customer.lastLoginAt)
+                    ) : (
+                      <>
+                        Hiç girmedi
+                        {!customer.hasPassword ? <div className="cell-muted">Şifre belirlenmemiş</div> : null}
+                      </>
+                    ),
+                  },
+                  {
+                    label: 'Müşteri tipi',
+                    value: (
+                      <>
+                        {customerOriginLabel(customer.customerOrigin)}
+                        {customer.customerOrigin === 'AUTO_CREATED_REQUEST' ? (
+                          <div className="cell-muted">
+                            Talep formu üzerinden otomatik oluşturuldu; normal kayıt sürecini tamamlamamış
+                            olabilir.
+                          </div>
+                        ) : null}
+                      </>
+                    ),
+                  },
+                  {
+                    label: 'Hesap durumu',
+                    value: customer.isActive ? (
+                      <span className="badge badge-good">Aktif</span>
+                    ) : (
+                      <span className="badge badge-bad">Pasif</span>
+                    ),
+                  },
+                  { label: 'Güncellenme', value: formatDateTime(customer.updatedAt) },
+                  {
+                    label: 'Müşteri ID',
+                    value: (
+                      <details className="muted technical-id">
+                        <summary>Teknik bilgi</summary>
+                        <code>{customer.id}</code>
+                      </details>
+                    ),
+                  },
+                ]}
+              />
+            </SectionCard>
 
-        <SectionCard title="Profil & İletişim" className="card-wide">
-          <dl className="meta-row">
-            <dt>Ad</dt>
-            <dd>{customer.name ?? '-'}</dd>
-            <dt>Telefon</dt>
-            <dd>
-              {customer.phone ? (
-                <a className="cell-link" href={`tel:${customer.phone}`}>
-                  {customer.phone}
-                </a>
-              ) : (
-                '-'
-              )}
-              <VerificationLine channel="phone" proof={phoneProof} />
-            </dd>
-            <dt>E-posta</dt>
-            <dd>
-              {customer.email ? (
-                <a className="cell-link" href={`mailto:${customer.email}`}>
-                  {customer.email}
-                </a>
-              ) : (
-                '-'
-              )}
-              <VerificationLine channel="email" proof={emailProof} />
-            </dd>
-            <dt>Durum</dt>
-            <dd>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {customer.isActive ? (
-                  <span className="badge badge-good">Aktif</span>
-                ) : (
-                  <span className="badge badge-bad">Pasif</span>
-                )}
-                {canChangeStatus ? (
-                <form action={updateCustomerStatusAction}>
-                  <input type="hidden" name="customerId" value={customer.id} />
-                  <input
-                    type="hidden"
-                    name="isActive"
-                    value={customer.isActive ? 'false' : 'true'}
-                  />
-                  <button
-                    type="submit"
-                    className={
-                      customer.isActive ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'
-                    }
-                  >
-                    {customer.isActive ? 'Pasifleştir' : 'Aktifleştir'}
-                  </button>
-                </form>
-                ) : null}
-              </div>
-              <div
-                className="muted"
-                style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}
-              >
-                Bu alan müşterinin aktiflik durumunu yönetmek için kullanılır.
-              </div>
-            </dd>
-            <dt>Müşteri tipi</dt>
-            <dd>
-              <span className={customerOriginBadgeClass(customer.customerOrigin)}>
-                {customerOriginLabel(customer.customerOrigin)}
-              </span>
-              {customer.customerOrigin === 'AUTO_CREATED_REQUEST' ? (
-                <div
-                  className="muted"
-                  style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}
-                >
-                  Bu müşteri, talep formu üzerinden otomatik oluşturuldu. Henüz
-                  normal kayıt sürecini tamamlamamış olabilir.
-                </div>
-              ) : null}
-            </dd>
-            <dt>Kayıt tarihi</dt>
-            <dd>{formatDateTime(customer.createdAt)}</dd>
-            <dt>Son giriş</dt>
-            <dd>{customer.lastLoginAt ? formatDateTime(customer.lastLoginAt) : '-'}</dd>
-            <dt>Güncellenme</dt>
-            <dd>{formatDateTime(customer.updatedAt)}</dd>
-          </dl>
-          <details style={{ marginTop: 12 }}>
-            <summary className="cell-muted" style={{ cursor: 'pointer', fontSize: 12 }}>
-              Teknik bilgi
-            </summary>
-            <dl className="meta-row" style={{ marginTop: 8 }}>
-              <dt>Müşteri ID</dt>
-              <dd>
-                <code style={{ fontSize: 12 }}>{customer.id}</code>
-              </dd>
-            </dl>
-          </details>
-        </SectionCard>
+            <CustomerAccessSection customer={customer} canIssue={canIssueActivationLink} />
+          </div>
+        </div>
+      ) : null}
 
-        {canReadNotes ? (
-        <SectionCard
-          title="Müşteri Notları"
-          subtitle={notes.length > 0 ? `Toplam ${notes.length}` : undefined}
-          className="card-wide"
-        >
-          {canWriteNotes ? (
-          <form
-            action={createCustomerNoteAction}
-            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}
+      {activeTab === 'talepler' ? (
+        <div className="detail-panel" data-testid="customer-panel-talepler">
+          <SectionCard
+            title="Açtığı talepler"
+            subtitle={metrics.requestCount > 0 ? shownOfTotal(recentRequests.length, metrics.requestCount) : undefined}
           >
-            <input type="hidden" name="customerId" value={customer.id} />
-            <textarea
-              className="input"
-              name="note"
-              required
-              minLength={2}
-              maxLength={2000}
-              rows={3}
-              placeholder="Müşteriyle ilgili operasyonel bir not ekleyin..."
-            />
-            <div>
-              <button type="submit" className="btn btn-primary btn-sm">
-                Not ekle
-              </button>
-            </div>
-          </form>
-          ) : null}
+            {recentRequests.length === 0 ? (
+              <EmptyState
+                title="Henüz talep yok."
+                description="Müşteri bir talep gönderdiğinde burada listelenir."
+              />
+            ) : (
+              <DataTable caption="Açtığı talepler" columns={REQUEST_COLUMNS} minWidth={860} testId="customer-requests">
+                {recentRequests.map((request) => (
+                  <CustomerRequestRow key={request.id} request={request} links={links} />
+                ))}
+              </DataTable>
+            )}
+          </SectionCard>
+        </div>
+      ) : null}
 
-          {notes.length === 0 ? (
-            <EmptyState title="Henüz müşteri notu yok." />
-          ) : (
-            <ul
-              style={{
-                listStyle: 'none',
-                margin: 0,
-                padding: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-              }}
-            >
-              {notes.map((note) => (
-                <CustomerNoteItem key={note.id} note={note} />
-              ))}
-            </ul>
-          )}
-        </SectionCard>
-        ) : null}
-
-        <SectionCard
-          title="Talep geçmişi"
-          subtitle={metrics.requestCount > 0 ? `Toplam ${metrics.requestCount}` : undefined}
-          className="card-wide"
-        >
-          {recentRequests.length === 0 ? (
-            <EmptyState title="Henüz talep yok." />
-          ) : (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Talep No</th>
-                    <th>Kategori</th>
-                    <th>Konum</th>
-                    <th>Kalite</th>
-                    <th>Durum</th>
-                    <th>Tarih</th>
-                    <th className="col-num">Teklif</th>
-                    <th className="col-actions">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentRequests.map((request) => (
-                    <CustomerRequestRow key={request.id} request={request} links={links} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title="Aldığı teklifler"
-          subtitle={metrics.offerCount > 0 ? `Toplam ${metrics.offerCount}` : undefined}
-          className="card-wide"
-        >
-          {recentOffers.length === 0 ? (
-            <EmptyState title="Henüz teklif yok." />
-          ) : (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Teklif No</th>
-                    <th>Talep No</th>
-                    <th>Hizmet Veren</th>
-                    <th>Fiyat</th>
-                    <th>Durum</th>
-                    <th>Tarih</th>
-                    <th className="col-actions">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody>
+      {activeTab === 'teklifler' ? (
+        <div className="detail-panel" data-testid="customer-panel-teklifler">
+          <SectionCard
+            title="Aldığı teklifler"
+            subtitle={
+              metrics.offerCount > 0
+                ? `${metrics.offerCount} teklifin ${metrics.acceptedOfferCount} tanesini kabul etti`
+                : undefined
+            }
+          >
+            {recentOffers.length === 0 ? (
+              <EmptyState
+                title="Henüz teklif yok."
+                description="Müşterinin taleplerine hizmet verenler teklif gönderdiğinde burada listelenir."
+              />
+            ) : (
+              <>
+                {recentOffers.length < metrics.offerCount ? (
+                  <p className="detail-muted-note">
+                    {shownOfTotal(recentOffers.length, metrics.offerCount)}
+                  </p>
+                ) : null}
+                <DataTable caption="Aldığı teklifler" columns={OFFER_COLUMNS} minWidth={860} testId="customer-offers">
                   {recentOffers.map((offer) => (
                     <CustomerOfferRow key={offer.id} offer={offer} links={links} />
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
+                </DataTable>
+              </>
+            )}
+          </SectionCard>
 
-        <SectionCard
-          title="Kabul edilen teklifler"
-          subtitle={
-            metrics.acceptedOfferCount > 0
-              ? `Toplam ${metrics.acceptedOfferCount}`
-              : undefined
-          }
-          className="card-wide"
-        >
-          {acceptedOffers.length === 0 ? (
-            <EmptyState title="Henüz kabul edilmiş teklif yok." />
-          ) : (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Teklif No</th>
-                    <th>Talep No</th>
-                    <th>Hizmet Veren</th>
-                    <th>Fiyat</th>
-                    <th>Durum</th>
-                    <th>Tarih</th>
-                    <th className="col-actions">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {acceptedOffers.map((offer) => (
-                    <CustomerOfferRow key={offer.id} offer={offer} links={links} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      </div>
+          <SectionCard
+            title="Kabul ettiği teklifler"
+            subtitle={
+              metrics.acceptedOfferCount > 0
+                ? shownOfTotal(acceptedOffers.length, metrics.acceptedOfferCount)
+                : undefined
+            }
+          >
+            {acceptedOffers.length === 0 ? (
+              <EmptyState
+                title="Henüz kabul edilmiş teklif yok."
+                description="Müşteri bir teklifi kabul ettiğinde burada görünür."
+              />
+            ) : (
+              <DataTable
+                caption="Kabul ettiği teklifler"
+                columns={OFFER_COLUMNS}
+                minWidth={860}
+                testId="customer-accepted-offers"
+              >
+                {acceptedOffers.map((offer) => (
+                  <CustomerOfferRow key={offer.id} offer={offer} links={links} />
+                ))}
+              </DataTable>
+            )}
+          </SectionCard>
+        </div>
+      ) : null}
+
+      {activeTab === 'notlar' && canReadNotes ? (
+        <div className="detail-panel" data-testid="customer-panel-notlar">
+          <SectionCard
+            title="Operasyon notları"
+            subtitle={notes.length > 0 ? `Toplam ${notes.length}` : undefined}
+            className="customer-notes-card"
+          >
+            {canWriteNotes ? (
+              <form action={createCustomerNoteAction} className="detail-form customer-note-form" id="not-ekle">
+                <input type="hidden" name="customerId" value={customer.id} />
+                <label className="detail-form-field" htmlFor="customer-note">
+                  <span>Yeni not</span>
+                  <textarea
+                    id="customer-note"
+                    name="note"
+                    required
+                    minLength={2}
+                    maxLength={2000}
+                    rows={3}
+                    placeholder="Bu müşteriyle ilgili operasyonel bir not yazın — yalnız ekip görür."
+                  />
+                </label>
+                <div className="detail-form-actions">
+                  <button type="submit" className="btn btn-primary btn-sm">
+                    Notu ekle
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {notes.length === 0 ? (
+              <EmptyState
+                title="Henüz müşteri notu yok."
+                description="Ekipten biri not eklediğinde burada, en yenisi önce görünür."
+              />
+            ) : (
+              <ul className="customer-note-list" data-testid="customer-notes">
+                {notes.map((note) => (
+                  <CustomerNoteItem key={note.id} note={note} />
+                ))}
+              </ul>
+            )}
+          </SectionCard>
+        </div>
+      ) : null}
     </main>
   );
 }
 
-function CustomerActivationSection({
+/**
+ * "Hesabı pasife al" behind a confirmation; turning an account back on is not
+ * destructive and goes straight through. Both are the same form and action as
+ * before.
+ */
+function CustomerStatusAction({ customerId, isActive }: { customerId: string; isActive: boolean }) {
+  return (
+    <form action={updateCustomerStatusAction}>
+      <input type="hidden" name="customerId" value={customerId} />
+      <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
+      {isActive ? (
+        <ConfirmDialog
+          triggerLabel="Hesabı pasife al"
+          triggerClassName="btn btn-destructive btn-sm"
+          title="Hesap pasife alınsın mı?"
+          consequence={PASSIVATE_CONSEQUENCE}
+          confirmLabel="Evet, pasife al"
+          testId="customer-passivate"
+        />
+      ) : (
+        <button type="submit" className="btn btn-primary btn-sm" data-testid="customer-activate">
+          Hesabı etkinleştir
+        </button>
+      )}
+    </form>
+  );
+}
+
+/**
+ * "Hesap erişimi": only for an account the request form created, because only
+ * that one can be without a password the customer chose.
+ */
+function CustomerAccessSection({
   customer,
   canIssue,
 }: {
@@ -401,12 +526,18 @@ function CustomerActivationSection({
     return null;
   }
 
+  const info = (
+    <InfoPopover label="Hesap erişimi nasıl çalışır?" size="sm">
+      {ACCESS_INFO}
+    </InfoPopover>
+  );
+
   if (customer.hasPassword) {
     return (
-      <SectionCard title="Hesap aktivasyonu" className="card-wide">
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Aktivasyon tamamlandı. Bu müşteri şifresini belirlemiş; yeni aktivasyon bağlantısı
-          oluşturulmasına gerek yok.
+      <SectionCard title="Hesap erişimi" actions={info} id="hesap-erisimi">
+        <p className="detail-muted-note">
+          Aktivasyon tamamlandı. Bu müşteri şifresini belirlemiş; yeni bağlantı oluşturmaya gerek
+          yok.
         </p>
       </SectionCard>
     );
@@ -414,9 +545,9 @@ function CustomerActivationSection({
 
   if (!customer.isActive) {
     return (
-      <SectionCard title="Hesap aktivasyonu" className="card-wide">
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Pasif müşteri için aktivasyon linki oluşturulamaz. Önce müşteriyi aktifleştirin.
+      <SectionCard title="Hesap erişimi" actions={info} id="hesap-erisimi">
+        <p className="detail-muted-note">
+          Pasif müşteri için şifre belirleme bağlantısı oluşturulamaz. Önce hesabı etkinleştirin.
         </p>
       </SectionCard>
     );
@@ -429,15 +560,12 @@ function CustomerActivationSection({
   }
 
   return (
-    <SectionCard title="Hesap aktivasyonu" className="card-wide">
-      <div style={{ marginBottom: 12 }}>
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Bu müşteri talep formu üzerinden otomatik oluşturuldu. Hesabını kullanabilmesi için şifre
-          belirleme bağlantısı oluşturabilirsiniz. Bağlantıyı kopyalayıp WhatsApp / SMS / e-posta
-          ile manuel olarak paylaşın.
-        </p>
-        <ActivationLinkForm customerId={customer.id} />
-      </div>
+    <SectionCard title="Hesap erişimi" actions={info} id="hesap-erisimi">
+      <p className="detail-muted-note customer-access-lead">
+        Bu müşteri talep formu üzerinden otomatik oluşturuldu ve henüz şifre belirlemedi — panele
+        giremez. Bağlantıyı oluşturup WhatsApp, SMS veya e-postayla kendiniz paylaşın.
+      </p>
+      <ActivationLinkForm customerId={customer.id} />
     </SectionCard>
   );
 }
@@ -451,27 +579,23 @@ function CustomerRequestRow({
 }) {
   const requestRef = request.requestNumber ?? `#${request.id.slice(-8)}`;
   return (
-    <tr>
-      <td>
+    <tr data-testid="customer-request-row">
+      <td className="cell-nowrap">
         <code className="display-number">{requestRef}</code>
       </td>
       <td>{request.categoryName}</td>
       <td>
         {request.city}
-        {request.district ? `/${request.district}` : ''}
+        {request.district ? ` · ${request.district}` : ''}
       </td>
       <td>
-        <span className={qualityBadgeClass(request.qualityLabel)}>
-          {qualityLabel(request.qualityLabel)}
-        </span>
+        <span className={qualityBadgeClass(request.qualityLabel)}>{qualityLabel(request.qualityLabel)}</span>
       </td>
       <td>
-        <span className={statusBadgeClass(request.status)}>
-          {requestStatusLabel(request.status)}
-        </span>
+        <span className={statusBadgeClass(request.status)}>{requestStatusLabel(request.status)}</span>
       </td>
       <td>{formatDateTime(request.submittedAt)}</td>
-      <td className="col-num">
+      <td className="is-num">
         {request.offerCount === 0 ? (
           <span className="cell-muted">0</span>
         ) : (
@@ -480,8 +604,8 @@ function CustomerRequestRow({
       </td>
       <td className="col-actions">
         {links.requests ? (
-          <Link className="btn btn-secondary btn-sm" href={`/requests/${request.id}`}>
-            Detay
+          <Link className="btn btn-secondary btn-sm" href={`/requests/${request.id}`} aria-label={`Aç: ${requestRef}`}>
+            Aç
           </Link>
         ) : null}
       </td>
@@ -492,28 +616,12 @@ function CustomerRequestRow({
 function CustomerNoteItem({ note }: { note: CustomerNote }) {
   const authorName = note.createdBy?.name ?? note.createdBy?.email ?? 'Bilinmeyen kullanıcı';
   return (
-    <li
-      style={{
-        border: '1px solid var(--border, #e5e7eb)',
-        borderRadius: 8,
-        padding: 12,
-        background: 'var(--surface-soft, #f9fafb)',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          gap: 12,
-          marginBottom: 6,
-          fontSize: 12,
-        }}
-      >
+    <li className="customer-note" data-testid="customer-note">
+      <div className="customer-note-head">
         <strong>{authorName}</strong>
-        <span className="muted">{formatDateTime(note.createdAt)}</span>
+        <time dateTime={note.createdAt}>{formatDateTime(note.createdAt)}</time>
       </div>
-      <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{note.note}</div>
+      <p className="customer-note-body">{note.note}</p>
     </li>
   );
 }
@@ -522,11 +630,11 @@ function CustomerOfferRow({ offer, links }: { offer: CustomerRecentOffer; links:
   const offerRef = offer.offerNumber ?? `#${offer.id.slice(-8)}`;
   const requestRef = offer.requestNumber ?? `#${offer.requestId.slice(-8)}`;
   return (
-    <tr>
-      <td>
+    <tr data-testid="customer-offer-row">
+      <td className="cell-nowrap">
         <code className="display-number">{offerRef}</code>
       </td>
-      <td>
+      <td className="cell-nowrap">
         {links.requests ? (
           <Link href={`/requests/${offer.requestId}`}>
             <code className="display-number">{requestRef}</code>
@@ -542,15 +650,17 @@ function CustomerOfferRow({ offer, links }: { offer: CustomerRecentOffer; links:
           offer.providerName
         )}
       </td>
-      <td>{formatPrice(offer.priceAmount, offer.currency)}</td>
+      <td className="is-num">
+        <strong>{formatPrice(offer.priceAmount, offer.currency)}</strong>
+      </td>
       <td>
         <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
       </td>
       <td>{formatDateTime(offer.submittedAt)}</td>
       <td className="col-actions">
         {links.offers ? (
-          <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
-            Detay
+          <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`} aria-label={`Aç: ${offerRef}`}>
+            Aç
           </Link>
         ) : null}
       </td>
@@ -578,9 +688,7 @@ function VerificationLine({
       <span className={verificationBadgeClass(proof)} aria-label={proof.ariaLabel}>
         {proof.label}
       </span>
-      {proof.at ? (
-        <span className="muted customer-verification-at">{formatDateTime(proof.at)}</span>
-      ) : null}
+      {proof.at ? <span className="muted customer-verification-at">{formatDateTime(proof.at)}</span> : null}
     </div>
   );
 }
