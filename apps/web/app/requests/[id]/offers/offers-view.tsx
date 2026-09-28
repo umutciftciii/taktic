@@ -366,7 +366,9 @@ const OFFER_STATUS_LABELS: Record<OfferStatus, string> = {
  * Why a CANCELLED offer is on the list at all: the platform took the request
  * down and closed every offer on it. Read-only — no detail link, no accept.
  */
-const CLOSED_OFFER_TEXT = 'Talep kaldırıldığı için kapatıldı';
+// Neutral on purpose: a request removed by the platform and one cancelled
+// (PR #118) both close their offers, and this list does not know which.
+const CLOSED_OFFER_TEXT = 'Talep kapandığı için kapatıldı';
 
 function offerIsClosed(offer: RequestOfferPreview): boolean {
   return offer.status === 'CANCELLED';

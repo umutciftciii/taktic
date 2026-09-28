@@ -284,6 +284,8 @@ export type ServiceRequest = {
   submittedAt: string;
   createdAt: string;
   updatedAt: string;
+  /** Only on the detail read (`GET /service-requests/:id`); null until cancelled. */
+  cancellation?: RequestCancellation | null;
   category: {
     id: string;
     name: string;
@@ -565,7 +567,11 @@ export type Offer = {
   viewedAt: string | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
+  /** 'COMPETITOR_ACCEPTED' when an acceptance closed it; null when rejected by hand. */
+  rejectionReason: 'COMPETITOR_ACCEPTED' | null;
   withdrawnAt: string | null;
+  /** When a request cascade (removal or cancel) closed it. */
+  cancelledAt: string | null;
   provider: {
     id: string;
     businessName: string;
@@ -1557,6 +1563,9 @@ export function notificationTemplateLabel(template: string): string {
     'package-purchase-confirmation': 'Kredi paketi makbuzu',
     'request-expired-customer': 'Talep süresi doldu (müşteri)',
     'request-expired-provider': 'Talep süresi doldu (hizmet veren)',
+    'request-cancelled-customer': 'Talep iptal edildi (müşteri)',
+    'request-cancelled-winner': 'Talep iptal edildi (kabul edilen teklif)',
+    'request-cancelled-offer': 'Talep iptal edildi (diğer teklifler)',
     // Vitrin: the run's life, from the money to the end of the clock.
     'showcase-placement-activated': 'Vitrin: kart yayında',
     'showcase-lead-received': 'Vitrin: yeni talep',
@@ -3727,6 +3736,26 @@ export function listAdminUserRoles(userId: string) {
  * appears. The area names below are the only hand-written part, and a missing
  * one falls back to the raw prefix rather than to nothing.
  */
+/** The cancellation record a cancel writes (PR #118). Admin surfaces only. */
+export type RequestCancellation = {
+  actorKind: 'CUSTOMER' | 'STAFF';
+  actor: { id: string; name: string | null; email: string | null; role: string };
+  previousStatus: ServiceRequestStatus;
+  acceptedOfferId: string | null;
+  winnerRefundDecision: 'NOT_MATCHED' | 'REFUNDED' | 'WITHHELD' | 'NOTHING_TO_REFUND';
+  withholdReason: string | null;
+  closedOfferIds: string[];
+  refundedOfferIds: string[];
+  createdAt: string;
+};
+
+export const WINNER_REFUND_DECISION_LABELS: Record<RequestCancellation['winnerRefundDecision'], string> = {
+  NOT_MATCHED: 'Eşleşme yoktu',
+  REFUNDED: 'Kazanan teklifin kredisi iade edildi',
+  WITHHELD: 'Kazanan teklifin kredisi iade edilmedi (gerekçeli)',
+  NOTHING_TO_REFUND: 'Kazanan teklif için iade edilecek kredi yoktu',
+};
+
 export function adminPermissionLabel(permission: AdminPermission): {
   area: string;
   action: string;
@@ -3798,6 +3827,14 @@ export function adminPermissionLabel(permission: AdminPermission): {
   }
   if (permission === 'PROMOTION_ELIGIBILITY_REVIEW') {
     return { area: 'Kampanya', action: 'promosyon uygunluk incelemesi ve kararı' };
+  }
+
+  // PR #118: the operations cancel and its one audited exception.
+  if (permission === 'REQUESTS_CANCEL') {
+    return { area: 'Talepler', action: 'iptal (eşleşmiş talep dahil; kredi iadeleriyle)' };
+  }
+  if (permission === 'REQUESTS_CANCEL_WITHOUT_REFUND') {
+    return { area: 'Talepler', action: 'kazanan teklifin kredisini iade etmeden iptal (gerekçe zorunlu)' };
   }
 
   const parts = permission.split('_');

@@ -72,20 +72,35 @@ describe('removal availability and its reason', () => {
     expect(reason).not.toContain('İptal');
   });
 
-  it('MATCHED names the cancel only as a risk awaiting a product decision, not as an alternative', () => {
+  it('MATCHED names the operations cancel with its decided consequences, and that the customer cannot', () => {
     const reason = removalUnavailableReason('MATCHED', 'offer-1') ?? '';
     expect(reason).toContain('eşleşmiş talep reddedilemez');
-    expect(reason).toContain('bir ret karşılığı değildir');
-    expect(reason).toContain('kabul edilen teklif kabul edilmiş kalır');
-    expect(reason).toContain('kredisi iade edilmez');
-    expect(reason).toContain('kimseye bildirim gitmez');
-    expect(reason).toContain('ürün kararı bekliyor');
+    expect(reason).toContain('iptal yetkisi olan yöneticinin');
+    expect(reason).toContain('kazanan teklifin kredisi varsayılan olarak iade edilir');
+    expect(reason).toContain('iadesiz iptal ayrı yetki ve gerekçe ister');
+    expect(reason).toContain('Müşteri eşleşmiş talebi iptal edemez');
+    // The pre-contract wording must not come back.
+    expect(reason).not.toContain('kabul edilmiş kalır');
+    expect(reason).not.toContain('ürün kararı bekliyor');
     expect(reason).not.toMatch(RECOMMENDS_CANCEL);
   });
+
+  // PR #118 review, item 6: a closed request that still carries its match
+  // is answered as closed — never "matched, can be cancelled".
+  it.each(['COMPLETED', 'CANCELLED', 'EXPIRED', 'REJECTED'])(
+    '%s with a matchedOfferId is answered as closed, not as matched',
+    (status) => {
+      const reason = removalUnavailableReason(status, 'offer-1') ?? '';
+      expect(reason).toBe(removalUnavailableReason(status, null));
+      expect(reason).not.toContain('eşleşmiş talep reddedilemez');
+      expect(reason).not.toContain('“İptal et”');
+    },
+  );
 
   it('DRAFT: not removable, takes no offers', () => {
     const reason = removalUnavailableReason('DRAFT', null);
     expect(reason).toContain('taslak');
     expect(reason).toContain('teklif almadığı');
+    expect(reason).toContain('İptal yetkisi olan yönetici');
   });
 });

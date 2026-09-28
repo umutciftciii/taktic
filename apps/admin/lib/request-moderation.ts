@@ -60,22 +60,21 @@ export function isRemovable(status: string, matchedOfferId: string | null): bool
  * Why a request cannot be rejected or removed, and what — if anything — the
  * API still lets an operator do with it. Null when it can be removed.
  *
- * Deliberately not a pointer to "İptal et" as a substitute:
  * - a closed request (COMPLETED, CANCELLED, EXPIRED, REJECTED) cannot be
- *   cancelled either — `POST /:id/cancel` refuses every terminal status;
- * - a matched request can be cancelled by a super admin, but what that does to
- *   the accepted offer, its credit and the people involved is an open product
- *   decision (ADMIN-ACTIONS-005 report K2–K5), so it is described as a risk,
- *   not offered as the rejection's alternative;
+ *   cancelled either — `POST /:id/cancel` refuses every terminal status — and
+ *   is answered as closed even when it still carries `matchedOfferId`;
+ * - a matched request is ended by the operations cancel (REQUESTS_CANCEL),
+ *   whose consequences are now decided (PR #118 contract): the accepted offer
+ *   closes, its credit comes back by default, losing offers are refunded,
+ *   everyone is notified. The customer cannot cancel it;
  * - a draft has not been sent and takes no offers.
  */
 export function removalUnavailableReason(status: string, matchedOfferId: string | null): string | null {
   if (isRemovable(status, matchedOfferId)) return null;
 
-  if (status === 'MATCHED' || matchedOfferId !== null) {
-    return 'Talep bir teklifle eşleşmiş; eşleşmiş talep reddedilemez ve şikayetle kaldırılamaz. Eşleşmeyi geri alan bir işlem henüz yok (ADMIN-ACTIONS-005). Süper yöneticinin “İptal et” işlemi talebi kapatır ama bir ret karşılığı değildir: kabul edilen teklif kabul edilmiş kalır, kredisi iade edilmez ve kimseye bildirim gitmez. Bu sonuçlar ürün kararı bekliyor.';
-  }
-
+  // Closed first, whatever the row still points at: a COMPLETED, CANCELLED,
+  // EXPIRED or REJECTED request keeps `matchedOfferId` as the record of a
+  // match, and none of them can be cancelled (PR #118 review, item 6).
   switch (status) {
     case 'REJECTED':
       return 'Talep zaten reddedilmiş; yayında değil. Şikayet sonucu kaldırıldıysa Şikayet sekmesinden geri açılabilir.';
@@ -85,9 +84,15 @@ export function removalUnavailableReason(status: string, matchedOfferId: string 
       return 'Talep iptal edildi. Kapanmış talep reddedilemez, kaldırılamaz ve yeniden açılamaz; bu ekrandan yapılabilecek bir durum işlemi yok.';
     case 'EXPIRED':
       return 'Talebin süresi doldu. Kapanmış talep reddedilemez, kaldırılamaz ve iptal edilemez; bu ekrandan yapılabilecek bir durum işlemi yok.';
-    case 'DRAFT':
-      return 'Talep henüz müşteri tarafından gönderilmedi (taslak). Taslak reddedilemez ve şikayetle kaldırılamaz; teklif almadığı için kapatılacak teklif ya da iade edilecek kredi de yok. Süper yönetici taslağı “İptal et” ile kapatabilir.';
-    default:
-      return 'Talep bu durumdan reddedilemez ve şikayetle kaldırılamaz.';
   }
+
+  if (status === 'MATCHED' || matchedOfferId !== null) {
+    return 'Talep bir teklifle eşleşmiş; eşleşmiş talep reddedilemez ve şikayetle kaldırılamaz. Eşleşmeyi sonlandıran işlem, iptal yetkisi olan yöneticinin “İptal et” işlemidir: kabul edilen teklif kapatılır, kazanan teklifin kredisi varsayılan olarak iade edilir (iadesiz iptal ayrı yetki ve gerekçe ister), kazanamayan tekliflerin kredileri iade edilir ve taraflara bildirim gider. Müşteri eşleşmiş talebi iptal edemez.';
+  }
+
+  if (status === 'DRAFT') {
+    return 'Talep henüz müşteri tarafından gönderilmedi (taslak). Taslak reddedilemez ve şikayetle kaldırılamaz; teklif almadığı için kapatılacak teklif ya da iade edilecek kredi de yok. İptal yetkisi olan yönetici taslağı “İptal et” ile kapatabilir.';
+  }
+
+  return 'Talep bu durumdan reddedilemez ve şikayetle kaldırılamaz.';
 }

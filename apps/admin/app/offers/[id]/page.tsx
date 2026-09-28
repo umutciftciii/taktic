@@ -51,9 +51,9 @@ import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
  * A decided offer is offered nothing either: since API-GUARD-OFFER-001
  * (PR #119) the endpoint moves an offer only out of SUBMITTED, VIEWED or
  * SHORTLISTED, and refuses an ACCEPTED or REJECTED one with 409
- * OFFER_ACTION_NOT_ALLOWED. Cancelling a match is ADMIN-ACTIONS-005 and does
- * not exist yet. A button the API is certain to refuse would only lead to a
- * refusal, so the screen says why instead.
+ * OFFER_ACTION_NOT_ALLOWED. A match ends through the request's operations
+ * cancel (PR #118), not here. A button the API is certain to refuse would only
+ * lead to a refusal, so the screen says why instead.
  *
  * The API still decides every case. When the row moved after the page was
  * drawn, the 409 lands back here as `?statusError=` (lib/status-conflicts.ts)
@@ -721,9 +721,9 @@ function OperationsList({
     notes.push(`Teklif “${statusLabel(offer.status)}” durumunda; durumu artık değiştirilemez.`);
   } else if (canUpdateStatus && isAccepted) {
     // The API refuses any move out of ACCEPTED (OFFER_ACTION_NOT_ALLOWED);
-    // cancelling the match is ADMIN-ACTIONS-005 and does not exist yet.
+    // the match ends through the request's operations cancel (PR #118).
     notes.push(
-      'Bu teklif kabul edildi ve talep bu teklifle eşleşti. Kabul edilmiş teklifin durumu buradan değiştirilemez; eşleşmeyi iptal etmek ayrı bir işlemdir ve henüz yok.',
+      'Bu teklif kabul edildi ve talep bu teklifle eşleşti. Kabul edilmiş teklifin durumu buradan değiştirilemez; eşleşme, talep sayfasındaki “İptal et” ile sona erer (iptal yetkisi gerekir).',
     );
   } else if (canUpdateStatus && offer.status === 'REJECTED') {
     notes.push('Bu teklif reddedildi. Reddedilmiş teklif yeniden açılamaz, kısa listeye alınamaz ve kabul edilemez.');
@@ -876,6 +876,11 @@ function OfferHistory({ offer }: { offer: Offer }) {
     { key: 'accepted', label: 'Kabul edildi', at: offer.acceptedAt },
     { key: 'rejected', label: 'Reddedildi', at: offer.rejectedAt },
     { key: 'withdrawn', label: 'Geri çekildi', at: offer.withdrawnAt, actor: offer.provider.businessName },
+    {
+      key: 'cancelled',
+      label: offer.acceptedAt ? 'Talep iptal edildi; kabul edilen teklif kapatıldı' : 'Talep kapandığı için teklif kapatıldı',
+      at: offer.cancelledAt,
+    },
     {
       key: 'refunded',
       label: 'Kredi iadesi yapıldı',

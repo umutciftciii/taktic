@@ -110,8 +110,8 @@ test.describe('admin action visibility', () => {
       await admin.gotoAdmin(`/requests/${request.id}?tab=teklifler`);
       await expect(admin.page.getByTestId('request-offers-panel')).toBeVisible();
       await admin.gotoAdmin(`/requests/${request.id}`);
-      // Completing and cancelling are CUSTOMER / SUPER_ADMIN routes; no role
-      // holds them, so no role is offered them.
+      // Completing is a CUSTOMER / SUPER_ADMIN route no role holds; cancelling
+      // needs REQUESTS_CANCEL (PR #118), which this role does not hold.
       await expect(admin.page.getByRole('button', { name: 'İptal et' })).toHaveCount(0);
       await expect(admin.page.getByRole('button', { name: 'Hizmeti tamamlandı işaretle' })).toHaveCount(0);
       await expect(admin.page.getByRole('button', { name: 'Kaliteyi yeniden hesapla' })).toHaveCount(0);

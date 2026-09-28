@@ -203,6 +203,16 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   // nothing. It carries the package and the state, never an operator's words,
   // an amount the payment provider reported, a reference or a text snapshot.
   'package-refund-status',
+  // PR #118 (ADMIN-DESIGN-001 Faz 3A): the three notices a request
+  // cancellation owes, enqueued in the cancel's own transaction and rebuilt
+  // from its audit row. The customer is told it is done; the provider whose
+  // accepted offer was ended is told whether the credit came back; every other
+  // provider whose offer the cancel closed or refunded is told what happened to
+  // their offer. No operator's reason, no other party's contact details, and
+  // nothing about any other provider.
+  'request-cancelled-customer',
+  'request-cancelled-winner',
+  'request-cancelled-offer',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -288,6 +298,12 @@ export function transactionalSubject(
       return withSuffix('Talebinizin süresi doldu', text(data.requestNumber));
     case 'request-expired-provider':
       return withSuffix('Teklif verdiğiniz talebin süresi doldu', text(data.requestNumber));
+    case 'request-cancelled-customer':
+      return withSuffix('Talebiniz iptal edildi', text(data.requestNumber));
+    case 'request-cancelled-winner':
+      return withSuffix('Kabul edilen teklifinizin talebi iptal edildi', text(data.requestNumber));
+    case 'request-cancelled-offer':
+      return withSuffix('Teklif verdiğiniz talep iptal edildi', text(data.requestNumber));
     case 'package-purchase-confirmation':
       return 'Kredi paketiniz hesabınıza yüklendi';
     case 'showcase-placement-activated':
@@ -432,6 +448,12 @@ export function buildDocument(
       return requestPublished(subject, fullName, data);
     case 'offer-received':
       return offerReceived(subject, fullName, data);
+    case 'request-cancelled-customer':
+      return requestCancelledCustomer(subject, fullName, data);
+    case 'request-cancelled-winner':
+      return requestCancelledWinner(subject, fullName, data);
+    case 'request-cancelled-offer':
+      return requestCancelledOffer(subject, fullName, data);
     case 'match-customer':
       return matchCustomer(subject, fullName, data);
     case 'request-available':
@@ -2907,6 +2929,125 @@ function packageRefundStatus(subject: string, fullName: string, data: Data): Ema
       note(
         'TakTic hesabınızda otomatik bir para veya kredi hareketi yapılmaz; ödeme iadesi yalnız ödeme sağlayıcısı üzerinden işlenir.',
       ),
+    ]),
+  };
+}
+
+// ───────────── request.cancelled → customer, winner, other offers ─────────────
+
+/**
+ * The customer's confirmation. Says who cancelled — the customer themselves or
+ * the platform — and nothing about any provider or any money.
+ */
+function requestCancelledCustomer(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const byStaff = text(data.cancelledBy) === 'STAFF';
+  const matched = text(data.matched) === '1';
+  const opening = `${requestNumber ? `${requestNumber} numaralı talebiniz` : 'Talebiniz'} ${
+    byStaff ? 'platform tarafından iptal edildi.' : 'isteğiniz üzerine iptal edildi.'
+  }`;
+
+  return {
+    subject,
+    preheader: byStaff ? 'Talebiniz platform tarafından iptal edildi.' : 'Talebinizi iptal ettiniz.',
+    audience: 'HİZMET ALAN',
+    kicker: 'İptal edildi',
+    heading: 'Talebiniz iptal edildi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${opening} Talep artık hizmet verenlere gösterilmez ve yeni teklif alamaz.` +
+          (matched ? ' Kabul ettiğiniz teklifle eşleşme de sona erdi.' : ''),
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', requestNumber),
+        row('Kategori', text(data.categoryName)),
+        row('İptal zamanı', formatDateTime(data.cancelledAt)),
+      ]),
+      spacer(24),
+      cta('Yeni talep oluştur', text(data.newRequestUrl), 'primary'),
+      spacer(20),
+      note('Teklif veren hizmet verenlere talebin iptal edildiği bildirildi.'),
+    ]),
+  };
+}
+
+/**
+ * The provider whose accepted offer the cancel ended. Whether the credit came
+ * back is stated as a fact; an operator's reason for keeping it is never sent.
+ */
+function requestCancelledWinner(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const refundedCredits = int(data.refundedCredits);
+  const creditLine =
+    refundedCredits !== null && refundedCredits > 0
+      ? `Bu teklif için harcadığınız ${refundedCredits} kredi bakiyenize iade edildi.`
+      : text(data.withheld) === '1'
+        ? 'Bu teklif için harcanan kredi iade edilmedi.'
+        : 'Bu teklif için iade edilecek bir kredi harcaması bulunmuyor.';
+
+  return {
+    subject,
+    preheader: 'Kabul edilen teklifinizin talebi iptal edildi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'İptal edildi',
+    heading: 'Kabul edilen teklifinizin talebi iptal edildi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${requestNumber ? `${requestNumber} numaralı talep` : 'Talep'} iptal edildi; bu talep için kabul edilen ` +
+          'teklifiniz kapatıldı ve eşleşme sona erdi. Müşteri iletişim bilgileri ve mesajlaşma artık açık değil.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Konum', joinNonEmpty([text(data.district), text(data.city)], ', ')),
+        row('Teklifiniz', formatMoneyMinor(int(data.offerAmountMinor))),
+        row('Kredi', creditLine),
+      ]),
+      spacer(24),
+      cta('Teklifi görüntüle', text(data.offerUrl), 'primary'),
+    ]),
+  };
+}
+
+/**
+ * Every other provider whose offer the cancel closed or whose credit it gave
+ * back. Never says who else offered, who won, or that anyone did.
+ */
+function requestCancelledOffer(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const refundedCredits = int(data.refundedCredits);
+  const closed = text(data.closed) === '1';
+
+  return {
+    subject,
+    preheader: 'Teklif verdiğiniz talep iptal edildi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'İptal edildi',
+    heading: 'Teklif verdiğiniz talep iptal edildi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${requestNumber ? `${requestNumber} numaralı talep` : 'Talep'} iptal edildi` +
+          (closed ? ' ve bu talebe verdiğiniz teklif kapatıldı.' : '.') +
+          (refundedCredits !== null && refundedCredits > 0
+            ? ` Teklif için harcadığınız ${refundedCredits} kredi bakiyenize iade edildi.`
+            : ''),
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Konum', joinNonEmpty([text(data.district), text(data.city)], ', ')),
+        row('Teklifiniz', formatMoneyMinor(int(data.offerAmountMinor))),
+        row('İade edilen kredi', refundedCredits !== null && refundedCredits > 0 ? `${refundedCredits} kredi` : null),
+      ]),
+      spacer(24),
+      cta('Uygun talepleri gör', text(data.requestsUrl), 'primary'),
     ]),
   };
 }

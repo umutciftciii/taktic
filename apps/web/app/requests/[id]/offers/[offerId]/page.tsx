@@ -321,7 +321,7 @@ function ActionButton({
 }
 
 /** The same sentence the offers list uses, so the two screens agree. */
-const CLOSED_OFFER_TEXT = 'Talep kaldırıldığı için kapatıldı.';
+const CLOSED_OFFER_TEXT = 'Talep kapandığı için kapatıldı.';
 
 /**
  * "Kapatıldı" rather than the generic "İptal": the customer did not cancel

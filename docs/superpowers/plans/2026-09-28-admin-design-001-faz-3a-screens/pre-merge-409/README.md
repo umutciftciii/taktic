@@ -1,4 +1,6 @@
-# Faz 3A — 409 bantları ve iptal diyaloğu (merge öncesi)
+# Faz 3A — 409 bantları ve iptal diyaloğu (merge öncesi, head `08ab7c86`)
+
+> **Yerini aldı:** iptal diyaloğu ve `request-409-not-removable` görüntüleri iptal sözleşmesinden önceki metni gösterir. Güncel hâlleri `../cancellation-contract/` klasöründe.
 
 Bu klasördeki görüntüler, PR #118'in main@4e1d1c98 ile birleştirilmiş ve 409 eşlemesi eklenmiş hâline aittir; üst klasördeki görüntüler daha eski head `b79f968a`'nındır ve bu ekranları içermez.
 

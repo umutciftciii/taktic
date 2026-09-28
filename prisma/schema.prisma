@@ -476,6 +476,7 @@ model User {
   operationsSettingsChanges       OperationsSettingsChange[]           @relation("OperationsSettingsChangedBy")
   customerMessageThreads          MessageThread[]                      @relation("MessageThreadCustomer")
   manualOfferRefunds              ManualOfferRefundAudit[]             @relation("ManualOfferRefundPerformedBy")
+  serviceRequestCancellations     ServiceRequestCancellation[]         @relation("ServiceRequestCancelledBy")
   providerMessageThreads          MessageThread[]                      @relation("MessageThreadProviderUser")
   sentMessages                    Message[]                            @relation("MessageSender")
   supportTickets                  SupportTicket[]                      @relation("SupportTicketRequester")
@@ -1030,22 +1031,23 @@ model ServiceRequest {
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
-  category               ServiceCategory        @relation(fields: [categoryId], references: [id])
-  entryCategory          ServiceCategory?       @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
-  customer               User?                  @relation(fields: [customerId], references: [id])
+  category               ServiceCategory             @relation(fields: [categoryId], references: [id])
+  entryCategory          ServiceCategory?            @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
+  customer               User?                       @relation(fields: [customerId], references: [id])
   answers                ServiceRequestAnswer[]
   offers                 Offer[]
-  matchedOffer           Offer?                 @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
+  matchedOffer           Offer?                      @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
   phoneVerifications     PhoneVerification[]
   notificationLogs       NotificationLog[]
   contactRevealEvent     ContactRevealEvent?
   messageThread          MessageThread?
+  cancellation           ServiceRequestCancellation?
   /// Restrict both ways. The lead carries the customer's urgency choice, the
   /// SLA they were promised and their fallback decision; none of it may be
   /// removed by removing something else.
-  showcaseLead           ShowcaseLead?          @relation("ServiceRequestShowcaseLead", fields: [showcaseLeadId], references: [id], onDelete: Restrict)
-  showcaseLeadSource     ShowcaseLead?          @relation("ShowcaseLeadRequest")
-  directShowcaseProvider ProviderProfile?       @relation("ServiceRequestDirectShowcaseProvider", fields: [directShowcaseProviderId], references: [id], onDelete: Restrict)
+  showcaseLead           ShowcaseLead?               @relation("ServiceRequestShowcaseLead", fields: [showcaseLeadId], references: [id], onDelete: Restrict)
+  showcaseLeadSource     ShowcaseLead?               @relation("ShowcaseLeadRequest")
+  directShowcaseProvider ProviderProfile?            @relation("ServiceRequestDirectShowcaseProvider", fields: [directShowcaseProviderId], references: [id], onDelete: Restrict)
   reports                ServiceRequestReport[]
   /// A list only because Prisma's one-to-one needs a scalar `@unique` on the
   /// review's side and the review's uniqueness is `(requestId, providerId)`.
@@ -1257,21 +1259,21 @@ model ServiceRequestAnswer {
 }
 
 model ProviderProfile {
-  id              String         @id @default(cuid())
+  id                       String         @id @default(cuid())
   // A platform account may own at most one provider profile. The column stays
   // nullable so guest (unclaimed) applications remain possible: PostgreSQL
   // treats NULLs as distinct in a unique index, so the constraint only binds
   // rows where userId IS NOT NULL.
-  userId          String?        @unique
-  businessName    String
-  contactName     String
-  phone           String
-  email           String?
+  userId                   String?        @unique
+  businessName             String
+  contactName              String
+  phone                    String
+  email                    String?
   /// Unverified free text from before CMP-006 PR-C, kept as it was written
   /// (never converted into a canonical registration). Masked in every
   /// response; the raw value only through the audited sensitive read.
-  taxType         String?
-  taxNumber       String?
+  taxType                  String?
+  taxNumber                String?
   /// The single service location a provider used to have, kept as it is.
   ///
   /// This is a historical field, not a newly-defined one. Before
@@ -1294,10 +1296,10 @@ model ProviderProfile {
   ///
   /// Still required and still canonical, resolved against the shipped location
   /// list like every other place name the product stores.
-  city            String
-  district        String
-  addressNote     String?
-  description     String?
+  city                     String
+  district                 String
+  addressNote              String?
+  description              String?
   /// CMP-006 PR-D. The channel the application behind this profile arrived
   /// through, written once by the server when the application row is created
   /// — never read from a client header, query or body. The web application
@@ -1306,13 +1308,13 @@ model ProviderProfile {
   /// It is the channel of PROVIDER_APPROVED: the approving request is the
   /// operator's, not the business's. Immutable after insert (trigger
   /// `ProviderProfile_application_source_channel_immutable`).
-  applicationSourceChannel SourceChannel @default(UNKNOWN)
-  status          ProviderStatus @default(PENDING_REVIEW)
-  moderationNote  String?
-  rejectionReason String?
-  approvedAt      DateTime?
-  rejectedAt      DateTime?
-  suspendedAt     DateTime?
+  applicationSourceChannel SourceChannel  @default(UNKNOWN)
+  status                   ProviderStatus @default(PENDING_REVIEW)
+  moderationNote           String?
+  rejectionReason          String?
+  approvedAt               DateTime?
+  rejectedAt               DateTime?
+  suspendedAt              DateTime?
   /// When a guest application became owned by a platform account through the
   /// claim flow, and never for any other reason.
   ///
@@ -1322,9 +1324,9 @@ model ProviderProfile {
   /// `userId` says who owns it; this says whether a claim is how that happened.
   ///
   /// Written once, inside the claim transaction, and never cleared.
-  claimedAt       DateTime?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  claimedAt                DateTime?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
 
   user                            User?                                @relation(fields: [userId], references: [id])
   serviceCategories               ProviderServiceCategory[]
@@ -1505,11 +1507,12 @@ model Offer {
   rejectedAt                  DateTime?
   rejectionReason             OfferRejectionReason?
   withdrawnAt                 DateTime?
-  /// When the platform closed this offer because its request was taken off the
-  /// market. Written together with `status: CANCELLED` by
-  /// ServiceRequestsService.rejectRequestInTransaction — the only writer of
-  /// CANCELLED in the product. NULL on every offer that was never closed that
-  /// way, which is every offer written before this column existed.
+  /// When the platform closed this offer because its request ended without it:
+  /// taken off the market (ServiceRequestsService.rejectRequestInTransaction)
+  /// or cancelled (ServiceRequestsService.cancelServiceRequest). Written
+  /// together with `status: CANCELLED`; those two are the only writers. An
+  /// accepted offer closed by a cancel keeps its `acceptedAt` as the record of
+  /// the acceptance. NULL on every offer never closed that way.
   cancelledAt                 DateTime?
   createdAt                   DateTime                @default(now())
   updatedAt                   DateTime                @updatedAt
@@ -2218,6 +2221,59 @@ model ProviderCreditTransaction {
 /// ledger entry and the offer update, so a manual refund without an operator's
 /// name on it cannot exist. `performedById` is non-nullable for the same
 /// reason — an operations action with no operator is not an audit record.
+/// Who cancelled a request.
+enum ServiceRequestCancelActor {
+  /// The customer who owns the request, before any offer was accepted.
+  CUSTOMER
+  /// An operator holding REQUESTS_CANCEL, or a SUPER_ADMIN.
+  STAFF
+}
+
+/// What a cancel did with the accepted offer's spent credit.
+enum CancelWinnerRefundDecision {
+  /// The request was not matched: there was no winning offer.
+  NOT_MATCHED
+  /// The winning offer's credit was given back by this cancel (the default).
+  REFUNDED
+  /// Kept spent on purpose, by an operator holding REQUESTS_CANCEL_WITHOUT_REFUND,
+  /// with the reason recorded beside it.
+  WITHHELD
+  /// Refund chosen, but nothing to give back: the offer spent no one-time
+  /// credit, or its credit had already come back another way.
+  NOTHING_TO_REFUND
+}
+
+/// One row per cancelled request, written in the cancel's own transaction.
+///
+/// The record of the decision, not of the money: the ledger rows are the money
+/// and they point at their offers. This row says who cancelled, whether a
+/// match was ended, what was decided about the winner's credit and why, and
+/// which offers the cancel closed or refunded — which is also what the
+/// cancellation notices are rebuilt from. UNIQUE on `requestId`: a request is
+/// cancelled once.
+model ServiceRequestCancellation {
+  id                   String                     @id @default(cuid())
+  requestId            String                     @unique
+  actorKind            ServiceRequestCancelActor
+  actorUserId          String
+  /// The request's status just before the cancel.
+  previousStatus       ServiceRequestStatus
+  /// The accepted offer the cancel ended, when the request was matched.
+  acceptedOfferId      String?
+  winnerRefundDecision CancelWinnerRefundDecision
+  /// Required when the decision is WITHHELD, NULL otherwise. Operator text:
+  /// admin surfaces only, never an outbound message.
+  withholdReason       String?
+  /// Offers this cancel moved to CANCELLED (the accepted one included).
+  closedOfferIds       String[]
+  /// Offers whose credit this cancel gave back (the accepted one included when refunded).
+  refundedOfferIds     String[]
+  createdAt            DateTime                   @default(now())
+
+  request ServiceRequest @relation(fields: [requestId], references: [id])
+  actor   User           @relation("ServiceRequestCancelledBy", fields: [actorUserId], references: [id])
+}
+
 model ManualOfferRefundAudit {
   id                  String   @id @default(cuid())
   /// UNIQUE, and that is the point: this is a second, independent
@@ -4662,6 +4718,15 @@ enum AdminPermission {
   REQUESTS_QUALITY_RECALC
   /// Republishes a request to providers, so it causes credit spends.
   REQUESTS_REOPEN
+  /// Cancels a request on the operations side, a matched one included. The
+  /// cancel closes the request's offers and gives their spent credit back —
+  /// the accepted offer's too, unless REQUESTS_CANCEL_WITHOUT_REFUND is also
+  /// held and used with a written reason.
+  REQUESTS_CANCEL
+  /// Cancels a matched request while keeping the winning offer's credit spent.
+  /// Only ever together with REQUESTS_CANCEL, and only with a reason that the
+  /// cancellation audit keeps.
+  REQUESTS_CANCEL_WITHOUT_REFUND
   REQUEST_REPORTS_READ
   REQUEST_REPORTS_RESOLVE
 

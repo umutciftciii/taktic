@@ -18,6 +18,8 @@ import {
   REMOVAL_REASON_CUSTOMER_LABELS,
   REPORT_REASON_ADMIN_LABELS,
   REPORT_REASON_KEYS,
+  type RequestCancellation,
+  WINNER_REFUND_DECISION_LABELS,
   reportReasonLabel,
   reportResolutionLabel,
   RequestReport,
@@ -31,6 +33,7 @@ import {
   urgencyLabel,
 } from '../../../lib/api';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { CancelRequestForm, type CancelOfferCounts } from './cancel-request-form';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailHeader } from '../../../components/detail-header';
 import { EmptyState } from '../../../components/empty-state';
@@ -50,7 +53,6 @@ import {
 } from '../../../lib/request-moderation';
 import { requestStatusErrorMessage } from '../../../lib/status-conflicts';
 import {
-  cancelRequestAction,
   completeRequestAction,
   recalculateRequestQualityAction,
   reopenRequestAction,
@@ -86,7 +88,7 @@ import {
 
 type RequestDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; statusError?: string; reportError?: string }>;
+  searchParams: Promise<{ tab?: string; statusError?: string; reportError?: string; cancelled?: string }>;
 };
 
 type TabKey = '' | 'teklifler' | 'sikayet' | 'gecmis';
@@ -143,7 +145,7 @@ function plannedExpiry(request: ServiceRequest): Date | null {
 export default async function RequestDetailPage({ params, searchParams }: RequestDetailPageProps) {
   const { can, isSuperAdmin } = await requireAdmin('REQUESTS_READ');
   const { id } = await params;
-  const { tab: rawTab, statusError, reportError } = await searchParams;
+  const { tab: rawTab, statusError, reportError, cancelled: justCancelled } = await searchParams;
   const request = await fetchOrNotFound(() => apiFetch<ServiceRequest>(`/service-requests/${id}`));
 
   // Each secondary block belongs to another permission. It is read only when
@@ -160,11 +162,15 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
   const canReopenRequest = can('REQUESTS_REOPEN');
   const canOpenProviders = can('PROVIDERS_READ_DETAIL');
   const canOpenReviews = can('PROVIDER_REVIEWS_READ');
-  // Completing and cancelling are customer-or-SUPER_ADMIN routes
-  // (`@Roles(CUSTOMER, SUPER_ADMIN)`), not permissions. No role grants them.
-  // The customer's review is read on the customer's own route, which a
-  // SUPER_ADMIN may also read and nobody else.
-  const canRunLifecycle = isSuperAdmin;
+  // Completing is a customer-or-SUPER_ADMIN route (`@Roles(CUSTOMER,
+  // SUPER_ADMIN)`); no role grants it. Cancelling is REQUESTS_CANCEL since
+  // PR #118, and keeping the winner's credit on a matched cancel is
+  // REQUESTS_CANCEL_WITHOUT_REFUND on top of it. The customer's review is read
+  // on the customer's own route, which a SUPER_ADMIN may also read and nobody
+  // else.
+  const canComplete = isSuperAdmin;
+  const canCancel = can('REQUESTS_CANCEL');
+  const canWithholdRefund = can('REQUESTS_CANCEL', 'REQUESTS_CANCEL_WITHOUT_REFUND');
   const canReadReview = isSuperAdmin;
 
   const [offers, reportsResult, reviewState, contactReveal] = await Promise.all([
@@ -376,6 +382,12 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
 
       <Tabs label="Talep sekmeleri" items={tabs} active={activeTab} path={path} testId="request-tabs" />
 
+      {justCancelled === '1' && request.status === 'CANCELLED' ? (
+        <div className="notice-success detail-notice" role="status" data-testid="request-cancelled-notice">
+          Talep iptal edildi. Teklif kapanışları, kredi iadeleri ve bildirimler iptal kaydında listeleniyor.
+        </div>
+      ) : null}
+
       {activeTab === '' ? (
         <div className="detail-panel" data-testid="request-panel-bilgiler">
           <div className="detail-panel-grid">
@@ -383,7 +395,9 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
               request={request}
               statusError={statusError}
               canChangeStatus={canChangeStatus}
-              canRunLifecycle={canRunLifecycle}
+              canComplete={canComplete}
+              canCancel={canCancel}
+              canWithholdRefund={canWithholdRefund}
               canRemove={canRemove}
               removalBlockedReason={removalBlockedReason}
               offers={offers}
@@ -395,6 +409,7 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
               canReadContactReveal={canReadContactReveal}
               contactReveal={contactReveal}
             />
+            {request.cancellation ? <CancellationCard cancellation={request.cancellation} canReadOffers={canReadOffers} /> : null}
             <SectionCard title="Müşteri ne istiyor" subtitle="Müşterinin formda yazdıkları.">
               {request.description ? (
                 <p className="detail-prose request-description">{request.description}</p>
@@ -585,7 +600,11 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
               offers.length === 0
                 ? 'Onaylı talebe teklif geldikçe burada listelenir.'
                 : request.matchedOfferId
-                  ? 'Müşteri bir teklifi kabul etti; talep eşleşti.'
+                  ? request.status === 'CANCELLED'
+                    ? 'Kabul edilen teklifle eşleşme, talebin iptaliyle sona erdi.'
+                    : request.status === 'MATCHED' || request.status === 'COMPLETED'
+                      ? 'Müşteri bir teklifi kabul etti; talep eşleşti.'
+                      : 'Talep kapandı; kayıtta bir kabul edilmiş teklif var.'
                   : `Müşteri ${offers.length} teklifi görebilir, henüz birini seçmedi.`
             }
             actions={
@@ -784,7 +803,9 @@ function StatusCard({
   request,
   statusError,
   canChangeStatus,
-  canRunLifecycle,
+  canComplete,
+  canCancel,
+  canWithholdRefund,
   canRemove,
   removalBlockedReason,
   offers,
@@ -792,7 +813,9 @@ function StatusCard({
   request: ServiceRequest;
   statusError: string | undefined;
   canChangeStatus: boolean;
-  canRunLifecycle: boolean;
+  canComplete: boolean;
+  canCancel: boolean;
+  canWithholdRefund: boolean;
   canRemove: boolean;
   removalBlockedReason: string | null;
   offers: Offer[] | null;
@@ -856,26 +879,27 @@ function StatusCard({
         </p>
       ) : null}
 
-      {canRunLifecycle ? (
+      {canComplete || canCancel ? (
         <div className="status-action-list">
-          <form action={completeRequestAction} className="status-quick-form">
-            <input type="hidden" name="id" value={request.id} />
-            <button
-              className="btn btn-primary btn-sm status-action-btn"
-              type="submit"
-              disabled={request.status !== 'MATCHED'}
-              aria-disabled={request.status !== 'MATCHED'}
-              title={request.status === 'MATCHED' ? undefined : 'Yalnız eşleşmiş talep tamamlanabilir.'}
-            >
-              <span className="status-action-label">Hizmeti tamamlandı işaretle</span>
-            </button>
-          </form>
-          <form action={cancelRequestAction} className="status-quick-form">
-            <input type="hidden" name="id" value={request.id} />
-            {isTerminalStatus(request.status) ? (
+          {canComplete ? (
+            <form action={completeRequestAction} className="status-quick-form">
+              <input type="hidden" name="id" value={request.id} />
+              <button
+                className="btn btn-primary btn-sm status-action-btn"
+                type="submit"
+                disabled={request.status !== 'MATCHED'}
+                aria-disabled={request.status !== 'MATCHED'}
+                title={request.status === 'MATCHED' ? undefined : 'Yalnız eşleşmiş talep tamamlanabilir.'}
+              >
+                <span className="status-action-label">Hizmeti tamamlandı işaretle</span>
+              </button>
+            </form>
+          ) : null}
+          {canCancel ? (
+            isTerminalStatus(request.status) ? (
               <button
                 className="btn btn-ghost btn-sm status-action-btn"
-                type="submit"
+                type="button"
                 disabled
                 aria-disabled
                 title="Talep kapanmış durumda."
@@ -883,16 +907,14 @@ function StatusCard({
                 <span className="status-action-label">İptal et</span>
               </button>
             ) : (
-              <ConfirmDialog
-                triggerLabel="İptal et"
-                triggerClassName="btn btn-destructive btn-sm status-action-btn"
-                title="Talep iptal edilsin mi?"
-                consequence={<CancelConsequence request={request} offers={offers} />}
-                confirmLabel="Evet, iptal et"
-                testId="request-cancel"
+              <CancelRequestForm
+                requestId={request.id}
+                matchedOfferId={request.matchedOfferId}
+                canWithhold={canWithholdRefund}
+                counts={cancelOfferCounts(request, offers)}
               />
-            )}
-          </form>
+            )
+          ) : null}
         </div>
       ) : null}
 
@@ -973,73 +995,90 @@ function StatusCard({
 }
 
 /**
- * What `POST /service-requests/:id/cancel` really does, per the ADMIN-ACTIONS-005
- * risk report (docs/superpowers/specs/2026-09-28-admin-actions-005-cancelled-risk-report.md
- * §1–§3): the status and the vitrin lead change, nothing else does. Offers,
- * credits and the match are left as they are and nobody is told — K2–K5 there
- * are open product decisions, so the dialog describes today's behaviour
- * instead of promising a different one.
- *
- * The automatic refund reads no offer or request status (unviewed-offer-refund
- * service), so an offer the customer never opened still gets its credit back
- * when its window closes; that is the one credit movement a cancel does not
- * stop. That includes the competitors an acceptance rejected
- * (COMPETITOR_ACCEPTED writes no refund block); the accepted offer itself is
- * viewed or refund-blocked and never comes back.
- *
- * On a matched request the acceptance normally closed every other live offer,
- * but the cancel does not rely on it: whatever is still open (an old row)
- * stays open, and the dialog counts it from the request's own offer list.
+ * What the cancel will find on this request, from the offer list the page
+ * already read (null when the session cannot read offers). Mirrors the API's
+ * cancelLoserOfferRule; a REJECTED offer counts as "rejected because another
+ * offer was accepted" only when its rejectionReason says COMPETITOR_ACCEPTED
+ * and the request is matched.
  */
-function CancelConsequence({ request, offers }: { request: ServiceRequest; offers: Offer[] | null }) {
-  const matched = request.status === 'MATCHED';
-  const others = offers?.filter((offer) => offer.id !== request.matchedOfferId) ?? null;
-  const liveOthers = others?.filter((offer) => LIVE_OFFER_STATUSES.has(offer.status)).length ?? null;
-  const rejectedOthers = others?.filter((offer) => offer.status === 'REJECTED').length ?? null;
+function cancelOfferCounts(request: ServiceRequest, offers: Offer[] | null): CancelOfferCounts {
+  if (!offers) return null;
+  const matched = request.matchedOfferId !== null;
+  const others = offers.filter((offer) => offer.id !== request.matchedOfferId);
+  const winner = offers.find((offer) => offer.id === request.matchedOfferId) ?? null;
+  const competitorRejected = matched
+    ? others.filter((offer) => offer.status === 'REJECTED' && offer.rejectionReason === 'COMPETITOR_ACCEPTED').length
+    : 0;
+  return {
+    live: others.filter((offer) => LIVE_OFFER_STATUSES.has(offer.status)).length,
+    competitorRejected,
+    otherRejected: others.filter((offer) => offer.status === 'REJECTED').length - competitorRejected,
+    winnerRefundable: Boolean(
+      winner && winner.creditSpentTransactionId && !winner.creditRefundedAt && winner.creditCost > 0,
+    ),
+    winnerCreditCost: winner?.creditCost ?? 0,
+  };
+}
+
+/** The cancellation record (PR #118): who, what was decided about the winner's credit, and why. */
+function CancellationCard({
+  cancellation,
+  canReadOffers,
+}: {
+  cancellation: RequestCancellation;
+  canReadOffers: boolean;
+}) {
+  const offerLink = (offerId: string) =>
+    canReadOffers ? (
+      <Link key={offerId} className="cell-link" href={`/offers/${offerId}`}>
+        #{offerId.slice(-8)}
+      </Link>
+    ) : (
+      <span key={offerId}>#{offerId.slice(-8)}</span>
+    );
+  const list = (ids: string[]) =>
+    ids.length === 0 ? '—' : ids.map((offerId, index) => [index > 0 ? ', ' : null, offerLink(offerId)]);
 
   return (
-    <>
-      <p>
-        Talep “İptal edildi” durumuna geçer ve hizmet verenlere gösterilmez. Vitrinden geldiyse işletmeyle açılan kayıt
-        da kapanır. İptal hiçbir teklifin durumunu değiştirmez ve kredi iade etmez.
-      </p>
-      {matched ? (
-        <>
-          <p>
-            Kabul edilen teklif “kabul edildi” olarak kalır ve kredisi iade edilmez. İletişim bilgileri ve mesajlaşma iki
-            taraf için de kapanır; iletişim paylaşımı kaydı denetim için saklanır.
-          </p>
-          <p data-testid="request-cancel-other-offers">
-            {liveOthers === null
-              ? 'Kabul anında reddedilen diğer teklifler reddedilmiş kalır. Kabul edilen dışında hâlâ açık bir teklif varsa (eski kayıt) o da açık kalır ve kredisi iade edilmez.'
-              : liveOthers > 0
-                ? `Bu talepte kabul edilen dışında ${liveOthers} açık teklif var (gönderildi, görüntülendi ya da kısa listede). İptal bunları kapatmaz: açık kalırlar ve kredileri bu işlemle iade edilmez.`
-                : 'Kabul edilen dışında açık teklif yok.'}
-            {rejectedOthers
-              ? ` ${rejectedOthers} teklif kabul anında reddedilmişti; iptal onların durumunu ve kredisini değiştirmez.`
-              : ''}
-          </p>
-        </>
-      ) : (
-        <p data-testid="request-cancel-other-offers">
-          {liveOthers === null
-            ? 'Açık teklifler (gönderildi, görüntülendi, kısa listede) kapatılmaz; açık kalırlar.'
-            : liveOthers > 0
-              ? `Bu talepteki ${liveOthers} açık teklif (gönderildi, görüntülendi, kısa listede) kapatılmaz; açık kalırlar.`
-              : 'Bu talepte açık teklif yok.'}{' '}
-          Açık teklifleri kapatıp kredilerini iade eden işlem “Talebi reddet”tir.
-        </p>
-      )}
-      <p>
-        Kredi hareketi olarak yalnız otomatik iade kuralı işlemeye devam eder: müşterinin hiç görmediği teklifler (reddedilmiş
-        olanlar dahil), kural kapsamındaysa süresi dolunca iptalden bağımsız olarak iade edilir. Görülmüş tekliflerin
-        {matched ? ' ve kabul edilen teklifin' : ''} kredisi iade edilmez.
-      </p>
-      <p>
-        Müşteriye ya da hizmet verenlere{matched ? ', kabul edilen teklifin sahibi dahil,' : ''} e-posta veya bildirim
-        gönderilmez. İptal geri alınamaz. Bunlar bugünkü davranıştır; değişip değişmeyeceği ürün kararı bekliyor.
-      </p>
-    </>
+    <SectionCard title="İptal kaydı" subtitle="İptali kimin yaptığı ve kredi kararları. Yalnız yöneticiler görür.">
+      <dl className="kv-list" data-testid="request-cancellation">
+        <div className="kv-row">
+          <dt>İptal eden</dt>
+          <dd>
+            {cancellation.actorKind === 'CUSTOMER' ? 'Müşteri' : 'Yönetici'} ·{' '}
+            {cancellation.actor.name ?? cancellation.actor.email ?? cancellation.actor.id}
+          </dd>
+        </div>
+        <div className="kv-row">
+          <dt>Zaman</dt>
+          <dd>{formatDateTime(cancellation.createdAt)}</dd>
+        </div>
+        <div className="kv-row">
+          <dt>Önceki durum</dt>
+          <dd>{requestStatusLabel(cancellation.previousStatus)}</dd>
+        </div>
+        <div className="kv-row">
+          <dt>Kazanan teklif</dt>
+          <dd data-testid="request-cancellation-decision">{WINNER_REFUND_DECISION_LABELS[cancellation.winnerRefundDecision]}</dd>
+        </div>
+        {cancellation.withholdReason ? (
+          <div className="kv-row">
+            <dt>İadesiz iptal gerekçesi</dt>
+            <dd className="detail-prose" data-testid="request-cancellation-reason">
+              {cancellation.withholdReason}
+            </dd>
+          </div>
+        ) : null}
+        <div className="kv-row">
+          <dt>Kapatılan teklifler</dt>
+          <dd>{list(cancellation.closedOfferIds)}</dd>
+        </div>
+        <div className="kv-row">
+          <dt>Kredisi iade edilen teklifler</dt>
+          <dd>{list(cancellation.refundedOfferIds)}</dd>
+        </div>
+      </dl>
+    </SectionCard>
   );
 }
 

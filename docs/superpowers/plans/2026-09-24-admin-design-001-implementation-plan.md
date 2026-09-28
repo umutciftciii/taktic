@@ -253,6 +253,13 @@ Merge öncesi düzeltmeler (PR #118, head `624f3e06` sonrası):
 - **İptal diyaloğu:** talebin gerçek teklif listesinden sayıyor: kabul edilen dışında açık kalan ve kabul anında reddedilen teklifler. İptal hiçbirine dokunmuyor; E2E onaydan sonra veritabanında doğruluyor.
 - **Görüntüler:** `2026-09-28-admin-design-001-faz-3a-screens/pre-merge-409/` (Chromium 1440, WebKit 320). Üst klasördeki görüntüler head `b79f968a`'ya aittir.
 
+İptal sözleşmesi (PR #118, head `08ab7c86` sonrası; `docs/superpowers/specs/2026-09-28-request-cancellation-contract.md`):
+- **API:** müşteri ya da `REQUESTS_CANCEL` izinli personel iptal eder. İadesiz iptal ayrı uçtadır (`REQUESTS_CANCEL_WITHOUT_REFUND` + gerekçe). Kazanamayan teklifler kapanır ve iade edilir, kabul edilmiş teklif CANCELLED olur. Denetim satırı ve üç bildirim şablonu var. Migration `20260928160000_add_request_cancellation_contract`.
+- **Admin `04`:** iptal artık `REQUESTS_CANCEL` ile açılıyor, tamamlama yalnız süper yöneticide. Eşleşmiş talepte "Kazanan teklifin kredisini iade et" kutusu varsayılan işaretli; işaret kaldırılınca gerekçe zorunlu. "İptal kaydı" kartı eklendi. Durum metinleri kapanmış talepte eşleşme varsa da "kapanmış" diyor.
+- **Müşteri web:** açık ve eşleşmemiş talepte "Talebi iptal et" onay diyaloğuyla sunuluyor. Eşleşmiş talepte sunulmuyor; bayat sayfadan gelen 409 açıklanıyor.
+- **Görüntüler:** `2026-09-28-admin-design-001-faz-3a-screens/cancellation-contract/` klasöründe (Chromium 1440, WebKit 320).
+
+
 ### 3B — Kişiler ve destek (#7, #8, #9, #10, #12, #13, #14)
 
 - **Tasarım karşılıkları:**

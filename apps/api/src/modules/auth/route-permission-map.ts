@@ -18,7 +18,7 @@ import { AdminPermission } from '@prisma/client';
  *    role-management routes. They keep `@Roles(UserRole.SUPER_ADMIN)` because
  *    their capabilities are absent from `AdminPermission` altogether (RG-7
  *    §12.1) and so cannot be delegated to any role.
- *  - The 27 routes whose `@Roles(...)` names a marketplace role alongside
+ *  - The 26 routes whose `@Roles(...)` names a marketplace role alongside
  *    SUPER_ADMIN. Those are customer and provider routes; an ADMIN does not
  *    reach them, by decision (§12.2).
  *  - The 21 routes guarded only by `ProviderAccessGuard`. They stay outside the
@@ -193,6 +193,17 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'PATCH', path: '/questions/:id/status', permission: AdminPermission.QUESTIONS_WRITE },
   { method: 'GET', path: '/service-requests', permission: AdminPermission.REQUESTS_READ },
   { method: 'GET', path: '/service-requests/:id', permission: AdminPermission.REQUESTS_READ },
+  // PR #118: the lifecycle cancel moves off `@Roles(CUSTOMER, SUPER_ADMIN)`.
+  // The owning customer still reaches it (the guard has no opinion on a
+  // non-staff caller); staff need REQUESTS_CANCEL. Keeping the winner's credit
+  // spent is its own route, so the permission guards a route of its own.
+  { method: 'POST', path: '/service-requests/:id/cancel', permission: AdminPermission.REQUESTS_CANCEL },
+  {
+    method: 'POST',
+    path: '/service-requests/:id/cancel/withhold-winner-refund',
+    permission: AdminPermission.REQUESTS_CANCEL_WITHOUT_REFUND,
+    alsoRequires: [AdminPermission.REQUESTS_CANCEL],
+  },
   { method: 'POST', path: '/service-requests/:id/recalculate-quality', permission: AdminPermission.REQUESTS_QUALITY_RECALC },
   { method: 'POST', path: '/service-requests/:id/reopen', permission: AdminPermission.REQUESTS_REOPEN },
   { method: 'GET', path: '/service-requests/:id/reports', permission: AdminPermission.REQUEST_REPORTS_READ },

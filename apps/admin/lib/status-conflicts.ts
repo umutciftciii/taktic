@@ -60,6 +60,8 @@ export type RequestStatusErrorKey =
   | 'transitionNotAllowed'
   | 'notModerationTarget'
   | 'notCancellable'
+  | 'cancelStateChanged'
+  | 'withholdReasonRequired'
   | 'notCompletable';
 
 export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string> = {
@@ -75,6 +77,10 @@ export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string
     'Durum değiştirilmedi. İstenen durum moderasyonla yazılmaz; moderasyon yalnız incelemeye alır, onaylar veya reddeder. Talep değişmedi.',
   notCancellable:
     'Talep iptal edilmedi. Talep bu sayfa açıldıktan sonra kapandı (tamamlandı, reddedildi, süresi doldu ya da zaten iptal edildi); kapanmış talep iptal edilemez. Teklifler ve krediler değişmedi.',
+  cancelStateChanged:
+    'Talep iptal edilmedi. Talep bu sayfa açıldıktan sonra değişti (örneğin bir teklif kabul edildi); iptal kararı eski duruma göre verilmişti. Yukarıda güncel durum görünüyor; kararı buna göre yeniden verin. Hiçbir teklif ve kredi değişmedi.',
+  withholdReasonRequired:
+    'Talep iptal edilmedi. Kazanan teklifin kredisi iade edilmeyecekse en az 10 karakterlik gerekçe yazılması zorunludur.',
   notCompletable:
     'Talep tamamlandı olarak işaretlenmedi. Yalnız eşleşmiş talep tamamlanabilir ve talep bu sayfa açıldıktan sonra durum değiştirdi. Yukarıda talebin güncel durumu görünüyor.',
 };

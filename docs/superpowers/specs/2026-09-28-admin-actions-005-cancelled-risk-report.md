@@ -2,6 +2,15 @@
 
 **Tarih:** 2026-09-28 · **Durum:** karar bekliyor · **Kapsam:** yalnız analiz — bu rapor davranış değiştirmez.
 
+> **Karar ve uygulama (2026-09-28, PR #118):** K1–K5 kararlandı ve uygulandı; ayrıntılar `2026-09-28-request-cancellation-contract.md` belgesinde.
+> - **K1:** Müşteri kabul edilene kadar iptal edebilir. Operasyonda iptal `REQUESTS_CANCEL` izniyle yapılır, eşleşmiş talep dahil.
+> - **K2:** Kabul edilmiş teklif CANCELLED olur; `acceptedAt` ve `matchedOfferId` iz olarak kalır.
+> - **K3:** Kazananın kredisi varsayılan olarak iade edilir. İadesiz iptal ayrı izin ve gerekçe ister.
+> - **K4:** Açık teklifler kapanır ve kredileri iade edilir.
+> - **K5:** Müşteriye, kazanana ve etkilenen diğer teklif sahiplerine bildirim gider.
+>
+> Bu raporun §1–§3 tabloları **tarihsel kanıttır** (PR #118 öncesi davranış).
+
 > **Güncelleme (2026-09-28, main@4e1d1c98):** §1'deki moderasyon kapısı (`PATCH …/status {CANCELLED}`) ve §5'teki DRAFT/SUBMITTED açığı PR #120 (API-GUARD-REQUEST-002) ile kapandı; bu satırlar **tarihsel kanıttır**. K1 ve K6 böylece "tek kapı: `POST /:id/cancel`" yönünde çözüldü. `/cancel` kapısının davranışı (§1 ikinci satır, §2, §3) değişmedi; **K2–K5 açık**. Admin "İptal et" diyaloğu bugünkü davranışı anlatır ve bu kararlar verilmeden farklı bir sonuç vaat etmez (PR #118).
 **İlgili PR:** API-GUARD-OFFER-001 / API-GUARD-REQUEST-001 (bu raporla aynı dal). O PR CANCELLED hedefine **dokunmaz**.
 

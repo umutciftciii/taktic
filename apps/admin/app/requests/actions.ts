@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { apiFetch, readConflict, ServiceRequest, ServiceRequestStatus } from '../../lib/api';
+import { ApiError, apiFetch, readConflict, ServiceRequest, ServiceRequestStatus } from '../../lib/api';
 import { requestModerationErrorKey, type RequestStatusErrorKey } from '../../lib/status-conflicts';
 
 export async function updateRequestStatusAction(formData: FormData) {
@@ -71,16 +71,44 @@ export async function completeRequestAction(formData: FormData) {
   revalidatePath(`/requests/${id}`);
 }
 
+/**
+ * The operations cancel (PR #118). `winnerRefund` is written by the cancel
+ * form's own hidden field; only the exact value `withhold` goes to the
+ * withhold endpoint — anything else, a missing field included, is the default
+ * cancel, which gives the winner's credit back. The API holds the same line:
+ * `/cancel` has no refund switch at all.
+ */
 export async function cancelRequestAction(formData: FormData) {
   const id = readFormString(formData, 'id');
+  const expectedMatchedOfferId = readFormString(formData, 'expectedMatchedOfferId');
+  const withhold = readFormString(formData, 'winnerRefund') === 'withhold';
+  const withholdReason = readOptionalFormString(formData, 'withholdReason');
+
+  if (withhold && (!withholdReason || withholdReason.length < 10)) {
+    redirect(statusErrorHref(id, 'withholdReasonRequired'));
+  }
 
   try {
-    await apiFetch<ServiceRequest>(`/service-requests/${id}/cancel`, { method: 'POST' });
+    if (withhold) {
+      await apiFetch<ServiceRequest>(`/service-requests/${id}/cancel/withhold-winner-refund`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: withholdReason, expectedMatchedOfferId }),
+      });
+    } else {
+      await apiFetch<ServiceRequest>(`/service-requests/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ expectedMatchedOfferId }),
+      });
+    }
   } catch (error) {
-    // The endpoint's only 409 is "already closed": COMPLETED, CANCELLED,
-    // EXPIRED or REJECTED by the time the write ran. Nothing was written.
-    if (readConflict(error)) {
-      redirect(statusErrorHref(id, 'notCancellable'));
+    const conflict = readConflict(error);
+    if (conflict) {
+      // The request moved after the page was drawn (a match appeared or ended),
+      // or it closed. Nothing was written either way.
+      redirect(statusErrorHref(id, conflict.code === 'REQUEST_CANCEL_STATE_CHANGED' ? 'cancelStateChanged' : 'notCancellable'));
+    }
+    if (isBadRequestCode(error, 'CANCEL_WITHHOLD_REASON_REQUIRED')) {
+      redirect(statusErrorHref(id, 'withholdReasonRequired'));
     }
 
     throw error;
@@ -88,6 +116,16 @@ export async function cancelRequestAction(formData: FormData) {
 
   revalidatePath('/requests');
   revalidatePath(`/requests/${id}`);
+  redirect(`/requests/${id}?cancelled=1`);
+}
+
+function isBadRequestCode(error: unknown, code: string): boolean {
+  if (!(error instanceof ApiError) || error.status !== 400) return false;
+  try {
+    return (JSON.parse(error.body) as { code?: unknown }).code === code;
+  } catch {
+    return false;
+  }
 }
 
 /**

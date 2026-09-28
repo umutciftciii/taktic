@@ -6674,3 +6674,44 @@ button:disabled {
 .detail-panel .section-card-header {
   border-bottom: 2px solid var(--text);
 }
+
+/* The operations cancel (PR #118): on a matched request the refund choice and
+   its reason sit above the button, on their own line, never squeezed into the
+   button row. */
+.status-cancel-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+.status-cancel-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.status-cancel-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-cancel-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: none;
+}
+
+.status-cancel-check input:disabled + span {
+  color: var(--muted);
+}

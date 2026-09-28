@@ -302,6 +302,8 @@ veri okur) · `AYAR` (operasyon davranışını değiştirir) · `YAYIN` (public
 | GET | `/service-requests/:id/reports` | `listForRequest` (L46) | Talebin bildirimleri | `REQUEST_REPORTS_READ` | PII |
 | POST | `/service-requests/:id/reports/resolve` | `resolve` (L51) | Bildirimi karara bağlar | `REQUEST_REPORTS_RESOLVE` | — |
 | POST | `/service-requests/:id/reopen` | `reopen` (L60) | **Talebi yeniden yayımlar → yeni kredi harcamaları** | `REQUESTS_REOPEN` | PARA |
+| POST | `/service-requests/:id/cancel` | `cancelServiceRequest` (PR #118) | **Talebi iptal eder; teklifleri kapatır, kazanan dahil kredileri iade eder.** Müşteri (sahip, eşleşme yokken) de çağırır: `@RequiresPermissionFromStaff` | `REQUESTS_CANCEL` | PARA |
+| POST | `/service-requests/:id/cancel/withhold-winner-refund` | `cancelWithholdingWinnerRefund` (PR #118) | **Eşleşmiş talebi kazananın kredisini iade etmeden iptal eder; gerekçe zorunlu, denetim kaydında** | `REQUESTS_CANCEL_WITHOUT_REFUND` + `REQUESTS_CANCEL` | PARA |
 
 > `reopen`, bildirim çözme iznine **katılmaz**: bir bildirimi kapatmak ile talebi sağlayıcılara yeniden açıp
 > kredi harcanmasına yol açmak farklı sonuçlardır.

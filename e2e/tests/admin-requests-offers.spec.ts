@@ -263,17 +263,16 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       expect(offer.status).toBe('CANCELLED');
       expect(await countRefundTransactions(provider.id)).toBe(1);
 
-      // ---- "İptal et" (a super admin's alone) ----------------------------
+      // ---- "İptal et" -----------------------------------------------------
       await admin.gotoAdmin(`/requests/${second.request.id}`);
       const cancel = page.getByTestId('request-cancel');
       const cancelDialog = page.getByRole('dialog', { name: 'Talep iptal edilsin mi?' });
       await cancel.click();
-      // What /cancel really does to an open request (ADMIN-ACTIONS-005 report
-      // §3): no offer is closed, no credit moves, nobody is told.
-      await expect(cancelDialog).toContainText('açık teklif (gönderildi, görüntülendi, kısa listede) kapatılmaz');
-      await expect(cancelDialog).toContainText('İptal hiçbir teklifin durumunu değiştirmez ve kredi iade etmez');
-      await expect(cancelDialog).toContainText('süresi dolunca iptalden bağımsız olarak iade edilir');
-      await expect(cancelDialog).toContainText('e-posta veya bildirim gönderilmez');
+      // What /cancel does to an open request (PR #118 contract): its live
+      // offers close and get their credit back; there is no winner to decide on.
+      await expect(cancelDialog).toContainText('1 açık teklif (gönderildi, görüntülendi, kısa listede) kapatılır ve harcanan kredileri iade edilir');
+      await expect(cancelDialog).toContainText('Müşteriye iptal teyidi');
+      await expect(page.getByTestId('request-cancel-refund-winner')).toHaveCount(0);
       await cancelDialog.getByRole('button', { name: 'Kapat' }).click();
       await expect(cancelDialog).toBeHidden();
       await page.waitForTimeout(300);
@@ -283,6 +282,8 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       await cancel.click();
       await cancelDialog.getByRole('button', { name: 'Evet, iptal et' }).click();
       await expect(page.getByTestId('request-status')).toHaveText('İptal Edildi');
+      expect((await prisma().offer.findFirstOrThrow({ where: { requestId: second.request.id } })).status).toBe('CANCELLED');
+      expect(await countRefundTransactions(second.provider.id)).toBe(1);
 
       // ---- "Talebi kaldır" on the Şikayet tab ----------------------------
       const third = await seedScene();
@@ -1065,8 +1066,8 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       await expect(page).toHaveURL(/statusError=notRemovable/);
       await expect(statusError).toContainText('Talep reddedilmedi');
       await expect(statusError).toContainText('eşleşmiş talep reddedilemez');
-      await expect(statusError).toContainText('bir ret karşılığı değildir');
-      await expect(statusError).toContainText('ürün kararı bekliyor');
+      await expect(statusError).toContainText('Eşleşmeyi sonlandıran işlem');
+      await expect(statusError).toContainText('Müşteri eşleşmiş talebi iptal edemez');
       await expect(statusError).not.toContainText(OLD_CANCEL_HINT);
       await assertNoErrorScreen(page);
       await capture(page, testInfo, 'request-409-not-removable', statusError);
@@ -1087,7 +1088,7 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
     }
   });
 
-  test('the matched cancel dialog counts the offers it leaves, and the cancel leaves exactly those', async ({
+  test('the matched cancel: the dialog counts what it will do, and the database shows exactly that', async ({
     browser,
   }, testInfo) => {
     const matched = await seedMatchedRequest();
@@ -1096,79 +1097,238 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
       select: { categoryId: true, city: true, district: true },
     });
     const location = { city: request.city, district: request.district };
-    // An old row: an offer the acceptance did not close, and a competitor it did.
+    const winnerProviderId = (await prisma().offer.findUniqueOrThrow({ where: { id: matched.offer.id } })).providerId;
+    // An old row the acceptance did not close, a competitor it rejected, and
+    // one the customer rejected by hand before accepting.
     const straggler = await createProvider({ categoryId: request.categoryId, location, credits: STARTING_CREDITS });
     const loser = await createProvider({ categoryId: request.categoryId, location, credits: STARTING_CREDITS });
+    const declined = await createProvider({ categoryId: request.categoryId, location, credits: STARTING_CREDITS });
     const liveOffer = await seedOffer({ requestId: matched.request.id, providerId: straggler.id, status: 'VIEWED' });
     const lostOffer = await seedOffer({ requestId: matched.request.id, providerId: loser.id });
+    const declinedOffer = await seedOffer({ requestId: matched.request.id, providerId: declined.id });
     await prisma().offer.update({
       where: { id: lostOffer.id },
       data: { status: 'REJECTED', rejectedAt: new Date(), rejectionReason: 'COMPETITOR_ACCEPTED' },
     });
+    await prisma().offer.update({ where: { id: declinedOffer.id }, data: { status: 'REJECTED', rejectedAt: new Date() } });
     const admin = await openAs(browser, 'super', viewportFor(testInfo));
     const page = admin.page;
 
     try {
       await admin.gotoAdmin(`/requests/${matched.request.id}`);
       await page.locator('details.status-reject-block > summary').click();
-      await expect(page.getByTestId('status-reject-hint')).toContainText('bir ret karşılığı değildir');
+      await expect(page.getByTestId('status-reject-hint')).toContainText('Eşleşmeyi sonlandıran işlem');
       await expect(page.getByTestId('status-reject-hint')).not.toContainText(OLD_CANCEL_HINT);
 
+      const refundWinner = page.getByTestId('request-cancel-refund-winner');
+      await expect(refundWinner).toBeChecked();
+      await expect(refundWinner).toBeEnabled();
       await page.getByTestId('request-cancel').click();
       const dialog = page.getByRole('dialog', { name: 'Talep iptal edilsin mi?' });
-      await expect(dialog).toContainText('İptal hiçbir teklifin durumunu değiştirmez ve kredi iade etmez');
-      await expect(dialog).toContainText('Kabul edilen teklif “kabul edildi” olarak kalır ve kredisi iade edilmez');
-      await expect(dialog).toContainText('İletişim bilgileri ve mesajlaşma iki taraf için de kapanır');
+      await expect(page.getByTestId('request-cancel-winner')).toContainText('Kabul edilen teklif kapatılır ve eşleşme sona erer');
+      await expect(page.getByTestId('request-cancel-winner')).toContainText('Kazanan teklifin 3 kredisi iade edilir');
       const others = page.getByTestId('request-cancel-other-offers');
-      await expect(others).toContainText('kabul edilen dışında 1 açık teklif var');
-      await expect(others).toContainText('1 teklif kabul anında reddedilmişti');
-      await expect(dialog).toContainText('kabul edilen teklifin sahibi dahil');
-      await expect(dialog).toContainText('ürün kararı bekliyor');
+      await expect(others).toContainText('Kabul edilen dışında 1 açık teklif');
+      // Named "rejected because another was accepted" only on the record's word.
+      await expect(others).toContainText('Başka teklif kabul edildiği için reddedilmiş 1 teklifin kredisi iade edilir');
+      await expect(others).toContainText('Tek tek reddedilmiş 1 teklif olduğu gibi kalır');
+      await expect(others).not.toContainText('kabul anında reddedilmiş');
       await capture(page, testInfo, 'request-cancel-dialog-matched');
 
-      // Confirmed: the request closes, and every offer is where the dialog said.
       await dialog.getByRole('button', { name: 'Evet, iptal et' }).click();
       await expect(page.getByTestId('request-status')).toHaveText('İptal Edildi');
+      await expect(page.getByTestId('request-cancelled-notice')).toBeVisible();
+      await expect(page.getByTestId('request-cancellation-decision')).toHaveText('Kazanan teklifin kredisi iade edildi');
       await assertNoErrorScreen(page);
+      await capture(page, testInfo, 'request-cancellation-record', page.getByTestId('request-cancellation'));
+
       const offers = await prisma().offer.findMany({
         where: { requestId: matched.request.id },
-        select: { id: true, status: true, creditRefundedAt: true },
+        select: { id: true, status: true, acceptedAt: true },
       });
       const byId = new Map(offers.map((offer) => [offer.id, offer]));
-      expect(byId.get(matched.offer.id)?.status).toBe('ACCEPTED');
-      expect(byId.get(liveOffer.id)?.status).toBe('VIEWED');
+      expect(byId.get(matched.offer.id)?.status).toBe('CANCELLED');
+      expect(byId.get(matched.offer.id)?.acceptedAt).not.toBeNull();
+      expect(byId.get(liveOffer.id)?.status).toBe('CANCELLED');
       expect(byId.get(lostOffer.id)?.status).toBe('REJECTED');
-      expect(offers.every((offer) => offer.creditRefundedAt === null)).toBe(true);
-      expect(await countRefundTransactions(straggler.id)).toBe(0);
-      expect(await countRefundTransactions(loser.id)).toBe(0);
+      expect(byId.get(declinedOffer.id)?.status).toBe('REJECTED');
+      expect(await countRefundTransactions(winnerProviderId)).toBe(1);
+      expect(await countRefundTransactions(straggler.id)).toBe(1);
+      expect(await countRefundTransactions(loser.id)).toBe(1);
+      expect(await countRefundTransactions(declined.id)).toBe(0);
       const closed = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: matched.request.id } });
       expect(closed.status).toBe('CANCELLED');
       expect(closed.matchedOfferId).toBe(matched.offer.id);
+      // Notices: the customer, the winner and the two affected offers (the
+      // straggler closed and refunded, the competitor refunded) — not the offer
+      // the customer declined by hand, which the cancel left alone.
+      const notices = () =>
+        prisma().notificationLog.findMany({
+          where: { requestId: matched.request.id, template: { startsWith: 'request-cancelled' } },
+          select: { template: true, dedupeKey: true },
+        });
+      await expect.poll(async () => (await notices()).length).toBe(4);
+      const keys = (await notices()).map((row) => row.dedupeKey).sort();
+      expect(keys).toEqual(
+        [
+          `request-cancelled-customer:${matched.request.id}`,
+          `request-cancelled-offer:${liveOffer.id}`,
+          `request-cancelled-offer:${lostOffer.id}`,
+          `request-cancelled-winner:${matched.offer.id}`,
+        ].sort(),
+      );
     } finally {
       await admin.close();
     }
   });
 
-  test('the open-request cancel dialog counts the live offers it leaves open', async ({ browser }, testInfo) => {
+  test('the open-request cancel dialog says its live offers close and are refunded', async ({ browser }, testInfo) => {
     const { request } = await seedScene();
     const admin = await openAs(browser, 'super', viewportFor(testInfo));
     const page = admin.page;
 
     try {
       await admin.gotoAdmin(`/requests/${request.id}`);
+      await expect(page.getByTestId('request-cancel-refund-winner')).toHaveCount(0);
       await page.getByTestId('request-cancel').click();
       const dialog = page.getByRole('dialog', { name: 'Talep iptal edilsin mi?' });
       await expect(page.getByTestId('request-cancel-other-offers')).toContainText(
-        'Bu talepteki 1 açık teklif (gönderildi, görüntülendi, kısa listede) kapatılmaz',
+        '1 açık teklif (gönderildi, görüntülendi, kısa listede) kapatılır ve harcanan kredileri iade edilir',
       );
-      await expect(dialog).toContainText('süresi dolunca iptalden bağımsız olarak iade edilir');
-      await expect(dialog).toContainText('e-posta veya bildirim gönderilmez');
+      await expect(dialog).toContainText('Daha önce iade edilmiş hiçbir kredi ikinci kez iade edilmez');
       await capture(page, testInfo, 'request-cancel-dialog-open');
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden();
       expect((await prisma().serviceRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe('APPROVED');
     } finally {
       await admin.close();
+    }
+  });
+
+  test('operations cancel: REQUESTS_CANCEL refunds the winner; withholding needs its own permission and a reason', async ({
+    browser,
+  }, testInfo) => {
+    const viewport = viewportFor(testInfo);
+    const canceller = await openAs(browser, ['REQUESTS_READ', 'REQUESTS_CANCEL'], viewport);
+    const withholder = await openAs(browser, ['REQUESTS_READ', 'REQUESTS_CANCEL', 'REQUESTS_CANCEL_WITHOUT_REFUND'], viewport);
+    const moderator = await openAs(browser, ['REQUESTS_READ', 'REQUESTS_STATUS'], viewport);
+
+    try {
+      // ---- REQUESTS_CANCEL alone: the refund box is checked and locked ------
+      const first = await seedMatchedRequest();
+      const firstWinner = (await prisma().offer.findUniqueOrThrow({ where: { id: first.offer.id } })).providerId;
+      await canceller.gotoAdmin(`/requests/${first.request.id}`);
+      const locked = canceller.page.getByTestId('request-cancel-refund-winner');
+      await expect(locked).toBeChecked();
+      await expect(locked).toBeDisabled();
+      await expect(canceller.page.getByTestId('request-cancel-refund-locked')).toContainText('ayrı yetki ister');
+      await canceller.page.getByTestId('request-cancel').click();
+      await canceller.page
+        .getByRole('dialog', { name: 'Talep iptal edilsin mi?' })
+        .getByRole('button', { name: 'Evet, iptal et' })
+        .click();
+      await expect(canceller.page.getByTestId('request-status')).toHaveText('İptal Edildi');
+      expect(await countRefundTransactions(firstWinner)).toBe(1);
+      const firstAudit = await prisma().serviceRequestCancellation.findUniqueOrThrow({ where: { requestId: first.request.id } });
+      expect(firstAudit).toMatchObject({ actorKind: 'STAFF', winnerRefundDecision: 'REFUNDED', withholdReason: null });
+
+      // ---- with the exception permission: unchecking asks for a reason -----
+      const second = await seedMatchedRequest();
+      const secondWinner = (await prisma().offer.findUniqueOrThrow({ where: { id: second.offer.id } })).providerId;
+      const page = withholder.page;
+      await withholder.gotoAdmin(`/requests/${second.request.id}`);
+      const box = page.getByTestId('request-cancel-refund-winner');
+      await expect(box).toBeEnabled();
+      await box.uncheck();
+      const reason = page.getByTestId('request-cancel-withhold-reason');
+      await expect(reason).toBeVisible();
+      // An empty reason is the browser's to refuse: no dialog, nothing posted.
+      const dialog = page.getByRole('dialog', { name: 'Talep iptal edilsin mi?' });
+      await page.getByTestId('request-cancel').click();
+      await expect(dialog).toBeHidden();
+      const withheldReason = 'Hizmet veren müşteriye ulaşmadığını kendisi bildirdi.';
+      await reason.fill(withheldReason);
+      await page.getByTestId('request-cancel').click();
+      await expect(page.getByTestId('request-cancel-winner')).toContainText('Kazanan teklifin kredisi iade edilmez');
+      await capture(page, testInfo, 'request-cancel-dialog-withhold');
+      await dialog.getByRole('button', { name: 'Evet, iptal et' }).click();
+      await expect(page.getByTestId('request-status')).toHaveText('İptal Edildi');
+      await expect(page.getByTestId('request-cancellation-reason')).toHaveText(withheldReason);
+      await assertNoErrorScreen(page);
+      expect(await countRefundTransactions(secondWinner)).toBe(0);
+      const secondAudit = await prisma().serviceRequestCancellation.findUniqueOrThrow({ where: { requestId: second.request.id } });
+      expect(secondAudit).toMatchObject({ winnerRefundDecision: 'WITHHELD', withholdReason: withheldReason });
+
+      // ---- without REQUESTS_CANCEL: no cancel control at all ---------------
+      const third = await seedMatchedRequest();
+      await moderator.gotoAdmin(`/requests/${third.request.id}`);
+      await expect(moderator.page.getByTestId('request-cancel')).toHaveCount(0);
+      await expect(moderator.page.getByRole('button', { name: 'İptal et', includeHidden: true })).toHaveCount(0);
+    } finally {
+      await canceller.close();
+      await withholder.close();
+      await moderator.close();
+    }
+  });
+
+  test('the customer cancels their own request until an offer is accepted', async ({ browser }, testInfo) => {
+    const viewport = viewportFor(testInfo);
+    const open = await seedScene();
+    const customer = await Actor.open(browser, 'customer', primaryRuntime, { viewport });
+
+    try {
+      await customer.loginToWeb(open.customer.email, open.customer.password);
+      const page = customer.page;
+
+      // ---- an open request: asked first, then cancelled ---------------------
+      await customer.gotoWeb(`/requests/${open.request.id}/offers`);
+      await page.getByTestId('customer-cancel-request').click();
+      const dialog = page.getByTestId('customer-cancel-dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toContainText('Gelen 1 teklif kapatılır');
+      await expect(dialog).not.toContainText('kredi');
+      await capture(page, testInfo, 'customer-cancel-dialog');
+      await dialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(dialog).toBeHidden();
+      expect((await prisma().serviceRequest.findUniqueOrThrow({ where: { id: open.request.id } })).status).toBe('APPROVED');
+
+      await page.getByTestId('customer-cancel-request').click();
+      await page.getByTestId('customer-cancel-confirm').click();
+      await expect(page.getByTestId('customer-cancel-outcome')).toContainText('Talebiniz iptal edildi');
+      await expect(page.getByTestId('customer-cancel-request')).toHaveCount(0);
+      await capture(page, testInfo, 'customer-cancelled');
+      expect((await prisma().serviceRequest.findUniqueOrThrow({ where: { id: open.request.id } })).status).toBe('CANCELLED');
+      expect((await prisma().offer.findUniqueOrThrow({ where: { id: open.offer.id } })).status).toBe('CANCELLED');
+      expect(await countRefundTransactions(open.provider.id)).toBe(1);
+
+      // ---- a request that matched while the page was open: 409, explained --
+      const stale = await seedScene();
+      const staleCustomer = await Actor.open(browser, 'customer-stale', primaryRuntime, { viewport });
+      try {
+        await staleCustomer.loginToWeb(stale.customer.email, stale.customer.password);
+        await staleCustomer.gotoWeb(`/requests/${stale.request.id}/offers`);
+        await prisma().offer.update({ where: { id: stale.offer.id }, data: { status: 'ACCEPTED', acceptedAt: new Date() } });
+        await prisma().serviceRequest.update({
+          where: { id: stale.request.id },
+          data: { status: 'MATCHED', matchedOfferId: stale.offer.id, matchedAt: new Date() },
+        });
+        await staleCustomer.page.getByTestId('customer-cancel-request').click();
+        await staleCustomer.page.getByTestId('customer-cancel-confirm').click();
+        const outcome = staleCustomer.page.getByTestId('customer-cancel-outcome');
+        await expect(outcome).toContainText('bir teklifi kabul ettiğiniz için');
+        await assertNoErrorScreen(staleCustomer.page);
+        // Redrawn as matched: no cancel offered any more.
+        await expect(staleCustomer.page.getByTestId('customer-cancel-request')).toHaveCount(0);
+        await capture(staleCustomer.page, testInfo, 'customer-cancel-refused-matched');
+        const kept = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: stale.request.id } });
+        expect(kept.status).toBe('MATCHED');
+        expect((await prisma().offer.findUniqueOrThrow({ where: { id: stale.offer.id } })).status).toBe('ACCEPTED');
+        expect(await prisma().serviceRequestCancellation.count({ where: { requestId: stale.request.id } })).toBe(0);
+      } finally {
+        await staleCustomer.close();
+      }
+    } finally {
+      await customer.close();
     }
   });
 
