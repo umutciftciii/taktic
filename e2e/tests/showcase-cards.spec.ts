@@ -275,7 +275,9 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
       */
       await expect(admin.page.getByText('Filtre temizliği', { exact: true })).toBeVisible();
       await expect(admin.page.getByText('Gaz dolumu', { exact: true })).toBeVisible();
-      await expect(admin.page.getByText('₺1.500,00')).toBeVisible();
+      // Once in the header's summary strip (Faz 3C) and once in the version body.
+      await expect(admin.page.getByTestId('showcase-review-header')).toContainText('₺1.500,00');
+      await expect(admin.page.locator('.showcase-compare').getByText('₺1.500,00')).toBeVisible();
       await expect(
         admin.page.getByText('TakTick tahsil etmez', { exact: false }).first(),
       ).toBeVisible();

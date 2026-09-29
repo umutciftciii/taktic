@@ -15,8 +15,11 @@ import {
   type ShowcaseCardVersion,
   type ShowcaseVersionDetail,
 } from '../../../../lib/api';
-import { PageHeader } from '../../../../components/page-header';
+import { ConfirmDialog } from '../../../../components/confirm-dialog';
+import { DetailHeader } from '../../../../components/detail-header';
+import { KeyValueList } from '../../../../components/key-value-list';
 import { SectionCard } from '../../../../components/section-card';
+import type { SummaryItem } from '../../../../components/summary-strip';
 import { approveShowcaseVersionAction, rejectShowcaseVersionAction } from './actions';
 
 type ShowcaseReviewPageProps = {
@@ -37,6 +40,12 @@ type ShowcaseReviewPageProps = {
  * have to reconstruct. Approving version four of a card means replacing version
  * three, and "what changes if I say yes" is not answerable from the new text
  * alone.
+ *
+ * ADMIN-DESIGN-001 Faz 3C: no screen of its own in the design (`soon`), so it
+ * sits on the shared detail template. Refusing asks first, in a dialog whose
+ * text follows `rejectVersion` exactly — including the part that is easy to
+ * get wrong: no mail goes out for a refusal, and for a card that is already
+ * live the note does not reach the provider's panel either.
  *
  * Nothing here edits the card. An operator approves a business's words or refuses
  * them with a reason; a route that let them fix a typo would make the review row
@@ -70,238 +79,273 @@ export default async function ShowcaseReviewPage({
   const isPending = version.reviewStatus === 'PENDING';
   const replaces = live && live.id !== version.id ? live : null;
 
+  const facts: SummaryItem[] = [
+    { label: 'Kart türü', value: SHOWCASE_CARD_KIND_LABELS[version.kind] },
+    {
+      label: 'İlan ettiği fiyat',
+      value:
+        version.listedServicePriceAmount === null
+          ? 'Sabit fiyat yok'
+          : formatPrice(version.listedServicePriceAmount, version.listedServiceCurrency),
+      note: 'hizmet verenin kendi fiyatı',
+    },
+    { label: 'Bölge', value: `${version.areas.length} bölge` },
+    {
+      label: 'Yanıt taahhüdü',
+      value: `${version.responseSlaUrgentHours} / ${version.responseSlaNormalHours} saat`,
+      note: 'acil / normal',
+    },
+    { label: 'Gönderim', value: version.submittedAt ? formatDateTime(version.submittedAt) : '—' },
+  ];
+
   return (
-    <>
-      <PageHeader
-        title={version.title}
-        subtitle={`${version.provider.businessName} · ${card.category.name} · sürüm ${version.versionNumber}`}
-        breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Kart İncelemeleri', href: '/showcase/reviews' },
-          { label: `Sürüm ${version.versionNumber}` },
-        ]}
-        actions={
-          <span className="inline-actions">
-            <span className={showcaseReviewBadgeClass(version.reviewStatus)}>
+    <main className="showcase-review-detail-page">
+      <DetailHeader
+        back={{ href: '/showcase/reviews', label: 'Onay bekleyen kartlar' }}
+        badges={
+          <>
+            <span className={showcaseReviewBadgeClass(version.reviewStatus)} data-testid="showcase-version-review-status">
               {SHOWCASE_VERSION_REVIEW_LABELS[version.reviewStatus]}
             </span>
-            <span className={showcaseStatusBadgeClass(card.status)}>
+            <span className={showcaseStatusBadgeClass(card.status)} data-testid="showcase-card-status">
               Kart: {SHOWCASE_CARD_STATUS_LABELS[card.status]}
             </span>
-          </span>
+          </>
         }
+        meta={`${version.versionNumber}. sürüm · ${card.category.name}`}
+        title={version.title}
+        subtitle={`${version.provider.businessName} · ${version.provider.district}, ${version.provider.city}`}
+        facts={facts}
+        factsLabel="Sürüm özeti"
+        testId="showcase-review-header"
       />
 
       {error ? (
-        <div className="notice notice-error" role="alert">
+        <div className="notice notice-error detail-notice" role="alert">
           {error}
         </div>
       ) : null}
       {approved === 'first' ? (
-        <div className="notice notice-success" role="status">
-          Sürüm onaylandı; kart vitrinde yayına girdi.
+        <div className="notice notice-success detail-notice" role="status">
+          Sürüm onaylandı; kart vitrinde yayına girdi. Hizmet verene e-posta gönderildi.
         </div>
       ) : null}
       {approved === 'revision' ? (
-        <div className="notice notice-success" role="status">
-          Sürüm onaylandı ve yayındaki metin güncellendi.
+        <div className="notice notice-success detail-notice" role="status">
+          Sürüm onaylandı ve yayındaki metin güncellendi. Hizmet verene e-posta gönderildi.
         </div>
       ) : null}
       {rejected ? (
-        <div className="notice notice-success" role="status">
-          Sürüm reddedildi. Gerekçe hizmet verene iletildi.
+        <div className="notice notice-success detail-notice" role="status" data-testid="showcase-rejected-notice">
+          {card.liveVersion
+            ? 'Sürüm reddedildi. Yayındaki sürüm yayında kalır. Gerekçe kayda geçti; hizmet verene e-posta gitmedi ve bu not panelinde görünmez.'
+            : 'Sürüm reddedildi. Gerekçe hizmet verenin panelinde kartın durumunda görünür; e-posta gitmedi.'}
         </div>
       ) : null}
 
-      <SectionCard title="İşletme">
-        <dl className="meta-row">
-          <div>
-            <dt>İşletme</dt>
-            <dd>
-              {canOpenProvider ? (
-                <Link href={`/providers/${version.provider.id}`}>
-                  {version.provider.businessName}
-                </Link>
-              ) : (
-                version.provider.businessName
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>Yetkili</dt>
-            <dd>{version.provider.contactName}</dd>
-          </div>
-          <div>
-            <dt>Merkez</dt>
-            <dd>
-              {version.provider.district}, {version.provider.city}
-            </dd>
-          </div>
-          <div>
-            <dt>Kart türü</dt>
-            <dd>{SHOWCASE_CARD_KIND_LABELS[version.kind]}</dd>
-          </div>
-        </dl>
+      <div className="detail-panel">
+        <SectionCard title="İşletme">
+          <KeyValueList
+            items={[
+              {
+                label: 'İşletme',
+                value: canOpenProvider ? (
+                  <Link href={`/providers/${version.provider.id}`}>{version.provider.businessName}</Link>
+                ) : (
+                  version.provider.businessName
+                ),
+              },
+              { label: 'Yetkili', value: version.provider.contactName },
+              { label: 'Merkez', value: `${version.provider.district}, ${version.provider.city}` },
+              { label: 'Kart türü', value: SHOWCASE_CARD_KIND_LABELS[version.kind] },
+            ]}
+          />
 
-        {/*
-          The provider's own declared coverage, printed beside the card's claim.
-          The API already refuses a card area outside it — this is here so the
-          operator can see the relation rather than trust it.
-        */}
-        <h3 className="section-card-subtitle" style={{ marginTop: 16 }}>
-          İşletmenin hizmet bölgeleri
-        </h3>
-        <ul className="showcase-list">
-          {version.provider.serviceAreas.map((area) => (
-            <li key={`${area.city}|${area.district ?? ''}|${area.neighborhood ?? ''}`}>
-              {serviceAreaLabel(area)}
-            </li>
-          ))}
-        </ul>
-      </SectionCard>
-
-      {card.liveVersion === null ? (
-        <SectionCard title="Yayın hakkı">
-          {version.entitlement ? (
-            <p data-testid="review-entitlement">
-              {version.entitlement.packageName} · {version.entitlement.durationDays} gün yayın ·{' '}
-              {version.entitlement.pausedForReview
-                ? 'inceleme süresince geçerliliği durduruldu'
-                : `${formatDateTime(version.entitlement.expiresAt)} tarihine kadar geçerli`}
-            </p>
-          ) : (
-            <div className="notice notice-error" role="alert" data-testid="review-entitlement-missing">
-              Bu kartın geçerli bir yayın hakkı yok. Sağlayıcı vitrin paketi almadan kart
-              onaylanıp yayına alınamaz.
-            </div>
-          )}
-        </SectionCard>
-      ) : null}
-
-      <div className="showcase-compare">
-        <SectionCard
-          title="İncelenen sürüm"
-          subtitle={
-            version.submittedAt
-              ? `Gönderim: ${formatDateTime(version.submittedAt)}`
-              : 'Gönderim kaydı yok'
-          }
-        >
-          <VersionBody version={version} />
+          {/*
+            The provider's own declared coverage, printed beside the card's claim.
+            The API already refuses a card area outside it — this is here so the
+            operator can see the relation rather than trust it.
+          */}
+          <h3 className="section-card-subtitle" style={{ marginTop: 16 }}>
+            İşletmenin hizmet bölgeleri
+          </h3>
+          <ul className="showcase-list">
+            {version.provider.serviceAreas.map((area) => (
+              <li key={`${area.city}|${area.district ?? ''}|${area.neighborhood ?? ''}`}>
+                {serviceAreaLabel(area)}
+              </li>
+            ))}
+          </ul>
         </SectionCard>
 
-        {replaces ? (
+        {card.liveVersion === null ? (
+          <SectionCard title="Yayın hakkı">
+            {version.entitlement ? (
+              <p data-testid="review-entitlement">
+                {version.entitlement.packageName} · {version.entitlement.durationDays} gün yayın ·{' '}
+                {version.entitlement.pausedForReview
+                  ? 'inceleme süresince geçerliliği durduruldu'
+                  : `${formatDateTime(version.entitlement.expiresAt)} tarihine kadar geçerli`}
+              </p>
+            ) : (
+              <div className="notice notice-error" role="alert" data-testid="review-entitlement-missing">
+                Bu kartın geçerli bir yayın hakkı yok. Sağlayıcı vitrin paketi almadan kart
+                onaylanıp yayına alınamaz.
+              </div>
+            )}
+          </SectionCard>
+        ) : null}
+
+        <div className="showcase-compare">
           <SectionCard
-            title={`Yerini alacağı sürüm (${replaces.versionNumber})`}
-            subtitle="Onaylarsanız müşteriye gösterilecek metin bu sürümden yenisine geçer."
+            title="İncelenen sürüm"
+            subtitle={
+              version.submittedAt
+                ? `Gönderim: ${formatDateTime(version.submittedAt)}`
+                : 'Gönderim kaydı yok'
+            }
           >
-            <VersionBody version={replaces} />
+            <VersionBody version={version} />
+          </SectionCard>
+
+          {replaces ? (
+            <SectionCard
+              title={`Yerini alacağı sürüm (${replaces.versionNumber})`}
+              subtitle="Onaylarsanız müşteriye gösterilecek metin bu sürümden yenisine geçer."
+            >
+              <VersionBody version={replaces} />
+            </SectionCard>
+          ) : (
+            <SectionCard
+              title="Yerini alacağı sürüm yok"
+              subtitle="Bu kartın daha önce onaylanmış bir sürümü bulunmuyor."
+            >
+              <p className="cell-muted">
+                Onaylarsanız bu, kartın ilk yayına hazır sürümü olur.
+              </p>
+            </SectionCard>
+          )}
+        </div>
+
+        {version.autoPublish ? (
+          <SectionCard
+            title="Bu sürüm operatör kararı olmadan yayına alındı"
+            subtitle="Yalnızca bölge daraltan bir değişiklik; sistem olayı olarak kaydedildi."
+          >
+            <KeyValueList
+              items={[
+                { label: 'Tarih', value: formatDateTime(version.autoPublish.createdAt) },
+                { label: 'Çıkarılan bölge anahtarları', value: version.autoPublish.removedAreaKeys.join(', ') },
+              ]}
+            />
+          </SectionCard>
+        ) : null}
+
+        {version.review ? (
+          <SectionCard title="Verilmiş karar">
+            <KeyValueList
+              items={[
+                { label: 'Karar', value: SHOWCASE_VERSION_REVIEW_LABELS[version.review.decision] },
+                {
+                  label: 'Karar veren',
+                  value: version.review.reviewedBy?.name ?? version.review.reviewedBy?.email ?? '-',
+                },
+                { label: 'Tarih', value: formatDateTime(version.review.createdAt) },
+                ...(version.review.note ? [{ label: 'Gerekçe', value: version.review.note }] : []),
+              ]}
+            />
+          </SectionCard>
+        ) : null}
+
+        {isPending && !canDecide ? null : isPending ? (
+          <SectionCard
+            title="Karar"
+            subtitle="Onay bu sürümü kartın yayına hazır sürümü yapar ve hizmet verene e-posta gönderir. Ret, gerekçe ister ve onaydan önce ne olacağını sorar."
+          >
+            <form action={approveShowcaseVersionAction} className="inline-actions">
+              <input type="hidden" name="versionId" value={version.id} />
+              <button
+                className="btn btn-primary btn-sm"
+                type="submit"
+                disabled={!isPending || (card.liveVersion === null && !version.entitlement?.valid)}
+              >
+                Onayla
+              </button>
+              {card.liveVersion === null && !version.entitlement?.valid ? (
+                <span className="cell-muted">Geçerli bir yayın hakkı yok.</span>
+              ) : null}
+            </form>
+
+            <form action={rejectShowcaseVersionAction} style={{ marginTop: 16 }} data-testid="showcase-reject-form">
+              <input type="hidden" name="versionId" value={version.id} />
+              <label className="form-row" htmlFor="showcase-reject-note">
+                <span>Ret gerekçesi *</span>
+                <textarea
+                  id="showcase-reject-note"
+                  name="note"
+                  required
+                  minLength={10}
+                  maxLength={1000}
+                  rows={4}
+                  placeholder="Hizmet verenin düzeltebilmesi için neyin kabul edilmediğini yazın."
+                />
+              </label>
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <ConfirmDialog
+                  triggerLabel="Reddet"
+                  triggerClassName="btn btn-secondary btn-sm"
+                  title="Bu sürüm reddedilsin mi?"
+                  consequence={
+                    replaces || card.liveVersion ? (
+                      <ul>
+                        <li>
+                          Bu sürüm “Reddedildi” olarak kapanır ve yeniden incelemeye alınamaz; hizmet veren yeni bir
+                          sürüm gönderebilir.
+                        </li>
+                        <li>
+                          <strong>
+                            Yayındaki {card.liveVersion?.versionNumber ?? replaces?.versionNumber}. sürüm yayında
+                            kalır;
+                          </strong>{' '}
+                          kart “Onaylı” kalır, yayın süresi ve raflar değişmez.
+                        </li>
+                        <li>
+                          Gerekçe kayda geçer ama bugün hizmet verene ulaşmaz: e-posta gitmez ve panel yayındaki kartın
+                          reddedilen sürüm notunu göstermez. Gerekirse hizmet verene ayrıca ulaşın.
+                        </li>
+                      </ul>
+                    ) : (
+                      <ul>
+                        <li>
+                          Kart “Reddedildi” durumuna geçer ve yayına girmez. Karar geri alınamaz; hizmet veren yeni bir
+                          sürüm gönderebilir.
+                        </li>
+                        <li>
+                          Kartın bir yayın hakkı varsa hak kartta kalır; incelemede geçen süre hakkın geçerliliğine geri
+                          eklenir.
+                        </li>
+                        <li>
+                          Gerekçe hizmet verenin panelinde kartın durumunda “İnceleme notu” olarak görünür. E-posta
+                          gitmez.
+                        </li>
+                      </ul>
+                    )
+                  }
+                  confirmLabel="Evet, sürümü reddet"
+                  testId="showcase-reject"
+                />
+              </div>
+            </form>
           </SectionCard>
         ) : (
-          <SectionCard
-            title="Yerini alacağı sürüm yok"
-            subtitle="Bu kartın daha önce onaylanmış bir sürümü bulunmuyor."
-          >
+          <SectionCard title="Karar">
             <p className="cell-muted">
-              Onaylarsanız bu, kartın ilk yayına hazır sürümü olur.
+              Bu sürüm inceleme bekleyen bir sürüm değil; üzerinde işlem yapılamaz.
             </p>
           </SectionCard>
         )}
       </div>
-
-      {version.autoPublish ? (
-        <SectionCard
-          title="Bu sürüm operatör kararı olmadan yayına alındı"
-          subtitle="Yalnızca bölge daraltan bir değişiklik; sistem olayı olarak kaydedildi."
-        >
-          <dl className="meta-row">
-            <div>
-              <dt>Tarih</dt>
-              <dd>{formatDateTime(version.autoPublish.createdAt)}</dd>
-            </div>
-            <div>
-              <dt>Çıkarılan bölge anahtarları</dt>
-              <dd>{version.autoPublish.removedAreaKeys.join(', ')}</dd>
-            </div>
-          </dl>
-        </SectionCard>
-      ) : null}
-
-      {version.review ? (
-        <SectionCard title="Verilmiş karar">
-          <dl className="meta-row">
-            <div>
-              <dt>Karar</dt>
-              <dd>{SHOWCASE_VERSION_REVIEW_LABELS[version.review.decision]}</dd>
-            </div>
-            <div>
-              <dt>Karar veren</dt>
-              <dd>
-                {version.review.reviewedBy?.name ?? version.review.reviewedBy?.email ?? '-'}
-              </dd>
-            </div>
-            <div>
-              <dt>Tarih</dt>
-              <dd>{formatDateTime(version.review.createdAt)}</dd>
-            </div>
-            {version.review.note ? (
-              <div>
-                <dt>Gerekçe</dt>
-                <dd>{version.review.note}</dd>
-              </div>
-            ) : null}
-          </dl>
-        </SectionCard>
-      ) : null}
-
-      {isPending && !canDecide ? null : isPending ? (
-        <SectionCard
-          title="Karar"
-          subtitle="Onay bu sürümü kartın yayına hazır sürümü yapar. Ret, hizmet verenin okuyacağı bir gerekçe ister."
-        >
-          <form action={approveShowcaseVersionAction} className="inline-actions">
-            <input type="hidden" name="versionId" value={version.id} />
-            <button
-              className="btn btn-primary btn-sm"
-              type="submit"
-              disabled={!isPending || (card.liveVersion === null && !version.entitlement?.valid)}
-            >
-              Onayla
-            </button>
-            {card.liveVersion === null && !version.entitlement?.valid ? (
-              <span className="cell-muted">Geçerli bir yayın hakkı yok.</span>
-            ) : null}
-          </form>
-
-          <form action={rejectShowcaseVersionAction} style={{ marginTop: 16 }}>
-            <input type="hidden" name="versionId" value={version.id} />
-            <label className="form-row" htmlFor="showcase-reject-note">
-              <span>Ret gerekçesi *</span>
-              <textarea
-                id="showcase-reject-note"
-                name="note"
-                required
-                minLength={10}
-                maxLength={1000}
-                rows={4}
-                placeholder="Hizmet verenin düzeltebilmesi için neyin kabul edilmediğini yazın."
-              />
-            </label>
-            <div className="inline-actions" style={{ marginTop: 12 }}>
-              <button className="btn btn-secondary btn-sm" type="submit">
-                Reddet
-              </button>
-            </div>
-          </form>
-        </SectionCard>
-      ) : (
-        <SectionCard title="Karar">
-          <p className="cell-muted">
-            Bu sürüm inceleme bekleyen bir sürüm değil; üzerinde işlem yapılamaz.
-          </p>
-        </SectionCard>
-      )}
-    </>
+    </main>
   );
 }
 

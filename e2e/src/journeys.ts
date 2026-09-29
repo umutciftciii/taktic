@@ -702,6 +702,17 @@ export async function moderateReview(
     await admin.page.getByTestId('moderation-reason').selectOption(reason);
   }
   await admin.page.getByTestId('moderation-submit').click();
+  // Both removals mail the customer and ask first (ADMIN-DESIGN-001 Faz 3C);
+  // a restore does neither.
+  if (action !== 'RESTORE') {
+    const dialog = admin.page.getByTestId('moderation-submit-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog
+      .getByRole('button', {
+        name: action === 'REMOVE_REVIEW' ? 'Evet, değerlendirmeyi kaldır' : 'Evet, yorumu kaldır',
+      })
+      .click();
+  }
 
   const expected =
     action === 'RESTORE' ? 'Yayında' : action === 'REMOVE_COMMENT' ? 'Yorum kaldırıldı' : 'Kaldırıldı';

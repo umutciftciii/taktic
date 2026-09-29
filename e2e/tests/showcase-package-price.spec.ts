@@ -29,6 +29,11 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       await admin.gotoAdmin('/showcase/packages');
       await assertNoErrorScreen(admin.page);
 
+      // The form lives in the "Yeni paket ekle" window (ADMIN-DESIGN-001 Faz 3C).
+      await admin.page.getByTestId('showcase-package-new').click();
+      await expect(admin.page).toHaveURL(/paket=yeni/);
+      await expect(admin.page.getByTestId('showcase-package-dialog')).toBeVisible();
+
       const createForm = admin.page.locator('form').filter({
         has: admin.page.getByRole('button', { name: 'Paketi oluştur' }),
       });
@@ -72,7 +77,12 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       const row = admin.page.locator('tr').filter({ hasText: name });
       await expect(row.getByTestId('showcase-package-price-cell')).toHaveText('₺10,50');
 
-      // The edit form: the stored 1050 reads back as 10,50 — never as 1050.
+      // The edit form, in the package's own window: the stored 1050 reads
+      // back as 10,50 — never as 1050. The slug is shown, and not sent.
+      await row.getByTestId('showcase-package-open').click();
+      await expect(admin.page).toHaveURL(new RegExp(`paket=${created.id}`));
+      await expect(admin.page.getByTestId('showcase-package-slug')).toContainText(slug);
+      await expect(admin.page.locator('input[name="slug"]')).toHaveCount(0);
       const editForm = admin.page.locator('form').filter({
         has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`),
       });
@@ -89,6 +99,7 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       await expect(
         admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-price-cell'),
       ).toHaveText('₺1.250,75');
+      await admin.gotoAdmin(`/showcase/packages?paket=${created.id}`);
       await expect(
         admin.page
           .locator('form')
@@ -97,10 +108,9 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       ).toHaveValue('1.250,75');
 
       // ── A whole number is lira, not kuruş ──────────────────────────────
-      // From the bare listing URL, so the `?saved=1` the action redirects to
-      // is a new URL this time and the wait for it is a real wait — the
-      // previous save left the page on `?saved=1` already.
-      await admin.gotoAdmin('/showcase/packages');
+      // From the package's window URL, so the `?saved=1` the action redirects
+      // to is a new URL this time and the wait for it is a real wait.
+      await admin.gotoAdmin(`/showcase/packages?paket=${created.id}`);
       const editAgain = admin.page.locator('form').filter({
         has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`),
       });
@@ -116,6 +126,7 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       ).toHaveText('₺10,00');
 
       // ── Zero is refused by the server action, with a sentence ──────────
+      await admin.gotoAdmin(`/showcase/packages?paket=${created.id}`);
       const editZero = admin.page.locator('form').filter({
         has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`),
       });
@@ -123,7 +134,11 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       await editZero.getByTestId('showcase-package-price').fill('0');
       await editZero.getByRole('button', { name: 'Kaydet' }).click();
       await expect(admin.page).toHaveURL(/error=SHOWCASE_PACKAGE_PRICE_INVALID/);
-      await expect(admin.page.locator('.notice-error')).toContainText('Türk lirası olarak girilmeli');
+      // The refusal comes back inside the package's window, not behind it.
+      await expect(admin.page).toHaveURL(new RegExp(`paket=${created.id}`));
+      await expect(admin.page.getByTestId('showcase-package-dialog').locator('.notice-error')).toContainText(
+        'Türk lirası olarak girilmeli',
+      );
       expect(
         (await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } })).priceAmount,
       ).toBe(1000);

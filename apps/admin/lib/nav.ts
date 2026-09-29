@@ -22,6 +22,14 @@ export type NavItem = {
    * `@Roles(UserRole.SUPER_ADMIN)` says, in the vocabulary a sidebar has.
    */
   superAdminOnly?: boolean;
+  /**
+   * A path whose screens this row also stands for, when they do not sit under
+   * the row's own href: the review queue is `/provider-reviews/reports`, and
+   * one review is `/provider-reviews/<id>`, a sibling rather than a child.
+   * Without it the sidebar lights nothing and the top bar names no page on the
+   * review screen (ADMIN-DESIGN-001 Faz 3C).
+   */
+  alsoUnder?: string;
 };
 
 /** The inline icons the sidebar draws (components/nav-icon.tsx). */
@@ -139,7 +147,12 @@ export const navGroups: NavGroup[] = [
       { href: '/showcase/leads', label: 'Vitrinden gelen talepler', permission: 'SHOWCASE_LEADS_READ' },
       // The comments providers flagged on their reviews: in the design's
       // vitrin group, because a review is read on a provider's public card.
-      { href: '/provider-reviews/reports', label: 'Şikayet edilen yorumlar', permission: 'PROVIDER_REVIEWS_READ' },
+      {
+        href: '/provider-reviews/reports',
+        label: 'Şikayet edilen yorumlar',
+        permission: 'PROVIDER_REVIEWS_READ',
+        alsoUnder: '/provider-reviews',
+      },
       // Every card in every state, and the consent ledger for the vitrin
       // package texts. Both used to be reachable only from another vitrin
       // screen; K1 gave them rows of their own.
@@ -196,6 +209,9 @@ export function allNavItems(): NavItem[] {
 function matchesNavItem(item: NavItem, pathname: string): boolean {
   if (item.exact) {
     return pathname === item.href;
+  }
+  if (item.alsoUnder && pathname.startsWith(`${item.alsoUnder}/`)) {
+    return true;
   }
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }

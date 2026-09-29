@@ -105,10 +105,11 @@ describe('the report queue rows', () => {
     expect(activeHrefs('/requests/reports')).toEqual(['/requests/reports']);
   });
 
-  it('the review queue lights on itself; a review detail is claimed by no row', () => {
+  it('the review queue lights on itself and on one review (Faz 3C: the detail is its sibling path)', () => {
     expect(groupOf('/provider-reviews/reports')).toBe('Vitrin');
     expect(activeHrefs('/provider-reviews/reports')).toEqual(['/provider-reviews/reports']);
-    expect(activeHrefs('/provider-reviews/abc123')).toEqual([]);
+    expect(activeHrefs('/provider-reviews/abc123')).toEqual(['/provider-reviews/reports']);
+    expect(activeHrefs('/provider-reviewsabc')).toEqual([]);
   });
 });
 
@@ -205,6 +206,14 @@ describe('findActiveNavEntry — the top bar reads the filtered menu (F18)', () 
     expect(entry?.group).toBeNull();
     expect(entry?.item).toBe(navHome);
     expect(findActiveNavEntry(filterNavMenu(() => false), '/')).toBeNull();
+  });
+
+  it('lights the review queue row on one review, a sibling path (Faz 3C)', () => {
+    const entry = findActiveNavEntry(filterNavMenu(() => true, true), '/provider-reviews/abc123');
+    expect(entry?.group?.title).toBe('Vitrin');
+    expect(entry?.item.href).toBe('/provider-reviews/reports');
+    expect(findActiveNavEntry(filterNavMenu(() => true, true), '/provider-reviewsx')).toBeNull();
+    expect(findActiveNavEntry(filterNavMenu(() => false), '/provider-reviews/abc123')).toBeNull();
   });
 
   it('names nothing for a row the session does not hold, even when the path matches it', () => {

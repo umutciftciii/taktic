@@ -111,6 +111,16 @@ const CONVERTED_ROUTES = [
   '/providers',
   '/providers/[id]',
   '/providers/[id]/credits',
+  '/provider-reviews/reports',
+  '/provider-reviews/[reviewId]',
+  '/showcase/reviews',
+  '/showcase/reviews/[versionId]',
+  '/showcase/cards',
+  '/showcase/leads',
+  '/showcase/packages',
+  '/showcase/price-terms',
+  '/showcase/placements',
+  '/showcase/placements/[placementId]',
 ];
 
 const STATIC_ROUTES = [
