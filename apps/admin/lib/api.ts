@@ -3281,6 +3281,17 @@ export type ShowcasePlacement = {
     trigger: 'ADMIN_APPROVAL' | 'AREA_NARROWING';
     createdAt: string;
   }>;
+  /**
+   * Who cancelled the run (API-HARDENING-001). Detail read only. Null when the
+   * run is not cancelled — and also when it was cancelled before the operator
+   * was recorded, which is why a cancelled run with no row says "kayıt yok"
+   * rather than naming anybody.
+   */
+  cancellation?: {
+    actor: { id: string; name: string | null };
+    note: string | null;
+    cancelledAt: string;
+  } | null;
 };
 
 /**

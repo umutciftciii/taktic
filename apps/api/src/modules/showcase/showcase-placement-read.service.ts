@@ -84,6 +84,13 @@ export class ShowcasePlacementReadService {
         ...placementSelect,
         provider: providerSelect,
         suspensions: suspensionSelect,
+        cancellation: {
+          select: {
+            note: true,
+            createdAt: true,
+            actor: { select: { id: true, name: true } },
+          },
+        },
         versionChanges: {
           orderBy: [{ createdAt: 'desc' }],
           select: {
@@ -105,6 +112,16 @@ export class ShowcasePlacementReadService {
       ...toPlacementDetail(placement),
       provider: placement.provider,
       versionChanges: placement.versionChanges,
+      // Null for a run that is not cancelled, and also for one cancelled
+      // before API-HARDENING-001: that operator was never recorded, and the
+      // screen says so rather than naming somebody.
+      cancellation: placement.cancellation
+        ? {
+            actor: placement.cancellation.actor,
+            note: placement.cancellation.note,
+            cancelledAt: placement.cancellation.createdAt,
+          }
+        : null,
     };
   }
 }

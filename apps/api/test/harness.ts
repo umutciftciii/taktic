@@ -257,6 +257,7 @@ const TRUNCATED_TABLES = [
   'ShowcaseCardPriceTermsAcceptance',
   'ShowcasePlacementVersionChange',
   'ShowcasePlacementSuspension',
+  'ShowcasePlacementCancellation',
   'ShowcasePlacementShelf',
   'ShowcasePlacement',
   'ShowcasePackage',

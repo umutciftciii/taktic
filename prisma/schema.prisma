@@ -484,6 +484,7 @@ model User {
   supportTicketStatusChanges      SupportTicketStatusChange[]          @relation("SupportTicketStatusChangedBy")
   showcaseCardReviews             ShowcaseCardReview[]                 @relation("ShowcaseCardReviewedBy")
   showcasePlacementSuspensions    ShowcasePlacementSuspension[]        @relation("ShowcasePlacementSuspendedBy")
+  showcasePlacementCancellations  ShowcasePlacementCancellation[]      @relation("ShowcasePlacementCancelledBy")
   showcasePriceTermsAcceptances   ShowcaseCardPriceTermsAcceptance[]
   showcasePackageTermsAcceptances ShowcasePackageTermsAcceptance[]     @relation("ShowcasePackageTermsAcceptedBy")
   /// CMP-006 PR-A. Purchase-terms acceptances this account made at checkout.
@@ -3454,6 +3455,7 @@ model ShowcasePlacement {
 
   shelves        ShowcasePlacementShelf[]
   suspensions    ShowcasePlacementSuspension[]
+  cancellation   ShowcasePlacementCancellation?
   versionChanges ShowcasePlacementVersionChange[]
   leads          ShowcaseLead[]
   entitlement    ShowcaseEntitlement?
@@ -3740,6 +3742,38 @@ model ShowcasePlacementSuspension {
   // migration: a placement can be off the air for one reason at a time.
 
   @@index([placementId, startedAt])
+}
+
+/// Who ended a paid run early, and what they wrote (API-HARDENING-001).
+///
+/// One row per cancelled placement, written in the same transaction that moves
+/// the placement to CANCELLED. Only an operator can cancel a run — no system
+/// path does — so `actorUserId` is NOT NULL: an actor-less cancellation is not
+/// a state this table can hold.
+///
+/// ## Placements cancelled before this table existed
+///
+/// They have no row, and the migration does not invent one. The operator who
+/// cancelled them was never recorded, and a guessed actor would be a false
+/// record rather than a missing one — screens say "kayıt yok" instead.
+///
+/// ## Append-only
+///
+/// A trigger refuses UPDATE and DELETE, and the actor relation is Restrict: an
+/// audit row must never lose its actor because an account was deleted. The
+/// note is kept here rather than only on `PackagePurchase.adminNote`, which is
+/// written only when the purchase was not already flagged for review.
+model ShowcasePlacementCancellation {
+  id          String   @id @default(cuid())
+  placementId String   @unique
+  actorUserId String
+  note        String?
+  createdAt   DateTime @default(now())
+
+  placement ShowcasePlacement @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  actor     User              @relation("ShowcasePlacementCancelledBy", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([actorUserId, createdAt])
 }
 
 /// One re-pin: the placement moved from one version of its card to another.

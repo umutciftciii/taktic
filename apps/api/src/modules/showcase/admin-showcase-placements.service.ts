@@ -102,6 +102,10 @@ export class AdminShowcasePlacementsService {
    *
    * Any open suspension is closed with the run, so the partial unique index on
    * open suspensions does not keep a row alive for a placement that is over.
+   *
+   * The operator and their note are recorded on `ShowcasePlacementCancellation`
+   * — the purchase's `adminNote` is written only when the purchase was not
+   * already flagged, so it cannot be the record of who cancelled.
    */
   async cancel(placementId: string, user: AuthUser, note: string | null) {
     const now = new Date();
@@ -141,6 +145,15 @@ export class AdminShowcasePlacementsService {
           throw showcasePlacementNotCancellable();
         }
 
+        // Who did it, in the same transaction as the status change. The row is
+        // the audit record (API-HARDENING-001); the unique index on
+        // `placementId` means a cancellation can be recorded once, and the
+        // conditional update above already refuses a second cancel before this
+        // line is reached.
+        await tx.showcasePlacementCancellation.create({
+          data: { placementId, actorUserId: user.id, note: note?.trim() || null },
+        });
+
         await tx.showcasePlacementSuspension.updateMany({
           where: { placementId, endedAt: null },
           // `endAtAfter` equals `endAtBefore` here whatever the flag says: a
@@ -164,8 +177,6 @@ export class AdminShowcasePlacementsService {
             adminNote: note,
           },
         });
-
-        void user;
       },
       { label: 'showcase.adminCancelPlacement' },
     );
