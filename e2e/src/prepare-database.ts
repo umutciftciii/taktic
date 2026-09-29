@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
 import { describeDatabase, requireE2eDatabaseUrl } from './database-url';
 import { disconnectE2ePrisma, e2ePrisma, truncateE2eDatabase } from './database';
-import { outboxDir, repoRoot } from './runtime';
+import { locationClaimDir, outboxDir, repoRoot } from './runtime';
 
 /**
  * Runs before Playwright starts anything.
@@ -38,6 +38,9 @@ async function main() {
   // from a previous run could satisfy a poll that should have failed.
   rmSync(outboxDir, { recursive: true, force: true });
   mkdirSync(outboxDir, { recursive: true });
+  // The run's district claims describe the rows just truncated; a claim left
+  // over would make its district unusable for no reason (see fixtures.ts).
+  rmSync(locationClaimDir, { recursive: true, force: true });
 
   console.log(`[e2e] database "${name}" migrated and emptied`);
 }
