@@ -331,12 +331,23 @@ test.describe('test-mode credit package checkout', () => {
       await staff.page.getByTestId('credit-hold-filter').click();
       await expect(staff.page).toHaveURL(/creditHold=OPEN/);
       await expect(staff.page.getByTestId('purchase-credit-hold')).toHaveText('Tahsil edildi · kredi teslim edilmedi');
-      await staff.page.getByRole('link', { name: 'Detay' }).click();
+      // Faz 3D: the row's hold badge sits under the payment status, and "Aç"
+      // opens the detail (its accessible name carries the purchase number).
+      await expect(staff.page.getByTestId('purchase-row')).toHaveCount(1);
+      await staff.page.getByTestId('purchase-row').getByRole('link', { name: /^Aç:/ }).click();
       const card = staff.page.getByTestId('purchase-credit-hold-card');
       await expect(card).toContainText('e2e-held-order');
+      // Charged, to deliver and delivered stay three separate figures (Faz 3D).
+      await expect(staff.page.getByTestId('purchase-credit-hold-delivered')).toHaveText('0');
+      await expect(staff.page.getByTestId('purchase-credit-hold-to-deliver')).not.toHaveText('0');
+      await expect(staff.page.getByTestId('purchase-credit-hold-charged')).toContainText('₺');
       await expect(staff.page.getByTestId('purchase-credit-hold-steps')).toContainText('Otomatik iade yapılmaz');
       await expect(staff.page.getByTestId('purchase-credit-hold-no-manual-fix')).toBeVisible();
-      await expect(staff.page.getByRole('button', { name: 'Durumu güncelle' })).toHaveCount(0);
+      // This session holds PACKAGE_PURCHASE_STATUS_WRITE and the purchase is
+      // still PENDING — the open hold alone keeps both corrections away.
+      await expect(staff.page.getByTestId('purchase-status-form')).toHaveCount(0);
+      await expect(staff.page.getByRole('button', { name: 'İptal olarak işaretle' })).toHaveCount(0);
+      await expect(staff.page.getByRole('button', { name: 'Süresi doldu olarak işaretle' })).toHaveCount(0);
 
       // Room appears; the same order redelivered settles purchase and hold once.
       await grantCredits(seeded.id, -1);
