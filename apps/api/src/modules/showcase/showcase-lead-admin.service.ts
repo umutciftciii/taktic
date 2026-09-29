@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, ShowcaseLeadStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ListShowcaseLeadsDto, showcaseAdminPage } from './dto/admin-showcase-list.dto';
 import { showcaseLeadNotFound } from './showcase.errors';
 
 /**
@@ -28,18 +29,63 @@ import { showcaseLeadNotFound } from './showcase.errors';
 export class ShowcaseLeadAdminService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async list(filters: { status?: ShowcaseLeadStatus; providerId?: string }) {
-    const leads = await this.prisma.showcaseLead.findMany({
-      where: {
-        ...(filters.status ? { status: filters.status } : {}),
-        ...(filters.providerId ? { providerId: filters.providerId } : {}),
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 200,
-      select: adminLeadSelect,
-    });
+  /**
+   * One page of leads, newest first, with the total for the filter and the
+   * per-status counts for the scope (API-HARDENING-001).
+   *
+   * Used to stop at the newest 200 with no total, so an older lead was
+   * unreachable from the operator's screen. Now every row is reachable by
+   * page, and the counts are exact: `total` is the filtered list's size and
+   * `statusCounts` answers the saved-view tabs without the status filter (the
+   * provider filter still applies — it is the scope, not a view).
+   *
+   * All three reads run in one REPEATABLE READ transaction, so the page, its
+   * total and the tab counts describe the same moment rather than three.
+   */
+  async list(filters: ListShowcaseLeadsDto) {
+    const { page, pageSize, skip } = showcaseAdminPage(filters);
+    const scope: Prisma.ShowcaseLeadWhereInput = filters.providerId ? { providerId: filters.providerId } : {};
+    const where: Prisma.ShowcaseLeadWhereInput = {
+      ...scope,
+      ...(filters.status ? { status: filters.status } : {}),
+    };
 
-    return { leads };
+    const [total, leads, grouped] = await this.prisma.$transaction(
+      [
+        this.prisma.showcaseLead.count({ where }),
+        this.prisma.showcaseLead.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip,
+          take: pageSize,
+          select: adminLeadSelect,
+        }),
+        this.prisma.showcaseLead.groupBy({
+          by: ['status'],
+          where: scope,
+          orderBy: { status: 'asc' },
+          _count: { _all: true },
+        }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    const statusCounts = Object.fromEntries(
+      Object.values(ShowcaseLeadStatus).map((status) => [status, 0]),
+    ) as Record<ShowcaseLeadStatus, number>;
+    for (const row of grouped) {
+      const count = row._count;
+      statusCounts[row.status] = typeof count === 'object' ? (count._all ?? 0) : 0;
+    }
+
+    return {
+      leads,
+      total,
+      page,
+      pageSize,
+      hasNextPage: skip + leads.length < total,
+      statusCounts,
+    };
   }
 
   async get(leadId: string) {

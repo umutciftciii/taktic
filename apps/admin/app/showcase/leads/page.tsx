@@ -12,9 +12,10 @@ import {
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
-import { WholeListFooter } from '../../../components/pagination';
+import { Pagination } from '../../../components/pagination';
 import { SavedViewTabs, type TabItem } from '../../../components/tabs';
-import type { QueryParams } from '../../../lib/list-query';
+import { parsePage, type QueryParams } from '../../../lib/list-query';
+import { formatCount } from '../../../lib/pagination';
 
 const STATUSES: ShowcaseLeadStatus[] = [
   'OPEN',
@@ -26,11 +27,20 @@ const STATUSES: ShowcaseLeadStatus[] = [
 
 const PATH = '/showcase/leads';
 
-/** `ShowcaseLeadAdminService.list` stops at the newest 200 rows. */
-const API_LIST_CAP = 200;
+/** Rows per page; the API caps a page at 100. */
+const PAGE_SIZE = 50;
+
+type LeadsPage = {
+  leads: ShowcaseAdminLead[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  statusCounts: Record<ShowcaseLeadStatus, number>;
+};
 
 type LeadsPageProps = {
-  searchParams: Promise<{ status?: string; providerId?: string }>;
+  searchParams: Promise<{ status?: string; providerId?: string; page?: string }>;
 };
 
 /**
@@ -63,12 +73,12 @@ type LeadsPageProps = {
  *
  * ## Against the design
  *
- * The API returns the newest 200 leads in one answer with no total, so the
- * design's "Bu ay 38 talep · 4 tanesinde söz verilen sürede dönülmedi" is not
- * drawn (a month's count is not something this answer can give), the saved
- * views carry no counters, and the footer says when the cap was reached. Its
- * Ara and Tarih filters are not drawn either (the API takes neither), and
- * "Süresi aşılanları göster" is the "Süre doldu" view.
+ * The list is paged on the server (API-HARDENING-001): every lead is reachable,
+ * the footer's total is the filtered list's real size, and the saved views carry
+ * exact counters from the same answer. The design's "Bu ay 38 talep" is still
+ * not drawn — a month's count is not something this answer gives — and neither
+ * are its Ara and Tarih filters (the API takes neither). "Süresi aşılanları
+ * göster" is the "Süre doldu" view.
  */
 
 /** The design's ⓘ; every sentence of it holds (showcase-lead*.service.ts). */
@@ -90,32 +100,37 @@ export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps
   const canOpenRequest = can('REQUESTS_READ');
   const canOpenProvider = can('PROVIDERS_READ_DETAIL');
 
-  const { status, providerId } = await searchParams;
+  const { status, providerId, page: pageParam } = await searchParams;
   const selected = STATUSES.find((candidate) => candidate === status) ?? null;
   const provider = (providerId ?? '').trim();
+  const page = parsePage(pageParam);
 
   const query = new URLSearchParams();
   if (selected) query.set('status', selected);
   if (provider) query.set('providerId', provider);
-  const suffix = query.toString() ? `?${query.toString()}` : '';
+  query.set('page', String(page));
+  query.set('pageSize', String(PAGE_SIZE));
 
-  const { leads } = await apiFetch<{ leads: ShowcaseAdminLead[] }>(`/admin/showcase/leads${suffix}`);
+  const response = await apiFetch<LeadsPage>(`/admin/showcase/leads?${query.toString()}`);
+  const { leads, statusCounts } = response;
+  const scopeTotal = STATUSES.reduce((sum, value) => sum + (statusCounts[value] ?? 0), 0);
 
   const params: QueryParams = { status: selected ?? '', providerId: provider };
   const views: TabItem[] = [
-    { key: '', label: 'Tümü', testId: 'lead-view-all' },
+    { key: '', label: 'Tümü', count: scopeTotal, testId: 'lead-view-all' },
     ...STATUSES.map((value) => ({
       key: value,
       label: SHOWCASE_LEAD_STATUS_LABELS[value],
+      count: statusCounts[value] ?? 0,
       testId: `lead-view-${value.toLowerCase()}`,
     })),
   ];
 
-  const capped = leads.length >= API_LIST_CAP;
+  // The total is the API's count for this view, never the rows on this page.
   const summary =
-    leads.length === 0
+    response.total === 0
       ? 'Bu görünümde vitrin talebi yok'
-      : `${capped ? `En yeni ${API_LIST_CAP}` : leads.length} talep · en yeni başta · moderasyonsuz, yalnız kart sahibine`;
+      : `${formatCount(response.total)} talep · en yeni başta · moderasyonsuz, yalnız kart sahibine`;
 
   return (
     <main className="showcase-leads-page">
@@ -238,8 +253,17 @@ export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps
             })}
           </DataTable>
         )}
-        {leads.length > 0 ? (
-          <WholeListFooter count={leads.length} noun="talep" cap={API_LIST_CAP} summaryTestId="lead-count" />
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={params}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="talep"
+            summaryTestId="lead-count"
+          />
         ) : null}
       </div>
     </main>

@@ -12,21 +12,32 @@ import {
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
-import { WholeListFooter } from '../../../components/pagination';
+import { Pagination } from '../../../components/pagination';
 import { SavedViewTabs, type TabItem } from '../../../components/tabs';
-import type { QueryParams } from '../../../lib/list-query';
+import { parsePage, type QueryParams } from '../../../lib/list-query';
+import { formatCount } from '../../../lib/pagination';
 
 const PATH = '/showcase/price-terms';
 
+/** Rows per page; the API caps a page at 100. */
+const PAGE_SIZE = 50;
+
 /**
- * `ShowcasePriceTermsService.listForAdmin` reads the newest 200 card-bound and
- * the newest 200 package-bound acceptances; either table reaching its cap is
- * the point where this list stops being the whole ledger.
+ * `ShowcasePriceTermsService.listForAdmin` (API-HARDENING-001): one page of
+ * both tables merged newest first, the exact total for the filter, and every
+ * version's count under the provider/card scope without the version filter.
  */
-const API_TABLE_CAP = 200;
+type PriceTermsPage = {
+  acceptances: ShowcasePriceTermsAcceptance[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  versions: Array<{ termsVersion: string; count: number }>;
+};
 
 type PriceTermsPageProps = {
-  searchParams: Promise<{ providerId?: string; cardId?: string; termsVersion?: string }>;
+  searchParams: Promise<{ providerId?: string; cardId?: string; termsVersion?: string; page?: string }>;
 };
 
 /**
@@ -59,9 +70,10 @@ type PriceTermsPageProps = {
  * under the terms it was sold under, which are snapshotted on the placement
  * itself rather than looked up from here.
  *
- * The version views are read from the list without the version filter, so
- * choosing one no longer hides the others (it did before this slice: the
- * chips were derived from the already-filtered rows).
+ * The version views come from the API's own per-version counts, taken without
+ * the version filter, so choosing one never hides the others and the counters
+ * do not depend on which page is open. The list itself is paged on the server:
+ * every acceptance is reachable, however old.
  */
 
 const SCREEN_INFO =
@@ -86,52 +98,38 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
   const providerId = (params.providerId ?? '').trim();
   const cardId = (params.cardId ?? '').trim();
   const termsVersion = (params.termsVersion ?? '').trim();
+  const page = parsePage(params.page);
 
-  const scopeQuery = new URLSearchParams();
-  if (providerId) scopeQuery.set('providerId', providerId);
-  if (cardId) scopeQuery.set('cardId', cardId);
+  const query = new URLSearchParams();
+  if (providerId) query.set('providerId', providerId);
+  if (cardId) query.set('cardId', cardId);
+  if (termsVersion) query.set('termsVersion', termsVersion);
+  query.set('page', String(page));
+  query.set('pageSize', String(PAGE_SIZE));
 
-  // The version chips come from a read without the version filter, so they do
-  // not shrink to the chosen version. The rows under a chosen version are the
-  // API's own filtered answer, not a cut of the first read: each table stops
-  // at 200 rows, and the newest 200 need not contain an older version's rows.
-  const read = (query: URLSearchParams) =>
-    apiFetch<{ acceptances: ShowcasePriceTermsAcceptance[] }>(
-      `/admin/showcase/price-terms-acceptances${query.toString() ? `?${query.toString()}` : ''}`,
-    ).then((answer) => answer.acceptances);
-  const versionQuery = new URLSearchParams(scopeQuery);
-  if (termsVersion) versionQuery.set('termsVersion', termsVersion);
-  const [all, acceptances] = await Promise.all([
-    read(scopeQuery),
-    termsVersion ? read(versionQuery) : null,
-  ]).then(([unfiltered, filtered]) => [unfiltered, filtered ?? unfiltered] as const);
+  const response = await apiFetch<PriceTermsPage>(`/admin/showcase/price-terms-acceptances?${query.toString()}`);
+  const { acceptances } = response;
 
-  const reachedCap = (rows: ShowcasePriceTermsAcceptance[]) =>
-    rows.filter((row) => row.scope === 'CARD').length >= API_TABLE_CAP ||
-    rows.filter((row) => row.scope === 'PACKAGE').length >= API_TABLE_CAP;
-  // Counters only while the unfiltered read is the whole ledger.
-  const exactCounts = !reachedCap(all);
-  // The chosen version keeps its chip even when it is older than the newest rows.
-  const versions = [...new Set([...all.map((row) => row.termsVersion), ...(termsVersion ? [termsVersion] : [])])].sort();
+  const counts = new Map(response.versions.map((entry) => [entry.termsVersion, entry.count]));
+  const scopeTotal = response.versions.reduce((sum, entry) => sum + entry.count, 0);
+  // The chosen version keeps its chip even when nothing in the scope names it.
+  const versions = [...new Set([...counts.keys(), ...(termsVersion ? [termsVersion] : [])])].sort();
   const filters: QueryParams = { providerId, cardId, termsVersion };
+  const pageParams: QueryParams = filters;
   const views: TabItem[] = [
-    { key: '', label: 'Tümü', count: exactCounts ? all.length : null, testId: 'terms-view-all' },
+    { key: '', label: 'Tümü', count: scopeTotal, testId: 'terms-view-all' },
     ...versions.map((value) => ({
       key: value,
       label: value,
-      count: exactCounts ? all.filter((row) => row.termsVersion === value).length : null,
+      count: counts.get(value) ?? 0,
       testId: `terms-view-${value}`,
     })),
   ];
 
-  const capped = reachedCap(acceptances);
-
   const summary =
-    all.length === 0
+    scopeTotal === 0
       ? 'Henüz onay kaydı yok'
-      : `${exactCounts ? all.length : `En yeni ${all.length}`} onay · ${versions.length} metin sürümü${
-          providerId || cardId ? ' · süzülmüş' : ''
-        }`;
+      : `${formatCount(scopeTotal)} onay · ${versions.length} metin sürümü${providerId || cardId ? ' · süzülmüş' : ''}`;
 
   return (
     <main className="showcase-price-terms-page">
@@ -229,11 +227,15 @@ export default async function ShowcasePriceTermsPage({ searchParams }: PriceTerm
             ))}
           </DataTable>
         )}
-        {acceptances.length > 0 ? (
-          <WholeListFooter
-            count={acceptances.length}
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={pageParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
             noun="onay"
-            cap={capped ? acceptances.length : undefined}
             summaryTestId="terms-count"
           />
         ) : null}

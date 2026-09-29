@@ -101,30 +101,24 @@ export function CursorPagination({
 
 /**
  * The footer for a list the API returns whole — no page, no cursor — so the
- * count is the list's real size and there is nowhere to go next. When the API
- * stops at a fixed number of rows (`cap`) and this answer reached it, the
- * footer says the list is the newest `cap` rather than claiming it is all.
- * Önceki / Sonraki are not drawn: a pager with nothing behind it would promise
- * pages that do not exist.
+ * count is the list's real size and there is nowhere to go next. Önceki /
+ * Sonraki are not drawn: a pager with nothing behind it would promise pages
+ * that do not exist. A list the API stops at a fixed number of rows must not
+ * use this footer; it pages on the server instead (API-HARDENING-001).
  */
 export function WholeListFooter({
   count,
   noun = 'kayıt',
-  cap,
   summaryTestId,
 }: {
   count: number;
   noun?: string;
-  cap?: number;
   summaryTestId?: string;
 }) {
-  const capped = cap !== undefined && count >= cap;
   return (
     <nav className="pagination" aria-label="Liste sonu">
-      <p className="pagination-summary" data-testid={summaryTestId} data-capped={capped || undefined}>
-        {capped
-          ? `En yeni ${formatCount(cap)} ${noun} gösteriliyor · daha eskileri bu ekranda listelenmez`
-          : `${formatCount(count)} ${noun}, tamamı gösteriliyor`}
+      <p className="pagination-summary" data-testid={summaryTestId}>
+        {`${formatCount(count)} ${noun}, tamamı gösteriliyor`}
       </p>
     </nav>
   );
