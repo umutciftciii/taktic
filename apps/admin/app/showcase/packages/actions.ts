@@ -33,7 +33,7 @@ export async function createShowcasePackageAction(formData: FormData) {
   // place the two meet, and a value it refuses never reaches the API.
   const priceAmount = parseTurkishLiraToMinor(readString(formData, 'priceAmount'));
   if (priceAmount === null) {
-    redirect('/showcase/packages?error=SHOWCASE_PACKAGE_PRICE_INVALID');
+    redirect(failureHref(NEW_PACKAGE_KEY, 'SHOWCASE_PACKAGE_PRICE_INVALID'));
   }
 
   try {
@@ -53,7 +53,7 @@ export async function createShowcasePackageAction(formData: FormData) {
     });
   } catch (error) {
     rethrowNextControlFlow(error);
-    redirect(`/showcase/packages?error=${errorCode(error)}`);
+    redirect(failureHref(NEW_PACKAGE_KEY, errorCode(error)));
   }
 
   revalidatePath('/showcase/packages');
@@ -64,7 +64,7 @@ export async function updateShowcasePackageAction(formData: FormData) {
   const packageId = readString(formData, 'packageId');
   const priceAmount = parseTurkishLiraToMinor(readString(formData, 'priceAmount'));
   if (priceAmount === null) {
-    redirect('/showcase/packages?error=SHOWCASE_PACKAGE_PRICE_INVALID');
+    redirect(failureHref(packageId, 'SHOWCASE_PACKAGE_PRICE_INVALID'));
   }
 
   try {
@@ -84,11 +84,22 @@ export async function updateShowcasePackageAction(formData: FormData) {
     });
   } catch (error) {
     rethrowNextControlFlow(error);
-    redirect(`/showcase/packages?error=${errorCode(error)}`);
+    redirect(failureHref(packageId, errorCode(error)));
   }
 
   revalidatePath('/showcase/packages');
   redirect('/showcase/packages?saved=1');
+}
+
+/** The `?paket=` value that opens the new-package window. */
+const NEW_PACKAGE_KEY = 'yeni';
+
+/**
+ * A refusal goes back into the window it came from (ADMIN-DESIGN-001 Faz 3C:
+ * the forms live in a `?paket=` window now), with the reason inside it.
+ */
+function failureHref(packageKey: string, code: string): string {
+  return `/showcase/packages?${new URLSearchParams({ paket: packageKey || NEW_PACKAGE_KEY, error: code }).toString()}`;
 }
 
 function readString(formData: FormData, key: string): string {
@@ -117,7 +128,7 @@ function errorCode(error: unknown): string {
     try {
       const parsed = JSON.parse(error.body) as { code?: unknown };
       if (typeof parsed.code === 'string') {
-        return encodeURIComponent(parsed.code);
+        return parsed.code;
       }
     } catch {
       // Not JSON, or JSON with no code.

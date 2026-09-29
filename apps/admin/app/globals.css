@@ -6835,3 +6835,46 @@ button:disabled {
   color: var(--color-accent-700);
   font-weight: 600;
 }
+
+/* ---- ADMIN-DESIGN-001 Faz 3C: vitrin and reviews ---- */
+
+/* A record's detail/edit window at a URL (RouteDialog): the confirm dialog's
+   frame, wider, and scrolling inside itself rather than past the window. */
+.route-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+
+.route-dialog .form-grid {
+  margin: 0;
+  align-items: start;
+}
+
+/* A field's label, input and help stack from the top; a longer label beside
+   it must not stretch the input to match. */
+.route-dialog .form-grid > label {
+  align-content: start;
+}
+
+.route-dialog-body .kv-list + .form-grid,
+.route-dialog-body .kv-list + .detail-muted-note {
+  margin-top: 16px;
+}
+
+.route-dialog-body .notice {
+  margin: 0 0 12px;
+}
+
+/* A value the form shows but will not send: the package slug. */
+.readonly-value {
+  display: grid;
+  gap: 4px;
+}
+
+.readonly-value code {
+  padding: 8px 10px;
+  border: 1px dashed var(--color-neutral-400);
+  background: var(--color-neutral-100);
+  overflow-wrap: anywhere;
+}

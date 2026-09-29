@@ -11,9 +11,10 @@ import {
   reviewStateLabel,
   type AdminReviewDetail,
 } from '../../../lib/api';
+import { DetailHeader } from '../../../components/detail-header';
 import { EmptyState } from '../../../components/empty-state';
-import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
+import type { SummaryItem } from '../../../components/summary-strip';
 import { dismissReviewReportAction } from './actions';
 import { ReviewModerationForm } from './moderation-form';
 
@@ -30,6 +31,12 @@ import { ReviewModerationForm } from './moderation-form';
  * or the whole review down, or puts it back; each of those closes any open
  * report as a side effect on the API side, so a removal never leaves a
  * report waiting on a decision that was just taken.
+ *
+ * ADMIN-DESIGN-001 Faz 3C: the design has no screen of its own for this
+ * (`soon`), so it is built on the shared detail template — the header card
+ * with a way back to the queue, the state badges and a summary strip of the
+ * record's own figures — and every card it had before keeps its place. Both
+ * removals ask in a dialog first (moderation-form.tsx).
  *
  * What is deliberately absent: a way to file a report on the provider's
  * behalf. A report is the business's own statement about a review of its
@@ -75,45 +82,55 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
   const openReport = review.reports.find((report) => report.resolvedAt === null) ?? null;
   const requestRef = review.request.requestNumber ?? `#${review.request.id.slice(-8)}`;
 
-  return (
-    <main className="request-detail-page">
-      <p className="breadcrumbs">
-        {can('DASHBOARD_READ') ? <Link href="/">Dashboard</Link> : <span>Dashboard</span>}
-        <span aria-hidden="true">/</span>
-        <Link href="/provider-reviews/reports">Değerlendirme bildirimleri</Link>
-        <span aria-hidden="true">/</span>
-        <span>Değerlendirme</span>
-      </p>
+  const facts: SummaryItem[] = [
+    { label: 'Puan', value: `${review.rating} / 5` },
+    { label: 'Durum', value: reviewStateLabel(review) },
+    { label: 'Bildirim', value: String(review.reports.length), note: openReport ? '1 açık' : 'açık bildirim yok' },
+    { label: 'Karar', value: String(review.moderation.length), note: 'moderasyon günlüğünde' },
+    { label: 'Değerlendirme', value: formatDateTime(review.createdAt) },
+  ];
 
-      <PageHeader
-        title={`${review.provider.businessName} — değerlendirme`}
-        subtitle={
-          <span className="request-header-meta">
+  return (
+    <main className="request-detail-page review-detail-page">
+      <DetailHeader
+        back={{ href: '/provider-reviews/reports', label: 'Şikayet edilen yorumlar' }}
+        badges={
+          <>
             <span className={reviewStateBadgeClass(review)} data-testid="review-state">
               {reviewStateLabel(review)}
             </span>
+            {openReport ? <span className="badge badge-bad">Karar bekliyor</span> : null}
             <span className="badge badge-muted" data-testid="review-rating" aria-label={`5 üzerinden ${review.rating}`}>
               ★ {review.rating}
             </span>
-            <span className="muted">· {formatDateTime(review.createdAt)}</span>
-          </span>
+          </>
         }
+        meta={
+          <>
+            <code className="display-number">{requestRef}</code> · {review.request.categoryName}
+          </>
+        }
+        title={`${review.provider.businessName} — değerlendirme`}
+        subtitle={`${review.request.customerName} · ${review.request.city}/${review.request.district}`}
+        facts={facts}
+        factsLabel="Değerlendirme özeti"
+        testId="review-detail-header"
       />
 
       {okMessage ? (
-        <div className="notice notice-success" role="status" data-testid="review-ok" style={{ marginBottom: 12 }}>
+        <div className="notice notice-success detail-notice" role="status" data-testid="review-ok">
           {okMessage}
         </div>
       ) : null}
       {errorMessage ? (
-        <div className="notice notice-error" role="status" data-testid="review-error" style={{ marginBottom: 12 }}>
+        <div className="notice notice-error detail-notice" role="status" data-testid="review-error">
           {errorMessage}
         </div>
       ) : null}
 
-      <div className="request-detail-card-grid">
+      <div className="detail-panel detail-panel-grid">
         <SectionCard
-          className="card-wide"
+          className="is-wide"
           title="Değerlendirme"
           subtitle="Müşterinin yıldızı ve yorumu. Kaldırılmış bir yorum burada okunmaya devam eder; dışarıda görünmez."
         >
@@ -151,6 +168,7 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
               hasLiveComment={review.comment !== null && !review.commentRemoved}
               removed={review.removed}
               commentRemoved={review.commentRemoved}
+              hasOpenReport={openReport !== null}
             />
           ) : null}
         </SectionCard>
@@ -204,7 +222,7 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
         </SectionCard>
 
         <SectionCard
-          className="card-wide"
+          className="is-wide"
           title="Bildirimler"
           subtitle="Hizmet verenin bu değerlendirme hakkındaki bildirimleri ve verilen kararlar. Not yalnız yönetici görür."
         >
@@ -282,7 +300,7 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
         </SectionCard>
 
         <SectionCard
-          className="card-wide"
+          className="is-wide"
           title="Moderasyon günlüğü"
           subtitle="Bu değerlendirme üzerindeki her karar, kim tarafından ve ne zaman."
         >

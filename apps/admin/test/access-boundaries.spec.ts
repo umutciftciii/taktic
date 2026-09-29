@@ -154,7 +154,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
     '/showcase/price-terms': { row: '/showcase/price-terms', gate: ['SHOWCASE_TERMS_ACCEPTANCES_READ'] },
     '/showcase/packages': { row: '/showcase/packages', gate: ['SHOWCASE_PACKAGES_READ'] },
     '/provider-reviews/reports': { row: '/provider-reviews/reports', gate: ['PROVIDER_REVIEWS_READ'] },
-    '/provider-reviews/[reviewId]': { row: null, gate: ['PROVIDER_REVIEWS_READ'] },
+    '/provider-reviews/[reviewId]': { row: '/provider-reviews/reports', gate: ['PROVIDER_REVIEWS_READ'] },
     '/categories': { row: '/categories', gate: ['CATALOG_READ'] },
     '/categories/new': {
       row: '/categories',

@@ -571,6 +571,7 @@ test.describe('vitrin: paket-önce akış', () => {
       await expect(admin.page.getByTestId('review-entitlement')).toContainText(pkg.name);
       await admin.page.getByLabel('Ret gerekçesi *').fill('Başlık çok genel, hizmeti adlandırın.');
       await admin.page.getByRole('button', { name: 'Reddet' }).click();
+      await admin.page.getByTestId('showcase-reject-dialog').getByRole('button', { name: 'Evet, sürümü reddet' }).click();
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByText('Sürüm reddedildi', { exact: false })).toBeVisible();
 
@@ -696,6 +697,7 @@ test.describe('vitrin: paket-önce akış', () => {
       await assertNoErrorScreen(admin.page);
       await admin.page.getByLabel('Ret gerekçesi *').fill('Başlık çok genel, hizmeti adlandırın.');
       await admin.page.getByRole('button', { name: 'Reddet' }).click();
+      await admin.page.getByTestId('showcase-reject-dialog').getByRole('button', { name: 'Evet, sürümü reddet' }).click();
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByText('Sürüm reddedildi', { exact: false })).toBeVisible();
 

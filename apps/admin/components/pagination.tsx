@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { pageHref, type QueryParams } from '../lib/list-query';
-import { cursorSummary, pageSummary, pageWindow } from '../lib/pagination';
+import { cursorSummary, formatCount, pageSummary, pageWindow } from '../lib/pagination';
 
 type PagerLinkProps = { href: string | null; rel: 'prev' | 'next'; label: string; testId?: string };
 
@@ -95,6 +95,37 @@ export function CursorPagination({
         <PagerLink rel="prev" label="Önceki" href={previousHref} testId="pagination-previous" />
         <PagerLink rel="next" label="Sonraki" href={nextHref} testId="pagination-next" />
       </div>
+    </nav>
+  );
+}
+
+/**
+ * The footer for a list the API returns whole — no page, no cursor — so the
+ * count is the list's real size and there is nowhere to go next. When the API
+ * stops at a fixed number of rows (`cap`) and this answer reached it, the
+ * footer says the list is the newest `cap` rather than claiming it is all.
+ * Önceki / Sonraki are not drawn: a pager with nothing behind it would promise
+ * pages that do not exist.
+ */
+export function WholeListFooter({
+  count,
+  noun = 'kayıt',
+  cap,
+  summaryTestId,
+}: {
+  count: number;
+  noun?: string;
+  cap?: number;
+  summaryTestId?: string;
+}) {
+  const capped = cap !== undefined && count >= cap;
+  return (
+    <nav className="pagination" aria-label="Liste sonu">
+      <p className="pagination-summary" data-testid={summaryTestId} data-capped={capped || undefined}>
+        {capped
+          ? `En yeni ${formatCount(cap)} ${noun} gösteriliyor · daha eskileri bu ekranda listelenmez`
+          : `${formatCount(count)} ${noun}, tamamı gösteriliyor`}
+      </p>
     </nav>
   );
 }

@@ -11,8 +11,12 @@ import {
   SHOWCASE_SUSPEND_REASON_LABELS,
   type ShowcasePlacement,
 } from '../../../../lib/api';
-import { PageHeader } from '../../../../components/page-header';
+import { ConfirmDialog } from '../../../../components/confirm-dialog';
+import { DataTable, type DataColumn } from '../../../../components/data-table';
+import { DetailHeader } from '../../../../components/detail-header';
+import { KeyValueList } from '../../../../components/key-value-list';
 import { SectionCard } from '../../../../components/section-card';
+import type { SummaryItem } from '../../../../components/summary-strip';
 import {
   cancelShowcasePlacementAction,
   resumeShowcasePlacementAction,
@@ -41,6 +45,11 @@ const ERRORS: Record<string, string> = {
 /**
  * One paid run: what was sold, what it is publishing, and everything that has
  * happened to it.
+ *
+ * ADMIN-DESIGN-001 Faz 3C: the design has no screen for one run (`soon`), so
+ * it sits on the shared detail template. Cancelling — the one irreversible
+ * action here — asks first, in a dialog that says what the API really does
+ * (CANCEL_CONSEQUENCE); closing it writes nothing.
  *
  * ## The suspension table is the interesting part
  *
@@ -80,290 +89,314 @@ export default async function ShowcasePlacementPage({
     placement.status === 'PENDING_ACTIVATION' ||
     placement.status === 'SUSPENDED';
 
+  const facts: SummaryItem[] = [
+    { label: 'Paket', value: placement.packageName, note: `${placement.durationDays} gün` },
+    // What TakTick charged for the listing. Never shown beside the card's own
+    // service price, which is the provider's money.
+    { label: 'Yayın bedeli', value: formatPrice(placement.priceAmount, placement.currency) },
+    { label: 'Başlangıç', value: formatDateTime(placement.startAt) },
+    {
+      label: 'Bitiş',
+      value: formatDateTime(placement.endAt),
+      note: placement.extendedDays > 0 ? `durdurmalar nedeniyle +${placement.extendedDays} gün` : undefined,
+    },
+    { label: 'Gelen talep', value: String(placement.leadCount) },
+  ];
+
   return (
-    <>
-      <PageHeader
+    <main className="showcase-placement-detail-page">
+      <DetailHeader
+        back={{ href: '/showcase/placements', label: 'Yayında olan kartlar' }}
+        badges={
+          <span className={showcasePlacementBadgeClass(placement.status)} data-testid="placement-status">
+            {SHOWCASE_PLACEMENT_STATUS_LABELS[placement.status]}
+          </span>
+        }
+        meta={
+          placement.suspendReason
+            ? SHOWCASE_SUSPEND_REASON_LABELS[placement.suspendReason]
+            : placement.cancelledAt
+              ? `İptal: ${formatDateTime(placement.cancelledAt)}`
+              : `${SHOWCASE_CARD_KIND_LABELS[placement.kind]} · ${placement.category.name}`
+        }
         title={placement.version.title}
-        subtitle={`${SHOWCASE_CARD_KIND_LABELS[placement.kind]} · ${placement.category.name}`}
-        breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Yayındaki Kartlar', href: '/showcase/placements' },
-          { label: placement.version.title },
-        ]}
+        subtitle={`${placement.provider?.businessName ?? '—'} · ${SHOWCASE_CARD_KIND_LABELS[placement.kind]} · ${placement.category.name}`}
+        facts={facts}
+        factsLabel="Yerleşim özeti"
+        testId="placement-header"
       />
 
       {error ? (
-        <div className="notice notice-error" role="alert">
+        <div className="notice notice-error detail-notice" role="alert" data-testid="placement-error">
           {ERRORS[error] ?? ERRORS.SHOWCASE_PLACEMENT_ACTION_FAILED}
         </div>
       ) : null}
       {suspended ? (
-        <div className="notice" role="status">
+        <div className="notice detail-notice" role="status">
           Yerleşim durduruldu ve yayından kaldırıldı. Süre işlemiyor; sürdürdüğünüzde durdurma
           süresi kadar uzatılacak.
         </div>
       ) : null}
       {resumed ? (
-        <div className="notice" role="status">
+        <div className="notice detail-notice" role="status">
           Yerleşim yeniden yayında. Durdurma süresi bitiş tarihine eklendi.
         </div>
       ) : null}
       {cancelled ? (
-        <div className="notice notice-warning" role="status">
+        <div className="notice notice-warning detail-notice" role="status" data-testid="placement-cancelled-notice">
           Yerleşim iptal edildi. <strong>Para iadesi yapılmadı</strong> — ilgili satın alma
           manuel inceleme için işaretlendi.
         </div>
       ) : null}
 
-      <SectionCard title="Yerleşim">
-        <dl className="detail-grid">
-          <div>
-            <dt>Durum</dt>
-            <dd>
-              <span className={showcasePlacementBadgeClass(placement.status)}>
-                {SHOWCASE_PLACEMENT_STATUS_LABELS[placement.status]}
-              </span>
-              {placement.suspendReason ? (
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {SHOWCASE_SUSPEND_REASON_LABELS[placement.suspendReason]}
-                </div>
-              ) : null}
-            </dd>
-          </div>
-          <div>
-            <dt>İşletme</dt>
-            <dd>
-              {placement.provider && canOpenProvider ? (
-                <Link href={`/providers/${placement.provider.id}`}>
-                  {placement.provider.businessName}
-                </Link>
-              ) : placement.provider ? (
-                placement.provider.businessName
-              ) : (
-                '—'
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>Paket</dt>
-            <dd>
-              {placement.packageName} · {placement.durationDays} gün
-            </dd>
-          </div>
-          <div>
-            <dt>Yayın bedeli</dt>
-            {/*
-              What TakTick charged for the listing. Never shown beside the
-              card's own service price, which is the provider's money.
-            */}
-            <dd>{formatPrice(placement.priceAmount, placement.currency)}</dd>
-          </div>
-          <div>
-            <dt>Başlangıç</dt>
-            <dd>{formatDateTime(placement.startAt)}</dd>
-          </div>
-          <div>
-            <dt>Bitiş</dt>
-            <dd>
-              {formatDateTime(placement.endAt)}
-              {placement.extendedDays > 0 ? (
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Durdurmalar nedeniyle {placement.extendedDays} gün eklendi
-                </div>
-              ) : null}
-            </dd>
-          </div>
-          <div>
-            <dt>Yayındaki sürüm</dt>
-            <dd>
-              {canOpenReview ? (
-                <Link href={`/showcase/reviews/${placement.version.id}`}>
-                  v{placement.version.versionNumber}
-                </Link>
-              ) : (
-                `v${placement.version.versionNumber}`
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>Gelen talep</dt>
-            <dd>{placement.leadCount}</dd>
-          </div>
-          <div>
-            <dt>Raflar</dt>
-            <dd>
-              <ul className="plain-list">
-                {placement.areas.map((area) => (
-                  <li key={area.id}>
-                    {area.label}
-                    {!area.active ? <span className="muted"> · yayında değil</span> : null}
-                  </li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-        </dl>
-      </SectionCard>
+      <div className="detail-panel">
+        <SectionCard title="Yerleşim">
+          <KeyValueList
+            items={[
+              {
+                label: 'Durum',
+                value: (
+                  <>
+                    <span className={showcasePlacementBadgeClass(placement.status)}>
+                      {SHOWCASE_PLACEMENT_STATUS_LABELS[placement.status]}
+                    </span>
+                    {placement.suspendReason ? (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {SHOWCASE_SUSPEND_REASON_LABELS[placement.suspendReason]}
+                      </div>
+                    ) : null}
+                  </>
+                ),
+              },
+              {
+                label: 'İşletme',
+                value:
+                  placement.provider && canOpenProvider ? (
+                    <Link href={`/providers/${placement.provider.id}`}>{placement.provider.businessName}</Link>
+                  ) : (
+                    (placement.provider?.businessName ?? '—')
+                  ),
+              },
+              { label: 'Paket', value: `${placement.packageName} · ${placement.durationDays} gün` },
+              { label: 'Yayın bedeli', value: formatPrice(placement.priceAmount, placement.currency) },
+              { label: 'Başlangıç', value: formatDateTime(placement.startAt) },
+              {
+                label: 'Bitiş',
+                value: (
+                  <>
+                    {formatDateTime(placement.endAt)}
+                    {placement.extendedDays > 0 ? (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        Durdurmalar nedeniyle {placement.extendedDays} gün eklendi
+                      </div>
+                    ) : null}
+                  </>
+                ),
+              },
+              ...(placement.cancelledAt
+                ? [{ label: 'İptal zamanı', value: formatDateTime(placement.cancelledAt) }]
+                : []),
+              {
+                label: 'Yayındaki sürüm',
+                value: canOpenReview ? (
+                  <Link href={`/showcase/reviews/${placement.version.id}`}>v{placement.version.versionNumber}</Link>
+                ) : (
+                  `v${placement.version.versionNumber}`
+                ),
+              },
+              { label: 'Gelen talep', value: String(placement.leadCount) },
+              {
+                label: 'Raflar',
+                value: (
+                  <ul className="plain-list">
+                    {placement.areas.map((area) => (
+                      <li key={area.id}>
+                        {area.label}
+                        {!area.active ? <span className="muted"> · yayında değil</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ),
+              },
+            ]}
+          />
+        </SectionCard>
 
-      {placement.suspensions && placement.suspensions.length > 0 ? (
-        <SectionCard
-          title="Durdurma geçmişi"
-          subtitle="“Süre durdu” sütunu, durdurma açıldığı anda alınan bir kopyadır; kural sonradan değişse bile bu satırlar değişmez."
-          padded={false}
-        >
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Sebep</th>
-                  <th>Süre durdu</th>
-                  <th>Başlangıç</th>
-                  <th>Bitiş</th>
-                  <th>Bitiş tarihi</th>
-                  <th>Operatör</th>
+        {placement.suspensions && placement.suspensions.length > 0 ? (
+          <SectionCard
+            title="Durdurma geçmişi"
+            subtitle="“Süre durdu” sütunu, durdurma açıldığı anda alınan bir kopyadır; kural sonradan değişse bile bu satırlar değişmez."
+            padded={false}
+          >
+            <DataTable
+              caption="Durdurma geçmişi"
+              columns={SUSPENSION_COLUMNS}
+              minWidth={760}
+              testId="placement-suspensions"
+            >
+              {placement.suspensions.map((suspension) => (
+                <tr key={suspension.id}>
+                  <td>{SHOWCASE_SUSPEND_REASON_LABELS[suspension.reason]}</td>
+                  <td>
+                    <span className={suspension.extendsClock ? 'badge badge-good' : 'badge badge-muted'}>
+                      {suspension.extendsClock ? 'Evet' : 'Hayır'}
+                    </span>
+                  </td>
+                  <td>{formatDateTime(suspension.startedAt)}</td>
+                  <td>{suspension.endedAt ? formatDateTime(suspension.endedAt) : 'Sürüyor'}</td>
+                  <td>
+                    {formatDateTime(suspension.endAtBefore)}
+                    {suspension.endAtAfter ? (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        → {formatDateTime(suspension.endAtAfter)}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td>
+                    {suspension.actor?.name ?? (suspension.actor ? 'Operatör' : 'Sistem')}
+                    {suspension.note ? (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {suspension.note}
+                      </div>
+                    ) : null}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {placement.suspensions.map((suspension) => (
-                  <tr key={suspension.id}>
-                    <td>{SHOWCASE_SUSPEND_REASON_LABELS[suspension.reason]}</td>
-                    <td>
-                      <span
-                        className={suspension.extendsClock ? 'badge badge-good' : 'badge badge-muted'}
-                      >
-                        {suspension.extendsClock ? 'Evet' : 'Hayır'}
-                      </span>
-                    </td>
-                    <td>{formatDateTime(suspension.startedAt)}</td>
-                    <td>{suspension.endedAt ? formatDateTime(suspension.endedAt) : 'Sürüyor'}</td>
-                    <td>
-                      {formatDateTime(suspension.endAtBefore)}
-                      {suspension.endAtAfter ? (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          → {formatDateTime(suspension.endAtAfter)}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>
-                      {suspension.actor?.name ?? (suspension.actor ? 'Operatör' : 'Sistem')}
-                      {suspension.note ? (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          {suspension.note}
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      ) : null}
+              ))}
+            </DataTable>
+          </SectionCard>
+        ) : null}
 
-      {placement.versionChanges && placement.versionChanges.length > 0 ? (
-        <SectionCard
-          title="Sürüm değişiklikleri"
-          subtitle="Yerleşim, kartın yayındaki sürümünü takip eder; kart sayfası ile ana sayfa farklı metin göstermez."
-          padded={false}
-        >
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Tarih</th>
-                  <th>Sebep</th>
-                  <th>Sürüm</th>
+        {placement.versionChanges && placement.versionChanges.length > 0 ? (
+          <SectionCard
+            title="Sürüm değişiklikleri"
+            subtitle="Yerleşim, kartın yayındaki sürümünü takip eder; kart sayfası ile ana sayfa farklı metin göstermez."
+            padded={false}
+          >
+            <DataTable caption="Sürüm değişiklikleri" columns={VERSION_CHANGE_COLUMNS} minWidth={480}>
+              {placement.versionChanges.map((change) => (
+                <tr key={change.id}>
+                  <td>{formatDateTime(change.createdAt)}</td>
+                  <td>{change.trigger === 'ADMIN_APPROVAL' ? 'Operatör onayı' : 'Sağlayıcı bölge daralttı'}</td>
+                  <td>
+                    {canOpenReview ? (
+                      <Link href={`/showcase/reviews/${change.toVersionId}`}>Yeni sürüm</Link>
+                    ) : (
+                      'Yeni sürüm'
+                    )}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {placement.versionChanges.map((change) => (
-                  <tr key={change.id}>
-                    <td>{formatDateTime(change.createdAt)}</td>
-                    <td>
-                      {change.trigger === 'ADMIN_APPROVAL'
-                        ? 'Operatör onayı'
-                        : 'Sağlayıcı bölge daralttı'}
-                    </td>
-                    <td>
-                      {canOpenReview ? (
-                        <Link href={`/showcase/reviews/${change.toVersionId}`}>Yeni sürüm</Link>
-                      ) : (
-                        'Yeni sürüm'
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      ) : null}
+              ))}
+            </DataTable>
+          </SectionCard>
+        ) : null}
 
-      {placement.status === 'ACTIVE' && canModerate ? (
-        <SectionCard
-          title="Yayından kaldır"
-          subtitle="Operatör kararıyla durdurmak süreyi durdurur: durdurma boyunca geçen süre, sürdürüldüğünde bitiş tarihine eklenir."
-        >
-          <form action={suspendShowcasePlacementAction} className="form-grid">
-            <input type="hidden" name="placementId" value={placementId} />
-            <label className="form-grid-wide">
-              <span>Not</span>
-              <textarea name="note" maxLength={500} placeholder="Kayda geçecek gerekçe" />
-            </label>
-            <div className="form-actions form-grid-wide">
-              <button className="btn btn-danger" type="submit">
-                Yerleşimi durdur
-              </button>
-            </div>
-          </form>
-        </SectionCard>
-      ) : null}
-
-      {placement.status === 'SUSPENDED' && canModerate ? (
-        <SectionCard
-          title="Yayına al"
-          subtitle={
-            isAdminHold
-              ? 'Durdurma süresi bitiş tarihine eklenerek yerleşim yeniden yayına alınır.'
-              : 'Bu yerleşim operatör kararıyla durdurulmadı. Sebep ortadan kalktığında kendiliğinden yayına döner.'
-          }
-        >
-          {isAdminHold ? (
-            <form action={resumeShowcasePlacementAction}>
+        {placement.status === 'ACTIVE' && canModerate ? (
+          <SectionCard
+            title="Yayından kaldır"
+            subtitle="Operatör kararıyla durdurmak süreyi durdurur: durdurma boyunca geçen süre, sürdürüldüğünde bitiş tarihine eklenir."
+          >
+            <form action={suspendShowcasePlacementAction} className="form-grid">
               <input type="hidden" name="placementId" value={placementId} />
-              <button className="btn btn-primary" type="submit">
-                Yerleşimi sürdür
-              </button>
+              <label className="form-grid-wide">
+                <span>Not</span>
+                <textarea name="note" maxLength={500} placeholder="Kayda geçecek gerekçe" />
+              </label>
+              <div className="form-actions form-grid-wide">
+                <button className="btn btn-danger" type="submit">
+                  Yerleşimi durdur
+                </button>
+              </div>
             </form>
-          ) : (
-            <p className="muted">
-              {placement.suspendReason
-                ? SHOWCASE_SUSPEND_REASON_LABELS[placement.suspendReason]
-                : ''}
-            </p>
-          )}
-        </SectionCard>
-      ) : null}
+          </SectionCard>
+        ) : null}
 
-      {isLive && canCancel ? (
-        <SectionCard
-          title="Yerleşimi iptal et"
-          subtitle="Yerleşim sonlanır ve yayından kalkar. Para iadesi otomatik yapılmaz: ilgili satın alma manuel inceleme için işaretlenir ve kararı bir insan verir."
-        >
-          <form action={cancelShowcasePlacementAction} className="form-grid">
-            <input type="hidden" name="placementId" value={placementId} />
-            <label className="form-grid-wide">
-              <span>Not</span>
-              <textarea name="note" maxLength={500} placeholder="İptal gerekçesi" />
-            </label>
-            <div className="form-actions form-grid-wide">
-              <button className="btn btn-danger" type="submit">
-                Yerleşimi iptal et
-              </button>
-            </div>
-          </form>
-        </SectionCard>
-      ) : null}
-    </>
+        {placement.status === 'SUSPENDED' && canModerate ? (
+          <SectionCard
+            title="Yayına al"
+            subtitle={
+              isAdminHold
+                ? 'Durdurma süresi bitiş tarihine eklenerek yerleşim yeniden yayına alınır.'
+                : 'Bu yerleşim operatör kararıyla durdurulmadı. Sebep ortadan kalktığında kendiliğinden yayına döner.'
+            }
+          >
+            {isAdminHold ? (
+              <form action={resumeShowcasePlacementAction}>
+                <input type="hidden" name="placementId" value={placementId} />
+                <button className="btn btn-primary" type="submit">
+                  Yerleşimi sürdür
+                </button>
+              </form>
+            ) : (
+              <p className="muted">
+                {placement.suspendReason ? SHOWCASE_SUSPEND_REASON_LABELS[placement.suspendReason] : ''}
+              </p>
+            )}
+          </SectionCard>
+        ) : null}
+
+        {isLive && canCancel ? (
+          <SectionCard
+            title="Yerleşimi iptal et"
+            subtitle="Yerleşim sonlanır ve yayından kalkar. Para iadesi otomatik yapılmaz: ilgili satın alma manuel inceleme için işaretlenir ve kararı bir insan verir."
+          >
+            <form action={cancelShowcasePlacementAction} className="form-grid" data-testid="placement-cancel-form">
+              <input type="hidden" name="placementId" value={placementId} />
+              <label className="form-grid-wide">
+                <span>Not</span>
+                <textarea name="note" maxLength={500} placeholder="İptal gerekçesi" />
+              </label>
+              <div className="form-actions form-grid-wide">
+                <ConfirmDialog
+                  triggerLabel="Yerleşimi iptal et"
+                  triggerClassName="btn btn-danger"
+                  title="Yerleşim iptal edilsin mi?"
+                  consequence={CANCEL_CONSEQUENCE}
+                  confirmLabel="Evet, kalıcı olarak iptal et"
+                  testId="placement-cancel"
+                />
+              </div>
+            </form>
+          </SectionCard>
+        ) : null}
+      </div>
+    </main>
   );
 }
+
+const SUSPENSION_COLUMNS: DataColumn[] = [
+  { key: 'reason', label: 'Sebep' },
+  { key: 'clock', label: 'Süre durdu' },
+  { key: 'startedAt', label: 'Başlangıç' },
+  { key: 'endedAt', label: 'Bitiş' },
+  { key: 'endAt', label: 'Bitiş tarihi' },
+  { key: 'actor', label: 'Operatör' },
+];
+
+const VERSION_CHANGE_COLUMNS: DataColumn[] = [
+  { key: 'createdAt', label: 'Tarih' },
+  { key: 'trigger', label: 'Sebep' },
+  { key: 'version', label: 'Sürüm' },
+];
+
+/**
+ * What `AdminShowcasePlacementsService.cancel` does, in the order it does it.
+ * The last line is the audit gap stated rather than hidden: the service takes
+ * the operator and does not store them (`void user`), so the run records when
+ * it was cancelled and not by whom.
+ */
+const CANCEL_CONSEQUENCE = (
+  <ul>
+    <li>
+      Yerleşim hemen “İptal edildi” olur ve bütün vitrin raflarından kalkar. Açık bir durdurma varsa o da kapanır.
+    </li>
+    <li>
+      <strong>Geri alınamaz:</strong> iptal edilen yerleşim yeniden yayına alınamaz, kalan günler geri verilmez.
+    </li>
+    <li>
+      <strong>Para iadesi yapılmaz.</strong> İlgili paket satın alması manuel inceleme için işaretlenir ve notunuz
+      satın almanın yönetici notuna yazılır (satın alma daha önce işaretlenmişse not eklenmez).
+    </li>
+    <li>Hizmet verene e-posta gitmez. Kart, onaylı sürümü ve bu yerleşimden gelmiş talepler değişmez.</li>
+    <li>İptal zamanı kaydedilir; iptal eden kişi bugün kayda geçmez.</li>
+  </ul>
+);

@@ -9,11 +9,15 @@ import {
   SHOWCASE_VERSION_REVIEW_LABELS,
   type ShowcaseVersionListEntry,
 } from '../../../lib/api';
+import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
-import { SectionCard } from '../../../components/section-card';
+import { WholeListFooter } from '../../../components/pagination';
 
 /**
+ * Onay bekleyen kartlar (#17), design `list:cardReviews` (paket 2
+ * `31-vitrin-onay-bekleyen-kartlar`, ADMIN-DESIGN-001 Faz 3C).
+ *
  * The vitrin review queue: card versions waiting on an operator.
  *
  * Oldest submission first, because a queue ordered newest-first leaves the
@@ -26,103 +30,125 @@ import { SectionCard } from '../../../components/section-card';
  *
  * The list is read-only. Approving from a row would mean deciding without having
  * read the scope, the price and the areas, and those are what the decision is.
+ *
+ * The API returns the whole queue in one answer, so the count in the summary is
+ * the queue's real size and there is no next page. Not drawn from the design:
+ * its Ara, Durum and Tarih filters (the queue is one state, and the API takes
+ * no search or date).
  */
+
+/** The design's ⓘ, fitted to what an approval actually does (admin-showcase.service.ts). */
+const SCREEN_INFO =
+  'Vitrin kartı, bir işletmenin belirli bir hizmeti kendi fiyatıyla ilan ettiği reklamdır. Kartın her yeni metni yayına girmeden önce bir kişi tarafından okunur: abartılı iddia, yanlış fiyat ve iletişim bilgisi paylaşımı aranır. İlk sürümü onaylanan kart, geçerli bir yayın hakkı varsa hemen yayına girer; yayındaki bir kartın yeni sürümü onaylanınca yayındaki metin değişir, yayın süresi değişmez. Karar, sürümün kendi ekranında verilir.';
+
+const COLUMNS: DataColumn[] = [
+  { key: 'card', label: 'Kart' },
+  { key: 'provider', label: 'İşletme' },
+  { key: 'kind', label: 'Tür' },
+  { key: 'price', label: 'İlan ettiği fiyat', align: 'end' },
+  { key: 'areas', label: 'Bölge' },
+  { key: 'submittedAt', label: 'Gönderim' },
+  { key: 'status', label: 'Durum' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
+
 export default async function ShowcaseReviewQueuePage() {
   const { can } = await requireAdmin('SHOWCASE_REVIEW_READ');
+  const canOpenProvider = can('PROVIDERS_READ_DETAIL');
 
   const versions = await apiFetch<ShowcaseVersionListEntry[]>('/admin/showcase/versions');
 
-  return (
-    <>
-      <PageHeader
-        title="Kart İncelemeleri"
-        subtitle="İnceleme bekleyen vitrin kartı sürümleri. En eski gönderim başta."
-        breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Kart İncelemeleri' }]}
-      />
+  const summary =
+    versions.length === 0
+      ? 'Okunmayı bekleyen kart yok'
+      : `${versions.length} kart okunmayı bekliyor · en eski gönderim başta`;
 
-      <SectionCard
-        title="Bekleyen sürümler"
-        subtitle={`${versions.length} sürüm inceleme bekliyor.`}
+  return (
+    <main className="showcase-reviews-page">
+      <PageHeader
+        title="Onay bekleyen kartlar"
+        subtitle={summary}
+        info={SCREEN_INFO}
         /*
-          The full card list, reachable from the queue rather than from the
-          sidebar. An operator comes looking for "every card, in every state"
-          while already inside vitrin — usually from a card they have just
-          decided about — and it does not earn a permanent row beside the three
-          jobs the sidebar names.
+          The full card list, one click from the queue as the design has it. An
+          operator comes looking for "every card, in every state" while already
+          inside vitrin — usually from a card they have just decided about.
         */
         actions={
           can('SHOWCASE_CARDS_READ') ? (
-            <Link className="btn btn-sm btn-secondary" href="/showcase/cards">
+            <Link className="btn btn-primary" href="/showcase/cards" data-testid="showcase-all-cards-link">
               Tüm vitrin kartları
             </Link>
           ) : undefined
         }
-        padded={false}
-      >
+      />
+
+      <div className="data-list-card">
         {versions.length === 0 ? (
           <EmptyState
             title="Bekleyen sürüm yok"
-            description="İnceleme bekleyen bir vitrin kartı sürümü bulunmuyor."
+            description="Bir hizmet veren kartını incelemeye gönderdiğinde burada, en eski gönderim başta olacak şekilde listelenir."
           />
         ) : (
-          /*
-            Both classes, exactly as the support queue carries both of its own:
-            `.table-scroll` only gets its `overflow-x` inside a `.table-card`,
-            and this table lives in a `.section-card`. Without the second class
-            the seven columns widen the document itself on a 320px phone instead
-            of scrolling inside their own box.
-          */
-          <div className="table-scroll showcase-table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Kart</th>
-                  <th>İşletme</th>
-                  <th>Tür</th>
-                  <th>Hizmet bedeli</th>
-                  <th>Bölge</th>
-                  <th>Gönderim</th>
-                  <th>Durum</th>
-                </tr>
-              </thead>
-              <tbody>
-                {versions.map((version) => (
-                  <tr key={version.id}>
-                    <td>
-                      <Link href={`/showcase/reviews/${version.id}`}>{version.title}</Link>
-                      <div className="cell-muted">
-                        {version.card.category.name} · sürüm {version.versionNumber}
-                      </div>
-                    </td>
-                    <td>{version.provider.businessName}</td>
-                    <td>{SHOWCASE_CARD_KIND_LABELS[version.kind]}</td>
-                    <td>
-                      {version.listedServicePriceAmount === null ? (
-                        <span className="cell-muted">Sabit fiyat yok</span>
-                      ) : (
-                        formatPrice(version.listedServicePriceAmount, version.listedServiceCurrency)
-                      )}
-                    </td>
-                    <td>{version.areas.length}</td>
-                    <td>
-                      {version.submittedAt ? (
-                        formatDateTime(version.submittedAt)
-                      ) : (
-                        <span className="cell-muted">-</span>
-                      )}
-                    </td>
-                    <td>
-                      <span className={showcaseReviewBadgeClass(version.reviewStatus)}>
-                        {SHOWCASE_VERSION_REVIEW_LABELS[version.reviewStatus]}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable caption="Onay bekleyen kartlar" columns={COLUMNS} minWidth={1040} testId="showcase-review-queue">
+            {versions.map((version) => (
+              <tr key={version.id} data-testid="showcase-review-row" data-version-id={version.id}>
+                <td>
+                  <div className="cell-stack">
+                    <Link className="cell-link" href={`/showcase/reviews/${version.id}`}>
+                      <strong className="cell-break" id={`showcase-review-title-${version.id}`}>
+                        {version.title}
+                      </strong>
+                    </Link>
+                    <span className="cell-muted">
+                      {version.card.category.name} · {version.versionNumber}. sürüm
+                      {version.card.liveVersion ? ' · yayındaki metni değiştirir' : ' · ilk yayın'}
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  {canOpenProvider ? (
+                    <Link className="cell-link" href={`/providers/${version.provider.id}`}>
+                      {version.provider.businessName}
+                    </Link>
+                  ) : (
+                    version.provider.businessName
+                  )}
+                </td>
+                <td>{SHOWCASE_CARD_KIND_LABELS[version.kind]}</td>
+                <td className="is-num">
+                  {version.listedServicePriceAmount === null ? (
+                    <strong>Sabit fiyat yok</strong>
+                  ) : (
+                    <strong>{formatPrice(version.listedServicePriceAmount, version.listedServiceCurrency)}</strong>
+                  )}
+                </td>
+                <td>{version.areas.length} bölge</td>
+                <td>
+                  {version.submittedAt ? formatDateTime(version.submittedAt) : <span className="cell-muted">—</span>}
+                </td>
+                <td>
+                  <span className={showcaseReviewBadgeClass(version.reviewStatus)}>
+                    {SHOWCASE_VERSION_REVIEW_LABELS[version.reviewStatus]}
+                  </span>
+                </td>
+                <td className="col-actions">
+                  <Link
+                    className="btn btn-secondary btn-sm"
+                    href={`/showcase/reviews/${version.id}`}
+                    aria-describedby={`showcase-review-title-${version.id}`}
+                  >
+                    Aç
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </DataTable>
         )}
-      </SectionCard>
-    </>
+        {versions.length > 0 ? (
+          <WholeListFooter count={versions.length} noun="sürüm" summaryTestId="showcase-review-count" />
+        ) : null}
+      </div>
+    </main>
   );
 }

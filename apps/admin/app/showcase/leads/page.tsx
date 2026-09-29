@@ -9,9 +9,12 @@ import {
   type ShowcaseAdminLead,
   type ShowcaseLeadStatus,
 } from '../../../lib/api';
+import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
 import { PageHeader } from '../../../components/page-header';
-import { SectionCard } from '../../../components/section-card';
+import { WholeListFooter } from '../../../components/pagination';
+import { SavedViewTabs, type TabItem } from '../../../components/tabs';
+import type { QueryParams } from '../../../lib/list-query';
 
 const STATUSES: ShowcaseLeadStatus[] = [
   'OPEN',
@@ -21,11 +24,19 @@ const STATUSES: ShowcaseLeadStatus[] = [
   'CLOSED_UNANSWERED',
 ];
 
+const PATH = '/showcase/leads';
+
+/** `ShowcaseLeadAdminService.list` stops at the newest 200 rows. */
+const API_LIST_CAP = 200;
+
 type LeadsPageProps = {
   searchParams: Promise<{ status?: string; providerId?: string }>;
 };
 
 /**
+ * Vitrinden gelen talepler (#20), design `list:leads` (paket 2
+ * `33-vitrinden-gelen-talepler`, ADMIN-DESIGN-001 Faz 3C).
+ *
  * Direct vitrin leads, for the operator.
  *
  * ## Read-only, and the two absences are the point
@@ -49,7 +60,31 @@ type LeadsPageProps = {
  *
  * No customer telephone number or e-mail address appears here, exactly as none
  * appears on the provider's own inbox.
+ *
+ * ## Against the design
+ *
+ * The API returns the newest 200 leads in one answer with no total, so the
+ * design's "Bu ay 38 talep · 4 tanesinde söz verilen sürede dönülmedi" is not
+ * drawn (a month's count is not something this answer can give), the saved
+ * views carry no counters, and the footer says when the cap was reached. Its
+ * Ara and Tarih filters are not drawn either (the API takes neither), and
+ * "Süresi aşılanları göster" is the "Süre doldu" view.
  */
+
+/** The design's ⓘ; every sentence of it holds (showcase-lead*.service.ts). */
+const SCREEN_INFO =
+  'Müşteri bir vitrin kartından doğrudan o işletmeye talep gönderdiğinde oluşur. Bu talep moderasyondan geçmez, başka hizmet verene gösterilmez ve işletme kartında yazan sürede dönmeyi taahhüt eder. Süre aşılırsa müşteri talebini genel pazara açabilir; bu kararı yalnız müşteri verir, buradan açılamaz ya da kapatılamaz. Bir talebi durdurmak gerekirse talebin kendi ekranından reddedin; vitrin talebi de onunla kapanır. Müşterinin telefonu ve e-postası bu listede gösterilmez.';
+
+const COLUMNS: DataColumn[] = [
+  { key: 'request', label: 'Talep' },
+  { key: 'provider', label: 'İşletme' },
+  { key: 'card', label: 'Kart' },
+  { key: 'urgency', label: 'Aciliyet' },
+  { key: 'due', label: 'Dönüş süresi' },
+  { key: 'status', label: 'Durum' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
+
 export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps) {
   const { can } = await requireAdmin('SHOWCASE_LEADS_READ');
   const canOpenRequest = can('REQUESTS_READ');
@@ -57,93 +92,93 @@ export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps
 
   const { status, providerId } = await searchParams;
   const selected = STATUSES.find((candidate) => candidate === status) ?? null;
+  const provider = (providerId ?? '').trim();
 
   const query = new URLSearchParams();
   if (selected) query.set('status', selected);
-  if (providerId) query.set('providerId', providerId);
+  if (provider) query.set('providerId', provider);
   const suffix = query.toString() ? `?${query.toString()}` : '';
 
-  const { leads } = await apiFetch<{ leads: ShowcaseAdminLead[] }>(
-    `/admin/showcase/leads${suffix}`,
-  );
+  const { leads } = await apiFetch<{ leads: ShowcaseAdminLead[] }>(`/admin/showcase/leads${suffix}`);
+
+  const params: QueryParams = { status: selected ?? '', providerId: provider };
+  const views: TabItem[] = [
+    { key: '', label: 'Tümü', testId: 'lead-view-all' },
+    ...STATUSES.map((value) => ({
+      key: value,
+      label: SHOWCASE_LEAD_STATUS_LABELS[value],
+      testId: `lead-view-${value.toLowerCase()}`,
+    })),
+  ];
+
+  const capped = leads.length >= API_LIST_CAP;
+  const summary =
+    leads.length === 0
+      ? 'Bu görünümde vitrin talebi yok'
+      : `${capped ? `En yeni ${API_LIST_CAP}` : leads.length} talep · en yeni başta · moderasyonsuz, yalnız kart sahibine`;
 
   return (
-    <>
-      <PageHeader
-        title="Vitrin Talepleri"
-        subtitle="Vitrin kartlarından doğrudan gelen talepler, yanıt süreleri ve müşteri kararları."
-        breadcrumbs={[{ label: 'Dashboard', href: '/' }, { label: 'Vitrin Talepleri' }]}
+    <main className="showcase-leads-page">
+      <PageHeader title="Vitrinden gelen talepler" subtitle={summary} info={SCREEN_INFO} />
+
+      <SavedViewTabs
+        label="Vitrin talebi durumu"
+        items={views}
+        active={selected ?? ''}
+        path={PATH}
+        params={params}
+        param="status"
+        testId="lead-views"
       />
 
-      <SectionCard
-        title="Talepler"
-        subtitle={`${leads.length} talep listeleniyor. Bu talepler moderasyondan geçmeden doğrudan kart sahibine iletilir; reddedilen bir talep, talebin kendi ekranından kapatılır.`}
-        actions={
-          <span className="inline-actions">
-            <Link
-              className={`btn btn-sm ${selected ? 'btn-secondary' : 'btn-primary'}`}
-              href="/showcase/leads"
-            >
-              Tümü
-            </Link>
-            {STATUSES.map((candidate) => (
-              <Link
-                key={candidate}
-                className={`btn btn-sm ${selected === candidate ? 'btn-primary' : 'btn-secondary'}`}
-                href={`/showcase/leads?status=${candidate}`}
-              >
-                {SHOWCASE_LEAD_STATUS_LABELS[candidate]}
-              </Link>
-            ))}
-          </span>
-        }
-        padded={false}
-      >
+      {provider ? (
+        <p className="detail-muted-note" data-testid="lead-provider-filter">
+          Yalnız bir işletmenin vitrin talepleri gösteriliyor.{' '}
+          <Link href={selected ? `${PATH}?status=${selected}` : PATH}>Tüm işletmeler</Link>
+        </p>
+      ) : null}
+
+      <div className="data-list-card">
         {leads.length === 0 ? (
           <EmptyState
             title="Talep yok"
-            description="Bu filtreye uyan bir vitrin talebi bulunmuyor."
+            description={
+              selected
+                ? 'Bu durumda bir vitrin talebi bulunmuyor.'
+                : 'Bir müşteri vitrin kartından doğrudan talep gönderdiğinde burada listelenir.'
+            }
           />
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Talep</th>
-                  <th>İşletme</th>
-                  <th>Kart</th>
-                  <th>Aciliyet</th>
-                  <th>Son yanıt</th>
-                  <th>Durum</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leads.map((lead) => (
-                  <tr key={lead.id}>
-                    <td>
+          <DataTable caption="Vitrinden gelen talepler" columns={COLUMNS} minWidth={1080} testId="lead-table">
+            {leads.map((lead) => {
+              const requestRef = lead.request.requestNumber ?? lead.request.id.slice(-6);
+              return (
+                <tr key={lead.id} data-testid="lead-row" data-status={lead.status}>
+                  <td>
+                    <div className="cell-stack">
                       {canOpenRequest ? (
-                        <Link href={`/requests/${lead.request.id}`}>
-                          {lead.request.requestNumber ?? lead.request.id.slice(-6)}
+                        <Link className="cell-link" href={`/requests/${lead.request.id}`}>
+                          <strong className="display-number">{requestRef}</strong>
                         </Link>
                       ) : (
-                        (lead.request.requestNumber ?? lead.request.id.slice(-6))
+                        <strong className="display-number">{requestRef}</strong>
                       )}
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {lead.request.category.name} · {lead.request.district},{' '}
-                        {lead.request.city}
-                      </div>
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        Kalite {lead.request.qualityScore} ·{' '}
-                        {formatDateTime(lead.request.submittedAt)}
-                      </div>
-                    </td>
-                    <td>
+                      <span className="cell-muted">
+                        {lead.request.category.name} · {lead.request.district}, {lead.request.city}
+                      </span>
+                      <span className="cell-muted">
+                        Kalite {lead.request.qualityScore} · {formatDateTime(lead.request.submittedAt)}
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="cell-stack">
                       {canOpenProvider ? (
-                        <Link href={`/providers/${lead.provider.id}`}>
+                        <Link className="cell-link" href={`/providers/${lead.provider.id}`}>
                           {lead.provider.businessName}
                         </Link>
                       ) : (
-                        lead.provider.businessName
+                        <span>{lead.provider.businessName}</span>
                       )}
                       {/*
                         Whether the request is still reserved. It is the one
@@ -151,45 +186,62 @@ export default async function ShowcaseLeadsPage({ searchParams }: LeadsPageProps
                         reach the market, and it is read straight off the gate
                         column rather than inferred from the status.
                       */}
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {lead.request.directShowcaseProviderId
-                          ? 'Yalnız bu işletmeye açık'
-                          : 'Genel pazara açık'}
-                      </div>
-                    </td>
-                    <td>{lead.cardVersion.title}</td>
-                    <td>
-                      {SHOWCASE_LEAD_URGENCY_LABELS[lead.urgencyBucket]}
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {lead.slaHoursSnapshot} saat taahhüt
-                      </div>
-                    </td>
-                    <td>
-                      {formatDateTime(lead.slaDueAt)}
+                      <span className="cell-muted">
+                        {lead.request.directShowcaseProviderId ? 'Yalnız bu işletmeye açık' : 'Genel pazara açık'}
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="cell-stack">
+                      <span className="cell-break">{lead.cardVersion.title}</span>
+                      <span className="cell-muted">{lead.cardVersion.versionNumber}. sürüm</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="cell-stack">
+                      <span>{SHOWCASE_LEAD_URGENCY_LABELS[lead.urgencyBucket]}</span>
+                      <span className="cell-muted">{lead.slaHoursSnapshot} saat taahhüt</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="cell-stack">
+                      <span>{formatDateTime(lead.slaDueAt)}</span>
                       {lead.breachedAt ? (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          Aşıldı: {formatDateTime(lead.breachedAt)}
-                        </div>
+                        <span className="cell-muted">Aşıldı: {formatDateTime(lead.breachedAt)}</span>
+                      ) : lead.respondedAt ? (
+                        <span className="cell-muted">Dönüş: {formatDateTime(lead.respondedAt)}</span>
                       ) : null}
-                    </td>
-                    <td>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="cell-stack">
                       <span className={showcaseLeadBadgeClass(lead.status)}>
                         {SHOWCASE_LEAD_STATUS_LABELS[lead.status]}
                       </span>
                       {lead.fallbackDecision ? (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          Müşteri kararı:{' '}
-                          {lead.fallbackDecision === 'RELEASE' ? 'Pazara aç' : 'Kapalı tut'}
-                        </div>
+                        <span className="cell-muted">
+                          Müşteri kararı: {lead.fallbackDecision === 'RELEASE' ? 'Pazara aç' : 'Kapalı tut'}
+                        </span>
                       ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </td>
+                  <td className="col-actions">
+                    {/* The design's "Aç" is the request, where the operator acts on a lead. */}
+                    {canOpenRequest ? (
+                      <Link className="btn btn-secondary btn-sm" href={`/requests/${lead.request.id}`}>
+                        Aç
+                      </Link>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </DataTable>
         )}
-      </SectionCard>
-    </>
+        {leads.length > 0 ? (
+          <WholeListFooter count={leads.length} noun="talep" cap={API_LIST_CAP} summaryTestId="lead-count" />
+        ) : null}
+      </div>
+    </main>
   );
 }
