@@ -843,6 +843,12 @@ export type AdminPaymentConfig = {
 export type PackagePurchase = {
   id: string;
   purchaseNumber: string | null;
+  /**
+   * Which catalogue the purchase came from. The API has always sent it (the
+   * admin projection omits only payment secrets); Faz 3D reads it to say what
+   * a manual cancellation tells the provider.
+   */
+  kind?: 'OFFER_PACKAGE' | 'SHOWCASE_PACKAGE';
   providerId: string;
   packageId: string;
   status: PackagePurchaseStatus;
