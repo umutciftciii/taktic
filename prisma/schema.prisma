@@ -4345,6 +4345,10 @@ enum CampaignEvaluationOutcome {
   /// channel is another one (or UNKNOWN). `reasonCode` is `SOURCE_<channel>`.
   /// Not an error and never retried: the event is simply not this version's.
   CHANNEL_MISMATCH
+  /// API-HARDENING-001: the grant would take the provider's wallet past the
+  /// ledger's integer column. Refused inside the candidate savepoint (nothing
+  /// consumed or written); an outcome, not an error — never retried.
+  CREDIT_BALANCE_LIMIT
 }
 
 /// One business event the engine has seen, independent of any campaign.

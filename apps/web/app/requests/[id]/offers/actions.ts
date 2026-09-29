@@ -136,7 +136,7 @@ function readFormString(formData: FormData, key: string) {
  */
 export async function cancelOwnRequestAction(formData: FormData) {
   const requestId = readFormString(formData, 'requestId');
-  let outcome: 'cancelled' | 'matched' | 'closed' = 'cancelled';
+  let outcome: 'cancelled' | 'matched' | 'closed' | 'unavailable' = 'cancelled';
 
   try {
     await apiFetch<CustomerServiceRequest>(`/service-requests/${requestId}/cancel`, {
@@ -144,10 +144,16 @@ export async function cancelOwnRequestAction(formData: FormData) {
       body: JSON.stringify({}),
     });
   } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 409) {
+    // API-HARDENING-001: an offer's credit could not be given back within the
+    // ledger's bound, so the whole cancel was refused and nothing changed. The
+    // customer is not told why — it is another business's balance.
+    if (error instanceof ApiError && error.status === 400 && readErrorCode(error.body) === 'CREDIT_BALANCE_LIMIT_EXCEEDED') {
+      outcome = 'unavailable';
+    } else if (!(error instanceof ApiError) || error.status !== 409) {
       throw error;
+    } else {
+      outcome = readErrorCode(error.body) === 'REQUEST_MATCHED_NOT_CANCELLABLE_BY_CUSTOMER' ? 'matched' : 'closed';
     }
-    outcome = readErrorCode(error.body) === 'REQUEST_MATCHED_NOT_CANCELLABLE_BY_CUSTOMER' ? 'matched' : 'closed';
   }
 
   revalidatePath('/requests/my');

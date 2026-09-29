@@ -12,7 +12,7 @@ import {
   Prisma,
   ServiceCategoryStatus,
 } from '@prisma/client';
-import { CREDIT_LEDGER_INTEGER_MAX } from '../../common/credit-limits';
+import { CREDIT_LEDGER_INTEGER_MAX, creditBalanceLimitExceeded, fitsCreditLedger } from '../../common/credit-limits';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
@@ -463,7 +463,7 @@ export class CreditsService {
     return {
       currentBalance,
       maxBalance: CREDIT_LEDGER_INTEGER_MAX,
-      fits: currentBalance + amount <= CREDIT_LEDGER_INTEGER_MAX,
+      fits: fitsCreditLedger(currentBalance, amount),
     };
   }
 
@@ -554,19 +554,6 @@ export class CreditsService {
       throw new NotFoundException('Credit package not found');
     }
   }
-}
-
-export const CREDIT_BALANCE_LIMIT_EXCEEDED = 'CREDIT_BALANCE_LIMIT_EXCEEDED';
-
-function creditBalanceLimitExceeded(currentBalance: number, maxBalance: number) {
-  return new BadRequestException({
-    statusCode: 400,
-    error: 'Bad Request',
-    code: CREDIT_BALANCE_LIMIT_EXCEEDED,
-    message: `Credit balance cannot exceed ${maxBalance}`,
-    currentBalance,
-    maxBalance,
-  });
 }
 
 /** Exactly the columns `GET /credit-packages` returned before period packages. */

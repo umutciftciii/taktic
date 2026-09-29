@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
 import { UNVIEWED_OFFER_REFUND_REASON, calculateRefundEligibility } from './refund-policy';
+import { CREDIT_BALANCE_LIMIT_EXCEEDED, isCreditBalanceLimitExceeded } from '../../common/credit-limits';
 import { refundOfferCreditInTransaction } from './offers.service';
 
 type UnviewedOfferRefundOptions = {
@@ -217,6 +218,20 @@ export class UnviewedOfferRefundService {
             offerId: offer.id,
             status: 'SKIPPED' as const,
             reason: 'Offer is no longer eligible',
+          });
+          continue;
+        }
+
+        // API-HARDENING-001: giving this credit back would take the provider's
+        // balance past the ledger's integer column. Nothing was written (the
+        // refusal comes before the ledger row, and the transaction rolled
+        // back), the offer is still eligible, and a later scan refunds it once
+        // the balance has room. Skipped, not FAILED: nothing is broken.
+        if (isCreditBalanceLimitExceeded(err)) {
+          results.push({
+            offerId: offer.id,
+            status: 'SKIPPED' as const,
+            reason: CREDIT_BALANCE_LIMIT_EXCEEDED,
           });
           continue;
         }

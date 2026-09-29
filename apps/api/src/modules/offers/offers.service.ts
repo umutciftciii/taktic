@@ -1,3 +1,4 @@
+import { creditBalanceLimitExceeded, fitsCreditLedger } from '../../common/credit-limits';
 import {
   BadRequestException,
   ConflictException,
@@ -975,6 +976,14 @@ export async function refundOfferCreditInTransaction(
   const enforceUnviewedPolicy = options.enforceUnviewedPolicy ?? true;
   const now = new Date();
   const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
+  // API-HARDENING-001: the refund row is the highest balance this function
+  // writes (any promo forfeit that follows is a debit), so the bound is judged
+  // here, before anything is written. The refusal rolls the caller's whole
+  // transaction back — the worker skips the offer and tries it again on a
+  // later scan; a removal or cancel is refused whole rather than half-done.
+  if (!fitsCreditLedger(currentBalance, offer.creditCost)) {
+    throw creditBalanceLimitExceeded(currentBalance);
+  }
   const refundTransaction = await createRefundLedgerRow(tx, {
     providerId: offer.providerId,
     offerId: offer.id,

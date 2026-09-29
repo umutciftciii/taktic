@@ -6,6 +6,7 @@ import {
   PromoCreditLotConsumptionStatus,
   PromoCreditLotStatus,
 } from '@prisma/client';
+import { fitsCreditLedger } from '../../common/credit-limits';
 import { PRISMA_WRITE_CONFLICT_ERROR_CODE } from '../../common/serializable-transaction';
 
 /**
@@ -61,6 +62,21 @@ export class PromoCreditWriteConflict extends Error {
   }
 }
 
+/**
+ * A promo grant that would take the wallet past the ledger's integer column
+ * (API-HARDENING-001). Thrown before anything is written, so the savepoint the
+ * engine grants under rolls back clean.
+ */
+export class PromoCreditBalanceLimitExceeded extends Error {
+  constructor(
+    readonly providerId: string,
+    readonly currentBalance: number,
+  ) {
+    super(`Promo credit ledger: a grant would take provider ${providerId} past the ledger's balance limit`);
+    this.name = 'PromoCreditBalanceLimitExceeded';
+  }
+}
+
 // ───────────────────────────── ledger rows ─────────────────────────────
 
 /**
@@ -83,7 +99,14 @@ async function appendCampaignLedgerRow(
     createdById?: string | null;
   },
 ) {
-  const balanceAfter = (await readWalletBalance(tx, entry.providerId)) + entry.amount;
+  const balanceBefore = await readWalletBalance(tx, entry.providerId);
+  const balanceAfter = balanceBefore + entry.amount;
+  // API-HARDENING-001: a grant is the only positive movement this writer
+  // makes, and it must not pass the ledger's integer column. Refused before
+  // the row exists; the engine turns it into a CREDIT_BALANCE_LIMIT outcome.
+  if (entry.amount > 0 && !fitsCreditLedger(balanceBefore, entry.amount)) {
+    throw new PromoCreditBalanceLimitExceeded(entry.providerId, balanceBefore);
+  }
   if (balanceAfter < 0) {
     // Cannot happen for a movement bounded by a lot's own remainder, but the
     // ledger's rule is the ledger's rule and this writer states it too.

@@ -7,7 +7,7 @@ import {
   SourceChannel,
 } from '@prisma/client';
 import { isWriteConflictError } from '../../../common/serializable-transaction';
-import { grantPromoCreditLot } from '../../credits/promo-credit-ledger';
+import { grantPromoCreditLot, PromoCreditBalanceLimitExceeded } from '../../credits/promo-credit-ledger';
 import { OPERATIONS_SETTINGS_ID } from '../../operations-settings/operations-settings.service';
 import type { CampaignDefinition } from '../rules/types';
 import { validateCampaignDefinition } from '../rules/validator';
@@ -399,6 +399,15 @@ export class CampaignEngineService {
         // a row this snapshot can see only now. Same answer as the read.
         await this.repository.rollbackTo(tx, SAVEPOINT.candidate);
         return { kind: 'refused', outcome: 'ALREADY_REDEEMED' };
+      }
+      if (error instanceof PromoCreditBalanceLimitExceeded) {
+        // API-HARDENING-001: the grant would take the wallet past the
+        // ledger's integer column. Rolled back to the savepoint like any
+        // refused candidate — no counter, redemption, ledger row or lot is
+        // left — and logged as an outcome, not an engine error, so the event
+        // is evaluated once and never retried into the same refusal.
+        await this.repository.rollbackTo(tx, SAVEPOINT.candidate);
+        return { kind: 'refused', outcome: 'CREDIT_BALANCE_LIMIT' };
       }
       throw error;
     }
