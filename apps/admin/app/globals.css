@@ -6893,6 +6893,10 @@ button:disabled {
   margin: 0 0 16px;
 }
 
+.finance-list-page > .data-list-card + .section-card {
+  margin-top: 16px;
+}
+
 .finance-list-page .detail-notice code,
 .purchase-detail-page code,
 .refund-detail-page code {

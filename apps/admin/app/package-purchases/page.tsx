@@ -137,63 +137,6 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
         </div>
       ) : null}
 
-      {paymentConfig ? (
-        <SectionCard
-          title="Ödeme sağlayıcı"
-          subtitle="Bu kurulum yalnızca test modunda çalışır ve gerçek tahsilat yapmaz."
-          className="payment-provider-card"
-        >
-          <div data-testid="payment-provider-config">
-            <p className="detail-muted-note">
-              Canlı ödeme bu sürümde açılamaz: Lemon Squeezy&apos;nin bu pazar yeri için uygunluk onayı yazılı olarak
-              alınmadan canlı moda geçilmeyecektir. Canlı moda işaret eden bir ortam değişkeni ayarlanırsa API
-              açılışta durur.
-            </p>
-            <KeyValueList
-              items={[
-                {
-                  label: 'Sağlayıcı',
-                  value: (
-                    <>
-                      <code>{paymentConfig.provider}</code>{' '}
-                      {paymentConfig.provider === 'lemon-squeezy-test'
-                        ? '(Lemon Squeezy sandbox)'
-                        : '(uygulama içi mock ödeme)'}
-                    </>
-                  ),
-                },
-                { label: 'Mod', value: <span className="badge badge-warn">test</span> },
-                { label: 'Canlı tahsilat', value: 'Kapalı — bu sürümde açılamaz' },
-                {
-                  label: 'Yapılandırma',
-                  value: paymentConfig.ready ? (
-                    'Tamamlandı'
-                  ) : (
-                    <>
-                      Eksik ayar var:{' '}
-                      {paymentConfig.missingConfig.map((key) => (
-                        <code key={key} className="config-key">
-                          {key}
-                        </code>
-                      ))}
-                      <span className="detail-muted-note config-key-note">
-                        Yalnızca değişken adları gösterilir; API anahtarı ve webhook gizli anahtarı hiçbir ekranda ve
-                        hiçbir API yanıtında görünmez.
-                      </span>
-                    </>
-                  ),
-                },
-                {
-                  label: 'Kredi yükleme',
-                  value:
-                    'Yalnızca imzası doğrulanmış ödeme bildirimi (webhook) sonrasında. Ödeme sayfasından dönüş, tarayıcı sonucu veya istemci isteği kredi yükleyemez.',
-                },
-              ]}
-            />
-          </div>
-        </SectionCard>
-      ) : null}
-
       {providerId || packageId ? (
         <div className="notice detail-notice" data-testid="purchase-pin">
           {providerId ? (
@@ -267,6 +210,64 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
           <WholeListFooter count={purchases.length} noun="satın alma" summaryTestId="purchase-count" />
         ) : null}
       </div>
+
+      {/* The payment setup, under the list it explains: the list is what this screen is for. */}
+      {paymentConfig ? (
+        <SectionCard
+          title="Ödeme sağlayıcı"
+          subtitle="Bu kurulum yalnızca test modunda çalışır ve gerçek tahsilat yapmaz."
+          className="payment-provider-card"
+        >
+          <div data-testid="payment-provider-config">
+            <p className="detail-muted-note">
+              Canlı ödeme bu sürümde açılamaz: Lemon Squeezy&apos;nin bu pazar yeri için uygunluk onayı yazılı olarak
+              alınmadan canlı moda geçilmeyecektir. Canlı moda işaret eden bir ortam değişkeni ayarlanırsa API
+              açılışta durur.
+            </p>
+            <KeyValueList
+              items={[
+                {
+                  label: 'Sağlayıcı',
+                  value: (
+                    <>
+                      <code>{paymentConfig.provider}</code>{' '}
+                      {paymentConfig.provider === 'lemon-squeezy-test'
+                        ? '(Lemon Squeezy sandbox)'
+                        : '(uygulama içi mock ödeme)'}
+                    </>
+                  ),
+                },
+                { label: 'Mod', value: <span className="badge badge-warn">test</span> },
+                { label: 'Canlı tahsilat', value: 'Kapalı — bu sürümde açılamaz' },
+                {
+                  label: 'Yapılandırma',
+                  value: paymentConfig.ready ? (
+                    'Tamamlandı'
+                  ) : (
+                    <>
+                      Eksik ayar var:{' '}
+                      {paymentConfig.missingConfig.map((key) => (
+                        <code key={key} className="config-key">
+                          {key}
+                        </code>
+                      ))}
+                      <span className="detail-muted-note config-key-note">
+                        Yalnızca değişken adları gösterilir; API anahtarı ve webhook gizli anahtarı hiçbir ekranda ve
+                        hiçbir API yanıtında görünmez.
+                      </span>
+                    </>
+                  ),
+                },
+                {
+                  label: 'Kredi yükleme',
+                  value:
+                    'Yalnızca imzası doğrulanmış ödeme bildirimi (webhook) sonrasında. Ödeme sayfasından dönüş, tarayıcı sonucu veya istemci isteği kredi yükleyemez.',
+                },
+              ]}
+            />
+          </div>
+        </SectionCard>
+      ) : null}
     </main>
   );
 }

@@ -391,6 +391,52 @@ Karşılaştırma bu PR'ın fixture verili 1440×1617 Chromium görüntüleriyle
 - **Test:** `package-refund-request`, `provider-package-purchase-detail`, `lemon-checkout`, `purchase-terms-checkout`, `offer-packages`, `provider-promo-credits`.
 - **Geri dönüş riski:** Yüksek (para hareketi). Onay diyaloğu eklemek dışında akış değişikliği yok.
 
+#### Faz 3D gerçekleşen (2026-09-29)
+
+- **Eski bulgular güncel main'de (`fd64edbe`) koddan doğrulandı; hiçbiri için yeni iş gerekmedi:**
+  - F2: `/finance/manual-adjustments` hem menüde hem sayfada `FINANCE_LEDGER_READ` (ADMIN-DESIGN-000).
+  - F3: ödeme sağlayıcı kartı `can('PAYMENTS_CONFIG_READ')` ile; izin yoksa liste açılır, kart çizilmez.
+  - F4: PR #114 personel okuma uçlarıyla kapalıydı (3B).
+  - F12: `/finance` üst ve hızlı bağlantıları hedef sayfanın izniyle kapılıydı; 3D E2E ile sabitlendi.
+- **Kapılar (menü · route · bölüm · aksiyon), `route-permission-map.ts` ile karşılaştırıldı; hiçbiri değişmedi:**
+
+  | Route | Route izni | Bölüm / bağlantı kapıları | Yazma |
+  | --- | --- | --- | --- |
+  | `/finance` | `FINANCE_READ` | Kredi hareketleri ve elle işlemler `FINANCE_LEDGER_READ`; paket satışları `PACKAGE_PURCHASES_READ`; iade kontrolü `OFFER_REFUND_SCAN_READ`; kredi paketleri `CREDIT_PACKAGES_READ`; hizmet verenler `PROVIDERS_READ`; işletme `PROVIDERS_READ_DETAIL`; kayıt bağlantıları `gateLedgerSource` | — |
+  | `/finance/credit-ledger` | `FINANCE_LEDGER_READ` | Finans özeti `FINANCE_READ`; ilgili kayıt `CAMPAIGNS_READ` / `OFFERS_READ` / `PACKAGE_PURCHASES_READ` | — |
+  | `/finance/manual-adjustments` | `FINANCE_LEDGER_READ` | "Yeni düzeltme" kartı `CREDITS_GRANT` ∨ `CREDITS_DEDUCT`; "İşletme seç" `FINANCE_READ` | — (K4: form `/providers/[id]/credits`'te) |
+  | `/finance/providers` | `FINANCE_READ` | Kredi ekranı / hareketler / elle işlemler `FINANCE_LEDGER_READ` | — |
+  | `/package-purchases` | `PACKAGE_PURCHASES_READ` | Ödeme sağlayıcı kartı `PAYMENTS_CONFIG_READ`; işletme `PROVIDERS_READ_DETAIL` | — |
+  | `/package-purchases/[id]` | `PACKAGE_PURCHASES_READ` | İşletme `PROVIDERS_READ_DETAIL`; kredi geçmişi `FINANCE_LEDGER_READ` | İptal / süresi doldu `PACKAGE_PURCHASE_STATUS_WRITE`, yalnız PENDING ve açık kredi vakası yokken |
+  | `/package-refunds` | `PACKAGE_REFUND_READ` | — | — |
+  | `/package-refunds/[id]` | `PACKAGE_REFUND_READ` | Destek talebi `SUPPORT_READ` | Yalnız API'nin `allowedActions`'ı; UI `can()` eklemez |
+
+- **Onay diyalogları ve gerçek etkileri (API koduna göre; Vazgeç/Esc/× yazmaz, E2E veritabanında doğrular):**
+  - **Normal / istisna iade onayı** (`PackageRefundRequestsService.approve`): APPROVED_PENDING_SETTLEMENT; TakTic'te para ve kredi hareket etmez, dış iade sağlayıcı panelinde tam tutarla yapılır; uygunluk onay transaction'ında yeniden hesaplanır; SETTLED yalnız imzalı iade bildirimiyle; hizmet verene durum e-postası (gerekçesiz).
+  - **Reddet** (`reject`): REJECTED, para/kredi hareketi yok, gerekçe hizmet verene gösterilmez, durum e-postası gider.
+  - **Ödeme iadesi tamamlanamadı** (`markSettlementFailed`): SETTLEMENT_FAILED, hareket yok, sonradan gelen kanıtlı bildirim yine tamamlayabilir, durum e-postası gider.
+  - **Bekleyen satın almayı İptal / Süresi doldu** (`updateAdminPurchaseStatus`): geri dönüşsüz; para/kredi hareketi yok; sonradan tamamlanan ödeme kredi yüklemez (webhook yalnız PENDING'i işler); not mevcut yönetici notunun yerine geçer; yalnız iptal edilen *vitrin* satın alması hizmet verene e-posta gönderir. Tek form, iki düğme; `status` basılan düğmenin değeri.
+  - **İşleme al** onaysız kaldı: karar değil, geri dönüşü olan bir durum geçişi (yine de hizmet verene durum e-postası gider).
+- **Bulunan ve bu PR'da düzeltilen hata:** formda `name="id"` gizli alanı `form.id`'yi gölgeliyor; React 19 basılan düğmenin name/value'sunu FormData'ya eklerken geçici input'a `form="[object HTMLInputElement]"` yazıyor ve değer düşüyor. Satın alma düzeltme formunun alanı `purchaseId` oldu. `ConfirmDialog`'un `name`/`value` desteği, `id` adlı alan taşıyan başka bir formda aynı şekilde sessizce kaybolur; bileşen düzeyinde koruma ayrı bir iş olarak önerildi.
+- **API etkisi:** yok. Prisma, migration, `.env`, compose değişmedi. `/finance`'ta aylık çubuklar mevcut `/finance/analytics` ucuna ikinci bir `groupBy=month` okumasıyla kuruldu. `PackagePurchase.kind` admin tipine eklendi (API zaten döndürüyordu).
+- **StickyActionBar kullanılmadı:** formlar kısa eylem formları; Faz 2 entegrasyon kabul kriteri bu PR'a düşmedi.
+- **Test:** yeni `e2e/tests/admin-finance-package-screens.spec.ts` (Chromium + WebKit) ve `apps/admin/test/finance-package-screens.spec.tsx`; güncellenen `package-refund-request` (onay/ret/tamamlanamadı diyalogları, salt okunur personel, 6 genişlik), `lemon-checkout` (vaka rakamları, OPEN'da iki düğme de yok), `admin-route-scan` (`CONVERTED_ROUTES` + 8 route, 320px).
+
+#### Faz 3D görsel karşılaştırma (paket 2, 2026-09-29)
+
+Görüntüler `e2e/.artifacts/faz-3d-screens/` altında (1440×1617 ve 320). Gerekçe kısaltmaları 3A ile aynı (D = backend yok, K7 = bilgi korunur, İzin).
+
+| Görüntü / prototip | Uygulandı | Korunan (gerçek veri) | Uygulanmayan (gerekçe) |
+| --- | --- | --- | --- |
+| `25-finans-ozeti` / `finance` | Başlık + ⓘ (düzeltildi: gelir kredi *ve* vitrin paketi) + dönem satırı; 4 KPI (Tahsilat, Harcanan, İade edilen, Elle düzeltme); "Aylık tahsilat" 6 ay çubuk (gerçek `groupBy=month`, son ay vurgulu); "Son paket satışları" + "Tümünü gör" | K7: dönem seçici/gruplama, tahsilat trendi + 3 içgörü, paket satışları, kredi kullanımı, operasyonel müdahale, tüm zaman tahsilat/kredi, 6 paket durum sayacı, son kredi hareketleri, hızlı bağlantılar | D: "Satılan kredi nereye gitti", "Rapor indir", "geçen aya göre %" (önceki dönem okuması yok) |
+| `26-kredi-hareketleri` / `list:ledger` | Liste şablonu; Tarih · İşletme · Ne oldu · İlgili kayıt · Önceki · Değişim · Sonraki | K7: Sebep (+not) ve İşlemi yapan sütunları; 9 tip, arama, tarih aralığı, `providerId` sabitleme, 50'lik sayfa | D: "Excel'e aktar", "Bu ay … harcandı" satırı (ledger okuması dönem toplamı taşımaz) |
+| `27-elle-kredi-ekle-dus` / `manual` | Başlık + ⓘ (form bu ekranda değil diye düzeltildi); "Yeni düzeltme" kartı gerçek kredi ekranına bağlanır; Tümü/Ekleme/Düşme görünümleri | K7: denetim notu, arama, tarih, `providerId`, tüm sütunlar | K4: form taşınmadı |
+| `28-isletme-bakiyeleri` / `list:balances` | Liste şablonu, "Aç" = kredi ekranı | K7: 11 sütun (tablo kendi kabında kayar), 9 alanlı sıralama, arama | D: "Bu ay harcadığı", "Son teklif", Durum/Tarih filtresi, "Excel'e aktar" |
+| `29-paket-satislari` / `list:purchases` | Liste şablonu; satın alma no + tarih, paket, kredi, tutar, ödeme rozeti, "Aç" | Açık kredi vakası uyarısı (filtreden bağımsız sayım) + satır rozeti, manuel inceleme uyarısı + satır rozeti, ödeme sağlayıcı kartı (listenin altında), `status`/`creditHold` alanları, `providerId`/`packageId` sabitleme; liste sayfasız olduğundan `WholeListFooter` | D: Ara/Tarih filtresi, "Bu ay 96 satış" (FINANCE_READ verisi), "Excel'e aktar" |
+| — `/package-purchases/[id]` (şablon) | Özet kartı + şerit (Tutar, Kredi, Ödeme, Kredi teslimi, Oluşturulma) | "Tahsilat · kredi teslimi" kartı (tahsil edilen / teslim edilecek / teslim edilen ayrı), sağlayıcı bildirimleri, zaman çizgisi, notlar | — |
+| — `/package-refunds` (tasarımda yok) | Liste şablonu, durum görünümleri API sayaçlarıyla | 8 sütun, 25'lik sayfa, `?status=` | — |
+| — `/package-refunds/[id]` (tasarımda yok) | Özet kartı + şerit; 7 bölüm detay ızgarasında | Uygunluk ×3, kararlar, denetim kaydı | — |
+
 ### 3E — Kampanyalar, uygunluk ve operasyon ayarları (#33–#37, #45)
 
 - **Tasarım karşılıkları:** `campaigns` (`45`), `settings` (`44`). Şablon kullananlar: `/campaigns/new`, `/campaigns/[id]`, `/promotion-eligibility*`.
