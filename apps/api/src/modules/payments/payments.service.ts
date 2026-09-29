@@ -236,6 +236,10 @@ export class PaymentsService {
         status: PackagePurchaseStatus.PENDING,
         paymentProvider: kind,
         providerCheckoutUrl: { not: null },
+        // API-HARDENING-001: a purchase with a credit hold was already paid
+        // for. Handing its checkout back would invite a second payment for
+        // the same credit.
+        creditHold: { is: null },
         OR: [
           { providerCheckoutExpiresAt: null },
           { providerCheckoutExpiresAt: { gt: new Date() } },

@@ -1,17 +1,28 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { apiFetch, PackagePurchase, PackagePurchaseStatus } from '../../lib/api';
+import { redirect } from 'next/navigation';
+import { apiFetch, PackagePurchase, PackagePurchaseStatus, readConflict } from '../../lib/api';
 
 export async function updatePackagePurchaseStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const status = readFormString(formData, 'status') as PackagePurchaseStatus;
   const adminNote = readOptionalFormString(formData, 'adminNote');
 
-  await apiFetch<PackagePurchase>(`/package-purchases/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status, adminNote }),
-  });
+  try {
+    await apiFetch<PackagePurchase>(`/package-purchases/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, adminNote }),
+    });
+  } catch (error) {
+    // API-HARDENING-001: a paid purchase with a held credit is not the
+    // operator's to cancel. The detail page already says so; this is the
+    // answer for a submission that bypassed the hidden form.
+    if (readConflict(error)?.code === 'PURCHASE_CREDIT_HOLD_OPEN') {
+      redirect(`/package-purchases/${id}`);
+    }
+    throw error;
+  }
 
   revalidatePath('/package-purchases');
   revalidatePath(`/package-purchases/${id}`);

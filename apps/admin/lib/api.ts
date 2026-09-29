@@ -896,6 +896,38 @@ export type PackagePurchase = {
    * could add one.
    */
   webhookEvents?: PaymentWebhookAttempt[];
+  /**
+   * API-HARDENING-001: a captured payment whose credit is held because it
+   * would pass the ledger bound. The list carries the summary; the detail
+   * endpoint carries the whole hold. Null when the purchase never had one.
+   */
+  creditHold: PurchaseCreditHold | null;
+};
+
+export type PurchaseCreditHoldStatus = 'OPEN' | 'SETTLED' | 'REFUND_REPORTED';
+
+export type PurchaseCreditHold = {
+  status: PurchaseCreditHoldStatus;
+  chargedAmountMinor: number;
+  currency: string;
+  creditAmount: number;
+  openedAt: string;
+  resolvedAt: string | null;
+  /** Detail endpoint only. */
+  reason?: string;
+  providerOrderId?: string;
+  balanceAtOpen?: number;
+  refusedDeliveries?: number;
+  lastRefusedAt?: string;
+  creditTransactionId?: string | null;
+  openedEvent?: { eventName: string };
+  resolvedEvent?: { eventName: string } | null;
+};
+
+export const PURCHASE_CREDIT_HOLD_LABELS: Record<PurchaseCreditHoldStatus, string> = {
+  OPEN: 'Tahsil edildi · kredi teslim edilmedi',
+  SETTLED: 'Kredi sonradan teslim edildi',
+  REFUND_REPORTED: 'Ödeme iade edildi · kredi teslim edilmedi',
 };
 
 export type PaymentWebhookAttempt = {

@@ -15,6 +15,7 @@ import {
 import { packageRefundRequestHref } from '../../../../../lib/package-refund';
 import { ProviderShell } from '../../../provider-shell';
 import { providerStatusBadgeClass } from '../../../provider-ui';
+import { purchaseCreditHoldView } from '../credit-limit';
 import { Notice, noticeForStatus } from '../purchase-notice';
 
 type ProviderPackagePurchaseDetailPageProps = {
@@ -74,11 +75,16 @@ export default async function ProviderPackagePurchaseDetailPage({
   ]);
 
   const timeline = buildTimeline(purchase);
-  const notice = noticeForStatus(purchase.status, purchase.mockPaymentFailureReason);
+  // API-HARDENING-001: a captured payment with a held credit is not "awaiting
+  // payment" — its own notice replaces the PENDING ones and every pay action.
+  const held = purchaseCreditHoldView(purchase);
+  const notice: Notice | null = held
+    ? { tone: held.tone === 'warn' ? 'warn' : 'default', icon: '⏸', title: held.title, body: held.text }
+    : noticeForStatus(purchase.status, purchase.mockPaymentFailureReason);
   // Read from the purchase the API just returned, never from the query string.
-  const outcomeNotice = checkoutOutcomeNotice(outcome, purchase.status);
+  const outcomeNotice = held ? null : checkoutOutcomeNotice(outcome, purchase.status);
   const hostedCheckoutUrl =
-    purchase.status === 'PENDING' ? purchase.providerCheckoutUrl : null;
+    purchase.status === 'PENDING' && !held ? purchase.providerCheckoutUrl : null;
   const title = purchase.packageNameSnapshot || 'Paket Satın Alma';
   const referenceText =
     purchase.purchaseNumber ?? purchase.mockPaymentReference ?? '—';
@@ -112,7 +118,7 @@ export default async function ProviderPackagePurchaseDetailPage({
             className={providerStatusBadgeClass(purchase.status)}
             data-testid="purchase-status"
           >
-            {statusLabel(purchase.status)}
+            {held ? held.label : statusLabel(purchase.status)}
           </span>
         </div>
         <p className="pdash-page-sub" style={{ marginTop: 6 }}>
@@ -263,7 +269,7 @@ export default async function ProviderPackagePurchaseDetailPage({
               <span aria-hidden="true">⬇</span> Faturayı İndir
             </span>
           ) : null}
-          {purchase.status === 'PENDING' ? (
+          {purchase.status === 'PENDING' && !held ? (
             <Link
               className="pdash-btn pdash-btn-primary"
               // The hosted page when the purchase was opened against one,

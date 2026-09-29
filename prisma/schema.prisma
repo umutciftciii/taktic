@@ -1338,6 +1338,7 @@ model ProviderProfile {
   packagePurchases                PackagePurchase[]
   /// CMP-006 PR-B.
   packageRefundRequests           PackageRefundRequest[]
+  packagePurchaseCreditHolds      PackagePurchaseCreditHold[]
   contactRevealEvents             ContactRevealEvent[]
   claimTokens                     ProviderClaimToken[]
   notificationLogs                NotificationLog[]
@@ -1874,6 +1875,7 @@ model PackagePurchase {
   /// CMP-006 PR-B: the refund requests raised against this purchase. At most
   /// one open and at most one SETTLED at a time (partial unique indexes).
   packageRefundRequests          PackageRefundRequest[]
+  creditHold                     PackagePurchaseCreditHold?
 
   /// Target of `PurchaseTermsAcceptance(purchaseId, id)`: an acceptance may
   /// only exist for the purchase that points back at it.
@@ -2151,10 +2153,92 @@ model PaymentWebhookEvent {
   failedPackageRefundRequest  PackageRefundRequest?       @relation("PackageRefundRequestFailedByWebhookEvent")
   packageRefundRequestEvents  PackageRefundRequestEvent[] @relation("PackageRefundRequestEventWebhook")
 
+  openedCreditHolds   PackagePurchaseCreditHold[] @relation("CreditHoldOpenedByWebhookEvent")
+  resolvedCreditHolds PackagePurchaseCreditHold[] @relation("CreditHoldResolvedByWebhookEvent")
+
   @@unique([provider, eventKey])
   @@index([status])
   @@index([purchaseId])
   @@index([createdAt])
+}
+
+/// Where a credit hold stands (API-HARDENING-001). OPEN is the only
+/// non-terminal state; each move out of it happens once.
+enum PackagePurchaseCreditHoldStatus {
+  /// Money was captured, credit was not delivered, a person has to know.
+  OPEN
+  /// A later delivery of the same order loaded the credit.
+  SETTLED
+  /// The provider reported a refund or chargeback for the held order. The
+  /// purchase can no longer load credit.
+  REFUND_REPORTED
+}
+
+/// A verified, captured payment whose credit could not be delivered
+/// (API-HARDENING-001).
+///
+/// Opened by the payment webhook when a genuine, matching order would take the
+/// provider's balance past the ledger's integer column. The purchase stays
+/// PENDING — no ledger row, no partial credit — and this row is the durable
+/// record that the money and the credit disagree, for an operator to filter on
+/// and for the provider's screens to tell apart from an unpaid checkout.
+///
+/// ## Why its own table
+///
+/// `PackagePurchase.manualReviewReason/At` is a single set-once slot that means
+/// "a reversal was reported" to the refund-eligibility and promotion readers,
+/// and it has no resolution. Writing a hold there would stop a later genuine
+/// refund from being recorded and would read as a chargeback. A hold needs an
+/// open/closed life of its own.
+///
+/// ## How it closes, exactly once
+///
+/// - SETTLED: a redelivery of the held order settles the purchase; the hold is
+///   closed in that same transaction and names the ledger row.
+/// - REFUND_REPORTED: a relevant reversal event for the held order arrives
+///   (staff refunded it in the provider's dashboard). From then on the
+///   settlement path refuses the purchase, so refunded money never becomes
+///   credit.
+///
+/// Refunding is a person's decision; nothing here moves money. CHECKs pair the
+/// status with its resolution columns, and a trigger makes a closed hold and
+/// every identity column immutable and refuses deletes.
+model PackagePurchaseCreditHold {
+  id                  String                          @id @default(cuid())
+  purchaseId          String                          @unique
+  providerId          String
+  /// Always CREDIT_BALANCE_LIMIT_EXCEEDED today (CHECK); a column so a second
+  /// cause does not need a new table.
+  reason              String
+  /// The provider's order that captured the money.
+  providerOrderId     String
+  /// What was charged, in the order's minor units and currency, as the
+  /// verified delivery stated it.
+  chargedAmountMinor  Int
+  currency            String
+  /// The credit the purchase should have delivered.
+  creditAmount        Int
+  /// The provider's balance when the hold opened.
+  balanceAtOpen       Int
+  openedEventId       String
+  openedAt            DateTime                        @default(now())
+  /// Deliveries refused while the hold was open, the first included.
+  refusedDeliveries   Int                             @default(1)
+  lastRefusedAt       DateTime                        @default(now())
+  status              PackagePurchaseCreditHoldStatus @default(OPEN)
+  resolvedAt          DateTime?
+  resolvedEventId     String?
+  /// The PACKAGE_PURCHASE row that finally delivered the credit (SETTLED only).
+  creditTransactionId String?                         @unique
+
+  purchase          PackagePurchase            @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  provider          ProviderProfile            @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  openedEvent       PaymentWebhookEvent        @relation("CreditHoldOpenedByWebhookEvent", fields: [openedEventId], references: [id], onDelete: Restrict)
+  resolvedEvent     PaymentWebhookEvent?       @relation("CreditHoldResolvedByWebhookEvent", fields: [resolvedEventId], references: [id], onDelete: Restrict)
+  creditTransaction ProviderCreditTransaction? @relation(fields: [creditTransactionId], references: [id], onDelete: Restrict)
+
+  @@index([status, openedAt])
+  @@index([providerId, status])
 }
 
 model SequenceCounter {
@@ -2195,6 +2279,7 @@ model ProviderCreditTransaction {
   promoConsumptionsAsSpend  PromoCreditLotConsumption[] @relation("PromoCreditLotConsumptionSpend")
   promoConsumptionsAsRefund PromoCreditLotConsumption[] @relation("PromoCreditLotConsumptionRefund")
   promoForfeitOf            PromoCreditLotConsumption?  @relation("PromoCreditLotConsumptionForfeit")
+  creditHoldSettledBy       PackagePurchaseCreditHold?
 
   // A PostgreSQL partial unique index —
   // "ProviderCreditTransaction_one_refund_per_offer", UNIQUE ("referenceId")

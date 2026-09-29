@@ -9,6 +9,7 @@ import {
 } from '../../../../../../lib/api';
 import { ProviderShell } from '../../../../provider-shell';
 import { providerStatusBadgeClass } from '../../../../provider-ui';
+import { purchaseCreditHoldView } from '../../credit-limit';
 import { CREDIT_BALANCE_LIMIT_SETTLEMENT_MESSAGE } from '../../purchase-terms-documents';
 import { mockPayPackagePurchaseAction } from './actions';
 
@@ -30,8 +31,12 @@ export default async function ProviderPackagePurchaseCheckoutPage({
   }
 
   const purchase = await apiFetch<PackagePurchase>(`/providers/${id}/package-purchases/${purchaseId}`);
+  // API-HARDENING-001: a purchase whose payment was captured and whose credit
+  // is held is never offered for payment again — not the hosted page, not the
+  // mock form.
+  const held = purchaseCreditHoldView(purchase);
   const hostedCheckoutUrl =
-    purchase.status === 'PENDING' ? purchase.providerCheckoutUrl : null;
+    purchase.status === 'PENDING' && !held ? purchase.providerCheckoutUrl : null;
 
   return (
     <ProviderShell user={user} providerId={id} active="packages">
@@ -59,7 +64,11 @@ export default async function ProviderPackagePurchaseCheckoutPage({
       <div className="pdash-detail-grid">
         <section className="pdash-detail-card">
           <h2>Kart Bilgileri</h2>
-          {hostedCheckoutUrl ? (
+          {held ? (
+            <div className="pdash-notice pdash-notice-warn" data-testid="purchase-credit-hold-checkout">
+              <strong>{held.title}.</strong> {held.text}
+            </div>
+          ) : hostedCheckoutUrl ? (
             /*
              * This purchase was opened against a hosted sandbox checkout, so
              * the in-app mock form must not be offered for it: paying it here
@@ -154,7 +163,7 @@ export default async function ProviderPackagePurchaseCheckoutPage({
               </p>
             </div>
             <span className={providerStatusBadgeClass(purchase.status)}>
-              {statusLabel(purchase.status)}
+              {held ? held.label : statusLabel(purchase.status)}
             </span>
           </div>
 

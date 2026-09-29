@@ -998,6 +998,19 @@ export type PackagePurchase = {
   expiredAt: string | null;
   refundedAt: string | null;
   creditTransactionId: string | null;
+  /**
+   * API-HARDENING-001: the payment was captured but its credit is held
+   * (it would pass the balance bound). Null for an ordinary purchase. While
+   * OPEN the purchase still reads PENDING and must not be offered for payment.
+   */
+  creditHold?: {
+    status: 'OPEN' | 'SETTLED' | 'REFUND_REPORTED';
+    chargedAmountMinor: number;
+    currency: string;
+    creditAmount: number;
+    openedAt: string;
+    resolvedAt: string | null;
+  } | null;
   createdAt: string;
   updatedAt: string;
   provider?: {

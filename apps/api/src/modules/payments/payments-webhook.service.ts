@@ -10,6 +10,7 @@ import {
 import {
   CreditTransactionType,
   OfferPackageType,
+  PackagePurchaseCreditHoldStatus,
   PackagePurchaseKind,
   PackagePurchaseStatus,
   PaymentWebhookEventStatus,
@@ -116,7 +117,19 @@ type MismatchCode =
    * like every mismatch, recoverable: a redelivery once the balance has room
    * settles it. Not a payload fact, so not a sign of a forged delivery.
    */
-  | 'CREDIT_BALANCE_LIMIT_EXCEEDED';
+  | 'CREDIT_BALANCE_LIMIT_EXCEEDED'
+  /**
+   * API-HARDENING-001. The purchase's credit hold was closed as
+   * REFUND_REPORTED: the held money went back, so a later delivery of the
+   * order must never turn it into credit.
+   */
+  | 'CREDIT_HOLD_REFUND_REPORTED'
+  /**
+   * API-HARDENING-001. The purchase has an open credit hold for one order and
+   * this delivery names another. Two captures for one checkout are a person's
+   * to reconcile; neither loads credit on its own.
+   */
+  | 'CREDIT_HOLD_ORDER_MISMATCH';
 
 export const MANUAL_REVIEW_REASON = 'PAYMENT_REVERSAL_REPORTED';
 
@@ -150,7 +163,26 @@ type SettlementResult = {
   mismatch: MismatchCode | null;
   /** Known as soon as the correlation token resolves, mismatch or not. */
   purchaseId: string | null;
+  /**
+   * API-HARDENING-001: set with CREDIT_BALANCE_LIMIT_EXCEEDED. The facts the
+   * credit hold is opened (or touched) with, in the same transaction as the
+   * refusal's audit row.
+   */
+  hold?: CreditHoldOpening;
+  /** The ledger row a successful credit settlement wrote. */
+  creditTransactionId?: string | null;
 };
+
+type CreditHoldOpening = {
+  providerId: string;
+  providerOrderId: string;
+  chargedAmountMinor: number;
+  currency: string;
+  creditAmount: number;
+  balanceAtOpen: number;
+};
+
+export const CREDIT_HOLD_REASON = 'CREDIT_BALANCE_LIMIT_EXCEEDED';
 
 type AttemptOutcome = {
   status: PaymentWebhookEventStatus;
@@ -297,7 +329,7 @@ export class PaymentsWebhookService implements OnModuleInit {
             return { status: 'duplicate' } as const;
           }
 
-          const { mismatch, purchaseId } = await this.settle(
+          const { mismatch, purchaseId, hold, creditTransactionId } = await this.settle(
             tx,
             event,
             expectedStoreId,
@@ -306,24 +338,46 @@ export class PaymentsWebhookService implements OnModuleInit {
           );
 
           if (mismatch) {
-            await recordAttempt(
+            const refused = await recordAttempt(
               tx,
               event,
               existing,
               { status: PaymentWebhookEventStatus.MISMATCHED, purchaseId, detail: mismatch },
               now,
             );
+            if (hold && purchaseId) {
+              // API-HARDENING-001: the money is captured and the credit is
+              // not; the hold is the durable, filterable record of that, in
+              // the same transaction as the refusal. Still answered 2xx below:
+              // the provider stops redelivering, and a person decides.
+              await touchCreditHold(tx, purchaseId, refused.id, hold, now);
+            }
             this.logger.error(`webhook ${event.eventName} refused: ${mismatch}`);
             return { status: 'mismatched' } as const;
           }
 
-          await recordAttempt(
+          const processed = await recordAttempt(
             tx,
             event,
             existing,
             { status: PaymentWebhookEventStatus.PROCESSED, purchaseId, detail: null },
             now,
           );
+
+          // API-HARDENING-001: a purchase that was held settles its hold here,
+          // once — the conditional update matches only an OPEN hold, and this
+          // branch runs only for the delivery that made the purchase PAID.
+          if (purchaseId && creditTransactionId) {
+            await tx.packagePurchaseCreditHold.updateMany({
+              where: { purchaseId, status: PackagePurchaseCreditHoldStatus.OPEN },
+              data: {
+                status: PackagePurchaseCreditHoldStatus.SETTLED,
+                resolvedAt: now,
+                resolvedEventId: processed.id,
+                creditTransactionId,
+              },
+            });
+          }
 
           // Noted, not sent. The receipt goes out only once this transaction
           // has committed — a settlement that rolls back must leave no message
@@ -599,13 +653,40 @@ export class PaymentsWebhookService implements OnModuleInit {
      * judges is the one the ledger row would follow.
      */
     if (isOneTime) {
+      // A held purchase settles only for the order that was held, and never
+      // after that order was reported refunded (API-HARDENING-001).
+      const existingHold = await tx.packagePurchaseCreditHold.findUnique({
+        where: { purchaseId: purchase.id },
+        select: { status: true, providerOrderId: true },
+      });
+      if (existingHold?.status === PackagePurchaseCreditHoldStatus.REFUND_REPORTED) {
+        return { mismatch: 'CREDIT_HOLD_REFUND_REPORTED', purchaseId: purchase.id };
+      }
+      if (
+        existingHold?.status === PackagePurchaseCreditHoldStatus.OPEN &&
+        existingHold.providerOrderId !== event.objectId
+      ) {
+        return { mismatch: 'CREDIT_HOLD_ORDER_MISMATCH', purchaseId: purchase.id };
+      }
+
       const headroom = await this.credits.readCreditHeadroom(
         tx,
         purchase.providerId,
         purchase.creditAmountSnapshot,
       );
       if (!headroom.fits) {
-        return { mismatch: 'CREDIT_BALANCE_LIMIT_EXCEEDED', purchaseId: purchase.id };
+        return {
+          mismatch: 'CREDIT_BALANCE_LIMIT_EXCEEDED',
+          purchaseId: purchase.id,
+          hold: {
+            providerId: purchase.providerId,
+            providerOrderId: event.objectId,
+            chargedAmountMinor: event.chargedMinor ?? purchase.priceAmountSnapshot,
+            currency: event.currency ?? purchase.currencySnapshot.toUpperCase(),
+            creditAmount: purchase.creditAmountSnapshot,
+            balanceAtOpen: headroom.currentBalance,
+          },
+        };
       }
     }
 
@@ -669,7 +750,7 @@ export class PaymentsWebhookService implements OnModuleInit {
      */
     await this.campaignHooks.packagePaymentSucceeded(tx, purchase.providerId, purchase.id);
 
-    return { mismatch: null, purchaseId: purchase.id };
+    return { mismatch: null, purchaseId: purchase.id, creditTransactionId: creditTransaction?.id ?? null };
   }
 
   /**
@@ -805,6 +886,26 @@ export class PaymentsWebhookService implements OnModuleInit {
             },
             now,
           );
+
+          // API-HARDENING-001: staff refunded (or the buyer disputed) the very
+          // order whose credit was held. The hold closes once, naming this
+          // event, and the purchase can never load that credit afterwards.
+          // Relevance is the settlement path's own: a sandbox event from the
+          // configured store naming the held order.
+          if (purchase && event.testMode && event.storeId === expectedStoreId && event.objectId) {
+            await tx.packagePurchaseCreditHold.updateMany({
+              where: {
+                purchaseId: purchase.id,
+                status: PackagePurchaseCreditHoldStatus.OPEN,
+                providerOrderId: event.objectId,
+              },
+              data: {
+                status: PackagePurchaseCreditHoldStatus.REFUND_REPORTED,
+                resolvedAt: now,
+                resolvedEventId: recorded.id,
+              },
+            });
+          }
 
           if (purchase && isRelevantReversal(event, purchase, expectedStoreId)) {
             // CMP-006 PR-B. An `order_refunded` arrives for a full *and* for a
@@ -1086,6 +1187,49 @@ function readEvent(host: EventReader, event: LemonSqueezyEvent): Promise<Existin
  * first. Nothing else is stored: no raw payload, no signature, no amount that
  * could be tied to a named person, no buyer detail of any kind.
  */
+/**
+ * Opens the purchase's credit hold, or counts one more refused delivery on an
+ * open one (API-HARDENING-001).
+ *
+ * `createMany … skipDuplicates` is an INSERT … ON CONFLICT DO NOTHING on the
+ * unique `purchaseId`, so two deliveries racing to open the same hold cannot
+ * produce two rows or a unique-violation error; the loser counts its refusal
+ * on the row the winner wrote.
+ */
+async function touchCreditHold(
+  tx: Prisma.TransactionClient,
+  purchaseId: string,
+  eventId: string,
+  hold: CreditHoldOpening,
+  now: Date,
+) {
+  const opened = await tx.packagePurchaseCreditHold.createMany({
+    data: [
+      {
+        purchaseId,
+        providerId: hold.providerId,
+        reason: CREDIT_HOLD_REASON,
+        providerOrderId: hold.providerOrderId,
+        chargedAmountMinor: hold.chargedAmountMinor,
+        currency: hold.currency,
+        creditAmount: hold.creditAmount,
+        balanceAtOpen: hold.balanceAtOpen,
+        openedEventId: eventId,
+        openedAt: now,
+        lastRefusedAt: now,
+      },
+    ],
+    skipDuplicates: true,
+  });
+
+  if (opened.count === 0) {
+    await tx.packagePurchaseCreditHold.updateMany({
+      where: { purchaseId, status: PackagePurchaseCreditHoldStatus.OPEN },
+      data: { refusedDeliveries: { increment: 1 }, lastRefusedAt: now },
+    });
+  }
+}
+
 function recordAttempt(
   tx: Prisma.TransactionClient,
   event: LemonSqueezyEvent,

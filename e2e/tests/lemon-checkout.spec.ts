@@ -6,7 +6,9 @@ import {
   createCategory,
   createLemonSqueezyCreditPackage,
   createProvider,
+  createStaffAdmin,
   creditBalance,
+  grantCredits,
   prisma,
   uniqueLocation,
 } from '../src/fixtures';
@@ -269,4 +271,89 @@ test.describe('test-mode credit package checkout', () => {
       await provider.close();
     }
   });
+
+  /*
+   * API-HARDENING-001: a captured payment refused at the credit bound. The
+   * provider paid; the credit would pass the ledger's integer column. The
+   * notice is answered 200 so the provider stops redelivering, a credit hold
+   * opens, the provider reads "paid, credit on hold" with no way to pay again,
+   * the operator filters it and reads the gap and the two ways out, and a
+   * later delivery with room settles the purchase and the hold once.
+   */
+  test('a captured payment the balance cannot take is held, shown to both sides, and settled once there is room', async ({
+    browser,
+  }) => {
+    const MAX = 2_147_483_647;
+    const category = await createCategory(3);
+    const seeded = await createProvider({ categoryId: category.id, location: uniqueLocation(), credits: MAX - CREDIT_AMOUNT });
+    await createLemonSqueezyCreditPackage({ creditAmount: CREDIT_AMOUNT, priceAmount: PRICE_AMOUNT });
+    const staffAccount = await createStaffAdmin(['PACKAGE_PURCHASES_READ', 'PACKAGE_PURCHASE_STATUS_WRITE']);
+
+    const provider = await Actor.open(browser, 'provider', lemonSqueezyRuntime);
+    const staff = await Actor.open(browser, 'staff', lemonSqueezyRuntime);
+
+    try {
+      await provider.loginToWeb(seeded.email, seeded.password);
+      await provider.gotoWeb(`/providers/${seeded.id}/credits`);
+      await provider.page.getByRole('button', { name: 'Test Ödemesiyle Paket Al' }).click();
+      await expect(provider.page.getByTestId('stub-checkout')).toBeVisible();
+      const purchase = await prisma().packagePurchase.findFirstOrThrow({ where: { providerId: seeded.id } });
+
+      // The balance grows between the checkout and the capture.
+      await grantCredits(seeded.id, 1);
+      const refused = await deliverWebhook(purchase.paymentReference as string, { orderId: 'e2e-held-order' });
+      expect(refused.status).toBe(200);
+      expect(await refused.json()).toEqual({ status: 'mismatched' });
+
+      const hold = await prisma().packagePurchaseCreditHold.findUniqueOrThrow({ where: { purchaseId: purchase.id } });
+      expect(hold).toMatchObject({ status: 'OPEN', providerOrderId: 'e2e-held-order', creditAmount: CREDIT_AMOUNT });
+      expect((await prisma().packagePurchase.findUniqueOrThrow({ where: { id: purchase.id } })).status).toBe('PENDING');
+      expect(await creditBalance(seeded.id)).toBe(MAX - CREDIT_AMOUNT + 1);
+
+      // The provider: paid and waiting, never "Bekliyor", never a pay button.
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases/${purchase.id}`);
+      await assertNoErrorScreen(provider.page);
+      await expect(provider.page.getByTestId('purchase-status')).toHaveText('Ödendi · kredi beklemede');
+      await expect(provider.page.getByTestId('purchase-notice')).toContainText('yeniden satın almanıza gerek yok');
+      await expect(provider.page.getByRole('link', { name: 'Test Ödemesine Devam Et' })).toHaveCount(0);
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases`);
+      await expect(provider.page.getByTestId('purchase-credit-hold-status')).toHaveText('Ödendi · kredi beklemede');
+      await expect(provider.page.getByRole('link', { name: 'Ödemeye Devam Et' })).toHaveCount(0);
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases/${purchase.id}/checkout`);
+      await expect(provider.page.getByTestId('purchase-credit-hold-checkout')).toBeVisible();
+      await expect(provider.page.getByRole('link', { name: 'Test Ödeme Sayfasını Aç' })).toHaveCount(0);
+
+      // The operator: counted over every purchase, one click to the filtered
+      // list, and the whole gap on the detail — with no cancel form.
+      await staff.loginToAdmin(staffAccount.email, staffAccount.password);
+      await staff.gotoAdmin('/package-purchases');
+      await expect(staff.page.getByTestId('credit-hold-notice')).toContainText('tahsil edildi');
+      await staff.page.getByTestId('credit-hold-filter').click();
+      await expect(staff.page).toHaveURL(/creditHold=OPEN/);
+      await expect(staff.page.getByTestId('purchase-credit-hold')).toHaveText('Tahsil edildi · kredi teslim edilmedi');
+      await staff.page.getByRole('link', { name: 'Detay' }).click();
+      const card = staff.page.getByTestId('purchase-credit-hold-card');
+      await expect(card).toContainText('e2e-held-order');
+      await expect(staff.page.getByTestId('purchase-credit-hold-steps')).toContainText('Otomatik iade yapılmaz');
+      await expect(staff.page.getByTestId('purchase-credit-hold-no-manual-fix')).toBeVisible();
+      await expect(staff.page.getByRole('button', { name: 'Durumu güncelle' })).toHaveCount(0);
+
+      // Room appears; the same order redelivered settles purchase and hold once.
+      await grantCredits(seeded.id, -1);
+      const settled = await deliverWebhook(purchase.paymentReference as string, { orderId: 'e2e-held-order' });
+      expect(await settled.json()).toEqual({ status: 'processed' });
+      expect(await creditBalance(seeded.id)).toBe(MAX);
+      const closed = await prisma().packagePurchaseCreditHold.findUniqueOrThrow({ where: { purchaseId: purchase.id } });
+      expect(closed.status).toBe('SETTLED');
+      expect(closed.creditTransactionId).not.toBeNull();
+
+      await provider.gotoWeb(`/providers/${seeded.id}/package-purchases/${purchase.id}`);
+      await expect(provider.page.getByTestId('purchase-status')).toHaveText('Ödendi');
+      await staff.page.reload();
+      await expect(card).toContainText('Kredi sonradan teslim edildi');
+    } finally {
+      await Promise.all([provider.close(), staff.close()]);
+    }
+  });
 });
+

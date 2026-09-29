@@ -6,6 +6,7 @@ import {
   formatPrice,
   PackagePurchase,
   PackagePurchaseStatus,
+  PURCHASE_CREDIT_HOLD_LABELS,
   requireAdmin,
   statusBadgeClass,
   statusLabel,
@@ -16,6 +17,7 @@ type AdminPackagePurchasesPageProps = {
     status?: PackagePurchaseStatus;
     providerId?: string;
     packageId?: string;
+    creditHold?: string;
   }>;
 };
 
@@ -31,11 +33,16 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
   if (params.status) query.set('status', params.status);
   if (params.providerId) query.set('providerId', params.providerId);
   if (params.packageId) query.set('packageId', params.packageId);
-  const [purchases, paymentConfig] = await Promise.all([
+  const holdFilter = params.creditHold === 'OPEN' || params.creditHold === 'ANY' ? params.creditHold : null;
+  if (holdFilter) query.set('creditHold', holdFilter);
+  const [purchases, paymentConfig, openHolds] = await Promise.all([
     apiFetch<PackagePurchase[]>(
       `/package-purchases${query.toString() ? `?${query.toString()}` : ''}`,
     ),
     canReadPaymentConfig ? apiFetch<AdminPaymentConfig>('/payments/config') : Promise.resolve(null),
+    // API-HARDENING-001: counted over every purchase, whatever the filter, so
+    // captured-but-undelivered money is never hidden by the view.
+    apiFetch<PackagePurchase[]>('/package-purchases?creditHold=OPEN'),
   ]);
 
   const manualReviewCount = purchases.filter((purchase) => purchase.manualReviewAt).length;
@@ -98,6 +105,18 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
       </section>
       ) : null}
 
+      {openHolds.length > 0 ? (
+        <div className="notice notice-warn" style={{ marginBottom: 18 }} data-testid="credit-hold-notice">
+          <strong>{openHolds.length}</strong> satın almada ödeme sağlayıcıda tahsil edildi ama kredi, hizmet verenin
+          bakiyesi üst sınırı aşacağı için teslim edilmedi. Otomatik iade yapılmaz; her birini detayında inceleyin.{' '}
+          {holdFilter === 'OPEN' ? null : (
+            <Link href="/package-purchases?creditHold=OPEN" data-testid="credit-hold-filter">
+              Yalnız bunları göster
+            </Link>
+          )}
+        </div>
+      ) : null}
+
       {manualReviewCount > 0 ? (
         <div className="notice notice-warn" style={{ marginBottom: 18 }} data-testid="manual-review-notice">
           <strong>{manualReviewCount}</strong> satın alma için sağlayıcıdan iade/ters ibraz bildirimi
@@ -150,6 +169,15 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
                     <td>{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</td>
                     <td>
                       <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
+                      {purchase.creditHold ? (
+                        <div
+                          className={purchase.creditHold.status === 'OPEN' ? 'badge badge-warn' : 'muted'}
+                          style={{ fontSize: 12, marginTop: 4 }}
+                          data-testid="purchase-credit-hold"
+                        >
+                          {PURCHASE_CREDIT_HOLD_LABELS[purchase.creditHold.status]}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="muted" style={{ fontSize: 12 }}>{purchase.mockPaymentReference ?? '-'}</td>
                     <td>

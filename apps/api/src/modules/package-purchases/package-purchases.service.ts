@@ -11,6 +11,7 @@ import {
   CreditTransactionType,
   NumberedEntityType,
   OfferPackageType,
+  PackagePurchaseCreditHoldStatus,
   PackagePurchaseKind,
   PackagePurchaseStatus,
   Prisma,
@@ -44,7 +45,14 @@ type AdminPurchaseFilters = {
   status?: PackagePurchaseStatus;
   providerId?: string;
   packageId?: string;
+  /**
+   * API-HARDENING-001: `OPEN` lists only captured payments whose credit is
+   * held; `ANY` every purchase that ever had a hold. Anything else is refused.
+   */
+  creditHold?: string;
 };
+
+export const PURCHASE_CREDIT_HOLD_OPEN = 'PURCHASE_CREDIT_HOLD_OPEN';
 
 @Injectable()
 export class PackagePurchasesService implements OnModuleInit {
@@ -483,12 +491,18 @@ export class PackagePurchasesService implements OnModuleInit {
     const status = normalizeOptionalPurchaseStatus(filters.status);
     const providerId = normalizeNullableString(filters.providerId);
     const packageId = normalizeNullableString(filters.packageId);
+    const creditHold = normalizeNullableString(filters.creditHold);
+    if (creditHold !== null && creditHold !== 'OPEN' && creditHold !== 'ANY') {
+      throw new BadRequestException('creditHold must be OPEN or ANY');
+    }
 
     return this.prisma.packagePurchase.findMany({
       where: {
         ...(status ? { status } : {}),
         ...(providerId ? { providerId } : {}),
         ...(packageId ? { packageId } : {}),
+        ...(creditHold === 'OPEN' ? { creditHold: { is: { status: PackagePurchaseCreditHoldStatus.OPEN } } } : {}),
+        ...(creditHold === 'ANY' ? { creditHold: { isNot: null } } : {}),
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: packagePurchaseInclude,
@@ -507,7 +521,38 @@ export class PackagePurchasesService implements OnModuleInit {
       throw new NotFoundException('Package purchase not found');
     }
 
-    return { ...purchase, webhookEvents: await this.readWebhookAttempts(id) };
+    return {
+      ...purchase,
+      webhookEvents: await this.readWebhookAttempts(id),
+      creditHold: await this.readCreditHoldForAdmin(id),
+    };
+  }
+
+  /**
+   * The operator's whole view of a credit hold (API-HARDENING-001): the order
+   * that captured the money, what it captured against what it should have
+   * delivered, how many deliveries were refused, and how it closed.
+   */
+  private readCreditHoldForAdmin(purchaseId: string) {
+    return this.prisma.packagePurchaseCreditHold.findUnique({
+      where: { purchaseId },
+      select: {
+        status: true,
+        reason: true,
+        providerOrderId: true,
+        chargedAmountMinor: true,
+        currency: true,
+        creditAmount: true,
+        balanceAtOpen: true,
+        openedAt: true,
+        refusedDeliveries: true,
+        lastRefusedAt: true,
+        resolvedAt: true,
+        creditTransactionId: true,
+        openedEvent: { select: { eventName: true } },
+        resolvedEvent: { select: { eventName: true } },
+      },
+    });
   }
 
   /**
@@ -556,6 +601,22 @@ export class PackagePurchasesService implements OnModuleInit {
 
     if (purchase.status !== PackagePurchaseStatus.PENDING) {
       throw new ConflictException('Only pending package purchases can be manually cancelled or expired');
+    }
+
+    // API-HARDENING-001: an open credit hold is money the provider already
+    // paid. Cancelling or expiring the purchase would hide it; the hold closes
+    // by a settlement or by a reported refund, never by this button.
+    const hold = await this.prisma.packagePurchaseCreditHold.findUnique({
+      where: { purchaseId: id },
+      select: { status: true },
+    });
+    if (hold?.status === PackagePurchaseCreditHoldStatus.OPEN) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        code: PURCHASE_CREDIT_HOLD_OPEN,
+        message: 'This purchase was paid and its credit is held; it cannot be cancelled or expired',
+      });
     }
 
     const now = new Date();
@@ -659,6 +720,23 @@ const packagePurchaseInclude = {
   },
   showcasePlacement: {
     select: { id: true, status: true, startAt: true, endAt: true },
+  },
+  /*
+   * API-HARDENING-001: whether this purchase's payment was captured while its
+   * credit is held. On every projection — the provider's included — so a
+   * screen can tell "paid, credit on hold" from an unpaid checkout and never
+   * invite a second payment. Only facts about the provider's own money: no
+   * order id, no event, no balance.
+   */
+  creditHold: {
+    select: {
+      status: true,
+      chargedAmountMinor: true,
+      currency: true,
+      creditAmount: true,
+      openedAt: true,
+      resolvedAt: true,
+    },
   },
 } satisfies Prisma.PackagePurchaseInclude;
 
