@@ -3057,7 +3057,11 @@ export type ShowcaseCard = {
   category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
-  /** The newest refused version, only while the card has neither a draft nor a live one. */
+  /**
+   * The newest refused version while nothing has superseded it: no draft, and
+   * no live version newer than it. Also set for a refused revision of a live
+   * card (API-HARDENING-001), so screens that prefer `liveVersion` keep doing so.
+   */
   rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;
   suspendReason: string | null;

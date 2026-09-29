@@ -135,22 +135,37 @@ export function toShowcaseCard(card: CardRow) {
 }
 
 /**
- * The refused text a card with nothing else to show still carries.
+ * The refusal the provider still has to act on, with its note.
  *
- * Only for a card with no draft and no live version: once either exists the
- * refusal is history rather than the thing to act on. The rows may arrive as
- * the one-row filtered include above or, from the operator's card screen, as
- * the card's whole history newest first — so the status is checked here
+ * Two cases, one rule — the newest refused version, while nothing newer has
+ * superseded it:
+ *
+ * - a card with no draft and no live version: its first version was refused;
+ * - a card whose live version is *older* than the refusal, and with no draft:
+ *   a revision of approved text was refused (API-HARDENING-001). The card
+ *   stays APPROVED and keeps serving the live text, so this field is the only
+ *   place the refusal and its note reach the provider's panel.
+ *
+ * A new draft supersedes the refusal (the provider is acting on it), and so
+ * does a later approval (the live version is then newer). The rows may arrive
+ * as the one-row filtered include above or, from the operator's card screen,
+ * as the card's whole history newest first — so the status is checked here
  * rather than assumed from the include.
  */
 function rejectedVersion(card: CardRow) {
-  if (card.liveVersion || card.draftVersion) {
+  if (card.draftVersion) {
     return null;
   }
   const refused = card.versions.find(
     (version) => version.reviewStatus === 'REJECTED',
   );
-  return refused ? toShowcaseVersion(refused) : null;
+  if (!refused) {
+    return null;
+  }
+  if (card.liveVersion && card.liveVersion.versionNumber > refused.versionNumber) {
+    return null;
+  }
+  return toShowcaseVersion(refused);
 }
 
 export type ShowcaseCardProjection = ReturnType<typeof toShowcaseCard>;

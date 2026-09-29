@@ -501,6 +501,13 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     showcaseUrl: `${WEB}/providers/p1/vitrin`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'showcase-card-revision-rejected': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    rejectedAt: '2026-08-27T11:12:00.000Z',
+    cardUrl: `${WEB}/providers/p1/vitrin/c1`,
+    accountUrl: `${WEB}/providers/me`,
+  },
   'showcase-placement-ending-7d': {
     fullName: 'Murat Şahin',
     cardTitle: 'Kombi bakım paketi',
@@ -603,8 +610,9 @@ describe('transactional e-mail rendering', () => {
     // payload here would still render, silently, with every field missing.
     // Twenty-eight before vitrin's four, then the seven of the run's life,
     // then the two of a request report, then the four of a provider review,
-    // then the provider's mailbox proof (AUTH-PROVIDER-CONTACT-001).
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(50);
+    // then the provider's mailbox proof (AUTH-PROVIDER-CONTACT-001), then the
+    // refused revision of a live card (API-HARDENING-001).
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(51);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -866,6 +874,7 @@ describe('transactional e-mail rendering', () => {
       'showcase-package-payment-failed': 'Vitrin paketi ödemesi tamamlanmadı',
       'showcase-card-approved-live': 'Kartınız onaylandı ve yayında — Kombi bakım paketi',
       'showcase-card-approved': 'Vitrin kartınız onaylandı — Kombi bakım paketi',
+      'showcase-card-revision-rejected': 'Vitrin kartınızdaki değişiklik onaylanmadı — Kombi bakım paketi',
       'showcase-placement-ending-7d':
         'Vitrin yayınınızın bitmesine 7 gün kaldı — Kombi bakım paketi',
       'showcase-placement-ending-3d': 'Vitrin yayınınız 3 gün içinde bitiyor — Kombi bakım paketi',

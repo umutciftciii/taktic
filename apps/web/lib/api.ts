@@ -1600,9 +1600,10 @@ export type ShowcaseCard = {
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
   /**
-   * The most recent refused version, only while the card has neither a draft
-   * nor a live one: a rejection clears the draft pointer, and this is what the
-   * owner still has to read and fix.
+   * The most recent refused version while nothing has superseded it — no
+   * draft, and no live version newer than it. A rejection clears the draft
+   * pointer, and this is what the owner still has to read: the refused first
+   * version, or a refused revision of a live card (API-HARDENING-001).
    */
   rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;
