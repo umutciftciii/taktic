@@ -138,7 +138,7 @@ export default async function ShowcaseReviewPage({
       {rejected ? (
         <div className="notice notice-success detail-notice" role="status" data-testid="showcase-rejected-notice">
           {card.liveVersion
-            ? 'Sürüm reddedildi. Yayındaki sürüm yayında kalır. Gerekçe kayda geçti; hizmet verene e-posta gitmedi ve bu not panelinde görünmez.'
+            ? 'Sürüm reddedildi. Yayındaki sürüm yayında kalır. Gerekçe hizmet verenin panelinde kart sayfasında görünür; hizmet verene notu içermeyen bir e-posta gönderildi.'
             : 'Sürüm reddedildi. Gerekçe hizmet verenin panelinde kartın durumunda görünür; e-posta gitmedi.'}
         </div>
       ) : null}
@@ -310,8 +310,12 @@ export default async function ShowcaseReviewPage({
                           kart “Onaylı” kalır, yayın süresi ve raflar değişmez.
                         </li>
                         <li>
-                          Gerekçe kayda geçer ama bugün hizmet verene ulaşmaz: e-posta gitmez ve panel yayındaki kartın
-                          reddedilen sürüm notunu göstermez. Gerekirse hizmet verene ayrıca ulaşın.
+                          Gerekçe hizmet verenin panelinde kart sayfasında “İnceleme notu” olarak görünür; hizmet veren
+                          yeni bir taslak açana ya da sonraki bir sürüm onaylanana kadar orada kalır.
+                        </li>
+                        <li>
+                          Hizmet verene bir kez e-posta gider: değişikliğin onaylanmadığını ve notun panelde olduğunu
+                          söyler. Notunuz e-postaya eklenmez.
                         </li>
                       </ul>
                     ) : (

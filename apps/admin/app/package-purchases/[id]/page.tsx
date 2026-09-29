@@ -5,11 +5,14 @@ import {
   formatDateTime,
   formatPrice,
   PackagePurchase,
+  PURCHASE_CREDIT_HOLD_LABELS,
   requireAdmin,
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
 import { updatePackagePurchaseStatusAction } from '../actions';
+import { CREDIT_AMOUNT_MAX } from '../../../lib/credit-amount';
+import { formatCount } from '../../../lib/pagination';
 
 type AdminPackagePurchaseDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -25,6 +28,8 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
     apiFetch<PackagePurchase>(`/package-purchases/${encodeURIComponent(id)}`),
   );
   const purchaseRef = purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;
+  const hold = purchase.creditHold;
+  const holdOpen = hold?.status === 'OPEN';
 
   return (
     <main>
@@ -86,6 +91,70 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
               <dd><strong>{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</strong></dd>
             </dl>
           </section>
+
+          {hold ? (
+            /*
+             * API-HARDENING-001. The money and the credit disagree: the
+             * provider's order was captured, the credit was not delivered
+             * because it would pass the ledger bound. This card is where an
+             * operator reads the gap and how it can close — nothing here
+             * refunds or loads anything.
+             */
+            <section className="card" style={{ margin: 0 }} data-testid="purchase-credit-hold-card">
+              <h2>Tahsilat · kredi teslimi</h2>
+              <p>
+                <span className={holdOpen ? 'badge badge-warn' : 'badge'}>{PURCHASE_CREDIT_HOLD_LABELS[hold.status]}</span>
+              </p>
+              <dl className="meta-row">
+                <dt>Tahsil edilen</dt>
+                <dd>
+                  <strong>{formatPrice(hold.chargedAmountMinor, hold.currency)}</strong>
+                </dd>
+                <dt>Teslim edilecek kredi</dt>
+                <dd>{formatCount(hold.creditAmount)}</dd>
+                <dt>Teslim edilen kredi</dt>
+                <dd>{hold.status === 'SETTLED' ? formatCount(hold.creditAmount) : '0'}</dd>
+                <dt>Sağlayıcı sipariş no</dt>
+                <dd>
+                  <code>{hold.providerOrderId ?? '-'}</code>
+                </dd>
+                <dt>Vaka açıldığında bakiye</dt>
+                <dd>
+                  {hold.balanceAtOpen !== undefined ? formatCount(hold.balanceAtOpen) : '-'} (üst sınır{' '}
+                  {formatCount(CREDIT_AMOUNT_MAX)})
+                </dd>
+                <dt>Reddedilen teslimat</dt>
+                <dd>
+                  {hold.refusedDeliveries ?? '-'}
+                  {hold.lastRefusedAt ? ` · son ${formatDateTime(hold.lastRefusedAt)}` : ''}
+                </dd>
+                <dt>Açıldı</dt>
+                <dd>{formatDateTime(hold.openedAt)}</dd>
+                <dt>Kapandı</dt>
+                <dd>
+                  {hold.resolvedAt
+                    ? `${formatDateTime(hold.resolvedAt)}${hold.resolvedEvent ? ` · ${hold.resolvedEvent.eventName}` : ''}`
+                    : 'hayır'}
+                </dd>
+              </dl>
+              {holdOpen ? (
+                <div className="notice-warning" data-testid="purchase-credit-hold-steps">
+                  <strong>Otomatik iade yapılmaz.</strong> İki çözüm yolu var ve karar yetkili personelindir:
+                  <ol style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                    <li>
+                      Hizmet verenin bakiyesi bu kredi için yeterince düştüyse Lemon Squeezy panelinden bu siparişin
+                      ödeme bildirimini yeniden gönderin: kredi yüklenir, satın alma “Ödendi” olur ve vaka kendiliğinden
+                      “Kredi sonradan teslim edildi” olarak kapanır.
+                    </li>
+                    <li>
+                      İade kararı verilirse iadeyi Lemon Squeezy panelinden yapın: gelen iade bildirimi vakayı “Ödeme
+                      iade edildi” olarak kapatır ve bu sipariş bir daha krediye dönüşmez.
+                    </li>
+                  </ol>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="card" style={{ margin: 0 }}>
             <h2>Zaman çizgisi</h2>
@@ -163,6 +232,19 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
                         <br />
                         Çözüldü:{' '}
                         {attempt.resolvedAt ? formatDateTime(attempt.resolvedAt) : 'hayır'}
+                        {/*
+                          API-HARDENING-001: a genuine, matching order refused
+                          because its credits would pass the ledger's integer
+                          bound. Nothing was written; the next delivery is
+                          judged again.
+                        */}
+                        {attempt.status === 'MISMATCHED' && attempt.detail === 'CREDIT_BALANCE_LIMIT_EXCEEDED' ? (
+                          <div className="notice-warning" data-testid="webhook-credit-limit-note" style={{ marginTop: 6 }}>
+                            Ödeme doğrulandı ama kredileri bakiyenin üst sınırını ({formatCount(CREDIT_AMOUNT_MAX)}) aşacağı için
+                            yüklenmedi. Kısmi kredi yazılmadı, satın alma “Bekliyor” durumunda kaldı ve “Tahsilat ·
+                            kredi teslimi” vakası açıldı; çözüm yolları o kartta.
+                          </div>
+                        ) : null}
                       </div>
                     ))
                   : '-'}
@@ -178,7 +260,12 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
         </div>
 
         <div className="stack">
-          {purchase.status === 'PENDING' && !canFixStatus ? null : purchase.status === 'PENDING' ? (
+          {holdOpen ? (
+            <div className="notice" data-testid="purchase-credit-hold-no-manual-fix">
+              Bu satın almanın ödemesi tahsil edildi; iptal veya “Süresi doldu” olarak işaretlenemez. Vaka, kredi
+              teslimi ya da bildirilen iade ile kapanır.
+            </div>
+          ) : purchase.status === 'PENDING' && !canFixStatus ? null : purchase.status === 'PENDING' ? (
             <section className="card" style={{ margin: 0 }}>
               <h2>Manuel düzeltme</h2>
               <div className="notice-warning">

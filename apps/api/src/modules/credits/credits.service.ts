@@ -12,7 +12,7 @@ import {
   Prisma,
   ServiceCategoryStatus,
 } from '@prisma/client';
-import { CREDIT_LEDGER_INTEGER_MAX } from '../../common/credit-limits';
+import { CREDIT_LEDGER_INTEGER_MAX, creditBalanceLimitExceeded, fitsCreditLedger } from '../../common/credit-limits';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
@@ -444,12 +444,50 @@ export class CreditsService {
   }
 
   /**
+   * Whether `amount` more credit fits under the ledger's integer column
+   * (API-HARDENING-001).
+   *
+   * Read inside the caller's transaction so the answer and the write that
+   * follows it see the same balance. Callers that settle money use this to
+   * refuse *before* writing anything — the webhook turns a refusal into a
+   * recorded, recoverable outcome rather than an exception — and pass
+   * `maxBalanceAfter` to the write as the second line of the same rule.
+   */
+  async readCreditHeadroom(client: CreditTransactionTx | PrismaService, providerId: string, amount: number) {
+    const latest = await client.providerCreditTransaction.findFirst({
+      where: { providerId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { balanceAfter: true },
+    });
+    const currentBalance = latest?.balanceAfter ?? 0;
+    return {
+      currentBalance,
+      maxBalance: CREDIT_LEDGER_INTEGER_MAX,
+      fits: fitsCreditLedger(currentBalance, amount),
+    };
+  }
+
+  /**
+   * The same refusal every credit-loading path answers with: 400
+   * `CREDIT_BALANCE_LIMIT_EXCEEDED`, nothing written. Advisory where it runs
+   * before money moves (checkout); binding where it runs in the settling
+   * transaction.
+   */
+  async assertCreditHeadroom(client: CreditTransactionTx | PrismaService, providerId: string, amount: number) {
+    const headroom = await this.readCreditHeadroom(client, providerId, amount);
+    if (!headroom.fits) {
+      throw creditBalanceLimitExceeded(headroom.currentBalance, headroom.maxBalance);
+    }
+  }
+
+  /**
    * One ledger row, chained onto the provider's latest balance.
    *
-   * Shared with package purchases, entitlements and the payment webhook,
-   * whose behaviour is unchanged: `maxBalanceAfter` is opt-in and only the
-   * manual path passes it. For them an overflowing balance still fails the
-   * whole transaction (as a database error), exactly as before.
+   * `maxBalanceAfter` is opt-in. The manual path and every credit-*loading*
+   * settlement pass it (API-HARDENING-001: the mock payment, and the webhook
+   * behind its own pre-check), so a balance past the ledger's integer column
+   * is a 400 with nothing written rather than a database 500. The entitlement
+   * resolver writes only debits, which cannot overflow upwards.
    */
   async createProviderCreditTransactionInTransaction(
     tx: CreditTransactionTx,
@@ -478,14 +516,7 @@ export class CreditsService {
     }
 
     if (options.maxBalanceAfter !== undefined && balanceAfter > options.maxBalanceAfter) {
-      throw new BadRequestException({
-        statusCode: 400,
-        error: 'Bad Request',
-        code: 'CREDIT_BALANCE_LIMIT_EXCEEDED',
-        message: `Credit balance cannot exceed ${options.maxBalanceAfter}`,
-        currentBalance,
-        maxBalance: options.maxBalanceAfter,
-      });
+      throw creditBalanceLimitExceeded(currentBalance, options.maxBalanceAfter);
     }
 
     return tx.providerCreditTransaction.create({

@@ -194,7 +194,29 @@ export default async function ShowcasePlacementPage({
                 ),
               },
               ...(placement.cancelledAt
-                ? [{ label: 'İptal zamanı', value: formatDateTime(placement.cancelledAt) }]
+                ? [
+                    { label: 'İptal zamanı', value: formatDateTime(placement.cancelledAt) },
+                    {
+                      label: 'İptal eden',
+                      value: placement.cancellation ? (
+                        <span data-testid="placement-cancelled-by">
+                          {placement.cancellation.actor.name ?? 'Adı olmayan personel hesabı'}
+                          {placement.cancellation.note ? (
+                            <div className="muted" style={{ fontSize: 12 }}>
+                              Not: {placement.cancellation.note}
+                            </div>
+                          ) : null}
+                        </span>
+                      ) : (
+                        // A run cancelled before the operator was recorded. The
+                        // actor is unknown, not missing by accident — no name is
+                        // guessed for it.
+                        <span className="muted" data-testid="placement-cancelled-by-unknown">
+                          Kayıt yok — bu iptal, iptal edenin kaydedilmeye başlanmasından önce yapıldı
+                        </span>
+                      ),
+                    },
+                  ]
                 : []),
               {
                 label: 'Yayındaki sürüm',
@@ -380,9 +402,8 @@ const VERSION_CHANGE_COLUMNS: DataColumn[] = [
 
 /**
  * What `AdminShowcasePlacementsService.cancel` does, in the order it does it.
- * The last line is the audit gap stated rather than hidden: the service takes
- * the operator and does not store them (`void user`), so the run records when
- * it was cancelled and not by whom.
+ * The last line is the audit record: the operator and the note are written to
+ * `ShowcasePlacementCancellation` in the same transaction (API-HARDENING-001).
  */
 const CANCEL_CONSEQUENCE = (
   <ul>
@@ -397,6 +418,6 @@ const CANCEL_CONSEQUENCE = (
       satın almanın yönetici notuna yazılır (satın alma daha önce işaretlenmişse not eklenmez).
     </li>
     <li>Hizmet verene e-posta gitmez. Kart, onaylı sürümü ve bu yerleşimden gelmiş talepler değişmez.</li>
-    <li>İptal zamanı kaydedilir; iptal eden kişi bugün kayda geçmez.</li>
+    <li>İptal zamanı, iptal eden kişi ve notunuz yerleşimin kalıcı kaydına yazılır; bu kayıt sonradan değiştirilemez.</li>
   </ul>
 );

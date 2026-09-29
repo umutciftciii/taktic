@@ -13,10 +13,22 @@ import type { ShowcaseCard } from '../../../../lib/api';
 /**
  * The version the edit form should open on: the draft if there is one, else
  * the live one, else the refused one — a provider fixing a rejected first
- * version must not have to retype it.
+ * version must not have to retype it. A refused *revision* of a live card
+ * deliberately does not win over the live text: the edit starts from what an
+ * operator approved, with the note on the card screen beside it.
  */
 export function editableVersion(card: ShowcaseCard) {
   return card.draftVersion ?? card.liveVersion ?? card.rejectedVersion;
+}
+
+/**
+ * A refused revision of a card that already has approved text: the card stays
+ * on its live version, so this is the only place the refusal shows up.
+ */
+export function rejectedRevision(card: ShowcaseCard) {
+  return card.liveVersion && !card.draftVersion && card.rejectedVersion?.review?.decision === 'REJECTED'
+    ? card.rejectedVersion
+    : null;
 }
 
 /** The version a screen shows when it can show only one. */

@@ -21,6 +21,7 @@ import { IconArrowRight } from '../../../landing-icons';
 import { createPackagePurchaseAction } from '../package-purchases/actions';
 import { PurchaseTermsConsent } from '../package-purchases/purchase-terms-consent';
 import {
+  CREDIT_BALANCE_LIMIT_MESSAGE,
   PURCHASE_TERMS_ERROR_MESSAGES,
   PurchaseTermsDocuments,
 } from '../package-purchases/purchase-terms-documents';
@@ -28,7 +29,7 @@ import { ProviderShell } from '../../provider-shell';
 
 type ProviderCreditsPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ kosullar?: string }>;
+  searchParams: Promise<{ kosullar?: string; 'satin-alma'?: string }>;
 };
 
 export default async function ProviderCreditsPage({
@@ -36,7 +37,7 @@ export default async function ProviderCreditsPage({
   searchParams,
 }: ProviderCreditsPageProps) {
   const { id } = await params;
-  const { kosullar } = await searchParams;
+  const { kosullar, 'satin-alma': purchaseRefusal } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/credits`);
@@ -65,6 +66,7 @@ export default async function ProviderCreditsPage({
     apiFetch<PurchaseTerms>('/payments/purchase-terms'),
   ]);
   const termsError = kosullar ? (PURCHASE_TERMS_ERROR_MESSAGES[kosullar] ?? null) : null;
+  const balanceLimitError = purchaseRefusal === 'bakiye-siniri' ? CREDIT_BALANCE_LIMIT_MESSAGE : null;
 
   const activePackages = packages.filter((p) => p.isActive);
   const refundedTotal = credits.transactions
@@ -261,6 +263,11 @@ export default async function ProviderCreditsPage({
         </h2>
       </div>
 
+      {balanceLimitError ? (
+        <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="credit-balance-limit-error">
+          <span>{balanceLimitError}</span>
+        </p>
+      ) : null}
       {purchaseTerms.required && termsError ? (
         <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="purchase-terms-error">
           <span>{termsError}</span>

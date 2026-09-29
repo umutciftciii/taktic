@@ -9,12 +9,14 @@ import {
 } from '../../../../../../lib/api';
 import { ProviderShell } from '../../../../provider-shell';
 import { providerStatusBadgeClass } from '../../../../provider-ui';
+import { purchaseCreditHoldView } from '../../credit-limit';
+import { CREDIT_BALANCE_LIMIT_SETTLEMENT_MESSAGE } from '../../purchase-terms-documents';
 import { mockPayPackagePurchaseAction } from './actions';
 
 type ProviderPackagePurchaseCheckoutPageProps = {
   params: Promise<{ id: string; purchaseId: string }>;
   /** `card`: the vitrin card a package purchase should return to once paid. */
-  searchParams: Promise<{ card?: string }>;
+  searchParams: Promise<{ card?: string; hata?: string }>;
 };
 
 export default async function ProviderPackagePurchaseCheckoutPage({
@@ -22,15 +24,19 @@ export default async function ProviderPackagePurchaseCheckoutPage({
   searchParams,
 }: ProviderPackagePurchaseCheckoutPageProps) {
   const { id, purchaseId } = await params;
-  const { card } = await searchParams;
+  const { card, hata } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/package-purchases/${purchaseId}/checkout`);
   }
 
   const purchase = await apiFetch<PackagePurchase>(`/providers/${id}/package-purchases/${purchaseId}`);
+  // API-HARDENING-001: a purchase whose payment was captured and whose credit
+  // is held is never offered for payment again — not the hosted page, not the
+  // mock form.
+  const held = purchaseCreditHoldView(purchase);
   const hostedCheckoutUrl =
-    purchase.status === 'PENDING' ? purchase.providerCheckoutUrl : null;
+    purchase.status === 'PENDING' && !held ? purchase.providerCheckoutUrl : null;
 
   return (
     <ProviderShell user={user} providerId={id} active="packages">
@@ -49,10 +55,20 @@ export default async function ProviderPackagePurchaseCheckoutPage({
         <code>0000</code> ile biterse mock ödeme deterministik olarak başarısız olur.
       </div>
 
+      {hata === 'bakiye-siniri' && purchase.status === 'PENDING' ? (
+        <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="credit-balance-limit-error">
+          {CREDIT_BALANCE_LIMIT_SETTLEMENT_MESSAGE}
+        </p>
+      ) : null}
+
       <div className="pdash-detail-grid">
         <section className="pdash-detail-card">
           <h2>Kart Bilgileri</h2>
-          {hostedCheckoutUrl ? (
+          {held ? (
+            <div className="pdash-notice pdash-notice-warn" data-testid="purchase-credit-hold-checkout">
+              <strong>{held.title}.</strong> {held.text}
+            </div>
+          ) : hostedCheckoutUrl ? (
             /*
              * This purchase was opened against a hosted sandbox checkout, so
              * the in-app mock form must not be offered for it: paying it here
@@ -147,7 +163,7 @@ export default async function ProviderPackagePurchaseCheckoutPage({
               </p>
             </div>
             <span className={providerStatusBadgeClass(purchase.status)}>
-              {statusLabel(purchase.status)}
+              {held ? held.label : statusLabel(purchase.status)}
             </span>
           </div>
 

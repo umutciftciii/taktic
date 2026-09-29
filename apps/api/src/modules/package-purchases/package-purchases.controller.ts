@@ -67,8 +67,9 @@ export class PackagePurchasesController {
     @Query('status') status?: PackagePurchaseStatus,
     @Query('providerId') providerId?: string,
     @Query('packageId') packageId?: string,
+    @Query('creditHold') creditHold?: string,
   ) {
-    return this.packagePurchasesService.listAdminPurchases({ status, providerId, packageId });
+    return this.packagePurchasesService.listAdminPurchases({ status, providerId, packageId, creditHold });
   }
 
   @Get('package-purchases/:id')

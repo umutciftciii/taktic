@@ -47,6 +47,10 @@ const CANCEL_OUTCOME_MESSAGES: Record<string, { tone: 'success' | 'error'; text:
     text: 'Talebiniz iptal edilmedi: bir teklifi kabul ettiğiniz için talep artık sizin tarafınızdan iptal edilemez. Destek ekibimizle iletişime geçebilirsiniz.',
   },
   closed: { tone: 'error', text: 'Talebiniz iptal edilmedi: talep zaten kapanmış.' },
+  unavailable: {
+    tone: 'error',
+    text: 'Talebiniz şu anda iptal edilemedi; talep ve teklifler değişmedi. Lütfen daha sonra tekrar deneyin ya da destek ekibimizle iletişime geçin.',
+  },
 };
 
 export default async function RequestOffersPage({ params, searchParams }: RequestOffersPageProps) {

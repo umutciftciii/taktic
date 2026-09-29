@@ -23,7 +23,7 @@ import {
 import { CardMenu } from '../card-menu';
 import { SHOWCASE_ERROR_MESSAGES } from '../showcase-errors';
 import { showcaseStage } from '../showcase-stage';
-import { lastRejection, shownVersion } from '../showcase-ui';
+import { lastRejection, rejectedRevision, shownVersion } from '../showcase-ui';
 import { StageAction } from '../stage-action';
 
 type ShowcaseCardPageProps = {
@@ -80,6 +80,7 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
   const stage = showcaseStage(entry, { providerId: id, cardId, hasAvailableRight });
   const shown = shownVersion(card);
   const rejection = lastRejection(card);
+  const refusedRevision = rejectedRevision(card);
   const onAir = entry ? PUBLISHED_STATES.has(entry.state) : false;
   // The API's own rule for retiring a card: one that has ever been approved
   // is archived and keeps its paid days; one that never was is deleted and
@@ -237,6 +238,17 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             <p className="vitrin-status-note" data-testid="showcase-review-note">
               <strong>İnceleme notu:</strong> {rejection.note}
             </p>
+          ) : null}
+          {refusedRevision?.review ? (
+            <div className="vitrin-status-note" data-testid="showcase-revision-rejected">
+              <p>
+                <strong>Son değişikliğiniz onaylanmadı.</strong> Kartınızın onaylı metni aynen geçerli; yayındaysa
+                yayında kalıyor.
+              </p>
+              <p>
+                <strong>İnceleme notu:</strong> {refusedRevision.review.note}
+              </p>
+            </div>
           ) : null}
           <StageAction stage={stage} providerId={id} cardId={cardId} />
           {unsentRevision ? (

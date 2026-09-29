@@ -257,6 +257,7 @@ const TRUNCATED_TABLES = [
   'ShowcaseCardPriceTermsAcceptance',
   'ShowcasePlacementVersionChange',
   'ShowcasePlacementSuspension',
+  'ShowcasePlacementCancellation',
   'ShowcasePlacementShelf',
   'ShowcasePlacement',
   'ShowcasePackage',
@@ -271,6 +272,9 @@ const TRUNCATED_TABLES = [
   // ticket, the purchase and the webhook event below.
   'PackageRefundRequestEvent',
   'PackageRefundRequest',
+  // API-HARDENING-001: a hold points at a purchase, two webhook events and a
+  // ledger row, all further down.
+  'PackagePurchaseCreditHold',
   'SupportTicketStatusChange',
   'SupportTicketMessage',
   'SupportTicket',

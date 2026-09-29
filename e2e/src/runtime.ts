@@ -38,6 +38,13 @@ export const artifactsDir = resolve(packageRoot, '.artifacts');
  */
 export const outboxDir = resolve(artifactsDir, 'outbox');
 
+/**
+ * Where one run's fixture district claims live — one empty file per claimed
+ * index (see `createLocationAllocator` in fixtures.ts). Emptied by
+ * `prepare-database` together with the database the claims describe.
+ */
+export const locationClaimDir = resolve(artifactsDir, 'location-claims');
+
 export type RuntimePorts = {
   api: number;
   web: number;

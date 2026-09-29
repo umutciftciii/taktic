@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, readConflict, ServiceRequest, ServiceRequestStatus } from '../../lib/api';
-import { requestModerationErrorKey, type RequestStatusErrorKey } from '../../lib/status-conflicts';
+import { isCreditBalanceLimitError, requestModerationErrorKey, type RequestStatusErrorKey } from '../../lib/status-conflicts';
 
 export async function updateRequestStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
@@ -28,6 +28,11 @@ export async function updateRequestStatusAction(formData: FormData) {
     const key = requestModerationErrorKey(conflictCode(error));
     if (key) {
       redirect(statusErrorHref(id, key));
+    }
+    // A rejection refunds live offers in the same transaction; a refund past
+    // the ledger bound refuses the whole rejection (API-HARDENING-001).
+    if (isCreditBalanceLimitError(error)) {
+      redirect(statusErrorHref(id, 'creditBalanceLimit'));
     }
 
     throw error;
@@ -110,6 +115,9 @@ export async function cancelRequestAction(formData: FormData) {
     if (isBadRequestCode(error, 'CANCEL_WITHHOLD_REASON_REQUIRED')) {
       redirect(statusErrorHref(id, 'withholdReasonRequired'));
     }
+    if (isCreditBalanceLimitError(error)) {
+      redirect(statusErrorHref(id, 'creditBalanceLimit'));
+    }
 
     throw error;
   }
@@ -168,6 +176,9 @@ export async function resolveReportsAction(formData: FormData) {
     }
     if (code === 'NO_OPEN_REPORTS') {
       redirect(reportErrorHref(id, 'noOpen'));
+    }
+    if (isCreditBalanceLimitError(error)) {
+      redirect(statusErrorHref(id, 'creditBalanceLimit'));
     }
 
     throw error;

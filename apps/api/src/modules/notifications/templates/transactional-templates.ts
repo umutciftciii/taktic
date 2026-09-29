@@ -169,6 +169,12 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'showcase-package-payment-failed',
   'showcase-card-approved-live',
   'showcase-card-approved',
+  // API-HARDENING-001: a revision of a card that already has approved text
+  // was refused. The card keeps its approved text, so without this message
+  // the refusal was invisible — the panel kept saying the card was fine. The
+  // operator's note is deliberately NOT in the mail: it is free text, and it
+  // is read in the panel behind the provider's own session.
+  'showcase-card-revision-rejected',
   'showcase-placement-ending-7d',
   'showcase-placement-ending-3d',
   'showcase-placement-expired',
@@ -322,6 +328,8 @@ export function transactionalSubject(
       return withSuffix('Kartınız onaylandı ve yayında', text(data.cardTitle));
     case 'showcase-card-approved':
       return withSuffix('Vitrin kartınız onaylandı', text(data.cardTitle));
+    case 'showcase-card-revision-rejected':
+      return withSuffix('Vitrin kartınızdaki değişiklik onaylanmadı', text(data.cardTitle));
     case 'showcase-placement-ending-7d':
       return withSuffix('Vitrin yayınınızın bitmesine 7 gün kaldı', text(data.cardTitle));
     case 'showcase-placement-ending-3d':
@@ -492,6 +500,8 @@ export function buildDocument(
       return showcaseCardApprovedLive(subject, fullName, data);
     case 'showcase-card-approved':
       return showcaseCardApproved(subject, fullName, data);
+    case 'showcase-card-revision-rejected':
+      return showcaseCardRevisionRejected(subject, fullName, data);
     case 'showcase-placement-ending-7d':
       return showcasePlacementEnding(subject, fullName, data, 7);
     case 'showcase-placement-ending-3d':
@@ -2656,6 +2666,45 @@ function showcaseCardApproved(subject: string, fullName: string, data: Data): Em
       cta('Vitrin merkezine git', text(data.showcaseUrl), 'primary'),
       spacer(20),
       note('Paket seçtiğiniz anda kartınız yayına girer; yeni bir inceleme gerekmez.'),
+    ]),
+  };
+}
+
+/**
+ * A revision of a card with approved text was refused (API-HARDENING-001).
+ *
+ * What the provider needs is two facts: the change did not go through, and
+ * nothing about the approved card changed with it. The operator's note is not
+ * here — it is free text written into a panel field, and a mailbox is not the
+ * place it was written for. The link opens the card, where the note is shown
+ * behind the provider's own session.
+ */
+function showcaseCardRevisionRejected(subject: string, fullName: string, data: Data): EmailDocument {
+  const cardTitle = text(data.cardTitle);
+
+  return {
+    subject,
+    preheader: 'Onaylı kart metniniz değişmedi; inceleme notunu vitrin merkezinizde okuyabilirsiniz.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: 'Kartınızdaki değişiklik onaylanmadı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        'Vitrin kartınız için incelemeye gönderdiğiniz değişiklik incelendi ve onaylanmadı. ' +
+          'Kartınızın daha önce onaylanmış metni aynen geçerli; yayındaysa yayında kalıyor ve ' +
+          'yayın süreniz bu karardan etkilenmiyor.',
+      ),
+      spacer(4),
+      dataTable([row('Kart', cardTitle), row('Karar tarihi', formatDateTime(data.rejectedAt))]),
+      spacer(24),
+      cta('İnceleme notunu oku', text(data.cardUrl), 'primary'),
+      spacer(20),
+      note(
+        'İnceleme notu bu e-postaya eklenmez; hesabınıza giriş yaptığınızda kart sayfasında görünür. ' +
+          'Notu dikkate alarak kartı düzenleyip yeniden incelemeye gönderebilirsiniz.',
+      ),
     ]),
   };
 }

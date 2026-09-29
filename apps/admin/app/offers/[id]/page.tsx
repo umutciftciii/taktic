@@ -62,7 +62,7 @@ import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
 
 type OfferDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ tab?: string; refunded?: string; statusSaved?: string; statusError?: string }>;
+  searchParams?: Promise<{ tab?: string; refunded?: string; refundError?: string; statusSaved?: string; statusError?: string }>;
 };
 
 type TabKey = '' | 'talep' | 'kredi' | 'gecmis';
@@ -134,6 +134,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
   const { id } = await params;
   const search = (await searchParams) ?? {};
   const justRefunded = search.refunded === '1';
+  const refundBlockedByLimit = search.refundError === 'creditBalanceLimit';
   const justStatusSaved = search.statusSaved === '1';
   const statusErrorText = offerStatusErrorMessage(search.statusError);
   const activeTab = resolveTab<TabKey>(search.tab, TAB_KEYS, '');
@@ -247,6 +248,12 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
       {justRefunded ? (
         <div className="notice-success detail-notice" role="status">
           Manuel iade tamamlandı. Kredi hizmet verenin bakiyesine eklendi.
+        </div>
+      ) : null}
+      {refundBlockedByLimit ? (
+        <div className="notice-warning detail-notice" role="alert" data-testid="offer-refund-limit-error">
+          İade yapılmadı: kredi hizmet verenin bakiyesini üst sınırın üzerine çıkaracaktı. Kredi ve kayıtlar
+          değişmedi; bakiye düştükten sonra yeniden deneyin.
         </div>
       ) : null}
       {justStatusSaved ? (

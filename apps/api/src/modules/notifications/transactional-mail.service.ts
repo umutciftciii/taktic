@@ -636,6 +636,39 @@ export class TransactionalMailService {
   }
 
   /**
+   * A revision of a card that already has approved text was refused
+   * (API-HARDENING-001).
+   *
+   * Only for that case: a card refused before it was ever approved turns
+   * REJECTED in the panel, which says so on its own. Read back from the
+   * committed rows, so a rejection that rolled back sends nothing; keyed on the
+   * version, which is decided once, so a replayed click or a retry is one
+   * message. The operator's note is never loaded here.
+   */
+  async sendShowcaseRevisionRejected(versionId: string) {
+    const version = await loadRejectedShowcaseRevision(this.prisma, versionId);
+    if (!version) {
+      return;
+    }
+
+    const provider = await loadProvider(this.prisma, version.card.providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    await this.send(
+      'showcase-card-revision-rejected',
+      provider.recipient,
+      showcaseRevisionRejectedData(provider, version),
+      {
+        providerId: provider.id,
+        userId: provider.userId,
+        dedupeKey: `showcase-card-revision-rejected:${version.id}`,
+      },
+    );
+  }
+
+  /**
    * A direct lead — to the one business it was addressed to, and to nobody
    * else.
    *
@@ -1516,6 +1549,17 @@ export class TransactionalMailService {
         const provider = await loadProvider(this.prisma, version.card.providerId);
         return provider?.recipient
           ? { to: provider.recipient, data: showcaseCardApprovedData(provider, version) }
+          : null;
+      }
+
+      case 'showcase-card-revision-rejected': {
+        const version = await loadRejectedShowcaseRevision(this.prisma, source.ids[0]);
+        if (!version) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, version.card.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcaseRevisionRejectedData(provider, version) }
           : null;
       }
 
@@ -3107,6 +3151,7 @@ const RETRY_DEDUPE_PREFIXES = {
   'showcase-package-payment-failed': 'showcase-package-payment-failed',
   'showcase-card-approved-live': 'showcase-card-approved-live',
   'showcase-card-approved': 'showcase-card-approved',
+  'showcase-card-revision-rejected': 'showcase-card-revision-rejected',
   'showcase-placement-ending-7d': 'showcase-placement-ending-7d',
   'showcase-placement-ending-3d': 'showcase-placement-ending-3d',
   'showcase-placement-expired': 'showcase-placement-expired',
@@ -3184,6 +3229,7 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'showcase-package-payment-failed': 1,
   'showcase-card-approved-live': 1,
   'showcase-card-approved': 1,
+  'showcase-card-revision-rejected': 1,
   'showcase-placement-ending-7d': 1,
   'showcase-placement-ending-3d': 1,
   'showcase-placement-expired': 1,
@@ -3664,6 +3710,56 @@ function showcaseCardApprovedData(
     cardTitle: version.title,
     approvedAt: version.publishedAt?.toISOString() ?? null,
     showcaseUrl: providerShowcaseUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/**
+ * A REJECTED version that was a revision of approved text — the card has a
+ * live version older than it. Nothing else qualifies: a refused first version
+ * is not this message's business. The review's note is not selected.
+ */
+async function loadRejectedShowcaseRevision(prisma: PrismaService, versionId: string) {
+  const version = await prisma.showcaseCardVersion.findUnique({
+    where: { id: versionId },
+    select: {
+      id: true,
+      versionNumber: true,
+      reviewStatus: true,
+      review: { select: { decision: true, createdAt: true } },
+      card: {
+        select: {
+          id: true,
+          providerId: true,
+          liveVersion: { select: { versionNumber: true, title: true } },
+        },
+      },
+    },
+  });
+
+  if (
+    !version ||
+    version.reviewStatus !== ShowcaseVersionReview.REJECTED ||
+    version.review?.decision !== ShowcaseVersionReview.REJECTED ||
+    !version.card.liveVersion ||
+    version.card.liveVersion.versionNumber >= version.versionNumber
+  ) {
+    return null;
+  }
+
+  return { ...version, card: { ...version.card, liveVersion: version.card.liveVersion } };
+}
+
+function showcaseRevisionRejectedData(
+  provider: ShowcaseProviderSource,
+  version: NonNullable<Awaited<ReturnType<typeof loadRejectedShowcaseRevision>>>,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    // The card as the provider knows it — the approved text still in force.
+    cardTitle: version.card.liveVersion.title,
+    rejectedAt: version.review?.createdAt.toISOString() ?? null,
+    cardUrl: providerShowcaseCardUrl(provider.id, version.card.id),
     accountUrl: providerAccountUrl(),
   };
 }

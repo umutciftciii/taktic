@@ -6,11 +6,12 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { PackagePurchaseStatus, Prisma, SourceChannel, UserRole } from '@prisma/client';
+import { OfferPackageType, PackagePurchaseStatus, Prisma, SourceChannel, UserRole } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { RequestMeta } from '../../common/request-meta';
 import { AuthUser } from '../auth/auth.types';
+import { CreditsService } from '../credits/credits.service';
 import { PurchaseTermsService } from '../purchase-terms/purchase-terms.service';
 import {
   PackagePurchasesService,
@@ -53,6 +54,7 @@ export class PaymentsService {
     @Inject(PackagePurchasesService)
     private readonly packagePurchases: PackagePurchasesService,
     @Inject(PurchaseTermsService) private readonly purchaseTerms: PurchaseTermsService,
+    @Inject(CreditsService) private readonly credits: CreditsService,
   ) {}
 
   /** What the checkout screen shows and must have accepted (CMP-006 PR-A). */
@@ -121,6 +123,15 @@ export class PaymentsService {
 
     if (!creditPackage) {
       throw new BadRequestException('Active credit package not found');
+    }
+
+    // API-HARDENING-001: before a checkout is handed out — a reused one
+    // included — a credit package whose credits no longer fit under the
+    // ledger's integer column is refused, so the provider is not sent to pay
+    // for credit the settlement would have to refuse. Advisory: the webhook
+    // re-checks it in the settling transaction.
+    if (creditPackage.type === OfferPackageType.ONE_TIME_CREDITS) {
+      await this.credits.assertCreditHeadroom(this.prisma, providerId, creditPackage.creditAmount);
     }
 
     const reusable = await this.findReusableCheckout(
@@ -225,6 +236,10 @@ export class PaymentsService {
         status: PackagePurchaseStatus.PENDING,
         paymentProvider: kind,
         providerCheckoutUrl: { not: null },
+        // API-HARDENING-001: a purchase with a credit hold was already paid
+        // for. Handing its checkout back would invite a second payment for
+        // the same credit.
+        creditHold: { is: null },
         OR: [
           { providerCheckoutExpiresAt: null },
           { providerCheckoutExpiresAt: { gt: new Date() } },

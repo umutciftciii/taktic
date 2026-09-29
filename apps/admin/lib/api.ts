@@ -896,6 +896,38 @@ export type PackagePurchase = {
    * could add one.
    */
   webhookEvents?: PaymentWebhookAttempt[];
+  /**
+   * API-HARDENING-001: a captured payment whose credit is held because it
+   * would pass the ledger bound. The list carries the summary; the detail
+   * endpoint carries the whole hold. Null when the purchase never had one.
+   */
+  creditHold: PurchaseCreditHold | null;
+};
+
+export type PurchaseCreditHoldStatus = 'OPEN' | 'SETTLED' | 'REFUND_REPORTED';
+
+export type PurchaseCreditHold = {
+  status: PurchaseCreditHoldStatus;
+  chargedAmountMinor: number;
+  currency: string;
+  creditAmount: number;
+  openedAt: string;
+  resolvedAt: string | null;
+  /** Detail endpoint only. */
+  reason?: string;
+  providerOrderId?: string;
+  balanceAtOpen?: number;
+  refusedDeliveries?: number;
+  lastRefusedAt?: string;
+  creditTransactionId?: string | null;
+  openedEvent?: { eventName: string };
+  resolvedEvent?: { eventName: string } | null;
+};
+
+export const PURCHASE_CREDIT_HOLD_LABELS: Record<PurchaseCreditHoldStatus, string> = {
+  OPEN: 'Tahsil edildi · kredi teslim edilmedi',
+  SETTLED: 'Kredi sonradan teslim edildi',
+  REFUND_REPORTED: 'Ödeme iade edildi · kredi teslim edilmedi',
 };
 
 export type PaymentWebhookAttempt = {
@@ -3057,7 +3089,11 @@ export type ShowcaseCard = {
   category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
-  /** The newest refused version, only while the card has neither a draft nor a live one. */
+  /**
+   * The newest refused version while nothing has superseded it: no draft, and
+   * no live version newer than it. Also set for a refused revision of a live
+   * card (API-HARDENING-001), so screens that prefer `liveVersion` keep doing so.
+   */
   rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;
   suspendReason: string | null;
@@ -3281,6 +3317,17 @@ export type ShowcasePlacement = {
     trigger: 'ADMIN_APPROVAL' | 'AREA_NARROWING';
     createdAt: string;
   }>;
+  /**
+   * Who cancelled the run (API-HARDENING-001). Detail read only. Null when the
+   * run is not cancelled — and also when it was cancelled before the operator
+   * was recorded, which is why a cancelled run with no row says "kayıt yok"
+   * rather than naming anybody.
+   */
+  cancellation?: {
+    actor: { id: string; name: string | null };
+    note: string | null;
+    cancelledAt: string;
+  } | null;
 };
 
 /**

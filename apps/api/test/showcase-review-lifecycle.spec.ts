@@ -425,9 +425,11 @@ describe('canlı kartın yeni sürümü', () => {
     expect(after.body.liveVersion.id).toBe(liveVersionId);
     expect(after.body.liveVersion.title).toBe(liveTitle);
     expect(after.body.draftVersion).toBeNull();
-    // Canlı metni olan kart için ret geçmiştir, sahibinin düzelteceği bir
-    // şey değil: `rejectedVersion` yalnız taslağı ve canlısı olmayan kartta dolar.
-    expect(after.body.rejectedVersion).toBeNull();
+    // API-HARDENING-001: canlı kartın reddedilen revizyonu da sahibine
+    // gerekçesiyle ulaşır. Kart APPROVED kaldığı için bu alan, reddin panelde
+    // göründüğü tek yer.
+    expect(after.body.rejectedVersion.id).toBe(submitted.body.draftVersion.id);
+    expect(after.body.rejectedVersion.review.note).toBe('Başlık hizmetin kapsamını yansıtmıyor.');
 
     // Reddedilen sürüm gerekçesiyle birlikte geçmişte duruyor.
     const rejectedVersion = await ctx.prisma.showcaseCardVersion.findUniqueOrThrow({

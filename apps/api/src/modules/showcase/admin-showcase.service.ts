@@ -495,7 +495,11 @@ export class AdminShowcaseService {
    * next attempt is the next version, on the same right.
    */
   async rejectVersion(versionId: string, user: AuthUser, note: string) {
+    let revisionOfLiveCard = false;
+
     await runSerializable(this.prisma, async (tx) => {
+      revisionOfLiveCard = false;
+
       const version = await tx.showcaseCardVersion.findUnique({
         where: { id: versionId },
         select: {
@@ -540,8 +544,20 @@ export class AdminShowcaseService {
 
       if (!version.card.liveVersionId) {
         await this.entitlements.resumeAfterReview(tx, version.cardId, 'REJECTED', new Date());
+      } else {
+        revisionOfLiveCard = true;
       }
     }, { label: 'showcase.rejectVersion' });
+
+    // After the commit, and only for a revision of a card that already has
+    // approved text (API-HARDENING-001). That card stays APPROVED, so without
+    // this notice the refusal reached the provider nowhere. The panel carries
+    // the note (`rejectedVersion` in the card projection); the mail carries
+    // only that a decision exists. A replay never gets here — the version is
+    // no longer PENDING — and the dedupe key names the version regardless.
+    if (revisionOfLiveCard) {
+      await this.mail.sendShowcaseRevisionRejected(versionId);
+    }
 
     return this.getVersion(versionId);
   }

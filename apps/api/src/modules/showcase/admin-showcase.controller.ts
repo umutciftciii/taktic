@@ -19,6 +19,7 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
 import { AdminShowcaseService } from './admin-showcase.service';
 import { ShowcasePriceTermsService } from './showcase-price-terms.service';
+import { ListShowcasePriceTermsDto } from './dto/admin-showcase-list.dto';
 import {
   ListShowcaseCardsDto,
   ListShowcaseVersionsDto,
@@ -67,12 +68,8 @@ export class AdminShowcaseController {
    */
   @Get('price-terms-acceptances')
   @RequiresPermission(AdminPermission.SHOWCASE_TERMS_ACCEPTANCES_READ)
-  listPriceTermsAcceptances(
-    @Query('providerId') providerId?: string,
-    @Query('cardId') cardId?: string,
-    @Query('termsVersion') termsVersion?: string,
-  ) {
-    return this.priceTerms.listForAdmin({ providerId, cardId, termsVersion });
+  listPriceTermsAcceptances(@Query() query: ListShowcasePriceTermsDto) {
+    return this.priceTerms.listForAdmin(query);
   }
 
   /** The queue. Defaults to PENDING — what is actually waiting on somebody. */

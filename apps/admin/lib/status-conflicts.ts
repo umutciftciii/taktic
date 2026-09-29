@@ -62,7 +62,8 @@ export type RequestStatusErrorKey =
   | 'notCancellable'
   | 'cancelStateChanged'
   | 'withholdReasonRequired'
-  | 'notCompletable';
+  | 'notCompletable'
+  | 'creditBalanceLimit';
 
 export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string> = {
   phoneNotVerified:
@@ -83,7 +84,24 @@ export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string
     'Talep iptal edilmedi. Kazanan teklifin kredisi iade edilmeyecekse en az 10 karakterlik gerekçe yazılması zorunludur.',
   notCompletable:
     'Talep tamamlandı olarak işaretlenmedi. Yalnız eşleşmiş talep tamamlanabilir ve talep bu sayfa açıldıktan sonra durum değiştirdi. Yukarıda talebin güncel durumu görünüyor.',
+  // API-HARDENING-001: an offer refund in the same transaction would have
+  // passed the ledger's integer bound, so the whole operation was refused.
+  creditBalanceLimit:
+    'İşlem yapılmadı. Bir teklifin kredisini iade etmek hizmet verenin bakiyesini üst sınırın üzerine çıkaracaktı; talep, teklifler ve krediler değişmedi. Hizmet verenin bakiyesi düştükten sonra yeniden deneyin.',
 };
+
+/** API-HARDENING-001: the ledger bound refused a refund inside the operation. */
+export function isCreditBalanceLimitError(error: unknown): boolean {
+  // Read structurally (an ApiError carries `status` and the raw `body`), so
+  // this module stays free of the server-only API client.
+  const candidate = error as { status?: unknown; body?: unknown } | null;
+  if (!candidate || candidate.status !== 400 || typeof candidate.body !== 'string') return false;
+  try {
+    return (JSON.parse(candidate.body) as { code?: unknown }).code === 'CREDIT_BALANCE_LIMIT_EXCEEDED';
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The moderation save's coded refusals. Anything else — an unknown code, a

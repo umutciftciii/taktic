@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, Offer, OfferStatus, readConflict } from '../../lib/api';
-import { offerStatusErrorKey } from '../../lib/status-conflicts';
+import { isCreditBalanceLimitError, offerStatusErrorKey } from '../../lib/status-conflicts';
 
 export async function updateOfferStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
@@ -43,10 +43,19 @@ export async function refundOfferCreditAction(formData: FormData) {
   const reasonCode = readFormString(formData, 'reasonCode');
   const note = readOptionalFormString(formData, 'note');
 
-  await apiFetch<{ offer: Offer; balance: number }>(`/offers/${id}/refund-credit`, {
-    method: 'POST',
-    body: JSON.stringify({ reasonCode, note }),
-  });
+  try {
+    await apiFetch<{ offer: Offer; balance: number }>(`/offers/${id}/refund-credit`, {
+      method: 'POST',
+      body: JSON.stringify({ reasonCode, note }),
+    });
+  } catch (error) {
+    // API-HARDENING-001: giving the credit back would pass the ledger bound.
+    // Nothing was written; the form's tab says so.
+    if (isCreditBalanceLimitError(error)) {
+      redirect(`/offers/${id}?tab=kredi&refundError=creditBalanceLimit`);
+    }
+    throw error;
+  }
 
   revalidatePath('/offers');
   revalidatePath(`/offers/${id}`);

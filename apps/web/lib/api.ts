@@ -998,6 +998,19 @@ export type PackagePurchase = {
   expiredAt: string | null;
   refundedAt: string | null;
   creditTransactionId: string | null;
+  /**
+   * API-HARDENING-001: the payment was captured but its credit is held
+   * (it would pass the balance bound). Null for an ordinary purchase. While
+   * OPEN the purchase still reads PENDING and must not be offered for payment.
+   */
+  creditHold?: {
+    status: 'OPEN' | 'SETTLED' | 'REFUND_REPORTED';
+    chargedAmountMinor: number;
+    currency: string;
+    creditAmount: number;
+    openedAt: string;
+    resolvedAt: string | null;
+  } | null;
   createdAt: string;
   updatedAt: string;
   provider?: {
@@ -1600,9 +1613,10 @@ export type ShowcaseCard = {
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
   /**
-   * The most recent refused version, only while the card has neither a draft
-   * nor a live one: a rejection clears the draft pointer, and this is what the
-   * owner still has to read and fix.
+   * The most recent refused version while nothing has superseded it — no
+   * draft, and no live version newer than it. A rejection clears the draft
+   * pointer, and this is what the owner still has to read: the refused first
+   * version, or a refused revision of a live card (API-HARDENING-001).
    */
   rejectedVersion: ShowcaseCardVersion | null;
   suspendedAt: string | null;

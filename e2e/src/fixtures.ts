@@ -1,9 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
+import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { join } from 'node:path';
 import { getCities, getDistrictsOfEachCity } from 'turkey-neighbourhoods';
 import { e2ePrisma } from './database';
-import { E2E_LEMON_PACKAGE_SLUG } from './runtime';
+import { E2E_LEMON_PACKAGE_SLUG, locationClaimDir } from './runtime';
 
 /**
  * Deterministic, collision-free seed data.
@@ -180,35 +182,6 @@ export function prisma(): PrismaClient {
   return e2ePrisma();
 }
 
-/**
- * How many worker processes may each hold a private range of districts.
- *
- * Turkey has 973 of them, so a block is a hundred-odd — comfortably more than
- * any one worker allocates, and the allocator below refuses rather than wraps
- * if that ever stops being true.
- *
- * Was sixteen blocks of sixty until the offer-package suite arrived and the
- * single worker this config runs (`workers: 1`) went past sixty allocations,
- * then eight blocks of a hundred and twenty-one until the identity-gate suite
- * — two forms per scenario, each on its own district — went past that too.
- * Widened rather than worked around both times, which is what the allocator's
- * own refusal message asks for: four is still more parallelism than this suite
- * has ever been run with, and the ceiling per worker doubles again.
- *
- * What four costs, stated plainly. Blocks are indexed by TEST_WORKER_INDEX,
- * and Playwright numbers every worker process it starts across one run — one
- * per project, plus one for each retry restart — so a run now survives four
- * worker processes before `has no location block`, where it survived eight:
- * chromium (0), webkit (1) and two retry restarts. Enough for how this suite
- * is run today (one project per invocation, `retries: 1` in CI), but the
- * ceiling moved from "never" to "a bad day". The permanent fix is the other
- * direction: fewer unique districts per test. A scenario that does not need
- * a distinct card area — most of the marketplace identity-gate scenarios,
- * whose district is only what the request is posted with — can share one
- * location instead of allocating its own.
- */
-export const LOCATION_WORKER_BLOCKS = 4;
-
 /** Every (province, district) pair, in one deterministic order. */
 export function allDistrictPairs(): Location[] {
   const districtsByCity = getDistrictsOfEachCity() as Record<string, string[]>;
@@ -223,37 +196,58 @@ export function allDistrictPairs(): Location[] {
     );
 }
 
-export function createLocationAllocator(
-  block: number = resolveWorkerIndex('location', LOCATION_WORKER_BLOCKS),
-): () => Location {
+/**
+ * Hands out every (province, district) pair at most once per run, across
+ * every worker process the run starts (API-HARDENING-001).
+ *
+ * ## Why not a block per worker any more
+ *
+ * This used to split the 973 districts into four static blocks indexed by
+ * TEST_WORKER_INDEX. A single chromium run (`workers: 1`) now needs more than
+ * one block's 243, so the test that happened to be scheduled past that point
+ * — `showcase-cards.spec.ts:365` in today's order — failed on its first
+ * attempt and passed only because a retry starts a new worker with a new
+ * block. Which test failed depended on the order, and with `retries: 0` it
+ * always failed.
+ *
+ * ## How a claim works
+ *
+ * A claim is `open(<dir>/<index>, 'wx')`: an exclusive create, which the file
+ * system grants to exactly one process however many ask at once. A process
+ * walks the indices upwards from where it last stopped and takes the first
+ * one it creates. So the whole run — the first worker, a retry's replacement,
+ * a second project — shares one pool of 973, no index is handed out twice,
+ * and the total is the only limit: nothing depends on which test runs when.
+ * Exhaustion refuses rather than wraps, because a wrapped district would
+ * already hold another test's rows.
+ */
+export function createLocationAllocator(claimDir: string = locationClaimDir): () => Location {
   const pairs = allDistrictPairs();
-  const perBlock = Math.floor(pairs.length / LOCATION_WORKER_BLOCKS);
-
-  if (!Number.isInteger(block) || block < 0 || block >= LOCATION_WORKER_BLOCKS) {
-    throw new Error(
-      `Worker ${block} has no location block: the suite reserves ${LOCATION_WORKER_BLOCKS} blocks, ` +
-        'and sharing one would put two worker processes on the same district.',
-    );
-  }
-
-  let serial = 0;
+  let next = 0;
 
   return () => {
-    if (serial >= perBlock) {
-      throw new Error(
-        `This worker has allocated all ${perBlock} of its fixture districts. ` +
-          'Widen the block rather than letting the sequence wrap onto districts already in the database.',
-      );
+    mkdirSync(claimDir, { recursive: true });
+
+    for (; next < pairs.length; next += 1) {
+      try {
+        closeSync(openSync(join(claimDir, String(next)), 'wx'));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          continue;
+        }
+        throw error;
+      }
+
+      const pair = pairs[next]!;
+      next += 1;
+      return pair;
     }
 
-    const pair = pairs[block * perBlock + serial];
-    serial += 1;
-
-    if (!pair) {
-      throw new Error('Fixture district allocation ran past the district list.');
-    }
-
-    return pair;
+    throw new Error(
+      `All ${pairs.length} fixture districts are claimed in this run (${claimDir}). ` +
+        'Run the suite through `pnpm e2e`, which empties the claims with the database, ' +
+        'or make more scenarios share a location.',
+    );
   };
 }
 

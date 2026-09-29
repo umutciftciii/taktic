@@ -11,7 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { AdminPermission, ShowcaseLeadStatus } from '@prisma/client';
+import { AdminPermission } from '@prisma/client';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -27,6 +27,7 @@ import {
   ShowcasePlacementSuspendDto,
 } from './dto/showcase-placement-admin.dto';
 import { AdminShowcasePlacementsService } from './admin-showcase-placements.service';
+import { ListShowcaseLeadsDto } from './dto/admin-showcase-list.dto';
 import { ShowcaseLeadAdminService } from './showcase-lead-admin.service';
 import { ShowcasePackagesService } from './showcase-packages.service';
 import { ShowcasePlacementReadService } from './showcase-placement-read.service';
@@ -166,11 +167,8 @@ export class AdminShowcasePlacementsController {
 
   @Get('leads')
   @RequiresPermission(AdminPermission.SHOWCASE_LEADS_READ)
-  listLeads(
-    @Query('status') status?: ShowcaseLeadStatus,
-    @Query('providerId') providerId?: string,
-  ) {
-    return this.leads.list({ status, providerId });
+  listLeads(@Query() query: ListShowcaseLeadsDto) {
+    return this.leads.list(query);
   }
 
   @Get('leads/:leadId')

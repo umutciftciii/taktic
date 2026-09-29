@@ -16,6 +16,7 @@ import { ProviderShell } from '../../provider-shell';
 import { createPackagePurchaseAction } from '../package-purchases/actions';
 import { PurchaseTermsConsent } from '../package-purchases/purchase-terms-consent';
 import {
+  CREDIT_BALANCE_LIMIT_MESSAGE,
   PURCHASE_TERMS_ERROR_MESSAGES,
   PurchaseTermsDocuments,
 } from '../package-purchases/purchase-terms-documents';
@@ -23,7 +24,7 @@ import { AutoRenewControls } from './auto-renew-controls';
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ kosullar?: string }>;
+  searchParams: Promise<{ kosullar?: string; 'satin-alma'?: string }>;
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -59,7 +60,7 @@ const RENEWAL_FAILURE_LABEL: Record<string, string> = {
 
 export default async function ProviderSubscriptionsPage({ params, searchParams }: PageProps) {
   const { id } = await params;
-  const { kosullar } = await searchParams;
+  const { kosullar, 'satin-alma': purchaseRefusal } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/subscriptions`);
@@ -76,6 +77,7 @@ export default async function ProviderSubscriptionsPage({ params, searchParams }
     apiFetch<PurchaseTerms>('/payments/purchase-terms'),
   ]);
   const termsError = kosullar ? (PURCHASE_TERMS_ERROR_MESSAGES[kosullar] ?? null) : null;
+  const balanceLimitError = purchaseRefusal === 'bakiye-siniri' ? CREDIT_BALANCE_LIMIT_MESSAGE : null;
   const anyPurchasable = catalogue.packages.some((item) => item.purchasable);
 
   const active = entitlements.entitlements.filter((item) => item.usable || item.queued);
@@ -148,6 +150,11 @@ export default async function ProviderSubscriptionsPage({ params, searchParams }
           </h2>
         </div>
 
+        {balanceLimitError ? (
+          <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="credit-balance-limit-error">
+            <span>{balanceLimitError}</span>
+          </p>
+        ) : null}
         {purchaseTerms.required && termsError ? (
           <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="purchase-terms-error">
             <span>{termsError}</span>

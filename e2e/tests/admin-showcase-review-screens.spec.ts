@@ -348,7 +348,10 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       const dialog = page.getByTestId('showcase-reject-dialog');
       await page.getByTestId('showcase-reject').click();
       await expect(dialog).toContainText('Yayındaki 1. sürüm yayında kalır');
-      await expect(dialog).toContainText('e-posta gitmez');
+      // API-HARDENING-001: the note reaches the provider's panel, and one mail
+      // without the note tells them it is there.
+      await expect(dialog).toContainText('kart sayfasında “İnceleme notu” olarak görünür');
+      await expect(dialog).toContainText('Notunuz e-postaya eklenmez');
       await capture(page, 'surum-reddet-diyalogu');
       await dialog.getByRole('button', { name: 'Vazgeç' }).click();
 
@@ -369,6 +372,10 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
         where: { cardVersionId: seeded.pendingVersionId },
       });
       expect(review).toMatchObject({ decision: 'REJECTED', reviewedById: staffId });
+      const notices = await prisma().notificationLog.findMany({
+        where: { dedupeKey: `showcase-card-revision-rejected:${seeded.pendingVersionId}` },
+      });
+      expect(notices).toHaveLength(1);
     } finally {
       await staff.close();
     }
@@ -378,8 +385,9 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
     browser,
   }) => {
     const seeded = await seedPlacementWithLead(`E2E Faz3C İptal Kartı ${uniqueSuffix()}`);
-    const { actor: staff } = await openAs(browser, ['SHOWCASE_PLACEMENTS_READ', 'SHOWCASE_PLACEMENT_CANCEL']);
+    const { actor: staff, account } = await openAs(browser, ['SHOWCASE_PLACEMENTS_READ', 'SHOWCASE_PLACEMENT_CANCEL']);
     const page = staff.page;
+    const staffId = await staffUserId(account.email);
     const placementOf = () =>
       prisma().showcasePlacement.findUniqueOrThrow({ where: { id: seeded.placement.id } });
     const purchaseOf = () => prisma().packagePurchase.findUniqueOrThrow({ where: { id: seeded.purchase.id } });
@@ -398,6 +406,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await expect(dialog).toContainText('Geri alınamaz');
       await expect(dialog).toContainText('Para iadesi yapılmaz');
       await expect(dialog).toContainText('manuel inceleme');
+      await expect(dialog).toContainText('iptal eden kişi ve notunuz yerleşimin kalıcı kaydına yazılır');
       await capture(page, 'yerlesim-iptal-diyalogu');
       await dialog.getByRole('button', { name: 'Vazgeç' }).click();
 
@@ -416,6 +425,12 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       const purchase = await purchaseOf();
       expect(purchase.manualReviewReason).toBe('SHOWCASE_PLACEMENT_CANCELLED');
       expect(purchase.adminNote).toBe('Faz 3C E2E iptali');
+      // API-HARDENING-001: who cancelled it is on the record and on the screen.
+      const record = await prisma().showcasePlacementCancellation.findUniqueOrThrow({
+        where: { placementId: seeded.placement.id },
+      });
+      expect(record).toMatchObject({ actorUserId: staffId, note: 'Faz 3C E2E iptali' });
+      await expect(page.getByTestId('placement-cancelled-by')).toContainText('Faz 3C E2E iptali');
       expect(
         await prisma().showcasePlacementShelf.count({ where: { placementId: seeded.placement.id, active: true } }),
       ).toBe(0);

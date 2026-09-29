@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { purchaseCreditHoldView } from './credit-limit';
 import Link from 'next/link';
 import {
   apiFetch,
@@ -260,6 +261,7 @@ export default async function ProviderPackagePurchasesPage({
                       purchase.purchaseNumber ??
                       purchase.mockPaymentReference ??
                       '—';
+                    const held = purchaseCreditHoldView(purchase);
                     return (
                       <tr key={purchase.id}>
                         <td>
@@ -274,8 +276,11 @@ export default async function ProviderPackagePurchasesPage({
                         </td>
                         <td style={{ fontFamily: 'monospace', fontSize: 12.5 }}>{ref}</td>
                         <td>
-                          <span className={providerStatusBadgeClass(purchase.status)}>
-                            {statusLabel(purchase.status)}
+                          <span
+                            className={providerStatusBadgeClass(purchase.status)}
+                            data-testid={held ? 'purchase-credit-hold-status' : undefined}
+                          >
+                            {held ? held.label : statusLabel(purchase.status)}
                           </span>
                         </td>
                         <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -286,7 +291,7 @@ export default async function ProviderPackagePurchasesPage({
                             className="pdash-actions"
                             style={{ justifyContent: 'flex-end' }}
                           >
-                            {purchase.status === 'PENDING' ? (
+                            {purchase.status === 'PENDING' && !held ? (
                               <Link
                                 className="pdash-btn pdash-btn-primary pdash-btn-sm"
                                 href={`/providers/${id}/package-purchases/${purchase.id}/checkout`}
