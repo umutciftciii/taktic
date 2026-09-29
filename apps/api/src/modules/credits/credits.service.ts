@@ -12,6 +12,7 @@ import {
   Prisma,
   ServiceCategoryStatus,
 } from '@prisma/client';
+import { CREDIT_LEDGER_INTEGER_MAX } from '../../common/credit-limits';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
@@ -418,14 +419,43 @@ export class CreditsService {
     return latestTransaction?.balanceAfter ?? 0;
   }
 
+  /**
+   * A manual grant or deduction (the only callers).
+   *
+   * Serializable, and replayed on a write conflict: a concurrent movement on
+   * the same provider makes this attempt re-read the balance rather than fail
+   * with a database error, and the bounds below are judged against the balance
+   * the committed row will actually follow. Exhausted retries answer the
+   * shared 409 CONCURRENT_MODIFICATION.
+   *
+   * The upper bound is checked here, in the transaction that computes the
+   * final balance, so a grant that would take the balance past the ledger's
+   * integer column is a 400 with nothing written, never a database 500.
+   */
   async createProviderCreditTransaction(input: CreditTransactionInput) {
-    return this.prisma.$transaction(
-      async (tx) => this.createProviderCreditTransactionInTransaction(tx, input),
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    return runSerializable(
+      this.prisma,
+      async (tx) =>
+        this.createProviderCreditTransactionInTransaction(tx, input, {
+          maxBalanceAfter: CREDIT_LEDGER_INTEGER_MAX,
+        }),
+      { label: 'credits.manualTransaction' },
     );
   }
 
-  async createProviderCreditTransactionInTransaction(tx: CreditTransactionTx, input: CreditTransactionInput) {
+  /**
+   * One ledger row, chained onto the provider's latest balance.
+   *
+   * Shared with package purchases, entitlements and the payment webhook,
+   * whose behaviour is unchanged: `maxBalanceAfter` is opt-in and only the
+   * manual path passes it. For them an overflowing balance still fails the
+   * whole transaction (as a database error), exactly as before.
+   */
+  async createProviderCreditTransactionInTransaction(
+    tx: CreditTransactionTx,
+    input: CreditTransactionInput,
+    options: { maxBalanceAfter?: number } = {},
+  ) {
     const provider = await tx.providerProfile.findUnique({
       where: { id: input.providerId },
       select: { id: true },
@@ -445,6 +475,17 @@ export class CreditsService {
 
     if (balanceAfter < 0) {
       throw new BadRequestException('Credit balance cannot go below zero');
+    }
+
+    if (options.maxBalanceAfter !== undefined && balanceAfter > options.maxBalanceAfter) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'CREDIT_BALANCE_LIMIT_EXCEEDED',
+        message: `Credit balance cannot exceed ${options.maxBalanceAfter}`,
+        currentBalance,
+        maxBalance: options.maxBalanceAfter,
+      });
     }
 
     return tx.providerCreditTransaction.create({

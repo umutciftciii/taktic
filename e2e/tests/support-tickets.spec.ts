@@ -127,7 +127,7 @@ test.describe('customer support tickets', () => {
       const queueRow = admin.page.getByTestId('support-ticket-row').filter({ hasText: SUBJECT });
       await expect(queueRow).toHaveCount(1);
       await expect(queueRow.getByTestId('support-ticket-subject')).toHaveText(SUBJECT);
-      await queueRow.getByRole('link', { name: 'Detay' }).click();
+      await queueRow.getByRole('link', { name: 'Aç' }).click();
       await expect(admin.page).toHaveURL(new RegExp(`/support/${ticketId}$`));
 
       await expect(admin.page.getByTestId('support-timeline-message')).toHaveCount(1);
@@ -191,6 +191,8 @@ test.describe('customer support tickets', () => {
 
       await admin.gotoAdmin(`/support/${ticketId}`);
       await admin.page.getByTestId('support-transition-CLOSED').click();
+      // Closing is final, so it asks first (ADMIN-DESIGN-001 Faz 3B).
+      await admin.page.getByTestId('support-transition-CLOSED-dialog').getByRole('button', { name: 'Evet, kapat' }).click();
       await expect(admin.page.getByTestId('support-detail-status')).toHaveText('Kapatıldı');
 
       // Closed is terminal: no transition is offered at all, and the operator's

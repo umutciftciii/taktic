@@ -109,8 +109,12 @@ test.describe('business registration', () => {
       await expect(viewer.page).not.toHaveURL(/\/yetkisiz/);
       await expect(viewer.page.getByTestId('registration-masked')).toHaveText(TCKN_MASKED);
       await expect(viewer.page.getByTestId('registration-reveal')).toHaveCount(0);
-      await expect(viewer.page.getByRole('heading', { name: 'Değerlendirmeler' })).toBeVisible();
       await expect(viewer.page.getByTestId('provider-eligibility-empty')).toBeVisible();
+      expect(await viewer.page.content()).not.toContain(TCKN);
+      // Faz 3B: the reviews are the Değerlendirmeler tab of the same screen.
+      await viewer.page.getByTestId('provider-tab-degerlendirmeler').click();
+      await expect(viewer.page).toHaveURL(/\?tab=degerlendirmeler$/);
+      await expect(viewer.page.getByRole('heading', { name: 'Değerlendirmeler' })).toBeVisible();
       expect(await viewer.page.content()).not.toContain(TCKN);
 
       // The list permission alone: masked in the list.

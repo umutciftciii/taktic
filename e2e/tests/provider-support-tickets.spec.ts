@@ -328,6 +328,8 @@ test.describe('a hizmet veren and the support desk', () => {
 
       await admin.gotoAdmin(`/support/${ticketId}`);
       await admin.page.getByTestId('support-transition-CLOSED').click();
+      // Closing is final, so it asks first (ADMIN-DESIGN-001 Faz 3B).
+      await admin.page.getByTestId('support-transition-CLOSED-dialog').getByRole('button', { name: 'Evet, kapat' }).click();
       await expect(admin.page.getByTestId('support-no-transitions')).toBeVisible();
       await expect(admin.page.getByTestId('support-reply-closed')).toBeVisible();
 

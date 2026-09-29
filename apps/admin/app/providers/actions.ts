@@ -12,21 +12,36 @@ import {
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
+/**
+ * Moves a provider to another status, with the note and the rejection reason
+ * the form carries, and says how it went.
+ *
+ * The outcome is a short code in the query string and nothing more; the API's
+ * own message is not carried through a URL. A 401/403 is a navigation (to
+ * /login or /yetkisiz) and is re-thrown, never turned into "could not save"
+ * (F14).
+ */
 export async function updateProviderStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const status = readFormString(formData, 'status') as ProviderStatus;
 
-  await apiFetch<ProviderProfile>(`/providers/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      status,
-      moderationNote: readOptionalFormString(formData, 'moderationNote'),
-      rejectionReason: readOptionalFormString(formData, 'rejectionReason'),
-    }),
-  });
+  try {
+    await apiFetch<ProviderProfile>(`/providers/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status,
+        moderationNote: readOptionalFormString(formData, 'moderationNote'),
+        rejectionReason: readOptionalFormString(formData, 'rejectionReason'),
+      }),
+    });
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    redirect(`/providers/${id}?statusError=${error instanceof ApiError && error.status === 400 ? 'invalid' : 'error'}#durum-yonetimi`);
+  }
 
   revalidatePath('/providers');
   revalidatePath(`/providers/${id}`);
+  redirect(`/providers/${id}?statusSaved=1#durum-yonetimi`);
 }
 
 /**

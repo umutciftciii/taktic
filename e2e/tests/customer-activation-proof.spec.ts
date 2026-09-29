@@ -57,7 +57,7 @@ test.describe('customer activation and the e-mail proof', () => {
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
       await admin.gotoAdmin(`/customers/${claimable.id}`);
-      await admin.page.getByRole('button', { name: 'Aktivasyon linki oluştur' }).click();
+      await admin.page.getByRole('button', { name: 'Şifre belirleme bağlantısı oluştur' }).click();
       // The link is shown in the page and never carried in the address bar:
       // it is a live credential, and a URL leaks into history, logs and the
       // next page's Referer.

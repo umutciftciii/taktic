@@ -1,13 +1,19 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-
-type OperationType = 'GRANT' | 'DEDUCT';
+import { useActionState, useEffect, useState } from 'react';
+import { ConfirmDialog } from '../../../../components/confirm-dialog';
+import { CREDIT_AMOUNT_MAX, creditAmountProblemMessage, parseCreditAmount } from '../../../../lib/credit-amount';
+import { formatCount } from '../../../../lib/pagination';
+import { submitCreditOperationAction } from './actions';
+import {
+  CREDIT_OPERATION_IDLE,
+  type CreditOperationType as OperationType,
+} from './credit-operation-state';
 
 type CreditOperationFormProps = {
   providerId: string;
+  businessName: string;
   currentBalance: number;
-  action: (formData: FormData) => Promise<void> | void;
   /**
    * Which operations this session may perform: CREDITS_GRANT and
    * CREDITS_DEDUCT, computed on the server. They are separate permissions, so
@@ -20,82 +26,109 @@ type CreditOperationFormProps = {
 
 const REASON_MIN_LENGTH = 3;
 
+/**
+ * The manual credit form (ADMIN-DESIGN-001 Faz 3B).
+ *
+ * Adding credit goes straight through. Deducting asks first, and the
+ * confirmation says the balance before and after and that the row is
+ * permanent; cancelling it sends nothing. The server's answer comes back in
+ * the action state: a refusal (say, a balance that moved below the amount in
+ * the meantime) is shown above the button with everything typed kept, a
+ * success says the new balance and clears the form.
+ */
 export function CreditOperationForm({
   providerId,
+  businessName,
   currentBalance,
-  action,
   canGrant,
   canDeduct,
 }: CreditOperationFormProps) {
-  const [operationType, setOperationType] = useState<OperationType>(
-    canGrant ? 'GRANT' : 'DEDUCT',
-  );
+  const [state, formAction, pending] = useActionState(submitCreditOperationAction, CREDIT_OPERATION_IDLE);
+  const [operationType, setOperationType] = useState<OperationType>(canGrant ? 'GRANT' : 'DEDUCT');
   const [amountInput, setAmountInput] = useState('');
   const [reason, setReason] = useState('');
 
-  const parsedAmount = Number.parseInt(amountInput, 10);
-  const hasAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
-  const signedDelta = hasAmount
-    ? operationType === 'GRANT'
-      ? parsedAmount
-      : -parsedAmount
-    : 0;
+  // A success clears the fields; a refusal leaves them as they were typed.
+  const doneAt = state.kind === 'done' ? state.at : null;
+  useEffect(() => {
+    if (doneAt !== null) {
+      setAmountInput('');
+      setReason('');
+    }
+  }, [doneAt]);
+
+  // The one reading of the typed amount (lib/credit-amount.ts). The preview,
+  // the confirmation and the server action all use it, so "1e2" cannot be
+  // previewed as 1 and sent as 100: it is not an amount anywhere.
+  const amount = parseCreditAmount(amountInput);
+  const hasAmount = amount.ok;
+  const parsedAmount = amount.ok ? amount.value : 0;
+  const amountProblem = !amount.ok && amount.problem !== 'empty' ? creditAmountProblemMessage(amount.problem) : null;
+  const signedDelta = hasAmount ? (operationType === 'GRANT' ? parsedAmount : -parsedAmount) : 0;
   const previewBalance = currentBalance + signedDelta;
   const overdraft = operationType === 'DEDUCT' && hasAmount && parsedAmount > currentBalance;
+  // The balance lives in the same integer column as the amount.
+  const overflow = operationType === 'GRANT' && hasAmount && previewBalance > CREDIT_AMOUNT_MAX;
 
-  const reasonTrimmed = reason.trim();
-  const reasonValid = reasonTrimmed.length >= REASON_MIN_LENGTH;
-  const submitDisabled = !hasAmount || !reasonValid || overdraft;
+  const reasonValid = reason.trim().length >= REASON_MIN_LENGTH;
+  const submitDisabled = !hasAmount || !reasonValid || overdraft || overflow || pending;
 
   const isDeduct = operationType === 'DEDUCT';
 
-  const submitLabel = isDeduct ? 'Kredi düş' : 'Kredi ekle';
-  const submitClass = useMemo(
-    () => `btn ${isDeduct ? 'btn-danger' : 'btn-primary'} btn-block`,
-    [isDeduct],
-  );
-
   return (
-    <form action={action} className="credit-operation-form">
+    <form action={formAction} className="credit-operation-form" data-testid="credit-operation-form">
       <input type="hidden" name="providerId" value={providerId} />
       <input type="hidden" name="operationType" value={operationType} />
 
       {canGrant && canDeduct ? (
-      <div className="credit-operation-tabs" role="tablist" aria-label="İşlem tipi">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!isDeduct}
-          className={`credit-operation-tab${!isDeduct ? ' is-active is-grant' : ''}`}
-          onClick={() => setOperationType('GRANT')}
-        >
-          Kredi ekle
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={isDeduct}
-          className={`credit-operation-tab${isDeduct ? ' is-active is-deduct' : ''}`}
-          onClick={() => setOperationType('DEDUCT')}
-        >
-          Kredi düş
-        </button>
-      </div>
+        <div className="credit-operation-tabs" role="tablist" aria-label="İşlem tipi">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!isDeduct}
+            className={`credit-operation-tab${!isDeduct ? ' is-active is-grant' : ''}`}
+            onClick={() => setOperationType('GRANT')}
+          >
+            Kredi ekle
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isDeduct}
+            className={`credit-operation-tab${isDeduct ? ' is-active is-deduct' : ''}`}
+            onClick={() => setOperationType('DEDUCT')}
+          >
+            Kredi düş
+          </button>
+        </div>
       ) : null}
 
       <label className="form-row">
         <span>Tutar</span>
+        {/*
+          Text, not type="number": a number field accepts "1e2" and "2.5" and
+          reports its value differently per browser. The digits rule is the
+          form's own and the server's (lib/credit-amount.ts).
+        */}
         <input
           name="amount"
-          type="number"
-          min={1}
-          step={1}
+          type="text"
           inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="off"
           required
           value={amountInput}
           onChange={(event) => setAmountInput(event.target.value)}
           placeholder="Örn. 50"
+          aria-invalid={amountProblem ? true : undefined}
+          aria-describedby={amountProblem ? 'credit-operation-amount-problem' : undefined}
+          data-testid="credit-operation-amount"
         />
+        {amountProblem ? (
+          <p className="help-text is-error" id="credit-operation-amount-problem" data-testid="credit-operation-amount-invalid">
+            {amountProblem}
+          </p>
+        ) : null}
       </label>
 
       <label className="form-row">
@@ -108,10 +141,9 @@ export function CreditOperationForm({
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           placeholder="Bu işlemin nedeni (zorunlu, en az 3 karakter)"
+          data-testid="credit-operation-reason"
         />
-        <p className="help-text">
-          Sebep zorunludur ve kredi hareketlerine kalıcı olarak kaydedilir.
-        </p>
+        <p className="help-text">Sebep zorunludur ve kredi hareketlerine kalıcı olarak kaydedilir.</p>
       </label>
 
       <div className="balance-preview" aria-live="polite">
@@ -122,23 +154,24 @@ export function CreditOperationForm({
         <div className="balance-preview-row">
           <span className="balance-preview-label">İşlem</span>
           <span
-            className={`balance-preview-delta${
-              hasAmount ? (isDeduct ? ' is-deduct' : ' is-grant') : ' is-empty'
-            }`}
+            className={`balance-preview-delta${hasAmount ? (isDeduct ? ' is-deduct' : ' is-grant') : ' is-empty'}`}
           >
             {hasAmount ? `${signedDelta > 0 ? '+' : ''}${signedDelta}` : '—'}
           </span>
         </div>
         <div className="balance-preview-row is-total">
           <span className="balance-preview-label">Yeni bakiye</span>
-          <span
-            className={`balance-preview-value${
-              overdraft ? ' is-negative' : ''
-            }`}
-          >
+          <span className={`balance-preview-value${overdraft ? ' is-negative' : ''}`}>
             {hasAmount ? previewBalance : currentBalance}
           </span>
         </div>
+        {overflow ? (
+          <p className="balance-preview-warning" data-testid="credit-operation-overflow">
+            Bakiye en fazla {formatCount(CREDIT_AMOUNT_MAX)} olabilir. Ekranda görünen bakiyeye göre en fazla{' '}
+            {formatCount(Math.max(0, CREDIT_AMOUNT_MAX - currentBalance))} kredi eklenebilir; işlem sunucu
+            tarafında reddedilir.
+          </p>
+        ) : null}
         {overdraft ? (
           <p className="balance-preview-warning">
             Bu düşüş mevcut bakiyeyi aşıyor. İşlem sunucu tarafında reddedilir.
@@ -146,9 +179,48 @@ export function CreditOperationForm({
         ) : null}
       </div>
 
-      <button type="submit" className={submitClass} disabled={submitDisabled}>
-        {submitLabel}
-      </button>
+      {state.kind === 'error' ? (
+        <div className="notice notice-error" role="alert" data-testid="credit-operation-error">
+          {state.message}
+        </div>
+      ) : state.kind === 'done' ? (
+        <div className="notice notice-success" role="status" data-testid="credit-operation-done">
+          {state.amount} kredi {state.operation === 'DEDUCT' ? 'düşüldü' : 'eklendi'}. Yeni bakiye{' '}
+          {state.balanceAfter}.
+        </div>
+      ) : null}
+
+      {isDeduct ? (
+        <ConfirmDialog
+          triggerLabel="Kredi düş"
+          triggerClassName="btn btn-danger btn-block"
+          title="Kredi düşülsün mü?"
+          consequence={
+            <>
+              <p>
+                {parsedAmount} kredi {businessName} bakiyesinden düşülür: bakiye{' '}
+                {currentBalance} → {previewBalance}.
+              </p>
+              <p>
+                Hareket, yazdığınız sebep ve sizin adınızla kredi hareketlerine kalıcı olarak kaydedilir;
+                silinemez. Yanlış bir düşme ancak ayrı bir kredi ekleme işlemiyle dengelenir.
+              </p>
+            </>
+          }
+          confirmLabel="Evet, düş"
+          disabled={submitDisabled}
+          testId="credit-operation-deduct"
+        />
+      ) : (
+        <button
+          type="submit"
+          className="btn btn-primary btn-block"
+          disabled={submitDisabled}
+          data-testid="credit-operation-grant"
+        >
+          Kredi ekle
+        </button>
+      )}
 
       <p className="audit-note">
         Bu işlem kredi hareketlerine kalıcı olarak kaydedilir ve işlemi yapan yönetici tutulur.

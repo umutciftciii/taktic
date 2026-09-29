@@ -19,8 +19,11 @@ import {
   type SupportTicketDetail,
   type SupportTicketTimelineEntry,
 } from '../../../lib/api';
-import { PageHeader } from '../../../components/page-header';
+import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { DetailHeader } from '../../../components/detail-header';
+import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
+import type { SummaryItem } from '../../../components/summary-strip';
 import { changeSupportTicketStatusAction, replySupportTicketAction } from '../actions';
 import { openPackageRefundRequestAction } from '../../package-refunds/actions';
 
@@ -29,15 +32,41 @@ type AdminSupportTicketPageProps = {
   searchParams: Promise<{ sent?: string; statusSaved?: string; error?: string }>;
 };
 
+const TOPIC_LABELS: Record<SupportTicketDetail['topic'], string> = {
+  GENERAL: 'Genel',
+  PACKAGE_AND_CREDIT_REFUND: 'Paket ve kredi iadesi',
+};
+
 /**
- * One ticket, its whole history, and the two things an operator can do to it.
+ * What closing does (support-ticket.rules.ts, admin-support-tickets.service.ts):
+ * CLOSED has no way out and nobody may write to it, and every status change
+ * mails the requester.
+ */
+const CLOSE_CONSEQUENCE = (
+  <>
+    <p>
+      Talep kalıcı olarak kapanır: ne siz ne talep sahibi yeni mesaj ekleyebilir, talep yeniden
+      açılamaz. Konu sürüyorsa talep sahibi yeni bir destek talebi açar.
+    </p>
+    <p>Yazışma ve geçmiş silinmez. Talep sahibine durum değişikliği e-postası gider.</p>
+  </>
+);
+
+/**
+ * One ticket, its whole history, and the two things an operator can do to it
+ * (ADMIN-DESIGN-001 Faz 3B, the detail template; the design has no screen of
+ * its own for this route).
  *
  * The status controls are built from `allowedTransitions`, which the API
  * returns for the status the ticket actually holds — so a move the transition
  * table forbids has no button here at all, and the one case a button could
  * still be wrong (somebody else moved the ticket between this render and the
  * click) is refused by the API's compare-and-swap and reported above the
- * timeline.
+ * tabs. Closing is final, so it asks first.
+ *
+ * Every section keeps its own permission: replying and moving need
+ * SUPPORT_WRITE, opening a refund request PACKAGE_REFUND_REQUEST_CREATE, and
+ * the refund block is only in the answer for PACKAGE_REFUND_READ.
  */
 export default async function AdminSupportTicketPage({
   params,
@@ -47,23 +76,39 @@ export default async function AdminSupportTicketPage({
   const canWrite = can('SUPPORT_WRITE');
   const canOpenRefund = can('PACKAGE_REFUND_REQUEST_CREATE');
   const canReadRefund = can('PACKAGE_REFUND_READ');
-  const canReadUser = can('ADMIN_USERS_READ');
+  const canReadCustomers = can('CUSTOMERS_READ');
 
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const ticket = await fetchOrNotFound(() =>
     apiFetch<SupportTicketDetail>(`/admin/support/tickets/${id}`),
   );
 
+  const messageCount = ticket.timeline.filter((entry) => entry.kind === 'MESSAGE').length;
+  // The account behind the ticket. A hizmet alan's user id is their customer
+  // id, so their screen is one link away. A hizmet veren's profile id is not
+  // in this answer, and `/users/:id` is the staff screen (it answers 404 for
+  // anyone else), so no account link is drawn for one.
+  const accountHref =
+    ticket.requesterRole === 'CUSTOMER' && canReadCustomers ? `/customers/${ticket.requester.id}` : null;
+
+  const facts: SummaryItem[] = [
+    {
+      label: 'Durum',
+      value: supportTicketStatusLabel(ticket.status),
+      tone: ticket.status === 'OPEN' ? 'warning' : ticket.status === 'CLOSED' ? 'neutral' : 'success',
+    },
+    { label: 'Talep sahibi', value: supportTicketRequesterRoleLabel(ticket.requesterRole) },
+    { label: 'Konu', value: TOPIC_LABELS[ticket.topic] ?? ticket.topic },
+    { label: 'Mesaj', value: String(messageCount), note: 'Yazışmadaki mesaj sayısı' },
+    { label: 'Son hareket', value: formatDateTime(ticket.lastActivityAt) },
+  ];
+
   return (
-    <main>
-      <PageHeader
-        breadcrumbs={[{ label: 'Destek Talepleri', href: '/support' }, { label: ticket.subject }]}
-        title={ticket.subject}
-        subtitle={`Oluşturulma: ${formatDateTime(ticket.createdAt)} · Son hareket: ${formatDateTime(
-          ticket.lastActivityAt,
-        )}`}
-        actions={
-          <span className="inline-actions">
+    <main className="support-detail-page">
+      <DetailHeader
+        back={{ href: '/support', label: 'Destek talepleri' }}
+        badges={
+          <>
             {/*
               The desk sits beside the status, and before it in reading order,
               because it is the fact that decides what the answer may say: a
@@ -76,206 +121,212 @@ export default async function AdminSupportTicketPage({
             >
               {supportTicketRequesterRoleLabel(ticket.requesterRole)}
             </span>
-            <span
-              className={supportTicketStatusBadgeClass(ticket.status)}
-              data-testid="support-detail-status"
-            >
+            <span className={supportTicketStatusBadgeClass(ticket.status)} data-testid="support-detail-status">
               {supportTicketStatusLabel(ticket.status)}
             </span>
-          </span>
+          </>
         }
+        meta={
+          <>
+            <code>#{ticket.id.slice(-8)}</code> · {formatDateTime(ticket.createdAt)}&apos;de açıldı
+          </>
+        }
+        title={ticket.subject}
+        subtitle={[ticket.requester.name ?? 'İsimsiz hesap', ticket.requester.email].filter(Boolean).join(' · ')}
+        actions={
+          accountHref ? (
+            <Link className="btn btn-secondary btn-sm" href={accountHref} data-testid="support-account-link">
+              Hizmet alanı aç
+            </Link>
+          ) : null
+        }
+        facts={facts}
+        factsLabel="Destek talebi özeti"
+        testId="support-detail-header"
       />
 
       {query.error ? (
-        <div
-          className="notice notice-error"
-          role="alert"
-          style={{ marginBottom: 12 }}
-          data-testid="support-detail-error"
-        >
+        <div className="notice notice-error detail-notice" role="alert" data-testid="support-detail-error">
           {query.error}
         </div>
       ) : query.statusSaved === '1' ? (
-        <div
-          className="notice notice-success"
-          role="status"
-          style={{ marginBottom: 12 }}
-          data-testid="support-status-saved"
-        >
+        <div className="notice notice-success detail-notice" role="status" data-testid="support-status-saved">
           Talep durumu güncellendi.
         </div>
       ) : query.sent === '1' ? (
-        <div
-          className="notice notice-success"
-          role="status"
-          style={{ marginBottom: 12 }}
-          data-testid="support-reply-sent"
-        >
+        <div className="notice notice-success detail-notice" role="status" data-testid="support-reply-sent">
           Mesajınız talebe eklendi.
         </div>
       ) : null}
 
-      <SectionCard title="Talep sahibi">
-        <dl className="meta-row">
-          <div>
-            <dt>Rol</dt>
-            <dd data-testid="support-detail-requester-role-row">
-              {supportTicketRequesterRoleLabel(ticket.requesterRole)}
-            </dd>
-          </div>
-          <div>
-            <dt>Ad</dt>
-            <dd>{ticket.requester.name ?? <span className="cell-muted">İsimsiz hesap</span>}</dd>
-          </div>
-          <div>
-            <dt>E-posta</dt>
-            <dd>{ticket.requester.email ?? <span className="cell-muted">-</span>}</dd>
-          </div>
-          <div>
-            <dt>Hesap</dt>
-            <dd>
-              {/*
-                `/users/:id` rather than `/customers/:id`: the account behind a
-                ticket is now either a hizmet alan or a hizmet veren, and the
-                customer screen would 404 on half of them.
-              */}
-              {canReadUser ? (
-                <Link href={`/users/${ticket.requester.id}`}>Hesabı görüntüle</Link>
-              ) : (
-                <span className="cell-muted">-</span>
-              )}
-            </dd>
-          </div>
-        </dl>
-      </SectionCard>
-
-      {ticket.packageRefund ? (
-        <SectionCard
-          title="Paket ve kredi iadesi"
-          subtitle={
-            ticket.topic === 'PACKAGE_AND_CREDIT_REFUND'
-              ? 'Hizmet veren bu talebi iade konusuyla açtı.'
-              : 'Bu genel talebe bağlı iade isteği.'
-          }
-        >
-          {ticket.packageRefund.request ? (
-            <p data-testid="support-refund-link">
-              <span className={packageRefundStatusBadgeClass(ticket.packageRefund.request.status)}>
-                {PACKAGE_REFUND_STATUS_LABELS[ticket.packageRefund.request.status]}
-              </span>{' '}
-              {canReadRefund ? (
-                <Link href={`/package-refunds/${ticket.packageRefund.request.id}`}>İade isteğini aç</Link>
-              ) : null}
-            </p>
-          ) : ticket.packageRefund.canOpen && canOpenRefund ? (
-            <form action={openPackageRefundRequestAction} data-testid="support-refund-open-form">
-              <input type="hidden" name="supportTicketId" value={ticket.id} />
-              <label className="form-row" htmlFor="support-refund-purchase">
-                <span>Bu talep üzerinden iade isteği aç (istisna incelemesi dahil)</span>
-                <select id="support-refund-purchase" name="purchaseId" required defaultValue="">
-                  <option value="" disabled>
-                    Satın alma seçin
-                  </option>
-                  {ticket.packageRefund.candidatePurchases.map((purchase) => (
-                    <option key={purchase.id} value={purchase.id}>
-                      {`${purchase.packageName} · ${purchase.purchaseNumber ?? purchase.id} · ${formatPrice(
-                        purchase.priceAmount,
-                        purchase.currency,
-                      )} · ${PACKAGE_REFUND_RECOMMENDATION_LABELS[purchase.recommendation]}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button className="btn btn-secondary btn-sm" type="submit" data-testid="support-refund-open">
-                İade isteği aç
-              </button>
-            </form>
-          ) : (
-            <p className="cell-muted" data-testid="support-refund-none">
-              Bu talebe bağlı bir iade isteği yok.
-            </p>
-          )}
-        </SectionCard>
-      ) : null}
-
-      {canWrite ? (
-        <SectionCard
-          title="Durum"
-          subtitle="Yalnızca bu talebin şu anda yapabileceği geçişler gösterilir."
-        >
-          {ticket.allowedTransitions.length === 0 ? (
-            <p className="cell-muted" data-testid="support-no-transitions">
-              Kapatılmış bir talep yeniden açılamaz. Konu devam ediyorsa talep sahibi yeni bir talep
-              açabilir.
-            </p>
-          ) : (
-            <div className="inline-actions" data-testid="support-transitions">
-              {ticket.allowedTransitions.map((next) => (
-                <form key={next} action={changeSupportTicketStatusAction}>
-                  <input type="hidden" name="id" value={ticket.id} />
-                  <input type="hidden" name="status" value={next} />
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="submit"
-                    data-testid={`support-transition-${next}`}
-                  >
-                    {supportTicketTransitionLabel(next)}
-                  </button>
-                </form>
+      <div className="detail-panel support-detail-layout">
+        <div className="support-detail-main">
+          <SectionCard title="Yazışma" subtitle="Mesajlar ve durum değişiklikleri, olduğu sırayla.">
+            <ol className="support-timeline" data-testid="support-timeline">
+              {ticket.timeline.map((entry) => (
+                <TimelineEntry key={`${entry.kind}-${entry.id}`} entry={entry} />
               ))}
-            </div>
-          )}
-        </SectionCard>
-      ) : null}
+            </ol>
+          </SectionCard>
 
-      <SectionCard title="Yazışma" subtitle="Mesajlar ve durum değişiklikleri, olduğu sırayla.">
-        <ol className="support-timeline" data-testid="support-timeline">
-          {ticket.timeline.map((entry) => (
-            <TimelineEntry key={`${entry.kind}-${entry.id}`} entry={entry} />
-          ))}
-        </ol>
-      </SectionCard>
+          {canWrite ? (
+            <SectionCard title="Yanıtla">
+              {ticket.canReply ? (
+                <form action={replySupportTicketAction} className="detail-form" data-testid="support-reply-form">
+                  <input type="hidden" name="id" value={ticket.id} />
+                  <label className="detail-form-field" htmlFor="support-admin-reply">
+                    <span>Mesajınız</span>
+                    {/*
+                      The same limit the API enforces and the same one the customer's
+                      composer counts against — both sides read
+                      `packages/shared/limits.json`, so an operator cannot type a
+                      reply the server will refuse.
+                    */}
+                    <textarea
+                      id="support-admin-reply"
+                      name="body"
+                      rows={5}
+                      required
+                      maxLength={SUPPORT_TICKET_MESSAGE_MAX_LENGTH}
+                      placeholder="Talep sahibine yazacağınız yanıt…"
+                      data-testid="support-reply-input"
+                    />
+                  </label>
+                  <div className="detail-form-actions">
+                    <button className="btn btn-primary btn-sm" type="submit" data-testid="support-reply-send">
+                      Yanıtı gönder
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <p className="detail-muted-note" data-testid="support-reply-closed">
+                  Kapatılmış bir talebe mesaj eklenemez.
+                </p>
+              )}
+            </SectionCard>
+          ) : null}
+        </div>
 
-      {canWrite ? (
-        <SectionCard title="Yanıtla">
-          {ticket.canReply ? (
-            <form action={replySupportTicketAction} data-testid="support-reply-form">
-              <input type="hidden" name="id" value={ticket.id} />
-              <label className="form-row" htmlFor="support-admin-reply">
-                <span>Mesajınız</span>
-                {/*
-                  The same limit the API enforces and the same one the customer's
-                  composer counts against — both sides read
-                  `packages/shared/limits.json`, so an operator cannot type a
-                  reply the server will refuse.
-                */}
-                <textarea
-                  id="support-admin-reply"
-                  name="body"
-                  rows={5}
-                  required
-                  maxLength={SUPPORT_TICKET_MESSAGE_MAX_LENGTH}
-                  placeholder="Talep sahibine yazacağınız yanıt…"
-                  data-testid="support-reply-input"
-                />
-              </label>
-              <div className="inline-actions" style={{ marginTop: 12 }}>
-                <button
-                  className="btn btn-primary btn-sm"
-                  type="submit"
-                  data-testid="support-reply-send"
+        <div className="support-detail-side">
+          {canWrite ? (
+            <SectionCard title="Durum" subtitle="Yalnızca bu talebin şu anda yapabileceği geçişler gösterilir.">
+              {ticket.allowedTransitions.length === 0 ? (
+                <p className="detail-muted-note" data-testid="support-no-transitions">
+                  Kapatılmış bir talep yeniden açılamaz. Konu devam ediyorsa talep sahibi yeni bir talep
+                  açabilir.
+                </p>
+              ) : (
+                <div className="detail-form-actions" data-testid="support-transitions">
+                  {ticket.allowedTransitions.map((next) => (
+                    <form key={next} action={changeSupportTicketStatusAction}>
+                      <input type="hidden" name="id" value={ticket.id} />
+                      <input type="hidden" name="status" value={next} />
+                      {next === 'CLOSED' ? (
+                        <ConfirmDialog
+                          triggerLabel={supportTicketTransitionLabel(next)}
+                          triggerClassName="btn btn-destructive btn-sm"
+                          title="Destek talebi kapatılsın mı?"
+                          consequence={CLOSE_CONSEQUENCE}
+                          confirmLabel="Evet, kapat"
+                          testId={`support-transition-${next}`}
+                        />
+                      ) : (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          type="submit"
+                          data-testid={`support-transition-${next}`}
+                        >
+                          {supportTicketTransitionLabel(next)}
+                        </button>
+                      )}
+                    </form>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          ) : null}
+
+          <SectionCard title="Talep sahibi">
+            <KeyValueList
+              items={[
+                {
+                  label: 'Rol',
+                  value: supportTicketRequesterRoleLabel(ticket.requesterRole),
+                  testId: 'support-detail-requester-role-row',
+                },
+                { label: 'Ad', value: ticket.requester.name ?? <span className="cell-muted">İsimsiz hesap</span> },
+                {
+                  label: 'E-posta',
+                  value: ticket.requester.email ? <span className="cell-break">{ticket.requester.email}</span> : null,
+                },
+                {
+                  label: 'Hesap',
+                  value: accountHref ? <Link href={accountHref}>Hizmet alan detayını aç</Link> : null,
+                },
+              ]}
+            />
+          </SectionCard>
+
+          {ticket.packageRefund ? (
+            <SectionCard
+              title="Paket ve kredi iadesi"
+              subtitle={
+                ticket.topic === 'PACKAGE_AND_CREDIT_REFUND'
+                  ? 'Hizmet veren bu talebi iade konusuyla açtı.'
+                  : 'Bu genel talebe bağlı iade isteği.'
+              }
+            >
+              {ticket.packageRefund.request ? (
+                <p className="support-refund-line" data-testid="support-refund-link">
+                  <span className={packageRefundStatusBadgeClass(ticket.packageRefund.request.status)}>
+                    {PACKAGE_REFUND_STATUS_LABELS[ticket.packageRefund.request.status]}
+                  </span>{' '}
+                  {canReadRefund ? (
+                    <Link href={`/package-refunds/${ticket.packageRefund.request.id}`}>İade isteğini aç</Link>
+                  ) : null}
+                </p>
+              ) : ticket.packageRefund.canOpen && canOpenRefund ? (
+                <form
+                  action={openPackageRefundRequestAction}
+                  className="detail-form"
+                  data-testid="support-refund-open-form"
                 >
-                  Yanıtı gönder
-                </button>
-              </div>
-            </form>
-          ) : (
-            <p className="cell-muted" data-testid="support-reply-closed">
-              Kapatılmış bir talebe mesaj eklenemez.
-            </p>
-          )}
-        </SectionCard>
-      ) : null}
+                  <input type="hidden" name="supportTicketId" value={ticket.id} />
+                  <label className="detail-form-field" htmlFor="support-refund-purchase">
+                    <span>Bu talep üzerinden iade isteği aç (istisna incelemesi dahil)</span>
+                    <select id="support-refund-purchase" name="purchaseId" required defaultValue="">
+                      <option value="" disabled>
+                        Satın alma seçin
+                      </option>
+                      {ticket.packageRefund.candidatePurchases.map((purchase) => (
+                        <option key={purchase.id} value={purchase.id}>
+                          {`${purchase.packageName} · ${purchase.purchaseNumber ?? purchase.id} · ${formatPrice(
+                            purchase.priceAmount,
+                            purchase.currency,
+                          )} · ${PACKAGE_REFUND_RECOMMENDATION_LABELS[purchase.recommendation]}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="detail-muted-note">
+                    İstek inceleme kuyruğuna düşer; para hareketi olmaz. Onay ve ödeme iade isteği
+                    ekranında ayrı adımlardır.
+                  </p>
+                  <div className="detail-form-actions">
+                    <button className="btn btn-secondary btn-sm" type="submit" data-testid="support-refund-open">
+                      İade isteği aç
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <p className="detail-muted-note" data-testid="support-refund-none">
+                  Bu talebe bağlı bir iade isteği yok.
+                </p>
+              )}
+            </SectionCard>
+          ) : null}
+        </div>
+      </div>
     </main>
   );
 }
