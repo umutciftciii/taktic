@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ApiError, CheckoutSessionResponse, apiFetch } from '../../../../lib/api';
 import { clientForwardingHeaders } from '../../../../lib/forwarded-for';
+import { isCreditBalanceLimitRefusal } from './credit-limit';
 
 /**
  * Starts a credit package checkout.
@@ -59,6 +60,9 @@ export async function createPackagePurchaseAction(formData: FormData) {
     if (refusal) {
       redirect(returnPath(providerId, readFormString(formData, 'returnTo'), refusal));
     }
+    if (isCreditBalanceLimitRefusal(error)) {
+      redirect(limitPath(providerId, readFormString(formData, 'returnTo')));
+    }
     throw error;
   }
 
@@ -91,6 +95,13 @@ function readTermsRefusal(error: unknown): 'onay-gerekli' | 'guncellendi' | null
     // Not JSON: not one of ours.
   }
   return null;
+}
+
+/** API-HARDENING-001: back to the package list, which explains the balance bound. */
+function limitPath(providerId: string, returnTo: string) {
+  return returnTo === 'subscriptions'
+    ? `/providers/${providerId}/subscriptions?satin-alma=bakiye-siniri#satin-al`
+    : `/providers/${providerId}/credits?satin-alma=bakiye-siniri#paketler`;
 }
 
 /** Back to the screen the form was on — one of two known pages, never a supplied URL. */

@@ -18,6 +18,7 @@ import {
   SourceChannel,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { CREDIT_LEDGER_INTEGER_MAX } from '../../common/credit-limits';
 import type { RequestMeta } from '../../common/request-meta';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -136,6 +137,15 @@ export class PackagePurchasesService implements OnModuleInit {
         pkg: creditPackage,
         now: new Date(),
       });
+
+      // API-HARDENING-001: a credit package whose credits would not fit under
+      // the ledger's integer column is refused while refusing is still free —
+      // before a purchase row exists and before any payment page opens. This
+      // is advisory (the balance can still grow before the money settles);
+      // the settlement paths below re-check it in their own transaction.
+      if (creditPackage.type === OfferPackageType.ONE_TIME_CREDITS) {
+        await this.creditsService.assertCreditHeadroom(tx, providerId, creditPackage.creditAmount);
+      }
 
       const purchaseNumber = await this.numbering.generateDisplayNumber(
         tx,
@@ -360,15 +370,24 @@ export class PackagePurchasesService implements OnModuleInit {
 
         const isOneTime = purchase.package?.type === OfferPackageType.ONE_TIME_CREDITS;
 
+        // API-HARDENING-001: bounded. A balance that would pass the ledger's
+        // integer column is a 400 CREDIT_BALANCE_LIMIT_EXCEEDED, and because
+        // it is thrown inside this transaction nothing it wrote survives — the
+        // purchase stays PENDING with no ledger row, and paying again once the
+        // balance has room settles it normally.
         const creditTransaction = isOneTime
-          ? await this.creditsService.createProviderCreditTransactionInTransaction(tx, {
-              providerId: purchase.providerId,
-              type: CreditTransactionType.PACKAGE_PURCHASE,
-              amount: purchase.creditAmountSnapshot,
-              reason: `Mock package purchase: ${purchase.packageNameSnapshot}`,
-              referenceType: 'PackagePurchase',
-              referenceId: purchase.id,
-            })
+          ? await this.creditsService.createProviderCreditTransactionInTransaction(
+              tx,
+              {
+                providerId: purchase.providerId,
+                type: CreditTransactionType.PACKAGE_PURCHASE,
+                amount: purchase.creditAmountSnapshot,
+                reason: `Mock package purchase: ${purchase.packageNameSnapshot}`,
+                referenceType: 'PackagePurchase',
+                referenceId: purchase.id,
+              },
+              { maxBalanceAfter: CREDIT_LEDGER_INTEGER_MAX },
+            )
           : null;
 
         if (!isOneTime) {

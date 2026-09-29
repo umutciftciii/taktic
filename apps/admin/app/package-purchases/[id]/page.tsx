@@ -10,6 +10,8 @@ import {
   statusLabel,
 } from '../../../lib/api';
 import { updatePackagePurchaseStatusAction } from '../actions';
+import { CREDIT_AMOUNT_MAX } from '../../../lib/credit-amount';
+import { formatCount } from '../../../lib/pagination';
 
 type AdminPackagePurchaseDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -163,6 +165,20 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
                         <br />
                         Çözüldü:{' '}
                         {attempt.resolvedAt ? formatDateTime(attempt.resolvedAt) : 'hayır'}
+                        {/*
+                          API-HARDENING-001: a genuine, matching order refused
+                          because its credits would pass the ledger's integer
+                          bound. Nothing was written; the next delivery is
+                          judged again.
+                        */}
+                        {attempt.status === 'MISMATCHED' && attempt.detail === 'CREDIT_BALANCE_LIMIT_EXCEEDED' ? (
+                          <div className="notice-warning" data-testid="webhook-credit-limit-note" style={{ marginTop: 6 }}>
+                            Ödeme doğrulandı ama kredileri bakiyenin üst sınırını ({formatCount(CREDIT_AMOUNT_MAX)}) aşacağı için
+                            yüklenmedi. Kısmi kredi yazılmadı, satın alma “Bekliyor” durumunda kaldı. Bakiye
+                            düştükten sonra sağlayıcı bildirimi yeniden gönderilirse satın alma normal şekilde
+                            tamamlanır; aksi hâlde ödemenin iadesi elle değerlendirilmelidir.
+                          </div>
+                        ) : null}
                       </div>
                     ))
                   : '-'}

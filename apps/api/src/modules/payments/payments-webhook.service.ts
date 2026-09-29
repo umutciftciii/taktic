@@ -20,6 +20,7 @@ import {
   isConcurrentModificationError,
   runSerializable,
 } from '../../common/serializable-transaction';
+import { CREDIT_LEDGER_INTEGER_MAX } from '../../common/credit-limits';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { CampaignRevokeService } from '../campaigns/engine/campaign-revoke.service';
@@ -107,7 +108,15 @@ type MismatchCode =
   | 'CURRENCY_MISMATCH'
   | 'VARIANT_MISMATCH'
   | 'ORDER_ID_MISSING'
-  | 'ORDER_ALREADY_SETTLED';
+  | 'ORDER_ALREADY_SETTLED'
+  /**
+   * API-HARDENING-001. The order is genuine and matches, but its credits would
+   * take the provider's balance past the ledger's integer column. Refused with
+   * nothing written — no ledger row, no PAID purchase, no campaign event — and,
+   * like every mismatch, recoverable: a redelivery once the balance has room
+   * settles it. Not a payload fact, so not a sign of a forged delivery.
+   */
+  | 'CREDIT_BALANCE_LIMIT_EXCEEDED';
 
 export const MANUAL_REVIEW_REASON = 'PAYMENT_REVERSAL_REPORTED';
 
@@ -576,15 +585,46 @@ export class PaymentsWebhookService implements OnModuleInit {
 
     const isOneTime = purchase.package?.type === OfferPackageType.ONE_TIME_CREDITS;
 
+    /*
+     * API-HARDENING-001: the balance bound, judged before anything is written.
+     *
+     * Returned as a mismatch rather than thrown, for the same reason every
+     * refusal above is: an exception here used to surface as a database 500,
+     * which Lemon Squeezy answers by redelivering the same event for as long as
+     * it retries — each delivery rolling back, nothing recorded. As a mismatch
+     * the refusal is one audit row, the delivery is answered 2xx, the purchase
+     * stays PENDING with no partial ledger row, and a later redelivery (after
+     * the balance has room, or a resend from the dashboard) is judged again
+     * from the top. Read in this Serializable transaction, so the balance it
+     * judges is the one the ledger row would follow.
+     */
+    if (isOneTime) {
+      const headroom = await this.credits.readCreditHeadroom(
+        tx,
+        purchase.providerId,
+        purchase.creditAmountSnapshot,
+      );
+      if (!headroom.fits) {
+        return { mismatch: 'CREDIT_BALANCE_LIMIT_EXCEEDED', purchaseId: purchase.id };
+      }
+    }
+
     const creditTransaction = isOneTime
-      ? await this.credits.createProviderCreditTransactionInTransaction(tx, {
-          providerId: purchase.providerId,
-          type: CreditTransactionType.PACKAGE_PURCHASE,
-          amount: purchase.creditAmountSnapshot,
-          reason: `Test-mode package purchase: ${purchase.packageNameSnapshot}`,
-          referenceType: 'PackagePurchase',
-          referenceId: purchase.id,
-        })
+      ? await this.credits.createProviderCreditTransactionInTransaction(
+          tx,
+          {
+            providerId: purchase.providerId,
+            type: CreditTransactionType.PACKAGE_PURCHASE,
+            amount: purchase.creditAmountSnapshot,
+            reason: `Test-mode package purchase: ${purchase.packageNameSnapshot}`,
+            referenceType: 'PackagePurchase',
+            referenceId: purchase.id,
+          },
+          // The same rule a second time, at the write. Unreachable after the
+          // check above in this transaction; kept so the write is bounded on
+          // its own terms rather than by the code in front of it.
+          { maxBalanceAfter: CREDIT_LEDGER_INTEGER_MAX },
+        )
       : null;
 
     if (!isOneTime) {

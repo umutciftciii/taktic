@@ -59,6 +59,19 @@ export function PurchaseTermsDocuments({
 }
 
 /** What a refused checkout says, keyed by the query value the action redirects with. */
+/**
+ * API-HARDENING-001: the API refuses a credit package whose credits would take
+ * the balance past the ledger's upper bound (`CREDIT_BALANCE_LIMIT_EXCEEDED`),
+ * before a payment page opens and again at settlement. Nothing is charged or
+ * loaded when it does.
+ */
+export const CREDIT_BALANCE_LIMIT_MESSAGE =
+  'Bu paketin kredileri bakiyenizin üst sınırını aşacağı için satın alma başlatılmadı; ödeme alınmadı ve kredi yüklenmedi. Bakiyenizin bir kısmını kullandıktan sonra yeniden deneyebilirsiniz.';
+
+/** The same bound, met at the mock settlement: the purchase exists and stays PENDING. */
+export const CREDIT_BALANCE_LIMIT_SETTLEMENT_MESSAGE =
+  'Ödeme tamamlanmadı: bu paketin kredileri bakiyenizin üst sınırını aşacaktı. Ödeme alınmadı ve kredi yüklenmedi; satın alma beklemede kalır ve bakiyenizin bir kısmını kullandıktan sonra yeniden deneyebilirsiniz.';
+
 export const PURCHASE_TERMS_ERROR_MESSAGES: Record<string, string> = {
   'onay-gerekli': 'Ödemeye geçmek için satın alma koşullarını onaylamanız gerekiyor.',
   guncellendi:

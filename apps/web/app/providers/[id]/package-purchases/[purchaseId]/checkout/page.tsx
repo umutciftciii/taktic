@@ -9,12 +9,13 @@ import {
 } from '../../../../../../lib/api';
 import { ProviderShell } from '../../../../provider-shell';
 import { providerStatusBadgeClass } from '../../../../provider-ui';
+import { CREDIT_BALANCE_LIMIT_SETTLEMENT_MESSAGE } from '../../purchase-terms-documents';
 import { mockPayPackagePurchaseAction } from './actions';
 
 type ProviderPackagePurchaseCheckoutPageProps = {
   params: Promise<{ id: string; purchaseId: string }>;
   /** `card`: the vitrin card a package purchase should return to once paid. */
-  searchParams: Promise<{ card?: string }>;
+  searchParams: Promise<{ card?: string; hata?: string }>;
 };
 
 export default async function ProviderPackagePurchaseCheckoutPage({
@@ -22,7 +23,7 @@ export default async function ProviderPackagePurchaseCheckoutPage({
   searchParams,
 }: ProviderPackagePurchaseCheckoutPageProps) {
   const { id, purchaseId } = await params;
-  const { card } = await searchParams;
+  const { card, hata } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/package-purchases/${purchaseId}/checkout`);
@@ -48,6 +49,12 @@ export default async function ProviderPackagePurchaseCheckoutPage({
         bir tahsilat yapılmayacaktır. Lütfen test kartı bilgilerini kullanınız. İpucu: kart numarası{' '}
         <code>0000</code> ile biterse mock ödeme deterministik olarak başarısız olur.
       </div>
+
+      {hata === 'bakiye-siniri' && purchase.status === 'PENDING' ? (
+        <p className="pdash-notice pdash-notice-warn" role="alert" data-testid="credit-balance-limit-error">
+          {CREDIT_BALANCE_LIMIT_SETTLEMENT_MESSAGE}
+        </p>
+      ) : null}
 
       <div className="pdash-detail-grid">
         <section className="pdash-detail-card">
