@@ -4,5 +4,6 @@
   "supportTicketMessageMaxLength": 2000,
   "providerReviewCommentMaxLength": 600,
   "providerReviewPublicMinCount": 3,
-  "providerReviewWindowDays": 90
+  "providerReviewWindowDays": 90,
+  "creditLedgerIntegerMax": 2147483647
 }

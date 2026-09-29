@@ -18,8 +18,14 @@
  * and read as the same number ("050" is 50, and 50 is what is shown and sent).
  */
 
-/** The largest value the ledger's `integer` column can hold. */
-export const CREDIT_AMOUNT_MAX = 2_147_483_647;
+import limits from '@taktic/shared/limits.json';
+
+/**
+ * The largest value the ledger's `integer` column can hold — for an amount and
+ * for the balance after it. From `packages/shared/limits.json`, the same number
+ * the API's DTO (`@Max`) and its manual-credit transaction read.
+ */
+export const CREDIT_AMOUNT_MAX: number = limits.creditLedgerIntegerMax;
 
 export type CreditAmountProblem = 'empty' | 'format' | 'range';
 

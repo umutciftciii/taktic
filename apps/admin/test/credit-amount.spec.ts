@@ -24,6 +24,7 @@ vi.mock('../lib/api', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
 const { submitCreditOperationAction } = await import('../app/providers/[id]/credits/actions');
+const { ApiError } = await import('../lib/api');
 const { CREDIT_OPERATION_IDLE } = await import('../app/providers/[id]/credits/credit-operation-state');
 
 describe('parseCreditAmount', () => {
@@ -85,5 +86,31 @@ describe('submitCreditOperationAction, called directly', () => {
     expect(path).toBe('/providers/provider-1/credits/deduct');
     expect(JSON.parse(init.body)).toEqual({ amount: 7, reason: 'Birim test gerekçesi' });
     expect(state).toMatchObject({ kind: 'done', operation: 'DEDUCT', amount: 7, balanceAfter: 33 });
+  });
+
+  it('explains a balance-limit refusal with the API\'s current balance, not the page\'s', async () => {
+    apiFetch.mockRejectedValue(
+      new ApiError(
+        400,
+        JSON.stringify({ code: 'CREDIT_BALANCE_LIMIT_EXCEEDED', currentBalance: CREDIT_AMOUNT_MAX - 3, maxBalance: CREDIT_AMOUNT_MAX }),
+      ),
+    );
+    const state = await submitCreditOperationAction(CREDIT_OPERATION_IDLE, form('10'));
+    expect(state).toMatchObject({ kind: 'error' });
+    const message = state.kind === 'error' ? state.message : '';
+    expect(message).toContain('üst sınırını aşardı');
+    expect(message).toContain('en fazla 3 kredi eklenebilir');
+  });
+
+  it('turns a 409 write conflict into a retry message rather than a failure page', async () => {
+    apiFetch.mockRejectedValue(new ApiError(409, JSON.stringify({ code: 'CONCURRENT_MODIFICATION' })));
+    const state = await submitCreditOperationAction(CREDIT_OPERATION_IDLE, form('10'));
+    expect(state.kind === 'error' ? state.message : '').toContain('aynı anda');
+  });
+
+  it('reads its bound from the shared limits file the API reads', async () => {
+    const limits = (await import('@taktic/shared/limits.json')).default;
+    expect(CREDIT_AMOUNT_MAX).toBe(limits.creditLedgerIntegerMax);
+    expect(CREDIT_AMOUNT_MAX).toBe(2_147_483_647);
   });
 });

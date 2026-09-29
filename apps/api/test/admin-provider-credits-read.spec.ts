@@ -332,6 +332,94 @@ describe('manual credit writes keep their own permissions', () => {
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(5);
   });
 
+  describe('the ledger integer bound (2 147 483 647)', () => {
+    const MAX = 2_147_483_647;
+
+    async function writer() {
+      return sessionWith([
+        AdminPermission.FINANCE_LEDGER_READ,
+        AdminPermission.CREDITS_GRANT,
+        AdminPermission.CREDITS_DEDUCT,
+      ]);
+    }
+
+    async function ledger(providerId: string) {
+      return ctx.prisma.providerCreditTransaction.findMany({
+        where: { providerId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, amount: true, balanceAfter: true },
+      });
+    }
+
+    it('accepts the bound itself, refuses bound + 1, and deducts normally at the top', async () => {
+      const provider = await createProviderProfile(ctx.prisma);
+      const session = await writer();
+      const send = (path: string, amount: number) =>
+        request(ctx.server)
+          .post(`/providers/${provider.id}/credits/${path}`)
+          .set('Cookie', session)
+          .send({ amount, reason: 'Faz 3B sınır testi' });
+
+      const tooLarge = await send('grant', MAX + 1);
+      expect(tooLarge.status).toBe(400);
+      expect(await ledger(provider.id)).toEqual([]);
+
+      const atBound = await send('grant', MAX);
+      expect(atBound.status).toBe(201);
+      expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(MAX);
+
+      const deducted = await send('deduct', 10);
+      expect(deducted.status).toBe(201);
+      expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(MAX - 10);
+
+      const deductTooLarge = await send('deduct', MAX + 1);
+      expect(deductTooLarge.status).toBe(400);
+      expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(MAX - 10);
+    });
+
+    it('refuses a valid grant whose sum with the balance passes the bound: 400, nothing written', async () => {
+      const provider = await createProviderProfile(ctx.prisma);
+      await grantCredits(ctx.prisma, provider.id, 5);
+      const session = await writer();
+      const before = await ledger(provider.id);
+
+      const response = await request(ctx.server)
+        .post(`/providers/${provider.id}/credits/grant`)
+        .set('Cookie', session)
+        .send({ amount: MAX - 4, reason: 'Faz 3B taşma denemesi' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({ code: 'CREDIT_BALANCE_LIMIT_EXCEEDED', currentBalance: 5, maxBalance: MAX });
+      expect(await ledger(provider.id)).toEqual(before);
+      expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(5);
+
+      // Exactly up to the bound is still a grant.
+      const fits = await request(ctx.server)
+        .post(`/providers/${provider.id}/credits/grant`)
+        .set('Cookie', session)
+        .send({ amount: MAX - 5, reason: 'Faz 3B sınıra kadar' });
+      expect(fits.status).toBe(201);
+      expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(MAX);
+    });
+
+    it('judges concurrent grants against the balance each one commits after: one lands, the other is a 400', async () => {
+      const provider = await createProviderProfile(ctx.prisma);
+      await grantCredits(ctx.prisma, provider.id, MAX - 10);
+      const session = await writer();
+      const grant = () =>
+        request(ctx.server)
+          .post(`/providers/${provider.id}/credits/grant`)
+          .set('Cookie', session)
+          .send({ amount: 6, reason: 'Faz 3B eşzamanlı ekleme' });
+
+      const statuses = (await Promise.all([grant(), grant()])).map((response) => response.status).sort();
+
+      expect(statuses).toEqual([201, 400]);
+      expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(MAX - 4);
+      expect(await ledger(provider.id)).toHaveLength(2);
+    });
+  });
+
   it('refuses both writes to a ledger reader holding neither', async () => {
     const provider = await createProviderProfile(ctx.prisma);
     const session = await sessionWith([AdminPermission.FINANCE_LEDGER_READ]);

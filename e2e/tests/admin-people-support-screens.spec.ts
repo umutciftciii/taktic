@@ -199,9 +199,40 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await expect(form.getByTestId('credit-operation-amount')).toHaveValue('20');
       await expect(form.getByTestId('credit-operation-reason')).toHaveValue('Faz 3B E2E: bayat bakiye');
       expect(await creditBalance(provider.id)).toBe(7);
-      expect(
-        await prisma().providerCreditTransaction.count({ where: { providerId: provider.id, createdById: staffId } }),
-      ).toBe(2);
+      expect(await staffRows()).toBe(2);
+
+      // The ledger's integer bound (2 147 483 647), on a stale page: elsewhere
+      // the balance climbs to the bound minus 3, this page still shows the 47
+      // of its last success (refusals do not refresh it). A grant
+      // of 10 looks fine here; the API judges it against the real balance,
+      // refuses it with a 400, nothing is written and the fields stay.
+      const MAX = 2_147_483_647;
+      await recordCreditTransaction({ providerId: provider.id, type: 'ADMIN_GRANT', amount: MAX - 10 });
+      await form.getByRole('tab', { name: 'Kredi ekle' }).click();
+      await amountInput.fill('10');
+      await form.getByTestId('credit-operation-reason').fill('Faz 3B E2E: sınır');
+      await expect(previewTotal).toHaveText('57');
+      await form.getByTestId('credit-operation-grant').click();
+      const refusal = page.getByTestId('credit-operation-error');
+      await expect(refusal).toContainText('üst sınırını aşardı');
+      await expect(refusal).toContainText('en fazla 3 kredi eklenebilir');
+      await expect(amountInput).toHaveValue('10');
+      await expect(form.getByTestId('credit-operation-reason')).toHaveValue('Faz 3B E2E: sınır');
+      expect(await creditBalance(provider.id)).toBe(MAX - 3);
+      expect(await staffRows()).toBe(2);
+
+      // Reloaded, the form knows the balance and says the limit before sending.
+      await page.reload();
+      await form.getByTestId('credit-operation-reason').fill('Faz 3B E2E: sınır');
+      await amountInput.fill('10');
+      await expect(form.getByTestId('credit-operation-overflow')).toContainText('en fazla 3 kredi eklenebilir');
+      await expect(form.getByTestId('credit-operation-grant')).toBeDisabled();
+      await amountInput.fill('3');
+      await expect(form.getByTestId('credit-operation-overflow')).toHaveCount(0);
+      await expect(previewTotal).toHaveText(String(MAX));
+      await form.getByTestId('credit-operation-grant').click();
+      await expect(page.getByTestId('credit-operation-done')).toHaveText(`3 kredi eklendi. Yeni bakiye ${MAX}.`);
+      expect(await creditBalance(provider.id)).toBe(MAX);
     } finally {
       await staff.close();
     }

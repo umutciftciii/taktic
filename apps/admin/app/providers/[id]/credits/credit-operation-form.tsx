@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from 'react';
 import { ConfirmDialog } from '../../../../components/confirm-dialog';
 import { CREDIT_AMOUNT_MAX, creditAmountProblemMessage, parseCreditAmount } from '../../../../lib/credit-amount';
+import { formatCount } from '../../../../lib/pagination';
 import { submitCreditOperationAction } from './actions';
 import {
   CREDIT_OPERATION_IDLE,
@@ -165,7 +166,11 @@ export function CreditOperationForm({
           </span>
         </div>
         {overflow ? (
-          <p className="balance-preview-warning">Bu ekleme bakiyeyi kaydedilebilecek en büyük değerin üstüne çıkarır.</p>
+          <p className="balance-preview-warning" data-testid="credit-operation-overflow">
+            Bakiye en fazla {formatCount(CREDIT_AMOUNT_MAX)} olabilir. Ekranda görünen bakiyeye göre en fazla{' '}
+            {formatCount(Math.max(0, CREDIT_AMOUNT_MAX - currentBalance))} kredi eklenebilir; işlem sunucu
+            tarafında reddedilir.
+          </p>
         ) : null}
         {overdraft ? (
           <p className="balance-preview-warning">
