@@ -110,8 +110,16 @@ test.describe('scheduled jobs', () => {
       await expect(expiryCard).toContainText('cron');
       await expect(expiryCard.locator('input:not([type="hidden"])')).toHaveCount(0);
 
-      // ---- one switch on -----------------------------------------------
+      // ---- one switch on: it asks first (ADMIN-DESIGN-001 Faz 3E) --------
       await admin.page.getByTestId('scheduler-toggle-request-expiry').click();
+      const openDialog = admin.page.getByTestId('scheduler-toggle-request-expiry-dialog');
+      await expect(openDialog).toBeVisible();
+      await expect(openDialog).toContainText('ilk çalışmasından itibaren devreye girer');
+      await openDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(openDialog).toBeHidden();
+      expect(await storedFlag('request-expiry')).toBe(false);
+      await admin.page.getByTestId('scheduler-toggle-request-expiry').click();
+      await openDialog.getByRole('button', { name: 'Evet, işi aç' }).click();
       await expect(admin.page.getByTestId('scheduler-toggle-request-expiry')).toHaveAttribute(
         'aria-checked',
         'true',
@@ -132,7 +140,7 @@ test.describe('scheduled jobs', () => {
       await expect(audit).toContainText(adminAccount.name);
       await expect(audit.locator('tbody tr')).toHaveCount(1);
 
-      // ---- off again ----------------------------------------------------
+      // ---- off again: one tap, no dialog ----------------------------------
       await admin.page.getByTestId('scheduler-toggle-request-expiry').click();
       await expect(admin.page.getByTestId('scheduler-toggle-request-expiry')).toHaveAttribute(
         'aria-checked',
@@ -171,6 +179,12 @@ test.describe('scheduled jobs', () => {
       expect(box!.x + box!.width).toBeLessThanOrEqual(320);
 
       await toggle.click();
+      // The dialog fits the phone too, and confirming is still one tap away.
+      const reminderDialog = admin.page.getByTestId('scheduler-toggle-request-reminder-dialog');
+      await expect(reminderDialog).toBeVisible();
+      const dialogBox = await reminderDialog.boundingBox();
+      expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(320);
+      await reminderDialog.getByRole('button', { name: 'Evet, işi aç' }).click();
       await expect(
         admin.page.getByTestId('scheduler-toggle-request-reminder'),
       ).toHaveAttribute('aria-checked', 'true');

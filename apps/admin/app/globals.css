@@ -7210,3 +7210,501 @@ button:disabled {
 .eligibility-reasons .is-blocking {
   color: var(--color-danger);
 }
+
+/* ── ADMIN-DESIGN-001 Faz 3E: campaigns, eligibility, operations settings ── */
+
+.campaigns-stack,
+.settings-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.popover-list {
+  display: grid;
+  gap: 4px;
+}
+
+.popover-list > span::before {
+  content: '· ';
+}
+
+/* The engine callout: a red rule while nothing can run, a neutral one while it can. */
+.engine-callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px 20px;
+  border: 1px solid var(--color-neutral-300);
+  border-left: 4px solid var(--color-neutral-500);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.engine-callout.is-off {
+  border-color: var(--color-accent-200);
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-100);
+}
+
+.engine-callout-text {
+  flex: 1 1 320px;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.engine-callout-text p {
+  margin: 0;
+}
+
+.engine-callout-title {
+  margin-bottom: 4px !important;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.engine-callout.is-off .engine-callout-title {
+  color: var(--color-accent-700);
+}
+
+.engine-callout-queue {
+  margin-top: 6px !important;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+}
+
+.engine-callout-action {
+  flex: 0 0 auto;
+}
+
+/* "Bir kampanya üç sorudan oluşur" */
+.campaign-questions {
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.campaign-questions-head,
+.data-list-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-neutral-300);
+}
+
+.campaign-questions-head h2,
+.data-list-card-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.data-list-card-head p {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.campaign-questions-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campaign-question {
+  padding: 16px 18px;
+  min-width: 0;
+}
+
+.campaign-question + .campaign-question {
+  border-left: 1px solid var(--color-neutral-300);
+}
+
+.campaign-question-step {
+  margin: 0 0 6px;
+  color: var(--color-neutral-700);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.campaign-question-title {
+  margin: 0 0 6px;
+  font-size: 14.5px;
+  font-weight: 800;
+}
+
+.campaign-question-body {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+@media (max-width: 860px) {
+  .campaign-questions-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .campaign-question + .campaign-question {
+    border-left: 0;
+    border-top: 1px solid var(--color-neutral-300);
+  }
+}
+
+/* The builder, grouped by the three questions. */
+.campaign-form-group {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 16px;
+  border-top: 2px solid var(--text);
+}
+
+.campaign-form-group-head {
+  min-width: 0;
+}
+
+/* A campaign name is free text: one long word must wrap, not widen the form. */
+.campaign-revise-heading,
+.campaign-form-group-title {
+  overflow-wrap: anywhere;
+}
+
+.campaign-form-group-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+/* The desk tables (versions, redemptions, events) in the shared list table. */
+.campaign-detail-page .data-list td,
+.campaign-detail-page .data-list th {
+  vertical-align: top;
+}
+
+.campaign-detail-page .data-list td.campaign-ops-wrap {
+  min-width: 220px;
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.campaign-detail-page .section-card:not(.is-padded) .pagination,
+.data-list-card > .pagination {
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+.campaign-ops-empty {
+  margin: 0;
+  padding: 16px 18px;
+  color: var(--color-neutral-700);
+  font-size: 13.5px;
+}
+
+/* The side column holds the lifecycle desk and a timeline: it scrolls with the page. */
+.campaign-detail-layout {
+  margin-top: 0;
+}
+
+.campaign-detail-layout .admin-side-column {
+  position: static;
+}
+
+/* Audit notes carry event keys and ids with no space in them. */
+.campaign-detail-page .timeline-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.campaign-lifecycle-panel > .section-card-title {
+  margin: 0 0 8px;
+}
+
+/* Eligibility */
+.eligibility-signal-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.eligibility-signal-list li {
+  display: grid;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 3px solid var(--color-accent-300);
+  overflow-wrap: anywhere;
+}
+
+/* Operations settings: groups of rows, each with its own control. */
+.settings-group {
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.settings-group-head {
+  padding: 16px 20px;
+  border-bottom: 2px solid var(--text);
+}
+
+.settings-group-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-group-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.settings-group-subtitle {
+  margin: 4px 0 0;
+  color: var(--color-neutral-700);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-row-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 24px;
+  align-items: start;
+  padding: 18px 20px;
+  min-width: 0;
+}
+
+.setting-row + .setting-row {
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+.setting-row-text {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.setting-row-name-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.setting-row-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.setting-row-description {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.setting-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.setting-row-meta code {
+  font-size: 12px;
+}
+
+.setting-row-warning {
+  margin: 0;
+  max-width: 72ch;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.setting-row-control {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setting-row-control {
+    justify-content: flex-start;
+  }
+}
+
+.setting-toggle-form {
+  margin: 0;
+}
+
+.setting-toggle-form .toggle {
+  cursor: pointer;
+}
+
+/* "ⓘ Kapatırsam ne olur?" */
+.what-happens {
+  max-width: 72ch;
+  font-size: 13px;
+}
+
+.what-happens summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-accent-700);
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.what-happens summary::-webkit-details-marker {
+  display: none;
+}
+
+.what-happens summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.what-happens-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--color-accent-700);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.what-happens-body {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-accent-300);
+  background: var(--color-neutral-100);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.what-happens-body p {
+  margin: 0;
+}
+
+.setting-number-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-number-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-number-field input {
+  width: 96px;
+  text-align: right;
+}
+
+.setting-number-unit {
+  color: var(--color-neutral-700);
+  font-size: 13px;
+}
+
+.setting-readonly {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.setting-readonly dt {
+  color: var(--color-neutral-700);
+  font-weight: 700;
+}
+
+.setting-readonly dd {
+  margin: 0;
+}
+
+.setting-quote {
+  max-width: 72ch;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-neutral-400);
+  background: var(--color-neutral-100);
+}
+
+.setting-quote-label {
+  margin: 0 0 2px;
+  color: var(--color-neutral-700);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.setting-quote-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.settings-notice {
+  margin: 0 0 16px;
+}
+
+.settings-audit-list {
+  display: grid;
+  gap: 0;
+}
+
+.settings-audit {
+  display: grid;
+  gap: 8px;
+  padding: 16px 20px;
+  min-width: 0;
+}
+
+.settings-audit + .settings-audit {
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+.settings-audit-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+}

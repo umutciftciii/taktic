@@ -11,13 +11,14 @@ import {
   SCHEDULER_JOB_COPY,
   SchedulerSettings,
 } from '../../lib/api';
+import { InfoPopover } from '../../components/info-popover';
 import { PageHeader } from '../../components/page-header';
-import { SectionCard } from '../../components/section-card';
 import { saveOperationsSettingsAction } from './actions';
 import { AutoPublishToggle } from './auto-publish-toggle';
 import { CampaignEngineToggle } from './campaign-engine-toggle';
 import { ProviderReviewsToggle } from './provider-reviews-toggle';
 import { SchedulerToggle } from './scheduler-toggle';
+import { AuditTable, SettingRow, SettingsGroup, switchStateLabel } from './setting-row';
 
 /**
  * The commercial terms an operator maintains, starting with the one this
@@ -36,6 +37,16 @@ import { SchedulerToggle } from './scheduler-toggle';
  * And it records who changed it. The audit list below is the platform's answer
  * to "what was the window on the third, and who set it?" — a question a
  * settings row that overwrites itself cannot answer.
+ *
+ * ADMIN-DESIGN-001 Faz 3E (design `settings`, K5): only the settings that
+ * exist are drawn — the refund window, auto-publish, reviews, the campaign
+ * engine and the scheduled jobs the API lists — each as the design's row with
+ * a state badge, what it does and a "ne olur" disclosure. The design's other
+ * rows (request lifetime, reminder day, offer price, offer cap, re-offer) are
+ * not settings in this product and are not drawn. Every row still saves on
+ * its own, behind the permission its own route asks for; there is no shared
+ * "save changes" bar. The five change lists moved together under "Neler
+ * oldu", each unchanged. Opening a job and moving the engine now ask first.
  */
 
 export const dynamic = 'force-dynamic';
@@ -116,86 +127,142 @@ export default async function OperationsSettingsPage({
     params.unviewedOfferRefundWindowHours ??
     String(settings.unviewedOfferRefundWindowHours);
 
+  const stateBadge = (enabled: boolean, testId: string) => (
+    <span className={enabled ? 'badge badge-good' : 'badge badge-muted'} data-testid={testId}>
+      {enabled ? 'Açık' : 'Kapalı'}
+    </span>
+  );
+  const defaultOff = (value: string | null) =>
+    value === null ? <span className="muted">varsayılan (kapalı)</span> : switchStateLabel(value);
+
   return (
     <main className="operations-settings-page">
       <PageHeader
-        breadcrumbs={[{ label: 'Yönetim' }, { label: 'Operasyon Ayarları' }]}
-        title="Operasyon Ayarları"
-        subtitle="Hizmet verenlere verilen ticari sözlerin yönetildiği yer."
+        title="Operasyon ayarları"
+        subtitle="Her ayar platformun kendi başına yaptığı bir işi açar, kapatır ya da ayarlar. Her satırın altında ne olacağı yazar; değişiklik kaydedildiği anda geçerli olur ve adınızla kayda geçer."
+        info={
+          <>
+            Her ayar kendi formuyla, kendi izniyle ve tek tek kaydedilir; toplu kaydetme yoktur. Görmeye yetkiniz olup
+            değiştirmeye yetkiniz olmayan bir ayarın yalnız durumu ve geçmişi görünür. Kredi miktarları, teklif sınırı ve
+            talep süreleri bu ekranda ayar değildir.
+          </>
+        }
       />
 
       {errorMessage ? (
-        <div
-          className="notice notice-error"
-          role="alert"
-          data-testid="operations-settings-error"
-          style={{ marginBottom: 12 }}
-        >
+        <div className="notice notice-error settings-notice" role="alert" data-testid="operations-settings-error">
           {errorMessage}
         </div>
       ) : null}
       {okMessage ? (
-        <div className="notice notice-success" role="status" style={{ marginBottom: 12 }}>
+        <div className="notice notice-success settings-notice" role="status" data-testid="operations-settings-ok">
           {okMessage}
         </div>
       ) : null}
 
-      <div className="admin-meta-pills">
-        <span
-          className={settings.configured ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
+      <div className="settings-stack">
+        <SettingsGroup
+          id="talep-akisi"
+          title="Talep akışı"
+          subtitle="Müşteriden gelen bir talebin hizmet verenlere ne zaman görüneceğini belirler."
         >
-          {settings.configured
-            ? 'Kayıtlı'
-            : `Varsayılan (${settings.defaultUnviewedOfferRefundWindowHours} saat)`}
-        </span>
-        {settings.updatedAt ? (
-          <span className="meta-pill">güncellenme {formatDateTime(settings.updatedAt)}</span>
-        ) : null}
-        {settings.updatedBy?.name ? (
-          <span className="meta-pill">son düzenleyen {settings.updatedBy.name}</span>
-        ) : null}
-      </div>
+          <SettingRow
+            id="otomatik-yayin"
+            testId="auto-publish"
+            name="Pazar talepleri otomatik yayınlansın"
+            badge={stateBadge(publish.enabled, 'auto-publish-state')}
+            description="Açıkken yeni talepler moderasyon beklemeden eşleşen hizmet verenlere iletilir; kapalıyken bugünkü onay akışı sürer."
+            whatHappens={{
+              question: publish.enabled ? 'Kapatırsam ne olur?' : 'Açarsam ne olur?',
+              answer: (
+                <p>
+                  Yalnız bundan sonra gönderilen talepleri etkiler: onay bekleyen bir talep kuyruğunda kalır, yayındaki
+                  bir talep geri çekilmez. Telefonu doğrulanmamış bir talep açıkken de yayınlanmaz. Hizmet verenler
+                  yayındaki bir talebi bildirebilir; bildirimler{' '}
+                  {can('REQUEST_REPORTS_READ') ? (
+                    <Link href="/requests/reports">Talep bildirimleri</Link>
+                  ) : (
+                    'Talep bildirimleri'
+                  )}{' '}
+                  kuyruğuna düşer.
+                </p>
+              ),
+            }}
+            control={canToggleAutoPublish ? <AutoPublishToggle enabled={publish.enabled} /> : null}
+          />
+        </SettingsGroup>
 
-      <div className="admin-module-layout">
-        <div className="admin-main-column">
-          <SectionCard
-            title="Kredi iadesi"
-            subtitle="Müşteri teklifi bu süre içinde görüntülemezse teklif kredisi otomatik olarak hizmet verene iade edilir."
+        <SettingsGroup
+          id="teklif-kredisi"
+          title="Teklif kredisi"
+          subtitle="Teklif veren hizmet verenin kredisinin ne zaman kendiliğinden geri döneceğini belirler."
+        >
+          <SettingRow
+            id="kredi-iadesi"
+            testId="refund-window"
+            name="Görüntülenmeyen teklif için kredi iade süresi"
+            badge={
+              <span className="badge badge-muted" data-testid="refund-window-state">
+                {settings.unviewedOfferRefundWindowHours} saat
+              </span>
+            }
+            description="Müşteri teklifi bu süre içinde görüntülemezse teklif kredisi otomatik olarak hizmet verene iade edilir."
+            meta={
+              <>
+                <span>
+                  {settings.configured
+                    ? 'Kayıtlı'
+                    : `Varsayılan (${settings.defaultUnviewedOfferRefundWindowHours} saat)`}
+                </span>
+                {settings.updatedAt ? <span>güncellenme {formatDateTime(settings.updatedAt)}</span> : null}
+                {settings.updatedBy?.name ? <span>son düzenleyen {settings.updatedBy.name}</span> : null}
+              </>
+            }
+            whatHappens={{
+              question: 'Değiştirirsem ne olur?',
+              answer: (
+                <p>
+                  Yalnız yeni teklifleri etkiler. Her teklif, oluşturulduğu andaki iade süresini ve kesin iade zamanını
+                  kendi üzerinde saklar; iade işçisi bu kaydı okur, güncel ayarı değil. Bugün{' '}
+                  {settings.defaultUnviewedOfferRefundWindowHours} saatle oluşturulmuş bir teklif, yarın bu ayar değişse
+                  bile kendi süresini korur.
+                </p>
+              ),
+            }}
+            control={
+              canWriteSettings ? (
+                <form action={saveOperationsSettingsAction} className="setting-number-form" data-testid="operations-settings-form">
+                  <label className="setting-number-field" htmlFor="refund-window-hours">
+                    <span className="sr-only">Görüntülenmeyen teklif için kredi iade süresi (saat)</span>
+                    <input
+                      id="refund-window-hours"
+                      name="unviewedOfferRefundWindowHours"
+                      type="number"
+                      required
+                      step={1}
+                      min={settings.minUnviewedOfferRefundWindowHours}
+                      max={settings.maxUnviewedOfferRefundWindowHours}
+                      defaultValue={windowHours}
+                    />
+                    <span className="setting-number-unit" aria-hidden="true">
+                      saat
+                    </span>
+                  </label>
+                  <button className="btn btn-primary btn-sm" type="submit">
+                    Kaydet
+                  </button>
+                </form>
+              ) : null
+            }
           >
             {canWriteSettings ? (
-            <form
-              action={saveOperationsSettingsAction}
-              className="compact-form"
-              data-testid="operations-settings-form"
-            >
-              <div className="compact-field-grid">
-                <label className="field field-12">
-                  <span>Görüntülenmeyen teklif için kredi iade süresi (saat) *</span>
-                  <input
-                    name="unviewedOfferRefundWindowHours"
-                    type="number"
-                    required
-                    step={1}
-                    min={settings.minUnviewedOfferRefundWindowHours}
-                    max={settings.maxUnviewedOfferRefundWindowHours}
-                    defaultValue={windowHours}
-                  />
-                  <small className="muted">
-                    Yalnız tam saat girilebilir. En az{' '}
-                    {settings.minUnviewedOfferRefundWindowHours}, en fazla{' '}
-                    {settings.maxUnviewedOfferRefundWindowHours} saat. Varsayılan{' '}
-                    {settings.defaultUnviewedOfferRefundWindowHours} saattir.
-                  </small>
-                </label>
-              </div>
-              <div className="inline-actions" style={{ marginTop: 12 }}>
-                <button className="btn btn-primary" type="submit">
-                  Kaydet
-                </button>
-              </div>
-            </form>
+              <p className="detail-muted-note">
+                Yalnız tam saat girilebilir. En az {settings.minUnviewedOfferRefundWindowHours}, en fazla{' '}
+                {settings.maxUnviewedOfferRefundWindowHours} saat. Varsayılan {settings.defaultUnviewedOfferRefundWindowHours}{' '}
+                saattir.
+              </p>
             ) : (
-              <dl className="info-grid" data-testid="operations-settings-readonly">
+              <dl className="setting-readonly" data-testid="operations-settings-readonly">
                 <div>
                   <dt>Görüntülenmeyen teklif için kredi iade süresi</dt>
                   <dd>{settings.unviewedOfferRefundWindowHours} saat</dd>
@@ -209,405 +276,222 @@ export default async function OperationsSettingsPage({
                 </div>
               </dl>
             )}
-          </SectionCard>
-
-          <SectionCard
-            title="Ayar değişiklikleri"
-            subtitle="Her değişiklikte eski değer, yeni değer, işlemi yapan yönetici ve zaman kaydedilir."
-          >
-            {settings.recentChanges.length === 0 ? (
-              <p className="muted" style={{ margin: 0 }}>
-                Henüz bir değişiklik kaydı yok.
+            <div className="setting-quote">
+              <p className="setting-quote-label">Hizmet verene gösterilen metin</p>
+              <p className="setting-quote-text" data-testid="operations-settings-notice">
+                {settings.unviewedOfferRefundNotice}
               </p>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table" data-testid="operations-settings-audit">
-                  <thead>
-                    <tr>
-                      <th>Ayar</th>
-                      <th>Eski</th>
-                      <th>Yeni</th>
-                      <th>Yönetici</th>
-                      <th>Zaman</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {settings.recentChanges.map((change) => (
-                      <tr key={change.id}>
-                        <td>{OPERATIONS_SETTING_LABELS[change.setting] ?? change.setting}</td>
-                        <td>
-                          {change.previousValue ?? (
-                            <span className="muted">
-                              varsayılan ({settings.defaultUnviewedOfferRefundWindowHours})
-                            </span>
-                          )}
-                        </td>
-                        <td>{change.newValue}</td>
-                        <td>{change.changedBy?.name ?? '-'}</td>
-                        <td>{formatDateTime(change.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            id="otomatik-yayin"
-            title="Pazar talepleri otomatik yayınlansın"
-            subtitle="Açıkken yeni talepler moderasyon beklemeden eşleşen hizmet verenlere iletilir; kapalıyken bugünkü onay akışı sürer."
-          >
-            <div className="scheduler-item-head" data-testid="auto-publish">
-              <div className="scheduler-item-text">
-                <p className="scheduler-item-impact">
-                  Yalnız bundan sonra gönderilen talepleri etkiler: onay bekleyen bir talep
-                  kuyruğunda kalır, yayındaki bir talep geri çekilmez. Telefonu doğrulanmamış bir
-                  talep açıkken de yayınlanmaz. Hizmet verenler yayındaki bir talebi bildirebilir;
-                  bildirimler{' '}
-                  {can('REQUEST_REPORTS_READ') ? (
-                    <Link href="/requests/reports">Talep bildirimleri</Link>
-                  ) : (
-                    'Talep bildirimleri'
-                  )}{' '}
-                  kuyruğuna düşer.
-                </p>
-              </div>
-              {canToggleAutoPublish ? <AutoPublishToggle enabled={publish.enabled} /> : null}
             </div>
-            <div className="scheduler-item-meta">
-              <span
-                className={publish.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
-                data-testid="auto-publish-state"
-              >
-                {publish.enabled ? 'Açık' : 'Kapalı'}
-              </span>
-            </div>
+          </SettingRow>
+        </SettingsGroup>
 
-            <h3 className="operations-subheading">Son değişiklikler</h3>
-            {publish.recentChanges.length === 0 ? (
-              <p className="muted" style={{ margin: 0 }} data-testid="auto-publish-audit-empty">
-                Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda.
-              </p>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table" data-testid="auto-publish-audit">
-                  <thead>
-                    <tr>
-                      <th>Eski</th>
-                      <th>Yeni</th>
-                      <th>Yönetici</th>
-                      <th>Zaman</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {publish.recentChanges.map((change) => (
-                      <tr key={change.id}>
-                        <td>
-                          {change.previousValue === null ? (
-                            <span className="muted">varsayılan (kapalı)</span>
-                          ) : (
-                            schedulerStateLabel(change.previousValue)
-                          )}
-                        </td>
-                        <td>{schedulerStateLabel(change.newValue)}</td>
-                        <td>{change.changedBy?.name ?? '-'}</td>
-                        <td>{formatDateTime(change.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
-
-          <SectionCard
+        <SettingsGroup
+          id="degerlendirme-ve-kampanyalar"
+          title="Değerlendirme ve kampanyalar"
+          subtitle="Müşteri değerlendirmelerinin ve otomatik kampanyaların çalışıp çalışmayacağı."
+        >
+          <SettingRow
             id="degerlendirmeler"
-            title="Hizmet veren değerlendirmeleri"
-            subtitle="Açıkken müşteri, tamamlanan işin hizmet verenini değerlendirebilir; public profil ve teklif kartlarında ortalama görünür. Kapalıyken mevcut değerlendirmeler silinmez, yalnız gizlenir."
-          >
-            <div className="scheduler-item-head" data-testid="provider-reviews">
-              <div className="scheduler-item-text">
-                <p className="scheduler-item-impact">
-                  Açıkken iş tamamlandığında müşteriye değerlendirme daveti gider ve
-                  değerlendirme geldiğinde hizmet verene haber verilir. Ortalama puan, en az üç
-                  değerlendirmesi olan hizmet verenler için gösterilir. Hizmet verenler uygunsuz bir
-                  yorumu bildirebilir; bildirimler{' '}
+            testId="provider-reviews"
+            name="Hizmet veren değerlendirmeleri"
+            badge={stateBadge(reviews.enabled, 'provider-reviews-state')}
+            description="Açıkken müşteri, tamamlanan işin hizmet verenini değerlendirebilir; public profil ve teklif kartlarında ortalama görünür. Kapalıyken mevcut değerlendirmeler silinmez, yalnız gizlenir."
+            whatHappens={{
+              question: reviews.enabled ? 'Kapatırsam ne olur?' : 'Açarsam ne olur?',
+              answer: (
+                <p>
+                  Açıkken iş tamamlandığında müşteriye değerlendirme daveti gider ve değerlendirme geldiğinde hizmet
+                  verene haber verilir. Ortalama puan, en az üç değerlendirmesi olan hizmet verenler için gösterilir.
+                  Hizmet verenler uygunsuz bir yorumu bildirebilir; bildirimler{' '}
                   {can('PROVIDER_REVIEWS_READ') ? (
                     <Link href="/provider-reviews/reports">Değerlendirme bildirimleri</Link>
                   ) : (
                     'Değerlendirme bildirimleri'
                   )}{' '}
-                  kuyruğuna
-                  düşer. Puanlar kredi, teklif sıralaması, paket ya da vitrin hakkını etkilemez.
+                  kuyruğuna düşer. Puanlar kredi, teklif sıralaması, paket ya da vitrin hakkını etkilemez. Kapalıyken
+                  müşteri değerlendirme yazamaz ve davet gönderilmez.
                 </p>
-              </div>
-              {canToggleProviderReviews ? <ProviderReviewsToggle enabled={reviews.enabled} /> : null}
-            </div>
-            <div className="scheduler-item-meta">
-              <span
-                className={reviews.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
-                data-testid="provider-reviews-state"
-              >
-                {reviews.enabled ? 'Açık' : 'Kapalı'}
-              </span>
-            </div>
-
-            <h3 className="operations-subheading">Son değişiklikler</h3>
-            {reviews.recentChanges.length === 0 ? (
-              <p className="muted" style={{ margin: 0 }} data-testid="provider-reviews-audit-empty">
-                Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda.
-              </p>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table" data-testid="provider-reviews-audit">
-                  <thead>
-                    <tr>
-                      <th>Eski</th>
-                      <th>Yeni</th>
-                      <th>Yönetici</th>
-                      <th>Zaman</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reviews.recentChanges.map((change) => (
-                      <tr key={change.id}>
-                        <td>
-                          {change.previousValue === null ? (
-                            <span className="muted">varsayılan (kapalı)</span>
-                          ) : (
-                            schedulerStateLabel(change.previousValue)
-                          )}
-                        </td>
-                        <td>{schedulerStateLabel(change.newValue)}</td>
-                        <td>{change.changedBy?.name ?? '-'}</td>
-                        <td>{formatDateTime(change.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
+              ),
+            }}
+            control={canToggleProviderReviews ? <ProviderReviewsToggle enabled={reviews.enabled} /> : null}
+          />
 
           {/*
             The campaign engine (CMP-004 S4). Off by default and read
             fail-closed by every engine path; this is its only writer. Unlike
-            the switches above it asks for an explicit confirmation, because it
-            is the one that starts promotional credit being granted.
+            the switches above it asks before it moves, because it is the one
+            that starts promotional credit being granted.
           */}
-          <SectionCard
+          <SettingRow
             id="kampanya-motoru"
-            title="Kampanya motoru"
-            subtitle="Açıkken aktif kampanyalar gerçek olaylarda (onay, kanıt, ödeme) promosyon kredisi verir; kapalıyken hiçbir olay kaydedilmez ve değerlendirilmez."
-          >
-            <div className="scheduler-item-head" data-testid="campaign-engine">
-              <div className="scheduler-item-text">
-                <p className="scheduler-item-impact">
-                  <strong>Açmak</strong> yalnız bundan sonraki olayları etkiler: motor kapalıyken
-                  olmuş bir onay, kanıt ya da ödeme için geriye dönük hak ediş üretilmez. Aktif
-                  kampanya yoksa motor açık olsa da kimseye kredi verilmez.{' '}
-                  <strong>Kapatmak</strong> yeni olay kaydını ve değerlendirmeyi durdurur; verilmiş
-                  promosyonların teklif iadesi ve ödeme iadesinde geri alınması aynen sürer.
-                  Kampanyalar{' '}
+            testId="campaign-engine"
+            name="Kampanya motoru çalışsın"
+            badge={stateBadge(engine.enabled, 'campaign-engine-state')}
+            description="Açıkken etkin kampanyalar gerçek olaylarda (onay, kanıt, ödeme) promosyon kredisi verir; kapalıyken hiçbir olay kaydedilmez ve değerlendirilmez."
+            whatHappens={{
+              question: engine.enabled ? 'Kapatırsam ne olur?' : 'Açarsam ne olur?',
+              answer: (
+                <p>
+                  <strong>Açmak</strong> yalnız bundan sonraki olayları etkiler: motor kapalıyken olmuş bir onay, kanıt ya
+                  da ödeme için geriye dönük hak ediş üretilmez. Aktif kampanya yoksa motor açık olsa da kimseye kredi
+                  verilmez. <strong>Kapatmak</strong> yeni olay kaydını ve değerlendirmeyi durdurur; verilmiş
+                  promosyonların teklif iadesi ve ödeme iadesinde geri alınması aynen sürer. Kampanyalar{' '}
                   {can('CAMPAIGNS_READ') ? <Link href="/campaigns">Kampanyalar</Link> : 'Kampanyalar'} ekranından
                   yönetilir.
                 </p>
-              </div>
-              <span
-                className={engine.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
-                data-testid="campaign-engine-state"
-              >
-                {engine.enabled ? 'Açık' : 'Kapalı'}
-              </span>
-            </div>
-            {canToggleEngine ? (
-              <CampaignEngineToggle enabled={engine.enabled} />
-            ) : (
-              <p className="muted" data-testid="campaign-engine-toggle-forbidden">
-                Motoru açma/kapama yetkiniz yok. Bu, operasyon ayarlarını düzenleme yetkisinden ayrı tutulan
-                tek anahtardır; promosyon kredisi dağıtımını başlatan karar olduğu için ayrı bir izne bağlıdır.
-              </p>
-            )}
-
-            <h3 className="operations-subheading">Son değişiklikler</h3>
-            {engine.recentChanges.length === 0 ? (
-              <p className="muted" style={{ margin: 0 }} data-testid="campaign-engine-audit-empty">
-                Henüz bir değişiklik kaydı yok; motor varsayılan (kapalı) durumda.
-              </p>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table" data-testid="campaign-engine-audit">
-                  <thead>
-                    <tr>
-                      <th>Eski</th>
-                      <th>Yeni</th>
-                      <th>Yönetici</th>
-                      <th>Zaman</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {engine.recentChanges.map((change) => (
-                      <tr key={change.id}>
-                        <td>
-                          {change.previousValue === null ? (
-                            <span className="muted">varsayılan (kapalı)</span>
-                          ) : (
-                            schedulerStateLabel(change.previousValue)
-                          )}
-                        </td>
-                        <td>{schedulerStateLabel(change.newValue)}</td>
-                        <td>{change.changedBy?.name ?? '-'}</td>
-                        <td>{formatDateTime(change.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            id="zamanlanmis-isler"
-            title="Zamanlanmış İşler"
-            subtitle="Arka plan işlerinin açık/kapalı durumu. Cron zamanları dağıtım ayarıdır ve buradan değiştirilemez."
+              ),
+            }}
+            control={canToggleEngine ? <CampaignEngineToggle enabled={engine.enabled} /> : null}
           >
-            <ul className="scheduler-list" data-testid="scheduler-list">
-              {schedulers.jobs.map((job) => {
-                const copy = SCHEDULER_JOB_COPY[job.key];
+            {canToggleEngine ? null : (
+              <p className="detail-muted-note" data-testid="campaign-engine-toggle-forbidden">
+                Motoru açma/kapama yetkiniz yok. Bu, operasyon ayarlarını düzenleme yetkisinden ayrı tutulan tek
+                anahtardır; promosyon kredisi dağıtımını başlatan karar olduğu için ayrı bir izne bağlıdır.
+              </p>
+            )}
+          </SettingRow>
+        </SettingsGroup>
 
-                return (
-                  <li className="scheduler-item" key={job.key} data-testid={`scheduler-${job.key}`}>
-                    <div className="scheduler-item-head">
-                      <div className="scheduler-item-text">
-                        <h3 className="scheduler-item-name">{copy.name}</h3>
-                        <p className="scheduler-item-impact">{copy.impact}</p>
-                      </div>
-                      {canToggleSchedulers ? (
-                        <SchedulerToggle job={job.key} jobName={copy.name} enabled={job.enabled} />
-                      ) : null}
-                    </div>
-
-                    <div className="scheduler-item-meta">
-                      <span
-                        className={
-                          job.enabled ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'
-                        }
-                        data-testid={`scheduler-state-${job.key}`}
-                      >
-                        {job.enabled ? 'Açık' : 'Kapalı'}
-                      </span>
-                      <span className="meta-pill">
+        <SettingsGroup
+          id="zamanlanmis-isler"
+          title="Zamanlanmış İşler"
+          subtitle="Arka plan işlerinin açık/kapalı durumu. Cron zamanları dağıtım ayarıdır ve buradan değiştirilemez."
+          info={
+            <InfoPopover label="Zamanlanmış işler nasıl çalışır?" size="sm">
+              Her iş kendi cron zamanında uyanır ve o anda bu ayarı okur. Açtığınız bir iş sıradaki cron çalışmasında
+              devreye girer, kapattığınız iş sıradaki çalışmada hiçbir şey yapmaz; sunucuyu yeniden başlatmanız gerekmez.
+              Ayar okunamazsa iş kapalı kabul edilir. Elle çalıştırma düğmesi bilinçli olarak yoktur. Son çalışma bilgisi
+              bu API sunucusunun belleğinde tutulur: yeniden başlatmada sıfırlanır ve birden fazla sunucu varsa her biri
+              kendi çalışmasını gösterir.
+            </InfoPopover>
+          }
+        >
+          <ul className="settings-row-list" data-testid="scheduler-list">
+            {schedulers.jobs.map((job) => {
+              const copy = SCHEDULER_JOB_COPY[job.key];
+              return (
+                <SettingRow
+                  key={job.key}
+                  as="li"
+                  testId={`scheduler-${job.key}`}
+                  name={copy.name}
+                  badge={stateBadge(job.enabled, `scheduler-state-${job.key}`)}
+                  description={copy.impact}
+                  meta={
+                    <>
+                      <span>
                         cron <code>{job.cron}</code>
                       </span>
                       {job.lastRun ? (
-                        <span className="meta-pill">
+                        <span>
                           son çalışma {formatDateTime(job.lastRun.finishedAt)} ·{' '}
                           {RUN_OUTCOME_LABELS[job.lastRun.outcome] ?? job.lastRun.outcome}
                           {job.lastRun.summary ? ` · ${job.lastRun.summary}` : ''}
                         </span>
                       ) : (
-                        <span className="meta-pill meta-pill-muted">bu sunucuda çalışmadı</span>
+                        <span>bu sunucuda çalışmadı</span>
                       )}
-                    </div>
+                    </>
+                  }
+                  // Shown before the switch is used, not after: an operator
+                  // deciding whether to flip a money job needs to read what it
+                  // will start while the switch is still off.
+                  warning={copy.confirmation}
+                  whatHappens={{
+                    question: job.enabled ? 'Kapatırsam ne olur?' : 'Açarsam ne olur?',
+                    answer: job.enabled ? (
+                      <p>Sıradaki cron çalışması hiçbir işlem yapmaz; sunucuyu yeniden başlatmaya gerek yoktur.</p>
+                    ) : (
+                      <p>İş, kendi cron zamanındaki ilk çalışmasından itibaren devreye girer.</p>
+                    ),
+                  }}
+                  control={
+                    canToggleSchedulers ? (
+                      <SchedulerToggle
+                        job={job.key}
+                        jobName={copy.name}
+                        enabled={job.enabled}
+                        consequence={
+                          <>
+                            <p>{copy.impact}</p>
+                            {copy.confirmation ? <p>{copy.confirmation}</p> : null}
+                            <p>
+                              İş, kendi cron zamanındaki (<code>{job.cron}</code>) ilk çalışmasından itibaren devreye girer.
+                              Değişiklik adınızla kayda geçer; kapatmak onay istemez.
+                            </p>
+                          </>
+                        }
+                      />
+                    ) : null
+                  }
+                />
+              );
+            })}
+          </ul>
+        </SettingsGroup>
 
-                    {/* Shown before the switch is used, not after: an operator
-                        deciding whether to flip a money job needs to read what
-                        it will start while the switch is still off. */}
-                    {copy.confirmation ? (
-                      <p className="scheduler-item-warning" role="note">
-                        {copy.confirmation}
-                      </p>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          </SectionCard>
-
-          <SectionCard
-            title="Zamanlanmış iş değişiklikleri"
-            subtitle="Her açma/kapama işleminde iş, eski durum, yeni durum, yönetici ve zaman kaydedilir."
-          >
-            {schedulers.recentChanges.length === 0 ? (
-              <p className="muted" style={{ margin: 0 }} data-testid="scheduler-audit-empty">
-                Henüz bir değişiklik kaydı yok.
-              </p>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table" data-testid="scheduler-audit">
-                  <thead>
-                    <tr>
-                      <th>İş</th>
-                      <th>Eski</th>
-                      <th>Yeni</th>
-                      <th>Yönetici</th>
-                      <th>Zaman</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {schedulers.recentChanges.map((change) => (
-                      <tr key={change.id}>
-                        <td>{OPERATIONS_SETTING_LABELS[change.setting] ?? change.setting}</td>
-                        <td>
-                          {change.previousValue === null ? (
-                            <span className="muted">varsayılan (kapalı)</span>
-                          ) : (
-                            schedulerStateLabel(change.previousValue)
-                          )}
-                        </td>
-                        <td>{schedulerStateLabel(change.newValue)}</td>
-                        <td>{change.changedBy?.name ?? '-'}</td>
-                        <td>{formatDateTime(change.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
-        </div>
-
-        <div className="admin-side-column">
-          <SectionCard title="Yalnız yeni teklifleri etkiler">
-            <p className="muted" style={{ margin: 0 }}>
-              Her teklif, oluşturulduğu andaki iade süresini ve kesin iade zamanını kendi üzerinde
-              saklar. İade işçisi bu kaydı okur, güncel ayarı değil. Bugün{' '}
-              {settings.defaultUnviewedOfferRefundWindowHours} saatle oluşturulmuş bir teklif,
-              yarın bu ayar değişse bile kendi süresini korur.
-            </p>
-          </SectionCard>
-
-          <SectionCard title="Zamanlanmış işler nasıl çalışır">
-            <p className="muted" style={{ margin: 0 }}>
-              Her iş kendi cron zamanında uyanır ve o anda bu ayarı okur. Açtığınız bir iş
-              sıradaki cron çalışmasında devreye girer, kapattığınız iş sıradaki çalışmada hiçbir
-              şey yapmaz; sunucuyu yeniden başlatmanız gerekmez. Ayar okunamazsa iş kapalı kabul
-              edilir. Cron zamanları dağıtım ayarıdır ve buradan değiştirilemez; elle çalıştırma
-              düğmesi bilinçli olarak yoktur.
-            </p>
-          </SectionCard>
-
-          <SectionCard title="Son çalışma bilgisi">
-            <p className="muted" style={{ margin: 0 }}>
-              Son çalışma bilgisi bu API sunucusunun belleğinde tutulur: yeniden başlatmada
-              sıfırlanır ve birden fazla sunucu varsa her biri kendi çalışmasını gösterir. Kalıcı
-              kayıt yalnızca yönetici değişiklikleri için tutulur.
-            </p>
-          </SectionCard>
-
-          <SectionCard title="Hizmet verene gösterilen metin">
-            <p className="muted" style={{ margin: 0 }} data-testid="operations-settings-notice">
-              {settings.unviewedOfferRefundNotice}
-            </p>
-          </SectionCard>
-        </div>
+        <SettingsGroup
+          id="neler-oldu"
+          title="Neler oldu"
+          subtitle="Her değişiklikte eski değer, yeni değer, işlemi yapan yönetici ve zaman kaydedilir. Her ayarın geçmişi ayrı tutulur."
+        >
+          <div className="settings-audit-list">
+            <AuditTable
+              title="Kredi iade süresi"
+              caption="Kredi iade süresi değişiklikleri"
+              changes={settings.recentChanges}
+              testId="operations-settings-audit"
+              emptyText="Henüz bir değişiklik kaydı yok."
+              settingLabel={(setting) => OPERATIONS_SETTING_LABELS[setting] ?? setting}
+              formatValue={(value) => value}
+              formatPrevious={(value) =>
+                value ?? <span className="muted">varsayılan ({settings.defaultUnviewedOfferRefundWindowHours})</span>
+              }
+            />
+            <AuditTable
+              title="Otomatik yayın"
+              caption="Otomatik yayın değişiklikleri"
+              changes={publish.recentChanges}
+              testId="auto-publish-audit"
+              emptyText="Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda."
+              emptyTestId="auto-publish-audit-empty"
+              formatValue={switchStateLabel}
+              formatPrevious={defaultOff}
+            />
+            <AuditTable
+              title="Hizmet veren değerlendirmeleri"
+              caption="Değerlendirme ayarı değişiklikleri"
+              changes={reviews.recentChanges}
+              testId="provider-reviews-audit"
+              emptyText="Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda."
+              emptyTestId="provider-reviews-audit-empty"
+              formatValue={switchStateLabel}
+              formatPrevious={defaultOff}
+            />
+            <AuditTable
+              title="Kampanya motoru"
+              caption="Kampanya motoru değişiklikleri"
+              changes={engine.recentChanges}
+              testId="campaign-engine-audit"
+              emptyText="Henüz bir değişiklik kaydı yok; motor varsayılan (kapalı) durumda."
+              emptyTestId="campaign-engine-audit-empty"
+              formatValue={switchStateLabel}
+              formatPrevious={defaultOff}
+            />
+            <AuditTable
+              title="Zamanlanmış işler"
+              caption="Zamanlanmış iş değişiklikleri"
+              changes={schedulers.recentChanges}
+              testId="scheduler-audit"
+              emptyText="Henüz bir değişiklik kaydı yok."
+              emptyTestId="scheduler-audit-empty"
+              settingLabel={(setting) => OPERATIONS_SETTING_LABELS[setting] ?? setting}
+              formatValue={switchStateLabel}
+              formatPrevious={defaultOff}
+            />
+          </div>
+        </SettingsGroup>
       </div>
     </main>
   );
-}
-
-/** `true`/`false` as the audit trail stores them, in the panel's own words. */
-function schedulerStateLabel(value: string): string {
-  return value === 'true' ? 'Açık' : 'Kapalı';
 }

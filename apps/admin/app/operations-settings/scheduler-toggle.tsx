@@ -1,6 +1,9 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
+import { ConfirmDialog } from '../../components/confirm-dialog';
+import { Toggle } from '../../components/toggle';
 import { toggleSchedulerAction } from './actions';
 
 /**
@@ -10,63 +13,63 @@ import { toggleSchedulerAction } from './actions';
  * inside its own form, so it works without JavaScript, and the role plus
  * `aria-checked` is what tells a screen reader that this control *is* the
  * job's state rather than an action that happens to sit next to it. The
- * accessible name carries the job's own name, so "kapalı, Paket yenileme" is
- * unambiguous with four of these on the page.
+ * accessible name is the job's own name, so it is unambiguous with six of
+ * these on the page.
  *
  * The whole payload is the job key and the state being asked for — the state is
  * computed here from what is currently true, so a double submission asks for
  * the same thing twice and the API records one change, not two.
  *
- * `useFormStatus` disables the button for the life of the submission, which is
- * the visible half of the double-submit guard; the invisible half is the API's
- * own "a write that changes nothing writes nothing".
+ * ADMIN-DESIGN-001 Faz 3E: switching a job *on* asks first (ConfirmDialog, the
+ * same switch as its trigger): the dialog says what the job will start doing
+ * at its next cron run, and — for the two money jobs — the money or credit it
+ * moves. Switching a job off stays one tap: it only stops the next run. The
+ * form, its two fields and SCHEDULERS_WRITE are unchanged.
  */
 export function SchedulerToggle({
   job,
   jobName,
   enabled,
+  consequence,
 }: {
   job: string;
   jobName: string;
   enabled: boolean;
+  /** What switching the job on starts doing; shown in the dialog. */
+  consequence: ReactNode;
 }) {
   return (
-    <form action={toggleSchedulerAction} className="scheduler-toggle-form">
+    <form action={toggleSchedulerAction} className="setting-toggle-form">
       <input type="hidden" name="job" value={job} />
       <input type="hidden" name="enabled" value={enabled ? 'false' : 'true'} />
-      <ToggleSubmit job={job} jobName={jobName} enabled={enabled} />
+      {enabled ? (
+        <OffSwitch job={job} jobName={jobName} />
+      ) : (
+        <ConfirmDialog
+          triggerLabel={jobName}
+          triggerClassName="toggle"
+          switchChecked={false}
+          tone="primary"
+          title={`“${jobName}” açılsın mı?`}
+          consequence={consequence}
+          confirmLabel="Evet, işi aç"
+          testId={`scheduler-toggle-${job}`}
+        />
+      )}
     </form>
   );
 }
 
-function ToggleSubmit({
-  job,
-  jobName,
-  enabled,
-}: {
-  job: string;
-  jobName: string;
-  enabled: boolean;
-}) {
+function OffSwitch({ job, jobName }: { job: string; jobName: string }) {
   const { pending } = useFormStatus();
-
   return (
-    <button
+    <Toggle
       type="submit"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={`${jobName}: ${enabled ? 'açık' : 'kapalı'}`}
-      className={`scheduler-switch${enabled ? ' is-on' : ''}`}
+      checked
+      label={jobName}
+      stateText={pending ? { on: 'Kaydediliyor…', off: 'Kaydediliyor…' } : undefined}
       disabled={pending}
-      aria-disabled={pending}
-      data-testid={`scheduler-toggle-${job}`}
-    >
-      <span className="scheduler-switch-track" aria-hidden="true">
-        <span className="scheduler-switch-thumb" />
-      </span>
-      <span className="scheduler-switch-label">
-        {pending ? 'Kaydediliyor…' : enabled ? 'Açık' : 'Kapalı'}
-      </span>
-    </button>
+      testId={`scheduler-toggle-${job}`}
+    />
   );
 }

@@ -175,7 +175,16 @@ test.describe('admin campaign lifecycle', () => {
 
       // ---- end: terminal ----
       await page.getByTestId('campaign-lifecycle-reason').fill('E2E: sonlandır');
+      // Ending asks first (ADMIN-DESIGN-001 Faz 3E); "Vazgeç" writes nothing.
       await page.getByTestId('campaign-end').click();
+      const endDialog = page.getByTestId('campaign-end-dialog');
+      await expect(endDialog).toBeVisible();
+      await expect(endDialog).toContainText('bir daha açılamaz');
+      await endDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(endDialog).toBeHidden();
+      expect((await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe('ACTIVE');
+      await page.getByTestId('campaign-end').click();
+      await endDialog.getByRole('button', { name: 'Evet, sonlandır' }).click();
       await expect(page).toHaveURL(/ok=end/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'ENDED');

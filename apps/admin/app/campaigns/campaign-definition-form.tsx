@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useMemo, useState } from 'react';
+import { useActionState, useId, useMemo, useState, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import type { CampaignRuleError } from '../../lib/api';
 import {
@@ -67,6 +67,7 @@ export function CampaignDefinitionForm({
   const [form, setForm] = useState<CampaignForm>(initialForm);
   const [key, setKey] = useState('');
   const [name, setName] = useState('');
+  const formId = useId();
 
   const definition = useMemo(() => buildDefinition(form), [form]);
   const definitionJson = useMemo(() => JSON.stringify(definition), [definition]);
@@ -163,250 +164,256 @@ export function CampaignDefinitionForm({
         </p>
       )}
 
-      <fieldset className="campaign-fieldset" data-testid="campaign-trigger">
-        <legend>Tetikleyici</legend>
-        <FieldErrors errors={fieldError('trigger')} />
-        <div className="campaign-radio-list" role="radiogroup" aria-label="Tetikleyici">
-          {CAMPAIGN_TRIGGER_OPTIONS.map((option) => (
-            <label key={option.value} className={`campaign-radio${form.trigger === option.value ? ' is-selected' : ''}`}>
-              <input
-                type="radio"
-                name="trigger-choice"
-                value={option.value}
-                checked={form.trigger === option.value}
-                onChange={() => setTrigger(option.value)}
-              />
-              <span>
-                <strong>{option.label}</strong>
-                <small>{option.help}</small>
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
-      <fieldset className="campaign-fieldset" data-testid="campaign-channel" data-channel={form.channel}>
-        <legend>Kanal</legend>
-        <p className="help-text">
-          Kanal, olayın kaynağından sunucuda belirlenir; istemcinin beyanı kullanılmaz. Kanal sürümün parçasıdır:
-          değiştirmek yeni bir sürüm kaydeder, çalışan sürüm yerinde değişmez.
-        </p>
-        <FieldErrors errors={fieldError('channel')} />
-        <div className="campaign-radio-list" role="radiogroup" aria-label="Kanal">
-          {CAMPAIGN_CHANNEL_OPTIONS.map((option) => (
-            <label key={option.value} className={`campaign-radio${form.channel === option.value ? ' is-selected' : ''}`}>
-              <input
-                type="radio"
-                name="channel-choice"
-                value={option.value}
-                checked={form.channel === option.value}
-                onChange={() => update('channel', option.value)}
-                data-testid={`campaign-channel-${option.value}`}
-              />
-              <span>
-                <strong>{option.label}</strong>
-                <small>{option.help}</small>
-              </span>
-            </label>
-          ))}
-        </div>
-        {form.channel === 'MOBILE' ? (
-          <div className="notice notice-warning" role="note" data-testid="campaign-channel-mobile-warning">
-            {MOBILE_CHANNEL_WARNING}
-          </div>
-        ) : null}
-      </fieldset>
-
-      {eligibility ? (
-        <fieldset className="campaign-fieldset" data-testid="campaign-facts">
-          <legend>Olgu kümesi</legend>
-          <p className="help-text">
-            Seçilen olguların tamamı ilk kez birlikte doğru olduğunda kampanya değerlendirilir ({CATALOG.factSet.min}–
-            {CATALOG.factSet.max} olgu).
-          </p>
-          <FieldErrors errors={fieldError('facts')} />
-          <div className="checkbox-group">
-            {CATALOG.facts.map((fact) => (
-              <label key={fact} className="checkbox-row">
-                <input type="checkbox" checked={form.facts.includes(fact)} onChange={() => toggleFact(fact)} />
-                {FACT_LABELS[fact]}
+      <FormGroup id={`${formId}-covers`} step="1 · Kimi kapsıyor" title="Hangi olayda, hangi hizmet verenler">
+        <fieldset className="campaign-fieldset" data-testid="campaign-trigger">
+          <legend>Tetikleyici</legend>
+          <FieldErrors errors={fieldError('trigger')} />
+          <div className="campaign-radio-list" role="radiogroup" aria-label="Tetikleyici">
+            {CAMPAIGN_TRIGGER_OPTIONS.map((option) => (
+              <label key={option.value} className={`campaign-radio${form.trigger === option.value ? ' is-selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="trigger-choice"
+                  value={option.value}
+                  checked={form.trigger === option.value}
+                  onChange={() => setTrigger(option.value)}
+                />
+                <span>
+                  <strong>{option.label}</strong>
+                  <small>{option.help}</small>
+                </span>
               </label>
             ))}
           </div>
         </fieldset>
-      ) : null}
 
-      <fieldset className="campaign-fieldset" data-testid="campaign-conditions">
-        <legend>Koşullar</legend>
-        <p className="help-text">
-          &ldquo;Zorunlu&rdquo; koşulların hepsi, &ldquo;alternatif&rdquo; koşulların en az biri sağlanmalıdır.
-          Koşul yoksa tetikleyici tek başına yeter.
-        </p>
-        <FieldErrors errors={fieldError('conditions')} />
-        {form.conditions.length === 0 ? (
-          <p className="campaign-empty-rows">Henüz koşul eklenmedi.</p>
-        ) : (
-          <ol className="campaign-condition-list">
-            {form.conditions.map((row, index) => (
-              <li key={row.id} className="campaign-condition" data-testid="campaign-condition-row">
-                <div className="campaign-condition-head">
-                  <span className="campaign-condition-index">{index + 1}</span>
-                  <label className="field campaign-condition-type">
-                    <span>Koşul</span>
-                    <select
-                      value={row.type}
-                      aria-label={`Koşul ${index + 1} türü`}
-                      onChange={(e) => updateRow(row.id, { type: e.target.value as ConditionRow['type'], args: {} })}
-                    >
-                      <option value="">Seçin…</option>
-                      {conditionOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field campaign-condition-group">
-                    <span>Grup</span>
-                    <select
-                      value={row.group}
-                      aria-label={`Koşul ${index + 1} grubu`}
-                      onChange={(e) => updateRow(row.id, { group: e.target.value as ConditionRow['group'] })}
-                    >
-                      <option value="all">Zorunlu (hepsi)</option>
-                      <option value="any">Alternatif (en az biri)</option>
-                    </select>
-                  </label>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeRow(row.id)}>
-                    Kaldır
-                  </button>
-                </div>
-                <FieldErrors errors={conditionError(row, null)} />
-                <ConditionArguments row={row} onChange={updateRowArg} errorsFor={(argument) => conditionError(row, argument)} />
-              </li>
+        <fieldset className="campaign-fieldset" data-testid="campaign-channel" data-channel={form.channel}>
+          <legend>Kanal</legend>
+          <p className="help-text">
+            Kanal, olayın kaynağından sunucuda belirlenir; istemcinin beyanı kullanılmaz. Kanal sürümün parçasıdır:
+            değiştirmek yeni bir sürüm kaydeder, çalışan sürüm yerinde değişmez.
+          </p>
+          <FieldErrors errors={fieldError('channel')} />
+          <div className="campaign-radio-list" role="radiogroup" aria-label="Kanal">
+            {CAMPAIGN_CHANNEL_OPTIONS.map((option) => (
+              <label key={option.value} className={`campaign-radio${form.channel === option.value ? ' is-selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="channel-choice"
+                  value={option.value}
+                  checked={form.channel === option.value}
+                  onChange={() => update('channel', option.value)}
+                  data-testid={`campaign-channel-${option.value}`}
+                />
+                <span>
+                  <strong>{option.label}</strong>
+                  <small>{option.help}</small>
+                </span>
+              </label>
             ))}
-          </ol>
-        )}
-        <div>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            data-testid="campaign-add-condition"
-            onClick={() => setForm((current) => ({ ...current, conditions: [...current.conditions, newConditionRow()] }))}
-          >
-            Koşul ekle
-          </button>
-        </div>
-      </fieldset>
+          </div>
+          {form.channel === 'MOBILE' ? (
+            <div className="notice notice-warning" role="note" data-testid="campaign-channel-mobile-warning">
+              {MOBILE_CHANNEL_WARNING}
+            </div>
+          ) : null}
+        </fieldset>
 
-      <fieldset className="campaign-fieldset" data-testid="campaign-benefit">
-        <legend>Fayda</legend>
-        <div className="compact-field-grid">
-          <label className="field field-4">
-            <span>Fayda türü</span>
-            <input value="Promosyon kredisi (süreli)" readOnly aria-readonly="true" />
-            <span className="help-text">Bu sürümde tek fayda türü.</span>
-          </label>
-          <NumberField
-            className="field field-4"
-            label={`Kredi * (${CATALOG.benefit.credits.min}–${CATALOG.benefit.credits.max})`}
-            name="credits"
-            value={form.credits}
-            onChange={(value) => update('credits', value)}
-            errors={fieldError('credits')}
-            testId="campaign-credits"
-          />
-          <NumberField
-            className="field field-4"
-            label={`Son kullanma (gün) * (${CATALOG.benefit.expiresInDays.min}–${CATALOG.benefit.expiresInDays.max})`}
-            name="expiresInDays"
-            value={form.expiresInDays}
-            onChange={(value) => update('expiresInDays', value)}
-            errors={fieldError('expiresInDays')}
-            testId="campaign-expires-in-days"
-          />
-        </div>
-      </fieldset>
+        {eligibility ? (
+          <fieldset className="campaign-fieldset" data-testid="campaign-facts">
+            <legend>Olgu kümesi</legend>
+            <p className="help-text">
+              Seçilen olguların tamamı ilk kez birlikte doğru olduğunda kampanya değerlendirilir ({CATALOG.factSet.min}–
+              {CATALOG.factSet.max} olgu).
+            </p>
+            <FieldErrors errors={fieldError('facts')} />
+            <div className="checkbox-group">
+              {CATALOG.facts.map((fact) => (
+                <label key={fact} className="checkbox-row">
+                  <input type="checkbox" checked={form.facts.includes(fact)} onChange={() => toggleFact(fact)} />
+                  {FACT_LABELS[fact]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
 
-      <fieldset className="campaign-fieldset" data-testid="campaign-limits">
-        <legend>Limitler ve bütçe</legend>
-        <div className="compact-field-grid">
-          <NumberField
-            className="field field-3"
-            label="Hizmet veren başına *"
-            name="maxRedemptionsPerProvider"
-            value={form.maxRedemptionsPerProvider}
-            onChange={(value) => update('maxRedemptionsPerProvider', value)}
-            errors={fieldError('maxRedemptionsPerProvider')}
-            help={`${CATALOG.limits.maxRedemptionsPerProvider.min}–${CATALOG.limits.maxRedemptionsPerProvider.max}`}
-          />
-          <NumberField
-            className="field field-3"
-            label="Toplam"
-            name="maxRedemptionsGlobal"
-            value={form.maxRedemptionsGlobal}
-            onChange={(value) => update('maxRedemptionsGlobal', value)}
-            errors={fieldError('maxRedemptionsGlobal')}
-            help="Boş = sınırsız"
-          />
-          <NumberField
-            className="field field-3"
-            label="Günlük"
-            name="maxRedemptionsPerDay"
-            value={form.maxRedemptionsPerDay}
-            onChange={(value) => update('maxRedemptionsPerDay', value)}
-            errors={fieldError('maxRedemptionsPerDay')}
-            help="Boş = sınırsız"
-          />
-          <NumberField
-            className="field field-3"
-            label="Kredi bütçesi"
-            name="budgetCredits"
-            value={form.budgetCredits}
-            onChange={(value) => update('budgetCredits', value)}
-            errors={fieldError('budgetCredits')}
-            help="Boş = sınırsız"
-          />
-          <NumberField
-            className="field field-3"
-            label="Günlük geri alma eşiği"
-            name="maxRevokesPerDay"
-            value={form.maxRevokesPerDay}
-            onChange={(value) => update('maxRevokesPerDay', value)}
-            errors={fieldError('maxRevokesPerDay')}
-            help={`Boş = kapalı; ${CATALOG.limits.maxRevokesPerDay.min}–${CATALOG.limits.maxRevokesPerDay.max}. Aşılınca kampanya kendini duraklatır (UTC günü).`}
-          />
-        </div>
-      </fieldset>
+        <fieldset className="campaign-fieldset" data-testid="campaign-conditions">
+          <legend>Koşullar</legend>
+          <p className="help-text">
+            &ldquo;Zorunlu&rdquo; koşulların hepsi, &ldquo;alternatif&rdquo; koşulların en az biri sağlanmalıdır.
+            Koşul yoksa tetikleyici tek başına yeter.
+          </p>
+          <FieldErrors errors={fieldError('conditions')} />
+          {form.conditions.length === 0 ? (
+            <p className="campaign-empty-rows">Henüz koşul eklenmedi.</p>
+          ) : (
+            <ol className="campaign-condition-list">
+              {form.conditions.map((row, index) => (
+                <li key={row.id} className="campaign-condition" data-testid="campaign-condition-row">
+                  <div className="campaign-condition-head">
+                    <span className="campaign-condition-index">{index + 1}</span>
+                    <label className="field campaign-condition-type">
+                      <span>Koşul</span>
+                      <select
+                        value={row.type}
+                        aria-label={`Koşul ${index + 1} türü`}
+                        onChange={(e) => updateRow(row.id, { type: e.target.value as ConditionRow['type'], args: {} })}
+                      >
+                        <option value="">Seçin…</option>
+                        {conditionOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field campaign-condition-group">
+                      <span>Grup</span>
+                      <select
+                        value={row.group}
+                        aria-label={`Koşul ${index + 1} grubu`}
+                        onChange={(e) => updateRow(row.id, { group: e.target.value as ConditionRow['group'] })}
+                      >
+                        <option value="all">Zorunlu (hepsi)</option>
+                        <option value="any">Alternatif (en az biri)</option>
+                      </select>
+                    </label>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeRow(row.id)}>
+                      Kaldır
+                    </button>
+                  </div>
+                  <FieldErrors errors={conditionError(row, null)} />
+                  <ConditionArguments row={row} onChange={updateRowArg} errorsFor={(argument) => conditionError(row, argument)} />
+                </li>
+              ))}
+            </ol>
+          )}
+          <div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              data-testid="campaign-add-condition"
+              onClick={() => setForm((current) => ({ ...current, conditions: [...current.conditions, newConditionRow()] }))}
+            >
+              Koşul ekle
+            </button>
+          </div>
+        </fieldset>
+      </FormGroup>
 
-      <fieldset className="campaign-fieldset" data-testid="campaign-window">
-        <legend>Zaman penceresi ve öncelik</legend>
-        <div className="compact-field-grid">
-          <label className="field field-4">
-            <span>Başlangıç (UTC)</span>
-            <input type="datetime-local" value={form.windowStartAt} onChange={(e) => update('windowStartAt', e.target.value)} aria-invalid={fieldError('windowStartAt').length > 0} />
-            <FieldErrors errors={fieldError('windowStartAt')} />
-          </label>
-          <label className="field field-4">
-            <span>Bitiş (UTC)</span>
-            <input type="datetime-local" value={form.windowEndAt} onChange={(e) => update('windowEndAt', e.target.value)} aria-invalid={fieldError('windowEndAt').length > 0} />
-            <FieldErrors errors={fieldError('windowEndAt')} />
-          </label>
-          <NumberField
-            className="field field-4"
-            label={`Öncelik * (${CATALOG.priority.min}–${CATALOG.priority.max})`}
-            name="priority"
-            value={form.priority}
-            onChange={(value) => update('priority', value)}
-            errors={fieldError('priority')}
-            help="Aynı olayda eşit kredide küçük değer kazanır."
-          />
-          <label className="field field-12">
-            <span>Stack politikası</span>
-            <input value={STACK_POLICY_LABEL} readOnly aria-readonly="true" />
-          </label>
-        </div>
-      </fieldset>
+      <FormGroup id={`${formId}-gives`} step="2 · Ne veriyor" title="Kaç promosyon kredisi, kaç gün geçerli">
+        <fieldset className="campaign-fieldset" data-testid="campaign-benefit">
+          <legend>Fayda</legend>
+          <div className="compact-field-grid">
+            <label className="field field-4">
+              <span>Fayda türü</span>
+              <input value="Promosyon kredisi (süreli)" readOnly aria-readonly="true" />
+              <span className="help-text">Bu sürümde tek fayda türü.</span>
+            </label>
+            <NumberField
+              className="field field-4"
+              label={`Kredi * (${CATALOG.benefit.credits.min}–${CATALOG.benefit.credits.max})`}
+              name="credits"
+              value={form.credits}
+              onChange={(value) => update('credits', value)}
+              errors={fieldError('credits')}
+              testId="campaign-credits"
+            />
+            <NumberField
+              className="field field-4"
+              label={`Son kullanma (gün) * (${CATALOG.benefit.expiresInDays.min}–${CATALOG.benefit.expiresInDays.max})`}
+              name="expiresInDays"
+              value={form.expiresInDays}
+              onChange={(value) => update('expiresInDays', value)}
+              errors={fieldError('expiresInDays')}
+              testId="campaign-expires-in-days"
+            />
+          </div>
+        </fieldset>
+      </FormGroup>
+
+      <FormGroup id={`${formId}-stops`} step="3 · Ne zaman duruyor" title="Limitler, bütçe ve zaman penceresi">
+        <fieldset className="campaign-fieldset" data-testid="campaign-limits">
+          <legend>Limitler ve bütçe</legend>
+          <div className="compact-field-grid">
+            <NumberField
+              className="field field-3"
+              label="Hizmet veren başına *"
+              name="maxRedemptionsPerProvider"
+              value={form.maxRedemptionsPerProvider}
+              onChange={(value) => update('maxRedemptionsPerProvider', value)}
+              errors={fieldError('maxRedemptionsPerProvider')}
+              help={`${CATALOG.limits.maxRedemptionsPerProvider.min}–${CATALOG.limits.maxRedemptionsPerProvider.max}`}
+            />
+            <NumberField
+              className="field field-3"
+              label="Toplam"
+              name="maxRedemptionsGlobal"
+              value={form.maxRedemptionsGlobal}
+              onChange={(value) => update('maxRedemptionsGlobal', value)}
+              errors={fieldError('maxRedemptionsGlobal')}
+              help="Boş = sınırsız"
+            />
+            <NumberField
+              className="field field-3"
+              label="Günlük"
+              name="maxRedemptionsPerDay"
+              value={form.maxRedemptionsPerDay}
+              onChange={(value) => update('maxRedemptionsPerDay', value)}
+              errors={fieldError('maxRedemptionsPerDay')}
+              help="Boş = sınırsız"
+            />
+            <NumberField
+              className="field field-3"
+              label="Kredi bütçesi"
+              name="budgetCredits"
+              value={form.budgetCredits}
+              onChange={(value) => update('budgetCredits', value)}
+              errors={fieldError('budgetCredits')}
+              help="Boş = sınırsız"
+            />
+            <NumberField
+              className="field field-3"
+              label="Günlük geri alma eşiği"
+              name="maxRevokesPerDay"
+              value={form.maxRevokesPerDay}
+              onChange={(value) => update('maxRevokesPerDay', value)}
+              errors={fieldError('maxRevokesPerDay')}
+              help={`Boş = kapalı; ${CATALOG.limits.maxRevokesPerDay.min}–${CATALOG.limits.maxRevokesPerDay.max}. Aşılınca kampanya kendini duraklatır (UTC günü).`}
+            />
+          </div>
+        </fieldset>
+
+        <fieldset className="campaign-fieldset" data-testid="campaign-window">
+          <legend>Zaman penceresi ve öncelik</legend>
+          <div className="compact-field-grid">
+            <label className="field field-4">
+              <span>Başlangıç (UTC)</span>
+              <input type="datetime-local" value={form.windowStartAt} onChange={(e) => update('windowStartAt', e.target.value)} aria-invalid={fieldError('windowStartAt').length > 0} />
+              <FieldErrors errors={fieldError('windowStartAt')} />
+            </label>
+            <label className="field field-4">
+              <span>Bitiş (UTC)</span>
+              <input type="datetime-local" value={form.windowEndAt} onChange={(e) => update('windowEndAt', e.target.value)} aria-invalid={fieldError('windowEndAt').length > 0} />
+              <FieldErrors errors={fieldError('windowEndAt')} />
+            </label>
+            <NumberField
+              className="field field-4"
+              label={`Öncelik * (${CATALOG.priority.min}–${CATALOG.priority.max})`}
+              name="priority"
+              value={form.priority}
+              onChange={(value) => update('priority', value)}
+              errors={fieldError('priority')}
+              help="Aynı olayda eşit kredide küçük değer kazanır."
+            />
+            <label className="field field-12">
+              <span>Stack politikası</span>
+              <input value={STACK_POLICY_LABEL} readOnly aria-readonly="true" />
+            </label>
+          </div>
+        </fieldset>
+      </FormGroup>
 
       <ResultPanel state={state} form={form} />
 
@@ -427,6 +434,25 @@ export function CampaignDefinitionForm({
 
 // ───────────────────────────── pieces ─────────────────────────────
 
+/**
+ * One of the design's three questions (ADMIN-DESIGN-001 Faz 3E), as a titled
+ * group around the fieldsets that answer it. Only a heading: the fields,
+ * their names and the definition they build are unchanged.
+ */
+function FormGroup({ id, step, title, children }: { id: string; step: string; title: string; children: ReactNode }) {
+  return (
+    <section className="campaign-form-group" aria-labelledby={id}>
+      <header className="campaign-form-group-head">
+        <p className="campaign-question-step">{step}</p>
+        <h3 className="campaign-form-group-title" id={id}>
+          {title}
+        </h3>
+      </header>
+      {children}
+    </section>
+  );
+}
+
 function SubmitButton({
   intent,
   className,
@@ -436,7 +462,7 @@ function SubmitButton({
   intent: 'validate' | 'save';
   className: string;
   testId: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const { pending } = useFormStatus();
   return (

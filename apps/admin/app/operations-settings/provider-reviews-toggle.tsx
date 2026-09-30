@@ -1,6 +1,7 @@
 'use client';
 
 import { useFormStatus } from 'react-dom';
+import { Toggle } from '../../components/toggle';
 import { toggleProviderReviewsAction } from './actions';
 
 /**
@@ -15,10 +16,13 @@ import { toggleProviderReviewsAction } from './actions';
  * The payload is only the state being asked for, computed here from what is
  * currently true, so a double submission asks for the same thing twice and
  * the API records one change.
+ *
+ * ADMIN-DESIGN-001 Faz 3E: drawn with the design's `Toggle`; still one tap —
+ * turning it off hides reviews without deleting them, and on shows them again.
  */
 export function ProviderReviewsToggle({ enabled }: { enabled: boolean }) {
   return (
-    <form action={toggleProviderReviewsAction} className="scheduler-toggle-form">
+    <form action={toggleProviderReviewsAction} className="setting-toggle-form">
       <input type="hidden" name="enabled" value={enabled ? 'false' : 'true'} />
       <ToggleSubmit enabled={enabled} />
     </form>
@@ -27,24 +31,14 @@ export function ProviderReviewsToggle({ enabled }: { enabled: boolean }) {
 
 function ToggleSubmit({ enabled }: { enabled: boolean }) {
   const { pending } = useFormStatus();
-
   return (
-    <button
+    <Toggle
       type="submit"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={`Hizmet veren değerlendirmeleri: ${enabled ? 'açık' : 'kapalı'}`}
-      className={`scheduler-switch${enabled ? ' is-on' : ''}`}
+      checked={enabled}
+      label="Hizmet veren değerlendirmeleri"
+      stateText={pending ? { on: 'Kaydediliyor…', off: 'Kaydediliyor…' } : undefined}
       disabled={pending}
-      aria-disabled={pending}
-      data-testid="provider-reviews-toggle"
-    >
-      <span className="scheduler-switch-track" aria-hidden="true">
-        <span className="scheduler-switch-thumb" />
-      </span>
-      <span className="scheduler-switch-label">
-        {pending ? 'Kaydediliyor…' : enabled ? 'Açık' : 'Kapalı'}
-      </span>
-    </button>
+      testId="provider-reviews-toggle"
+    />
   );
 }
