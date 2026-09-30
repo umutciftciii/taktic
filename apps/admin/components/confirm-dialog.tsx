@@ -26,6 +26,13 @@ type ConfirmDialogProps = {
    * still running. A pending server action disables it on its own.
    */
   disabled?: boolean;
+  /**
+   * Draws the trigger as the design's switch (`Toggle`'s track and knob,
+   * `role="switch"`, `aria-checked`) for a setting that asks before it moves.
+   * `triggerLabel` is then the switch's accessible name, and the visible text
+   * beside the track is its state.
+   */
+  switchChecked?: boolean;
   testId?: string;
 };
 
@@ -39,7 +46,10 @@ type ConfirmDialogProps = {
  * submits the same form through `requestSubmit(trigger)`, so the button's
  * name/value, React's action and `useFormStatus` all behave exactly as if the
  * button had been pressed. Cancel, Esc and a click on the backdrop close it
- * without submitting anything.
+ * without submitting anything. The one case where React would lose the
+ * button's name/value — a field named "id" in the same form — is detected and
+ * the value carried by hand (`shadowedFormId`), so the action never receives
+ * a submission without it.
  *
  * The dialog is a native `<dialog>` opened with `showModal()`: the rest of the
  * page is inert while it is open (the focus trap), Esc is the browser's own
@@ -58,6 +68,7 @@ export function ConfirmDialog({
   name,
   value,
   disabled = false,
+  switchChecked,
   testId,
 }: ConfirmDialogProps) {
   const id = useId();
@@ -91,7 +102,14 @@ export function ConfirmDialog({
   function confirm() {
     const trigger = triggerRef.current;
     close();
-    trigger?.form?.requestSubmit(trigger);
+    const form = trigger?.form;
+    if (!trigger || !form) return;
+    const carrier = shadowedFormId(form) && name ? carryValue(form, trigger, name, value ?? '') : null;
+    try {
+      form.requestSubmit(trigger);
+    } finally {
+      carrier?.remove();
+    }
   }
 
   function onBackdropClick(event: MouseEvent<HTMLDialogElement>) {
@@ -99,6 +117,8 @@ export function ConfirmDialog({
     // on its content land on a child.
     if (event.target === dialogRef.current) close();
   }
+
+  const isSwitch = switchChecked !== undefined;
 
   return (
     <>
@@ -111,10 +131,26 @@ export function ConfirmDialog({
         onClick={open}
         disabled={pending || disabled}
         aria-disabled={pending || disabled}
-        aria-haspopup="dialog"
+        // A switch names what it turns on and reads its own state; the dialog
+        // it opens is the consequence text, not a popup the role allows.
+        role={isSwitch ? 'switch' : undefined}
+        aria-checked={isSwitch ? switchChecked : undefined}
+        aria-label={isSwitch ? triggerLabel : undefined}
+        aria-haspopup={isSwitch ? undefined : 'dialog'}
         data-testid={testId}
       >
-        {triggerLabel}
+        {isSwitch ? (
+          <>
+            <span className="toggle-track" aria-hidden="true">
+              <span className="toggle-knob" />
+            </span>
+            <span className="toggle-state" aria-hidden="true">
+              {pending ? 'Kaydediliyor…' : switchChecked ? 'Açık' : 'Kapalı'}
+            </span>
+          </>
+        ) : (
+          triggerLabel
+        )}
       </button>
       <dialog
         ref={dialogRef}
@@ -152,4 +188,32 @@ export function ConfirmDialog({
       </dialog>
     </>
   );
+}
+
+/**
+ * True when a control named "id" hides the form's own `id` property.
+ *
+ * React 19 carries the pressed button's name/value into the action's
+ * FormData through a temporary input it ties to the form with
+ * `form={form.id}`. A field named "id" (`<input type="hidden" name="id">`,
+ * the panel's usual record id) makes `form.id` that element, the temporary
+ * input points at "[object HTMLInputElement]", belongs to no form, and the
+ * button's value is dropped without an error (found in Faz 3D).
+ */
+export function shadowedFormId(form: HTMLFormElement): boolean {
+  return typeof form.id !== 'string';
+}
+
+/**
+ * Puts the trigger's name/value into the form for the one synchronous
+ * submission `requestSubmit` makes — React builds its FormData inside that
+ * call — so that a shadowed `form.id` cannot drop it. Removed straight after.
+ */
+function carryValue(form: HTMLFormElement, trigger: HTMLButtonElement, name: string, value: string): HTMLInputElement {
+  const carrier = form.ownerDocument.createElement('input');
+  carrier.type = 'hidden';
+  carrier.name = name;
+  carrier.value = value;
+  trigger.before(carrier);
+  return carrier;
 }

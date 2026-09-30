@@ -89,6 +89,27 @@ test.describe('ConfirmDialog', () => {
     await expect(page.getByRole('dialog')).toBeHidden();
     await page.waitForTimeout(300);
     expect(await submissions(page)).toHaveLength(1);
+    expect(entries!.filter(([name]) => name === 'intent')).toHaveLength(1);
+  });
+
+  // Faz 3D regression: a hidden field named "id" shadows `form.id`, and React
+  // 19 then ties its temporary submitter input to "[object HTMLInputElement]"
+  // — the button's name/value used to vanish without an error.
+  test('a field named "id" in the form does not cost the button its name/value', async ({ page }) => {
+    await openHarness(page, '/confirm-shadowed');
+    await page.getByLabel('Not').fill('gerekçe');
+    await page.getByRole('button', { name: 'Sonlandır' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Evet, sonlandır' }).click();
+
+    await expect.poll(() => submissions(page)).toHaveLength(1);
+    const [entries] = await submissions(page);
+    expect(entries).toContainEqual(['id', 'rec-1']);
+    expect(entries).toContainEqual(['note', 'gerekçe']);
+    expect(entries!.filter(([name]) => name === 'intent')).toEqual([['intent', 'end']]);
+    // The carrier is gone again: the form is back to its own fields.
+    expect(await page.locator('form input[name="intent"]').count()).toBe(0);
+    await page.waitForTimeout(300);
+    expect(await submissions(page)).toHaveLength(1);
   });
 });
 

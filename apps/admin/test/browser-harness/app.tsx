@@ -158,10 +158,49 @@ function ConfirmScreen() {
   );
 }
 
+/**
+ * The Faz 3D trap, kept as a screen: a record form whose hidden field is named
+ * "id" shadows `form.id`, and React 19 then drops the pressed button's
+ * name/value. ConfirmDialog must still deliver it — once.
+ */
+function ShadowedIdScreen() {
+  const [result, setResult] = useState('-');
+
+  async function decide(formData: FormData) {
+    const entries = plainEntries(formData);
+    harness.submissions.push(entries);
+    setResult(JSON.stringify(entries));
+  }
+
+  return (
+    <main>
+      <h1>Kayıt</h1>
+      <p data-testid="result">{result}</p>
+      <form action={decide}>
+        <input type="hidden" name="id" value="rec-1" />
+        <label>
+          Not
+          <input name="note" />
+        </label>
+        <ConfirmDialog
+          triggerLabel="Sonlandır"
+          title="Kayıt sonlandırılsın mı?"
+          consequence="Bu durum kalıcıdır."
+          confirmLabel="Evet, sonlandır"
+          name="intent"
+          value="end"
+          testId="confirm-shadowed"
+        />
+      </form>
+    </main>
+  );
+}
+
 function App() {
   const path = usePath();
   if (path === '/settings') return <SettingsScreen />;
   if (path === '/confirm') return <ConfirmScreen />;
+  if (path === '/confirm-shadowed') return <ShadowedIdScreen />;
   return (
     <main>
       <h1 data-testid="page">{path}</h1>
