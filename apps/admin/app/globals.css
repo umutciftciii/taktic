@@ -1827,38 +1827,6 @@ button:disabled {
   width: 92px;
 }
 
-/* Categories module scope: tighter padding/font/row height */
-.categories-page .data-table th,
-.categories-page .data-table td {
-  padding: 11px 14px;
-  font-size: 13.5px;
-}
-
-.categories-page .data-table tbody tr {
-  height: 56px;
-}
-
-.btn-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 28px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--color-accent-300);
-  background: var(--color-accent-100);
-  color: var(--primary-dark);
-  font-size: 12px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.btn-pill:hover {
-  background: var(--color-accent-200);
-  color: var(--primary-dark);
-  text-decoration: none;
-}
-
 /* Module layout (two-column) */
 
 .admin-module-layout {
@@ -2376,13 +2344,22 @@ button:disabled {
   }
 
   .question-row > summary {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
       "label status"
       "meta action";
     row-gap: 6px;
+    /* Two columns here, not seven: the 720px floor is the desktop table's.
+       Kept, it widened the page in WebKit despite the scroll box (Faz 3F). */
+    min-width: 0;
     min-height: 0;
     padding: 12px 14px;
+  }
+
+  .question-row .q-label,
+  .question-row .q-key {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .question-row .q-order,
@@ -7707,4 +7684,245 @@ button:disabled {
   margin: 0;
   font-size: 14px;
   font-weight: 800;
+}
+
+/* ── ADMIN-DESIGN-001 Faz 3F: catalog (categories, credit packages) ── */
+
+/* A list screen's pieces sit on one rhythm. */
+.catalog-list-page > .data-list-card {
+  margin: 0 0 16px;
+}
+
+.catalog-list-page .data-list-card-head .admin-toolbar-summary {
+  margin-left: auto;
+}
+
+.catalog-list-page .data-list-card-head p {
+  flex-basis: 100%;
+}
+
+.catalog-list-page .data-list td,
+.catalog-list-page .data-list th {
+  vertical-align: top;
+}
+
+.catalog-list-page .data-list td.cat-list-thumb-cell {
+  padding-right: 0;
+}
+
+/* The tree's indent carries a rule, so a child reads as under its parent. */
+.category-tree-name[data-depth]:not([data-depth='0']) {
+  border-left: 2px solid var(--color-neutral-300);
+  margin-left: 4px;
+}
+
+.release-verdict-cell {
+  min-width: 220px;
+  max-width: 340px;
+}
+
+.release-verdict-cell .release-blocker-list {
+  display: flex;
+}
+
+/* Sıra: ↑ ↓ and the number, on one line, the number right-aligned. */
+.package-order-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.package-order-button {
+  min-width: 30px;
+  padding-inline: 6px;
+}
+
+.package-order-value {
+  min-width: 22px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+/* Form screens: the fields on the page's width, not a 640px column. */
+.catalog-form-page .catalog-stack,
+.catalog-detail-page .admin-main-column {
+  display: grid;
+  /* A shrinkable track: an opened question row holds selects as wide as
+     their longest option, and they must scroll in the question table rather
+     than widen the page. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.catalog-form-page .compact-form {
+  max-width: 1080px;
+}
+
+.catalog-page .compact-field-grid .field > span {
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+/* A field is a grid: without a shrinkable track its <select> keeps the width of
+   its longest option (a long parent or source-question name). WebKit then
+   widened the page by that width even where the box itself fit (Faz 3F). */
+.catalog-page .compact-field-grid > .field {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.catalog-page .compact-form select,
+.catalog-page .compact-form input,
+.catalog-page .compact-form textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* WebKit counts a select's chosen option text (a long parent name) in the
+   page's scrollable width even though the box fits (Faz 3F; +700px at 320px
+   on CI's Linux WebKit). Paint containment on the card body keeps anything
+   inside from reaching the page's scrollable area; the body's padding keeps
+   focus rings inside the clip. */
+.catalog-page .section-card.is-padded > .section-card-body {
+  contain: paint;
+}
+
+.catalog-page .compact-form input[type='checkbox'] {
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+}
+
+/* Detail screens: the side column scrolls with the page (it holds several cards). */
+.catalog-detail-layout {
+  margin-top: 0;
+}
+
+.catalog-detail-layout .admin-side-column {
+  position: static;
+  /* One track that may shrink: a category or package name is free text, and
+     one long word in a side card must wrap rather than widen the column. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.catalog-detail-page .section-card,
+.catalog-detail-page .detail-card-title,
+.catalog-side-body {
+  overflow-wrap: anywhere;
+}
+
+.catalog-detail-page .detail-notice {
+  margin-top: 0;
+}
+
+/* The side column's cards: the design's card, tighter. */
+.catalog-side-card .section-card-title {
+  font-size: 15px;
+}
+
+.catalog-side-card.is-warning {
+  border-color: var(--color-warning-border);
+  border-top: 3px solid var(--color-warning);
+}
+
+.catalog-side-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.catalog-side-body > p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.catalog-side-note {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.catalog-side-body > .notice {
+  margin: 0;
+}
+
+.catalog-side-form {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.catalog-side-form .detail-form-field {
+  width: 100%;
+}
+
+.catalog-side-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-neutral-800);
+}
+
+/* The invitation link, shown once: the design's ruled warning block. */
+.catalog-issued-link {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-warning-border);
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.catalog-issued-link h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.catalog-issued-link p {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.catalog-issued-link .btn {
+  justify-self: start;
+}
+
+/* Read-only values in a detail card. */
+.catalog-readonly .cat-visual-preview-card,
+.catalog-readonly .cat-visual-preview-cover {
+  max-width: 100%;
+}
+
+/* The question set and the router map sit flush in their card. */
+.catalog-detail-page .question-manager > .empty-state {
+  border: 0;
+  box-shadow: none;
+}
+
+/* Sales summary on a package. */
+.catalog-sales {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.catalog-sales .summary-strip {
+  border: 1px solid var(--color-neutral-300);
+}
+
+.catalog-sales-more {
+  display: flex;
+  justify-content: flex-end;
 }

@@ -30,6 +30,13 @@ const PACKAGE_TYPES = [
   { value: 'CATEGORY_UNLIMITED', label: 'Kategori limitsiz (30 gün)' },
 ] as const;
 
+/**
+ * A new credit package (#42). The design has no screen for it (`soon`), so it
+ * is built on the form template (ADMIN-DESIGN-001 Faz 3F): a way back to the
+ * list, the title with its ⓘ — which now carries what the side cards said —
+ * and the form, whose twelve fields, names, type rules and action are
+ * unchanged.
+ */
 export default async function NewCreditPackagePage({ searchParams }: NewCreditPackagePageProps) {
   // WRITE for the form, READ for the eligible-category list it is built from
   // (`GET /admin/offer-packages/unlimited-eligible-categories`).
@@ -69,230 +76,215 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
     : 'TRY';
 
   return (
-    <main className="credit-packages-page">
+    <main className="catalog-page catalog-form-page">
+      <Link className="detail-back" href="/credit-packages">
+        <span aria-hidden="true">‹</span> Kredi paketleri
+      </Link>
       <PageHeader
-        breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Kredi Paketleri', href: '/credit-packages' },
-          { label: 'Yeni' },
-        ]}
-        title="Yeni Kredi Paketi"
-        subtitle="Hizmet verenler için yeni bir kredi paketi tanımlayın."
+        title="Yeni kredi paketi"
+        subtitle="Hizmet verenler için yeni bir paket tanımlayın. Tür kaydedildikten sonra değiştirilemez."
+        infoLabel="Paket nasıl oluşturulur?"
+        info={
+          <span className="popover-list">
+            <span>Kısa ad (slug) benzersizdir; aynı kısa adla ikinci paket oluşturulamaz.</span>
+            <span>Fiyat lira olarak, kuruş için virgülle girilir; örn. 149,90 veya 1.500.</span>
+            <span>Sıralama değeri küçük olan üstte görünür; eşit değerlerde isme göre alfabetik sıralanır.</span>
+            <span>Pasif paketler hizmet veren akışında listelenmez ancak silinmez.</span>
+            <span>Paket oluşturulduktan sonra detay ekranında satış özetini ve durumunu yönetebilirsiniz.</span>
+          </span>
+        }
       />
 
       {errorMessage ? (
-        <div className="notice notice-error" role="alert" style={{ marginBottom: 12 }}>
+        <div className="notice notice-error detail-notice" role="alert">
           {errorMessage}
         </div>
       ) : null}
 
-      <div className="admin-module-layout">
-        <div className="admin-main-column">
-          <SectionCard
-            title="Paket bilgileri"
-            subtitle="Listede ve provider satın alma akışında görünecek alanlar."
-          >
-            <form action={createCreditPackageAction} className="compact-form">
-              <div className="compact-field-grid">
-                <label className="field field-8">
-                  <span>İsim *</span>
-                  <input
-                    name="name"
-                    required
-                    defaultValue={draft.name}
-                    autoFocus
-                    maxLength={120}
-                  />
-                </label>
-                <label className="field field-4">
-                  <span>Sıralama</span>
-                  <input
-                    name="sortOrder"
-                    type="number"
-                    min="0"
-                    step="1"
-                    defaultValue={draft.sortOrder}
-                  />
-                  <span className="help-text">Küçük değer üstte görünür.</span>
-                </label>
+      <div className="catalog-stack">
+        <SectionCard
+          title="Paket bilgileri"
+          subtitle="Listede ve hizmet verenin satın alma akışında görünecek alanlar."
+        >
+          <form action={createCreditPackageAction} className="compact-form">
+            <div className="compact-field-grid">
+              <label className="field field-8">
+                <span>Paket adı *</span>
+                <input
+                  name="name"
+                  required
+                  defaultValue={draft.name}
+                  autoFocus
+                  maxLength={120}
+                />
+              </label>
+              <label className="field field-4">
+                <span>Sıralama</span>
+                <input
+                  name="sortOrder"
+                  type="number"
+                  min="0"
+                  step="1"
+                  defaultValue={draft.sortOrder}
+                />
+                <span className="help-text">Küçük değer üstte görünür.</span>
+              </label>
 
-                <label className="field field-6">
-                  <span>Slug *</span>
-                  <input
-                    name="slug"
-                    required
-                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                    placeholder="ornek-paket"
-                    defaultValue={draft.slug}
-                  />
-                  <span className="help-text">Yalnızca küçük harf, rakam ve tire (-).</span>
-                </label>
-                <label className="field field-3">
-                  <span>Paket türü *</span>
-                  <select name="type" defaultValue={draft.type} required>
-                    {PACKAGE_TYPES.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+              <label className="field field-6">
+                <span>Kısa ad (slug) *</span>
+                <input
+                  name="slug"
+                  required
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  placeholder="ornek-paket"
+                  defaultValue={draft.slug}
+                />
+                <span className="help-text">Yalnızca küçük harf, rakam ve tire (-).</span>
+              </label>
+              <label className="field field-3">
+                <span>Paket türü *</span>
+                <select name="type" defaultValue={draft.type} required>
+                  {PACKAGE_TYPES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="help-text">
+                  Tür sonradan değiştirilemez. Dönemsel paketler satın alma anından itibaren
+                  tam 30 gün sürer; takvim ayı kullanılmaz.
+                </span>
+              </label>
+              <label className="field field-3">
+                <span>Kredi (tek seferlik paket)</span>
+                <input
+                  name="creditAmount"
+                  type="number"
+                  min="1"
+                  step="1"
+                  defaultValue={draft.creditAmount || '1'}
+                />
+                <span className="help-text">
+                  Yalnızca tek seferlik kredi paketlerinde kullanılır.
+                </span>
+              </label>
+              <label className="field field-3">
+                <span>Aylık kota (kredi)</span>
+                <input
+                  name="quotaCredits"
+                  type="number"
+                  min="1"
+                  step="1"
+                  defaultValue={draft.quotaCredits}
+                />
+                <span className="help-text">
+                  Yalnızca aylık kota paketlerinde. Kullanılmayan kota dönem sonunda devretmez.
+                </span>
+              </label>
+              <label className="field field-3">
+                <span>Günlük teklif limiti</span>
+                <input
+                  name="dailyOfferLimit"
+                  type="number"
+                  min="0"
+                  step="1"
+                  defaultValue={draft.dailyOfferLimit || '0'}
+                />
+                <span className="help-text">
+                  Yalnızca limitsiz paketlerde. 0 = günlük sınır yok.
+                </span>
+              </label>
+              <label className="field field-12">
+                <span>Limitsiz paket kapsamı</span>
+                {eligibleCategories.length === 0 ? (
                   <span className="help-text">
-                    Tür sonradan değiştirilemez. Dönemsel paketler satın alma anından itibaren
-                    tam 30 gün sürer; takvim ayı kullanılmaz.
+                    Limitsiz paket kapsamına açılmış kategori yok. Kategori yönetiminden
+                    &ldquo;limitsiz paket uygunluğu&rdquo;nu açtığınız kategoriler burada
+                    listelenir. Regüle veya yüksek değerli kategoriler varsayılan olarak
+                    kapalıdır.
                   </span>
-                </label>
-                <label className="field field-3">
-                  <span>Kredi (tek seferlik paket)</span>
-                  <input
-                    name="creditAmount"
-                    type="number"
-                    min="1"
-                    step="1"
-                    defaultValue={draft.creditAmount || '1'}
-                  />
-                  <span className="help-text">
-                    Yalnızca tek seferlik kredi paketlerinde kullanılır.
-                  </span>
-                </label>
-                <label className="field field-3">
-                  <span>Aylık kota (kredi)</span>
-                  <input
-                    name="quotaCredits"
-                    type="number"
-                    min="1"
-                    step="1"
-                    defaultValue={draft.quotaCredits}
-                  />
-                  <span className="help-text">
-                    Yalnızca aylık kota paketlerinde. Kullanılmayan kota dönem sonunda devretmez.
-                  </span>
-                </label>
-                <label className="field field-3">
-                  <span>Günlük teklif limiti</span>
-                  <input
-                    name="dailyOfferLimit"
-                    type="number"
-                    min="0"
-                    step="1"
-                    defaultValue={draft.dailyOfferLimit || '0'}
-                  />
-                  <span className="help-text">
-                    Yalnızca limitsiz paketlerde. 0 = günlük sınır yok.
-                  </span>
-                </label>
-                <label className="field field-12">
-                  <span>Limitsiz paket kapsamı</span>
-                  {eligibleCategories.length === 0 ? (
+                ) : (
+                  <>
+                    <select
+                      name="scopeCategoryIds"
+                      multiple
+                      size={Math.min(8, eligibleCategories.length)}
+                      defaultValue={[...selectedScope]}
+                    >
+                      {eligibleCategories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                          {category.kind === 'GROUP' ? ' (grup)' : ''}
+                          {category.status === 'DRAFT' ? ' — taslak' : ''}
+                        </option>
+                      ))}
+                    </select>
                     <span className="help-text">
-                      Limitsiz paket kapsamına açılmış kategori yok. Kategori yönetiminden
-                      &ldquo;limitsiz paket uygunluğu&rdquo;nu açtığınız kategoriler burada
-                      listelenir. Regüle veya yüksek değerli kategoriler varsayılan olarak
-                      kapalıdır.
+                      Yalnızca limitsiz paketlerde kullanılır. Bir grup seçtiğinizde satın alma
+                      anındaki alt kategorileri de kapsanır ve bu kapsam o satın alma için
+                      dondurulur.
                     </span>
-                  ) : (
-                    <>
-                      <select
-                        name="scopeCategoryIds"
-                        multiple
-                        size={Math.min(8, eligibleCategories.length)}
-                        defaultValue={[...selectedScope]}
-                      >
-                        {eligibleCategories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                            {category.kind === 'GROUP' ? ' (grup)' : ''}
-                            {category.status === 'DRAFT' ? ' — taslak' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="help-text">
-                        Yalnızca limitsiz paketlerde kullanılır. Bir grup seçtiğinizde satın alma
-                        anındaki alt kategorileri de kapsanır ve bu kapsam o satın alma için
-                        dondurulur.
-                      </span>
-                    </>
-                  )}
-                </label>
-                <label className="field field-3">
-                  <span>Para birimi *</span>
-                  <select name="currency" defaultValue={selectedCurrency} required>
-                    {CURRENCIES.map((cur) => (
-                      <option key={cur} value={cur}>
-                        {cur}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  </>
+                )}
+              </label>
+              <label className="field field-3">
+                <span>Para birimi *</span>
+                <select name="currency" defaultValue={selectedCurrency} required>
+                  {CURRENCIES.map((cur) => (
+                    <option key={cur} value={cur}>
+                      {cur}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                <label className="field field-6">
-                  <span>Fiyat *</span>
-                  <input
-                    name="priceAmount"
-                    type="text"
-                    inputMode="decimal"
-                    pattern="([0-9]{1,3}(\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
-                    placeholder="Örn. 149,90"
-                    required
-                    defaultValue={draft.priceAmount}
-                  />
-                  <span className="help-text">
-                    Kuruş için virgül kullanın. Örn: 149,90 {selectedCurrency} veya 1.500.
-                  </span>
-                </label>
-                <label className="field field-6">
-                  <span>Durum</span>
-                  <select name="isActive" defaultValue={String(draft.isActive)}>
-                    <option value="true">Aktif (satışa açık)</option>
-                    <option value="false">Pasif (satışa kapalı)</option>
-                  </select>
-                  <span className="help-text">
-                    Pasif paketler yeni satın alıma kapanır, mevcut satın almaları etkilemez.
-                  </span>
-                </label>
+              <label className="field field-6">
+                <span>Fiyat *</span>
+                <input
+                  name="priceAmount"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="([0-9]{1,3}(\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
+                  placeholder="Örn. 149,90"
+                  required
+                  defaultValue={draft.priceAmount}
+                />
+                <span className="help-text">
+                  Kuruş için virgül kullanın. Örn: 149,90 {selectedCurrency} veya 1.500.
+                </span>
+              </label>
+              <label className="field field-6">
+                <span>Durum</span>
+                <select name="isActive" defaultValue={String(draft.isActive)}>
+                  <option value="true">Aktif (satışa açık)</option>
+                  <option value="false">Pasif (satışa kapalı)</option>
+                </select>
+                <span className="help-text">
+                  Pasif paketler yeni satın alıma kapanır, mevcut satın almaları etkilemez.
+                </span>
+              </label>
 
-                <label className="field">
-                  <span>Açıklama</span>
-                  <textarea
-                    name="description"
-                    placeholder="Paketi tanıtacak kısa metin (opsiyonel)."
-                    defaultValue={draft.description}
-                    maxLength={500}
-                  />
-                </label>
-              </div>
+              <label className="field">
+                <span>Açıklama</span>
+                <textarea
+                  name="description"
+                  placeholder="Paketi tanıtacak kısa metin (opsiyonel)."
+                  defaultValue={draft.description}
+                  maxLength={500}
+                />
+              </label>
+            </div>
 
-              <div className="compact-actions">
-                <button className="btn btn-primary btn-sm" type="submit">
-                  Paketi oluştur
-                </button>
-                <Link className="btn btn-secondary btn-sm" href="/credit-packages">
-                  Vazgeç
-                </Link>
-              </div>
-            </form>
-          </SectionCard>
-        </div>
-
-        <aside className="admin-side-column">
-          <div className="helper-card">
-            <h4>Hızlı ipuçları</h4>
-            <p>Paket oluştururken aklınızda bulundurun:</p>
-            <ul>
-              <li>Slug benzersizdir; aynı slug ile ikinci paket oluşturulamaz.</li>
-              <li>Fiyat lira olarak, kuruş için virgülle girilir; örn. 149,90 veya 1.500.</li>
-              <li>Sıralama değeri küçük olan üstte görünür; eşit değerlerde isme göre alfabetik sıralanır.</li>
-              <li>Pasif paketler provider akışında listelenmez ancak silinmez.</li>
-            </ul>
-          </div>
-
-          <div className="admin-action-panel">
-            <h3>Sıradaki adım</h3>
-            <p>
-              Paket oluşturulduktan sonra detay sayfasında satış özetini ve durum değişikliklerini
-              yönetebilirsiniz.
-            </p>
-          </div>
-        </aside>
+            <div className="compact-actions">
+              <button className="btn btn-primary btn-sm" type="submit">
+                Paketi oluştur
+              </button>
+              <Link className="btn btn-secondary btn-sm" href="/credit-packages">
+                Vazgeç
+              </Link>
+            </div>
+          </form>
+        </SectionCard>
       </div>
     </main>
   );

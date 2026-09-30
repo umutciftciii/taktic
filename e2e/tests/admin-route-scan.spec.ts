@@ -135,6 +135,12 @@ const CONVERTED_ROUTES = [
   '/promotion-eligibility',
   '/promotion-eligibility/[eventId]',
   '/operations-settings',
+  '/categories',
+  '/categories/new',
+  '/categories/[slug]',
+  '/credit-packages',
+  '/credit-packages/new',
+  '/credit-packages/[id]',
 ];
 
 const STATIC_ROUTES = [

@@ -1,16 +1,40 @@
 import Link from 'next/link';
-import {
-  apiFetch,
-  AdminOfferPackage,
-  formatDateTime,
-  formatPrice,
-  requireAdmin,
-} from '../../lib/api';
-import { PageHeader } from '../../components/page-header';
+import { apiFetch, AdminOfferPackage, formatDateTime, formatPrice, requireAdmin } from '../../lib/api';
+import { buildHref } from '../../lib/list-query';
+import { formatCount } from '../../lib/pagination';
+import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
+import { FilterBar, FilterField } from '../../components/filter-bar';
+import { PageHeader } from '../../components/page-header';
+import { WholeListFooter } from '../../components/pagination';
 import { moveCreditPackageAction, updateCreditPackageStatusAction } from './actions';
+import {
+  CREDIT_PACKAGES_SCREEN_INFO,
+  PackageOrderCell,
+  PackageStatusForm,
+  packageAllowance,
+  packageTypeLabel,
+} from './credit-package-cells';
+
+/**
+ * Kredi paketleri (#41), design `list:creditPackages` (paket 2
+ * `37-kredi-paketleri`, ADMIN-DESIGN-001 Faz 3F).
+ *
+ * The design's list template with every control the screen had: Sıra ↑/↓
+ * (CREDIT_PACKAGES_WRITE), Aktifleştir / Pasifleştir on the row
+ * (CREDIT_PACKAGES_STATUS), all three package types with their scope, period
+ * and daily cap, and the currency column (K7). "Aç" opens the package; the
+ * form there is the one edit surface.
+ *
+ * Not drawn: the design's "en çok satan" (it would need the purchase list,
+ * a separate read behind PACKAGE_PURCHASES_READ, for a screen that is about
+ * the catalogue), its Tarih filter (a package has no date the list filters on)
+ * and Önceki / Sonraki (the API returns every package).
+ */
 
 type StatusFilter = 'all' | 'active' | 'inactive';
+
+const PATH = '/credit-packages';
 
 type AdminCreditPackagesPageProps = {
   searchParams: Promise<{
@@ -34,24 +58,25 @@ function normalizeStatusFilter(value: string | undefined): StatusFilter {
   return 'all';
 }
 
-const PACKAGE_TYPE_LABEL: Record<string, string> = {
-  ONE_TIME_CREDITS: 'Tek seferlik kredi',
-  MONTHLY_QUOTA: 'Aylık kota',
-  CATEGORY_UNLIMITED: 'Kategori limitsiz',
-};
-
 function canonicalSort(packages: AdminOfferPackage[]) {
   return [...packages].sort(
-    (a, b) =>
-      a.sortOrder - b.sortOrder ||
-      a.name.localeCompare(b.name, 'tr-TR') ||
-      a.id.localeCompare(b.id),
+    (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'tr-TR') || a.id.localeCompare(b.id),
   );
 }
 
-export default async function AdminCreditPackagesPage({
-  searchParams,
-}: AdminCreditPackagesPageProps) {
+const COLUMNS: DataColumn[] = [
+  { key: 'order', label: 'Sıra', align: 'end' },
+  { key: 'package', label: 'Paket' },
+  { key: 'type', label: 'Tür' },
+  { key: 'credits', label: 'Kredi / kota', align: 'end' },
+  { key: 'price', label: 'Fiyat', align: 'end' },
+  { key: 'currency', label: 'Para birimi' },
+  { key: 'status', label: 'Durum' },
+  { key: 'updated', label: 'Güncellenme' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
+
+export default async function AdminCreditPackagesPage({ searchParams }: AdminCreditPackagesPageProps) {
   const { can } = await requireAdmin('CREDIT_PACKAGES_READ');
   // `/credit-packages/new` gates on CREDIT_PACKAGES_READ + WRITE; reordering is a
   // PATCH (WRITE); the status toggle is its own permission.
@@ -63,7 +88,7 @@ export default async function AdminCreditPackagesPage({
   const errorMessage = (params.error ?? '').trim();
   const okKey = (params.ok ?? '').trim();
   const partialFailure = params.partial === '1';
-  const okMessage = okKey ? OK_MESSAGES[okKey] ?? null : null;
+  const okMessage = okKey ? (OK_MESSAGES[okKey] ?? null) : null;
 
   // The admin listing: every package of every type, with its category scope.
   // The public `/credit-packages` route deliberately returns only the one-time
@@ -86,257 +111,177 @@ export default async function AdminCreditPackagesPage({
   const totalActive = packages.filter((pkg) => pkg.isActive).length;
   const totalInactive = packages.length - totalActive;
   const hasFilters = query.length > 0 || status !== 'all';
+  const filterParams = { q: query, status: status === 'all' ? '' : status };
+
+  const newPackageLink = canWrite ? (
+    <Link className="btn btn-primary" href="/credit-packages/new" data-testid="credit-package-new-link">
+      Yeni paket ekle
+    </Link>
+  ) : undefined;
 
   return (
-    <main className="credit-packages-page">
+    <main className="catalog-page catalog-list-page">
       <PageHeader
-        title="Kredi Paketleri"
-        subtitle="Hizmet verenlere satılan paketleri yönetin. Pasifleştirilen paketler yeni satışa kapanır, mevcut satın almaları etkilemez."
-        actions={
-          canWrite ? (
-            <Link className="btn btn-primary btn-sm" href="/credit-packages/new">
-              Yeni Paket
-            </Link>
-          ) : undefined
+        title="Kredi paketleri"
+        subtitle={
+          packages.length === 0
+            ? 'Henüz paket yok'
+            : `${formatCount(totalActive)} paket satışta · ${formatCount(totalInactive)} pasif`
         }
+        info={CREDIT_PACKAGES_SCREEN_INFO}
+        actions={newPackageLink}
       />
 
       {errorMessage ? (
-        <div className="notice notice-error" role="alert" style={{ marginBottom: 12 }}>
+        <div className="notice notice-error detail-notice" role="alert">
           {errorMessage}
-          {partialFailure ? (
-            <> Sıra takasının ikinci adımı tamamlanmadı; listeyi yenileyip tekrar deneyin.</>
-          ) : null}
+          {partialFailure ? <> Sıra takasının ikinci adımı tamamlanmadı; listeyi yenileyip tekrar deneyin.</> : null}
         </div>
       ) : null}
       {okMessage ? (
-        <div className="notice notice-success" role="status" style={{ marginBottom: 12 }}>
+        <div className="notice notice-success detail-notice" role="status">
           {okMessage}
         </div>
       ) : null}
 
-      <form className="admin-toolbar" method="get" action="/credit-packages">
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="package-search">Ara</label>
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        label="Kredi paketi filtreleri"
+        testId="credit-package-filters"
+      >
+        <FilterField label="Ara" htmlFor="package-search" wide>
           <input
             id="package-search"
             name="q"
             type="search"
-            placeholder="Paket adı veya slug"
+            placeholder="Paket adı veya kısa ad"
             defaultValue={query}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="package-status">Durum</label>
+        </FilterField>
+        <FilterField label="Durum" htmlFor="package-status">
           <select id="package-status" name="status" defaultValue={status}>
             <option value="all">Tümü</option>
             <option value="active">Aktif</option>
             <option value="inactive">Pasif</option>
           </select>
-        </div>
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">
-            {filtered.length} / {packages.length} kayıt · {totalActive} aktif · {totalInactive} pasif
-          </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/credit-packages">
-              Sıfırla
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
 
-      <div className="table-card">
-        <div className="table-header">
-          <div className="table-header-text">
-            <h2>Paket listesi</h2>
-            <p className="table-header-sub">
-              Sıra mikro butonlarıyla yer değiştirebilir. Düzenlemek için paket adına tıklayın.
-            </p>
-          </div>
-          <span className="admin-toolbar-summary">{filtered.length} kayıt</span>
-        </div>
+      <section className="data-list-card" aria-labelledby="credit-package-list-title">
+        <header className="data-list-card-head">
+          <h2 id="credit-package-list-title">Paket listesi</h2>
+          <p className="cell-muted">
+            {canWrite
+              ? 'Sıra oklarıyla bir paketi komşusuyla yer değiştirirsiniz; sıra filtreden bağımsız, tüm paketler üzerindedir.'
+              : 'Paketler hizmet verene bu sırayla listelenir.'}
+          </p>
+        </header>
 
         {filtered.length === 0 ? (
-          <div style={{ padding: 18 }}>
-            {packages.length === 0 ? (
-              <EmptyState
-                title="Henüz paket yok."
-                description="İlk paketinizi oluşturduğunuzda burada listelenecek."
-                action={
-                  canWrite ? (
-                    <Link className="btn btn-primary btn-sm" href="/credit-packages/new">
-                      Yeni Paket
-                    </Link>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <EmptyState
-                title="Filtrelere uygun paket bulunamadı."
-                description="Aramayı daraltabilir veya filtreleri temizleyebilirsiniz."
-                action={
-                  <Link className="btn btn-secondary btn-sm" href="/credit-packages">
-                    Filtreleri temizle
-                  </Link>
-                }
-              />
-            )}
-          </div>
+          packages.length === 0 ? (
+            <EmptyState
+              title="Henüz paket yok."
+              description="İlk paketinizi oluşturduğunuzda burada listelenecek."
+              action={newPackageLink}
+            />
+          ) : (
+            <EmptyState
+              title="Filtrelere uygun paket bulunamadı."
+              description="Aramayı daraltabilir veya filtreleri temizleyebilirsiniz."
+              action={
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
+                  Filtreleri temizle
+                </Link>
+              }
+            />
+          )
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th className="col-num">Sıra</th>
-                  <th>Paket</th>
-                  <th>Tür</th>
-                  <th className="col-num">Kredi / kota</th>
-                  <th className="col-num">Fiyat</th>
-                  <th>Para birimi</th>
-                  <th>Durum</th>
-                  <th>Güncellenme</th>
-                  <th className="col-actions">İşlem</th>
+          <DataTable caption="Kredi paketleri" columns={COLUMNS} minWidth={1060} testId="credit-package-table">
+            {filtered.map((pkg) => {
+              const position = positionById.get(pkg.id) ?? 0;
+              return (
+                <tr key={pkg.id} data-testid="credit-package-row" data-package-id={pkg.id}>
+                  <td className="is-num">
+                    <PackageOrderCell
+                      pkg={pkg}
+                      canWrite={canWrite}
+                      isFirst={position === 0}
+                      isLast={position === canonical.length - 1}
+                      moveAction={moveCreditPackageAction}
+                    />
+                  </td>
+                  <td>
+                    <div className="cell-stack">
+                      <Link
+                        className="cell-link cell-break"
+                        href={`/credit-packages/${pkg.id}`}
+                        id={`credit-package-name-${pkg.id}`}
+                      >
+                        <strong>{pkg.name}</strong>
+                      </Link>
+                      <code className="cell-muted cell-break">{pkg.slug}</code>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="cell-stack">
+                      <span>{packageTypeLabel(pkg.type)}</span>
+                      {pkg.type === 'CATEGORY_UNLIMITED' ? (
+                        <span className="cell-muted cell-break">
+                          {pkg.scopeCategories.length > 0
+                            ? pkg.scopeCategories.map((scope) => scope.category.name).join(', ')
+                            : 'Kapsam tanımsız'}
+                        </span>
+                      ) : null}
+                      {pkg.periodDays ? <span className="cell-muted">{pkg.periodDays} gün geçerli</span> : null}
+                    </div>
+                  </td>
+                  <td className="is-num">
+                    <strong>{packageAllowance(pkg)}</strong>
+                    {pkg.type === 'CATEGORY_UNLIMITED' && pkg.dailyOfferLimit ? (
+                      <div className="cell-muted">günlük {pkg.dailyOfferLimit}</div>
+                    ) : null}
+                  </td>
+                  <td className="is-num">
+                    <strong>{formatPrice(pkg.priceAmount, pkg.currency)}</strong>
+                  </td>
+                  <td>{pkg.currency}</td>
+                  <td>
+                    <span className={pkg.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+                      {pkg.isActive ? 'Aktif' : 'Pasif'}
+                    </span>
+                  </td>
+                  <td className="cell-nowrap">{formatDateTime(pkg.updatedAt)}</td>
+                  <td className="col-actions">
+                    <div className="inline-actions">
+                      <Link
+                        className="btn btn-secondary btn-sm"
+                        href={`/credit-packages/${pkg.id}`}
+                        aria-describedby={`credit-package-name-${pkg.id}`}
+                      >
+                        Aç
+                      </Link>
+                      {canChangeStatus ? (
+                        <PackageStatusForm pkg={pkg} redirectTo={PATH} action={updateCreditPackageStatusAction} />
+                      ) : null}
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map((pkg) => {
-                  const position = positionById.get(pkg.id) ?? 0;
-                  const isFirst = position === 0;
-                  const isLast = position === canonical.length - 1;
-                  return (
-                    <tr key={pkg.id}>
-                      <td className="col-num">
-                        <div
-                          className="inline-actions"
-                          style={{ justifyContent: 'flex-end', gap: 4, flexWrap: 'nowrap' }}
-                        >
-                          {canWrite ? (
-                          <>
-                          <form action={moveCreditPackageAction}>
-                            <input type="hidden" name="id" value={pkg.id} />
-                            <input type="hidden" name="direction" value="up" />
-                            <button
-                              type="submit"
-                              className="btn btn-ghost btn-sm"
-                              aria-label="Yukarı taşı"
-                              title="Yukarı taşı"
-                              disabled={isFirst}
-                            >
-                              ↑
-                            </button>
-                          </form>
-                          <form action={moveCreditPackageAction}>
-                            <input type="hidden" name="id" value={pkg.id} />
-                            <input type="hidden" name="direction" value="down" />
-                            <button
-                              type="submit"
-                              className="btn btn-ghost btn-sm"
-                              aria-label="Aşağı taşı"
-                              title="Aşağı taşı"
-                              disabled={isLast}
-                            >
-                              ↓
-                            </button>
-                          </form>
-                          </>
-                          ) : null}
-                          <span
-                            className="cell-muted"
-                            style={{ minWidth: 22, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
-                          >
-                            {pkg.sortOrder}
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <Link className="cell-link" href={`/credit-packages/${pkg.id}`}>
-                            <strong>{pkg.name}</strong>
-                          </Link>
-                          <span className="cell-muted" style={{ fontSize: 12 }}>
-                            <code>{pkg.slug}</code>
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="badge badge-muted">
-                          {PACKAGE_TYPE_LABEL[pkg.type] ?? pkg.type}
-                        </span>
-                        {pkg.type === 'CATEGORY_UNLIMITED' ? (
-                          <div className="cell-muted" style={{ fontSize: 12 }}>
-                            {pkg.scopeCategories.length > 0
-                              ? pkg.scopeCategories
-                                  .map((scope) => scope.category.name)
-                                  .join(', ')
-                              : 'Kapsam tanımsız'}
-                          </div>
-                        ) : null}
-                        {pkg.periodDays ? (
-                          <div className="cell-muted" style={{ fontSize: 12 }}>
-                            {pkg.periodDays} gün geçerli
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="col-num">
-                        <strong>
-                          {pkg.type === 'MONTHLY_QUOTA'
-                            ? (pkg.quotaCredits ?? '—')
-                            : pkg.type === 'CATEGORY_UNLIMITED'
-                              ? 'Limitsiz'
-                              : pkg.creditAmount}
-                        </strong>
-                        {pkg.type === 'CATEGORY_UNLIMITED' && pkg.dailyOfferLimit ? (
-                          <div className="cell-muted" style={{ fontSize: 12 }}>
-                            günlük {pkg.dailyOfferLimit}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="col-num">{formatPrice(pkg.priceAmount, pkg.currency)}</td>
-                      <td>{pkg.currency}</td>
-                      <td>
-                        <span className={pkg.isActive ? 'badge badge-good' : 'badge badge-muted'}>
-                          {pkg.isActive ? 'Aktif' : 'Pasif'}
-                        </span>
-                      </td>
-                      <td>{formatDateTime(pkg.updatedAt)}</td>
-                      <td className="col-actions">
-                        <div className="inline-actions">
-                          <Link
-                            className="btn btn-secondary btn-sm"
-                            href={`/credit-packages/${pkg.id}`}
-                          >
-                            {canWrite ? 'Düzenle' : 'Görüntüle'}
-                          </Link>
-                          {canChangeStatus ? (
-                          <form action={updateCreditPackageStatusAction}>
-                            <input type="hidden" name="id" value={pkg.id} />
-                            <input type="hidden" name="isActive" value={String(!pkg.isActive)} />
-                            <input type="hidden" name="redirectTo" value="/credit-packages" />
-                            <button
-                              className={
-                                pkg.isActive ? 'btn btn-ghost btn-sm' : 'btn btn-secondary btn-sm'
-                              }
-                              type="submit"
-                            >
-                              {pkg.isActive ? 'Pasifleştir' : 'Aktifleştir'}
-                            </button>
-                          </form>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              );
+            })}
+          </DataTable>
         )}
-      </div>
+        {filtered.length > 0 ? (
+          <WholeListFooter
+            count={filtered.length}
+            total={packages.length}
+            noun="paket"
+            summaryTestId="credit-package-count"
+          />
+        ) : null}
+      </section>
     </main>
   );
 }

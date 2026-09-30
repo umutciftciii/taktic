@@ -3,6 +3,7 @@
 import { formatDateTime } from '@taktic/shared';
 import { useActionState, useRef, useState } from 'react';
 import type { ProviderInvite } from '../../lib/api';
+import { SectionCard } from '../../components/section-card';
 import { providerInviteAction } from './actions';
 import {
   PROVIDER_INVITE_IDLE,
@@ -66,98 +67,99 @@ export function ProviderInvitePanel({
   const [notice, submit, pending] = useActionState(providerInviteAction, PROVIDER_INVITE_IDLE);
 
   return (
-    <div className="admin-action-panel" data-testid="provider-invite-panel">
-      <h3>Hizmet veren daveti</h3>
-      <p>
-        Tek kullanımlık bir başvuru bağlantısı üretir. Bağlantıyı alan işletme yalnızca{' '}
-        <strong>{categoryName}</strong> hizmetinin adını görür ve bu hizmet için başvuru formunu
-        doldurur. Kategori taslak olsa bile çalışır; müşteri kataloğu değişmez.
-      </p>
-      <p style={{ fontSize: 12 }}>
-        Bağlantı 14 gün geçerlidir ve bir kez kullanılabilir. E-posta göndermiyoruz: bağlantıyı
-        işletmeye siz iletirsiniz. <strong>Bağlantı yalnızca üretildiği anda görünür</strong> —
-        sayfayı yeniledikten sonra bir daha gösterilemez, gerekirse yenisini üretin.
-      </p>
-
-      {!mayIssue ? null : canIssue ? (
-        <form action={submit} className="panel-row">
-          <input type="hidden" name="intent" value="issue" />
-          <input type="hidden" name="categoryId" value={categoryId} />
-          <input type="hidden" name="categorySlug" value={categorySlug} />
-          <button
-            className="btn btn-primary btn-sm"
-            type="submit"
-            disabled={pending}
-            data-testid="provider-invite-create"
-          >
-            {pending ? 'İşleniyor…' : 'Yeni davet bağlantısı üret'}
-          </button>
-        </form>
-      ) : (
-        <p className="badge badge-warn" data-testid="provider-invite-closed">
-          Bu hizmet kapalı. Kapalı bir hizmet için yeni davet üretilemez; geçmiş davetler aşağıda
-          görünmeye devam eder.
+    <SectionCard title="Hizmet veren daveti" className="catalog-side-card" testId="provider-invite-panel">
+      <div className="catalog-side-body">
+        <p>
+          Tek kullanımlık bir başvuru bağlantısı üretir. Bağlantıyı alan işletme yalnızca{' '}
+          <strong>{categoryName}</strong> hizmetinin adını görür ve bu hizmet için başvuru formunu
+          doldurur. Kategori taslak olsa bile çalışır; müşteri kataloğu değişmez.
         </p>
-      )}
-
-      {notice.kind === 'issued' ? (
-        <IssuedLink url={notice.invite.url} expiresAt={notice.invite.expiresAt} />
-      ) : null}
-
-      {notice.kind === 'error' ? (
-        <p className="badge badge-warn" role="alert" data-testid="provider-invite-error">
-          {notice.message}
+        <p className="catalog-side-note">
+          Bağlantı 14 gün geçerlidir ve bir kez kullanılabilir. E-posta göndermiyoruz: bağlantıyı
+          işletmeye siz iletirsiniz. <strong>Bağlantı yalnızca üretildiği anda görünür</strong> —
+          sayfayı yeniledikten sonra bir daha gösterilemez, gerekirse yenisini üretin.
         </p>
-      ) : null}
 
-      {notice.kind === 'revoked' ? (
-        <p className="badge badge-good" role="status" data-testid="provider-invite-revoked">
-          {notice.alreadyDead
-            ? 'Bu bağlantı zaten kullanılmış veya iptal edilmişti; durumu listede görünüyor.'
-            : 'Davet bağlantısı iptal edildi. Artık kullanılamaz.'}
+        {!mayIssue ? null : canIssue ? (
+          <form action={submit} className="catalog-side-form">
+            <input type="hidden" name="intent" value="issue" />
+            <input type="hidden" name="categoryId" value={categoryId} />
+            <input type="hidden" name="categorySlug" value={categorySlug} />
+            <button
+              className="btn btn-primary btn-sm"
+              type="submit"
+              disabled={pending}
+              data-testid="provider-invite-create"
+            >
+              {pending ? 'İşleniyor…' : 'Yeni davet bağlantısı üret'}
+            </button>
+          </form>
+        ) : (
+          <p className="notice notice-warning" data-testid="provider-invite-closed">
+            Bu hizmet kapalı. Kapalı bir hizmet için yeni davet üretilemez; geçmiş davetler aşağıda
+            görünmeye devam eder.
+          </p>
+        )}
+
+        {notice.kind === 'issued' ? (
+          <IssuedLink url={notice.invite.url} expiresAt={notice.invite.expiresAt} />
+        ) : null}
+
+        {notice.kind === 'error' ? (
+          <p className="notice notice-error" role="alert" data-testid="provider-invite-error">
+            {notice.message}
+          </p>
+        ) : null}
+
+        {notice.kind === 'revoked' ? (
+          <p className="notice notice-success" role="status" data-testid="provider-invite-revoked">
+            {notice.alreadyDead
+              ? 'Bu bağlantı zaten kullanılmış veya iptal edilmişti; durumu listede görünüyor.'
+              : 'Davet bağlantısı iptal edildi. Artık kullanılamaz.'}
+          </p>
+        ) : null}
+
+        <p className="catalog-side-note" data-testid="provider-invite-count">
+          {activeCount} geçerli davet, {invites.length} toplam kayıt.
         </p>
-      ) : null}
 
-      <p className="muted" style={{ fontSize: 12, marginTop: 12 }} data-testid="provider-invite-count">
-        {activeCount} geçerli davet, {invites.length} toplam kayıt.
-      </p>
-
-      {invites.length === 0 ? (
-        <span className="muted">Bu hizmet için henüz davet üretilmedi.</span>
-      ) : (
-        <ul className="provider-category-list" data-testid="provider-invite-list">
-          {invites.map((invite) => (
-            <li key={invite.id} data-testid={`provider-invite-${invite.id}`}>
-              <span className="provider-category-name">
-                <span className={providerInviteStateBadgeClass(invite.state)}>
-                  {PROVIDER_INVITE_STATE_LABELS[invite.state]}
+        {invites.length === 0 ? (
+          <p className="catalog-side-note">Bu hizmet için henüz davet üretilmedi.</p>
+        ) : (
+          <ul className="provider-category-list" data-testid="provider-invite-list">
+            {invites.map((invite) => (
+              <li key={invite.id} data-testid={`provider-invite-${invite.id}`}>
+                <span className="provider-category-name">
+                  <span className={providerInviteStateBadgeClass(invite.state)}>
+                    {PROVIDER_INVITE_STATE_LABELS[invite.state]}
+                  </span>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {formatDateTime(invite.createdAt)} · {describeDeadline(invite)}
+                    {invite.createdBy?.name ? ` · ${invite.createdBy.name}` : ''}
+                  </span>
                 </span>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  {formatDateTime(invite.createdAt)} · {describeDeadline(invite)}
-                  {invite.createdBy?.name ? ` · ${invite.createdBy.name}` : ''}
-                </span>
-              </span>
-              {mayRevoke && invite.state === 'ACTIVE' ? (
-                <form action={submit}>
-                  <input type="hidden" name="intent" value="revoke" />
-                  <input type="hidden" name="categoryId" value={categoryId} />
-                  <input type="hidden" name="categorySlug" value={categorySlug} />
-                  <input type="hidden" name="inviteId" value={invite.id} />
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    type="submit"
-                    disabled={pending}
-                    data-testid={`provider-invite-revoke-${invite.id}`}
-                  >
-                    İptal et
-                  </button>
-                </form>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+                {mayRevoke && invite.state === 'ACTIVE' ? (
+                  <form action={submit}>
+                    <input type="hidden" name="intent" value="revoke" />
+                    <input type="hidden" name="categoryId" value={categoryId} />
+                    <input type="hidden" name="categorySlug" value={categorySlug} />
+                    <input type="hidden" name="inviteId" value={invite.id} />
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="submit"
+                      disabled={pending}
+                      data-testid={`provider-invite-revoke-${invite.id}`}
+                    >
+                      İptal et
+                    </button>
+                  </form>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -186,9 +188,9 @@ function IssuedLink({ url, expiresAt }: { url: string; expiresAt: string }) {
   }
 
   return (
-    <div className="admin-action-panel is-warning" data-testid="provider-invite-issued">
+    <div className="catalog-issued-link" data-testid="provider-invite-issued">
       <h3>Bağlantı hazır</h3>
-      <p style={{ fontSize: 12 }}>
+      <p>
         Bu bağlantıyı şimdi kopyalayın ve işletmeye iletin. Sayfadan ayrıldığınızda bir daha
         gösterilemez. Geçerlilik: <strong>{formatDateTime(expiresAt)}</strong>.
       </p>

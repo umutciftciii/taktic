@@ -514,6 +514,88 @@ Görüntüler `e2e/.artifacts/faz-3e-screens/` altında (1440×1617 ve 320). Ger
 - **Test:** `category-expansion`, `category-release-readiness`, `category-supply-status`, `category-wave-2-drafts`, `provider-invite-links`, `offer-packages`.
 - **Geri dönüş riski:** Yüksek (`/categories/[slug]` soru ve koşul editörü).
 
+#### Faz 3F envanter (dönüşümden önce, `main@4d83f64f`, DB 82 migration)
+
+Dönüşüm bu tabloya karşı yapıldı; her satır dönüşümden sonra da aynı koşulla render edilmek zorunda. İzin adları `route-permission-map.ts` ile karşılaştırıldı.
+
+**`/categories/[slug]`** — route `CATALOG_READ`. Okumalar: `GET /admin/categories/:slug` (`fetchOrNotFound`), `GET /admin/categories` (üst kategori ve yönlendirme hedefi seçicileri), `GET /categories/:id/questions` yalnız `QUESTIONS_READ` ile, `GET /categories/:id/provider-invites` yalnız hizmet (LEAF) + `PROVIDER_INVITES_READ` ile.
+
+| Bölüm / kontrol | Render koşulu | Yazma ucu (izin) | Test tutamağı |
+| --- | --- | --- | --- |
+| Künye: durum, tip, slug, üst kategori / üst seviye, soru sayısı, sıra, arz durumu | her zaman; soru sayısı yalnız `QUESTIONS_READ`; arz durumu `supplyStatus` varsa | — | `supply-status` |
+| Kategori formu (isim, slug, tip, üst kategori, sıra, başvuru anahtarı, limitsiz paket uygunluğu, teklif kredisi, açıklama, 2 görsel, ikon) | `CATEGORIES_WRITE` | `PATCH /categories/:id` (`CATEGORIES_WRITE`, durum için `orInstead CATEGORIES_STATUS`) | "Kategoriyi kaydet", `provider-enrollment-open`, `unlimited-package-eligible` |
+| Formdaki durum seçimi | `CATEGORIES_STATUS` varsa açık; yoksa kilitli + gizli `status` ve `statusLocked=1` (API'ye durum gönderilmez) | aynı | `select[disabled]` |
+| Başvuru anahtarı | yalnız LEAF + DRAFT'ta değiştirilebilir; ACTIVE'de işaretli + kapalı; INACTIVE/grup/yönlendiricide kapalı | payload yalnız LEAF + DRAFT'ta gönderir | `provider-enrollment-open` |
+| Limitsiz paket uygunluğu | INACTIVE'de kapalı ve payload'a girmez | — | `unlimited-package-eligible` |
+| Teklif kredisi | LEAF'te zorunlu; diğerlerinde kapalı, payload'a girmez | — | — |
+| Görsel yükleme düğmesi | `UPLOADS_WRITE` (URL alanı her zaman) | `POST /admin/uploads/category-image` (`UPLOADS_WRITE`) | "Dosya yükle" |
+| Salt okunur kategori bilgileri | `CATEGORIES_WRITE` yok | — | `category-read-only` |
+| Yönlendirme hedefleri kartı | ROUTER + `QUESTIONS_READ`; yönlendirme sorusu varsa `QUESTIONS_WRITE` ile form, yoksa salt okunur liste; soru yoksa boş durum (ipucu yalnız yazma izniyle) | `PUT /questions/:id/router-rules` (`QUESTIONS_WRITE`) | "Yönlendirmeyi kaydet", `routerTargetSlug` |
+| Soru seti (satır: sıra, etiket + sistem alanı / yönlendirme / koşullu rozetleri, key, tip, zorunlu, durum) | `QUESTIONS_READ` | — | `details.question-row` |
+| Soru düzenleme formu | `QUESTIONS_READ` ∧ `QUESTIONS_WRITE` | `PATCH /questions/:id` | "Soruyu kaydet" |
+| Koşul editörü (kaynak soru, beklenen cevaplar `kaynak::seçenek`, eşleşme kuralı; ALL yalnız çok seçimli kaynak varken) | aynı | `PUT /questions/:id/conditions` | "Koşulu kaydet", `option[value="ALL"]` disabled |
+| Soruyu aktifleştir / pasifleştir | aynı | `PATCH /questions/:id/status` | "Pasifleştir" / "Aktifleştir" |
+| Salt okunur soru ayrıntısı (sistem alanı, yardım metni, seçenekler, koşul) | `QUESTIONS_READ`, yazma yok | — | — |
+| Yeni soru ekle | `QUESTIONS_READ` ∧ `QUESTIONS_WRITE` | `POST /categories/:id/questions` | `details.question-create-panel`, "Soruyu oluştur" |
+| Kategori durumu paneli | `CATEGORIES_STATUS` | `PATCH /categories/:id/status` | "Kategori durumu", "Durumu güncelle" |
+| Hizmet veren daveti paneli (geçmiş, sayaç) | LEAF + `PROVIDER_INVITES_READ` | — | `provider-invite-panel`, `provider-invite-count`, `provider-invite-list` |
+| Davet üret | `PROVIDER_INVITES_ISSUE` ve durum ≠ INACTIVE; INACTIVE'de "kapalı" notu | `POST /categories/:id/provider-invites` | `provider-invite-create`, `provider-invite-closed` |
+| Bağlantı bir kez gösterilir (yalnız action sonucu, URL/çerez/listede yok) | davet üretildiğinde | — | `provider-invite-issued`, `provider-invite-url` |
+| Daveti iptal et | `PROVIDER_INVITES_REVOKE` ve davet ACTIVE | `POST …/provider-invites/:inviteId/revoke` | `provider-invite-revoke-<id>`, `provider-invite-revoked` |
+| Yayın kontrol listesi (teklif kredisi, onaylı hizmet veren, soru sayısı `QUESTIONS_READ`, geçerli davet "hazır sayılmaz", başvuru durumu, hazır mı) + engel gerekçeleri | DRAFT; liste yalnız LEAF | — | `draft-explainer`, `release-checklist`, `release-active-invites`, `enrollment-note`, `release-blockers`, `release-blocker-<kod>` |
+| Yönlendirici açıklaması | ROUTER | — | `router-explainer` |
+| Hızlı bilgi (soru sırası, options JSON, koşul sırası, sistem alanı) | her zaman | — | — |
+
+UI'sı olmayan ve açılmayacak yetenekler (K9): `DELETE /categories/:id` (`CATEGORIES_DELETE`), `DELETE /questions/:id` (`QUESTIONS_DELETE`).
+
+**`/categories`** — route `CATALOG_READ`, tek okuma `GET /admin/categories`. "Yeni Kategori" `CATALOG_READ` + `CATEGORIES_WRITE`. Yayın hazırlığı kartı (taslak hizmetler, filtreden bağımsız, hazırlar önce; 8 sütun: hizmet, üst grup, soru, teklif kredisi, onaylı hizmet veren, geçerli davet, arz durumu + başvuru notu, hazır mı + gerekçeler; `release-readiness-summary`, `release-row-<slug>`, `release-invites-<slug>`, `supply-status-<slug>`, `enrollment-note-<slug>`, `release-blocker-<kod>`). Filtre `q` (ad/slug) ve `status` (eski `active`/`inactive` değerleri eşlenir). Ağaç (`category-tree-table`): derinlik girintisi, filtrelenmiş ağaçta üstü düşen satır kök olarak kalır; 10 sütun (görsel, ad bağlantısı, slug, tip, durum, teklif kredisi, soru, onaylı hizmet veren, sıra, düzenle).
+
+**`/categories/new`** — route `CATALOG_READ` + `CATEGORIES_WRITE`; `UPLOADS_WRITE` yükleme düğmesi. 12 alan (isim, sıra, teklif kredisi, tip, durum, üst kategori yalnız GROUP, slug deseni, açıklama, 2 görsel, ikon); `createCategoryAction` → `/categories/<slug>`. Yan kart: sıradaki adım ve ipuçları.
+
+**`/credit-packages`** — route `CREDIT_PACKAGES_READ`, `GET /admin/offer-packages` (üç tür). "Yeni Paket" ve sıra ↑/↓ `CREDIT_PACKAGES_WRITE` (↑ ilk satırda, ↓ son satırda kapalı; kanonik sıra sortOrder → ad → id; takas iki PATCH, ikincisi düşerse `partial=1` uyarısı); aktif/pasif `CREDIT_PACKAGES_STATUS` (`redirectTo=/credit-packages`). Filtre `q`, `status` (all/active/inactive); `ok`/`error` bildirimleri; özet "N / M kayıt · A aktif · P pasif". 9 sütun: sıra, paket + slug, tür (+ limitsiz kapsamı veya "Kapsam tanımsız", dönem günü), kredi/kota/"Limitsiz" (+ günlük sınır), fiyat, para birimi, durum, güncellenme, işlem (Düzenle/Görüntüle).
+
+**`/credit-packages/new`** — route `CREDIT_PACKAGES_READ` + `CREDIT_PACKAGES_WRITE`; uygun kategori listesi `GET /admin/offer-packages/unlimited-eligible-categories`. 12 alan (isim, sıra, slug, tür, kredi, aylık kota, günlük teklif limiti, limitsiz kapsamı çoklu seçim veya "açılmış kategori yok" notu, para birimi TRY/USD/EUR, fiyat lira deseni, durum, açıklama). Doğrulama hatasında girilen değerler URL'den geri yazılır.
+
+**`/credit-packages/[id]`** — route `CREDIT_PACKAGES_READ`; paket `fetchOrNotFound`; uygunluk listesi (kapsamda olup artık uygun olmayan kategori de seçenek olarak kalır, yoksa kayıt kapsamı düşürürdü). Form `CREDIT_PACKAGES_WRITE` (tür gizli alanla gönderilir, düzenlenemez; türe göre kredi / aylık kota / günlük limit + kapsam; para birimi mevcut değer listede yoksa eklenir; fiyat `formatMinorAsTurkishLiraInput`; durum `CREDIT_PACKAGES_STATUS` yoksa kilitli + `statusLocked`); yoksa salt okunur (`credit-package-read-only`). Satış özeti `PACKAGE_PURCHASES_READ` (4 sayı, son 5 satın alma, işletme bağlantısı `PROVIDERS_READ_DETAIL`, "Tüm satın almaları gör (N)"). Durum paneli `CREDIT_PACKAGES_STATUS` ("Paketi pasifleştir/aktifleştir"). Künye: durum, slug, tür, kredi/kota/limitsiz, dönem, fiyat, sıra, güncellenme.
+
+#### Faz 3F gerçekleşen (2026-09-30)
+
+- **Kapsam:** yalnız yukarıdaki 6 route. Taban `main@4d83f64f`, DB 82 migration. API, Prisma, migration, `.env`, compose değişmedi; yeni yazma yeteneği yok; server action'lar (`categories/actions.ts`, `credit-packages/actions.ts`) ve gönderdikleri alanlar dokunulmadan kaldı.
+- **Kapılar (menü · route · bölüm · aksiyon), `route-permission-map.ts` ile karşılaştırıldı; hiçbiri değişmedi.** Envanterdeki her satır aynı koşulla çizilir; birim testi sayfa kaynağındaki `requireAdmin`/`can()` kapılarını da sabitler.
+
+  | Route | Route izni | Bölüm / bağlantı kapıları | Yazma |
+  | --- | --- | --- | --- |
+  | `/categories` | `CATALOG_READ` | — | "Yeni kategori ekle" `CATALOG_READ` + `CATEGORIES_WRITE` |
+  | `/categories/new` | `CATALOG_READ` + `CATEGORIES_WRITE` | — | Oluştur `CATEGORIES_WRITE`; yükleme `UPLOADS_WRITE` |
+  | `/categories/[slug]` | `CATALOG_READ` | Soru seti ve yönlendirme haritası `QUESTIONS_READ`; davet paneli LEAF + `PROVIDER_INVITES_READ` | Form `CATEGORIES_WRITE` (durum seçimi `CATEGORIES_STATUS`, yoksa `statusLocked`); yükleme `UPLOADS_WRITE`; soru/koşul/durum/yeni soru/yönlendirme `QUESTIONS_READ` ∧ `QUESTIONS_WRITE`; durum paneli `CATEGORIES_STATUS`; davet üret `PROVIDER_INVITES_ISSUE` (INACTIVE değilken); iptal `PROVIDER_INVITES_REVOKE` (ACTIVE davet) |
+  | `/credit-packages` | `CREDIT_PACKAGES_READ` | — | "Yeni paket ekle" ve ↑/↓ `CREDIT_PACKAGES_WRITE`; Aktifleştir/Pasifleştir `CREDIT_PACKAGES_STATUS` |
+  | `/credit-packages/new` | `CREDIT_PACKAGES_READ` + `CREDIT_PACKAGES_WRITE` | — | Oluştur `CREDIT_PACKAGES_WRITE` |
+  | `/credit-packages/[id]` | `CREDIT_PACKAGES_READ` | Satış özeti `PACKAGE_PURCHASES_READ` (F9); işletme bağlantısı `PROVIDERS_READ_DETAIL` | Form `CREDIT_PACKAGES_WRITE` (durum `CREDIT_PACKAGES_STATUS`, yoksa `statusLocked`); durum paneli `CREDIT_PACKAGES_STATUS` |
+
+- **`/categories/[slug]` bölünmesi:** sayfa veriyi yükler ve izinleri hesaplar; editörler `[slug]/category-sections.tsx` içinde birebir taşındı (alan adları, gizli alanlar, `kaynak::seçenek` koşul değerleri, ALL'un yalnız çok seçimli kaynakta açılması, yönlendiricide `isRouter` gizli `false`, başvuru ve limitsiz uygunluk anahtarlarının durum kuralları). Aksiyonlar prop olarak geçer; böylece her izin kombinasyonu oturumsuz birim testiyle çizilir. Salt okunur görünümler `KeyValueList`'e taşındı, içerik aynı.
+- **Korunan karmaşık işlevler:** kategori ağacı (derinlik girintisi + sol çizgi, üstü filtrelenen satır kök olarak kalır), filtreden bağımsız yayın hazırlığı kartı (8 sütun, gerekçeler satırda), soru seti editörü (satır içi açılır düzenleme, koşul editörü, aktif/pasif, yeni soru), yönlendirme kuralları (form / salt okunur / boş durum), davet paneli (bağlantı yalnız action sonucunda bir kez görünür; URL, çerez veya listede yok), yayın kontrol listesi (davet "hazır sayılmaz", başvuru durumu, engel gerekçeleri), kredi paketlerinde kanonik sıra ↑/↓ (iki PATCH, `partial=1` uyarısı), aktif/pasif, üç paket türü (kapsam, dönem, günlük sınır), paket formunda tüm alanlar ve doğrulama hatasında girilen değerlerin URL'den geri yazılması.
+- **Onay diyaloğu eklenmedi:** plan 3F için diyalog listelemiyor ve bu ekranlardaki yazmalar ya geri alınabilir (durum, aktif/pasif, sıra) ya da mevcut akışın parçası. Davet iptali geri alınamaz; ancak yeni bağlantı her zaman üretilebilir ve akış E2E'lerle sabit. İstenirse ayrı karar.
+- **StickyActionBar kullanılmadı:** kategori ekranında aynı sayfada birbirinden bağımsız 6+ form var (kategori, yönlendirme, soru başına 3 form, yeni soru, durum, davet); tek bir kayıt çubuğu bunlardan yalnız birini kaydeder ve yanıltır. Paket formu başarısızlıkta `?error=` ile yönlendirir; çubuğun "reddedilen kayıtta değerler korunur" sözü action sözleşmesini değiştirmeden verilemez. Faz 2 entegrasyon kabul kriteri bu PR'a düşmedi.
+- **Metinler:** tasarımın ⓘ'ları gerçek davranışa göre düzeltildi. Kategoriler: "Yayına hazır" soru seti istemez ve durumu değiştirmez, yalnız kontrol listesidir; müşteriyi gizleyen durumdur; kapatma vitrin yayınlarını süre durdurularak askıya alır. Kredi paketleri: aylık kota takvim ayı değil satın almadan itibaren 30 gündür ve devretmez; limitsiz paketin günlük sınırı isteğe bağlıdır; sıra hizmet verene listelenme sırasıdır. "Slug" etiketleri "Kısa ad (slug)" oldu; "provider" kalıntıları "hizmet veren".
+- **CSS (yalnız bu ekranlar):** `/categories/[slug]`'da telefon düzeninde soru satırının 720px taban genişliği kaldırıldı (≤900px iki sütun). WebKit, seçili seçeneği uzun olan bir `<select>`'in metnini kutusu sığsa da sayfa genişliğine katıyordu (uzun üst kategori adıyla 320px'te +731px); form alanlarına küçülebilir iz verildi ve dolgulu kart gövdelerine `contain: paint` kondu (select'e `overflow: hidden` macOS WebKit'te yetti, CI'ın Linux WebKit'inde yetmedi; +704px). Ana ve yan sütun `minmax(0, 1fr)`.
+- **Yeni bulgular (bu PR'a genişletilmedi):**
+  - `/providers/[id]` (3B): boşluksuz çok uzun bir kategori adı, işletmenin kategori listesinde 320/390px'te sayfayı genişletiyor (rota taraması bu PR'ın ilk uzun-ad fixture'ıyla yakaladı; fixture gerçekçi, boşluklu ada çevrildi). Gerçek kategori adlarında düşük olasılık; ayrı UI işi.
+  - Backend açığı yeni değil, bilinenler: kredi paketi sırası için toplu/atomik uç yok (takas iki PATCH, ikinci adım düşerse UI `partial=1` der); `GET /categories/:id/provider-invites` ve `GET /package-purchases?packageId=` sayfasız (satış özeti tüm satın almaları okuyup istemcide toplar); `_count.questions` pasif soruları da sayar (detay şeridi "N aktif" notunu soru listesinden hesaplar).
+- **Test:** yeni `e2e/tests/admin-catalog-screens.spec.ts` (Chromium + WebKit: kategori ekranında 5 izin kombinasyonu, paket listesinde okuma/yazma/durum ayrımı ve gerçek sıra takası + pasifleştirme, 3 tür, 6 genişlikte taşma, açık soru satırı) ve `apps/admin/test/catalog-screens.spec.tsx` (27 test: form/soru/yönlendirme/kontrol listesi/paket hücreleri, kaynak düzeyinde kapılar); güncellenen `admin-status-permission` (durum paneli test kimliğiyle), `offer-packages` (tür metni paket satırına daraltıldı; ⓘ de türleri anıyor), `admin-route-scan` (`CONVERTED_ROUTES` + 6 route, 320px), `playwright.config` (WebKit eşleşmesi).
+
+#### Faz 3F görsel karşılaştırma (paket 2, 2026-09-30)
+
+Görüntüler `e2e/.artifacts/faz-3f-screens/` altında (1440×1617 ve 320). Gerekçe kısaltmaları 3A ile aynı (D = backend yok, K7 = bilgi korunur, İzin).
+
+| Görüntü / prototip | Uygulandı | Korunan (gerçek veri) | Uygulanmayan (gerekçe) |
+| --- | --- | --- | --- |
+| `35-hizmet-kategorileri` / `list:categories` | Başlık + ⓘ (düzeltildi) + "N kategori · M tanesi yayında"; "Yeni kategori ekle"; filtre çubuğu (Ara, Durum); tablo: Kategori adı (+ "X altında" / "N alt kategori") · Kısa ad · Tip · Teklif kredisi · Soru sayısı · Onaylı hizmet veren · Yayına hazır mı? · Aç; liste sonu | K7: ağaç girintisi, görsel, Durum ve Sıra sütunları; yayın hazırlığı kartı (8 sütun, gerekçeler); filtrelenmiş ağaç | Tarih filtresi (kategoride filtrelenecek tarih yok); Önceki/Sonraki (API listeyi bütün döndürür); "Üst grup" tip adı (mevcut sözlük "Grup") |
+| `37-kredi-paketleri` / `list:creditPackages` | Başlık + ⓘ (düzeltildi) + "N paket satışta · M pasif"; "Yeni paket ekle"; filtre çubuğu; tablo: Sıra (↑/↓ + sayı) · Paket (+ kısa ad) · Tür (+ kapsam / dönem) · Kredi / kota (+ günlük) · Fiyat · Durum · Güncellenme · Aç | K7: Para birimi sütunu, satır içi Aktifleştir/Pasifleştir, `ok`/`error`/`partial` bildirimleri | "En çok satan" (D: satın alma listesi ayrı okuma, `PACKAGE_PURCHASES_READ`); Tarih filtresi; Önceki/Sonraki |
+| — `/categories/new` (şablon) | Geri bağlantı, başlık + ⓘ (eski yan kartlar), form kartı | 12 alan, 2 yükleyici | — |
+| — `/categories/[slug]` (şablon) | Özet kartı (durum/tip/arz rozetleri, kısa ad · üst kategori, başlık, tip açıklaması) + şerit (Tip, Teklif kredisi, Soru + aktif, Onaylı hizmet veren, Geçerli davet, Sıra); ana sütun editörler, yan sütun masa | Envanterdeki tüm bölümler | — |
+| — `/credit-packages/new` (şablon) | Geri bağlantı, başlık + ⓘ (eski yan kartlar), form kartı | 12 alan, tür kuralları | — |
+| — `/credit-packages/[id]` (şablon) | Özet kartı (durum, kısa ad, başlık, limitsiz kapsamı) + şerit (Tür + dönem, Kredi/kota + günlük sınır, Fiyat, Sıra, Güncellenme); satış özeti şeridi + tablo | Form, salt okunur görünüm, satış özeti, durum paneli, hatırlatmalar | — |
+
 ### 3G — Sistem ve yönetim (#44, #47–#52)
 
 (#46 `/notifications` Dilim 2'de yapıldı.)

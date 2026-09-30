@@ -55,9 +55,8 @@ test.describe('status permission on edit screens', () => {
       // No business form: the fields are shown read-only.
       await expect(switcher.page.getByRole('button', { name: 'Kategoriyi kaydet' })).toHaveCount(0);
       await expect(switcher.page.getByTestId('category-read-only')).toBeVisible();
-      const panel = switcher.page.locator('.admin-action-panel', {
-        has: switcher.page.getByRole('heading', { name: 'Kategori durumu' }),
-      });
+      const panel = switcher.page.getByTestId('category-status-panel');
+      await expect(panel.getByRole('heading', { name: 'Kategori durumu' })).toBeVisible();
       await panel.locator('select[name="status"]').selectOption('INACTIVE');
       await panel.getByRole('button', { name: 'Durumu güncelle' }).click();
       await expect

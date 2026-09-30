@@ -9,6 +9,7 @@ type SectionCardProps = {
   className?: string;
   /** Anchor target, so an action can send the operator back to this card. */
   id?: string;
+  testId?: string;
 };
 
 export function SectionCard({
@@ -19,13 +20,14 @@ export function SectionCard({
   padded = true,
   className,
   id,
+  testId,
 }: SectionCardProps) {
   const rootClass = ['section-card', padded ? 'is-padded' : '', className]
     .filter(Boolean)
     .join(' ');
 
   return (
-    <section className={rootClass} id={id}>
+    <section className={rootClass} id={id} data-testid={testId}>
       {title || actions ? (
         <header className="section-card-header">
           <div className="section-card-text">

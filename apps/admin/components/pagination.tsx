@@ -110,15 +110,24 @@ export function WholeListFooter({
   count,
   noun = 'kayıt',
   summaryTestId,
+  total,
 }: {
   count: number;
   noun?: string;
   summaryTestId?: string;
+  /**
+   * The whole list's size when the screen filters it in the page: the footer
+   * then says how many of them the filter left, rather than "tamamı".
+   */
+  total?: number;
 }) {
+  const filtered = total !== undefined && total !== count;
   return (
     <nav className="pagination" aria-label="Liste sonu">
       <p className="pagination-summary" data-testid={summaryTestId}>
-        {`${formatCount(count)} ${noun}, tamamı gösteriliyor`}
+        {filtered
+          ? `${formatCount(total)} ${noun} içinden filtreye uyan ${formatCount(count)} kayıt gösteriliyor`
+          : `${formatCount(count)} ${noun}, tamamı gösteriliyor`}
       </p>
     </nav>
   );
