@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import {
   apiFetch,
+  fetchOrNotFound,
   CustomerDetailResponse,
   CustomerNote,
   CustomerNotesResponse,
@@ -107,18 +107,6 @@ const OFFER_COLUMNS: DataColumn[] = [
   { key: 'actions', label: 'İşlem', srOnly: true },
 ];
 
-// apiFetch backend hatası geldiğinde body metnini Error.message'a koyar.
-// Backend NestJS NotFoundException JSON şekli: {"statusCode":404,...}.
-function isBackendNotFound(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  try {
-    const parsed = JSON.parse(error.message) as { statusCode?: unknown };
-    return parsed?.statusCode === 404;
-  } catch {
-    return error.message.includes('Customer not found');
-  }
-}
-
 /** "Son 10 · toplam 14", or just the total when every row is on screen. */
 function shownOfTotal(shown: number, total: number): string {
   return shown < total ? `Son ${shown} kayıt · toplam ${total}` : `Toplam ${total}`;
@@ -144,23 +132,18 @@ export default async function AdminCustomerDetailPage({
   const tabKeys = canReadNotes ? TAB_KEYS : TAB_KEYS.filter((key) => key !== 'notlar');
   const activeTab = resolveTab<TabKey>(search.tab, tabKeys, '');
 
-  let response: CustomerDetailResponse;
-  let notesResponse: CustomerNotesResponse | null;
-  try {
-    [response, notesResponse] = await Promise.all([
+  // An unknown or malformed id is the 404 screen, as on every other detail
+  // (`fetchOrNotFound`: 404 and 400 alike), never the error screen.
+  const [response, notesResponse] = await fetchOrNotFound(() =>
+    Promise.all([
       apiFetch<CustomerDetailResponse>(`/customers/${id}`),
       // Read only under its own permission: without it the notes endpoint is
       // not called, so CUSTOMERS_READ alone still opens the page (F7).
       canReadNotes
         ? apiFetch<CustomerNotesResponse>(`/customers/${id}/notes`)
-        : Promise.resolve(null),
-    ]);
-  } catch (error) {
-    if (isBackendNotFound(error)) {
-      notFound();
-    }
-    throw error;
-  }
+        : Promise.resolve<CustomerNotesResponse | null>(null),
+    ]),
+  );
   const { customer, metrics, recentRequests, recentOffers, acceptedOffers } = response;
   const notes = notesResponse?.items ?? [];
   const path = `/customers/${customer.id}`;

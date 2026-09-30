@@ -701,6 +701,52 @@ En sona bırakıldı, çünkü K2 ve K12 kararlarına bağlı.
 - **Yüklenme (K10):** onay gelirse `loading.tsx` iskeletleri eklenir; E2E zamanlaması ve `form-post` akışları yeniden koşulur.
 - **Geri dönüş riski:** Düşük (test ve iskelet).
 
+#### Faz 4 gerçekleşen (2026-10-01)
+
+- **Kapsam:** 56 `page.tsx` (53 oturumlu ekran + `/login`, `/admin-invite`, `/yetkisiz`) ve ortak kabuk/nav/topbar, liste/detay/form bileşenleri. Taban `main@514d9194`, DB 83 migration. API, Prisma, migration, `.env`, compose değişmedi. Backlog değiştirilmedi.
+- **Yöntem:** üç statik denetim (RBAC: sayfa ↔ `route-permission-map.ts`; tasarım tutarlılığı; erişilebilirlik ve kontrast hesabı) + E2E (tam Chromium, WebKit alt küme, genişletilmiş route taraması, yeni RBAC matrisi, yeni a11y spec'i).
+
+**Düzeltilen UI / RBAC / a11y regresyonları (bu PR):**
+
+| # | Tür | Bulgu | Düzeltme |
+| --- | --- | --- | --- |
+| 1 | Tasarım | `/users` Faz 3G'de dönüştürülmemiş tek liste: eski `admin-toolbar`, ham tablo, satır içi stilli elle pager, başlık menüden farklı ("Admin Kullanıcıları" ↔ "Yönetici hesapları") | `FilterBar` + `DataTable` + `Pagination` + ⓘ; aynı query adları, aynı API çağrısı ve sütunlar; başlık/geri bağlantıları menü adıyla; route taraması `CONVERTED_ROUTES`'a eklendi (320px) |
+| 2 | RBAC | `DASHBOARD_READ` olmayan rol girişte `/`'e gidip `/yetkisiz`'e düşüyordu; "Panele dön" ve logo tekrar `/`'e → döngü | `/` dashboard izni yoksa menünün ilk satırına yönlendirir; boş menü yine `/yetkisiz`. `requireAdmin('DASHBOARD_READ')` sözleşmesi korunur |
+| 3 | RBAC | `/providers/[id]`: `PROVIDER_CATEGORIES_WRITE` var, `CATALOG_READ` yok → katalog boş döner, kart "Bağlanabilecek başka kategori yok" diyerek işe yaramaz arama/ekle arayüzü gösterir | Ekleme arayüzü `PROVIDER_CATEGORIES_WRITE ∧ CATALOG_READ`; kaldırma yalnız yazma izniyle kalır |
+| 4 | RBAC | Destek talebinden iade isteği açan, `PACKAGE_REFUND_READ` olmayan rol başarıdan sonra `/yetkisiz`'e yönlenir | İzin yoksa talebe döner (`?refundOpened=1`, "İade isteği açıldı." `role=status`) |
+| 5 | Tasarım | Aynı ekranda iki ton: teklif detayında SUBMITTED rozeti uyarı, özet şeridi nötr; `/roles/[id]`'de Pasif hesap gri, diğer tüm listelerde kırmızı | Şerit rozetle aynı ton; Pasif her yerde `badge-bad` |
+| 6 | Tasarım | ConfirmDialog tetikleyicilerinden 5'i dolu `btn-danger`, 14'ü tasarımın `btn-destructive`'i | Satır içi tetikleyiciler `btn-destructive` (onay düğmesi `btn-danger` kalır; kredi düşme formunun ana düğmesi değişmedi) |
+| 7 | Tasarım | Detayda 404 üç desenle: `customers/[id]`, `users/[id]` mesaj parse ediyordu; `showcase/reviews/[versionId]` yalnız 404; bozuk id (400) hata ekranı | Hepsi `fetchOrNotFound` (404 ∧ 400 → 404 ekranı) |
+| 8 | Tasarım | Davet bağlantısı paneli tasarım öncesi gri/yuvarlak kutu ve Tailwind kırmızısı; `display-number` sınıfı 23 yerde tanımsız; sekme başlığı "TakTic Admin" | Token'lı `.invite-link-*` + `notice-error`; `display-number` = tabular-nums; başlık "TakTick Yönetim" |
+| 9 | a11y kontrast | Beyaz metin marka kırmızısında 4.20:1 (birincil düğme, `button`, aktif sekme sayacı); `btn-ghost` 3.76:1; bekleyen zaman `#7d7979` 3.85:1; alan kenarlığı 2.01:1, toggle kenarı, menü oku 2.89:1 | Dolu düğme `accent-600` (4.74), hover `accent-700`; metin `accent-700`; zaman `neutral-700`; alan/toggle kenarı `neutral-600` (4.30 ≥ 3:1, 1.4.11); ok `neutral-600`. Odak halkası (marka rengi, ≥3:1) değişmedi |
+| 10 | a11y | "Ana içeriğe geç" yok | Kabuğun ilk odak durağı; `#admin-content`'e taşır. Hedefe `tabindex` yalnız atlama anında verilir: kalıcı `tabIndex=-1` WebKit'te (tıklanan düğmeyi odaklamaz) her tıklamada odağı içerik kabına taşıyıp açık ⓘ'yi kapatıyordu — `admin-notifications-list` WebKit'te yakaladı |
+| 11 | a11y | Telefon çekmecesi açıkken arka plan ekran okuyucuya açık; çekmece `<aside>` + içindeki `<nav>` çift landmark | Açıkken `.admin-main` `inert`; `<aside>` → `<div>` (etiketli `<nav>` kalır) |
+| 12 | a11y | Kredi işlem tipi ve işlem filtresi `role=tablist` ama ok tuşu/roving tabindex yok | `lib/tablist-keys.ts`: ←/→/Home/End, tek Tab durağı (birim testi) |
+| 13 | a11y | `RouteDialog` ilk odağı × düğmesinde; kapanınca odak `body`'ye düşüyor | İlk alan odaklanır; kapanışta açan bağlantıya döner |
+| 14 | a11y | Üç ham tablo (dönemsel paketler, kredi işlemleri, moderasyon günlüğü) başlıksız, `scope`suz, klavyeyle kaydırılamaz | Adlandırılmış odaklanabilir bölge + sr-only caption + `th scope` |
+| 15 | a11y | Login hatası ve rol atama hatası `role=alert`sız; davet URL alanı adsız; `/yetkisiz` `<main>`siz; boş `<nav aria-label="Liste sonu">`; tahsilat grafiğinde metin alternatifi yok; ⓘ tıklama alanı 18–22px | `role=alert`; `aria-label`; `<main>`; `<div>`; sr-only değer listesi; ⓘ için görünmez 24px+ tıklama alanı |
+
+**Bilinçli bırakılanlar (regresyon değil, belgelenmiş karar):** iptal formunda `REQUESTS_CANCEL_WITHOUT_REFUND` yokken işaretli+kilitli "kredisini iade et" kutusu (PR #118 sözleşmesi, ne olacağını söyler); kategori/kredi paketi düzenlemede `*_STATUS` yokken kilitli durum alanı (`statusLocked` sözleşmesi); kayıt durumuna bağlı pasif düğmeler (izin kapısı değil).
+
+**Ayrı backend / ürün açıkları (bu PR'da yapılmadı):**
+
+1. Detay yanıtları başka alanın verisini gömüyor: `GET /providers/:id` (`PROVIDERS_READ_DETAIL`) son teklifler, paket alımları ve kredi bakiyesini; `GET /customers/:id` talep/teklif geçmişini; `GET /offers/:id` talep sahibinin iletişimini; `GET /providers` kredi sütununu döndürüyor. Ekran bölümleri API'nin verdiğini gösteriyor; alan izniyle kısmak API'de (yanıt projeksiyonu) yapılmalı — UI'da gizlemek backend açığını örterdi.
+2. Onaysız geri alınabilir/yıkıcı işlemler: "Yerleşimi durdur", kategori sorusu "Pasifleştir", vitrin paketi "Satıştan kaldır", kredi paketi pasifleştir, sağlayıcı daveti "İptal et". Onay mı, bilinçli istisna mı — ürün kararı.
+3. `StickyActionBar` hiçbir ekranda kullanılmıyor (kaydedilmemiş değişiklik uyarısı devrede değil); formlar `DetailFormFooter` kullanıyor. Entegre et / kaldır kararı.
+4. `Badge`/`badgeClass()` kullanılmıyor; `.badge-success/-warning/-error` `.badge-good/-warn/-bad`'in eşi; alanlar arası ton farkları (WITHDRAWN, SUSPENDED, REVOKED) tek durum→ton tablosu ister.
+5. `globals.css`'te hiçbir TS/TSX'in kullanmadığı ~83 sınıf; `providers/[id]` kategori aramasında eski `admin-toolbar` ve satır içi stiller; oluşturma formlarında alt bant yok.
+6. ConfirmDialog onayından sonra tetikleyici `pending` iken `disabled` → kapanışta odak geri dönemiyor (düşük).
+7. API'de UI'sı olmayan uçlar: `PATCH /providers/:id`, vitrin kartı askıya al/kaldır, `DELETE /categories/:id`, `DELETE /questions/:id`.
+
+**Test:**
+- `admin-rbac-permissions` + **RBAC matrisi**: nav'daki her okuma izni (26 izin + `PROMOTION_ELIGIBILITY_REVIEW`) tek başına — `/`'ten ilk satıra iniş, menü satırları tam olarak o iznin satırları, her satır açılır, POST/server-action formu yok, başka alan ve `/roles` → `/yetkisiz`.
+- `admin-route-scan`: 53 ekran × 1440/**1024**/**768**/390 + dönüştürülmüş 53 ekran × 320; uzun, kırılmaz müşteri adı fixture'ı.
+- Yeni `admin-accessibility`: tüm liste/form ekranlarında tek `<main>`, tek `<h1>`, adsız alan yok; skip link; çekmece `inert`; tablist okları; RouteDialog odak dönüşü; referans görüntüler. WebKit `testMatch`'e eklendi.
+- Birim: `test/tablist-keys.spec.ts`.
+- **Ekranlar:** `docs/superpowers/plans/2026-10-01-admin-design-001-faz-4-screens/` (`/users` 1440/1024/768/390/320 + skip link, Chromium ve WebKit).
+- **Route taraması:** 51/53 ekran kayıtla açıldı (vitrin sürümü, yayın, değerlendirme ve bildirim kaydı tarama içinde üretiliyor); `/package-refunds/[id]` ve `/promotion-eligibility/[eventId]` taze DB'de kayıtsız kalıyor — ikisi kendi spec'lerinde (`admin-finance-package-screens`, `admin-campaign-settings-screens`) kayıtla 320/390/1440'ta ölçülüyor. İçerik taşması: yok.
+- **Yerel koşular (2026-10-01):** taban main 413/413 Chromium; bu dal tam Chromium 446/446, WebKit alt küme 266/266; admin birim 564/564; typecheck/lint/build yeşil. Hiçbir koşuda `too many clients`/P2037 görülmedi (tek worker, paralellik düşürmeye gerek olmadı).
+
 ---
 
 ## Kapsam kontrolü: 55 route'un dilimlere dağılımı

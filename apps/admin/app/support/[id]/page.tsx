@@ -29,7 +29,7 @@ import { openPackageRefundRequestAction } from '../../package-refunds/actions';
 
 type AdminSupportTicketPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ sent?: string; statusSaved?: string; error?: string }>;
+  searchParams: Promise<{ sent?: string; statusSaved?: string; error?: string; refundOpened?: string }>;
 };
 
 const TOPIC_LABELS: Record<SupportTicketDetail['topic'], string> = {
@@ -156,6 +156,10 @@ export default async function AdminSupportTicketPage({
       ) : query.sent === '1' ? (
         <div className="notice notice-success detail-notice" role="status" data-testid="support-reply-sent">
           Mesajınız talebe eklendi.
+        </div>
+      ) : query.refundOpened === '1' ? (
+        <div className="notice notice-success detail-notice" role="status" data-testid="support-refund-opened">
+          İade isteği açıldı.
         </div>
       ) : null}
 

@@ -1,7 +1,7 @@
-import { notFound } from 'next/navigation';
 import {
   AdminUserDetailResponse,
   apiFetch,
+  fetchOrNotFound,
   formatDate,
   formatDateTime,
   listAdminRoles,
@@ -37,16 +37,6 @@ type AdminUserDetailPageProps = {
   searchParams?: Promise<SearchParams>;
 };
 
-function isBackendNotFound(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  try {
-    const parsed = JSON.parse(error.message) as { statusCode?: unknown };
-    return parsed?.statusCode === 404;
-  } catch {
-    return error.message.includes('User not found');
-  }
-}
-
 /**
  * One staff account (#50, ADMIN-DESIGN-001 Faz 3G). The design has no screen
  * for it; it is built on the detail template: a way back to the list, the
@@ -69,15 +59,8 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
   const { id } = await params;
   const search = (await searchParams) ?? {};
 
-  let response: AdminUserDetailResponse;
-  try {
-    response = await apiFetch<AdminUserDetailResponse>(`/users/${id}`);
-  } catch (error) {
-    if (isBackendNotFound(error)) {
-      notFound();
-    }
-    throw error;
-  }
+  // Unknown or malformed id: the 404 screen, as on every other detail.
+  const response = await fetchOrNotFound(() => apiFetch<AdminUserDetailResponse>(`/users/${id}`));
 
   const { user, metrics } = response;
   const isSelf = actor.id === user.id;
@@ -134,7 +117,7 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
   return (
     <main className="system-page user-detail-page">
       <DetailHeader
-        back={{ href: '/users', label: 'Admin kullanıcıları' }}
+        back={{ href: '/users', label: 'Yönetici hesapları' }}
         badges={
           <>
             <span className={userRoleBadgeClass(user.role)}>{userRoleLabel(user.role)}</span>
@@ -178,7 +161,7 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
         </div>
       ) : null}
       {search.error ? (
-        <div className="notice notice-error detail-notice" data-testid="role-assignment-error">
+        <div className="notice notice-error detail-notice" role="alert" data-testid="role-assignment-error">
           {search.error}
         </div>
       ) : null}

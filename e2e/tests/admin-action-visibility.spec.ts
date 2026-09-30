@@ -207,7 +207,7 @@ test.describe('admin action visibility', () => {
     try {
       await staff.gotoAdmin('/users');
       await expectOpen(staff.page, /\/users$/);
-      await expect(staff.page.getByRole('link', { name: 'Yeni Admin Kullanıcısı' })).toHaveCount(0);
+      await expect(staff.page.getByRole('link', { name: 'Yeni yönetici hesabı' })).toHaveCount(0);
 
       for (const path of ['/users/new', '/roles']) {
         await staff.gotoAdmin(path);

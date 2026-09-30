@@ -377,7 +377,7 @@ section {
 }
 
 .admin-sidebar-chevron {
-  color: var(--color-neutral-500);
+  color: var(--color-neutral-600);
 }
 
 .admin-sidebar-list {
@@ -873,7 +873,8 @@ textarea {
   width: 100%;
   max-width: 100%;
   min-height: 42px;
-  border: 1px solid var(--color-neutral-400);
+  /* Faz 4 (WCAG 1.4.11): a field's edge is how it is found — 4.30:1, not 2.01:1. */
+  border: 1px solid var(--color-neutral-600);
   border-radius: var(--radius-md);
   background: #fff;
   color: var(--text);
@@ -916,9 +917,10 @@ button,
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid var(--primary);
+  /* Faz 4 (contrast): one step under the accent, as `.btn` below. */
+  border: 1px solid var(--color-accent-600);
   border-radius: var(--radius-md);
-  background: var(--primary);
+  background: var(--color-accent-600);
   color: #fff;
   cursor: pointer;
   font: inherit;
@@ -929,8 +931,8 @@ button,
 
 button:hover,
 .button:hover {
-  border-color: var(--primary-dark);
-  background: var(--primary-dark);
+  border-color: var(--color-accent-700);
+  background: var(--color-accent-700);
   color: #fff;
   text-decoration: none;
 }
@@ -1177,9 +1179,15 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid var(--primary);
+  /*
+   * Faz 4 (contrast): white on the brand accent is 4.20:1, under AA for text
+   * this size, so the filled button sits one step darker (4.74:1) and its
+   * hover one more (7.17:1). The accent itself stays the brand's everywhere
+   * it is not behind text.
+   */
+  border: 1px solid var(--color-accent-600);
   border-radius: var(--radius-md);
-  background: var(--primary);
+  background: var(--color-accent-600);
   color: #fff;
   cursor: pointer;
   font: inherit;
@@ -1190,8 +1198,8 @@ button:disabled {
 
 .btn:hover,
 .btn-primary:hover {
-  border-color: var(--primary-dark);
-  background: var(--primary-dark);
+  border-color: var(--color-accent-700);
+  background: var(--color-accent-700);
   color: #fff;
   text-decoration: none;
 }
@@ -1222,12 +1230,13 @@ button:disabled {
 .btn-ghost {
   border: 1px solid transparent;
   background: transparent;
-  color: var(--primary);
+  /* Faz 4 (contrast): accent text is 3.76:1 on the page background. */
+  color: var(--color-accent-700);
 }
 
 .btn-ghost:hover {
   background: var(--color-accent-100);
-  color: var(--primary-dark);
+  color: var(--color-accent-800);
 }
 
 .btn-block {
@@ -3354,7 +3363,7 @@ button:disabled {
 .transaction-filter-chip.is-active {
   background: var(--color-accent-100);
   border-color: var(--color-accent-300);
-  color: var(--primary-dark);
+  color: var(--color-accent-700);
 }
 
 .transaction-filter-chip-count {
@@ -3372,7 +3381,7 @@ button:disabled {
 
 .transaction-filter-chip.is-active .transaction-filter-chip-count {
   background: var(--color-accent-200);
-  color: var(--primary-dark);
+  color: var(--color-accent-700);
 }
 
 .transaction-toolbar-search input {
@@ -3618,7 +3627,7 @@ button:disabled {
 }
 
 .offer-timeline-item.is-pending .offer-timeline-time {
-  color: var(--color-neutral-600);
+  color: var(--color-neutral-700);
 }
 
 .offer-timeline-body {
@@ -5425,6 +5434,43 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/*
+ * "Ana içeriğe geç" (Faz 4): out of sight until the keyboard reaches it, then
+ * a plain ink chip in the top-left corner above the shell.
+ */
+.skip-link {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 10px 14px;
+  overflow: visible;
+  clip: auto;
+  background: var(--color-text);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* The skip link's target takes focus only to move the reading point. */
+#admin-content:focus {
+  outline: none;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -5633,7 +5679,7 @@ button:disabled {
 }
 
 .tabs-link[aria-current='page'] .tabs-count {
-  background: var(--color-accent);
+  background: var(--color-accent-600);
   color: #fff;
 }
 
@@ -5721,11 +5767,13 @@ button:disabled {
  * resolve against the page, not this scroller, and an `.sr-only` header at the
  * far end of a wide table silently widens the whole document.
  */
-.data-list-scroll {
+.data-list-scroll,
+.table-scroll[role='region'] {
   position: relative;
 }
 
-.data-list-scroll:focus-visible {
+.data-list-scroll:focus-visible,
+.table-scroll[role='region']:focus-visible {
   outline-offset: -2px;
 }
 
@@ -5969,7 +6017,7 @@ button:disabled {
   flex: 0 0 auto;
   width: 52px;
   height: 28px;
-  border: 1px solid var(--color-neutral-400);
+  border: 1px solid var(--color-neutral-600);
   background: var(--color-neutral-200);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -8709,4 +8757,61 @@ a.dashboard-kpi-note {
     grid-column: 2;
     justify-self: start;
   }
+}
+
+/* ---- Faz 4 (cross-screen audit) ---- */
+
+/* The staff invite link (users/new, users/[id]): the panel's tokens, not a
+   pre-redesign grey box with rounded corners. */
+.invite-link-panel {
+  margin-top: 12px;
+}
+
+.invite-link-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.invite-link-url {
+  display: block;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.invite-link-error {
+  margin-top: 12px;
+}
+
+.forbidden-actions {
+  margin-top: 16px;
+}
+
+/* Tabular figures for every number the screens mark as one (the class was
+   used on 23 cells and never defined). */
+.display-number {
+  font-variant-numeric: tabular-nums;
+}
+
+
+/*
+ * The ⓘ stays 22px (18px small) to the eye, but a pointer gets 24px at least
+ * (WCAG 2.2, 2.5.8): an invisible margin of hit area around it.
+ */
+.info-popover-trigger {
+  position: relative;
+}
+
+.info-popover-trigger::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+}
+
+.info-popover.is-sm .info-popover-trigger::after {
+  inset: -4px;
 }

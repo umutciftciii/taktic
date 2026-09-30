@@ -141,15 +141,16 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
             Bu hizmet verenin aylık kota veya limitsiz paketi bulunmuyor.
           </p>
         ) : (
-          <div className="table-scroll">
+          <div className="table-scroll" role="region" aria-label="Dönemsel paketler" tabIndex={0}>
             <table className="data-table">
+              <caption className="sr-only">Dönemsel paketler</caption>
               <thead>
                 <tr>
-                  <th>Paket</th>
-                  <th>Dönem</th>
-                  <th>Durum</th>
-                  <th>Kalan / kapsam</th>
-                  <th>Yenileme</th>
+                  <th scope="col">Paket</th>
+                  <th scope="col">Dönem</th>
+                  <th scope="col">Durum</th>
+                  <th scope="col">Kalan / kapsam</th>
+                  <th scope="col">Yenileme</th>
                 </tr>
               </thead>
               <tbody>

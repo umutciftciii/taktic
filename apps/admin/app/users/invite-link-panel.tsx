@@ -13,47 +13,19 @@ export function InviteLinkPanel({
   intro: string;
 }) {
   return (
-    <div style={{ marginTop: 12 }}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
-        {intro}
-      </div>
-      <code
-        data-testid="admin-invite-url"
-        style={{
-          display: 'block',
-          padding: 10,
-          background: 'var(--surface-soft, #f3f4f6)',
-          border: '1px solid var(--border, #e5e7eb)',
-          borderRadius: 8,
-          fontSize: 12,
-          lineHeight: 1.5,
-          wordBreak: 'break-all',
-        }}
-      >
+    <div className="invite-link-panel">
+      <div className="invite-link-note">{intro}</div>
+      <code className="invite-link-url" data-testid="admin-invite-url">
         {inviteUrl}
       </code>
-      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-        Son geçerlilik: {formatDateTime(expiresAt)}
-      </div>
+      <div className="invite-link-note">Son geçerlilik: {formatDateTime(expiresAt)}</div>
     </div>
   );
 }
 
 export function InviteLinkError({ message }: { message: string }) {
   return (
-    <div
-      role="alert"
-      style={{
-        marginTop: 12,
-        padding: 10,
-        borderRadius: 8,
-        background: 'rgba(220, 38, 38, 0.08)',
-        border: '1px solid rgba(220, 38, 38, 0.25)',
-        color: 'rgb(153, 27, 27)',
-        fontSize: 13,
-        lineHeight: 1.5,
-      }}
-    >
+    <div className="notice notice-error invite-link-error" role="alert">
       {message}
     </div>
   );

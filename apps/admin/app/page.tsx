@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import {
   AdminSummary,
   apiFetch,
@@ -7,6 +8,7 @@ import {
   MarketplacePublishSettings,
   OperationsSettings,
   ProviderReviewSettings,
+  readAdminAccess,
   requireAdmin,
   SchedulerSettings,
 } from '../lib/api';
@@ -21,6 +23,7 @@ import {
   linkIfAllowed,
   type OperationsSnapshot,
 } from '../lib/dashboard-overview';
+import { filterNavMenu } from '../lib/nav';
 
 /**
  * Genel görünüm (#1), design `dashboard` (ADMIN-DESIGN-001 Faz 3H).
@@ -47,6 +50,20 @@ async function readOperations(): Promise<OperationsSnapshot> {
 }
 
 export default async function AdminHomePage() {
+  // `/` is where signing in, the brand mark and /yetkisiz's "Panele dön" all
+  // lead. A role without the dashboard is sent to the first row its menu
+  // holds instead of to /yetkisiz — which used to be a loop, since
+  // "Panele dön" came straight back here (Faz 4). A session whose menu is
+  // empty has nowhere to go and is refused below as before; no session at
+  // all (`null`) is `requireAdmin`'s to send to the sign-in form.
+  const access = await readAdminAccess();
+  if (access && !access.isSuperAdmin && !access.permissions.includes('DASHBOARD_READ')) {
+    const held = new Set(access.permissions);
+    const menu = filterNavMenu((permission) => held.has(permission), false);
+    const first = menu.groups[0]?.items[0]?.href;
+    if (first) redirect(first);
+  }
+
   const { user, can } = await requireAdmin('DASHBOARD_READ');
   const canReadOperations = can('OPERATIONS_SETTINGS_READ');
 

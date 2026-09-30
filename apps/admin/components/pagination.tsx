@@ -123,12 +123,13 @@ export function WholeListFooter({
 }) {
   const filtered = total !== undefined && total !== count;
   return (
-    <nav className="pagination" aria-label="Liste sonu">
+    // A plain footer, not a <nav>: there is nothing in it to navigate to.
+    <div className="pagination">
       <p className="pagination-summary" data-testid={summaryTestId}>
         {filtered
           ? `${formatCount(total)} ${noun} içinden filtreye uyan ${formatCount(count)} kayıt gösteriliyor`
           : `${formatCount(count)} ${noun}, tamamı gösteriliyor`}
       </p>
-    </nav>
+    </div>
   );
 }

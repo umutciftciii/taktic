@@ -309,15 +309,16 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
               Henüz bir karar verilmedi.
             </p>
           ) : (
-            <div className="table-scroll">
+            <div className="table-scroll" role="region" aria-label="Moderasyon günlüğü" tabIndex={0}>
               <table className="data-table" data-testid="review-moderation-log">
+                <caption className="sr-only">Moderasyon günlüğü</caption>
                 <thead>
                   <tr>
-                    <th>Karar</th>
-                    <th>Gerekçe</th>
-                    <th>Not</th>
-                    <th>Yönetici</th>
-                    <th>Zaman</th>
+                    <th scope="col">Karar</th>
+                    <th scope="col">Gerekçe</th>
+                    <th scope="col">Not</th>
+                    <th scope="col">Yönetici</th>
+                    <th scope="col">Zaman</th>
                   </tr>
                 </thead>
                 <tbody>

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, readAdminAccess } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 
 /**
@@ -86,7 +86,13 @@ export async function openPackageRefundRequestAction(formData: FormData) {
   if (!createdId) {
     redirect(`/support/${ticketId}?error=${encodeURIComponent(failure ?? 'İade isteği açılamadı.')}`);
   }
-  redirect(`/package-refunds/${createdId}?done=created`);
+  // The new request's own screen is PACKAGE_REFUND_READ's. A role that may
+  // open a request but not read the queue (PACKAGE_REFUND_REQUEST_CREATE
+  // alone) stays on the ticket, which now shows the request's status, rather
+  // than landing on /yetkisiz right after doing what it was allowed to (Faz 4).
+  const access = await readAdminAccess();
+  const canReadRefund = Boolean(access && (access.isSuperAdmin || access.permissions.includes('PACKAGE_REFUND_READ')));
+  redirect(canReadRefund ? `/package-refunds/${createdId}?done=created` : `/support/${ticketId}?refundOpened=1`);
 }
 
 async function submit(id: string, path: string, body: Record<string, unknown>, done: string) {

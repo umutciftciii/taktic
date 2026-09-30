@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { NavIcon } from '../components/nav-icon';
 import { Sidebar } from '../components/sidebar';
@@ -61,7 +61,7 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
   const [railPreferred, setRailPreferred] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
   const rail = railPreferred && isDesktop;
-  const sidebarRef = useRef<HTMLElement | null>(null);
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   /**
@@ -185,17 +185,43 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [sidebarOpen]);
 
+  /*
+   * The skip link's target is focusable only for the jump itself. A
+   * permanent tabIndex on the content column made it the focus target of
+   * every click inside it in WebKit (which does not focus a clicked button),
+   * and that focus move closed an open ⓘ before its own click reopened it.
+   */
+  function skipToContent(event: MouseEvent<HTMLAnchorElement>) {
+    const target = document.getElementById('admin-content');
+    if (!target) return;
+    event.preventDefault();
+    target.setAttribute('tabindex', '-1');
+    target.focus();
+    target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
+  }
+
   if (pathname === '/login' || pathname === '/admin-invite') {
     return <>{children}</>;
   }
 
   return (
     <div className={['admin-shell', sidebarOpen ? 'is-sidebar-open' : '', rail ? 'is-rail' : ''].filter(Boolean).join(' ')}>
-      <aside
+      {/*
+        Faz 4: the first thing Tab reaches, so a keyboard user does not walk
+        the whole menu on every screen. Visually hidden until focused.
+      */}
+      <a className="skip-link" href="#admin-content" onClick={skipToContent}>
+        Ana içeriğe geç
+      </a>
+      {/*
+        A plain box, not an <aside>: what is inside is the navigation, and the
+        <nav> in it is already the labelled landmark. An <aside> around it
+        announced a second, "complementary" landmark with nothing extra in it.
+      */}
+      <div
         ref={sidebarRef}
         id={SIDEBAR_ID}
         className="admin-sidebar"
-        aria-label="Birincil navigasyon"
       >
         <div className="admin-drawer-head">
           <button
@@ -216,7 +242,7 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
           onExpandRail={expandRail}
           onNavigate={closeSidebar}
         />
-      </aside>
+      </div>
 
       {/*
         Only in the tree while it can be used. A permanently mounted backdrop
@@ -232,7 +258,12 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
         />
       ) : null}
 
-      <div className="admin-main">
+      {/*
+        While the phone drawer is open it is modal: the Tab trap keeps the
+        keyboard in it, and `inert` keeps a screen reader's virtual cursor out
+        of the page behind it too.
+      */}
+      <div className="admin-main" inert={sidebarOpen}>
         <Topbar
           menu={navMenu}
           onToggleSidebar={toggleSidebar}
@@ -240,7 +271,9 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
           sidebarId={SIDEBAR_ID}
           toggleRef={toggleRef}
         />
-        <div className="admin-content">{children}</div>
+        <div className="admin-content" id="admin-content">
+          {children}
+        </div>
       </div>
 
       {/*

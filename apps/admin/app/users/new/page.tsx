@@ -17,7 +17,7 @@ export default async function NewAdminUserPage() {
   return (
     <main className="system-page system-form-page user-new-page">
       <Link className="detail-back" href="/users">
-        <span aria-hidden="true">‹</span> Admin kullanıcıları
+        <span aria-hidden="true">‹</span> Yönetici hesapları
       </Link>
       <PageHeader
         title="Yeni admin kullanıcısı"
