@@ -1,100 +1,109 @@
 import Link from 'next/link';
-import { AdminSummary, apiFetch, requireAdmin } from '../lib/api';
+import {
+  AdminSummary,
+  apiFetch,
+  CampaignEngineSettings,
+  formatDateTime,
+  MarketplacePublishSettings,
+  OperationsSettings,
+  ProviderReviewSettings,
+  requireAdmin,
+  SchedulerSettings,
+} from '../lib/api';
 import { PageHeader } from '../components/page-header';
-import { SectionCard } from '../components/section-card';
-import { StatCard } from '../components/stat-card';
+import { DashboardKpis, DashboardQueues, DashboardSystemActivity } from '../components/dashboard-overview';
 import { buildAdminDashboardMetrics } from '../lib/dashboard-metrics';
+import {
+  buildDashboardKpis,
+  buildDashboardQueues,
+  buildSystemActivity,
+  dashboardGreeting,
+  linkIfAllowed,
+  type OperationsSnapshot,
+} from '../lib/dashboard-overview';
 
 /**
- * The permission each destination page asks for in its own `requireAdmin`.
+ * Genel görünüm (#1), design `dashboard` (ADMIN-DESIGN-001 Faz 3H).
  *
- * The numbers are all covered by DASHBOARD_READ; following one into its list is
- * not. A card or a quick link whose page would answer /yetkisiz is not a link.
- * Longest prefix first, so `/requests/reports` is not read as `/requests`. An
- * unknown destination is not linked — a new card has to be added here.
+ * Greeting, "Önce bunlara bak", four headline figures and — for a session that
+ * may read the operations settings — "Sistem şu anda ne yapıyor". What each
+ * block shows, links and colours is decided in `lib/dashboard-overview.ts` on
+ * top of `lib/dashboard-metrics.ts`; see there for K2 (a queue only for a
+ * session that may open it) and K12 (no figure without a source: no change
+ * figures, sparklines, 7-day chart, "son yapılanlar" feed or vitrin queue).
  */
-const DESTINATION_PERMISSIONS: ReadonlyArray<readonly [string, string]> = [
-  ['/requests/reports', 'REQUEST_REPORTS_READ'],
-  ['/requests', 'REQUESTS_READ'],
-  ['/providers', 'PROVIDERS_READ'],
-  ['/offers', 'OFFERS_READ'],
-  ['/categories', 'CATALOG_READ'],
-  ['/credit-packages', 'CREDIT_PACKAGES_READ'],
-  ['/package-purchases', 'PACKAGE_PURCHASES_READ'],
-  ['/refund-scan', 'OFFER_REFUND_SCAN_READ'],
-  ['/support', 'SUPPORT_READ'],
-];
 
-function destinationPermission(href: string): string | null {
-  const path = href.split(/[?#]/, 1)[0] ?? href;
-  const match = DESTINATION_PERMISSIONS.find(
-    ([prefix]) => path === prefix || path.startsWith(`${prefix}/`),
-  );
-  return match ? match[1] : null;
+export const dynamic = 'force-dynamic';
+
+async function readOperations(): Promise<OperationsSnapshot> {
+  const [settings, schedulers, publish, reviews, engine] = await Promise.all([
+    apiFetch<OperationsSettings>('/operations-settings'),
+    apiFetch<SchedulerSettings>('/operations-settings/schedulers'),
+    apiFetch<MarketplacePublishSettings>('/operations-settings/marketplace-publish'),
+    apiFetch<ProviderReviewSettings>('/operations-settings/provider-reviews'),
+    apiFetch<CampaignEngineSettings>('/operations-settings/campaign-engine'),
+  ]);
+  return { settings, schedulers, publish, reviews, engine };
 }
-
-const QUICK_LINKS: ReadonlyArray<{ href: string; label: string; className: string }> = [
-  { href: '/requests', label: 'Talepleri incele', className: 'btn btn-primary btn-sm' },
-  { href: '/providers', label: 'Hizmet verenleri incele', className: 'btn btn-secondary btn-sm' },
-  { href: '/offers', label: 'Teklifleri incele', className: 'btn btn-secondary btn-sm' },
-  { href: '/categories', label: 'Kategorileri yönet', className: 'btn btn-secondary btn-sm' },
-  { href: '/credit-packages', label: 'Kredi paketleri', className: 'btn btn-secondary btn-sm' },
-  { href: '/package-purchases', label: 'Paket satın almaları', className: 'btn btn-secondary btn-sm' },
-  { href: '/refund-scan', label: 'İade taraması', className: 'btn btn-ghost btn-sm' },
-  { href: '/support', label: 'Destek talepleri', className: 'btn btn-ghost btn-sm' },
-];
 
 export default async function AdminHomePage() {
   const { user, can } = await requireAdmin('DASHBOARD_READ');
-  const canOpen = (href: string) => {
-    const permission = destinationPermission(href);
-    return permission !== null && can(permission);
-  };
-  const quickLinks = QUICK_LINKS.filter((link) => canOpen(link.href));
+  const canReadOperations = can('OPERATIONS_SETTINGS_READ');
+
+  // One after the other, not together: the summary is ten parallel counts and
+  // the settings reads are five requests of their own. Started at once they
+  // doubled the connections one page view asks the API's pool for, and on a
+  // shared database that is the difference between a slow page and a
+  // "too many clients" error screen.
   const summary = await apiFetch<AdminSummary>('/dashboard/admin-summary');
+  const operations = canReadOperations ? await readOperations() : null;
+
   const metrics = buildAdminDashboardMetrics(summary);
+  const queues = buildDashboardQueues(metrics, can);
+  const kpis = buildDashboardKpis(metrics, can);
+  const activity = operations ? buildSystemActivity(operations, formatDateTime) : null;
+  const greeting = dashboardGreeting(user.name, new Date());
+
+  const requestsHref = linkIfAllowed('/requests', can);
+  const settingsHref = linkIfAllowed('/operations-settings', can);
 
   return (
-    <main>
+    <main className="dashboard-page">
       <PageHeader
-        title="TakTic Admin"
+        title={greeting.title}
         subtitle={
           <>
-            Yönetim paneli · giriş yapan: <strong>{user.email}</strong>
+            <time dateTime={greeting.isoDate} data-testid="dashboard-date">
+              {greeting.date}
+            </time>
+            {queues.length > 0
+              ? '. Bekleyen işler aşağıda; her kutu kendi listesini aynı filtreyle açar.'
+              : '.'}
           </>
+        }
+        actions={
+          requestsHref || settingsHref ? (
+            <>
+              {requestsHref ? (
+                <Link className="btn btn-primary" href={requestsHref}>
+                  Talepleri incele
+                </Link>
+              ) : null}
+              {settingsHref ? (
+                <Link className="btn btn-secondary" href={settingsHref}>
+                  Operasyon ayarları
+                </Link>
+              ) : null}
+            </>
+          ) : undefined
         }
       />
 
-      <section className="stat-grid">
-        {/*
-          Every card, its number and its badge come from one place. The page
-          used to type `tone="warning"` onto each card, which is how an empty
-          marketplace ended up wearing a "dikkat" badge on three zeroes — see
-          lib/dashboard-metrics.ts for the rule that replaced it.
-        */}
-        {metrics.map((metric) => (
-          <StatCard
-            key={metric.key}
-            metricKey={metric.key}
-            label={metric.label}
-            value={metric.value}
-            href={canOpen(metric.href) ? metric.href : undefined}
-            tone={metric.tone}
-          />
-        ))}
-      </section>
+      {queues.length > 0 ? <DashboardQueues cells={queues} /> : null}
 
-      {quickLinks.length > 0 ? (
-        <SectionCard title="Hızlı işlemler" subtitle="Sık kullanılan operasyon ve katalog ekranlarına git.">
-          <div className="inline-actions">
-            {quickLinks.map((link) => (
-              <Link key={link.href} className={link.className} href={link.href}>
-                {link.label}
-              </Link>
-            ))}
-          </div>
-        </SectionCard>
-      ) : null}
+      <DashboardKpis kpis={kpis} />
+
+      {activity && settingsHref ? <DashboardSystemActivity rows={activity} settingsHref={settingsHref} /> : null}
     </main>
   );
 }

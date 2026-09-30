@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  IN_REVIEW_REQUESTS_HREF,
   OPEN_REQUEST_REPORTS_HREF,
+  PENDING_PROVIDERS_HREF,
+  PENDING_REQUESTS_HREF,
   buildAdminDashboardMetrics,
   resolveMetricTone,
 } from '../lib/dashboard-metrics';
@@ -150,6 +153,33 @@ describe('the open request reports card', () => {
 
     expect(card?.value).toBe(0);
     expect(card?.tone).toBe('neutral');
+  });
+});
+
+/**
+ * ADMIN-DESIGN-001 Faz 3H: an action card opens the status view it counts.
+ * `DashboardService.adminSummary` counts providers in PENDING_REVIEW and
+ * requests in SUBMITTED / IN_REVIEW; each link names exactly that status in the
+ * `?status=` value its list's `normalizeStatus` reads, so the view the operator
+ * lands on is the set the number counted rather than the whole list.
+ */
+describe('action cards open the view they count', () => {
+  it.each([
+    ['pendingProviders', PENDING_PROVIDERS_HREF, '/providers', 'PENDING_REVIEW'],
+    ['pendingRequests', PENDING_REQUESTS_HREF, '/requests', 'SUBMITTED'],
+    ['inReviewRequests', IN_REVIEW_REQUESTS_HREF, '/requests', 'IN_REVIEW'],
+  ])('%s → %s', (key, href, path, status) => {
+    const card = metric({ [key]: 2 }, key);
+    expect(card.href).toBe(href);
+    const url = new URL(card.href, 'https://admin.test');
+    expect(url.pathname).toBe(path);
+    expect([...url.searchParams.entries()]).toEqual([['status', status]]);
+  });
+
+  it('keeps totals on their whole list', () => {
+    expect(metric({}, 'totalRequests').href).toBe('/requests');
+    expect(metric({}, 'totalOffers').href).toBe('/offers');
+    expect(metric({}, 'packagePurchases').href).toBe('/package-purchases');
   });
 });
 

@@ -97,6 +97,7 @@ type Measurement = {
 
 /** Screens a Faz 2/3 slice has converted; each is scanned at 320px as well. */
 const CONVERTED_ROUTES = [
+  '/',
   '/notifications',
   '/requests',
   '/requests/[id]',

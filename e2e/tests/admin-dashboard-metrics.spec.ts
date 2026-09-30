@@ -1,43 +1,59 @@
-import { expect, test, type Page } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { createAdmin, createCustomer, createSupportTicket } from '../src/fixtures';
-import { primaryRuntime } from '../src/runtime';
+import {
+  createAdmin,
+  createCategory,
+  createCustomer,
+  createProvider,
+  createStaffAdmin,
+  createSupportTicket,
+  isAutoPublishEnabled,
+  openReportCount,
+  prisma,
+  uniqueLocation,
+} from '../src/fixtures';
+import { seedRequestReport } from '../src/offer-fixtures';
+import { seedCustomerRequest } from '../src/request-fixtures';
+import { artifactsDir, primaryRuntime } from '../src/runtime';
 
 /**
- * The admin dashboard's metric cards.
+ * Genel görünüm (`/`) — ADMIN-DESIGN-001 Faz 3H, design `dashboard`.
  *
- * Two defects, one screen. A card wore a "dikkat" badge whatever its count, so
- * an operator opening a quiet marketplace was warned about zero pending
- * requests, zero tickets in review and zero refund candidates — a badge that is
- * always on says nothing when it matters. And support tickets, which an
- * operator does have to answer, were not on the dashboard at all: the only way
- * to learn one had been opened was to go looking for it.
+ * The rules asserted here, each against the real screen:
  *
- * What is asserted here is the rule rather than a screenshot: **no card showing
- * a zero carries a badge**, checked across every card on the screen so a card
- * added later cannot quietly opt out, and **the support card counts the backlog
- * and hands the operator exactly the tickets it counted** — the number on the
- * card and the total on the screen it opens, compared against each other rather
- * than each against a hard-coded three. The badge rule itself is pinned
- * as a pure function in `apps/admin/test/dashboard-metrics.spec.ts` and the
- * backlog's definition in `apps/api/test/admin-dashboard-summary.spec.ts`; this
- * spec is what proves the screen actually uses both.
+ * - **No zero wears a colour.** Every queue cell and every KPI note: tone
+ *   `warning` if and only if its number is positive. Checked across every
+ *   one on the screen, so a cell added later cannot opt out.
+ * - **A number opens exactly what it counted.** The support cell's number is
+ *   the size of the list it opens and the same tickets; the application cell's
+ *   number is the "İnceleme bekliyor" view's count and the database's; the
+ *   report cell's number is the sum of the open queue's "Bildirim" column.
+ * - **K2.** A queue cell, a KPI link and a header action exist only for a
+ *   session that may open the page behind them; "Sistem şu anda ne yapıyor"
+ *   only with OPERATIONS_SETTINGS_READ, and then it says what is stored.
+ * - **K12.** No design element without a source is on the page.
+ *
+ * The badge rule itself is pinned in `apps/admin/test/dashboard-metrics.spec.ts`
+ * and the screen's decisions in `apps/admin/test/dashboard-overview.spec.tsx`;
+ * the backlog's definition in `apps/api/test/admin-dashboard-summary.spec.ts`.
  *
  * This file runs before `support-tickets.spec.ts` and before anything else that
- * opens a ticket, so the support card genuinely starts at zero — which is what
- * makes the zero case here a real observation rather than a hopeful one.
+ * opens a ticket, so the support cell genuinely starts at zero.
  */
 
-const SUPPORT_CARD = '[data-metric="openSupportTickets"]';
-const DESKTOP = { width: 1280, height: 900 } as const;
+const DESKTOP = { width: 1440, height: 900 } as const;
 
-/**
- * Subjects unique to this spec, so every assertion below names its own tickets.
- *
- * The suite shares one database and runs serially, so "how many tickets exist"
- * is a number other specs move. What this spec claims is about these five and
- * the delta they make, never about a total.
- */
+const SHOTS = resolve(artifactsDir, 'admin-design');
+function shot(testInfo: TestInfo, name: string): string {
+  mkdirSync(SHOTS, { recursive: true });
+  return resolve(SHOTS, `${testInfo.project.name}-${name}.png`);
+}
+const SUPPORT_CELL = '[data-testid="dashboard-queue"][data-metric="openSupportTickets"]';
+const PROVIDER_CELL = '[data-testid="dashboard-queue"][data-metric="pendingProviders"]';
+const REPORT_CELL = '[data-testid="dashboard-queue"][data-metric="openRequestReports"]';
+
 const BACKLOG = {
   openA: `Dashboard OPEN A ${Date.now()}`,
   openB: `Dashboard OPEN B ${Date.now()}`,
@@ -46,209 +62,324 @@ const BACKLOG = {
   closed: `Dashboard CLOSED ${Date.now()}`,
 } as const;
 
-/** Nothing may make the document wider than the window it is in. */
+/** "1.392" → 1392: the screen groups thousands the Turkish way. */
+function count(text: string): number {
+  return Number.parseInt(text.replace(/\./g, '').trim(), 10);
+}
+
 async function expectNoHorizontalOverflow(page: Page, label: string) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - window.innerWidth,
-  );
-  expect(
-    overflow,
-    `${label}: the page is ${overflow}px wider than the viewport`,
-  ).toBeLessThanOrEqual(0);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow, `${label}: the page is ${overflow}px wider than the viewport`).toBeLessThanOrEqual(0);
 }
 
-/** Every card on the dashboard: its metric key, the number it shows, and whether it is badged. */
-async function readCards(page: Page) {
-  await expect(page.getByTestId('stat-card').first()).toBeVisible();
-
+/** Every coloured-or-not number on the screen: queue cells and KPI notes. */
+async function readToned(page: Page) {
   return page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('[data-testid="stat-card"]')).map(
-      (card) => ({
-        metric: card.dataset.metric ?? '',
-        value: Number.parseInt(card.querySelector('.metric')?.textContent ?? '', 10),
-        badge: card.querySelector('[data-testid="stat-card-badge"]')?.textContent?.trim() ?? null,
-        href: card.getAttribute('href'),
-      }),
-    ),
+    Array.from(
+      document.querySelectorAll<HTMLElement>('[data-testid="dashboard-queue"], [data-testid="dashboard-kpi-note"]'),
+    ).map((element) => ({
+      metric: element.dataset.metric ?? '',
+      tone: element.dataset.tone ?? '',
+      value: Number.parseInt(
+        (
+          element.querySelector('[data-testid="dashboard-queue-value"], strong')?.textContent ?? ''
+        ).replace(/\./g, ''),
+        10,
+      ),
+      href: element.getAttribute('href'),
+    })),
   );
 }
 
-test.describe('admin dashboard metric cards', () => {
-  test('a zero is silent, a positive backlog is not, and the support card opens the queue', async ({
-    browser,
-  }) => {
+async function expectToneRule(page: Page) {
+  for (const entry of await readToned(page)) {
+    expect(Number.isFinite(entry.value), `"${entry.metric}" shows no number`).toBe(true);
+    expect(entry.tone, `"${entry.metric}" shows ${entry.value}`).toBe(entry.value > 0 ? 'warning' : 'neutral');
+  }
+}
+
+async function expectNoUnsourcedDesign(page: Page) {
+  const main = page.locator('main');
+  for (const absent of [
+    'Son 7 gün',
+    'Panelde son yapılanlar',
+    'güncellendi',
+    'Onay bekleyen vitrin kartı',
+    'Hızlı işlemler',
+    'Geçen hafta',
+  ]) {
+    await expect(main.getByText(absent)).toHaveCount(0);
+  }
+  await expect(main.locator('svg polyline')).toHaveCount(0);
+  await expect(page.getByTestId('stat-card')).toHaveCount(0);
+}
+
+test.describe('admin dashboard (Genel görünüm)', () => {
+  test('a zero is silent, a backlog is not, and each queue opens exactly what it counted', async ({ browser }) => {
+    test.setTimeout(120_000);
     const adminAccount = await createAdmin();
     const customerAccount = await createCustomer('E2E Destek Müşterisi');
 
-    const admin = await Actor.open(browser, 'admin-dashboard', primaryRuntime, {
-      viewport: DESKTOP,
-    });
+    const admin = await Actor.open(browser, 'admin-dashboard', primaryRuntime, { viewport: DESKTOP });
 
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
       await admin.gotoAdmin('/');
       await assertNoErrorScreen(admin.page);
 
-      // ---- nothing to do yet ---------------------------------------------
-      const quiet = await readCards(admin.page);
+      // ---- the greeting: the account's own name, today's date -------------
+      const firstName = (
+        await prisma().user.findUniqueOrThrow({ where: { id: adminAccount.id }, select: { name: true } })
+      ).name!.split(/\s+/)[0]!;
+      await expect(admin.page.getByRole('heading', { level: 1 })).toHaveText(
+        new RegExp(`^(Günaydın|İyi günler|İyi akşamlar|İyi geceler), ${firstName}$`),
+      );
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
+      await expect(admin.page.getByTestId('dashboard-date')).toHaveAttribute('datetime', today);
 
-      // The three the brief names, plus every other card on the screen: a count
-      // of zero must not be wearing a badge.
-      for (const key of ['pendingRequests', 'inReviewRequests', 'refundableOffers']) {
-        const card = quiet.find((entry) => entry.metric === key);
-        expect(card, `the dashboard has no "${key}" card`).toBeDefined();
-        if (card?.value === 0) {
-          expect(card.badge, `"${key}" shows 0 and still carries a badge`).toBeNull();
-        }
+      // A super admin may open everything: three cells, four figures, the list.
+      await expect(admin.page.getByTestId('dashboard-queue')).toHaveCount(3);
+      await expect(admin.page.getByTestId('dashboard-kpi')).toHaveCount(4);
+      await expect(admin.page.getByTestId('dashboard-system')).toBeVisible();
+      await expect(admin.page.getByRole('link', { name: 'Talepleri incele' })).toHaveAttribute('href', '/requests');
+      await expect(admin.page.locator('main').getByRole('link', { name: 'Operasyon ayarları', exact: true })).toHaveAttribute(
+        'href',
+        '/operations-settings',
+      );
+      await expectNoUnsourcedDesign(admin.page);
+      await expectToneRule(admin.page);
+
+      // ---- support: zero first ------------------------------------------
+      const support = admin.page.locator(SUPPORT_CELL);
+      await expect(support).toContainText('Açık destek talebi');
+      await expect(support.getByTestId('dashboard-queue-value')).toHaveText('0');
+      await expect(support).toHaveAttribute('data-tone', 'neutral');
+      await expect(support).toHaveAttribute('href', '/support?status=OPEN,IN_PROGRESS');
+
+      for (const [status, subject] of [
+        ['OPEN', BACKLOG.openA],
+        ['OPEN', BACKLOG.openB],
+        ['IN_PROGRESS', BACKLOG.inProgress],
+        ['RESOLVED', BACKLOG.resolved],
+        ['CLOSED', BACKLOG.closed],
+      ] as const) {
+        await createSupportTicket({ requesterId: customerAccount.id, status, subject });
       }
-
-      for (const card of quiet) {
-        if (card.value === 0) {
-          expect(card.badge, `"${card.metric}" shows 0 and still carries a badge`).toBeNull();
-        }
-      }
-
-      // Totals are there to be read, never to be warned about.
-      for (const key of ['totalRequests', 'totalOffers', 'packagePurchases']) {
-        expect(quiet.find((entry) => entry.metric === key)?.badge, `"${key}" is badged`).toBeNull();
-      }
-
-      // ---- the support card, before anybody has asked for help ------------
-      const supportCard = admin.page.locator(SUPPORT_CARD);
-      await expect(supportCard).toBeVisible();
-      await expect(supportCard).toContainText('Açık destek talepleri');
-      // This file sorts before every spec that opens a ticket, so the backlog
-      // really is empty here: the zero is an observation, not a hope.
-      await expect(supportCard.locator('.metric')).toHaveText('0');
-      await expect(supportCard.getByTestId('stat-card-badge')).toHaveCount(0);
-      // Both halves of the backlog, comma-separated and unencoded: the address
-      // is meant to be read and pasted.
-      await expect(supportCard).toHaveAttribute('href', '/support?status=OPEN,IN_PROGRESS');
-
-      // The card names itself, its number and where it goes, to a screen reader
-      // as well as to an eye.
-      const supportLink = admin.page.getByRole('link', { name: /Açık destek talepleri/ });
-      await expect(supportLink).toHaveCount(1);
-
-      // ---- a backlog appears ----------------------------------------------
-      // Two waiting and one being worked belong in the count; the answered one
-      // and the filed one do not. Asserted as the delta these five make, so the
-      // claim is about which statuses count rather than about a total the rest
-      // of the suite also moves.
-      const before = Number(await admin.page.locator(`${SUPPORT_CARD} .metric`).innerText());
-
-      await createSupportTicket({
-        requesterId: customerAccount.id,
-        status: 'OPEN',
-        subject: BACKLOG.openA,
-      });
-      await createSupportTicket({
-        requesterId: customerAccount.id,
-        status: 'OPEN',
-        subject: BACKLOG.openB,
-      });
-      await createSupportTicket({
-        requesterId: customerAccount.id,
-        status: 'IN_PROGRESS',
-        subject: BACKLOG.inProgress,
-      });
-      await createSupportTicket({
-        requesterId: customerAccount.id,
-        status: 'RESOLVED',
-        subject: BACKLOG.resolved,
-      });
-      await createSupportTicket({
-        requesterId: customerAccount.id,
-        status: 'CLOSED',
-        subject: BACKLOG.closed,
-      });
 
       await admin.gotoAdmin('/');
-      await assertNoErrorScreen(admin.page);
+      await expect(support.getByTestId('dashboard-queue-value')).toHaveText('3');
+      await expect(support).toHaveAttribute('data-tone', 'warning');
+      await expectToneRule(admin.page);
 
-      await expect(admin.page.locator(`${SUPPORT_CARD} .metric`)).toHaveText(String(before + 3));
-      await expect(admin.page.locator(SUPPORT_CARD).getByTestId('stat-card-badge')).toHaveText(
-        'dikkat',
-      );
-
-      // ---- and it leads to exactly the tickets it counted -----------------
-      const counted = Number(await admin.page.locator(`${SUPPORT_CARD} .metric`).innerText());
-
-      await admin.page.locator(SUPPORT_CARD).click();
-      // The comma survives the navigation, encoded or not, depending on the
-      // browser — either is the same filter.
+      await support.click();
       await expect(admin.page).toHaveURL(/\/support\?status=OPEN(,|%2C)IN_PROGRESS$/);
       await assertNoErrorScreen(admin.page);
-
-      // The filter reflects the link that was followed, so pressing Filtrele
-      // keeps the operator where they are instead of resetting to "Tümü".
       await expect(admin.page.locator('#support-status')).toHaveValue('OPEN,IN_PROGRESS');
-
-      // The number on the card is the size of the list behind it. This is the
-      // assertion the mismatch would have failed: the card said one thing and
-      // the screen it opened said another.
-      await expect(admin.page.getByTestId('support-ticket-count')).toHaveAttribute(
-        'data-total',
-        String(counted),
-      );
-
-      // And it is the same tickets, not merely the same number of them: both
-      // waiting ones and the one being worked are here, the answered and the
-      // filed are not.
+      await expect(admin.page.getByTestId('support-ticket-count')).toHaveAttribute('data-total', '3');
       const rows = admin.page.getByTestId('support-ticket-row');
       for (const present of [BACKLOG.openA, BACKLOG.openB, BACKLOG.inProgress]) {
-        await expect(
-          rows.filter({ hasText: present }),
-          `"${present}" is in the backlog and should be listed`,
-        ).toHaveCount(1);
+        await expect(rows.filter({ hasText: present })).toHaveCount(1);
       }
       for (const absent of [BACKLOG.resolved, BACKLOG.closed]) {
-        await expect(
-          rows.filter({ hasText: absent }),
-          `"${absent}" is finished work and should not be listed`,
-        ).toHaveCount(0);
+        await expect(rows.filter({ hasText: absent })).toHaveCount(0);
       }
 
-      // Nothing outside the backlog slipped through the filter either.
-      for (const status of await rows.evaluateAll((nodes) =>
-        nodes.map((node) => (node as HTMLElement).dataset.status),
-      )) {
-        expect(['OPEN', 'IN_PROGRESS']).toContain(status);
+      // ---- a waiting application, and one request reported twice ----------
+      const location = uniqueLocation();
+      const category = await createCategory(3);
+      const applicant = await createProvider({ categoryId: category.id, location, credits: 0 });
+      await prisma().providerProfile.update({ where: { id: applicant.id }, data: { status: 'PENDING_REVIEW' } });
+      const reporterA = await createProvider({ categoryId: category.id, location, credits: 0 });
+      const reporterB = await createProvider({ categoryId: category.id, location, credits: 0 });
+      const reported = await seedCustomerRequest({
+        customerId: customerAccount.id,
+        categoryId: category.id,
+        location,
+        content: 'empty',
+      });
+      await seedRequestReport({ requestId: reported.id, reporterProviderId: reporterA.id });
+      await seedRequestReport({ requestId: reported.id, reporterProviderId: reporterB.id });
+
+      // ---- applications: the database, the cell and the view agree -------
+      await admin.gotoAdmin('/');
+      await expectToneRule(admin.page);
+      const pendingInDb = await prisma().providerProfile.count({ where: { status: 'PENDING_REVIEW' } });
+      expect(pendingInDb).toBeGreaterThan(0);
+      const providers = admin.page.locator(PROVIDER_CELL);
+      await expect(providers).toHaveAttribute('data-tone', 'warning');
+      await expect(providers.getByTestId('dashboard-queue-value')).toHaveText(String(pendingInDb));
+      await providers.click();
+      await expect(admin.page).toHaveURL(/\/providers\?status=PENDING_REVIEW$/);
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.locator('#provider-status')).toHaveValue('PENDING_REVIEW');
+      await expect(admin.page.getByTestId('provider-view-pending_review')).toContainText(String(pendingInDb));
+      for (const status of await admin.page
+        .getByTestId('provider-row')
+        .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.status))) {
+        expect(status).toBe('PENDING_REVIEW');
       }
+
+      // ---- reports: counted per report, listed per request ---------------
+      await admin.gotoAdmin('/');
+      const openReports = await openReportCount();
+      expect(openReports).toBeGreaterThanOrEqual(2);
+      const reports = admin.page.locator(REPORT_CELL);
+      await expect(reports.getByTestId('dashboard-queue-value')).toHaveText(String(openReports));
+      await expect(reports).toHaveAttribute('data-tone', 'warning');
+      await reports.click();
+      await expect(admin.page).toHaveURL(/\/requests\/reports\?state=open$/);
+      await assertNoErrorScreen(admin.page);
+      // Two reports on one request: one row, whose "Bildirim" column reads 2.
+      const reportedRow = admin.page.locator(
+        `[data-testid="report-queue-row"][data-request-id="${reported.id}"]`,
+      );
+      await expect(reportedRow).toHaveCount(1);
+      await expect(reportedRow.getByTestId('report-count')).toHaveText('2');
+      if (
+        (await admin.page.getByTestId('pagination-next').evaluate((node) => node.tagName)) !== 'A'
+      ) {
+        // One page: the "Bildirim" column adds up to the cell.
+        const perRow = await admin.page.getByTestId('report-count').allInnerTexts();
+        expect(perRow.reduce((sum, text) => sum + count(text), 0)).toBe(openReports);
+      }
+
+      // ---- KPI notes open the status views they count --------------------
+      await admin.gotoAdmin('/');
+      const pendingRequests = admin.page.locator('[data-testid="dashboard-kpi-note"][data-metric="pendingRequests"]');
+      await expect(pendingRequests).toHaveAttribute('href', '/requests?status=SUBMITTED');
+      const submittedInDb = await prisma().serviceRequest.count({ where: { status: 'SUBMITTED' } });
+      await expect(pendingRequests.locator('strong')).toHaveText(String(submittedInDb));
+      await pendingRequests.click();
+      await expect(admin.page).toHaveURL(/\/requests\?status=SUBMITTED$/);
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.getByTestId('request-view-submitted')).toContainText(String(submittedInDb));
+
+      // ---- the system list says what is stored ---------------------------
+      await admin.gotoAdmin('/');
+      const autoPublish = admin.page.locator('[data-testid="dashboard-activity"][data-key="auto-publish"]');
+      await expect(autoPublish.getByTestId('dashboard-activity-state')).toHaveText(
+        (await isAutoPublishEnabled()) ? 'Açık' : 'Kapalı',
+      );
     } finally {
       await admin.close();
     }
   });
 
-  test('the cards and the list they open fit a 320px phone', async ({ browser }) => {
-    const adminAccount = await createAdmin();
+  test('K2: a staff account sees only the queues, links and system list its role opens', async ({ browser }) => {
+    const bare = await createStaffAdmin(['DASHBOARD_READ']);
+    const support = await createStaffAdmin(['DASHBOARD_READ', 'SUPPORT_READ']);
+    const operations = await createStaffAdmin(['DASHBOARD_READ', 'OPERATIONS_SETTINGS_READ', 'REQUESTS_READ']);
 
-    const admin = await Actor.open(browser, 'admin-dashboard-320', primaryRuntime, {
-      viewport: { width: 320, height: 640 },
-    });
+    const actor = await Actor.open(browser, 'admin-dashboard-k2', primaryRuntime, { viewport: DESKTOP });
+    try {
+      // DASHBOARD_READ alone: the four figures, as plain numbers, and nothing else.
+      await actor.loginToAdmin(bare.email, bare.password);
+      await actor.gotoAdmin('/');
+      await assertNoErrorScreen(actor.page);
+      await expect(actor.page.getByTestId('dashboard-kpi')).toHaveCount(4);
+      await expect(actor.page.getByTestId('dashboard-queues')).toHaveCount(0);
+      await expect(actor.page.getByTestId('dashboard-system')).toHaveCount(0);
+      await expect(actor.page.locator('main a')).toHaveCount(0);
+      await expect(actor.page.getByText('Talepleri incele')).toHaveCount(0);
+      await expectToneRule(actor.page);
+      await expectNoUnsourcedDesign(actor.page);
+      await actor.close();
+
+      // SUPPORT_READ: the support cell only.
+      const supportActor = await Actor.open(browser, 'admin-dashboard-k2-support', primaryRuntime, { viewport: DESKTOP });
+      try {
+        await supportActor.loginToAdmin(support.email, support.password);
+        await supportActor.gotoAdmin('/');
+        await assertNoErrorScreen(supportActor.page);
+        const cells = supportActor.page.getByTestId('dashboard-queue');
+        await expect(cells).toHaveCount(1);
+        await expect(cells.first()).toHaveAttribute('data-metric', 'openSupportTickets');
+        await expect(supportActor.page.getByTestId('dashboard-system')).toHaveCount(0);
+        await cells.first().click();
+        await expect(supportActor.page).toHaveURL(/\/support\?status=OPEN(,|%2C)IN_PROGRESS$/);
+        await assertNoErrorScreen(supportActor.page);
+      } finally {
+        await supportActor.close();
+      }
+
+      // OPERATIONS_SETTINGS_READ + REQUESTS_READ: the system list and both header actions, no queue.
+      const opsActor = await Actor.open(browser, 'admin-dashboard-k2-ops', primaryRuntime, { viewport: DESKTOP });
+      try {
+        await opsActor.loginToAdmin(operations.email, operations.password);
+        await opsActor.gotoAdmin('/');
+        await assertNoErrorScreen(opsActor.page);
+        await expect(opsActor.page.getByTestId('dashboard-queues')).toHaveCount(0);
+        await expect(opsActor.page.getByTestId('dashboard-system')).toBeVisible();
+        await expect(opsActor.page.getByRole('link', { name: 'Talepleri incele' })).toBeVisible();
+        await expect(
+          opsActor.page.locator('[data-testid="dashboard-activity"][data-key="auto-publish"]').getByTestId(
+            'dashboard-activity-state',
+          ),
+        ).toHaveText((await isAutoPublishEnabled()) ? 'Açık' : 'Kapalı');
+        // The offers figure's note points at the refund scan, which this role cannot open.
+        await expect(
+          opsActor.page.locator('[data-testid="dashboard-kpi-note"][data-metric="refundableOffers"]'),
+        ).not.toHaveAttribute('href', /.*/);
+        await expect(
+          opsActor.page.locator('[data-testid="dashboard-kpi-note"][data-metric="pendingRequests"]'),
+        ).toHaveAttribute('href', '/requests?status=SUBMITTED');
+        await opsActor.page.getByTestId('dashboard-system').getByRole('link', { name: 'Operasyon ayarlarını aç' }).click();
+        await expect(opsActor.page).toHaveURL(/\/operations-settings$/);
+        await assertNoErrorScreen(opsActor.page);
+      } finally {
+        await opsActor.close();
+      }
+    } finally {
+      await actor.close().catch(() => undefined);
+    }
+  });
+
+  test('fits 320, 390, 768 and 1440 without widening the page', async ({ browser }, testInfo) => {
+    const adminAccount = await createAdmin();
+    const admin = await Actor.open(browser, 'admin-dashboard-viewports', primaryRuntime, { viewport: DESKTOP });
 
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
-      await admin.gotoAdmin('/');
-      await assertNoErrorScreen(admin.page);
+      for (const width of [320, 390, 768, 1440]) {
+        await admin.page.setViewportSize({ width, height: 900 });
+        await admin.gotoAdmin('/');
+        await assertNoErrorScreen(admin.page);
+        await expect(admin.page.getByTestId('dashboard-queue').first()).toBeVisible();
+        await expectNoHorizontalOverflow(admin.page, `dashboard @${width}`);
+        await admin.page.screenshot({ path: shot(testInfo, `dashboard-${width}`), fullPage: true });
 
-      await expect(admin.page.locator(SUPPORT_CARD)).toBeVisible();
-      await expectNoHorizontalOverflow(admin.page, 'admin dashboard @320');
+        const boxes = await admin.page
+          .locator('[data-testid="dashboard-queue"], [data-testid="dashboard-kpi"], [data-testid="dashboard-activity"]')
+          .evaluateAll((nodes) =>
+            nodes.map((node) => {
+              const rect = node.getBoundingClientRect();
+              return { left: Math.round(rect.left), right: Math.round(rect.right) };
+            }),
+          );
+        expect(boxes.length).toBeGreaterThan(7);
+        for (const box of boxes) {
+          expect(box.left, `@${width}: a block starts off the left edge`).toBeGreaterThanOrEqual(-1);
+          expect(box.right, `@${width}: a block ends past the right edge`).toBeLessThanOrEqual(width + 1);
+        }
 
-      const box = await admin.page.locator(SUPPORT_CARD).evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        return { left: Math.round(rect.left), right: Math.round(rect.right) };
-      });
-      expect(box.left, 'the support card starts off the left edge').toBeGreaterThanOrEqual(-1);
-      expect(box.right, 'the support card ends past the right edge').toBeLessThanOrEqual(321);
+        // The ⓘ opens inside the window and closes on Esc.
+        const trigger = admin.page.getByTestId('dashboard-queues').getByRole('button', { name: 'Bu kutular neyi sayıyor?' });
+        await trigger.click();
+        await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+        await expectNoHorizontalOverflow(admin.page, `dashboard ⓘ @${width}`);
+        await admin.page.keyboard.press('Escape');
+        await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      }
 
-      // And the screen the card opens. Its filter gained an option naming both
-      // backlog statuses, and a `<select>` is as wide as its widest option — the
-      // one way this change could widen a phone.
-      await admin.gotoAdmin('/support?status=OPEN,IN_PROGRESS');
-      await assertNoErrorScreen(admin.page);
-      await expect(admin.page.locator('#support-status')).toHaveValue('OPEN,IN_PROGRESS');
-      await expectNoHorizontalOverflow(admin.page, 'admin backlog list @320');
+      // 1440: three queues in one row, four figures in one row.
+      const tops = async (selector: string) =>
+        new Set(
+          await admin.page
+            .locator(selector)
+            .evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top))),
+        ).size;
+      expect(await tops('[data-testid="dashboard-queue"]')).toBe(1);
+      expect(await tops('[data-testid="dashboard-kpi"]')).toBe(1);
     } finally {
       await admin.close();
     }
@@ -261,19 +392,15 @@ test.describe('admin dashboard metric cards', () => {
     const customer = await Actor.open(browser, 'admin-dashboard-customer', primaryRuntime);
 
     try {
-      // Nobody signed in: the dashboard is the login screen, and no metric
-      // reaches the page.
       await anonymous.gotoAdmin('/');
       await expect(anonymous.page).toHaveURL(/\/login/);
-      await expect(anonymous.page.getByTestId('stat-card')).toHaveCount(0);
+      await expect(anonymous.page.getByTestId('dashboard-kpi')).toHaveCount(0);
 
-      // A real customer session, carried to the admin panel: the panel's own
-      // guard sends them to its login screen rather than rendering the numbers.
       await customer.loginToWeb(customerAccount.email, customerAccount.password);
       await customer.gotoAdmin('/');
       await expect(customer.page).toHaveURL(/\/login/);
-      await expect(customer.page.getByTestId('stat-card')).toHaveCount(0);
-      await expect(customer.page.getByText('Açık destek talepleri')).toHaveCount(0);
+      await expect(customer.page.getByTestId('dashboard-kpi')).toHaveCount(0);
+      await expect(customer.page.getByText('Açık destek talebi')).toHaveCount(0);
     } finally {
       await anonymous.close();
       await customer.close();
