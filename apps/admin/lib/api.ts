@@ -106,6 +106,9 @@ export type Category = {
     providerInvites?: number;
   };
   questions?: Question[];
+  /** The row's own instants; sent by every category read (Faz 3F.1 reads them). */
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 /**
@@ -209,6 +212,12 @@ export type Question = {
   routerRules?: QuestionRouterRule[];
   sortOrder: number;
   isActive: boolean;
+  /**
+   * The row's own instants. The API has always sent them (the question is
+   * serialized whole); the category screen's "Neler oldu" reads them.
+   */
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ServiceRequestStatus =
@@ -898,6 +907,32 @@ export type PackagePurchase = {
     currency: string;
     isActive: boolean;
   };
+  /**
+   * The vitrin half of the same row. The API sends both catalogues on every
+   * purchase projection and exactly one is non-null; the vitrin package screen
+   * (Faz 3F.1) reads these to list its own sales and the run each one became.
+   */
+  showcasePackage?: {
+    id: string;
+    name: string;
+    slug: string;
+    priceAmount: number;
+    currency: string;
+    durationDays: number;
+    allowedCardKind: ShowcaseCardKind | null;
+  } | null;
+  showcaseCard?: {
+    id: string;
+    kind: ShowcaseCardKind;
+    status: ShowcaseCardStatus;
+    category: { id: string; name: string; slug: string };
+  } | null;
+  showcasePlacement?: {
+    id: string;
+    status: ShowcasePlacementStatus;
+    startAt: string;
+    endAt: string;
+  } | null;
   /**
    * What the payment provider's settlement notices did to this purchase. Only
    * present on the detail endpoint.

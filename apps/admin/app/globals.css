@@ -2084,7 +2084,7 @@ button:disabled {
 }
 
 /*
- * Seven columns that add up to about 720px at their narrowest. That is the
+ * Seven columns that add up to about 860px at their narrowest. That is the
  * table, not a bug — but it scrolls inside this box rather than dragging the
  * whole page sideways on a phone.
  */
@@ -2095,7 +2095,7 @@ button:disabled {
 
 .question-table-head {
   display: grid;
-  grid-template-columns: 48px minmax(180px, 2fr) minmax(120px, 1.2fr) 100px 80px 90px 96px;
+  grid-template-columns: 44px minmax(200px, 2.2fr) minmax(120px, 1.1fr) 76px minmax(140px, 1.4fr) 90px 104px;
   gap: 10px;
   align-items: center;
   padding: 9px 16px;
@@ -2123,15 +2123,15 @@ button:disabled {
 
 .question-table-head,
 .question-row > summary {
-  min-width: 720px;
+  min-width: 860px;
 }
 
 .question-row > summary {
   display: grid;
-  grid-template-columns: 48px minmax(180px, 2fr) minmax(120px, 1.2fr) 100px 80px 90px 96px;
+  grid-template-columns: 44px minmax(200px, 2.2fr) minmax(120px, 1.1fr) 76px minmax(140px, 1.4fr) 90px 104px;
   gap: 10px;
-  align-items: center;
-  padding: 10px 16px;
+  align-items: start;
+  padding: 12px 16px;
   cursor: pointer;
   list-style: none;
   font-size: 13px;
@@ -2157,12 +2157,33 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-.question-row .q-label {
+.question-row .q-label,
+.question-row .q-type,
+.question-row .q-when {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.question-row .q-label-text {
   font-weight: 700;
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* A cell's second line: the key and pills, an option count, the source question. */
+.question-row .q-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+
+.question-row .q-sub .meta-pill {
+  margin: 0;
 }
 
 .question-row .q-key code {
@@ -2207,18 +2228,16 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  padding: 7px 12px;
+  border: 1px solid var(--text);
   background: var(--surface);
-  color: var(--primary-dark);
-  font-size: 12px;
+  color: var(--text);
+  font-size: 12.5px;
   font-weight: 700;
 }
 
 .question-row > summary:hover .q-action {
-  background: var(--color-accent-100);
-  border-color: var(--color-accent-300);
+  background: var(--color-neutral-200);
 }
 
 .question-row[open] .q-action::after {
@@ -2356,24 +2375,17 @@ button:disabled {
     padding: 12px 14px;
   }
 
-  .question-row .q-label,
-  .question-row .q-key {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
   .question-row .q-order,
-  .question-row .q-type-badge,
-  .question-row .q-req-badge {
+  .question-row .q-type,
+  .question-row .q-required {
     display: none;
   }
 
   .question-row .q-label {
     grid-area: label;
-    white-space: normal;
   }
 
-  .question-row .q-key {
+  .question-row .q-when {
     grid-area: meta;
   }
 
@@ -7925,4 +7937,323 @@ button:disabled {
 .catalog-sales-more {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ---- Tabbed detail screens (ADMIN-DESIGN-001 Faz 3F.1) ---- */
+
+/* The tab strip sits under the summary card; each tab is one column of cards. */
+.catalog-detail-page .detail-header + .tabs,
+.catalog-detail-page .detail-notice + .tabs {
+  margin-top: 18px;
+}
+
+.detail-tab-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.detail-tab-panel > .section-card,
+.detail-tab-panel > .notice {
+  margin-top: 0;
+}
+
+/* The design's tab card: title (and ⓘ) left, a muted line and actions right,
+   over a 2px ink rule. */
+.detail-tab-card > .section-card-header {
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 2px solid var(--text);
+}
+
+.detail-tab-card .section-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-tab-card .section-card-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  margin-left: auto;
+}
+
+/* Fields in one row keep their inputs level: a field taller than its content
+   (a neighbour's longer help text) leaves the extra space below, not between
+   its label and its input. */
+.detail-tab-card .compact-field-grid > .field {
+  align-content: start;
+}
+
+/* A strip that is a tab card's whole body: the card is its frame. */
+.detail-tab-card > .section-card-body > .summary-strip {
+  border: 0;
+}
+
+.detail-tab-card.is-warning {
+  border-top: 3px solid var(--color-warning);
+}
+
+.section-card-meta {
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+/* The band under an edit form: what saving does, then Vazgeç · Kaydet.
+   Pulled over the card body's padding so it spans the card. */
+.detail-form-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin: 18px -20px -18px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--color-neutral-100);
+}
+
+.detail-form-footer-note {
+  flex: 1 1 280px;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.detail-form-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* A value the form shows and does not send. */
+.locked-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px dashed var(--color-neutral-400);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+  font-size: 13.5px;
+}
+
+.locked-field-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.locked-field-tag {
+  flex: none;
+  color: var(--color-neutral-700);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Cards side by side under a form (readiness · status · router). */
+.detail-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.detail-card-grid > .section-card {
+  min-width: 0;
+  margin-top: 0;
+}
+
+/* A grey band closing a card: a sentence, then a link or a form. */
+.detail-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--color-neutral-100);
+}
+
+.detail-card-footer > p {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.detail-card-footer > .detail-card-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.detail-card-footnote {
+  margin: 0;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* "Paketin diğer türleri", "Bu paket ne verir, ne vermez": ruled columns. */
+.detail-fact-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.detail-fact-cards > li {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+  padding: 16px 20px;
+  border-right: 1px solid var(--color-neutral-200);
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.detail-fact-cards h3 {
+  margin: 0;
+  color: var(--color-neutral-800);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.detail-fact-cards > li.is-current h3,
+.detail-fact-cards > li.is-positive h3 {
+  color: var(--color-accent-700);
+}
+
+.detail-fact-cards p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* The release checklist as the design's ticked rows. */
+.readiness-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.readiness-list > li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: start;
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--color-neutral-200);
+  font-size: 13px;
+}
+
+.readiness-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.readiness-mark.is-warn {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.readiness-mark.is-info {
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+
+.readiness-label {
+  min-width: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.readiness-label small {
+  display: block;
+  color: var(--color-neutral-700);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.readiness-value {
+  justify-self: end;
+  text-align: right;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.readiness-intro {
+  display: grid;
+  gap: 8px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.readiness-intro p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.readiness-card .release-blocker-reasons {
+  margin: 0;
+  padding: 12px 20px 12px 38px;
+}
+
+/* The status desk in a card footer: the select and its button on one line. */
+.detail-status-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.detail-status-form .detail-form-field {
+  min-width: 0;
+}
+
+/* The invitation desk: notices and the one-time link above the table. */
+.invite-desk-notices {
+  display: grid;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.invite-desk-notices:empty {
+  display: none;
+}
+
+.invite-desk-notices > .notice,
+.invite-desk-notices > p {
+  margin: 0;
 }

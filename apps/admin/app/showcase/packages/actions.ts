@@ -88,18 +88,52 @@ export async function updateShowcasePackageAction(formData: FormData) {
   }
 
   revalidatePath('/showcase/packages');
-  redirect('/showcase/packages?saved=1');
+  revalidatePath(detailHref(packageId));
+  redirect(`${detailHref(packageId)}?saved=1`);
+}
+
+/**
+ * "Satıştan kaldır" / "Satışa aç" on the package's own screen: the same PATCH
+ * and the same permission (SHOWCASE_PACKAGES_WRITE) as the edit form, carrying
+ * `isActive` alone. Nothing sold is touched either way — a package taken off
+ * sale only stops new purchases; every run already bought keeps its own copy.
+ */
+export async function updateShowcasePackageStatusAction(formData: FormData) {
+  const packageId = readString(formData, 'packageId');
+  const isActive = readString(formData, 'isActive') === 'true';
+
+  try {
+    await apiFetch(`/admin/showcase/packages/${packageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    });
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    redirect(failureHref(packageId, errorCode(error)));
+  }
+
+  revalidatePath('/showcase/packages');
+  revalidatePath(detailHref(packageId));
+  redirect(`${detailHref(packageId)}?${isActive ? 'activated' : 'deactivated'}=1`);
 }
 
 /** The `?paket=` value that opens the new-package window. */
 const NEW_PACKAGE_KEY = 'yeni';
 
+function detailHref(packageId: string): string {
+  return `/showcase/packages/${encodeURIComponent(packageId)}`;
+}
+
 /**
- * A refusal goes back into the window it came from (ADMIN-DESIGN-001 Faz 3C:
- * the forms live in a `?paket=` window now), with the reason inside it.
+ * A refusal goes back to the form it came from, with the reason beside it: the
+ * new-package window on the list (`?paket=yeni`), or the package's own screen
+ * (ADMIN-DESIGN-001 Faz 3F.1).
  */
 function failureHref(packageKey: string, code: string): string {
-  return `/showcase/packages?${new URLSearchParams({ paket: packageKey || NEW_PACKAGE_KEY, error: code }).toString()}`;
+  if (!packageKey || packageKey === NEW_PACKAGE_KEY) {
+    return `/showcase/packages?${new URLSearchParams({ paket: NEW_PACKAGE_KEY, error: code }).toString()}`;
+  }
+  return `${detailHref(packageKey)}?${new URLSearchParams({ error: code }).toString()}`;
 }
 
 function readString(formData: FormData, key: string): string {

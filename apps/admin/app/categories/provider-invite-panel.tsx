@@ -3,6 +3,9 @@
 import { formatDateTime } from '@taktic/shared';
 import { useActionState, useRef, useState } from 'react';
 import type { ProviderInvite } from '../../lib/api';
+import { DataTable, type DataColumn } from '../../components/data-table';
+import { EmptyState } from '../../components/empty-state';
+import { InfoPopover } from '../../components/info-popover';
 import { SectionCard } from '../../components/section-card';
 import { providerInviteAction } from './actions';
 import {
@@ -67,39 +70,53 @@ export function ProviderInvitePanel({
   const [notice, submit, pending] = useActionState(providerInviteAction, PROVIDER_INVITE_IDLE);
 
   return (
-    <SectionCard title="Hizmet veren daveti" className="catalog-side-card" testId="provider-invite-panel">
-      <div className="catalog-side-body">
-        <p>
-          Tek kullanımlık bir başvuru bağlantısı üretir. Bağlantıyı alan işletme yalnızca{' '}
-          <strong>{categoryName}</strong> hizmetinin adını görür ve bu hizmet için başvuru formunu
-          doldurur. Kategori taslak olsa bile çalışır; müşteri kataloğu değişmez.
-        </p>
-        <p className="catalog-side-note">
-          Bağlantı 14 gün geçerlidir ve bir kez kullanılabilir. E-posta göndermiyoruz: bağlantıyı
-          işletmeye siz iletirsiniz. <strong>Bağlantı yalnızca üretildiği anda görünür</strong> —
-          sayfayı yeniledikten sonra bir daha gösterilemez, gerekirse yenisini üretin.
-        </p>
-
-        {!mayIssue ? null : canIssue ? (
-          <form action={submit} className="catalog-side-form">
-            <input type="hidden" name="intent" value="issue" />
-            <input type="hidden" name="categoryId" value={categoryId} />
-            <input type="hidden" name="categorySlug" value={categorySlug} />
-            <button
-              className="btn btn-primary btn-sm"
-              type="submit"
-              disabled={pending}
-              data-testid="provider-invite-create"
-            >
-              {pending ? 'İşleniyor…' : 'Yeni davet bağlantısı üret'}
-            </button>
-          </form>
-        ) : (
+    <SectionCard
+      title={
+        <>
+          Hizmet veren davetleri
+          <InfoPopover label="Davet bağlantısı nasıl çalışır?" size="sm">
+            Tek kullanımlık bir başvuru bağlantısı üretir. Bağlantıyı alan işletme yalnızca{' '}
+            <strong>{categoryName}</strong> hizmetinin adını görür ve bu hizmet için başvuru formunu doldurur.
+            Kategori taslak olsa bile çalışır; müşteri kataloğu değişmez. Bağlantı 14 gün geçerlidir ve bir kez
+            kullanılabilir. E-posta göndermiyoruz: bağlantıyı işletmeye siz iletirsiniz. Bağlantı yalnızca
+            üretildiği anda görünür — sayfayı yeniledikten sonra bir daha gösterilemez, gerekirse yenisini üretin.
+            Geçerli davet yayına hazırlıkta sayılmaz.
+          </InfoPopover>
+        </>
+      }
+      actions={
+        <>
+          <span className="section-card-meta" data-testid="provider-invite-count">
+            {activeCount} geçerli davet, {invites.length} toplam kayıt.
+          </span>
+          {mayIssue && canIssue ? (
+            <form action={submit}>
+              <input type="hidden" name="intent" value="issue" />
+              <input type="hidden" name="categoryId" value={categoryId} />
+              <input type="hidden" name="categorySlug" value={categorySlug} />
+              <button
+                className="btn btn-primary btn-sm"
+                type="submit"
+                disabled={pending}
+                data-testid="provider-invite-create"
+              >
+                {pending ? 'İşleniyor…' : 'Yeni davet bağlantısı oluştur'}
+              </button>
+            </form>
+          ) : null}
+        </>
+      }
+      padded={false}
+      className="detail-tab-card"
+      testId="provider-invite-panel"
+    >
+      <div className="invite-desk-notices">
+        {mayIssue && !canIssue ? (
           <p className="notice notice-warning" data-testid="provider-invite-closed">
             Bu hizmet kapalı. Kapalı bir hizmet için yeni davet üretilemez; geçmiş davetler aşağıda
             görünmeye devam eder.
           </p>
-        )}
+        ) : null}
 
         {notice.kind === 'issued' ? (
           <IssuedLink url={notice.invite.url} expiresAt={notice.invite.expiresAt} />
@@ -118,26 +135,30 @@ export function ProviderInvitePanel({
               : 'Davet bağlantısı iptal edildi. Artık kullanılamaz.'}
           </p>
         ) : null}
+      </div>
 
-        <p className="catalog-side-note" data-testid="provider-invite-count">
-          {activeCount} geçerli davet, {invites.length} toplam kayıt.
-        </p>
-
-        {invites.length === 0 ? (
-          <p className="catalog-side-note">Bu hizmet için henüz davet üretilmedi.</p>
-        ) : (
-          <ul className="provider-category-list" data-testid="provider-invite-list">
-            {invites.map((invite) => (
-              <li key={invite.id} data-testid={`provider-invite-${invite.id}`}>
-                <span className="provider-category-name">
+      {invites.length === 0 ? (
+        <EmptyState title="Bu hizmet için henüz davet üretilmedi." />
+      ) : (
+        <DataTable caption="Hizmet veren davetleri" columns={INVITE_COLUMNS} minWidth={720} testId="provider-invite-list">
+          {invites.map((invite) => (
+            <tr key={invite.id} data-testid={`provider-invite-${invite.id}`}>
+              <td className="cell-break">
+                {invite.createdBy?.name ?? <span className="cell-muted">Kayıtlı değil</span>}
+              </td>
+              <td className="cell-nowrap">{formatDateTime(invite.createdAt)}</td>
+              <td className="cell-nowrap">{formatDateTime(invite.expiresAt)}</td>
+              <td>
+                <div className="cell-stack">
                   <span className={providerInviteStateBadgeClass(invite.state)}>
                     {PROVIDER_INVITE_STATE_LABELS[invite.state]}
                   </span>
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    {formatDateTime(invite.createdAt)} · {describeDeadline(invite)}
-                    {invite.createdBy?.name ? ` · ${invite.createdBy.name}` : ''}
-                  </span>
-                </span>
+                  {invite.usedAt || invite.revokedAt ? (
+                    <span className="cell-muted">{describeDeadline(invite)}</span>
+                  ) : null}
+                </div>
+              </td>
+              <td className="col-actions">
                 {mayRevoke && invite.state === 'ACTIVE' ? (
                   <form action={submit}>
                     <input type="hidden" name="intent" value="revoke" />
@@ -145,7 +166,7 @@ export function ProviderInvitePanel({
                     <input type="hidden" name="categorySlug" value={categorySlug} />
                     <input type="hidden" name="inviteId" value={invite.id} />
                     <button
-                      className="btn btn-ghost btn-sm"
+                      className="btn btn-secondary btn-sm"
                       type="submit"
                       disabled={pending}
                       data-testid={`provider-invite-revoke-${invite.id}`}
@@ -153,15 +174,32 @@ export function ProviderInvitePanel({
                       İptal et
                     </button>
                   </form>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                ) : (
+                  <span className="cell-muted" aria-hidden="true">
+                    —
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </DataTable>
+      )}
     </SectionCard>
   );
 }
+
+/**
+ * The design's invitation table, less its "Davet edilen" column: a link is not
+ * issued to anybody in particular — the record holds who made it and when,
+ * never who received it — so there is no invitee to show.
+ */
+const INVITE_COLUMNS: DataColumn[] = [
+  { key: 'creator', label: 'Oluşturan' },
+  { key: 'created', label: 'Oluşturma' },
+  { key: 'expires', label: 'Son geçerlilik' },
+  { key: 'state', label: 'Durum' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 /**
  * The one moment the link is legible.
@@ -209,7 +247,7 @@ function IssuedLink({ url, expiresAt }: { url: string; expiresAt: string }) {
   );
 }
 
-/** What the row says about the clock, in the words the state makes true. */
+/** When a spent or withdrawn link stopped working, under its state badge. */
 function describeDeadline(invite: ProviderInvite): string {
   if (invite.usedAt) {
     return `kullanıldı: ${formatDateTime(invite.usedAt)}`;
@@ -219,5 +257,5 @@ function describeDeadline(invite: ProviderInvite): string {
     return `iptal: ${formatDateTime(invite.revokedAt)}`;
   }
 
-  return `son geçerlilik: ${formatDateTime(invite.expiresAt)}`;
+  return '';
 }

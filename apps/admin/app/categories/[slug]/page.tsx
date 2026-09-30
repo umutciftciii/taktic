@@ -17,8 +17,12 @@ import {
   requireAdmin,
 } from '../../../lib/api';
 import { formatCount } from '../../../lib/pagination';
+import { resolveTab } from '../../../lib/list-query';
+import { ActivityLog, NO_CHANGE_HISTORY_NOTE } from '../../../components/activity-log';
 import { DetailHeader } from '../../../components/detail-header';
 import type { SummaryItem } from '../../../components/summary-strip';
+import { Tabs, type TabItem } from '../../../components/tabs';
+import { categoryActivity } from './category-activity';
 import {
   KIND_HINTS,
   KIND_LABELS,
@@ -32,7 +36,6 @@ import {
 import {
   CategoryInfoSection,
   CategoryStatusSection,
-  QuestionHintsSection,
   QuestionSetSection,
   ReleaseChecklistSection,
   RouterExplainerSection,
@@ -40,11 +43,22 @@ import {
 } from './category-sections';
 
 /**
- * One category (#40). The design has no screen for it (`soon`); it is built on
- * the detail template (ADMIN-DESIGN-001 Faz 3F): a way back to the list, the
- * summary card — status, type and supply badges, the slug and where it hangs,
- * the name, and a strip with the figures a release is decided on — then the
- * editors in the main column and the desk beside them.
+ * One category (#40), on the design's tabbed detail screen (ADMIN-DESIGN-001
+ * Faz 3F.1): a way back to the list, the summary card — status, type and
+ * supply badges, the slug and where it hangs, the name, and a strip with the
+ * figures a release is decided on — then four tabs as links (`?tab=`):
+ *
+ * - Kategori bilgileri (the plain URL): the category form, then the cards that
+ *   decide its status — the release checklist on a draft, the status desk and,
+ *   on a router, what a router is.
+ * - Sorular (QUESTIONS_READ): the routing map on a router and the question set.
+ * - Hizmet veren davetleri (a service + PROVIDER_INVITES_READ): the desk.
+ * - Neler oldu: the instants the category, its questions and its invitations
+ *   carry. No change log exists for them, and the tab says so.
+ *
+ * A tab the session may not read is not drawn, and asking for it by URL shows
+ * the first tab. The question actions revalidate the page without a redirect,
+ * so saving a question keeps the operator on Sorular.
  *
  * Nothing on this screen changed what it does. The inventory it was converted
  * against (plan belgesi, "Faz 3F envanter") lists every section and control
@@ -69,11 +83,15 @@ import {
 
 type CategoryDetailPageProps = {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ tab?: string }>;
 };
 
-export default async function CategoryDetailPage({ params }: CategoryDetailPageProps) {
+type TabKey = '' | 'sorular' | 'davetler' | 'gecmis';
+
+export default async function CategoryDetailPage({ params, searchParams }: CategoryDetailPageProps) {
   const { can } = await requireAdmin('CATALOG_READ');
   const { slug } = await params;
+  const { tab } = await searchParams;
   // Each control below is offered only to a session the API would let through;
   // the API still checks every one of them.
   const canWriteCategory = can('CATEGORIES_WRITE');
@@ -166,6 +184,21 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
     { label: 'Sıra', value: category.sortOrder },
   ];
 
+  const path = `/categories/${category.slug}`;
+  const tabs: TabItem[] = [
+    { key: '', label: 'Kategori bilgileri', testId: 'category-tab-bilgiler' },
+    ...(questions ? [{ key: 'sorular', label: 'Sorular', count: questions.length, testId: 'category-tab-sorular' }] : []),
+    ...(invites
+      ? [{ key: 'davetler', label: 'Hizmet veren davetleri', count: invites.invites.length, testId: 'category-tab-davetler' }]
+      : []),
+    { key: 'gecmis', label: 'Neler oldu', testId: 'category-tab-gecmis' },
+  ];
+  const activeTab = resolveTab<TabKey>(
+    tab,
+    tabs.map((item) => item.key as TabKey),
+    '',
+  );
+
   return (
     <main className="catalog-page catalog-detail-page">
       <DetailHeader
@@ -203,8 +236,10 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
         testId="category-header"
       />
 
-      <div className="admin-module-layout catalog-detail-layout">
-        <div className="admin-main-column">
+      <Tabs label="Kategori sekmeleri" items={tabs} active={activeTab} path={path} testId="category-tabs" />
+
+      {activeTab === '' ? (
+        <div className="detail-tab-panel" data-testid="category-panel-bilgiler">
           <CategoryInfoSection
             category={category}
             groups={groups}
@@ -214,7 +249,29 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
             updateAction={updateCategoryAction}
           />
 
-          {isRouter && questions ? (
+          {category.status === 'DRAFT' || canChangeStatus || isRouter ? (
+            <div className="detail-card-grid">
+              {category.status === 'DRAFT' ? (
+                <ReleaseChecklistSection
+                  category={category}
+                  blockers={blockers}
+                  questionCount={questions ? questions.length : null}
+                />
+              ) : null}
+
+              {canChangeStatus ? (
+                <CategoryStatusSection category={category} action={updateCategoryStatusAction} />
+              ) : null}
+
+              {isRouter ? <RouterExplainerSection /> : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {activeTab === 'sorular' && questions ? (
+        <div className="detail-tab-panel" data-testid="category-panel-sorular">
+          {isRouter ? (
             <RouterTargetsSection
               categorySlug={category.slug}
               routerQuestion={routerQuestion}
@@ -224,51 +281,58 @@ export default async function CategoryDetailPage({ params }: CategoryDetailPageP
             />
           ) : null}
 
-          {questions ? (
-            <QuestionSetSection
-              category={category}
-              questions={sortedQuestions}
-              isRouter={isRouter}
-              canWriteQuestions={canWriteQuestions}
-              actions={{
-                update: updateQuestionAction,
-                replaceConditions: replaceQuestionConditionsAction,
-                updateStatus: updateQuestionStatusAction,
-                create: createQuestionAction,
-              }}
-            />
-          ) : null}
+          <QuestionSetSection
+            category={category}
+            questions={sortedQuestions}
+            isRouter={isRouter}
+            canWriteQuestions={canWriteQuestions}
+            actions={{
+              update: updateQuestionAction,
+              replaceConditions: replaceQuestionConditionsAction,
+              updateStatus: updateQuestionStatusAction,
+              create: createQuestionAction,
+            }}
+          />
         </div>
+      ) : null}
 
-        <aside className="admin-side-column" aria-label="Kategori işlemleri">
-          {canChangeStatus ? <CategoryStatusSection category={category} action={updateCategoryStatusAction} /> : null}
+      {activeTab === 'davetler' && invites ? (
+        <div className="detail-tab-panel" data-testid="category-panel-davetler">
+          <ProviderInvitePanel
+            activeCount={invites.activeCount}
+            canIssue={category.status !== 'INACTIVE'}
+            mayIssue={can('PROVIDER_INVITES_ISSUE')}
+            mayRevoke={can('PROVIDER_INVITES_REVOKE')}
+            categoryId={category.id}
+            categoryName={category.name}
+            categorySlug={category.slug}
+            invites={invites.invites}
+          />
+        </div>
+      ) : null}
 
-          {category.status === 'DRAFT' ? (
-            <ReleaseChecklistSection
-              category={category}
-              blockers={blockers}
-              questionCount={questions ? questions.length : null}
-            />
-          ) : null}
-
-          {invites ? (
-            <ProviderInvitePanel
-              activeCount={invites.activeCount}
-              canIssue={category.status !== 'INACTIVE'}
-              mayIssue={can('PROVIDER_INVITES_ISSUE')}
-              mayRevoke={can('PROVIDER_INVITES_REVOKE')}
-              categoryId={category.id}
-              categoryName={category.name}
-              categorySlug={category.slug}
-              invites={invites.invites}
-            />
-          ) : null}
-
-          {isRouter ? <RouterExplainerSection /> : null}
-
-          <QuestionHintsSection />
-        </aside>
-      </div>
+      {activeTab === 'gecmis' ? (
+        <div className="detail-tab-panel" data-testid="category-panel-gecmis">
+          <ActivityLog
+            entries={categoryActivity({
+              category,
+              questions: questions ? sortedQuestions : null,
+              invites: invites ? invites.invites : null,
+            })}
+            meta={
+              questions && invites
+                ? 'Kategori, soruları ve davetleri'
+                : questions
+                  ? 'Kategori ve soruları'
+                  : invites
+                    ? 'Kategori ve davetleri'
+                    : 'Kategori kaydı'
+            }
+            footnote={NO_CHANGE_HISTORY_NOTE}
+            testId="category-activity"
+          />
+        </div>
+      ) : null}
     </main>
   );
 }

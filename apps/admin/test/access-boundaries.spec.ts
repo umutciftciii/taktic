@@ -153,6 +153,8 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
     '/showcase/cards': { row: '/showcase/cards', gate: ['SHOWCASE_CARDS_READ'] },
     '/showcase/price-terms': { row: '/showcase/price-terms', gate: ['SHOWCASE_TERMS_ACCEPTANCES_READ'] },
     '/showcase/packages': { row: '/showcase/packages', gate: ['SHOWCASE_PACKAGES_READ'] },
+    // Faz 3F.1: the package's own screen, where the list's `?paket=<id>` window went.
+    '/showcase/packages/[id]': { row: '/showcase/packages', gate: ['SHOWCASE_PACKAGES_READ'] },
     '/provider-reviews/reports': { row: '/provider-reviews/reports', gate: ['PROVIDER_REVIEWS_READ'] },
     '/provider-reviews/[reviewId]': { row: '/provider-reviews/reports', gate: ['PROVIDER_REVIEWS_READ'] },
     '/categories': { row: '/categories', gate: ['CATALOG_READ'] },
@@ -219,7 +221,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
       .filter((route) => !OUTSIDE_THE_SHELL.includes(route))
       .sort();
     expect(onDisk).toEqual(Object.keys(SCREENS).sort());
-    expect(onDisk).toHaveLength(52);
+    expect(onDisk).toHaveLength(53);
   });
 
   it.each(Object.entries(SCREENS))('%s asks for exactly its recorded gate', (route, screen) => {

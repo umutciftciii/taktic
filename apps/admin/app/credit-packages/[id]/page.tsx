@@ -13,28 +13,46 @@ import {
   statusLabel,
 } from '../../../lib/api';
 import { formatCount } from '../../../lib/pagination';
+import { resolveTab } from '../../../lib/list-query';
+import { ActivityLog, NO_CHANGE_HISTORY_NOTE, recordLifecycleEntries } from '../../../components/activity-log';
 import { DataTable, type DataColumn } from '../../../components/data-table';
+import { DetailFormFooter, LockedField } from '../../../components/detail-form-footer';
 import { DetailHeader } from '../../../components/detail-header';
 import { EmptyState } from '../../../components/empty-state';
 import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
 import { SummaryStrip, type SummaryItem } from '../../../components/summary-strip';
+import { Tabs, type TabItem } from '../../../components/tabs';
 import { updateCreditPackageAction, updateCreditPackageStatusAction } from '../actions';
-import { PackageStatusForm, packageAllowance, packageTypeLabel } from '../credit-package-cells';
+import {
+  PACKAGE_TYPE_DESCRIPTION,
+  PACKAGE_TYPE_LABEL,
+  PackageStatusForm,
+  packageAllowance,
+  packageSummarySentence,
+  packageTypeLabel,
+  perCreditMinor,
+} from '../credit-package-cells';
 
 /**
- * One credit package (#43). The design has no screen for it (`soon`); it is
- * built on the detail template (ADMIN-DESIGN-001 Faz 3F): a way back to the
- * list, the summary card (status, slug and order, name, and a strip with what
- * the package sells, for how long and at what price), then the edit form and
- * the sales summary beside the status desk.
+ * One credit package (#43), on the design's tabbed detail screen
+ * (ADMIN-DESIGN-001 Faz 3F.1): a way back to the list, the summary card
+ * (status and type, slug and order, name, what the package does, and a strip
+ * with what it sells, at what price), the record's actions — the purchases
+ * list and Pasifleştir/Aktifleştir — then three tabs as links (`?tab=`):
+ *
+ * - Paket bilgileri (the plain URL): the edit form, and what the other types
+ *   would have been.
+ * - Satışlar (PACKAGE_PURCHASES_READ, F9): the sales summary and the latest
+ *   purchases, with the provider link behind PROVIDERS_READ_DETAIL.
+ * - Neler oldu: the package's own instants. No change log exists for it.
  *
  * Unchanged: the form's fields and the payload it posts (the type rides along
  * as a hidden field and is never editable; `statusLocked` without
  * CREDIT_PACKAGES_STATUS), the read-only view without CREDIT_PACKAGES_WRITE,
- * the sales summary behind PACKAGE_PURCHASES_READ (F9) with the provider
- * link behind PROVIDERS_READ_DETAIL, and the status desk behind
- * CREDIT_PACKAGES_STATUS.
+ * the sales figures, and the status switch behind CREDIT_PACKAGES_STATUS —
+ * now in the summary card rather than a side panel. Every save and switch
+ * redirects to the plain URL, which is the tab it was made on.
  */
 
 const PURCHASE_COLUMNS: DataColumn[] = [
@@ -42,15 +60,20 @@ const PURCHASE_COLUMNS: DataColumn[] = [
   { key: 'provider', label: 'Hizmet veren' },
   { key: 'status', label: 'Durum' },
   { key: 'amount', label: 'Tutar', align: 'end' },
-  { key: 'reference', label: 'Referans' },
+  { key: 'number', label: 'Satın alma no' },
+  { key: 'reference', label: 'Ödeme referansı' },
 ];
 
 type CreditPackageDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
+  searchParams: Promise<{ error?: string; ok?: string; tab?: string }>;
 };
 
+type TabKey = '' | 'satislar' | 'gecmis';
+
 const CURRENCIES = ['TRY', 'USD', 'EUR'] as const;
+
+const RECENT_PURCHASES = 5;
 
 const OK_MESSAGES: Record<string, string> = {
   created: 'Paket oluşturuldu.',
@@ -70,7 +93,7 @@ export default async function CreditPackageDetailPage({
   const canReadPurchases = can('PACKAGE_PURCHASES_READ');
   const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const { id } = await params;
-  const { error: rawError, ok: rawOk } = await searchParams;
+  const { error: rawError, ok: rawOk, tab } = await searchParams;
   const errorMessage = (rawError ?? '').trim();
   const okKey = (rawOk ?? '').trim();
   const okMessage = okKey ? OK_MESSAGES[okKey] ?? null : null;
@@ -114,8 +137,10 @@ export default async function CreditPackageDetailPage({
   const revenueEntries = Object.entries(revenueByCurrency);
   const lastPurchase = sortedPurchases[0] ?? null;
   const lastPaid = paidPurchases[0] ?? null;
-  const recentPurchases = sortedPurchases.slice(0, 5);
+  const recentPurchases = sortedPurchases.slice(0, RECENT_PURCHASES);
+  const purchasesHref = `/package-purchases?packageId=${encodeURIComponent(creditPackage.id)}`;
 
+  const unitPrice = perCreditMinor(creditPackage);
   const facts: SummaryItem[] = [
     {
       label: 'Tür',
@@ -136,38 +161,82 @@ export default async function CreditPackageDetailPage({
           ? creditPackage.dailyOfferLimit
             ? `günlük en fazla ${creditPackage.dailyOfferLimit} teklif`
             : 'günlük sınır yok'
-          : undefined,
+          : unitPrice !== null
+            ? `kredi başı ${formatPrice(unitPrice, creditPackage.currency)}`
+            : undefined,
       testId: 'credit-package-fact-allowance',
     },
     {
       label: 'Fiyat',
       value: formatPrice(creditPackage.priceAmount, creditPackage.currency),
+      note: creditPackage.currency,
       testId: 'credit-package-fact-price',
     },
-    { label: 'Sıra', value: creditPackage.sortOrder },
+    { label: 'Sıra', value: creditPackage.sortOrder, note: 'listeleme sırası' },
     { label: 'Güncellenme', value: formatDateTime(creditPackage.updatedAt) },
   ];
+
+  const path = `/credit-packages/${creditPackage.id}`;
+  const tabs: TabItem[] = [
+    { key: '', label: 'Paket bilgileri', testId: 'credit-package-tab-bilgiler' },
+    ...(canReadPurchases
+      ? [{ key: 'satislar', label: 'Satışlar', count: sortedPurchases.length, testId: 'credit-package-tab-satislar' }]
+      : []),
+    { key: 'gecmis', label: 'Neler oldu', testId: 'credit-package-tab-gecmis' },
+  ];
+  const activeTab = resolveTab<TabKey>(
+    tab,
+    tabs.map((item) => item.key as TabKey),
+    '',
+  );
 
   return (
     <main className="catalog-page catalog-detail-page">
       <DetailHeader
         back={{ href: '/credit-packages', label: 'Kredi paketleri' }}
         badges={
-          <span
-            className={creditPackage.isActive ? 'badge badge-good' : 'badge badge-muted'}
-            data-testid="credit-package-status"
-          >
-            {creditPackage.isActive ? 'Aktif' : 'Pasif'}
-          </span>
+          <>
+            <span
+              className={creditPackage.isActive ? 'badge badge-good' : 'badge badge-muted'}
+              data-testid="credit-package-status"
+            >
+              {creditPackage.isActive ? 'Aktif' : 'Pasif'}
+            </span>
+            <span className="badge badge-muted">{packageTypeLabel(creditPackage.type)}</span>
+          </>
         }
-        meta={<code className="cell-break">{creditPackage.slug}</code>}
+        meta={
+          <>
+            <code className="cell-break">{creditPackage.slug}</code> · sıra {creditPackage.sortOrder}
+          </>
+        }
         title={creditPackage.name}
-        subtitle={
-          creditPackage.type === 'CATEGORY_UNLIMITED'
-            ? creditPackage.scopeCategories.length > 0
-              ? `Kapsam: ${creditPackage.scopeCategories.map((scope) => scope.category.name).join(', ')}`
-              : 'Kapsam tanımsız'
-            : undefined
+        subtitle={packageSummarySentence(creditPackage)}
+        actions={
+          canReadPurchases || canChangeStatus ? (
+            <>
+              {canReadPurchases ? (
+                <Link className="btn btn-secondary" href={purchasesHref}>
+                  Tüm satın almaları gör
+                </Link>
+              ) : null}
+              {/*
+                The old side panel's switch, where the design puts it. Not a
+                confirmation: deactivating closes new sales and nothing else,
+                and is undone by the same button.
+              */}
+              {canChangeStatus ? (
+                <span data-testid="credit-package-status-panel">
+                  <PackageStatusForm
+                    pkg={creditPackage}
+                    redirectTo={path}
+                    action={updateCreditPackageStatusAction}
+                    variant="panel"
+                  />
+                </span>
+              ) : null}
+            </>
+          ) : undefined
         }
         facts={facts}
         factsLabel="Paket özeti"
@@ -185,91 +254,82 @@ export default async function CreditPackageDetailPage({
         </div>
       ) : null}
 
-      <div className="admin-module-layout catalog-detail-layout">
-        <div className="admin-main-column">
+      <Tabs label="Paket sekmeleri" items={tabs} active={activeTab} path={path} testId="credit-package-tabs" />
+
+      {activeTab === '' ? (
+        <div className="detail-tab-panel" data-testid="credit-package-panel-bilgiler">
           <SectionCard
             title="Paket bilgileri"
-            subtitle="Hizmet verenin satın alma akışında görünen alanlar. Değişiklikler mevcut satın almaları etkilemez; her satın alma kendi kopyasını taşır."
+            actions={<span className="section-card-meta">Hizmet verenin satın alma ekranında görünen alanlar</span>}
+            className="detail-tab-card"
           >
             {canWrite ? (
-            <form action={updateCreditPackageAction} className="compact-form compact-form-wide">
-              <input type="hidden" name="id" value={creditPackage.id} />
-              <div className="compact-field-grid">
-                <label className="field field-8">
-                  <span>Paket adı *</span>
-                  <input
-                    name="name"
-                    required
-                    defaultValue={creditPackage.name}
-                    maxLength={120}
-                  />
-                </label>
-                <label className="field field-4">
-                  <span>Sıralama</span>
-                  <input
-                    name="sortOrder"
-                    type="number"
-                    min="0"
-                    step="1"
-                    defaultValue={creditPackage.sortOrder}
-                  />
-                  <span className="help-text">Küçük değer üstte görünür.</span>
-                </label>
-
-                <label className="field field-6">
-                  <span>Kısa ad (slug) *</span>
-                  <input
-                    name="slug"
-                    required
-                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                    defaultValue={creditPackage.slug}
-                  />
-                  <span className="help-text">
-                    Kısa ad değiştirilirse harici bağlantılar kırılabilir. Hizmet verenin satın alma akışı paketi kimliğiyle bulur, etkilenmez.
-                  </span>
-                </label>
-                {/*
-                  * The type is not editable and is therefore not a form field:
-                  * changing what a package sells would leave every period
-                  * already bought against it describing a product that no
-                  * longer exists. The API refuses it too.
-                  */}
-                <input type="hidden" name="type" value={creditPackage.type} />
-
-                {creditPackage.type === 'ONE_TIME_CREDITS' ? (
-                  <label className="field field-3">
-                    <span>Kredi *</span>
-                    <input
-                      name="creditAmount"
-                      type="number"
-                      min="1"
-                      step="1"
-                      required
-                      defaultValue={creditPackage.creditAmount}
-                    />
+              <form action={updateCreditPackageAction} className="compact-form compact-form-wide">
+                <input type="hidden" name="id" value={creditPackage.id} />
+                <div className="compact-field-grid">
+                  <label className="field field-4">
+                    <span>Paket adı *</span>
+                    <input name="name" required defaultValue={creditPackage.name} maxLength={120} />
                   </label>
-                ) : null}
-
-                {creditPackage.type === 'MONTHLY_QUOTA' ? (
-                  <label className="field field-3">
-                    <span>Aylık kota (kredi) *</span>
+                  <label className="field field-4">
+                    <span>Kısa ad (slug) *</span>
                     <input
-                      name="quotaCredits"
-                      type="number"
-                      min="1"
-                      step="1"
+                      name="slug"
                       required
-                      defaultValue={creditPackage.quotaCredits ?? 1}
+                      pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                      defaultValue={creditPackage.slug}
                     />
                     <span className="help-text">
-                      Kullanılmayan kota dönem sonunda devretmez.
+                      Değiştirilirse dış bağlantılar kırılabilir. Satın alma akışı paketi kimliğiyle bulur,
+                      etkilenmez.
                     </span>
                   </label>
-                ) : null}
+                  {/*
+                    The type is not editable and is therefore not a form field:
+                    changing what a package sells would leave every period
+                    already bought against it describing a product that no
+                    longer exists. The API refuses it too.
+                  */}
+                  <LockedField
+                    label="Tür"
+                    value={packageTypeLabel(creditPackage.type)}
+                    help="Tür sonradan değiştirilemez; satılmış paketler başka bir ürünü anlatır hâle gelirdi."
+                    testId="credit-package-type-locked"
+                  />
+                  <input type="hidden" name="type" value={creditPackage.type} />
 
-                {creditPackage.type === 'CATEGORY_UNLIMITED' ? (
-                  <>
-                    <label className="field field-3">
+                  {creditPackage.type === 'ONE_TIME_CREDITS' ? (
+                    <label className="field field-4">
+                      <span>Kredi *</span>
+                      <input
+                        name="creditAmount"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        defaultValue={creditPackage.creditAmount}
+                      />
+                      <span className="help-text">Satın alındığında hesaba bir kez yüklenir.</span>
+                    </label>
+                  ) : null}
+
+                  {creditPackage.type === 'MONTHLY_QUOTA' ? (
+                    <label className="field field-4">
+                      <span>Aylık kota (kredi) *</span>
+                      <input
+                        name="quotaCredits"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        defaultValue={creditPackage.quotaCredits ?? 1}
+                      />
+                      <span className="help-text">Kullanılmayan kota dönem sonunda devretmez.</span>
+                    </label>
+                  ) : null}
+
+                  {creditPackage.type === 'CATEGORY_UNLIMITED' ? (
+                    <label className="field field-4">
                       <span>Günlük teklif limiti</span>
                       <input
                         name="dailyOfferLimit"
@@ -280,6 +340,64 @@ export default async function CreditPackageDetailPage({
                       />
                       <span className="help-text">0 = günlük sınır yok.</span>
                     </label>
+                  ) : null}
+
+                  <label className="field field-4">
+                    <span>Fiyat *</span>
+                    <input
+                      name="priceAmount"
+                      type="text"
+                      inputMode="decimal"
+                      pattern="([0-9]{1,3}(\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
+                      placeholder="Örn. 149,90"
+                      required
+                      defaultValue={formatMinorAsTurkishLiraInput(creditPackage.priceAmount)}
+                    />
+                    <span className="help-text">
+                      Kuruş için virgül kullanın. Örn: 149,90 {selectedCurrency} veya 1.500. Sistem kuruşa çevirerek
+                      saklar.
+                    </span>
+                  </label>
+                  <label className="field field-4">
+                    <span>Para birimi *</span>
+                    <select name="currency" defaultValue={selectedCurrency} required>
+                      {currencyOptions.map((cur) => (
+                        <option key={cur} value={cur}>
+                          {cur}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="field field-4">
+                    <span>Durum</span>
+                    {/*
+                      The status is its own permission (CREDIT_PACKAGES_STATUS).
+                      Without it the select is shown but cannot be moved, and the
+                      save does not send `isActive` at all (`statusLocked`), so a
+                      stale page cannot turn an ordinary edit into a 403.
+                    */}
+                    {canChangeStatus ? null : <input type="hidden" name="statusLocked" value="1" />}
+                    <select
+                      name={canChangeStatus ? 'isActive' : undefined}
+                      defaultValue={String(creditPackage.isActive)}
+                      disabled={!canChangeStatus}
+                    >
+                      <option value="true">Aktif (satışa açık)</option>
+                      <option value="false">Pasif (satışa kapalı)</option>
+                    </select>
+                    <span className="help-text">
+                      Pasif paket yeni satışa kapanır; satılmışlar ve yüklenmiş krediler etkilenmez. İstediğiniz zaman
+                      geri açabilirsiniz.
+                    </span>
+                  </label>
+                  <label className="field field-4">
+                    <span>Sıralama</span>
+                    <input name="sortOrder" type="number" min="0" step="1" defaultValue={creditPackage.sortOrder} />
+                    <span className="help-text">Küçük değer hizmet verene önce listelenir.</span>
+                  </label>
+
+                  {creditPackage.type === 'CATEGORY_UNLIMITED' ? (
                     <label className="field field-12">
                       <span>Kapsam *</span>
                       <select
@@ -297,83 +415,30 @@ export default async function CreditPackageDetailPage({
                         ))}
                       </select>
                       <span className="help-text">
-                        Kapsamı değiştirmek yalnızca bundan sonraki satın almaları etkiler.
-                        Satılmış paketlerin kapsamı satın alma anında dondurulmuştur.
+                        Kapsamı değiştirmek yalnızca bundan sonraki satın almaları etkiler. Satılmış paketlerin kapsamı
+                        satın alma anında dondurulmuştur.
                       </span>
                     </label>
-                  </>
-                ) : null}
-                <label className="field field-3">
-                  <span>Para birimi *</span>
-                  <select name="currency" defaultValue={selectedCurrency} required>
-                    {currencyOptions.map((cur) => (
-                      <option key={cur} value={cur}>
-                        {cur}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  ) : null}
 
-                <label className="field field-6">
-                  <span>Fiyat *</span>
-                  <input
-                    name="priceAmount"
-                    type="text"
-                    inputMode="decimal"
-                    pattern="([0-9]{1,3}(\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?"
-                    placeholder="Örn. 149,90"
-                    required
-                    defaultValue={formatMinorAsTurkishLiraInput(creditPackage.priceAmount)}
-                  />
-                  <span className="help-text">
-                    Kuruş için virgül kullanın. Örn: 149,90 {selectedCurrency} veya 1.500. Mevcut
-                    değer paketten okunarak basılır; değiştirip kaydedebilirsiniz.
-                  </span>
-                </label>
-                <label className="field field-6">
-                  <span>Durum</span>
-                  {/*
-                    The status is its own permission (CREDIT_PACKAGES_STATUS).
-                    Without it the select is shown but cannot be moved, and the
-                    save does not send `isActive` at all (`statusLocked`), so a
-                    stale page cannot turn an ordinary edit into a 403.
-                  */}
-                  {canChangeStatus ? null : (
-                    <input type="hidden" name="statusLocked" value="1" />
-                  )}
-                  <select
-                    name={canChangeStatus ? 'isActive' : undefined}
-                    defaultValue={String(creditPackage.isActive)}
-                    disabled={!canChangeStatus}
-                  >
-                    <option value="true">Aktif (satışa açık)</option>
-                    <option value="false">Pasif (satışa kapalı)</option>
-                  </select>
-                  <span className="help-text">
-                    Pasif paketler yeni satın alıma kapanır; mevcut satın almalar etkilenmez.
-                  </span>
-                </label>
+                  <label className="field field-12">
+                    <span>Açıklama</span>
+                    <textarea
+                      name="description"
+                      placeholder="Paketi tanıtacak kısa metin (opsiyonel)."
+                      defaultValue={creditPackage.description ?? ''}
+                      maxLength={500}
+                    />
+                    <span className="help-text">Paketi tanıtan kısa metin. En fazla 500 karakter.</span>
+                  </label>
+                </div>
 
-                <label className="field">
-                  <span>Açıklama</span>
-                  <textarea
-                    name="description"
-                    placeholder="Paketi tanıtacak kısa metin (opsiyonel)."
-                    defaultValue={creditPackage.description ?? ''}
-                    maxLength={500}
-                  />
-                </label>
-              </div>
-
-              <div className="compact-actions">
-                <button className="btn btn-primary btn-sm" type="submit">
-                  Değişiklikleri kaydet
-                </button>
-                <Link className="btn btn-secondary btn-sm" href="/credit-packages">
-                  Listeye dön
-                </Link>
-              </div>
-            </form>
+                <DetailFormFooter note="Değişiklikler satılmış paketleri etkilemez; her satın alma paketin o anki adını, kredisini ve fiyatını saklar.">
+                  <button className="btn btn-primary" type="submit">
+                    Değişiklikleri kaydet
+                  </button>
+                </DetailFormFooter>
+              </form>
             ) : (
               <div className="catalog-readonly" data-testid="credit-package-read-only">
                 <KeyValueList
@@ -403,127 +468,145 @@ export default async function CreditPackageDetailPage({
             )}
           </SectionCard>
 
-          {canReadPurchases ? (
-            <SectionCard
-              title="Satış özeti"
-              subtitle="Bu pakete bağlı satın alma kayıtlarından özet (satın alma anındaki değerler)."
-              testId="credit-package-sales"
-            >
-              {sortedPurchases.length === 0 ? (
-                <EmptyState
-                  title="Bu pakete bağlı satın alma yok."
-                  description="Hizmet veren bu paketi satın aldığında özet burada görünür."
-                />
-              ) : (
-                <div className="catalog-sales">
-                  <SummaryStrip
-                    label="Satış özeti"
-                    items={[
-                      {
-                        label: 'Toplam satın alma',
-                        value: formatCount(sortedPurchases.length),
-                        note: `${paidPurchases.length} ödenmiş · ${pendingPurchases.length} bekleyen`,
-                      },
-                      {
-                        label: 'Yüklenen kredi',
-                        value: formatCount(totalPaidCredits),
-                        note: 'Yalnızca ödenmiş paketler',
-                      },
-                      {
-                        label: 'Toplam ciro',
-                        value:
-                          revenueEntries.length === 0
-                            ? formatPrice(0, creditPackage.currency)
-                            : revenueEntries.length === 1
-                              ? formatPrice(revenueEntries[0]![1], revenueEntries[0]![0])
-                              : 'Çoklu para birimi',
-                        note:
-                          revenueEntries.length > 1
-                            ? revenueEntries.map(([cur, amount]) => formatPrice(amount, cur)).join(' · ')
-                            : 'Satın alma anındaki fiyatların toplamı',
-                      },
-                      {
-                        label: 'Son satın alma',
-                        value: lastPurchase ? formatDateTime(lastPurchase.createdAt) : '-',
-                        note: lastPaid
-                          ? `Son ödeme: ${formatDateTime(lastPaid.paidAt ?? lastPaid.createdAt)}`
-                          : 'Ödenmiş satın alma yok',
-                      },
-                    ]}
-                  />
-
-                  <DataTable caption="Son satın almalar" columns={PURCHASE_COLUMNS} minWidth={720}>
-                    {recentPurchases.map((purchase) => (
-                      <tr key={purchase.id}>
-                        <td className="cell-nowrap">{formatDateTime(purchase.createdAt)}</td>
-                        <td>
-                          {canOpenProvider ? (
-                            <Link className="cell-link cell-break" href={`/providers/${purchase.provider.id}`}>
-                              {purchase.provider.businessName}
-                            </Link>
-                          ) : (
-                            <span className="cell-break">{purchase.provider.businessName}</span>
-                          )}
-                        </td>
-                        <td>
-                          <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
-                        </td>
-                        <td className="is-num">
-                          {formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}
-                        </td>
-                        <td className="cell-muted cell-break">{purchase.mockPaymentReference ?? '-'}</td>
-                      </tr>
-                    ))}
-                  </DataTable>
-
-                  {sortedPurchases.length > recentPurchases.length ? (
-                    <div className="catalog-sales-more">
-                      <Link
-                        className="btn btn-secondary btn-sm"
-                        href={`/package-purchases?packageId=${encodeURIComponent(creditPackage.id)}`}
-                      >
-                        Tüm satın almaları gör ({sortedPurchases.length})
-                      </Link>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </SectionCard>
-          ) : null}
+          <SectionCard title="Paketin diğer türleri" padded={false} className="detail-tab-card">
+            <ul className="detail-fact-cards" data-testid="credit-package-types">
+              {(Object.keys(PACKAGE_TYPE_LABEL) as Array<keyof typeof PACKAGE_TYPE_LABEL>).map((type) => (
+                <li key={type} className={type === creditPackage.type ? 'is-current' : undefined}>
+                  <h3>{PACKAGE_TYPE_LABEL[type]}</h3>
+                  <p>
+                    {PACKAGE_TYPE_DESCRIPTION[type]}
+                    {type === creditPackage.type ? ' Bu paket bu türde.' : ''}
+                  </p>
+                </li>
+              ))}
+              <li>
+                <h3>Tür seçimi</h3>
+                <p>Tür yalnız paket oluşturulurken seçilir. Farklı türde bir paket için yeni paket oluşturulur.</p>
+              </li>
+            </ul>
+          </SectionCard>
         </div>
+      ) : null}
 
-        <aside className="admin-side-column" aria-label="Paket işlemleri">
-          {canChangeStatus ? (
-            <SectionCard title="Durum" className="catalog-side-card" testId="credit-package-status-panel">
-              <div className="catalog-side-body">
-                <p>
-                  {creditPackage.isActive
-                    ? 'Paket şu anda satışa açık. Pasifleştirildiğinde yeni satın almalar engellenir.'
-                    : 'Paket pasif. Yeni satın alımlar engellenmiş durumda; aktifleştirebilirsiniz.'}
-                </p>
-                <PackageStatusForm
-                  pkg={creditPackage}
-                  redirectTo={`/credit-packages/${creditPackage.id}`}
-                  action={updateCreditPackageStatusAction}
-                  variant="panel"
-                />
+      {activeTab === 'satislar' && canReadPurchases ? (
+        <div className="detail-tab-panel" data-testid="credit-package-panel-satislar">
+          <SectionCard
+            title="Satış özeti"
+            actions={<span className="section-card-meta">Satın alma anındaki değerlerle</span>}
+            padded={false}
+            className="detail-tab-card"
+            testId="credit-package-sales"
+          >
+            {sortedPurchases.length === 0 ? (
+              <EmptyState
+                title="Bu pakete bağlı satın alma yok."
+                description="Hizmet veren bu paketi satın aldığında özet burada görünür."
+              />
+            ) : (
+              <SummaryStrip
+                label="Satış özeti"
+                items={[
+                  {
+                    label: 'Toplam satın alma',
+                    value: formatCount(sortedPurchases.length),
+                    note: `${paidPurchases.length} ödenmiş · ${pendingPurchases.length} bekleyen`,
+                  },
+                  {
+                    label: 'Yüklenen kredi',
+                    value: formatCount(totalPaidCredits),
+                    note: 'Yalnızca ödenmiş paketler',
+                  },
+                  {
+                    label: 'Toplam ciro',
+                    value:
+                      revenueEntries.length === 0
+                        ? formatPrice(0, creditPackage.currency)
+                        : revenueEntries.length === 1
+                          ? formatPrice(revenueEntries[0]![1], revenueEntries[0]![0])
+                          : 'Çoklu para birimi',
+                    note:
+                      revenueEntries.length > 1
+                        ? revenueEntries.map(([cur, amount]) => formatPrice(amount, cur)).join(' · ')
+                        : 'Satın alma anındaki fiyatların toplamı',
+                  },
+                  {
+                    label: 'Son satın alma',
+                    value: lastPurchase ? formatDateTime(lastPurchase.createdAt) : '-',
+                    note: lastPaid
+                      ? `Son ödeme: ${formatDateTime(lastPaid.paidAt ?? lastPaid.createdAt)}`
+                      : 'Ödenmiş satın alma yok',
+                  },
+                ]}
+              />
+            )}
+          </SectionCard>
+
+          {sortedPurchases.length > 0 ? (
+            <SectionCard
+              title="Son satın almalar"
+              actions={
+                <span className="section-card-meta">
+                  {formatCount(sortedPurchases.length)} satın almadan son {recentPurchases.length} kayıt
+                </span>
+              }
+              padded={false}
+              className="detail-tab-card"
+              testId="credit-package-recent-purchases"
+            >
+              <DataTable caption="Son satın almalar" columns={PURCHASE_COLUMNS} minWidth={760}>
+                {recentPurchases.map((purchase) => (
+                  <tr key={purchase.id}>
+                    <td className="cell-nowrap">{formatDateTime(purchase.createdAt)}</td>
+                    <td>
+                      {canOpenProvider ? (
+                        <Link className="cell-link cell-break" href={`/providers/${purchase.provider.id}`}>
+                          {purchase.provider.businessName}
+                        </Link>
+                      ) : (
+                        <span className="cell-break">{purchase.provider.businessName}</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
+                    </td>
+                    <td className="is-num">{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</td>
+                    <td>
+                      <Link className="cell-link cell-nowrap" href={`/package-purchases/${purchase.id}`}>
+                        {purchase.purchaseNumber ?? 'Aç'}
+                      </Link>
+                    </td>
+                    <td className="cell-muted cell-break">{purchase.mockPaymentReference ?? '-'}</td>
+                  </tr>
+                ))}
+              </DataTable>
+              <div className="detail-card-footer">
+                <p>Tüm satın almalar Finans › Paket satışları ekranında bu pakete göre filtrelenmiş açılır.</p>
+                <div className="detail-card-footer-actions">
+                  <Link className="btn btn-secondary btn-sm" href={purchasesHref}>
+                    Tüm satın almaları gör ({sortedPurchases.length})
+                  </Link>
+                </div>
               </div>
             </SectionCard>
           ) : null}
+        </div>
+      ) : null}
 
-          <SectionCard title="Hatırlatmalar" className="catalog-side-card">
-            <ul className="catalog-side-list">
-              <li>Fiyat lira olarak, kuruş için virgülle girilir (örn. 149,90); sistem kaydederken kuruşa çevirir.</li>
-              <li>
-                Satın alma kayıtları paketin o anki adı, kredisi, fiyatı ve para biriminin kopyasını tutar; sonraki
-                değişiklikler eski kayıtları bozmaz.
-              </li>
-              <li>Kısa ad değişikliği harici bağlantıları kırabilir.</li>
-              <li>Pasifleştirme yıkıcı değildir; istediğiniz zaman geri açabilirsiniz.</li>
-            </ul>
-          </SectionCard>
-        </aside>
-      </div>
+      {activeTab === 'gecmis' ? (
+        <div className="detail-tab-panel" data-testid="credit-package-panel-gecmis">
+          <ActivityLog
+            entries={recordLifecycleEntries({
+              createdAt: creditPackage.createdAt,
+              updatedAt: creditPackage.updatedAt,
+              created: 'Paket oluşturuldu',
+              updated: 'Paket son güncellendi',
+            })}
+            meta="Paket kaydının zamanları"
+            footnote={NO_CHANGE_HISTORY_NOTE}
+            testId="credit-package-activity"
+          />
+        </div>
+      ) : null}
     </main>
   );
 }
