@@ -13,6 +13,12 @@ import {
   STATUS_LABELS,
 } from '../category-taxonomy';
 
+/**
+ * A new category (#39). The design has no screen for it (`soon`), so it is
+ * built on the form template (ADMIN-DESIGN-001 Faz 3F): a way back to the
+ * list, the title with its ⓘ — which now carries what the side cards said —
+ * and the form, whose twelve fields, names and action are unchanged.
+ */
 export default async function NewCategoryPage() {
   const { can } = await requireAdmin('CATALOG_READ', 'CATEGORIES_WRITE');
   const canUpload = can('UPLOADS_WRITE');
@@ -22,160 +28,142 @@ export default async function NewCategoryPage() {
   const groups = categories.filter((category) => category.kind === 'GROUP');
 
   return (
-    <main className="categories-page">
+    <main className="catalog-page catalog-form-page">
+      <Link className="detail-back" href="/categories">
+        <span aria-hidden="true">‹</span> Hizmet kategorileri
+      </Link>
       <PageHeader
-        breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Kategoriler', href: '/categories' },
-          { label: 'Yeni' },
-        ]}
-        title="Yeni Kategori"
-        subtitle="Hizmet kategorisi oluşturun. Sorular kategori oluşturulduktan sonra eklenebilir."
+        title="Yeni kategori"
+        subtitle="Hizmet kategorisi oluşturun. Sorular, yönlendirme ve davetler kategori oluşturulduktan sonra detay ekranında eklenir."
+        infoLabel="Kategori nasıl oluşturulur?"
+        info={
+          <span className="popover-list">
+            <span>Kaydettikten sonra kategorinin detay ekranı açılır; soru seti, durum ve davetler oradan yönetilir.</span>
+            <span>Kısa ad (slug) yalnız küçük harf, rakam ve tire içerir; örn. elektrik-tesisati. Değiştirilirse mevcut bağlantılar kırılır.</span>
+            <span>Soru sırası müşteri formundaki gösterim sırasını belirler.</span>
+            <span>{STATUS_HINTS.DRAFT}</span>
+            <span>{KIND_HINTS.ROUTER}</span>
+          </span>
+        }
       />
 
-      <div className="admin-module-layout">
-        <div className="admin-main-column">
-          <SectionCard
-            title="Kategori bilgileri"
-            subtitle="Listede ve müşteri akışında görünecek temel alanlar."
-          >
-            <form action={createCategoryAction} className="compact-form">
-              <div className="compact-field-grid">
-                <label className="field field-8">
-                  <span>İsim *</span>
-                  <input name="name" required autoFocus />
-                </label>
-                <label className="field field-4">
-                  <span>Sıralama</span>
-                  <input name="sortOrder" type="number" min="0" defaultValue="0" />
-                </label>
-                <label className="field field-4">
-                  <span>Teklif kredisi *</span>
-                  <input name="offerCreditCost" type="number" min="1" step="1" defaultValue="1" required />
-                  <span className="help-text">
-                    Bu kategoride bir teklifin maliyeti. Yalnız hizmet tipinde kullanılır; grup ve
-                    yönlendirici kategorilerde teklif verilemediği için yok sayılır.
-                  </span>
-                </label>
-                <label className="field field-4">
-                  <span>Tip *</span>
-                  <select name="kind" defaultValue="LEAF">
-                    {CATEGORY_KINDS.map((kind) => (
-                      <option key={kind} value={kind}>
-                        {KIND_LABELS[kind]}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="help-text">{KIND_HINTS.LEAF}</span>
-                </label>
-                <label className="field field-4">
-                  <span>Durum *</span>
-                  <select name="status" defaultValue="DRAFT">
-                    {CATEGORY_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {STATUS_LABELS[status]}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="help-text">{STATUS_HINTS.DRAFT}</span>
-                </label>
-                <label className="field field-4">
-                  <span>Üst kategori</span>
-                  <select name="parentId" defaultValue="">
-                    <option value="">— (üst seviye)</option>
-                    {groups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="help-text">
-                    Yalnızca grup tipindeki kategoriler üst kategori olabilir.
-                  </span>
-                </label>
-                <label className="field field-12">
-                  <span>Slug *</span>
-                  <input
-                    name="slug"
-                    required
-                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                    placeholder="ornek-kategori"
-                  />
-                  <span className="help-text">Yalnızca küçük harf, rakam ve tire (-).</span>
-                </label>
-                <label className="field field-12">
-                  <span>Açıklama</span>
-                  <textarea
-                    name="description"
-                    placeholder="Müşteri akışında kategoriyi tanıtacak kısa metin (opsiyonel)."
-                  />
-                </label>
-                <CategoryImageUploader
-                  canUpload={canUpload}
-                  name="imageUrl"
-                  label="Kart görseli"
-                  variant="card"
-                  helpText="Kategoriler listesindeki kart için kullanılır."
+      <div className="catalog-stack">
+        <SectionCard
+          title="Kategori bilgileri"
+          subtitle="Listede ve müşteri akışında görünecek temel alanlar."
+        >
+          <form action={createCategoryAction} className="compact-form">
+            <div className="compact-field-grid">
+              <label className="field field-8">
+                <span>Kategori adı *</span>
+                <input name="name" required autoFocus />
+              </label>
+              <label className="field field-4">
+                <span>Sıralama</span>
+                <input name="sortOrder" type="number" min="0" defaultValue="0" />
+              </label>
+              <label className="field field-4">
+                <span>Teklif kredisi *</span>
+                <input name="offerCreditCost" type="number" min="1" step="1" defaultValue="1" required />
+                <span className="help-text">
+                  Bu kategoride bir teklifin maliyeti. Yalnız hizmet tipinde kullanılır; grup ve
+                  yönlendirici kategorilerde teklif verilemediği için yok sayılır.
+                </span>
+              </label>
+              <label className="field field-4">
+                <span>Tip *</span>
+                <select name="kind" defaultValue="LEAF">
+                  {CATEGORY_KINDS.map((kind) => (
+                    <option key={kind} value={kind}>
+                      {KIND_LABELS[kind]}
+                    </option>
+                  ))}
+                </select>
+                <span className="help-text">{KIND_HINTS.LEAF}</span>
+              </label>
+              <label className="field field-4">
+                <span>Durum *</span>
+                <select name="status" defaultValue="DRAFT">
+                  {CATEGORY_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {STATUS_LABELS[status]}
+                    </option>
+                  ))}
+                </select>
+                <span className="help-text">{STATUS_HINTS.DRAFT}</span>
+              </label>
+              <label className="field field-4">
+                <span>Üst kategori</span>
+                <select name="parentId" defaultValue="">
+                  <option value="">— (üst seviye)</option>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="help-text">
+                  Yalnızca grup tipindeki kategoriler üst kategori olabilir.
+                </span>
+              </label>
+              <label className="field field-12">
+                <span>Kısa ad (slug) *</span>
+                <input
+                  name="slug"
+                  required
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  placeholder="ornek-kategori"
                 />
-                <CategoryImageUploader
-                  canUpload={canUpload}
-                  name="coverImageUrl"
-                  label="Kapak görseli"
-                  variant="cover"
-                  helpText="Kategori detay sayfasının geniş kapak görseli. Boş bırakılırsa cover gösterilmez."
+                <span className="help-text">Yalnızca küçük harf, rakam ve tire (-).</span>
+              </label>
+              <label className="field field-12">
+                <span>Açıklama</span>
+                <textarea
+                  name="description"
+                  placeholder="Müşteri akışında kategoriyi tanıtacak kısa metin (opsiyonel)."
                 />
-                <label className="field field-12">
-                  <span>Fallback ikon anahtarı</span>
-                  <select name="iconKey" defaultValue="">
-                    <option value="">— (otomatik ikon kullan)</option>
-                    {CATEGORY_ICON_KEYS.map((key) => (
-                      <option key={key} value={key}>
-                        {key}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="help-text">
-                    Görsel verilmediğinde kullanılacak ikon. Boş bırakılırsa kategori adına göre
-                    otomatik fallback ikon kullanılır. Upload sistemi ayrı fazda eklenecek.
-                  </span>
-                </label>
-              </div>
+              </label>
+              <CategoryImageUploader
+                canUpload={canUpload}
+                name="imageUrl"
+                label="Kart görseli"
+                variant="card"
+                helpText="Kategoriler listesindeki kart için kullanılır."
+              />
+              <CategoryImageUploader
+                canUpload={canUpload}
+                name="coverImageUrl"
+                label="Kapak görseli"
+                variant="cover"
+                helpText="Kategori detay sayfasının geniş kapak görseli. Boş bırakılırsa cover gösterilmez."
+              />
+              <label className="field field-12">
+                <span>Fallback ikon anahtarı</span>
+                <select name="iconKey" defaultValue="">
+                  <option value="">— (otomatik ikon kullan)</option>
+                  {CATEGORY_ICON_KEYS.map((key) => (
+                    <option key={key} value={key}>
+                      {key}
+                    </option>
+                  ))}
+                </select>
+                <span className="help-text">
+                  Görsel verilmediğinde kullanılacak ikon. Boş bırakılırsa kategori adına göre
+                  otomatik fallback ikon kullanılır.
+                </span>
+              </label>
+            </div>
 
-              <div className="compact-actions">
-                <button className="btn btn-primary btn-sm" type="submit">
-                  Kategoriyi oluştur
-                </button>
-                <Link className="btn btn-secondary btn-sm" href="/categories">
-                  Vazgeç
-                </Link>
-              </div>
-            </form>
-          </SectionCard>
-        </div>
-
-        <aside className="admin-side-column">
-          <div className="helper-card">
-            <h4>Sıradaki adım</h4>
-            <p>
-              Kategori oluşturulduktan sonra detay sayfasından <strong>soru seti</strong> ekleyebilir,
-              durumu yönetebilirsiniz.
-            </p>
-            <ul>
-              <li>Slug değiştirildiğinde mevcut linkler kırılır.</li>
-              <li>Soru sırası, müşteri formundaki gösterim sırasını belirler.</li>
-              <li>{STATUS_HINTS.DRAFT}</li>
-              <li>{KIND_HINTS.ROUTER}</li>
-            </ul>
-          </div>
-
-          <div className="admin-action-panel">
-            <h3>İpucu</h3>
-            <p>
-              İsim alanını doldurduktan sonra slug'ı küçük harflerle ve tire (-) kullanarak yazın.
-              Örn. <code>elektrik-tesisati</code>.
-            </p>
-          </div>
-        </aside>
+            <div className="compact-actions">
+              <button className="btn btn-primary btn-sm" type="submit">
+                Kategoriyi oluştur
+              </button>
+              <Link className="btn btn-secondary btn-sm" href="/categories">
+                Vazgeç
+              </Link>
+            </div>
+          </form>
+        </SectionCard>
       </div>
     </main>
   );

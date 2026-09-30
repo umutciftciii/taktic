@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { apiFetch, Category, CategoryStatus, requireAdmin } from '../../lib/api';
-import { PageHeader } from '../../components/page-header';
-import { SectionCard } from '../../components/section-card';
+import { buildHref } from '../../lib/list-query';
+import { formatCount } from '../../lib/pagination';
+import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
+import { FilterBar, FilterField } from '../../components/filter-bar';
+import { PageHeader } from '../../components/page-header';
+import { WholeListFooter } from '../../components/pagination';
 import {
   draftServices,
   KIND_LABELS,
@@ -16,8 +20,36 @@ import {
   statusBadgeClass,
   toTreeRows,
 } from './category-taxonomy';
+import { CATEGORIES_SCREEN_INFO, TreeReadiness, treeRowContext } from './category-list-cells';
 
-type StatusFilter = 'all' | CategoryStatus;
+/**
+ * Hizmet kategorileri (#38), design `list:categories` (paket 2
+ * `35-hizmet-kategorileri`, ADMIN-DESIGN-001 Faz 3F).
+ *
+ * The design's list template — title with its ⓘ and one-line summary, the
+ * filter bar, the table with "Aç" and the footer — with the two things the
+ * design's flat table would have lost kept in place (K7):
+ *
+ * - The tree. Children follow their parent, indented by depth, and a filtered
+ *   list is a filtered tree: a row whose parent was filtered out stays, as a
+ *   root. The design's "Kombi servisi · Isıtma ve soğutma altında" line is the
+ *   parent's name under the child's; a group says how many categories hang
+ *   under it (`_count.children`).
+ * - The release checklist over the draft services, above the tree and
+ *   independent of its filters, with every column it had.
+ *
+ * "Yayına hazır mı?" is the design's column, filled with the same three rules
+ * the checklist and the detail screen use (`releaseBlockers`). It is advice:
+ * the API does not refuse a status change on its account.
+ *
+ * Kept beyond the design's columns: the card image, the status, the sort
+ * order. Not drawn: its Tarih filter (a category has no date the list could
+ * filter on) and Önceki / Sonraki (the API returns the catalogue whole).
+ */
+
+const PATH = '/categories';
+
+type StatusFilter = '' | CategoryStatus;
 
 type AdminCategoriesPageProps = {
   searchParams: Promise<{ q?: string; status?: string }>;
@@ -29,8 +61,33 @@ function normalizeStatus(value: string | undefined): StatusFilter {
   // filter should keep meaning what it meant.
   if (value === 'active') return 'ACTIVE';
   if (value === 'inactive') return 'INACTIVE';
-  return 'all';
+  return '';
 }
+
+const RELEASE_COLUMNS: DataColumn[] = [
+  { key: 'service', label: 'Hizmet' },
+  { key: 'parent', label: 'Üst grup' },
+  { key: 'questions', label: 'Soru', align: 'end' },
+  { key: 'price', label: 'Teklif kredisi', align: 'end' },
+  { key: 'providers', label: 'Onaylı hizmet veren', align: 'end' },
+  { key: 'invites', label: 'Geçerli davet', align: 'end' },
+  { key: 'supply', label: 'Arz durumu' },
+  { key: 'ready', label: 'Yayına hazır mı?' },
+];
+
+const TREE_COLUMNS: DataColumn[] = [
+  { key: 'thumb', label: 'Görsel', srOnly: true },
+  { key: 'name', label: 'Kategori adı' },
+  { key: 'slug', label: 'Kısa ad' },
+  { key: 'kind', label: 'Tip' },
+  { key: 'status', label: 'Durum' },
+  { key: 'price', label: 'Teklif kredisi', align: 'end' },
+  { key: 'questions', label: 'Soru sayısı', align: 'end' },
+  { key: 'providers', label: 'Onaylı hizmet veren', align: 'end' },
+  { key: 'ready', label: 'Yayına hazır mı?' },
+  { key: 'order', label: 'Sıra', align: 'end' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 export default async function AdminCategoriesPage({ searchParams }: AdminCategoriesPageProps) {
   const { can } = await requireAdmin('CATALOG_READ');
@@ -46,7 +103,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
 
   const normalizedQuery = query.toLocaleLowerCase('tr-TR');
   const filtered = categories.filter((category) => {
-    if (status !== 'all' && category.status !== status) return false;
+    if (status && category.status !== status) return false;
     if (!normalizedQuery) return true;
     const haystack = `${category.name} ${category.slug}`.toLocaleLowerCase('tr-TR');
     return haystack.includes(normalizedQuery);
@@ -56,7 +113,8 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
   // first, so a filtered list is a filtered tree rather than a tree with holes.
   const rows = toTreeRows(filtered);
 
-  const hasFilters = query.length > 0 || status !== 'all';
+  const hasFilters = query.length > 0 || status !== '';
+  const filterParams = { q: query, status };
 
   // Built from the whole catalogue rather than from `filtered`: this is a
   // standing list of what is waiting to be released, not a view of the table
@@ -78,342 +136,295 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
       return a.category.name.localeCompare(b.category.name, 'tr-TR');
     });
   const readyCount = draftReadiness.filter((entry) => entry.blockers.length === 0).length;
+  const liveCount = categories.filter((category) => category.status === 'ACTIVE').length;
+
+  const newCategoryLink = canCreate ? (
+    <Link className="btn btn-primary" href="/categories/new" data-testid="category-new-link">
+      Yeni kategori ekle
+    </Link>
+  ) : undefined;
 
   return (
-    <main className="categories-page">
+    <main className="catalog-page catalog-list-page">
       <PageHeader
-        title="Kategoriler"
-        subtitle="Hizmet talep akışında kullanılan kategori ağacını yönetin."
-        actions={
-          canCreate ? (
-            <Link className="btn btn-primary btn-sm" href="/categories/new">
-              Yeni Kategori
-            </Link>
-          ) : undefined
+        title="Hizmet kategorileri"
+        subtitle={
+          categories.length === 0
+            ? 'Henüz kategori yok'
+            : `${formatCount(categories.length)} kategori · ${formatCount(liveCount)} tanesi yayında`
         }
+        info={CATEGORIES_SCREEN_INFO}
+        actions={newCategoryLink}
       />
 
       {draftReadiness.length > 0 ? (
-        <SectionCard
-          className="category-release-card"
-          title="Yayın hazırlığı"
-          subtitle={
-            <>
-              Taslak hizmetler yalnızca bu panelde görünür. Bir hizmeti{' '}
-              <strong>{STATUS_LABELS.ACTIVE}</strong> yapmadan önce teklif kredisinin tanımlı ve
-              kategoriye bağlı onaylı bir hizmet verenin var olduğundan emin olun.
-            </>
-          }
-          actions={
+        <section
+          className="data-list-card category-release-card"
+          aria-labelledby="category-release-title"
+          data-testid="release-readiness-card"
+        >
+          <header className="data-list-card-head">
+            <h2 id="category-release-title">Yayın hazırlığı</h2>
             <span className="admin-toolbar-summary" data-testid="release-readiness-summary">
               {readyCount} / {draftReadiness.length} hizmet hazır
             </span>
-          }
-          padded={false}
-        >
-          <div className="table-scroll">
-            <table className="data-table" data-testid="release-readiness-table">
-              <thead>
-                <tr>
-                  <th>Hizmet</th>
-                  <th>Üst grup</th>
-                  <th className="col-num">Soru</th>
-                  <th className="col-num">Teklif kredisi</th>
-                  <th className="col-num">Onaylı hizmet veren</th>
-                  <th className="col-num">Geçerli davet</th>
-                  <th>Arz durumu</th>
-                  <th>Yayına hazır mı?</th>
-                </tr>
-              </thead>
-              <tbody>
-                {draftReadiness.map(({ category, blockers }) => {
-                  const parent = category.parentId
-                    ? categoriesById.get(category.parentId)
-                    : undefined;
-                  const providers = category._count?.providers ?? 0;
-                  const activeInvites = category._count?.providerInvites ?? 0;
+            <p className="cell-muted">
+              Taslak hizmetler yalnızca bu panelde görünür. Bir hizmeti{' '}
+              <strong>{STATUS_LABELS.ACTIVE}</strong> yapmadan önce teklif kredisinin tanımlı ve
+              kategoriye bağlı onaylı bir hizmet verenin var olduğundan emin olun. Bu liste
+              filtrelerden bağımsızdır.
+            </p>
+          </header>
+          <DataTable
+            caption="Yayın hazırlığı"
+            columns={RELEASE_COLUMNS}
+            minWidth={1080}
+            testId="release-readiness-table"
+          >
+            {draftReadiness.map(({ category, blockers }) => {
+              const parent = category.parentId ? categoriesById.get(category.parentId) : undefined;
+              const providers = category._count?.providers ?? 0;
+              const activeInvites = category._count?.providerInvites ?? 0;
+              const enrollment = enrollmentSentence(category);
 
-                  return (
-                    <tr key={category.id} data-testid={`release-row-${category.slug}`}>
-                      <td>
-                        <Link href={`/categories/${category.slug}`}>{category.name}</Link>
-                        <div>
-                          <code style={{ fontSize: 11 }}>{category.slug}</code>
-                        </div>
-                      </td>
-                      <td>
-                        {parent ? (
-                          <Link href={`/categories/${parent.slug}`}>{parent.name}</Link>
-                        ) : (
-                          <span className="muted">üst seviye</span>
-                        )}
-                      </td>
-                      <td className="col-num">{category._count?.questions ?? 0}</td>
-                      <td className="col-num">
-                        {category.offerCreditCost === null ? (
-                          <span
-                            className="badge badge-bad"
-                            title={RELEASE_BLOCKER_HINTS.NO_PRICE}
-                          >
-                            {RELEASE_BLOCKER_LABELS.NO_PRICE}
-                          </span>
-                        ) : (
-                          <strong>{category.offerCreditCost}</strong>
-                        )}
-                      </td>
-                      <td className="col-num">
-                        {providers === 0 ? (
-                          <span
-                            className="badge badge-bad"
-                            title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}
-                          >
-                            0
-                          </span>
-                        ) : (
-                          <strong>{providers}</strong>
-                        )}
-                      </td>
-                      {/*
-                        Sourcing progress, sitting next to the verdict and
-                        deliberately not part of it. "Three businesses have been
-                        approached" is a different sentence from "three
-                        businesses can answer a request", and only the second
-                        one releases a service — so this column never turns a
-                        row green, and the readiness rules never read it.
-                      */}
-                      <td className="col-num" data-testid={`release-invites-${category.slug}`}>
-                        {activeInvites === 0 ? (
-                          <span className="muted">0</span>
-                        ) : (
-                          <strong>{activeInvites}</strong>
-                        )}
-                      </td>
-                      {/*
-                        The supply reading, next to the release verdict and
-                        deliberately not merged into it. A draft can have its
-                        providers and still be unreleasable for want of a price,
-                        and that is the row somebody acts on differently.
-                      */}
-                      <td data-testid={`supply-status-${category.slug}`}>
-                        {category.supplyStatus ? (
-                          <span className={supplyStatusBadgeClass(category.supplyStatus)}>
-                            {SUPPLY_STATUS_LABELS[category.supplyStatus]}
-                          </span>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                        {enrollmentSentence(category) ? (
-                          <div
-                            className="muted"
-                            data-testid={`enrollment-note-${category.slug}`}
-                            style={{ fontSize: 12 }}
-                          >
-                            {enrollmentSentence(category)}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td>
-                        {blockers.length === 0 ? (
-                          <span className="badge badge-good">Hazır</span>
-                        ) : (
-                          // Label *and* reason, in the row itself. The reason
-                          // used to live in a title attribute, which a mouse
-                          // reveals and a keyboard, a phone and a screenshot in
-                          // a release meeting do not — and "why is this not
-                          // ready" is the only question this table is asked.
-                          <span className="release-blocker-list">
-                            <span className="badge badge-warn">Hazır değil</span>
-                            {blockers.map((blocker) => (
-                              <span
-                                className="muted"
-                                data-testid={`release-blocker-${blocker}`}
-                                key={blocker}
-                                style={{ fontSize: 12 }}
-                              >
-                                <strong>{RELEASE_BLOCKER_LABELS[blocker]}.</strong>{' '}
-                                {RELEASE_BLOCKER_HINTS[blocker]}
-                              </span>
-                            ))}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
+              return (
+                <tr key={category.id} data-testid={`release-row-${category.slug}`}>
+                  <td>
+                    <div className="cell-stack">
+                      <Link className="cell-link cell-break" href={`/categories/${category.slug}`}>
+                        <strong>{category.name}</strong>
+                      </Link>
+                      <code className="cell-muted cell-break">{category.slug}</code>
+                    </div>
+                  </td>
+                  <td>
+                    {parent ? (
+                      <Link className="cell-break" href={`/categories/${parent.slug}`}>
+                        {parent.name}
+                      </Link>
+                    ) : (
+                      <span className="cell-muted">üst seviye</span>
+                    )}
+                  </td>
+                  <td className="is-num">{category._count?.questions ?? 0}</td>
+                  <td className="is-num">
+                    {category.offerCreditCost === null ? (
+                      <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_PRICE}>
+                        {RELEASE_BLOCKER_LABELS.NO_PRICE}
+                      </span>
+                    ) : (
+                      <strong>{category.offerCreditCost}</strong>
+                    )}
+                  </td>
+                  <td className="is-num">
+                    {providers === 0 ? (
+                      <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}>
+                        0
+                      </span>
+                    ) : (
+                      <strong>{providers}</strong>
+                    )}
+                  </td>
+                  {/*
+                    Sourcing progress, sitting next to the verdict and
+                    deliberately not part of it. "Three businesses have been
+                    approached" is a different sentence from "three businesses
+                    can answer a request", and only the second one releases a
+                    service — so this column never turns a row green, and the
+                    readiness rules never read it.
+                  */}
+                  <td className="is-num" data-testid={`release-invites-${category.slug}`}>
+                    {activeInvites === 0 ? <span className="cell-muted">0</span> : <strong>{activeInvites}</strong>}
+                  </td>
+                  {/*
+                    The supply reading, next to the release verdict and
+                    deliberately not merged into it. A draft can have its
+                    providers and still be unreleasable for want of a price, and
+                    that is the row somebody acts on differently.
+                  */}
+                  <td data-testid={`supply-status-${category.slug}`}>
+                    <div className="cell-stack">
+                      {category.supplyStatus ? (
+                        <span className={supplyStatusBadgeClass(category.supplyStatus)}>
+                          {SUPPLY_STATUS_LABELS[category.supplyStatus]}
+                        </span>
+                      ) : (
+                        <span className="cell-muted">—</span>
+                      )}
+                      {enrollment ? (
+                        <span className="cell-muted" data-testid={`enrollment-note-${category.slug}`}>
+                          {enrollment}
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className="release-verdict-cell">
+                    <TreeReadiness blockers={blockers} explain />
+                  </td>
+                </tr>
+              );
+            })}
+          </DataTable>
+        </section>
       ) : null}
 
-      <form className="admin-toolbar" method="get" action="/categories">
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="category-search">Ara</label>
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        label="Kategori filtreleri"
+        testId="category-filters"
+      >
+        <FilterField label="Ara" htmlFor="category-search" wide>
           <input
             id="category-search"
             name="q"
             type="search"
-            placeholder="Kategori adı veya slug"
+            placeholder="Kategori adı veya kısa ad"
             defaultValue={query}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="category-status">Durum</label>
+        </FilterField>
+        <FilterField label="Durum" htmlFor="category-status">
           <select id="category-status" name="status" defaultValue={status}>
-            <option value="all">Tümü</option>
+            <option value="">Tümü</option>
             <option value="DRAFT">{STATUS_LABELS.DRAFT}</option>
             <option value="ACTIVE">{STATUS_LABELS.ACTIVE}</option>
             <option value="INACTIVE">{STATUS_LABELS.INACTIVE}</option>
           </select>
-        </div>
-        <div className="admin-toolbar-actions">
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/categories">
-              Sıfırla
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
 
-      <div className="table-card">
-        <div className="table-header">
-          <div className="table-header-text">
-            <h2>Kategori ağacı</h2>
-            <p className="table-header-sub">
-              Grup, hizmet ve yönlendirici kategorileri ile soru setlerini yönetin.
-            </p>
-          </div>
-          <span className="admin-toolbar-summary">
-            {filtered.length} / {categories.length} kayıt
-          </span>
-        </div>
+      <section className="data-list-card" aria-labelledby="category-tree-title">
+        <header className="data-list-card-head">
+          <h2 id="category-tree-title">Kategori ağacı</h2>
+          <p className="cell-muted">
+            Alt kategoriler üst grubunun altında, girintili listelenir. Soru seti, yönlendirme ve
+            davetler için kategoriyi açın.
+          </p>
+        </header>
         {filtered.length === 0 ? (
-          <div style={{ padding: 18 }}>
-            {categories.length === 0 ? (
-              <EmptyState
-                title="Henüz kategori yok."
-                description="İlk kategoriyi oluşturduğunuzda burada listelenecek."
-                action={
-                  canCreate ? (
-                    <Link className="btn btn-primary btn-sm" href="/categories/new">
-                      Yeni Kategori
-                    </Link>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <EmptyState
-                title="Aramana uygun kategori bulunamadı."
-                description="Filtreleri temizleyerek tüm kategorileri görebilirsin."
-                action={
-                  <Link className="btn btn-secondary btn-sm" href="/categories">
-                    Filtreleri temizle
-                  </Link>
-                }
-              />
-            )}
-          </div>
+          categories.length === 0 ? (
+            <EmptyState
+              title="Henüz kategori yok."
+              description="İlk kategoriyi oluşturduğunuzda burada listelenecek."
+              action={newCategoryLink}
+            />
+          ) : (
+            <EmptyState
+              title="Aramana uygun kategori bulunamadı."
+              description="Filtreleri temizleyerek tüm kategorileri görebilirsin."
+              action={
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
+                  Filtreleri temizle
+                </Link>
+              }
+            />
+          )
         ) : (
-          <div className="table-scroll">
-            <table className="data-table" data-testid="category-tree-table">
-              <thead>
-                <tr>
-                  <th className="cat-list-thumb-cell" aria-label="Görsel" />
-                  <th>Kategori adı</th>
-                  <th>Slug</th>
-                  <th>Tip</th>
-                  <th>Durum</th>
-                  <th className="col-num">Teklif Kredisi</th>
-                  <th className="col-num">Soru sayısı</th>
-                  <th className="col-num">Onaylı hizmet veren</th>
-                  <th className="col-num">Sıra</th>
-                  <th className="col-actions">İşlem</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ category, depth }) => (
-                  <tr key={category.id}>
-                    <td className="cat-list-thumb-cell">
-                      {category.imageUrl ? (
-                        <img
-                          src={category.imageUrl}
-                          alt=""
-                          className="cat-list-thumb"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <span className="cat-list-thumb-placeholder" aria-hidden="true">
-                          {category.iconKey ? category.iconKey.slice(0, 3) : '—'}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ paddingLeft: 12 + depth * 18 }}>
-                      <Link href={`/categories/${category.slug}`}>{category.name}</Link>
-                    </td>
-                    <td>
-                      <code style={{ fontSize: 12 }}>{category.slug}</code>
-                    </td>
-                    <td>
-                      <span className="meta-pill">{KIND_LABELS[category.kind]}</span>
-                    </td>
-                    <td>
-                      <span className={statusBadgeClass(category.status)}>
-                        {STATUS_LABELS[category.status]}
+          <DataTable caption="Kategori ağacı" columns={TREE_COLUMNS} minWidth={1080} testId="category-tree-table">
+            {rows.map(({ category, depth }) => {
+              const context = treeRowContext(category, categoriesById);
+              const isLeaf = category.kind === 'LEAF';
+              const providers = category._count?.providers ?? 0;
+
+              return (
+                <tr key={category.id} data-testid={`category-row-${category.slug}`}>
+                  <td className="cat-list-thumb-cell">
+                    {category.imageUrl ? (
+                      <img src={category.imageUrl} alt="" className="cat-list-thumb" loading="lazy" />
+                    ) : (
+                      <span className="cat-list-thumb-placeholder" aria-hidden="true">
+                        {category.iconKey ? category.iconKey.slice(0, 3) : '—'}
                       </span>
-                    </td>
-                    <td className="col-num">
-                      {category.kind !== 'LEAF' ? (
-                        <span className="muted" title="Yalnız hizmet kategorilerinde teklif verilir.">
-                          —
-                        </span>
-                      ) : category.offerCreditCost === null ? (
-                        <span
-                          className="badge badge-bad"
-                          title="Fiyat tanımlı olmadığı için bu kategoride teklif verilemez."
-                        >
-                          Fiyat tanımsız
-                        </span>
-                      ) : (
-                        <strong>{category.offerCreditCost}</strong>
-                      )}
-                    </td>
-                    <td className="col-num">{category._count?.questions ?? 0}</td>
-                    <td className="col-num">
-                      {category.kind !== 'LEAF' ? (
-                        <span
-                          className="muted"
-                          title="Yalnız hizmet kategorilerine hizmet veren bağlanır."
-                        >
-                          —
-                        </span>
-                      ) : (category._count?.providers ?? 0) === 0 ? (
-                        <span
-                          className="badge badge-bad"
-                          title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}
-                        >
-                          0
-                        </span>
-                      ) : (
-                        <strong>{category._count?.providers}</strong>
-                      )}
-                    </td>
-                    <td className="col-num">{category.sortOrder}</td>
-                    <td className="col-actions">
-                      <Link className="btn-pill" href={`/categories/${category.slug}`}>
-                        Düzenle
+                    )}
+                  </td>
+                  <td>
+                    <div
+                      className="cell-stack category-tree-name"
+                      style={depth > 0 ? { paddingLeft: depth * 20 } : undefined}
+                      data-depth={depth}
+                    >
+                      <Link
+                        className="cell-link cell-break"
+                        href={`/categories/${category.slug}`}
+                        id={`category-name-${category.id}`}
+                      >
+                        <strong>{category.name}</strong>
                       </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      {context ? <span className="cell-muted cell-break">{context}</span> : null}
+                    </div>
+                  </td>
+                  <td>
+                    <code className="cell-break">{category.slug}</code>
+                  </td>
+                  <td>{KIND_LABELS[category.kind]}</td>
+                  <td>
+                    <span className={statusBadgeClass(category.status)}>{STATUS_LABELS[category.status]}</span>
+                  </td>
+                  <td className="is-num">
+                    {!isLeaf ? (
+                      <span className="cell-muted" title="Yalnız hizmet kategorilerinde teklif verilir.">
+                        —
+                      </span>
+                    ) : category.offerCreditCost === null ? (
+                      <span
+                        className="badge badge-bad"
+                        title="Fiyat tanımlı olmadığı için bu kategoride teklif verilemez."
+                      >
+                        Fiyat tanımsız
+                      </span>
+                    ) : (
+                      <strong>{category.offerCreditCost}</strong>
+                    )}
+                  </td>
+                  <td className="is-num">{category._count?.questions ?? 0}</td>
+                  <td className="is-num">
+                    {!isLeaf ? (
+                      <span className="cell-muted" title="Yalnız hizmet kategorilerine hizmet veren bağlanır.">
+                        —
+                      </span>
+                    ) : providers === 0 ? (
+                      <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}>
+                        0
+                      </span>
+                    ) : (
+                      <strong>{providers}</strong>
+                    )}
+                  </td>
+                  <td data-testid={`tree-readiness-${category.slug}`}>
+                    {isLeaf ? (
+                      <TreeReadiness blockers={releaseBlockers(category)} />
+                    ) : (
+                      <span className="cell-muted" title="Grup ve yönlendirici talep almaz; yayın kontrolü hizmetler içindir.">
+                        —
+                      </span>
+                    )}
+                  </td>
+                  <td className="is-num">{category.sortOrder}</td>
+                  <td className="col-actions">
+                    <Link
+                      className="btn btn-secondary btn-sm"
+                      href={`/categories/${category.slug}`}
+                      aria-describedby={`category-name-${category.id}`}
+                    >
+                      Aç
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
+          </DataTable>
         )}
-      </div>
+        {filtered.length > 0 ? (
+          <WholeListFooter
+            count={filtered.length}
+            total={categories.length}
+            noun="kategori"
+            summaryTestId="category-count"
+          />
+        ) : null}
+      </section>
     </main>
   );
 }
