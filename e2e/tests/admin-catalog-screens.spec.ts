@@ -218,6 +218,9 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
         .poll(async () => (await prisma().serviceCategory.findUniqueOrThrow({ where: { id: service.id } })).name)
         .toBe(`${service.name} yeni`);
       expect((await prisma().serviceCategory.findUniqueOrThrow({ where: { id: service.id } })).status).toBe('DRAFT');
+      // The save redirects back to this screen; let it land before leaving,
+      // or the next goto is interrupted by it (WebKit on CI).
+      await expect(page.getByTestId('category-header')).toContainText(`${service.name} yeni`);
 
       await editor.gotoAdmin(`/categories/${router.slug}`);
       await expect(page.getByRole('button', { name: 'Yönlendirmeyi kaydet' })).toBeVisible();

@@ -7784,10 +7784,12 @@ button:disabled {
 }
 
 /* WebKit counts a select's chosen option text (a long parent name) in the
-   page's scrollable width even though the box fits; clip it to the box. */
-.catalog-page .compact-form select {
-  overflow: hidden;
-  text-overflow: ellipsis;
+   page's scrollable width even though the box fits (Faz 3F; +700px at 320px
+   on CI's Linux WebKit). Paint containment on the card body keeps anything
+   inside from reaching the page's scrollable area; the body's padding keeps
+   focus rings inside the clip. */
+.catalog-page .section-card.is-padded > .section-card-body {
+  contain: paint;
 }
 
 .catalog-page .compact-form input[type='checkbox'] {
