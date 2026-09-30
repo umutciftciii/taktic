@@ -150,7 +150,7 @@ test.describe('package refund request', () => {
       await expect(admin.page.locator('#admin-sidebar').getByRole('link', { name: 'Paket iadeleri' })).toBeVisible();
       const row = admin.page.getByTestId('package-refund-row').filter({ hasText: seeded.businessName });
       await expect(row).toHaveAttribute('data-status', 'SUBMITTED');
-      await row.getByRole('link', { name: 'Detay' }).click();
+      await row.getByRole('link', { name: /^Aç:/ }).click();
       await expect(admin.page).toHaveURL(new RegExp(`/package-refunds/${refund.id}$`));
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByTestId('package-refund-current-eligibility')).toHaveAttribute(
@@ -161,7 +161,22 @@ test.describe('package refund request', () => {
 
       await admin.page.getByTestId('package-refund-take').click();
       await expect(admin.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'UNDER_REVIEW');
+      // Faz 3D: the approval asks first. Closing the dialog writes nothing;
+      // confirming sends the approval exactly once.
       await admin.page.getByTestId('package-refund-approve-normal').click();
+      const approveDialog = admin.page.getByTestId('package-refund-approve-normal-dialog');
+      await expect(approveDialog).toBeVisible();
+      await expect(approveDialog).toContainText('para ya da kredi hareket etmez');
+      await approveDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(approveDialog).toBeHidden();
+      await admin.page.getByTestId('package-refund-approve-normal').click();
+      await admin.page.keyboard.press('Escape');
+      await expect(approveDialog).toBeHidden();
+      expect((await prisma().packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } })).status).toBe(
+        'UNDER_REVIEW',
+      );
+      await admin.page.getByTestId('package-refund-approve-normal').click();
+      await approveDialog.getByRole('button', { name: 'Evet, iadeyi onayla' }).click();
       await expect(admin.page.getByTestId('package-refund-status')).toHaveAttribute(
         'data-status',
         'APPROVED_PENDING_SETTLEMENT',
@@ -277,6 +292,8 @@ test.describe('package refund request', () => {
       await expect(makerActor.page.getByTestId('package-refund-maker-checker')).toBeVisible();
       await expect(makerActor.page.getByTestId('package-refund-exception-form')).toHaveCount(0);
       await expect(makerActor.page.getByTestId('package-refund-approve-normal')).toHaveCount(0);
+      // allowedActions still lets the maker refuse it — the rule is about approving.
+      await expect(makerActor.page.getByTestId('package-refund-reject-form')).toBeVisible();
       const detailPath = new URL(makerActor.page.url()).pathname;
 
       // The checker approves it as an exception, with a ground and a reason.
@@ -286,6 +303,10 @@ test.describe('package refund request', () => {
       await form.locator('select[name="exceptionGround"]').selectOption('DUPLICATE_CHARGE');
       await form.locator('textarea[name="exceptionReason"]').fill('Aynı sipariş iki kez tahsil edilmiş.');
       await checkerActor.page.getByTestId('package-refund-approve-exception').click();
+      await checkerActor.page
+        .getByTestId('package-refund-approve-exception-dialog')
+        .getByRole('button', { name: 'Evet, istisna olarak onayla' })
+        .click();
       await expect(checkerActor.page.getByTestId('package-refund-status')).toHaveAttribute(
         'data-status',
         'APPROVED_PENDING_SETTLEMENT',
@@ -295,10 +316,123 @@ test.describe('package refund request', () => {
       const refund = await prisma().packageRefundRequest.findFirstOrThrow({ where: { purchaseId: purchase.id } });
       expect(refund).toMatchObject({ approvalKind: 'EXCEPTION', exceptionGround: 'DUPLICATE_CHARGE', origin: 'ADMIN' });
       expect(refund.approvedById).not.toBe(refund.reviewStartedById);
+
+      // Faz 3D: recording that the external refund did not happen asks first.
+      // × writes nothing; confirming writes SETTLEMENT_FAILED once, and there
+      // is still no way to mark the refund completed.
+      const failed = checkerActor.page.getByTestId('package-refund-failed-form');
+      await failed.locator('textarea[name="reason"]').fill('Sağlayıcı panelinde iade başarısız oldu.');
+      const failedDialog = checkerActor.page.getByTestId('package-refund-mark-failed-dialog');
+      await checkerActor.page.getByTestId('package-refund-mark-failed').click();
+      await expect(failedDialog).toContainText('Para ve kredi hareket etmez');
+      await failedDialog.getByRole('button', { name: 'Kapat' }).click();
+      await expect(failedDialog).toBeHidden();
+      expect((await prisma().packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } })).status).toBe(
+        'APPROVED_PENDING_SETTLEMENT',
+      );
+      await checkerActor.page.getByTestId('package-refund-mark-failed').click();
+      await failedDialog.getByRole('button', { name: 'Evet, tamamlanamadı olarak kaydet' }).click();
+      await expect(checkerActor.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'SETTLEMENT_FAILED');
+      await expect(checkerActor.page.getByTestId('package-refund-failed-hint')).toBeVisible();
+      await expect(checkerActor.page.getByTestId('package-refund-no-actions')).toBeVisible();
+      expect(
+        await prisma().packageRefundRequestEvent.count({ where: { requestId: refund.id, action: 'SETTLEMENT_FAILED' } }),
+      ).toBe(1);
     } finally {
       await provider.close();
       await makerActor.close();
       await checkerActor.close();
+    }
+  });
+
+  test('an operator rejects a request only after the dialog; a read-only operator sees no control', async ({
+    browser,
+    browserName,
+  }) => {
+    const { provider, purchase, packageName } = await providerWithPaidPurchase(
+      browser,
+      purchaseTermsRuntime,
+      `ret-${browserName}`,
+    );
+    const operator = await createStaffAdmin(REFUND_PERMISSIONS);
+    const viewer = await createStaffAdmin(['DASHBOARD_READ', 'PACKAGE_REFUND_READ']);
+    const operatorActor = await Actor.open(browser, 'staff', purchaseTermsRuntime);
+    const viewerActor = await Actor.open(browser, 'staff', purchaseTermsRuntime);
+
+    try {
+      await provider.gotoWeb('/destek/yeni');
+      await provider.page.getByTestId('support-topic').getByText('Paket ve kredi iadesi', { exact: true }).click();
+      await provider.page.getByTestId('refund-purchase-option').filter({ hasText: packageName }).click();
+      await provider.page.getByTestId('support-message-input').fill('Paketi kullanmadım, iade istiyorum.');
+      await provider.page.getByRole('button', { name: 'İade talebini gönder' }).click();
+      await expect(provider.page).toHaveURL(/\?created=refund$/);
+      const refund = await prisma().packageRefundRequest.findFirstOrThrow({ where: { purchaseId: purchase.id } });
+      const detailPath = `/package-refunds/${refund.id}`;
+
+      // A read-only viewer: the request, and not one control — allowedActions is all false for them.
+      await signInStaff(viewerActor, viewer);
+      await viewerActor.gotoAdmin(detailPath);
+      await assertNoErrorScreen(viewerActor.page);
+      await expect(viewerActor.page.getByTestId('package-refund-no-actions')).toBeVisible();
+      for (const testId of [
+        'package-refund-take',
+        'package-refund-approve-normal',
+        'package-refund-approve-exception',
+        'package-refund-reject',
+        'package-refund-mark-failed',
+      ]) {
+        await expect(viewerActor.page.getByTestId(testId), testId).toHaveCount(0);
+      }
+
+      await signInStaff(operatorActor, operator);
+      await operatorActor.gotoAdmin(detailPath);
+      await operatorActor.page.getByTestId('package-refund-take').click();
+      await expect(operatorActor.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'UNDER_REVIEW');
+
+      // The dialog opens only once the form is valid: an empty reason is the
+      // browser's to report, and nothing is asked or sent.
+      const dialog = operatorActor.page.getByTestId('package-refund-reject-dialog');
+      await operatorActor.page.getByTestId('package-refund-reject').click();
+      await expect(dialog).toBeHidden();
+
+      await operatorActor.page.locator('#reject-reason').fill('Paket kullanıldı; iade koşulları sağlanmıyor.');
+      await operatorActor.page.getByTestId('package-refund-reject').click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toContainText('hizmet verene gösterilmez');
+      await dialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(dialog).toBeHidden();
+      expect((await prisma().packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } })).status).toBe(
+        'UNDER_REVIEW',
+      );
+
+      await operatorActor.page.getByTestId('package-refund-reject').click();
+      await dialog.getByRole('button', { name: 'Evet, isteği reddet' }).click();
+      await expect(operatorActor.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'REJECTED');
+      await expect(operatorActor.page.getByTestId('package-refund-done')).toHaveText('İstek reddedildi.');
+      await expect(operatorActor.page.getByTestId('package-refund-no-actions')).toBeVisible();
+      const rejected = await prisma().packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } });
+      expect(rejected.rejectionReason).toBe('Paket kullanıldı; iade koşulları sağlanmıyor.');
+      expect(
+        await prisma().packageRefundRequestEvent.count({ where: { requestId: refund.id, action: 'REJECTED' } }),
+      ).toBe(1);
+
+      // The queue and the request at every width the panel supports: the page
+      // itself never scrolls sideways; the queue's table does, in its own box.
+      for (const width of [1440, 1280, 1024, 768, 390, 320]) {
+        await operatorActor.page.setViewportSize({ width, height: 900 });
+        for (const path of ['/package-refunds', detailPath]) {
+          await operatorActor.gotoAdmin(path);
+          await assertNoErrorScreen(operatorActor.page);
+          const overflow = await operatorActor.page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow, `${path} @${width}`).toBeLessThanOrEqual(1);
+        }
+      }
+    } finally {
+      await provider.close();
+      await operatorActor.close();
+      await viewerActor.close();
     }
   });
 

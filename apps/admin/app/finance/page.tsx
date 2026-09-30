@@ -13,12 +13,21 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../lib/api';
-import { formatLedgerReason, formatLedgerSource, type LedgerSource } from '../../lib/finance-format';
+import {
+  formatLedgerSource,
+  formatShortLira,
+  formatSignedCount,
+  gateLedgerSource,
+} from '../../lib/finance-format';
+import { formatCount } from '../../lib/pagination';
+import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
 import {
   AnalyticsPeriod,
   FinanceAnalyticsToolbar,
 } from '../../components/finance-analytics-toolbar';
+import { FinanceKpiRow, type FinanceKpi } from '../../components/finance-kpi';
+import { FinanceMonthBars, type MonthBar } from '../../components/finance-month-bars';
 import {
   FinanceTrendPanel,
   FinanceTrendPoint,
@@ -29,9 +38,39 @@ import {
 } from '../../components/finance-mini-sparkline';
 import { FinanceInsightCard } from '../../components/finance-insight-card';
 import { FinanceProgressMetric } from '../../components/finance-progress-metric';
+import {
+  LedgerReasonCell,
+  LedgerSourceCell,
+  SignedCredits,
+} from '../../components/ledger-cells';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { StatCard } from '../../components/stat-card';
+
+/**
+ * The finance summary.
+ *
+ * ADMIN-DESIGN-001 Faz 3D (paket 2 `25-finans-ozeti`, prototip `finance`):
+ * the design's hierarchy — four headline figures for the chosen period, a
+ * monthly bar chart, and the most recent package sales — on real reads only.
+ *
+ * - The four figures are the analytics totals for the period in the toolbar.
+ *   The fifth figure the old strip carried, "Satılan kredi", is not dropped
+ *   (K7): it is the second figure's reference ("satılanın %…") and stays in
+ *   "Kredi kullanımı".
+ * - The bars are one more read of the same analytics endpoint, `groupBy=month`
+ *   over the last six calendar months, so they do not move with the period.
+ * - Everything the old screen showed is still below: the period trend with its
+ *   three insights, package sales, credit use, manual intervention, all-time
+ *   revenue and credit totals, the six package status counters, both recent
+ *   tables and the quick links (K7).
+ *
+ * Not rendered: "Satılan kredi nereye gitti" (the API returns no breakdown of
+ * spent credit by purpose) and "Rapor indir" (no export exists). The design's
+ * "geçen aya göre +%18" is not drawn either: the analytics read has no
+ * previous-period comparison, and a second read to invent one is not this
+ * slice's to add.
+ */
 
 type RawSearchParams = {
   period?: string;
@@ -225,20 +264,9 @@ function monthLongName(month: number): string {
   return MONTH_LONG[(month - 1 + 12) % 12] ?? String(month);
 }
 
-const COUNT_FORMATTER = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 });
-
-function formatCount(value: number): string {
-  return COUNT_FORMATTER.format(value);
-}
-
 function formatPercent(ratio: number | null, fractionDigits = 0): string {
   if (ratio === null || Number.isNaN(ratio) || !Number.isFinite(ratio)) return '—';
   return `%${(ratio * 100).toFixed(fractionDigits).replace('.', ',')}`;
-}
-
-function formatSignedCount(value: number): string {
-  if (value > 0) return `+${formatCount(value)}`;
-  return formatCount(value);
 }
 
 function rangeSummaryText(range: ResolvedRange): string {
@@ -283,22 +311,54 @@ function pickPeak(
   return { bucket: peak, value: peakValue };
 }
 
-/**
- * A ledger row's "related record" link, kept only when this session may open
- * the screen it points at; otherwise the cell renders the same label as text.
- * An unrecognised destination is dropped rather than guessed at.
- */
-function gateLedgerSource(source: LedgerSource, can: (...names: string[]) => boolean): LedgerSource {
-  if (!source.href) return source;
-  const permission = source.href.startsWith('/campaigns/')
-    ? 'CAMPAIGNS_READ'
-    : source.href.startsWith('/offers/')
-      ? 'OFFERS_READ'
-      : source.href.startsWith('/package-purchases/')
-        ? 'PACKAGE_PURCHASES_READ'
-        : null;
-  return permission && can(permission) ? source : { ...source, href: null };
+
+/** The design's ⓘ, corrected: package sales are credit packages *and* vitrin packages. */
+const SCREEN_INFO =
+  'Platformun geliri paket satışıdır: hizmet verenler kredi paketi ya da vitrin paketi alır, teklif verirken kredi harcar. Bu ekran parayı üç açıdan gösterir — ne kadar tahsil edildi, satılan kredinin ne kadarı harcandı, ne kadarı geri verildi. Tutarlar yalnız ödemesi onaylanmış satışlardan gelir.';
+
+/** The last six calendar months, this one included, in Istanbul time. */
+function lastSixMonthsRange(): { from: string; to: string } {
+  const today = istanbulTodayParts();
+  const monthIndex = today.year * 12 + (today.month - 1) - 5;
+  const fromYear = Math.floor(monthIndex / 12);
+  const fromMonth = (monthIndex % 12) + 1;
+  return {
+    from: formatIsoDate(fromYear, fromMonth, 1),
+    to: formatIsoDate(today.year, today.month, today.day),
+  };
 }
+
+function toMonthBars(buckets: FinanceAnalyticsBucket[]): MonthBar[] {
+  return buckets.map((bucket) => ({
+    key: bucket.key,
+    label: bucketShortLabel(bucket, 'month'),
+    longLabel: bucketLongLabel(bucket, 'month'),
+    value: bucket.paidRevenue,
+    shortValue: formatShortLira(bucket.paidRevenue),
+    fullValue: formatPrice(bucket.paidRevenue),
+  }));
+}
+
+const RECENT_PURCHASE_COLUMNS: DataColumn[] = [
+  { key: 'number', label: 'Satın alma no' },
+  { key: 'date', label: 'Tarih' },
+  { key: 'provider', label: 'İşletme' },
+  { key: 'package', label: 'Paket' },
+  { key: 'credits', label: 'Kredi', align: 'end' },
+  { key: 'amount', label: 'Tutar', align: 'end' },
+  { key: 'status', label: 'Ödeme' },
+  { key: 'reference', label: 'Ödeme referansı' },
+];
+
+const RECENT_TRANSACTION_COLUMNS: DataColumn[] = [
+  { key: 'date', label: 'Tarih' },
+  { key: 'provider', label: 'İşletme' },
+  { key: 'type', label: 'Tip' },
+  { key: 'amount', label: 'Kredi', align: 'end' },
+  { key: 'balance', label: 'Bakiye', align: 'end' },
+  { key: 'reason', label: 'Sebep' },
+  { key: 'source', label: 'İlişkili kayıt' },
+];
 
 export default async function AdminFinanceDashboardPage({
   searchParams,
@@ -328,12 +388,13 @@ export default async function AdminFinanceDashboardPage({
     to: range.to,
     groupBy: range.groupBy,
   });
+  const monthsRange = lastSixMonthsRange();
+  const monthsQuery = new URLSearchParams({ ...monthsRange, groupBy: 'month' });
 
-  const [summary, analytics] = await Promise.all([
+  const [summary, analytics, months] = await Promise.all([
     apiFetch<FinanceSummary>('/finance/summary'),
-    apiFetch<FinanceAnalyticsResponse>(
-      `/finance/analytics?${analyticsQuery.toString()}`,
-    ),
+    apiFetch<FinanceAnalyticsResponse>(`/finance/analytics?${analyticsQuery.toString()}`),
+    apiFetch<FinanceAnalyticsResponse>(`/finance/analytics?${monthsQuery.toString()}`),
   ]);
 
   const { revenue, packagePurchases, credits, recentTransactions, recentPurchases } = summary;
@@ -342,6 +403,7 @@ export default async function AdminFinanceDashboardPage({
   const revenueTrend = toRevenueTrend(buckets, range.groupBy);
   const packageSparkline = toCountSparkline(buckets, (b) => b.paidPackageCount);
   const soldCreditsSparkline = toCountSparkline(buckets, (b) => b.soldCredits);
+  const monthBars = toMonthBars(months.buckets);
 
   const peakRevenue = pickPeak(buckets, (b) => b.paidRevenue);
   const peakPackage = pickPeak(buckets, (b) => b.paidPackageCount);
@@ -356,27 +418,72 @@ export default async function AdminFinanceDashboardPage({
 
   const bucketUnit = GROUP_BY_BUCKET_LABEL[range.groupBy];
 
+  const kpis: FinanceKpi[] = [
+    {
+      label: 'Tahsilat',
+      value: formatPrice(totals.paidRevenue),
+      delta: `${formatCount(totals.paidPackageCount)} paket ödendi`,
+      deltaTone: totals.paidRevenue > 0 ? 'success' : 'neutral',
+      hint:
+        totals.paidPackageCount > 0
+          ? `Paket başına ortalama ${formatPrice(Math.round(totals.paidRevenue / totals.paidPackageCount))}`
+          : 'Bu dönemde ödenmiş paket yok',
+      testId: 'finance-kpi-revenue',
+    },
+    {
+      label: 'Harcanan kredi',
+      value: formatCount(totals.spentCredits),
+      delta:
+        creditUsageRatio === null
+          ? 'Bu dönemde kredi satılmadı'
+          : `Satılanın ${formatPercent(creditUsageRatio)}'i`,
+      hint: `Satılan kredi: ${formatCount(totals.soldCredits)}`,
+      testId: 'finance-kpi-spent',
+    },
+    {
+      label: 'İade edilen kredi',
+      value: formatCount(totals.refundedCredits),
+      delta:
+        refundRatio === null ? 'Bu dönemde harcama yok' : `Harcananın ${formatPercent(refundRatio)}'i`,
+      deltaTone: totals.refundedCredits > 0 ? 'warning' : 'neutral',
+      hint: 'Teklif iadesiyle bakiyeye dönen kredi',
+      testId: 'finance-kpi-refunded',
+    },
+    {
+      label: 'Elle yapılan düzeltme',
+      value: `${formatSignedCount(manualNetCredits)} kredi`,
+      delta:
+        manualGrossActivity > 0
+          ? `+${formatCount(totals.adminGrantedCredits)} eklendi · -${formatCount(totals.adminDeductedCredits)} düşüldü`
+          : 'Manuel işlem yok',
+      deltaTone: manualNetCredits > 0 ? 'success' : manualNetCredits < 0 ? 'warning' : 'neutral',
+      hint: 'Yönetici eliyle eklenen / düşülen',
+      testId: 'finance-kpi-manual',
+    },
+  ];
+
   return (
-    <main>
+    <main className="finance-summary-page">
       <PageHeader
         title="Finans"
-        subtitle="Tahsilat, kredi hareketleri ve paket talep durumlarına dair özet."
+        subtitle={rangeSummaryText(range)}
+        info={SCREEN_INFO}
         actions={
           canOpenLedger || canOpenPurchases || canOpenRefundScan ? (
             <>
               {canOpenLedger ? (
                 <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
-                  Kredi Hareketleri
+                  Kredi hareketleri
                 </Link>
               ) : null}
               {canOpenPurchases ? (
                 <Link className="btn btn-secondary btn-sm" href="/package-purchases">
-                  Paket Satın Almaları
+                  Paket satışları
                 </Link>
               ) : null}
               {canOpenRefundScan ? (
-                <Link className="btn btn-ghost btn-sm" href="/refund-scan">
-                  İade Taraması
+                <Link className="btn btn-secondary btn-sm" href="/refund-scan">
+                  İade kontrolü
                 </Link>
               ) : null}
             </>
@@ -392,41 +499,115 @@ export default async function AdminFinanceDashboardPage({
         summary={rangeSummaryText(range)}
       />
 
+      <FinanceKpiRow items={kpis} label={`Dönem özeti (${range.from} → ${range.to})`} />
+
+      <div className="finance-headline-grid">
+        <SectionCard
+          title="Aylık tahsilat"
+          subtitle={`Son 6 ay · ${months.range.from} → ${months.range.to}`}
+          className="finance-month-card"
+        >
+          {monthBars.every((bar) => bar.value === 0) ? (
+            <p className="detail-muted-note">Son altı ayda ödenmiş paket yok.</p>
+          ) : null}
+          <FinanceMonthBars bars={monthBars} label="Aylık tahsilat, son 6 ay" />
+        </SectionCard>
+
+        <SectionCard title="Kredi kullanımı" subtitle="Satılan kredinin harcama ve iade akışı.">
+          <div className="finance-progress-stack">
+            <FinanceProgressMetric
+              label="Kullanım oranı"
+              value={formatPercent(creditUsageRatio)}
+              ratio={creditUsageRatio}
+              tone="primary"
+              hint={`Harcanan ${formatCount(totals.spentCredits)} / Satılan ${formatCount(totals.soldCredits)}`}
+            />
+            <FinanceProgressMetric
+              label="İade oranı"
+              value={formatPercent(refundRatio)}
+              ratio={refundRatio}
+              tone="warning"
+              hint={`İade edilen ${formatCount(totals.refundedCredits)} / Harcanan ${formatCount(totals.spentCredits)}`}
+            />
+            <div className="finance-mini-sparkline-row">
+              <div className="finance-mini-sparkline-row-label">Satılan kredi trendi</div>
+              <FinanceMiniSparkline
+                data={soldCreditsSparkline}
+                tone="success"
+                ariaLabel="Satılan kredi mini trend"
+              />
+            </div>
+          </div>
+        </SectionCard>
+      </div>
+
       <SectionCard
-        title="Dönem özeti"
-        subtitle={`Seçilen aralık (${range.from} → ${range.to}) için toplamlar.`}
+        title="Son paket satışları"
+        subtitle={`En son ${recentPurchases.length} kayıt`}
+        padded={false}
+        actions={
+          canOpenPurchases ? (
+            <Link className="btn btn-link btn-sm" href="/package-purchases">
+              Tümünü gör
+            </Link>
+          ) : undefined
+        }
       >
-        <div className="stat-grid">
-          <StatCard
-            label="Toplam tahsilat"
-            value={formatPrice(totals.paidRevenue)}
-            hint={`${formatCount(totals.paidPackageCount)} paket`}
-            tone={totals.paidRevenue > 0 ? 'success' : 'neutral'}
+        {recentPurchases.length === 0 ? (
+          <EmptyState
+            title="Henüz paket satın alma yok"
+            description="Hizmet verenler paket aldıkça burada görünür."
           />
-          <StatCard label="Satılan kredi" value={formatCount(totals.soldCredits)} />
-          <StatCard label="Harcanan kredi" value={formatCount(totals.spentCredits)} />
-          <StatCard
-            label="İade edilen kredi"
-            value={formatCount(totals.refundedCredits)}
-            tone={totals.refundedCredits > 0 ? 'warning' : 'neutral'}
-          />
-          <StatCard
-            label="Manuel net kredi"
-            value={formatSignedCount(manualNetCredits)}
-            hint={
-              manualGrossActivity > 0
-                ? `+${formatCount(totals.adminGrantedCredits)} / -${formatCount(totals.adminDeductedCredits)}`
-                : 'Manuel işlem yok'
-            }
-            tone={
-              manualNetCredits > 0
-                ? 'success'
-                : manualNetCredits < 0
-                  ? 'warning'
-                  : 'neutral'
-            }
-          />
-        </div>
+        ) : (
+          <DataTable
+            caption="Son paket satışları"
+            columns={RECENT_PURCHASE_COLUMNS}
+            minWidth={980}
+            testId="finance-recent-purchases"
+          >
+            {recentPurchases.map((purchase) => {
+              const purchaseRef = purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;
+              return (
+                <tr key={purchase.id}>
+                  <td>
+                    {canOpenPurchases ? (
+                      <Link href={`/package-purchases/${purchase.id}`}>
+                        <code className="display-number">{purchaseRef}</code>
+                      </Link>
+                    ) : (
+                      <code className="display-number">{purchaseRef}</code>
+                    )}
+                  </td>
+                  <td className="cell-nowrap">{formatDateTime(purchase.createdAt)}</td>
+                  <td className="cell-break">
+                    {canOpenProvider ? (
+                      <Link href={`/providers/${purchase.providerId}`}>
+                        <strong>{purchase.provider.businessName}</strong>
+                      </Link>
+                    ) : (
+                      <strong>{purchase.provider.businessName}</strong>
+                    )}
+                  </td>
+                  <td className="cell-break">
+                    {canOpenPurchases ? (
+                      <Link href={`/package-purchases/${purchase.id}`}>{purchase.packageNameSnapshot}</Link>
+                    ) : (
+                      purchase.packageNameSnapshot
+                    )}
+                  </td>
+                  <td className="is-num">{formatCount(purchase.creditAmountSnapshot)}</td>
+                  <td className="is-num cell-nowrap">
+                    <strong>{formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}</strong>
+                  </td>
+                  <td>
+                    <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
+                  </td>
+                  <td className="cell-muted cell-break">{purchase.mockPaymentReference ?? '—'}</td>
+                </tr>
+              );
+            })}
+          </DataTable>
+        )}
       </SectionCard>
 
       <SectionCard padded={false} className="finance-trend-section">
@@ -441,9 +622,7 @@ export default async function AdminFinanceDashboardPage({
             <div className="finance-trend-insights">
               <FinanceInsightCard
                 label={`En yüksek ${bucketUnit}`}
-                value={
-                  peakRevenue ? formatPrice(peakRevenue.value) : '—'
-                }
+                value={peakRevenue ? formatPrice(peakRevenue.value) : '—'}
                 hint={
                   peakRevenue
                     ? bucketLongLabel(peakRevenue.bucket, range.groupBy)
@@ -500,75 +679,45 @@ export default async function AdminFinanceDashboardPage({
         </SectionCard>
 
         <SectionCard
-          title="Kredi kullanımı"
-          subtitle="Satılan kredinin harcama ve iade akışı."
+          title="Operasyonel müdahale"
+          subtitle="Adminlerin manuel kredi eklemesi ve düşmesi."
         >
-          <div className="finance-progress-stack">
-            <FinanceProgressMetric
-              label="Kullanım oranı"
-              value={formatPercent(creditUsageRatio)}
-              ratio={creditUsageRatio}
-              tone="primary"
-              hint={`Harcanan ${formatCount(totals.spentCredits)} / Satılan ${formatCount(totals.soldCredits)}`}
+          <div className="finance-manual-grid">
+            <FinanceInsightCard
+              label="Eklenen kredi"
+              value={formatCount(totals.adminGrantedCredits)}
+              tone={totals.adminGrantedCredits > 0 ? 'success' : 'neutral'}
+              hint="Manuel olarak provider bakiyesine eklendi"
             />
-            <FinanceProgressMetric
-              label="İade oranı"
-              value={formatPercent(refundRatio)}
-              ratio={refundRatio}
-              tone="warning"
-              hint={`İade edilen ${formatCount(totals.refundedCredits)} / Harcanan ${formatCount(totals.spentCredits)}`}
+            <FinanceInsightCard
+              label="Düşülen kredi"
+              value={formatCount(totals.adminDeductedCredits)}
+              tone={totals.adminDeductedCredits > 0 ? 'warning' : 'neutral'}
+              hint="Manuel olarak provider bakiyesinden düşüldü"
             />
-            <div className="finance-mini-sparkline-row">
-              <div className="finance-mini-sparkline-row-label">Satılan kredi trendi</div>
-              <FinanceMiniSparkline
-                data={soldCreditsSparkline}
-                tone="success"
-                ariaLabel="Satılan kredi mini trend"
-              />
-            </div>
+            <FinanceInsightCard
+              label="Manuel net etki"
+              value={formatSignedCount(manualNetCredits)}
+              tone={
+                manualNetCredits > 0
+                  ? 'success'
+                  : manualNetCredits < 0
+                    ? 'warning'
+                    : 'neutral'
+              }
+              hint={
+                manualGrossActivity === 0
+                  ? 'Bu dönemde manuel işlem yok'
+                  : manualNetCredits === 0
+                    ? 'Ekleme ve düşme dengeli'
+                    : manualNetCredits > 0
+                      ? 'Sisteme net kredi eklendi'
+                      : 'Sistemden net kredi düşüldü'
+              }
+            />
           </div>
         </SectionCard>
       </div>
-
-      <SectionCard
-        title="Operasyonel müdahale"
-        subtitle="Adminlerin manuel kredi eklemesi ve düşmesi."
-      >
-        <div className="finance-manual-grid">
-          <FinanceInsightCard
-            label="Eklenen kredi"
-            value={formatCount(totals.adminGrantedCredits)}
-            tone={totals.adminGrantedCredits > 0 ? 'success' : 'neutral'}
-            hint="Manuel olarak provider bakiyesine eklendi"
-          />
-          <FinanceInsightCard
-            label="Düşülen kredi"
-            value={formatCount(totals.adminDeductedCredits)}
-            tone={totals.adminDeductedCredits > 0 ? 'warning' : 'neutral'}
-            hint="Manuel olarak provider bakiyesinden düşüldü"
-          />
-          <FinanceInsightCard
-            label="Manuel net etki"
-            value={formatSignedCount(manualNetCredits)}
-            tone={
-              manualNetCredits > 0
-                ? 'success'
-                : manualNetCredits < 0
-                  ? 'warning'
-                  : 'neutral'
-            }
-            hint={
-              manualGrossActivity === 0
-                ? 'Bu dönemde manuel işlem yok'
-                : manualNetCredits === 0
-                  ? 'Ekleme ve düşme dengeli'
-                  : manualNetCredits > 0
-                    ? 'Sisteme net kredi eklendi'
-                    : 'Sistemden net kredi düşüldü'
-            }
-          />
-        </div>
-      </SectionCard>
 
       <SectionCard title="Tahsilat" subtitle="Ödenmiş paketlerden gelen toplam gelir.">
         <div className="stat-grid">
@@ -651,6 +800,13 @@ export default async function AdminFinanceDashboardPage({
         title="Son kredi hareketleri"
         subtitle={`En son ${recentTransactions.length} işlem`}
         padded={false}
+        actions={
+          canOpenLedger ? (
+            <Link className="btn btn-link btn-sm" href="/finance/credit-ledger">
+              Tümünü gör
+            </Link>
+          ) : undefined
+        }
       >
         {recentTransactions.length === 0 ? (
           <EmptyState
@@ -658,220 +814,84 @@ export default async function AdminFinanceDashboardPage({
             description="Paket ödendiğinde, teklif gönderildiğinde veya manuel işlem yapıldığında burada görünür."
           />
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Tarih</th>
-                  <th>Hizmet Veren</th>
-                  <th>Tip</th>
-                  <th className="col-num">Kredi</th>
-                  <th className="col-num">Bakiye</th>
-                  <th>Sebep</th>
-                  <th>İlişkili Kayıt</th>
+          <DataTable
+            caption="Son kredi hareketleri"
+            columns={RECENT_TRANSACTION_COLUMNS}
+            minWidth={960}
+            testId="finance-recent-transactions"
+          >
+            {recentTransactions.map((transaction) => {
+              const source = gateLedgerSource(
+                formatLedgerSource(
+                  transaction.referenceType,
+                  transaction.referenceId,
+                  transaction.sourceNumber,
+                ),
+                can,
+              );
+              return (
+                <tr key={transaction.id}>
+                  <td className="cell-nowrap">{formatDateTime(transaction.createdAt)}</td>
+                  <td className="cell-break">
+                    {canOpenLedger ? (
+                      <Link href={`/providers/${transaction.providerId}/credits`}>
+                        {transaction.provider.businessName}
+                      </Link>
+                    ) : (
+                      transaction.provider.businessName
+                    )}
+                  </td>
+                  <td>{creditTxnTypeLabel(transaction.type)}</td>
+                  <td className="is-num">
+                    <SignedCredits amount={transaction.amount} />
+                  </td>
+                  <td className="is-num">{formatCount(transaction.balanceAfter)}</td>
+                  <td>
+                    <LedgerReasonCell reason={transaction.reason} />
+                  </td>
+                  <td>
+                    <LedgerSourceCell source={source} />
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {recentTransactions.map((transaction) => {
-                  const reason = formatLedgerReason(transaction.reason);
-                  const source = gateLedgerSource(
-                    formatLedgerSource(
-                      transaction.referenceType,
-                      transaction.referenceId,
-                      transaction.sourceNumber,
-                    ),
-                    can,
-                  );
-                  return (
-                    <tr key={transaction.id}>
-                      <td>{formatDateTime(transaction.createdAt)}</td>
-                      <td>
-                        {canOpenLedger ? (
-                          <Link href={`/providers/${transaction.providerId}/credits`}>
-                            {transaction.provider.businessName}
-                          </Link>
-                        ) : (
-                          transaction.provider.businessName
-                        )}
-                      </td>
-                      <td>{creditTxnTypeLabel(transaction.type)}</td>
-                      <td className="col-num">
-                        <strong>
-                          {transaction.amount > 0 ? `+${transaction.amount}` : transaction.amount}
-                        </strong>
-                      </td>
-                      <td className="col-num">{transaction.balanceAfter}</td>
-                      <td>
-                        {reason ? (
-                          <div className="cell-stack">
-                            <span>{reason.label}</span>
-                            {reason.note ? (
-                              <span className="cell-muted" style={{ fontSize: 12 }}>
-                                Not: {reason.note}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <span className="muted">-</span>
-                        )}
-                      </td>
-                      <td>
-                        {source.isSystem ? (
-                          <span className="muted" style={{ fontSize: 12 }}>
-                            {source.label}
-                          </span>
-                        ) : source.href ? (
-                          <Link href={source.href}>
-                            <span className="cell-stack">
-                              <span>{source.label}</span>
-                              {source.displayNumber ? (
-                                <code style={{ fontSize: 11 }}>
-                                  No: {source.displayNumber}
-                                </code>
-                              ) : source.shortId ? (
-                                <span className="cell-muted" style={{ fontSize: 11 }}>
-                                  Kısa ID: {source.shortId}
-                                </span>
-                              ) : null}
-                            </span>
-                          </Link>
-                        ) : (
-                          <div className="cell-stack">
-                            <span>{source.label}</span>
-                            {source.displayNumber ? (
-                              <code style={{ fontSize: 11 }}>
-                                No: {source.displayNumber}
-                              </code>
-                            ) : source.shortId ? (
-                              <span className="cell-muted" style={{ fontSize: 11 }}>
-                                Kısa ID: {source.shortId}
-                              </span>
-                            ) : null}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
-
-      <SectionCard
-        title="Son paket satın almaları"
-        subtitle={`En son ${recentPurchases.length} kayıt`}
-        padded={false}
-      >
-        {recentPurchases.length === 0 ? (
-          <EmptyState
-            title="Henüz paket satın alma yok"
-            description="Hizmet verenler paket aldıkça burada görünür."
-          />
-        ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Satın Alma No</th>
-                  <th>Tarih</th>
-                  <th>Hizmet Veren</th>
-                  <th>Paket</th>
-                  <th className="col-num">Kredi</th>
-                  <th className="col-num">Tutar</th>
-                  <th>Durum</th>
-                  <th>Ödeme Referansı</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentPurchases.map((purchase) => {
-                  const purchaseRef =
-                    purchase.purchaseNumber ?? `#${purchase.id.slice(-8)}`;
-                  return (
-                  <tr key={purchase.id}>
-                    <td>
-                      {canOpenPurchases ? (
-                        <Link href={`/package-purchases/${purchase.id}`}>
-                          <code className="display-number">{purchaseRef}</code>
-                        </Link>
-                      ) : (
-                        <code className="display-number">{purchaseRef}</code>
-                      )}
-                    </td>
-                    <td>{formatDateTime(purchase.createdAt)}</td>
-                    <td>
-                      {canOpenProvider ? (
-                        <Link href={`/providers/${purchase.providerId}`}>
-                          {purchase.provider.businessName}
-                        </Link>
-                      ) : (
-                        purchase.provider.businessName
-                      )}
-                    </td>
-                    <td>
-                      {canOpenPurchases ? (
-                        <Link href={`/package-purchases/${purchase.id}`}>
-                          {purchase.packageNameSnapshot}
-                        </Link>
-                      ) : (
-                        purchase.packageNameSnapshot
-                      )}
-                    </td>
-                    <td className="col-num">{purchase.creditAmountSnapshot}</td>
-                    <td className="col-num">
-                      {formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}
-                    </td>
-                    <td>
-                      <span className={statusBadgeClass(purchase.status)}>
-                        {statusLabel(purchase.status)}
-                      </span>
-                    </td>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {purchase.mockPaymentReference ?? '-'}
-                    </td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              );
+            })}
+          </DataTable>
         )}
       </SectionCard>
 
       <SectionCard title="Hızlı bağlantılar" subtitle="Sık kullanılan finans ekranları.">
         <div className="inline-actions">
           {canOpenLedger ? (
-            <Link className="btn btn-primary btn-sm" href="/finance/credit-ledger">
-              Kredi Hareketleri
+            <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
+              Kredi hareketleri
             </Link>
           ) : null}
           {canOpenManualAdjustments ? (
             <Link className="btn btn-secondary btn-sm" href="/finance/manual-adjustments">
-              Manuel İşlemler
+              Elle kredi işlemleri
             </Link>
           ) : null}
           <Link className="btn btn-secondary btn-sm" href="/finance/providers">
-            Provider Finans Bakiyeleri
+            İşletme bakiyeleri
           </Link>
           {canOpenPurchases ? (
             <Link className="btn btn-secondary btn-sm" href="/package-purchases">
-              Paket Satın Almaları
+              Paket satışları
             </Link>
           ) : null}
           {canOpenRefundScan ? (
             <Link className="btn btn-secondary btn-sm" href="/refund-scan">
-              İade Taraması
+              İade kontrolü
             </Link>
           ) : null}
           {canOpenCreditPackages ? (
             <Link className="btn btn-secondary btn-sm" href="/credit-packages">
-              Kredi Paketleri
+              Kredi paketleri
             </Link>
           ) : null}
           {canOpenProviders ? (
-            <Link className="btn btn-ghost btn-sm" href="/providers">
-              Hizmet Verenler
+            <Link className="btn btn-secondary btn-sm" href="/providers">
+              Hizmet verenler
             </Link>
           ) : null}
         </div>

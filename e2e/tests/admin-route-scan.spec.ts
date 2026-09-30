@@ -121,6 +121,14 @@ const CONVERTED_ROUTES = [
   '/showcase/price-terms',
   '/showcase/placements',
   '/showcase/placements/[placementId]',
+  '/finance',
+  '/finance/credit-ledger',
+  '/finance/manual-adjustments',
+  '/finance/providers',
+  '/package-purchases',
+  '/package-purchases/[id]',
+  '/package-refunds',
+  '/package-refunds/[id]',
 ];
 
 const STATIC_ROUTES = [

@@ -6,15 +6,68 @@ import {
   formatDateTime,
   requireAdmin,
 } from '../../../lib/api';
-import { formatLedgerReason } from '../../../lib/finance-format';
+import { buildHref, parsePage, type QueryParams } from '../../../lib/list-query';
+import { formatCount } from '../../../lib/pagination';
+import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
+import { FilterBar, FilterField } from '../../../components/filter-bar';
+import {
+  BalanceChange,
+  LedgerActorCell,
+  LedgerProviderCell,
+  LedgerReasonCell,
+  SignedCredits,
+} from '../../../components/ledger-cells';
 import { PageHeader } from '../../../components/page-header';
+import { Pagination } from '../../../components/pagination';
 import { SectionCard } from '../../../components/section-card';
+import { SavedViewTabs, type TabItem } from '../../../components/tabs';
 
+/**
+ * The manual credit adjustments — the ledger, filtered to the two types an
+ * operator writes by hand.
+ *
+ * ADMIN-DESIGN-001 Faz 3D (paket 2 `27-elle-kredi-ekle-dus`, prototip
+ * `manual`). The design puts a "Yeni manuel işlem" form beside this list; K4
+ * decided it stays where it is, on the provider's credit screen
+ * (`/providers/[id]/credits`), which already carries the balance preview, the
+ * no-negative guard, the integer bound and the confirmation for a deduction.
+ * This screen therefore writes nothing. What it takes from the design is the
+ * list, the ⓘ, and a way to *reach* that form: the "Yeni düzeltme" card below
+ * is a pair of links, shown only to a session that holds one of the two write
+ * permissions, and with a pinned business it goes straight to that business's
+ * credit screen.
+ *
+ * Kept from the old screen: the search, the type filter (now saved views,
+ * same `?type=` values), the date range, the `providerId` pin, the page size
+ * of 50, and the audit note — every column the old table had.
+ */
+
+const PATH = '/finance/manual-adjustments';
 const DEFAULT_PAGE_SIZE = 50;
 const MANUAL_TYPES = ['ADMIN_GRANT', 'ADMIN_DEDUCT'] as const;
 
 type ManualFilter = 'ALL' | 'ADMIN_GRANT' | 'ADMIN_DEDUCT';
+
+/** The design's ⓘ, minus the promise that the form is on this screen. */
+const SCREEN_INFO =
+  'Sistemin kendi yapmadığı bir düzeltme elle yapılır: ödeme geçtiği hâlde kredi yüklenmemişse, kredi iki kez düşülmüşse ya da müşteriye bir söz verildiyse. Her işlem yapanın adıyla kaydedilir ve kredi hareketlerinde görünür; geri almak için ters yönde yeni bir işlem gerekir. Tekrar eden bir durum için kampanya yazmak daha doğrudur. Yeni işlem, işletmenin kredi ekranından yapılır.';
+
+const TYPE_LABEL: Record<'ADMIN_GRANT' | 'ADMIN_DEDUCT', string> = {
+  ADMIN_GRANT: 'Manuel Kredi Ekleme',
+  ADMIN_DEDUCT: 'Manuel Kredi Düşme',
+};
+
+const COLUMNS: DataColumn[] = [
+  { key: 'date', label: 'Tarih' },
+  { key: 'provider', label: 'İşletme' },
+  { key: 'type', label: 'İşlem' },
+  { key: 'amount', label: 'Kredi', align: 'end' },
+  { key: 'balance', label: 'Bakiye (önce → sonra)', align: 'end' },
+  { key: 'reason', label: 'Sebep' },
+  { key: 'actor', label: 'İşlemi yapan' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 type RawSearchParams = {
   q?: string;
@@ -29,17 +82,6 @@ type AdminManualAdjustmentsPageProps = {
   searchParams: Promise<RawSearchParams>;
 };
 
-const TYPE_OPTIONS: Array<{ value: ManualFilter; label: string }> = [
-  { value: 'ALL', label: 'Tümü' },
-  { value: 'ADMIN_GRANT', label: 'Manuel Kredi Ekleme' },
-  { value: 'ADMIN_DEDUCT', label: 'Manuel Kredi Düşme' },
-];
-
-const TYPE_LABEL: Record<'ADMIN_GRANT' | 'ADMIN_DEDUCT', string> = {
-  ADMIN_GRANT: 'Manuel Kredi Ekleme',
-  ADMIN_DEDUCT: 'Manuel Kredi Düşme',
-};
-
 function normalizeTypeFilter(value: string | undefined): ManualFilter {
   if (value === 'ADMIN_GRANT' || value === 'ADMIN_DEDUCT') return value;
   return 'ALL';
@@ -51,36 +93,10 @@ function normalizeDate(value: string | undefined): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : '';
 }
 
-function normalizePage(value: string | undefined): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return parsed;
-}
-
 function formatRangeDateForApi(value: string, endOfDay: boolean): string | undefined {
   if (!value) return undefined;
   const suffix = endOfDay ? 'T23:59:59.999+03:00' : 'T00:00:00.000+03:00';
   return `${value}${suffix}`;
-}
-
-function buildQueryString(params: Record<string, string | number | undefined>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === '' || value === null) continue;
-    query.set(key, String(value));
-  }
-  const str = query.toString();
-  return str ? `?${str}` : '';
-}
-
-function buildPageHref(
-  baseParams: Record<string, string | number | undefined>,
-  page: number,
-): string {
-  const params = { ...baseParams };
-  if (page <= 1) delete params.page;
-  else params.page = page;
-  return `/finance/manual-adjustments${buildQueryString(params)}`;
 }
 
 function resolveApiTypeFilter(filter: ManualFilter): string {
@@ -116,6 +132,11 @@ export default async function AdminManualAdjustmentsPage({
   // it needs the permission that route needs. FINANCE_READ used to open the
   // page and then the ledger read sent the session to /yetkisiz (F2).
   const { can } = await requireAdmin('FINANCE_LEDGER_READ');
+  // Where a new adjustment is made: the credit screen, whose form shows only
+  // the operations these grant (CREDITS_GRANT / CREDITS_DEDUCT). A session with
+  // neither is not pointed at a form it will not see.
+  const canAdjust = can('CREDITS_GRANT') || can('CREDITS_DEDUCT');
+  const canFindProvider = can('FINANCE_READ');
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
@@ -123,75 +144,125 @@ export default async function AdminManualAdjustmentsPage({
   const providerId = (params.providerId ?? '').trim();
   const from = normalizeDate(params.from);
   const to = normalizeDate(params.to);
-  const page = normalizePage(params.page);
+  const page = parsePage(params.page);
 
   const apiQuery = buildApiQuery({ page, q, type, providerId, from, to });
   const response = await apiFetch<CreditLedgerResponse>(`/finance/credit-ledger?${apiQuery}`);
 
-  const hasFilters = Boolean(q || providerId || (type !== 'ALL') || from || to);
-  const baseParams = {
-    q,
-    type: type === 'ALL' ? '' : type,
-    providerId,
-    from,
-    to,
-  };
-  const filteredProviderName = providerId
-    ? (response.items[0]?.provider.businessName ?? null)
-    : null;
+  const hasFilters = Boolean(q || providerId || type !== 'ALL' || from || to);
+  const typeParam = type === 'ALL' ? '' : type;
+  const filterParams: QueryParams = { q, type: typeParam, providerId, from, to };
+  const filteredProviderName = providerId ? (response.items[0]?.provider.businessName ?? null) : null;
 
-  const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
-  const endIndex = Math.min(response.page * response.pageSize, response.total);
+  const views: TabItem[] = [
+    { key: '', label: 'Tümü', testId: 'manual-view-all' },
+    { key: 'ADMIN_GRANT', label: 'Ekleme', testId: 'manual-view-grant' },
+    { key: 'ADMIN_DEDUCT', label: 'Düşme', testId: 'manual-view-deduct' },
+  ];
+
+  const summary =
+    response.total === 0
+      ? hasFilters
+        ? 'Bu filtreyle elle yapılmış işlem yok'
+        : 'Henüz elle kredi işlemi yapılmadı'
+      : `${formatCount(response.total)} elle yapılmış işlem · en yeni başta`;
 
   return (
-    <main>
+    <main className="finance-list-page">
       <PageHeader
-        title="Manuel Kredi İşlemleri"
-        subtitle="Admin tarafından yapılan kredi ekleme ve kredi düşme işlemleri."
+        title="Elle kredi işlemleri"
+        subtitle={summary}
+        info={SCREEN_INFO}
         actions={
           <>
             <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
-              Tüm Kredi Hareketleri
+              Tüm kredi hareketleri
             </Link>
             {can('FINANCE_READ') ? (
-              <Link className="btn btn-ghost btn-sm" href="/finance">
-                Finans Dashboard
+              <Link className="btn btn-secondary btn-sm" href="/finance">
+                Finans özeti
               </Link>
             ) : null}
           </>
         }
       />
 
-      <SectionCard title="Audit notu" subtitle="Manuel işlemler nasıl tutulur?">
-        <ul className="bullet-list" style={{ margin: 0, paddingLeft: 18 }}>
-          <li>Manuel kredi işlemleri silinemez audit kaydı olarak tutulur.</li>
-          <li>
-            Her işlemde hizmet veren, kredi miktarı, sebep, önceki bakiye, sonraki bakiye ve
-            işlemi yapan admin takip edilir.
-          </li>
-          <li>
-            Yeni işlem yapmak için ilgili hizmet verenin{' '}
-            {can('PROVIDERS_READ') ? <Link href="/providers">kredi ekranına</Link> : 'kredi ekranına'}{' '}
-            gidilmelidir.
-          </li>
-        </ul>
-      </SectionCard>
+      <div className="manual-adjustments-cards">
+        {canAdjust ? (
+          <SectionCard
+            title="Yeni düzeltme"
+            subtitle="Kredi ekleme ve düşme bu ekranda yapılmaz; işletmenin kredi ekranında, bugünkü bakiye ve işlem sonrası bakiye görülerek yapılır."
+          >
+            <div className="inline-actions" data-testid="manual-new-adjustment">
+              {providerId ? (
+                <Link className="btn btn-primary btn-sm" href={`/providers/${providerId}/credits`}>
+                  {filteredProviderName ? `${filteredProviderName} · kredi ekranı` : 'Bu işletmenin kredi ekranı'}
+                </Link>
+              ) : null}
+              {canFindProvider ? (
+                <Link
+                  className={providerId ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
+                  href="/finance/providers"
+                >
+                  İşletme seç
+                </Link>
+              ) : null}
+            </div>
+            {!providerId && !canFindProvider ? (
+              <p className="detail-muted-note">
+                Listeden bir satırdaki işletme adına tıklayarak o işletmenin kredi ekranına gidebilirsiniz.
+              </p>
+            ) : null}
+          </SectionCard>
+        ) : null}
+
+        <SectionCard title="Denetim notu" subtitle="Manuel işlemler nasıl tutulur?">
+          <ul className="bullet-list">
+            <li>Manuel kredi işlemleri silinemez denetim kaydı olarak tutulur.</li>
+            <li>
+              Her işlemde hizmet veren, kredi miktarı, sebep, önceki bakiye, sonraki bakiye ve işlemi yapan
+              yönetici kaydedilir.
+            </li>
+            <li>Yanlış bir işlem silinmez; ters yönde yeni bir işlemle dengelenir.</li>
+          </ul>
+        </SectionCard>
+      </div>
 
       {providerId ? (
-        <div className="notice" style={{ marginBottom: 18 }}>
+        <div className="notice detail-notice" data-testid="manual-provider-pin">
           Belirli hizmet veren filtreleniyor
-          {filteredProviderName ? <> · <strong>{filteredProviderName}</strong></> : null} (
-          <code>{providerId}</code>).{' '}
-          <Link href={`/providers/${providerId}/credits`}>Provider kredi sayfası</Link>
+          {filteredProviderName ? (
+            <>
+              {' · '}
+              <strong>{filteredProviderName}</strong>
+            </>
+          ) : null}{' '}
+          (<code className="cell-break">{providerId}</code>).{' '}
+          <Link href={`/providers/${providerId}/credits`}>İşletmenin kredi ekranı</Link>
           {' · '}
-          <Link href="/finance/manual-adjustments">Provider filtresini kaldır</Link>
+          <Link href={buildHref(PATH, filterParams, { providerId: undefined })}>Provider filtresini kaldır</Link>
         </div>
       ) : null}
 
-      <form className="admin-toolbar" method="get" action="/finance/manual-adjustments">
-        {providerId ? <input type="hidden" name="providerId" value={providerId} /> : null}
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="manual-search">Ara</label>
+      <SavedViewTabs
+        label="Elle işlem görünümleri"
+        items={views}
+        active={typeParam}
+        path={PATH}
+        params={filterParams}
+        param="type"
+        testId="manual-views"
+      />
+
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        preserve={{ providerId, type: typeParam }}
+        label="Elle işlem filtreleri"
+        testId="manual-filters"
+      >
+        <FilterField label="Ara" htmlFor="manual-search" wide>
           <input
             id="manual-search"
             name="q"
@@ -200,132 +271,58 @@ export default async function AdminManualAdjustmentsPage({
             defaultValue={q}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="manual-type">İşlem tipi</label>
-          <select id="manual-type" name="type" defaultValue={type}>
-            {TYPE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="manual-from">Başlangıç</label>
-          <input
-            id="manual-from"
-            name="from"
-            type="date"
-            defaultValue={from}
-            autoComplete="off"
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="manual-to">Bitiş</label>
-          <input
-            id="manual-to"
-            name="to"
-            type="date"
-            defaultValue={to}
-            autoComplete="off"
-          />
-        </div>
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">
-            {response.total === 0
-              ? '0 kayıt'
-              : `${startIndex}-${endIndex} / ${response.total} kayıt`}
-          </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/finance/manual-adjustments">
-              Temizle
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+        <FilterField label="Başlangıç" htmlFor="manual-from">
+          <input id="manual-from" name="from" type="date" defaultValue={from} autoComplete="off" />
+        </FilterField>
+        <FilterField label="Bitiş" htmlFor="manual-to">
+          <input id="manual-to" name="to" type="date" defaultValue={to} autoComplete="off" />
+        </FilterField>
+      </FilterBar>
 
-      <SectionCard
-        title="Manuel işlem listesi"
-        subtitle={`Sayfa ${response.page} · ${response.pageSize} kayıt/sayfa`}
-        padded={false}
-      >
+      <div className="data-list-card">
         {response.items.length === 0 ? (
           <EmptyState
             title={
               hasFilters
                 ? 'Filtreye uygun manuel işlem bulunamadı.'
-                : 'Henüz manuel kredi işlemi bulunmuyor.'
+                : response.total > 0
+                  ? 'Bu sayfada manuel işlem yok.'
+                  : 'Henüz manuel kredi işlemi bulunmuyor.'
             }
             description={
               hasFilters
                 ? 'Filtreleri daraltabilir veya temizleyebilirsiniz.'
-                : 'Provider kredi ekranından kredi eklendiğinde veya düşüldüğünde burada görünür.'
+                : 'Bir işletmenin kredi ekranından kredi eklendiğinde veya düşüldüğünde burada görünür.'
             }
             action={
               hasFilters ? (
-                <Link className="btn btn-secondary btn-sm" href="/finance/manual-adjustments">
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
                   Filtreleri temizle
                 </Link>
               ) : null
             }
           />
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Tarih</th>
-                  <th>Hizmet Veren</th>
-                  <th>İşlem</th>
-                  <th className="col-num">Kredi</th>
-                  <th className="col-num">Önceki Bakiye</th>
-                  <th className="col-num">Sonraki Bakiye</th>
-                  <th>Sebep</th>
-                  <th>İşlemi Yapan</th>
-                  <th className="col-actions">Aksiyon</th>
-                </tr>
-              </thead>
-              <tbody>
-                {response.items.map((entry) => (
-                  <ManualRow key={entry.id} entry={entry} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable caption="Elle kredi işlemleri" columns={COLUMNS} minWidth={1080} testId="manual-table">
+            {response.items.map((entry) => (
+              <ManualRow key={entry.id} entry={entry} />
+            ))}
+          </DataTable>
         )}
-      </SectionCard>
-
-      {response.total > response.pageSize ? (
-        <nav className="inline-actions" style={{ marginTop: 16, justifyContent: 'space-between' }}>
-          {response.page > 1 ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page - 1)}
-            >
-              ← Önceki
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span className="muted" style={{ fontSize: 13 }}>
-            Sayfa {response.page}
-          </span>
-          {response.hasNextPage ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page + 1)}
-            >
-              Sonraki →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="işlem"
+            summaryTestId="manual-page-summary"
+          />
+        ) : null}
+      </div>
     </main>
   );
 }
@@ -335,75 +332,38 @@ function ManualRow({ entry }: { entry: CreditLedgerEntry }) {
   const isDeduct = entry.type === 'ADMIN_DEDUCT';
   const typeLabel =
     isGrant || isDeduct ? TYPE_LABEL[entry.type as 'ADMIN_GRANT' | 'ADMIN_DEDUCT'] : entry.type;
-  const amountClass = isGrant
-    ? 'badge badge-good'
-    : isDeduct
-      ? 'badge badge-bad'
-      : 'badge badge-muted';
-  const amountText = entry.amount > 0 ? `+${entry.amount}` : String(entry.amount);
+  const creditsHref = `/providers/${entry.provider.id}/credits`;
 
   return (
-    <tr>
-      <td>{formatDateTime(entry.createdAt)}</td>
+    <tr data-testid="manual-row" data-type={entry.type}>
+      <td className="cell-nowrap">{formatDateTime(entry.createdAt)}</td>
       <td>
-        <div className="cell-stack">
-          <Link href={`/providers/${entry.provider.id}/credits`}>
-            <strong>{entry.provider.businessName}</strong>
-          </Link>
-          {entry.provider.phone || entry.provider.email ? (
-            <span className="cell-muted">
-              {entry.provider.phone}
-              {entry.provider.phone && entry.provider.email ? ' · ' : ''}
-              {entry.provider.email ?? ''}
-            </span>
-          ) : null}
-        </div>
+        <LedgerProviderCell provider={entry.provider} href={creditsHref} />
       </td>
       <td>
         <span className={isGrant ? 'badge badge-good' : isDeduct ? 'badge badge-bad' : 'badge badge-muted'}>
           {typeLabel}
         </span>
       </td>
-      <td className="col-num">
-        <span className={amountClass}>{amountText}</span>
+      <td className="is-num">
+        <SignedCredits amount={entry.amount} />
       </td>
-      <td className="col-num">{entry.previousBalance}</td>
-      <td className="col-num">
-        <strong>{entry.balanceAfter}</strong>
-      </td>
-      <td>
-        {(() => {
-          const reason = formatLedgerReason(entry.reason);
-          if (!reason) return <span className="cell-muted">-</span>;
-          return (
-            <div className="cell-stack">
-              <span>{reason.label}</span>
-              {reason.note ? (
-                <span className="cell-muted" style={{ fontSize: 12 }}>
-                  Not: {reason.note}
-                </span>
-              ) : null}
-            </div>
-          );
-        })()}
+      <td className="is-num">
+        <BalanceChange before={entry.previousBalance} after={entry.balanceAfter} />
       </td>
       <td>
-        {entry.createdBy ? (
-          <div className="cell-stack">
-            <span>{entry.createdBy.name ?? entry.createdBy.email ?? entry.createdBy.id}</span>
-            {entry.createdBy.email && entry.createdBy.name ? (
-              <span className="cell-muted" style={{ fontSize: 11 }}>
-                {entry.createdBy.email}
-              </span>
-            ) : null}
-          </div>
-        ) : (
-          <span className="cell-muted">Sistem</span>
-        )}
+        <LedgerReasonCell reason={entry.reason} />
+      </td>
+      <td>
+        <LedgerActorCell actor={entry.createdBy} />
       </td>
       <td className="col-actions">
-        <Link className="btn btn-secondary btn-sm" href={`/providers/${entry.provider.id}/credits`}>
-          Provider Kredi Ekranı
+        <Link
+          className="btn btn-secondary btn-sm"
+          href={creditsHref}
+          aria-label={`Kredi ekranını aç: ${entry.provider.businessName}`}
+        >
+          Kredi ekranı
         </Link>
       </td>
     </tr>

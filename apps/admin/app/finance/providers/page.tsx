@@ -12,24 +12,39 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
+import { buildHref, parsePage, type QueryParams } from '../../../lib/list-query';
+import { formatCount } from '../../../lib/pagination';
+import { formatSignedCount } from '../../../lib/finance-format';
+import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
+import { FilterBar, FilterField } from '../../../components/filter-bar';
 import { PageHeader } from '../../../components/page-header';
-import { SectionCard } from '../../../components/section-card';
+import { Pagination } from '../../../components/pagination';
 
+/**
+ * Every provider's credit balance and money summary.
+ *
+ * ADMIN-DESIGN-001 Faz 3D (paket 2 `28-isletme-bakiyeleri`, prototip
+ * `list:balances`). The design shows six columns; this screen keeps all eleven
+ * of the old table (K7) inside the shared table's own scroll box — the page
+ * never widens, the table scrolls sideways on a narrow window. The nine sort
+ * fields, the search and the page size of 25 are the same query parameters as
+ * before.
+ *
+ * Not rendered: "Bu ay harcadığı" (the API has no per-period breakdown per
+ * provider), "Son teklif" (not in this read — "Son hareket" is the nearest
+ * true value and stays), the design's Durum and Tarih filters (the API takes
+ * neither) and "Excel'e aktar" (no export exists).
+ */
+
+const PATH = '/finance/providers';
 const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_SORT_BY: ProviderFinanceSortField = 'lastTransactionAt';
 const DEFAULT_SORT_DIR: ProviderFinanceSortDirection = 'desc';
 
-type RawSearchParams = {
-  q?: string;
-  sortBy?: string;
-  sortDir?: string;
-  page?: string;
-};
-
-type AdminProviderFinancePageProps = {
-  searchParams: Promise<RawSearchParams>;
-};
+/** The design's ⓘ, kept to what the balance is. */
+const SCREEN_INFO =
+  'Hizmet verenlerin elinde duran, henüz harcanmamış kredi ve her işletmenin ödeme ile kredi hareketi özeti. Bu krediler satılmış ama karşılığı henüz verilmemiş hizmettir. Bakiyesi biten işletme teklif veremez.';
 
 const SORT_LABEL: Record<ProviderFinanceSortField, string> = {
   businessName: 'İşletme adı',
@@ -43,11 +58,33 @@ const SORT_LABEL: Record<ProviderFinanceSortField, string> = {
   lastTransactionAt: 'Son hareket',
 };
 
+const COLUMNS: DataColumn[] = [
+  { key: 'provider', label: 'İşletme' },
+  { key: 'status', label: 'Durum' },
+  { key: 'balance', label: 'Bakiye', align: 'end' },
+  { key: 'paid', label: 'Toplam ödeme', align: 'end' },
+  { key: 'purchased', label: 'Satın alınan kredi', align: 'end' },
+  { key: 'spent', label: 'Harcanan kredi', align: 'end' },
+  { key: 'refunded', label: 'İade edilen kredi', align: 'end' },
+  { key: 'manual', label: 'Manuel net', align: 'end' },
+  { key: 'lastPayment', label: 'Son ödeme' },
+  { key: 'lastTransaction', label: 'Son hareket' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
+
+type RawSearchParams = {
+  q?: string;
+  sortBy?: string;
+  sortDir?: string;
+  page?: string;
+};
+
+type AdminProviderFinancePageProps = {
+  searchParams: Promise<RawSearchParams>;
+};
+
 function normalizeSortBy(value: string | undefined): ProviderFinanceSortField {
-  if (
-    value &&
-    (PROVIDER_FINANCE_SORT_FIELDS as readonly string[]).includes(value)
-  ) {
+  if (value && (PROVIDER_FINANCE_SORT_FIELDS as readonly string[]).includes(value)) {
     return value as ProviderFinanceSortField;
   }
   return DEFAULT_SORT_BY;
@@ -59,34 +96,8 @@ function normalizeSortDir(value: string | undefined): ProviderFinanceSortDirecti
   return DEFAULT_SORT_DIR;
 }
 
-function normalizePage(value: string | undefined): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return parsed;
-}
-
-function buildQueryString(params: Record<string, string | number | undefined>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === '' || value === null) continue;
-    query.set(key, String(value));
-  }
-  const str = query.toString();
-  return str ? `?${str}` : '';
-}
-
-function buildPageHref(
-  baseParams: Record<string, string | number | undefined>,
-  page: number,
-): string {
-  const params = { ...baseParams };
-  if (page <= 1) delete params.page;
-  else params.page = page;
-  return `/finance/providers${buildQueryString(params)}`;
-}
-
 function formatDateOrDash(value: string | null | undefined): string {
-  return value ? formatDateTime(value) : '-';
+  return value ? formatDateTime(value) : '—';
 }
 
 export default async function AdminProviderFinancePage({
@@ -102,7 +113,7 @@ export default async function AdminProviderFinancePage({
   const q = (params.q ?? '').trim();
   const sortBy = normalizeSortBy(params.sortBy);
   const sortDir = normalizeSortDir(params.sortDir);
-  const page = normalizePage(params.page);
+  const page = parsePage(params.page);
 
   const apiQuery = new URLSearchParams();
   apiQuery.set('page', String(page));
@@ -111,38 +122,52 @@ export default async function AdminProviderFinancePage({
   apiQuery.set('sortDir', sortDir);
   if (q) apiQuery.set('q', q);
 
-  const response = await apiFetch<ProviderFinanceResponse>(
-    `/finance/providers?${apiQuery.toString()}`,
-  );
+  const response = await apiFetch<ProviderFinanceResponse>(`/finance/providers?${apiQuery.toString()}`);
 
   const hasFilters = Boolean(q || sortBy !== DEFAULT_SORT_BY || sortDir !== DEFAULT_SORT_DIR);
-  const baseParams = { q, sortBy, sortDir };
+  // The defaults are written as no parameter, so the plain address and the
+  // default order are one URL.
+  const filterParams: QueryParams = {
+    q,
+    sortBy: sortBy === DEFAULT_SORT_BY ? '' : sortBy,
+    sortDir: sortDir === DEFAULT_SORT_DIR ? '' : sortDir,
+  };
 
-  const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
-  const endIndex = Math.min(response.page * response.pageSize, response.total);
+  const summary =
+    response.total === 0
+      ? q
+        ? 'Bu aramayla işletme yok'
+        : 'Henüz hizmet veren yok'
+      : `${formatCount(response.total)} işletme · ${SORT_LABEL[sortBy].toLocaleLowerCase('tr-TR')} sırasıyla (${sortDir === 'asc' ? 'artan' : 'azalan'})`;
 
   return (
-    <main>
+    <main className="finance-list-page">
       <PageHeader
-        title="Provider Finans Bakiyeleri"
-        subtitle="Hizmet verenlerin kredi bakiyesi, ödeme ve kredi hareketi özetleri."
+        title="İşletme bakiyeleri"
+        subtitle={summary}
+        info={SCREEN_INFO}
         actions={
           <>
             {canOpenLedger ? (
               <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
-                Kredi Hareketleri
+                Kredi hareketleri
               </Link>
             ) : null}
-            <Link className="btn btn-ghost btn-sm" href="/finance">
-              Finans Dashboard
+            <Link className="btn btn-secondary btn-sm" href="/finance">
+              Finans özeti
             </Link>
           </>
         }
       />
 
-      <form className="admin-toolbar" method="get" action="/finance/providers">
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="provider-finance-search">Ara</label>
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        label="İşletme bakiyesi filtreleri"
+        testId="provider-finance-filters"
+      >
+        <FilterField label="Ara" htmlFor="provider-finance-search" wide>
           <input
             id="provider-finance-search"
             name="q"
@@ -151,9 +176,8 @@ export default async function AdminProviderFinancePage({
             defaultValue={q}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="provider-finance-sort">Sıralama</label>
+        </FilterField>
+        <FilterField label="Sıralama" htmlFor="provider-finance-sort">
           <select id="provider-finance-sort" name="sortBy" defaultValue={sortBy}>
             {PROVIDER_FINANCE_SORT_FIELDS.map((field) => (
               <option key={field} value={field}>
@@ -161,114 +185,58 @@ export default async function AdminProviderFinancePage({
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="provider-finance-dir">Yön</label>
+        </FilterField>
+        <FilterField label="Yön" htmlFor="provider-finance-dir">
           <select id="provider-finance-dir" name="sortDir" defaultValue={sortDir}>
             <option value="asc">Artan</option>
             <option value="desc">Azalan</option>
           </select>
-        </div>
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">
-            {response.total === 0
-              ? '0 hizmet veren'
-              : `${startIndex}-${endIndex} / ${response.total} hizmet veren`}
-          </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/finance/providers">
-              Temizle
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
 
-      <SectionCard
-        title="Provider listesi"
-        subtitle={`Sayfa ${response.page} · ${response.pageSize} hizmet veren/sayfa`}
-        padded={false}
-      >
+      <div className="data-list-card">
         {response.items.length === 0 ? (
           <EmptyState
             title={
-              hasFilters
+              q
                 ? 'Filtreye uygun hizmet veren bulunamadı.'
-                : 'Henüz hizmet veren yok.'
+                : response.total > 0
+                  ? 'Bu sayfada hizmet veren yok.'
+                  : 'Henüz hizmet veren yok.'
             }
             description={
-              hasFilters
-                ? 'Aramayı daraltabilir veya sıralamayı değiştirebilirsiniz.'
+              q
+                ? 'Aramayı daraltabilir veya temizleyebilirsiniz.'
                 : 'Hizmet verenler eklendikçe kredi ve ödeme özetleri burada görünecek.'
             }
             action={
               hasFilters ? (
-                <Link className="btn btn-secondary btn-sm" href="/finance/providers">
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
                   Filtreleri temizle
                 </Link>
               ) : null
             }
           />
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Hizmet Veren</th>
-                  <th>Durum</th>
-                  <th className="col-num">Mevcut Kredi</th>
-                  <th className="col-num">Toplam Ödeme</th>
-                  <th className="col-num">Satın Alınan Kredi</th>
-                  <th className="col-num">Harcanan Kredi</th>
-                  <th className="col-num">İade Edilen Kredi</th>
-                  <th className="col-num">Manuel Net</th>
-                  <th>Son Ödeme</th>
-                  <th>Son Hareket</th>
-                  <th className="col-actions">Aksiyon</th>
-                </tr>
-              </thead>
-              <tbody>
-                {response.items.map((item) => (
-                  <ProviderFinanceRow key={item.provider.id} item={item} canOpenLedger={canOpenLedger} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable caption="İşletme bakiyeleri" columns={COLUMNS} minWidth={1320} testId="provider-finance-table">
+            {response.items.map((item) => (
+              <ProviderFinanceRow key={item.provider.id} item={item} canOpenLedger={canOpenLedger} />
+            ))}
+          </DataTable>
         )}
-      </SectionCard>
-
-      {response.total > response.pageSize ? (
-        <nav
-          className="inline-actions"
-          style={{ marginTop: 16, justifyContent: 'space-between' }}
-        >
-          {response.page > 1 ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page - 1)}
-            >
-              ← Önceki
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span className="muted" style={{ fontSize: 13 }}>
-            Sayfa {response.page}
-          </span>
-          {response.hasNextPage ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page + 1)}
-            >
-              Sonraki →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="işletme"
+            summaryTestId="provider-finance-page-summary"
+          />
+        ) : null}
+      </div>
     </main>
   );
 }
@@ -276,24 +244,17 @@ export default async function AdminProviderFinancePage({
 function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem; canOpenLedger: boolean }) {
   const { provider } = item;
   const balanceClass =
-    item.currentBalance > 0
-      ? 'badge badge-good'
-      : item.currentBalance < 0
-        ? 'badge badge-bad'
-        : 'badge badge-muted';
+    item.currentBalance > 0 ? 'badge badge-good' : item.currentBalance < 0 ? 'badge badge-bad' : 'badge badge-muted';
   const manualNetClass =
     item.manualNetCredits > 0
       ? 'badge badge-good'
       : item.manualNetCredits < 0
         ? 'badge badge-bad'
         : 'badge badge-muted';
-  const manualNetText =
-    item.manualNetCredits > 0
-      ? `+${item.manualNetCredits}`
-      : String(item.manualNetCredits);
+  const creditsHref = `/providers/${provider.id}/credits`;
 
   return (
-    <tr>
+    <tr data-testid="provider-finance-row">
       <td>
         {/*
           May break anywhere: a business name without spaces or an e-mail
@@ -302,7 +263,7 @@ function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem
         */}
         <div className="cell-stack cell-break">
           {canOpenLedger ? (
-            <Link href={`/providers/${provider.id}/credits`}>
+            <Link href={creditsHref}>
               <strong>{provider.businessName}</strong>
             </Link>
           ) : (
@@ -318,52 +279,47 @@ function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem
         </div>
       </td>
       <td>
-        <span className={statusBadgeClass(provider.status)}>
-          {statusLabel(provider.status)}
+        <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>
+      </td>
+      <td className="is-num">
+        <span className={balanceClass} data-testid="provider-finance-balance">
+          {formatCount(item.currentBalance)}
         </span>
       </td>
-      <td className="col-num">
-        <span className={balanceClass}>{item.currentBalance}</span>
-      </td>
-      <td className="col-num">{formatPrice(item.totalPaidAmount)}</td>
-      <td className="col-num">{item.totalCreditsPurchased}</td>
-      <td className="col-num">{item.totalCreditsSpent}</td>
-      <td className="col-num">
+      <td className="is-num cell-nowrap">{formatPrice(item.totalPaidAmount)}</td>
+      <td className="is-num">{formatCount(item.totalCreditsPurchased)}</td>
+      <td className="is-num">{formatCount(item.totalCreditsSpent)}</td>
+      <td className="is-num">
         {item.totalCreditsRefunded === 0 ? (
           <span className="cell-muted">0</span>
         ) : (
-          item.totalCreditsRefunded
+          formatCount(item.totalCreditsRefunded)
         )}
       </td>
-      <td className="col-num">
-        <span className={manualNetClass}>{manualNetText}</span>
+      <td className="is-num">
+        <span className={manualNetClass}>{formatSignedCount(item.manualNetCredits)}</span>
       </td>
-      <td>{formatDateOrDash(item.lastPaymentAt)}</td>
-      <td>{formatDateOrDash(item.lastTransactionAt)}</td>
+      <td className="cell-nowrap">{formatDateOrDash(item.lastPaymentAt)}</td>
+      <td className="cell-nowrap">{formatDateOrDash(item.lastTransactionAt)}</td>
       <td className="col-actions">
         {canOpenLedger ? (
-        <div className="inline-actions">
-          <Link
-            className="btn btn-secondary btn-sm"
-            href={`/providers/${provider.id}/credits`}
-          >
-            Kredi Ekranı
-          </Link>
-          <Link
-            className="btn btn-ghost btn-sm"
-            href={`/finance/credit-ledger?providerId=${provider.id}`}
-          >
-            Ledger
-          </Link>
-          <Link
-            className="btn btn-ghost btn-sm"
-            href={`/finance/manual-adjustments?providerId=${provider.id}`}
-          >
-            Manuel İşlemler
-          </Link>
-        </div>
+          <div className="inline-actions">
+            <Link
+              className="btn btn-secondary btn-sm"
+              href={creditsHref}
+              aria-label={`Kredi ekranını aç: ${provider.businessName}`}
+            >
+              Aç
+            </Link>
+            <Link className="btn btn-ghost btn-sm" href={`/finance/credit-ledger?providerId=${provider.id}`}>
+              Hareketler
+            </Link>
+            <Link className="btn btn-ghost btn-sm" href={`/finance/manual-adjustments?providerId=${provider.id}`}>
+              Elle işlemler
+            </Link>
+          </div>
         ) : (
-          <span className="cell-muted">-</span>
+          <span className="cell-muted">—</span>
         )}
       </td>
     </tr>

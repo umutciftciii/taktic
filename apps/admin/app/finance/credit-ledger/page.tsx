@@ -9,25 +9,48 @@ import {
   formatDateTime,
   requireAdmin,
 } from '../../../lib/api';
-import { formatLedgerReason, formatLedgerSource, type LedgerSource } from '../../../lib/finance-format';
+import { formatLedgerSource, gateLedgerSource } from '../../../lib/finance-format';
+import { buildHref, parsePage, type QueryParams } from '../../../lib/list-query';
+import { formatCount } from '../../../lib/pagination';
+import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
+import { FilterBar, FilterField } from '../../../components/filter-bar';
+import {
+  LedgerActorCell,
+  LedgerProviderCell,
+  LedgerReasonCell,
+  LedgerSourceCell,
+  SignedCredits,
+} from '../../../components/ledger-cells';
 import { PageHeader } from '../../../components/page-header';
-import { SectionCard } from '../../../components/section-card';
+import { Pagination } from '../../../components/pagination';
 
+/**
+ * Every credit movement on the platform, newest first.
+ *
+ * ADMIN-DESIGN-001 Faz 3D (paket 2 `26-kredi-hareketleri`, prototip
+ * `list:ledger`): the design's list template — header with ⓘ, the shared
+ * filter bar, the shared table in its own scroll box, the shared page footer.
+ * Everything the screen did before is still here: the nine movement types
+ * (three of them campaign movements), the search, the date range, the
+ * `providerId` pin a balance row links to, the page size of 50, and the related
+ * record of a campaign row linking to that campaign.
+ *
+ * Kept from the old screen beyond the design's seven columns: the reason with
+ * its operator note and who wrote the row — the ledger is an audit trail, and
+ * those two are what makes it one.
+ *
+ * Not rendered: "Excel'e aktar" (no export exists) and the design's "Bu ay
+ * 3.140 kredi harcandı" line (the ledger read carries no period totals; the
+ * finance summary does, behind its own permission).
+ */
+
+const PATH = '/finance/credit-ledger';
 const DEFAULT_PAGE_SIZE = 50;
 
-type RawSearchParams = {
-  q?: string;
-  type?: string;
-  providerId?: string;
-  from?: string;
-  to?: string;
-  page?: string;
-};
-
-type AdminCreditLedgerPageProps = {
-  searchParams: Promise<RawSearchParams>;
-};
+/** The design's ⓘ, fitted to this ledger: campaigns are a fourth source, and refunds are not only complaints. */
+const SCREEN_INFO =
+  'Platformdaki her kredi hareketinin kaydı: paket satın alımı, teklif harcaması, teklif iadesi, kampanya kredisi ve yönetici düzeltmeleri. Bu liste değiştirilemez — yanlış bir işlem silinmez, ters yönde yeni bir işlemle dengelenir.';
 
 const TYPE_LABELS: Record<CreditTransactionType, string> = {
   PACKAGE_PURCHASE: 'Paket Alımı',
@@ -56,6 +79,31 @@ const TYPE_BADGE_CLASS: Record<CreditTransactionType, string> = {
   CAMPAIGN_REVOKE: 'badge badge-bad',
 };
 
+const COLUMNS: DataColumn[] = [
+  { key: 'date', label: 'Tarih' },
+  { key: 'provider', label: 'İşletme' },
+  { key: 'type', label: 'Ne oldu' },
+  { key: 'source', label: 'İlgili kayıt' },
+  { key: 'before', label: 'Önceki bakiye', align: 'end' },
+  { key: 'amount', label: 'Değişim', align: 'end' },
+  { key: 'after', label: 'Sonraki bakiye', align: 'end' },
+  { key: 'reason', label: 'Sebep' },
+  { key: 'actor', label: 'İşlemi yapan' },
+];
+
+type RawSearchParams = {
+  q?: string;
+  type?: string;
+  providerId?: string;
+  from?: string;
+  to?: string;
+  page?: string;
+};
+
+type AdminCreditLedgerPageProps = {
+  searchParams: Promise<RawSearchParams>;
+};
+
 function normalizeType(value: string | undefined): CreditTransactionType | '' {
   if (!value) return '';
   const upper = value.toUpperCase();
@@ -69,32 +117,6 @@ function normalizeDate(value: string | undefined): string {
   const trimmed = value.trim();
   if (!trimmed) return '';
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : '';
-}
-
-function normalizePage(value: string | undefined): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return parsed;
-}
-
-function buildQueryString(params: Record<string, string | number | undefined>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === '' || value === null) continue;
-    query.set(key, String(value));
-  }
-  const str = query.toString();
-  return str ? `?${str}` : '';
-}
-
-function buildPageHref(
-  baseParams: Record<string, string | number | undefined>,
-  page: number,
-): string {
-  const params = { ...baseParams };
-  if (page <= 1) delete params.page;
-  else params.page = page;
-  return `/finance/credit-ledger${buildQueryString(params)}`;
 }
 
 function formatRangeDateForApi(value: string, endOfDay: boolean): string | undefined {
@@ -126,23 +148,6 @@ function buildApiQuery(params: {
   return apiQuery.toString();
 }
 
-/**
- * A row's "related record" link, kept only when this session may open the
- * screen it points at; otherwise the cell renders the same label as text. An
- * unrecognised destination is dropped rather than guessed at.
- */
-function gateLedgerSource(source: LedgerSource, can: (...names: string[]) => boolean): LedgerSource {
-  if (!source.href) return source;
-  const permission = source.href.startsWith('/campaigns/')
-    ? 'CAMPAIGNS_READ'
-    : source.href.startsWith('/offers/')
-      ? 'OFFERS_READ'
-      : source.href.startsWith('/package-purchases/')
-        ? 'PACKAGE_PURCHASES_READ'
-        : null;
-  return permission && can(permission) ? source : { ...source, href: null };
-}
-
 export default async function AdminCreditLedgerPage({ searchParams }: AdminCreditLedgerPageProps) {
   const { can } = await requireAdmin('FINANCE_LEDGER_READ');
 
@@ -152,36 +157,64 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
   const providerId = (params.providerId ?? '').trim();
   const from = normalizeDate(params.from);
   const to = normalizeDate(params.to);
-  const page = normalizePage(params.page);
+  const page = parsePage(params.page);
 
   const apiQuery = buildApiQuery({ page, q, type, providerId, from, to });
   const response = await apiFetch<CreditLedgerResponse>(`/finance/credit-ledger?${apiQuery}`);
 
   const hasFilters = Boolean(q || type || providerId || from || to);
-  const baseParams = { q, type, providerId, from, to };
+  const filterParams: QueryParams = { q, type, providerId, from, to };
+  // The pin names the business when this page holds one of its rows.
+  const pinnedName = providerId ? (response.items[0]?.provider.businessName ?? null) : null;
 
-  const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
-  const endIndex = Math.min(response.page * response.pageSize, response.total);
+  const summary =
+    response.total === 0
+      ? hasFilters
+        ? 'Bu filtreyle kredi hareketi yok'
+        : 'Henüz kredi hareketi yok'
+      : `${formatCount(response.total)} hareket · en yeni başta`;
 
   return (
-    <main>
+    <main className="finance-list-page">
       <PageHeader
-        title="Kredi Hareketleri"
-        subtitle="Hizmet verenlerin tüm kredi giriş, çıkış ve iade hareketleri."
+        title="Kredi hareketleri"
+        subtitle={summary}
+        info={SCREEN_INFO}
         actions={
-          // The dashboard asks for FINANCE_READ, which the ledger's own
+          // The summary asks for FINANCE_READ, which the ledger's own
           // permission does not imply.
           can('FINANCE_READ') ? (
-            <Link className="btn btn-ghost btn-sm" href="/finance">
-              Finans Dashboard
+            <Link className="btn btn-secondary btn-sm" href="/finance">
+              Finans özeti
             </Link>
           ) : undefined
         }
       />
 
-      <form className="admin-toolbar" method="get" action="/finance/credit-ledger">
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="ledger-search">Ara</label>
+      {providerId ? (
+        <div className="notice detail-notice" data-testid="ledger-provider-pin">
+          Yalnız bir işletmenin hareketleri gösteriliyor
+          {pinnedName ? (
+            <>
+              : <strong>{pinnedName}</strong>
+            </>
+          ) : null}{' '}
+          (<code className="cell-break">{providerId}</code>).{' '}
+          <Link href={`/providers/${providerId}/credits`}>İşletmenin kredi ekranı</Link>
+          {' · '}
+          <Link href={buildHref(PATH, filterParams, { providerId: undefined })}>Tüm işletmeler</Link>
+        </div>
+      ) : null}
+
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        preserve={{ providerId }}
+        label="Kredi hareketi filtreleri"
+        testId="ledger-filters"
+      >
+        <FilterField label="Ara" htmlFor="ledger-search" wide>
           <input
             id="ledger-search"
             name="q"
@@ -190,9 +223,8 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
             defaultValue={q}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="ledger-type">İşlem tipi</label>
+        </FilterField>
+        <FilterField label="İşlem tipi" htmlFor="ledger-type">
           <select id="ledger-type" name="type" defaultValue={type}>
             <option value="">Tümü</option>
             {CREDIT_TRANSACTION_TYPES.map((value) => (
@@ -201,63 +233,24 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="ledger-from">Başlangıç</label>
-          <input
-            id="ledger-from"
-            name="from"
-            type="date"
-            defaultValue={from}
-            autoComplete="off"
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="ledger-to">Bitiş</label>
-          <input
-            id="ledger-to"
-            name="to"
-            type="date"
-            defaultValue={to}
-            autoComplete="off"
-          />
-        </div>
-        {providerId ? <input type="hidden" name="providerId" value={providerId} /> : null}
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">
-            {response.total === 0
-              ? '0 kayıt'
-              : `${startIndex}-${endIndex} / ${response.total} kayıt`}
-          </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/finance/credit-ledger">
-              Temizle
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+        <FilterField label="Başlangıç" htmlFor="ledger-from">
+          <input id="ledger-from" name="from" type="date" defaultValue={from} autoComplete="off" />
+        </FilterField>
+        <FilterField label="Bitiş" htmlFor="ledger-to">
+          <input id="ledger-to" name="to" type="date" defaultValue={to} autoComplete="off" />
+        </FilterField>
+      </FilterBar>
 
-      {providerId ? (
-        <div className="notice" style={{ marginBottom: 18 }}>
-          Provider filtresi aktif (<code>{providerId}</code>).{' '}
-          <Link href={`/providers/${providerId}/credits`}>Provider kredi sayfası</Link>
-        </div>
-      ) : null}
-
-      <SectionCard
-        title="Kredi hareket listesi"
-        subtitle={`Sayfa ${response.page} · ${response.pageSize} kayıt/sayfa`}
-        padded={false}
-      >
+      <div className="data-list-card">
         {response.items.length === 0 ? (
           <EmptyState
             title={
               hasFilters
                 ? 'Filtreye uygun kredi hareketi bulunamadı.'
-                : 'Henüz kredi hareketi yok.'
+                : response.total > 0
+                  ? 'Bu sayfada kredi hareketi yok.'
+                  : 'Henüz kredi hareketi yok.'
             }
             description={
               hasFilters
@@ -266,59 +259,32 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
             }
             action={
               hasFilters ? (
-                <Link className="btn btn-secondary btn-sm" href="/finance/credit-ledger">
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
                   Filtreleri temizle
                 </Link>
               ) : null
             }
           />
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Tarih</th>
-                  <th>Hizmet Veren</th>
-                  <th>Tip</th>
-                  <th className="col-num">Kredi</th>
-                  <th className="col-num">Önceki Bakiye</th>
-                  <th className="col-num">Sonraki Bakiye</th>
-                  <th>Sebep</th>
-                  <th>İlişkili Kayıt</th>
-                  <th>İşlemi Yapan</th>
-                </tr>
-              </thead>
-              <tbody>
-                {response.items.map((entry) => (
-                  <LedgerRow key={entry.id} entry={entry} can={can} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable caption="Kredi hareketleri" columns={COLUMNS} minWidth={1180} testId="ledger-table">
+            {response.items.map((entry) => (
+              <LedgerRow key={entry.id} entry={entry} can={can} />
+            ))}
+          </DataTable>
         )}
-      </SectionCard>
-
-      {response.total > response.pageSize ? (
-        <nav className="inline-actions" style={{ marginTop: 16, justifyContent: 'space-between' }}>
-          {response.page > 1 ? (
-            <Link className="btn btn-secondary btn-sm" href={buildPageHref(baseParams, response.page - 1)}>
-              ← Önceki
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span className="muted" style={{ fontSize: 13 }}>
-            Sayfa {response.page}
-          </span>
-          {response.hasNextPage ? (
-            <Link className="btn btn-secondary btn-sm" href={buildPageHref(baseParams, response.page + 1)}>
-              Sonraki →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="hareket"
+            summaryTestId="ledger-page-summary"
+          />
+        ) : null}
+      </div>
     </main>
   );
 }
@@ -330,97 +296,35 @@ function LedgerRow({
   entry: CreditLedgerEntry;
   can: (...names: string[]) => boolean;
 }) {
-  const amountClass = entry.amount > 0 ? 'badge badge-good' : entry.amount < 0 ? 'badge badge-bad' : 'badge badge-muted';
-  const amountText = entry.amount > 0 ? `+${entry.amount}` : String(entry.amount);
-  const reason = formatLedgerReason(entry.reason);
   const source = gateLedgerSource(
     formatLedgerSource(entry.referenceType, entry.referenceId, entry.sourceNumber, entry.campaign),
     can,
   );
 
   return (
-    <tr>
-      <td>{formatDateTime(entry.createdAt)}</td>
+    <tr data-testid="ledger-row" data-type={entry.type}>
+      <td className="cell-nowrap">{formatDateTime(entry.createdAt)}</td>
       <td>
-        <div className="cell-stack">
-          <Link href={`/providers/${entry.provider.id}/credits`}>
-            <strong>{entry.provider.businessName}</strong>
-          </Link>
-          {entry.provider.phone || entry.provider.email ? (
-            <span className="cell-muted">
-              {entry.provider.phone}
-              {entry.provider.phone && entry.provider.email ? ' · ' : ''}
-              {entry.provider.email ?? ''}
-            </span>
-          ) : null}
-        </div>
+        <LedgerProviderCell provider={entry.provider} href={`/providers/${entry.provider.id}/credits`} />
       </td>
       <td>
         <span className={TYPE_BADGE_CLASS[entry.type]}>{TYPE_LABELS[entry.type] ?? creditTxnTypeLabel(entry.type)}</span>
       </td>
-      <td className="col-num">
-        <span className={amountClass}>{amountText}</span>
+      <td>
+        <LedgerSourceCell source={source} />
       </td>
-      <td className="col-num">{entry.previousBalance}</td>
-      <td className="col-num">
-        <strong>{entry.balanceAfter}</strong>
+      <td className="is-num">{formatCount(entry.previousBalance)}</td>
+      <td className="is-num">
+        <SignedCredits amount={entry.amount} />
+      </td>
+      <td className="is-num">
+        <strong>{formatCount(entry.balanceAfter)}</strong>
       </td>
       <td>
-        {reason ? (
-          <div className="cell-stack">
-            <span>{reason.label}</span>
-            {reason.note ? (
-              <span className="cell-muted" style={{ fontSize: 12 }}>
-                Not: {reason.note}
-              </span>
-            ) : null}
-          </div>
-        ) : (
-          <span className="cell-muted">-</span>
-        )}
+        <LedgerReasonCell reason={entry.reason} />
       </td>
       <td>
-        {source.isSystem ? (
-          <span className="cell-muted">{source.label}</span>
-        ) : source.href ? (
-          <Link href={source.href}>
-            <span className="cell-stack">
-              <span>{source.label}</span>
-              {source.displayNumber ? (
-                <code style={{ fontSize: 11 }}>No: {source.displayNumber}</code>
-              ) : source.shortId ? (
-                <span className="cell-muted" style={{ fontSize: 11 }}>
-                  Kısa ID: {source.shortId}
-                </span>
-              ) : null}
-            </span>
-          </Link>
-        ) : (
-          <div className="cell-stack">
-            <span>{source.label}</span>
-            {source.displayNumber ? (
-              <code style={{ fontSize: 11 }}>No: {source.displayNumber}</code>
-            ) : source.shortId ? (
-              <span className="cell-muted" style={{ fontSize: 11 }}>
-                Kısa ID: {source.shortId}
-              </span>
-            ) : null}
-          </div>
-        )}
-      </td>
-      <td>
-        {entry.createdBy ? (
-          <div className="cell-stack">
-            <span>{entry.createdBy.name ?? entry.createdBy.email ?? entry.createdBy.id}</span>
-            {entry.createdBy.email && entry.createdBy.name ? (
-              <span className="cell-muted" style={{ fontSize: 11 }}>
-                {entry.createdBy.email}
-              </span>
-            ) : null}
-          </div>
-        ) : (
-          <span className="cell-muted">Sistem</span>
-        )}
+        <LedgerActorCell actor={entry.createdBy} />
       </td>
     </tr>
   );

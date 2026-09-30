@@ -6878,3 +6878,335 @@ button:disabled {
   background: var(--color-neutral-100);
   overflow-wrap: anywhere;
 }
+
+/* ==================================================================== */
+/* ---- ADMIN-DESIGN-001 Faz 3D: finance, packages, refunds ---- */
+/* ==================================================================== */
+
+/* A list screen's pieces sit on one rhythm. */
+.finance-list-page > .section-card,
+.finance-summary-page > .section-card,
+.finance-summary-page > .finance-two-col,
+.finance-summary-page > .finance-headline-grid,
+.finance-summary-page > .finance-kpi-row,
+.finance-summary-page > .admin-toolbar {
+  margin: 0 0 16px;
+}
+
+.finance-list-page > .data-list-card + .section-card {
+  margin-top: 16px;
+}
+
+.finance-list-page .detail-notice code,
+.purchase-detail-page code,
+.refund-detail-page code {
+  overflow-wrap: anywhere;
+}
+
+/* ---- Signed credit amounts and balance changes ---- */
+
+.credit-delta {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.credit-delta.is-in {
+  color: var(--color-success);
+}
+
+.credit-delta.is-out {
+  color: var(--color-danger);
+}
+
+.balance-change {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.balance-change-before {
+  color: var(--color-neutral-700);
+}
+
+/* ---- Finance summary: the four headline figures ---- */
+
+.finance-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.finance-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.finance-kpi dd {
+  margin: 0;
+}
+
+.finance-kpi-label {
+  color: var(--color-neutral-700);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.finance-kpi-value {
+  font-family: var(--font-heading);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.finance-kpi-delta {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.finance-kpi-delta.tone-success {
+  color: var(--color-success);
+}
+
+.finance-kpi-delta.tone-warning {
+  color: var(--color-warning);
+}
+
+.finance-kpi-delta.tone-danger {
+  color: var(--color-danger);
+}
+
+.finance-kpi-hint {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Finance summary: monthly bars beside credit use ---- */
+
+.finance-headline-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .finance-headline-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    align-items: start;
+  }
+}
+
+.finance-headline-grid > .section-card {
+  margin: 0;
+  min-width: 0;
+}
+
+.finance-month-bars {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.finance-month-bar {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 150px auto;
+  gap: 6px;
+  min-width: 0;
+  text-align: center;
+}
+
+.finance-month-bar-value {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.finance-month-bar-track {
+  position: relative;
+  display: block;
+  background: var(--color-neutral-100);
+}
+
+.finance-month-bar-fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: calc(var(--bar-ratio, 0) * 100%);
+  background: var(--color-neutral-300);
+}
+
+.finance-month-bar.is-current .finance-month-bar-fill {
+  background: var(--color-accent);
+}
+
+.finance-month-bar-label {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+
+.finance-month-card .detail-muted-note {
+  margin: 0 0 12px;
+}
+
+/* ---- Manual adjustments: the "where to adjust" card and the audit note ---- */
+
+.manual-adjustments-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 16px;
+  margin: 0 0 16px;
+}
+
+.manual-adjustments-cards > .section-card {
+  margin: 0;
+  min-width: 0;
+}
+
+.bullet-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+/* ---- Package purchases ---- */
+
+.purchase-status-cell {
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.config-key {
+  margin-right: 6px;
+  overflow-wrap: anywhere;
+}
+
+.config-key-note {
+  display: block;
+  margin-top: 4px;
+}
+
+.payment-provider-card .detail-muted-note {
+  margin: 0 0 8px;
+}
+
+.hold-steps {
+  margin-top: 14px;
+}
+
+.hold-steps ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.webhook-attempts {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.webhook-attempt {
+  min-width: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.webhook-attempt:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.webhook-attempt-head {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.webhook-attempt .notice-warning {
+  margin-top: 8px;
+}
+
+/* ---- Package refunds ---- */
+
+.refund-notices {
+  display: grid;
+  gap: 10px;
+}
+
+.refund-notices:empty {
+  display: none;
+}
+
+.refund-notices + .refund-action-stack {
+  margin-top: 14px;
+}
+
+.refund-notices .notice {
+  margin: 0;
+}
+
+.refund-action-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.refund-action {
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+.refund-action-stack > form:first-child.refund-action {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.refund-action-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.eligibility-summary {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.eligibility-reasons {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding-left: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.eligibility-reasons .is-ok {
+  color: var(--color-neutral-700);
+}
+
+.eligibility-reasons .is-blocking {
+  color: var(--color-danger);
+}

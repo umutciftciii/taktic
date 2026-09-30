@@ -135,3 +135,54 @@ export function formatLedgerSource(
 
   return { label, displayNumber, shortId, href, isSystem: false };
 }
+
+const signedCountFormat = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 });
+
+/**
+ * A credit movement with its direction spelled out: "+500", "-10", "0".
+ * Integers only — the ledger stores whole credits — grouped the Turkish way,
+ * so a large grant reads "+1.500" rather than "+1500".
+ */
+export function formatSignedCount(value: number): string {
+  const formatted = signedCountFormat.format(value);
+  return value > 0 ? `+${formatted}` : formatted;
+}
+
+/**
+ * A ledger row's "related record" link, kept only when this session may open
+ * the screen it points at; otherwise the same label is shown as text. An
+ * unrecognised destination is dropped rather than guessed at.
+ *
+ * (It lived twice, in the finance summary and in the ledger; ADMIN-DESIGN-001
+ * Faz 3D moved the one copy here unchanged.)
+ */
+export function gateLedgerSource(
+  source: LedgerSource,
+  can: (...names: string[]) => boolean,
+): LedgerSource {
+  if (!source.href) return source;
+  const permission = source.href.startsWith('/campaigns/')
+    ? 'CAMPAIGNS_READ'
+    : source.href.startsWith('/offers/')
+      ? 'OFFERS_READ'
+      : source.href.startsWith('/package-purchases/')
+        ? 'PACKAGE_PURCHASES_READ'
+        : null;
+  return permission && can(permission) ? source : { ...source, href: null };
+}
+
+/**
+ * A lira amount short enough to sit above a chart bar: "184 B ₺" (bin) from
+ * 18430000 kuruş. Whole thousands, rounded half up on the integer kuruş, so no
+ * fractional lira is ever produced; below a thousand lira it is the whole
+ * figure in lira. Only for a chart label — every other amount on the screen
+ * goes through `formatPrice`, and the chart carries that exact figure too.
+ */
+export function formatShortLira(amountMinor: number): string {
+  const thousandMinor = 100_000;
+  if (Math.abs(amountMinor) >= thousandMinor) {
+    const thousands = Math.round(amountMinor / thousandMinor);
+    return `${signedCountFormat.format(thousands)} B ₺`;
+  }
+  return `${signedCountFormat.format(Math.round(amountMinor / 100))} ₺`;
+}

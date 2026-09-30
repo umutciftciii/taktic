@@ -5,7 +5,11 @@ import { redirect } from 'next/navigation';
 import { apiFetch, PackagePurchase, PackagePurchaseStatus, readConflict } from '../../lib/api';
 
 export async function updatePackagePurchaseStatusAction(formData: FormData) {
-  const id = readFormString(formData, 'id');
+  // `purchaseId`, not `id`: a control named "id" shadows `form.id`, and React
+  // then tags the submitter's name/value with a `form` attribute naming no
+  // form — the chosen `status` never reached the API (ADMIN-DESIGN-001 Faz 3D,
+  // where the status became the pressed button's value).
+  const id = readFormString(formData, 'purchaseId');
   const status = readFormString(formData, 'status') as PackagePurchaseStatus;
   const adminNote = readOptionalFormString(formData, 'adminNote');
 
