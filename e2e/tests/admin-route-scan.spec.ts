@@ -129,6 +129,12 @@ const CONVERTED_ROUTES = [
   '/package-purchases/[id]',
   '/package-refunds',
   '/package-refunds/[id]',
+  '/campaigns',
+  '/campaigns/new',
+  '/campaigns/[id]',
+  '/promotion-eligibility',
+  '/promotion-eligibility/[eventId]',
+  '/operations-settings',
 ];
 
 const STATIC_ROUTES = [

@@ -78,7 +78,18 @@ test.describe('admin campaign operations desk', () => {
       await expect(page).not.toHaveURL(/ok=revoke/);
       expect((await prisma().campaignRedemption.findUniqueOrThrow({ where: { id: firstLot.redemption.id } })).status).toBe('GRANTED');
       await firstRow.getByTestId('campaign-revoke-reason').fill('E2E: sahte ödeme şüphesi');
+      // With a reason the revoke asks first (ADMIN-DESIGN-001 Faz 3E): the
+      // dialog names the credit and the threshold; "Vazgeç" moves nothing.
       await firstRow.getByTestId('campaign-revoke').click();
+      const firstDialog = firstRow.getByTestId('campaign-revoke-dialog');
+      await expect(firstDialog).toBeVisible();
+      await expect(firstDialog).toContainText(first.businessName);
+      await expect(firstDialog).toContainText('eşiğini aşarsa kampanya kendini duraklatır');
+      await firstDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(firstDialog).toBeHidden();
+      expect((await prisma().campaignRedemption.findUniqueOrThrow({ where: { id: firstLot.redemption.id } })).status).toBe('GRANTED');
+      await firstRow.getByTestId('campaign-revoke').click();
+      await firstDialog.getByRole('button', { name: 'Evet, geri al' }).click();
       await expect(page).toHaveURL(/ok=revoke/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-ok')).toContainText('geri alındı');
@@ -109,6 +120,7 @@ test.describe('admin campaign operations desk', () => {
       const secondRow = page.locator(`[data-testid="campaign-redemption-row"][data-redemption="${secondLot.redemption.id}"]`);
       await secondRow.getByTestId('campaign-revoke-reason').fill('E2E: ikinci geri alma');
       await secondRow.getByTestId('campaign-revoke').click();
+      await secondRow.getByTestId('campaign-revoke-dialog').getByRole('button', { name: 'Evet, geri al' }).click();
       await expect(page).toHaveURL(/ok=revoke/);
       await assertNoErrorScreen(page);
       await expect(secondRow).toHaveAttribute('data-status', 'REVOKED');

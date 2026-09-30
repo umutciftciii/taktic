@@ -194,7 +194,7 @@ test.describe('promotion eligibility queue', () => {
       const row = reviewer.page.locator(`[data-testid="eligibility-row"][data-event="${event.id}"]`);
       await expect(row).toContainText(provider.businessName);
       await expect(row).toContainText('İşletme kaydı beyan edilmedi');
-      await row.getByRole('link', { name: 'Detay' }).click();
+      await row.getByRole('link', { name: /^Aç:/ }).click();
       await expect(reviewer.page).toHaveURL(new RegExp(`/promotion-eligibility/${event.id}`));
       await expect(reviewer.page.getByTestId('eligibility-signals')).toContainText('İşletme kaydı beyan edilmedi');
       // The candidate campaign is named, but not linked: this role cannot open
@@ -220,7 +220,17 @@ test.describe('promotion eligibility queue', () => {
       expect(await prisma().promotionEligibilityReview.count({ where: { triggerEventId: event.id } })).toBe(0);
 
       await reviewer.page.getByTestId('eligibility-reason').fill('E2E: belge sunulmadı, giriş promosyonu verilmesin.');
+      // The decision is final and asks first (ADMIN-DESIGN-001 Faz 3E); "Vazgeç" records nothing.
       await reviewer.page.getByTestId('eligibility-submit').click();
+      const decisionDialog = reviewer.page.getByTestId('eligibility-submit-dialog');
+      await expect(decisionDialog).toBeVisible();
+      await expect(decisionDialog).toContainText('giriş promosyonu verilmez');
+      await expect(decisionDialog).toContainText('kesindir');
+      await decisionDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(decisionDialog).toBeHidden();
+      expect(await prisma().promotionEligibilityReview.count({ where: { triggerEventId: event.id } })).toBe(0);
+      await reviewer.page.getByTestId('eligibility-submit').click();
+      await decisionDialog.getByRole('button', { name: 'Evet, uygun değil olarak kaydet' }).click();
       await expect(reviewer.page.getByTestId('eligibility-done')).toBeVisible();
       await expect(reviewer.page.getByTestId('eligibility-decision')).toContainText('Uygun değil');
       await expect(reviewer.page.getByTestId('eligibility-form')).toHaveCount(0);

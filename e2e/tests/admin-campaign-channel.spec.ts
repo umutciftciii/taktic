@@ -222,6 +222,11 @@ test.describe('admin campaign channel', () => {
       await expect(page.getByTestId('campaign-close-draft')).toHaveText('Taslağı kapat');
       await page.getByTestId('campaign-close-draft-reason').fill('E2E: mobil taslak kullanılmayacak');
       await page.getByTestId('campaign-close-draft').click();
+      // Closing a draft is irreversible and asks first (ADMIN-DESIGN-001 Faz 3E).
+      const closeDialog = page.getByTestId('campaign-close-draft-dialog');
+      await expect(closeDialog).toBeVisible();
+      await expect(closeDialog).toContainText('Sona erdi');
+      await closeDialog.getByRole('button', { name: 'Evet, taslağı kapat' }).click();
       await expect(page).toHaveURL(/ok=close/);
       await assertNoErrorScreen(page);
 

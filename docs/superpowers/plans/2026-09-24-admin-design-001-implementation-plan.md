@@ -452,6 +452,56 @@ Görüntüler `e2e/.artifacts/faz-3d-screens/` altında (1440×1617 ve 320). Ger
 - **Test:** `admin-campaign-drafts`, `admin-campaign-lifecycle`, `admin-campaign-operations`, `admin-campaign-engine-toggle`, `admin-campaign-channel`, `scheduler-settings`, `request-auto-publish`.
 - **Geri dönüş riski:** Yüksek (motor anahtarı ve kampanya yaşam döngüsü).
 
+#### Faz 3E gerçekleşen (2026-09-30)
+
+- **Kapsam:** `/campaigns`, `/campaigns/new`, `/campaigns/[id]`, `/promotion-eligibility`, `/promotion-eligibility/[eventId]`, `/operations-settings` (görevdeki `/operations/settings`; koddaki route budur). Taban `main@a4a288e4`, DB 82 migration.
+- **Kapılar (menü · route · bölüm · aksiyon), `route-permission-map.ts` ile karşılaştırıldı; hiçbiri değişmedi:**
+
+  | Route | Route izni | Bölüm / bağlantı kapıları | Yazma |
+  | --- | --- | --- | --- |
+  | `/campaigns` | `CAMPAIGNS_READ` | "Ayarlara git" ve Operasyon Ayarları bağlantısı `OPERATIONS_SETTINGS_READ` | "Yeni kampanya yaz" `CAMPAIGNS_WRITE` |
+  | `/campaigns/new` | `CAMPAIGNS_WRITE` + `CAMPAIGNS_READ` | aynı | Doğrula `CAMPAIGNS_READ`, kaydet `CAMPAIGNS_WRITE` (API) |
+  | `/campaigns/[id]` | `CAMPAIGNS_READ` | İşletme `PROVIDERS_READ_DETAIL`; kredi hareketleri `FINANCE_LEDGER_READ`; ayarlar `OPERATIONS_SETTINGS_READ` | Revizyon `CAMPAIGNS_WRITE` (ENDED değilken); etkinleştir/duraklat/devam/sonlandır/taslağı kapat `CAMPAIGNS_LIFECYCLE`; geri al `CAMPAIGN_REDEMPTION_REVOKE` (yalnız GRANTED); kuyruğa al `CAMPAIGN_EVENT_RETRY` (yalnız `retryable` ve motor açık) |
+  | `/promotion-eligibility` | `PROMOTION_ELIGIBILITY_REVIEW` | İşletme `PROVIDERS_READ_DETAIL` | — |
+  | `/promotion-eligibility/[eventId]` | aynı | İşletme `PROVIDERS_READ_DETAIL`; aday kampanya `CAMPAIGNS_READ` | Karar: aynı izin, yalnız `review` yok ve olay `HELD_FOR_REVIEW` iken |
+  | `/operations-settings` | `OPERATIONS_SETTINGS_READ` | Talep bildirimleri `REQUEST_REPORTS_READ`; değerlendirme bildirimleri `PROVIDER_REVIEWS_READ`; kampanyalar `CAMPAIGNS_READ` | İade süresi `OPERATIONS_SETTINGS_WRITE`; otomatik yayın `MARKETPLACE_PUBLISH_WRITE`; değerlendirmeler `PROVIDER_REVIEWS_SETTING_WRITE`; motor `CAMPAIGN_ENGINE_TOGGLE`; işler `SCHEDULERS_WRITE` |
+
+- **Onay diyalogları ve gerçek etkileri (API koduna göre; Vazgeç/Esc/× yazmaz, E2E veritabanında doğrular):**
+  - **Sonlandır** (`CampaignsService.end`, ACTIVE/PAUSED → ENDED): kalıcı; yeni hak ediş üretilmez; verilmiş lotlar etkilenmez; gerekçe denetim satırına. Motor ya da kanal okunmaz.
+  - **Taslağı kapat** (aynı `end` rotası, DRAFT → ENDED): hiç etkinleşmeden kalıcı kapanış; hak ediş, promosyon kredisi, olay oluşmaz; `fromStatus: DRAFT` denetim satırı.
+  - **Hak edişi geri al** (`revokeRedemption` → `CampaignRevokeService`): lotun kullanılmamış kredisi bakiyeden düşülür, harcanan kısım kayda geçer, borç oluşmaz; UTC gün sayacı artar, çalışan sürümün `maxRevokesPerDay` eşiği aşılırsa kampanya kendini duraklatır (AUTO_PAUSED). E-posta yok.
+  - **Uygunluk kararı** (`PromotionEligibilityReviewsService.decide`, serializable): tek seferlik ve kesin; ELIGIBLE olayı bir kez PENDING'e alır (kredi vermez, limitler ve motor anahtarı yine geçerli), INELIGIBLE olayı EVALUATED yapar ve `PROMOTION_INELIGIBLE` günlük satırı yazar. İkinci/eşzamanlı karar 409. E-posta yok.
+  - **Kampanya motoru aç/kapat**: onay kutusu diyaloğa taşındı. Server action'ın `confirm=yes` kuralı değişmedi; alan yalnız hydration sonrası form'a eklenir, böylece JS'den önceki bir tıklama (eskiden işaretsiz kutu) yine reddedilir.
+  - **Zamanlanmış işi açma**: iş sıradaki cron çalışmasında devreye girer; iki para işi (`entitlement-renewal`, `unviewed-offer-refund`) diyalogda para/kredi hareketini yazar. Kapatma onaysız kaldı (yalnız sıradaki çalışmayı durdurur).
+  - Onaysız kalanlar: etkinleştir / duraklat / devam ettir (geri dönüşü olan geçişler), kuyruğa al, otomatik yayın ve değerlendirme anahtarları (yalnız sonraki talepleri/görünürlüğü etkiler, iki yönde de geri alınır), iade süresi kaydı (yalnız yeni teklifler).
+- **ConfirmDialog + `name="id"` denetimi (PR #125 bulgusu):**
+  - Kök neden React 19.2'de doğrulandı (`createFormDataWithSubmitter`: `form.id && temp.setAttribute("form", form.id)`).
+  - 3E formlarının hiçbirinde `id` adlı alan yok (`campaignId`, `targetId`, `eventId`, `job`, `enabled`). Tüm admin'de `id` alanı taşıyan formlarda adlı submit düğmesi ya da `name/value`'lu ConfirmDialog kalmadı.
+  - Yine de ortak bileşen güvenli hale getirildi: `ConfirmDialog.confirm()` gölgelenmiş `form.id`'yi (`shadowedFormId`) algılarsa düğmenin name/value'sunu yalnız o senkron `requestSubmit` süresince gizli bir alanla taşır, sonra kaldırır. Gölgelenme yoksa davranış birebir aynı.
+  - Regresyon: `admin-form-components` harness'ine `/confirm-shadowed` ekranı; düzeltme kapatıldığında test düştü, açıkken Chromium + WebKit geçti. Birim testi 3E dosyalarında `name="id"` olmadığını kaynak düzeyinde de sabitler.
+- **Ortak bileşen eki:** `ConfirmDialog`'a isteğe bağlı `switchChecked` (tetik tasarımın anahtarı olarak, `role="switch"`, `aria-checked`, `aria-haspopup` yok). Verilmediğinde tetik değişmedi.
+- **Operasyon ayarları (K5):** yalnız gerçek ayarlar: iade süresi, otomatik yayın, değerlendirmeler, kampanya motoru ve API'nin listelediği 6 iş. Her biri ad + durum rozeti + açıklama + "ne olur" (native `<details>`) + kendi kontrolü. Tek kaydet çubuğu yok; her satır kendi formu, izni ve denetim satırıyla kaydolur. 5 denetim tablosu "Neler oldu" altında, test kimlikleri ve boş cümleleriyle korunur.
+- **Kampanyalar:** "Bir kampanya üç sorudan oluşur" statik kartı; tanım formu aynı üç başlık altında gruplandı. `TRIGGER_LABELS` ve veri anahtarları, form alan adları ve gönderilen tanım değişmedi.
+- **API etkisi:** yok. Prisma, migration, `.env`, compose değişmedi.
+- **StickyActionBar kullanılmadı:** ayarlar ayar başına kaydolur (K5); kampanya formu kendi Doğrula/Kaydet düğmelerini taşır.
+- **Yeni bulgular (bu PR'a genişletilmedi):**
+  - `GET /admin/promotion-eligibility/holds` `take: 100` ile keser, sayfa/cursor ve toplam döndürmez. 100'den fazla bekleyen olduğunda eski ekran da yeni ekran da fazlasını gösteremez. Yeni ekran listenin 100'de kesildiğini açıkça yazar; sayfalama API işi.
+  - `GET /admin/campaigns` yalnız `nextCursor` döndürür (toplam ve önceki cursor yok); liste "bu sayfada N kampanya" ve "İlk sayfa / Sonraki sayfa" ile sınırlı kalır.
+- **Test:** yeni `e2e/tests/admin-campaign-settings-screens.spec.ts` (Chromium + WebKit) ve `apps/admin/test/campaign-settings-screens.spec.tsx`; güncellenen `admin-campaign-lifecycle` (sonlandır diyaloğu, Vazgeç yazmaz), `admin-campaign-channel` (taslağı kapat diyaloğu), `admin-campaign-operations` (geri al diyaloğu, Vazgeç yazmaz), `admin-campaign-engine-toggle` (diyalog iki yönde), `scheduler-settings` (iş açma diyaloğu, 320px), `provider-business-registration` (karar diyaloğu, Vazgeç yazmaz), `admin-form-components` (`/confirm-shadowed`), `admin-route-scan` (`CONVERTED_ROUTES` + 6 route).
+
+#### Faz 3E görsel karşılaştırma (paket 2, 2026-09-30)
+
+Görüntüler `e2e/.artifacts/faz-3e-screens/` altında (1440×1617 ve 320). Gerekçe kısaltmaları 3A ile aynı (D = backend yok, K7 = bilgi korunur, İzin).
+
+| Görüntü / prototip | Uygulandı | Korunan (gerçek veri) | Uygulanmayan (gerekçe) |
+| --- | --- | --- | --- |
+| `45-kampanyalar` / `campaigns` | Başlık + ⓘ, "Yeni kampanya yaz"; motor bandı + "Ayarlara git"; "Bir kampanya üç sorudan oluşur" (metin motorun gerçek davranışına göre yazıldı); tablo: Kampanya · Kimi kapsıyor · Ne veriyor · Hak ediş · Sürüm · Son değişiklik · Durum · Aç | K7: anahtar, tetikleyici, kanal, kredi/gün, çalışan ve son sürüm, kuyruk satırı | Tasarım örnekleri "30 gündür teklif vermeyen", "sınır dolunca kendiliğinden durur" (motorda böyle koşul/davranış yok); "3 kampanya" toplamı (D: cursor listesi toplam taşımaz) |
+| — `/campaigns/new` (şablon) | Geri bağlantı, başlık + ⓘ (eski yan kart), motor bandı, form üç soru başlığıyla | 8 alan grubu, alan hataları, "Kaydetmek etkinleştirmez" | — |
+| — `/campaigns/[id]` (şablon) | Özet kartı + şerit (çalışan/son sürüm, kanal, hak ediş, verilen kredi, son değişiklik); sürüm/hak ediş/kuyruk tabloları; "Neler oldu" zaman çizgisi | Çalışan kural, bekleyen revizyon, 13 sütunlu sürüm geçmişi, revizyon formu, yaşam döngüsü paneli, "bu ekranda yapılamayanlar" | — |
+| — `/promotion-eligibility` (tasarımda yok) | Liste şablonu; Bekleyen / Karar verilen kayıtlı görünüm; "Aç" | 6 sütun | Karar verilenler sayacı (D: bu istek yalnız seçili görünümü getirir) |
+| — `/promotion-eligibility/[eventId]` (tasarımda yok) | Özet kartı (karar rozeti) + şerit; olay, değişmez gerekçeler, karar | Karar formu, gerekçe kuralları | — |
+| `44-operasyon-ayarlari` / `settings` | Başlık + açıklama; gruplar (Talep akışı · Teklif kredisi · Değerlendirme ve kampanyalar · Zamanlanmış İşler · Neler oldu); satır = ad + durum rozeti + açıklama + "ne olur" + kontrol | İade süresi (min/max/varsayılan, hizmet verene gösterilen metin), iş cron'u ve son çalışma, para işi uyarısı, 5 denetim tablosu | K5: "talep 14 gün", "hatırlatma 7. gün", "teklif 3 kredi", "en fazla 5 teklif", "aynı işletme tekrar teklif" (ayar değil); "Yorumlar yayından önce okunsun" (gerçek anahtarın anlamı farklı, gerçek metinle çizildi); tek "Değişiklikleri kaydet" çubuğu ve "Son değişiklik" satırı (ayar başına kayıt + ayrı izin) |
+
 ### 3F — Katalog (#38–#43)
 
 - **Tasarım karşılıkları:** `list:categories` (`35`), `list:creditPackages` (`37`). Formlar şablonla kurulur.

@@ -47,22 +47,30 @@ test.describe('campaign engine switch', () => {
       const card = page.locator('#kampanya-motoru');
       await expect(card).toBeVisible();
       await expect(card.getByTestId('campaign-engine-state')).toHaveText('Kapalı');
-      await expect(card.getByTestId('campaign-engine-audit-empty')).toBeVisible();
+      await expect(page.getByTestId('campaign-engine-audit-empty')).toBeVisible();
+      await expect(card.getByTestId('campaign-engine-submit')).toHaveAttribute('aria-checked', 'false');
 
-      // Without the confirmation the request never leaves the form.
+      // Without the confirmation the request never leaves the form: the
+      // switch opens the dialog (ADMIN-DESIGN-001 Faz 3E), and "Vazgeç" closes it.
+      const dialog = card.getByTestId('campaign-engine-submit-dialog');
       await card.getByTestId('campaign-engine-submit').click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toContainText('geriye dönük hak ediş üretilmez');
+      await dialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(dialog).toBeHidden();
       await expect(card.getByTestId('campaign-engine-state')).toHaveText('Kapalı');
       expect(await storedFlag()).not.toBe(true);
       expect(await prisma().operationsSettingsChange.count({ where: { setting: 'campaignEngineEnabled' } })).toBe(0);
 
       // Confirmed: on, with the operator on the trail.
-      await card.getByTestId('campaign-engine-confirm').check();
       await card.getByTestId('campaign-engine-submit').click();
+      await dialog.getByRole('button', { name: 'Evet, motoru aç' }).click();
       await expect(page).toHaveURL(/ok=campaign-engine-on/);
       await assertNoErrorScreen(page);
       await expect(card.getByTestId('campaign-engine-state')).toHaveText('Açık');
       expect(await storedFlag()).toBe(true);
-      const audit = card.getByTestId('campaign-engine-audit');
+      await expect(card.getByTestId('campaign-engine-submit')).toHaveAttribute('aria-checked', 'true');
+      const audit = page.getByTestId('campaign-engine-audit');
       await expect(audit).toContainText('Açık');
       await expect(audit).toContainText(adminAccount.name ?? 'Yönetici');
       expect(await prisma().operationsSettingsChange.count({ where: { setting: 'campaignEngineEnabled' } })).toBe(1);
@@ -74,8 +82,9 @@ test.describe('campaign engine switch', () => {
 
       // Off again, confirmed: a second trail line, nothing else.
       await admin.gotoAdmin('/operations-settings');
-      await card.getByTestId('campaign-engine-confirm').check();
       await card.getByTestId('campaign-engine-submit').click();
+      await expect(dialog).toContainText('geri alınması aynen sürer');
+      await dialog.getByRole('button', { name: 'Evet, motoru kapat' }).click();
       await expect(page).toHaveURL(/ok=campaign-engine-off/);
       await assertNoErrorScreen(page);
       await expect(card.getByTestId('campaign-engine-state')).toHaveText('Kapalı');
