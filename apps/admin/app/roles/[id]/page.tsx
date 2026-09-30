@@ -205,7 +205,7 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
                       <span className={userRoleBadgeClass(assignment.user.role)}>{userRoleLabel(assignment.user.role)}</span>
                     </td>
                     <td>
-                      <span className={assignment.user.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+                      <span className={assignment.user.isActive ? 'badge badge-good' : 'badge badge-bad'}>
                         {assignment.user.isActive ? 'Aktif' : 'Pasif'}
                       </span>
                     </td>

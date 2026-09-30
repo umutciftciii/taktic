@@ -953,7 +953,7 @@ function StatusCard({
             {canRemove ? (
               <ConfirmDialog
                 triggerLabel="Talebi reddet"
-                triggerClassName="btn btn-danger btn-sm"
+                triggerClassName="btn btn-destructive btn-sm"
                 title="Talep reddedilsin mi?"
                 consequence={
                   <>
@@ -1459,7 +1459,7 @@ function ReportDecisions({
             </p>
             <ConfirmDialog
               triggerLabel="Talebi kaldır"
-              triggerClassName="btn btn-danger btn-sm"
+              triggerClassName="btn btn-destructive btn-sm"
               title="Talep kaldırılsın mı?"
               consequence={
                 <>

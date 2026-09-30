@@ -111,6 +111,9 @@ function statusTone(status: OfferStatus): SummaryItem['tone'] {
   switch (status) {
     case 'ACCEPTED':
       return 'success';
+    // The same tone as the status badge above it (`statusBadgeClass`): an
+    // offer still waiting on the customer is one thing on this screen.
+    case 'SUBMITTED':
     case 'SHORTLISTED':
     case 'VIEWED':
       return 'warning';
@@ -640,7 +643,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                       <div className="detail-form-actions">
                         <ConfirmDialog
                           triggerLabel={`${offer.creditCost} krediyi iade et`}
-                          triggerClassName="btn btn-danger"
+                          triggerClassName="btn btn-destructive"
                           title="Kredi iade edilsin mi?"
                           consequence={
                             <>

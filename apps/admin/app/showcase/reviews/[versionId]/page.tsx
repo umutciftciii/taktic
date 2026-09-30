@@ -1,9 +1,8 @@
 import { serviceAreaLabel } from '@taktic/shared';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import {
-  ApiError,
   apiFetch,
+  fetchOrNotFound,
   formatDateTime,
   formatPrice,
   requireAdmin,
@@ -62,17 +61,10 @@ export default async function ShowcaseReviewPage({
   const { versionId } = await params;
   const { error, approved, rejected } = await searchParams;
 
-  let version: ShowcaseVersionDetail;
-  try {
-    version = await apiFetch<ShowcaseVersionDetail>(
-      `/admin/showcase/versions/${encodeURIComponent(versionId)}`,
-    );
-  } catch (caught) {
-    if (caught instanceof ApiError && caught.status === 404) {
-      notFound();
-    }
-    throw caught;
-  }
+  // Unknown or malformed id: the 404 screen, as on every other detail.
+  const version = await fetchOrNotFound(() =>
+    apiFetch<ShowcaseVersionDetail>(`/admin/showcase/versions/${encodeURIComponent(versionId)}`),
+  );
 
   const card = version.card;
   const live = card.liveVersion;

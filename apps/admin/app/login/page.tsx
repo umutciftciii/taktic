@@ -31,7 +31,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </div>
         </div>
         {error ? (
-          <div className="error-message">Giriş başarısız. E-posta ve şifrenizi kontrol edin.</div>
+          <div className="error-message" role="alert">
+            Giriş başarısız. E-posta ve şifrenizi kontrol edin.
+          </div>
         ) : null}
         {sessionEnded && !error ? (
           <div className="admin-session-notice" role="status" data-testid="session-expired-notice">

@@ -234,6 +234,7 @@ function IssuedLink({ url, expiresAt }: { url: string; expiresAt: string }) {
       </p>
       <input
         className="provider-invite-url"
+        aria-label="Davet bağlantısı"
         data-testid="provider-invite-url"
         onFocus={(event) => event.currentTarget.select()}
         readOnly

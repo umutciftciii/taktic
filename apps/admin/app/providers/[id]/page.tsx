@@ -248,6 +248,12 @@ export default async function ProviderDetailPage({
   const canReadCatalog = can('CATALOG_READ');
   const canReadNotifications = can('NOTIFICATION_LOGS_READ');
   const canReadRequests = can('REQUESTS_READ');
+  // Adding a category is a pick from the catalogue, and the catalogue is
+  // CATALOG_READ's to read. Without it the list comes back empty and the card
+  // used to say "no other category can be bound" — a false statement behind
+  // a control that could never do anything (Faz 4). Removing a bond needs no
+  // catalogue and stays on the write permission alone.
+  const canAddCategories = canWriteCategories && canReadCatalog;
 
   const tabKeys: TabKey[] = [
     '',
@@ -263,7 +269,7 @@ export default async function ProviderDetailPage({
       ? apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`)
       : Promise.resolve(null),
     // Only the "add a category" list reads the catalogue.
-    canReadBindings && canWriteCategories && activeTab === '' ? listCatalogueForFilter() : Promise.resolve([]),
+    canReadBindings && canAddCategories && activeTab === '' ? listCatalogueForFilter() : Promise.resolve([]),
     // The operator's own route (PROVIDER_REVIEWS_READ), not the provider
     // panel's: that one is ownership-guarded. A failure hides the reviews
     // rather than the screen — they are context here, not the subject.
@@ -621,7 +627,7 @@ export default async function ProviderDetailPage({
                   </p>
                 ) : null}
 
-                {canWriteCategories ? (
+                {canAddCategories ? (
                   <>
                     <form className="admin-toolbar" method="get" action={path} style={{ marginTop: 16 }}>
                       <div className="admin-toolbar-field admin-toolbar-search">

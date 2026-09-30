@@ -14,12 +14,12 @@ import { SectionCard } from '../../components/section-card';
  * roles, not the browser.
  */
 export const metadata = {
-  title: 'Yetkiniz yok · TakTic Admin',
+  title: 'Yetkiniz yok · TakTick Yönetim',
 };
 
 export default function ForbiddenPage() {
   return (
-    <>
+    <main className="forbidden-page">
       <PageHeader
         title="Bu sayfa için yetkiniz yok"
         subtitle="Hesabınız yönetim paneline erişebiliyor, ancak bu bölüm atanmış rollerinizin kapsamı dışında."
@@ -32,7 +32,7 @@ export default function ForbiddenPage() {
           gerekmez.
         </p>
 
-        <p style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+        <p className="inline-actions forbidden-actions">
           <Link className="btn btn-primary btn-sm" href="/">
             Panele dön
           </Link>
@@ -41,6 +41,6 @@ export default function ForbiddenPage() {
           </Link>
         </p>
       </SectionCard>
-    </>
+    </main>
   );
 }

@@ -7,7 +7,7 @@ import { filterNavMenu, type NavMenu } from '../lib/nav';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'TakTic Admin',
+  title: 'TakTick Yönetim',
   description: 'TakTic yönetim paneli',
 };
 

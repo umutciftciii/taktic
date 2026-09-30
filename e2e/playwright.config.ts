@@ -418,6 +418,9 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
  *                             requestSubmit with a submitter) and
  *                             StickyActionBar (beforeunload, popstate before
  *                             the router, React's form reset)
+ *   admin-accessibility       the Faz 4 audit: skip link, the drawer's inert
+ *                             page, arrow keys in the in-page tablists, and a
+ *                             URL window's focus hand-back — all engine business
  *
  * Set E2E_WEBKIT=1 (and install the browser with `pnpm e2e:install:webkit`) to
  * add it. Unset, the run is exactly the Chromium suite it was before, which is
@@ -433,7 +436,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(login-screen|stale-auth-forms|auth-session-cookie|admin-shell|admin-dashboard-metrics|admin-route-scan|admin-notifications-list|admin-requests-offers|admin-people-support-screens|admin-finance-package-screens|admin-form-components|admin-rbac-permissions|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|admin-campaign-settings-screens|admin-catalog-screens|admin-system-screens|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|showcase-[a-z-]+)\.spec\.ts/,
+        /(login-screen|stale-auth-forms|auth-session-cookie|admin-shell|admin-accessibility|admin-dashboard-metrics|admin-route-scan|admin-notifications-list|admin-requests-offers|admin-people-support-screens|admin-finance-package-screens|admin-form-components|admin-rbac-permissions|provider-claim|responsive-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|admin-campaign-settings-screens|admin-catalog-screens|admin-system-screens|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

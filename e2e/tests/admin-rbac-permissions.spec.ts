@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { Actor } from '../src/actors';
+import { expect, test, type Page } from '@playwright/test';
+import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createStaffAdmin, prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
 
@@ -135,4 +135,130 @@ test.describe('admin RBAC', () => {
       await admin.close();
     }
   });
+});
+
+/**
+ * ADMIN-DESIGN-001 Faz 4 — the matrix, one read permission at a time.
+ *
+ * Written from the menu's side, independently of `lib/nav.ts`, so a drift in
+ * either shows up as a disagreement: for every read permission a sidebar row
+ * asks for, a staff account holding that permission alone
+ * - lands on its first row from `/`, not on /yetkisiz;
+ * - is given exactly the rows that permission opens, and nothing else — no
+ *   other group, no dashboard row, no root row;
+ * - opens every one of them (a row that lands on /yetkisiz is the drift this
+ *   menu exists to prevent);
+ * - is shown no write control there: no server-action form, no POST form
+ *   (sign-out excepted) — a read permission renders a read screen;
+ * - and is refused a screen of another area with /yetkisiz.
+ */
+const READ_MATRIX: Array<{ permission: string; rows: string[]; refused: string; decides?: true }> = [
+  { permission: 'DASHBOARD_READ', rows: ['/'], refused: '/requests' },
+  { permission: 'REQUESTS_READ', rows: ['/requests'], refused: '/requests/reports' },
+  { permission: 'REQUEST_REPORTS_READ', rows: ['/requests/reports'], refused: '/requests' },
+  { permission: 'OFFERS_READ', rows: ['/offers'], refused: '/requests' },
+  { permission: 'PROVIDERS_READ', rows: ['/providers'], refused: '/customers' },
+  { permission: 'CUSTOMERS_READ', rows: ['/customers'], refused: '/providers' },
+  { permission: 'SUPPORT_READ', rows: ['/support'], refused: '/customers' },
+  { permission: 'FINANCE_READ', rows: ['/finance', '/finance/providers'], refused: '/finance/credit-ledger' },
+  {
+    permission: 'FINANCE_LEDGER_READ',
+    rows: ['/finance/credit-ledger', '/finance/manual-adjustments'],
+    refused: '/finance',
+  },
+  { permission: 'PACKAGE_PURCHASES_READ', rows: ['/package-purchases'], refused: '/package-refunds' },
+  { permission: 'PACKAGE_REFUND_READ', rows: ['/package-refunds'], refused: '/package-purchases' },
+  { permission: 'OFFER_REFUND_SCAN_READ', rows: ['/refund-scan'], refused: '/offers' },
+  { permission: 'SHOWCASE_REVIEW_READ', rows: ['/showcase/reviews'], refused: '/showcase/placements' },
+  { permission: 'SHOWCASE_PLACEMENTS_READ', rows: ['/showcase/placements'], refused: '/showcase/reviews' },
+  { permission: 'SHOWCASE_LEADS_READ', rows: ['/showcase/leads'], refused: '/showcase/cards' },
+  { permission: 'PROVIDER_REVIEWS_READ', rows: ['/provider-reviews/reports'], refused: '/showcase/reviews' },
+  { permission: 'SHOWCASE_CARDS_READ', rows: ['/showcase/cards'], refused: '/showcase/leads' },
+  {
+    permission: 'SHOWCASE_TERMS_ACCEPTANCES_READ',
+    rows: ['/showcase/price-terms'],
+    refused: '/showcase/packages',
+  },
+  { permission: 'CATALOG_READ', rows: ['/categories'], refused: '/credit-packages' },
+  { permission: 'SHOWCASE_PACKAGES_READ', rows: ['/showcase/packages'], refused: '/categories' },
+  { permission: 'CREDIT_PACKAGES_READ', rows: ['/credit-packages'], refused: '/showcase/packages' },
+  { permission: 'OPERATIONS_SETTINGS_READ', rows: ['/operations-settings'], refused: '/campaigns' },
+  { permission: 'CAMPAIGNS_READ', rows: ['/campaigns'], refused: '/promotion-eligibility' },
+  // The one row whose permission is a decision, not a read: its queue is where
+  // the decisions are taken, so its forms are expected (and gated by it).
+  {
+    permission: 'PROMOTION_ELIGIBILITY_REVIEW',
+    rows: ['/promotion-eligibility'],
+    refused: '/campaigns',
+    decides: true,
+  },
+  { permission: 'NOTIFICATION_LOGS_READ', rows: ['/notifications'], refused: '/operations-settings' },
+  { permission: 'ADMIN_USERS_READ', rows: ['/users'], refused: '/company-settings' },
+  { permission: 'COMPANY_SETTINGS_READ', rows: ['/company-settings'], refused: '/users' },
+];
+
+/** POST forms and server-action forms on the page, the sign-out form aside. */
+async function writeControls(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const found: string[] = [];
+    for (const form of Array.from(document.querySelectorAll('form'))) {
+      if (form.getAttribute('action') === '/logout') continue;
+      const method = (form.getAttribute('method') ?? 'get').toLowerCase();
+      const serverAction = form.querySelector('input[name^="$ACTION"]') !== null;
+      if (method === 'post' || serverAction) {
+        const label = form.getAttribute('aria-label') ?? form.getAttribute('data-testid') ?? form.className;
+        found.push(`form(${label})`);
+      }
+    }
+    for (const button of Array.from(document.querySelectorAll('button[formaction]'))) {
+      found.push(`button[formaction](${button.textContent?.trim() ?? ''})`);
+    }
+    return found;
+  });
+}
+
+test.describe('admin RBAC matrix (ADMIN-DESIGN-001 Faz 4)', () => {
+  for (const { permission, rows, refused, decides } of READ_MATRIX) {
+    test(`${permission} alone: its rows, nothing else, and no write control`, async ({ browser }) => {
+      const staff = await createStaffAdmin([permission]);
+      const admin = await Actor.open(browser, 'staff', primaryRuntime);
+
+      try {
+        await admin.loginToAdmin(staff.email, staff.password);
+        const [first] = rows as [string, ...string[]];
+        // `/` — where signing in, the brand mark and "Panele dön" lead — opens
+        // the dashboard for its reader and the first held row for anyone else,
+        // never /yetkisiz (which "Panele dön" used to loop back to).
+        await admin.gotoAdmin('/');
+        await expect(admin.page).toHaveURL((url) => url.pathname === first);
+        await assertNoErrorScreen(admin.page);
+
+        const sidebar = admin.page.locator('#admin-sidebar');
+        const hrefs = await sidebar
+          .locator('.admin-sidebar-link')
+          .evaluateAll((links) => links.map((link) => link.getAttribute('href') ?? ''));
+        expect(hrefs, `${permission}: sidebar rows`).toEqual(rows);
+        await expect(sidebar.getByRole('link', { name: 'Roller ve izinler' })).toHaveCount(0);
+        await expect(admin.page.getByTestId('admin-account-role')).toHaveText('Yetkili personel · 1 yetki');
+
+        for (const row of rows) {
+          await admin.gotoAdmin(row);
+          await expect(admin.page, row).not.toHaveURL(/\/(yetkisiz|login)(\?|$)/);
+          await assertNoErrorScreen(admin.page);
+          if (!decides) {
+            expect(await writeControls(admin.page), `${permission} on ${row}: write controls`).toEqual([]);
+          }
+        }
+
+        await admin.gotoAdmin(refused);
+        await expect(admin.page, refused).toHaveURL(/\/yetkisiz$/);
+        await expect(admin.page.getByRole('heading', { name: /yetkiniz yok/i })).toBeVisible();
+        // Root screens stay root whatever a role holds.
+        await admin.gotoAdmin('/roles');
+        await expect(admin.page).toHaveURL(/\/yetkisiz$/);
+      } finally {
+        await admin.close();
+      }
+    });
+  }
 });

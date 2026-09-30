@@ -370,7 +370,7 @@ export default async function ShowcasePlacementPage({
               <div className="form-actions form-grid-wide">
                 <ConfirmDialog
                   triggerLabel="Yerleşimi iptal et"
-                  triggerClassName="btn btn-danger"
+                  triggerClassName="btn btn-destructive"
                   title="Yerleşim iptal edilsin mi?"
                   consequence={CANCEL_CONSEQUENCE}
                   confirmLabel="Evet, kalıcı olarak iptal et"

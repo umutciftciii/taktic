@@ -5,6 +5,7 @@ import { ConfirmDialog } from '../../../../components/confirm-dialog';
 import { CREDIT_AMOUNT_MAX, creditAmountProblemMessage, parseCreditAmount } from '../../../../lib/credit-amount';
 import { formatCount } from '../../../../lib/pagination';
 import { submitCreditOperationAction } from './actions';
+import { handleTablistKeyDown } from '../../../../lib/tablist-keys';
 import {
   CREDIT_OPERATION_IDLE,
   type CreditOperationType as OperationType,
@@ -81,11 +82,17 @@ export function CreditOperationForm({
       <input type="hidden" name="operationType" value={operationType} />
 
       {canGrant && canDeduct ? (
-        <div className="credit-operation-tabs" role="tablist" aria-label="İşlem tipi">
+        <div
+          className="credit-operation-tabs"
+          role="tablist"
+          aria-label="İşlem tipi"
+          onKeyDown={(event) => handleTablistKeyDown(event, (index) => setOperationType(index === 0 ? 'GRANT' : 'DEDUCT'))}
+        >
           <button
             type="button"
             role="tab"
             aria-selected={!isDeduct}
+            tabIndex={isDeduct ? -1 : 0}
             className={`credit-operation-tab${!isDeduct ? ' is-active is-grant' : ''}`}
             onClick={() => setOperationType('GRANT')}
           >
@@ -95,6 +102,7 @@ export function CreditOperationForm({
             type="button"
             role="tab"
             aria-selected={isDeduct}
+            tabIndex={isDeduct ? 0 : -1}
             className={`credit-operation-tab${isDeduct ? ' is-active is-deduct' : ''}`}
             onClick={() => setOperationType('DEDUCT')}
           >

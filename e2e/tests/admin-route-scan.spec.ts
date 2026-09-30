@@ -14,6 +14,12 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { seedCustomerRequest } from '../src/request-fixtures';
+import { seedReview } from '../src/review-fixtures';
+import {
+  retireShowcasePlacements,
+  seedApprovedShowcaseCard,
+  seedLiveShowcasePlacement,
+} from '../src/showcase-fixtures';
 import { primaryRuntime, repoRoot } from '../src/runtime';
 
 /**
@@ -151,6 +157,8 @@ const CONVERTED_ROUTES = [
   '/users/[id]',
   '/roles',
   '/roles/[id]',
+  // Faz 4: the staff account list, the one list Faz 3G left on the old toolbar.
+  '/users',
 ];
 
 const STATIC_ROUTES = [
@@ -193,8 +201,14 @@ const STATIC_ROUTES = [
 async function detailTargets(): Promise<Target[]> {
   const db = prisma();
   const category = await createCategory(3);
-  const customer = await createCustomer('E2E Tarama Müşteri');
-  const provider = await createProvider({ categoryId: category.id, location: uniqueLocation(), credits: 5 });
+  // Faz 4: a name as long as a real one can get, with one unbreakable word in
+  // it, so the list, the detail header and the request screens are measured
+  // with text that has to wrap rather than with a short fixture name.
+  const customer = await createCustomer(
+    'E2E Tarama Müşteri Adı Soyadı Çok Uzun Bir Kayıt Mühendislikhizmetlerisanayiticaretlimitedşirketi',
+  );
+  const providerLocation = uniqueLocation();
+  const provider = await createProvider({ categoryId: category.id, location: providerLocation, credits: 5 });
   const request = await seedCustomerRequest({
     customerId: customer.id,
     categoryId: category.id,
@@ -220,17 +234,45 @@ async function detailTargets(): Promise<Target[]> {
     },
   });
   const staff = await createStaffAdmin(['DASHBOARD_READ']);
+
+  // Faz 4: three detail screens used to be skipped whenever this file ran
+  // before the vitrin and review specs had made a record. Each is cheap to
+  // make here, and none is left where another spec would see it: the card's
+  // run is retired at once (its screen opens an ended run just the same) and
+  // its package taken off sale, and the review is on this file's own provider.
+  const showcase = await seedApprovedShowcaseCard({
+    providerId: provider.id,
+    categoryId: category.id,
+    city: providerLocation.city,
+    district: providerLocation.district,
+    title: 'E2E Tarama Vitrin Kartı',
+  });
+  const run = await seedLiveShowcasePlacement({
+    providerId: provider.id,
+    cardId: showcase.card.id,
+    versionId: showcase.version.id,
+    categoryId: category.id,
+    city: providerLocation.city,
+    district: providerLocation.district,
+  });
+  await retireShowcasePlacements([run.placement.id]);
+  await db.showcasePackage.update({ where: { id: run.pkg.id }, data: { isActive: false } });
+  const review = await seedReview({
+    providerId: provider.id,
+    categoryId: category.id,
+    customerId: customer.id,
+    location: providerLocation,
+    rating: 4,
+    comment: 'E2E tarama: zamanında geldiler, iş temiz bitti.',
+  });
   const assignment = await db.adminRoleAssignment.findFirst({ where: { userId: staff.id }, select: { roleId: true } });
 
   // Whatever this database already holds, newest first where the table has a
   // creation time.
-  const [offer, purchase, refund, version, placement, review, campaign, hold, notification] = await Promise.all([
+  const [offer, purchase, refund, campaign, hold, notification] = await Promise.all([
     db.offer.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
     db.packagePurchase.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
     db.packageRefundRequest.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
-    db.showcaseCardVersion.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
-    db.showcasePlacement.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
-    db.providerReview.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
     db.campaign.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
     db.promotionEligibilityHold.findFirst({ select: { triggerEventId: true } }),
     db.notificationLog.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } }),
@@ -255,18 +297,36 @@ async function detailTargets(): Promise<Target[]> {
     existing('/offers/[id]', offer?.id),
     existing('/package-purchases/[id]', purchase?.id),
     existing('/package-refunds/[id]', refund?.id),
-    existing('/showcase/reviews/[versionId]', version?.id),
-    existing('/showcase/placements/[placementId]', placement?.id),
-    existing('/provider-reviews/[reviewId]', review?.id),
+    { route: '/showcase/reviews/[versionId]', path: `/showcase/reviews/${showcase.version.id}` },
+    { route: '/showcase/placements/[placementId]', path: `/showcase/placements/${run.placement.id}` },
+    { route: '/provider-reviews/[reviewId]', path: `/provider-reviews/${review.reviewId}` },
     existing('/campaigns/[id]', campaign?.id),
     existing('/promotion-eligibility/[eventId]', hold?.triggerEventId),
-    existing('/notifications/[id]', notification?.id),
+    // A log row is only ever written by a send; on a fresh database this file
+    // runs before anything has sent, so it writes a sent one of its own.
+    {
+      route: '/notifications/[id]',
+      path: `/notifications/${
+        notification?.id ??
+        (
+          await db.notificationLog.create({
+            data: {
+              channel: 'EMAIL',
+              template: 'e2e-route-scan',
+              maskedRecipient: 'e***@example.test',
+              status: 'SENT',
+            },
+            select: { id: true },
+          })
+        ).id
+      }`,
+    },
   ];
 }
 
 test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
-  test('all 53 signed-in screens render inside the shell at 1440px and 390px (and the converted screens at 320px)', async ({ browser }, testInfo) => {
-    test.setTimeout(600_000);
+  test('all 53 signed-in screens render inside the shell at 1440, 1024, 768 and 390px (and the converted screens at 320px)', async ({ browser }, testInfo) => {
+    test.setTimeout(1_200_000);
     const account = await createAdmin();
     const targets: Target[] = [...STATIC_ROUTES.map((route) => ({ route, path: route })), ...(await detailTargets())];
     expect(targets).toHaveLength(53);
@@ -290,8 +350,15 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
     // Every screen at the two widths Faz 1 set, and each screen a later slice
     // converted — the Faz 2 reference list, the six Faz 3A screens — at the
     // narrowest phone the panel supports.
+    //
+    // Faz 4 (the cross-screen audit) adds the two widths in between — a
+    // tablet in portrait and a small laptop — for every screen, because that
+    // is where the drawer gives way to the fixed sidebar and a two-column
+    // detail layout first has to fit next to it.
     const passes: Array<{ viewport: { width: number; height: number }; only?: string[] }> = [
       { viewport: { width: 1440, height: 900 } },
+      { viewport: { width: 1024, height: 768 } },
+      { viewport: { width: 768, height: 1024 } },
       { viewport: { width: 390, height: 844 } },
       { viewport: { width: 320, height: 740 }, only: CONVERTED_ROUTES },
     ];

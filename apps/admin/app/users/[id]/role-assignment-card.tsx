@@ -107,7 +107,7 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
                   <input type="hidden" name="roleId" value={assignment.role.id} />
                   <ConfirmDialog
                     triggerLabel="Geri al"
-                    triggerClassName="btn btn-danger btn-sm"
+                    triggerClassName="btn btn-destructive btn-sm"
                     title={`"${assignment.role.name}" bu hesaptan geri alınsın mı?`}
                     consequence={
                       <RevokeConsequence

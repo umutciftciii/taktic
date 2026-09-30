@@ -10,9 +10,40 @@ import {
   requireAdmin,
   USER_SORT_FIELDS,
 } from '../../lib/api';
+import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
+import { FilterBar, FilterField } from '../../components/filter-bar';
 import { PageHeader } from '../../components/page-header';
-import { SectionCard } from '../../components/section-card';
+import { Pagination } from '../../components/pagination';
+import { buildHref, type QueryParams } from '../../lib/list-query';
+import { formatCount } from '../../lib/pagination';
+
+/**
+ * Yönetici hesapları (#47), design `list:admins` (ADMIN-DESIGN-001 Faz 4).
+ *
+ * The one list Faz 3G left on the Faz 1 toolbar: it now reads through the
+ * shared filter bar, table and page footer like every other list. The query
+ * names, the API call and the columns are the ones it always had, so every
+ * bookmark opens the same view. Creating an account stays root-only
+ * (`POST /users`), so the header action is a super admin's alone.
+ */
+
+const PATH = '/users';
+
+const SCREEN_INFO =
+  'Panele giriş yapabilen personel hesapları. Durum pasif olan hesap giriş yapamaz; "Şifre yok" hesabın davet bağlantısıyla henüz şifre belirlemediğini gösterir. Bir hesabı açınca rolleri, oturumları ve hesap işlemleri görünür.';
+
+const COLUMNS: DataColumn[] = [
+  { key: 'user', label: 'Kullanıcı' },
+  { key: 'email', label: 'E-posta' },
+  { key: 'phone', label: 'Telefon' },
+  { key: 'status', label: 'Durum' },
+  { key: 'password', label: 'Şifre' },
+  { key: 'sessions', label: 'Aktif oturum', align: 'end' },
+  { key: 'lastLogin', label: 'Son giriş' },
+  { key: 'createdAt', label: 'Kayıt tarihi' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_SORT_BY: AdminUserSortField = 'createdAt';
@@ -76,26 +107,6 @@ function normalizePageSize(value: string | undefined): number {
   return Math.min(parsed, 100);
 }
 
-function buildQueryString(params: Record<string, string | number | undefined>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === '' || value === null) continue;
-    query.set(key, String(value));
-  }
-  const str = query.toString();
-  return str ? `?${str}` : '';
-}
-
-function buildPageHref(
-  baseParams: Record<string, string | number | undefined>,
-  page: number,
-): string {
-  const params = { ...baseParams };
-  if (page <= 1) delete params.page;
-  else params.page = page;
-  return `/users${buildQueryString(params)}`;
-}
-
 export default async function AdminUsersPage({ searchParams }: AdminUsersPageProps) {
   const { isSuperAdmin } = await requireAdmin('ADMIN_USERS_READ');
 
@@ -139,7 +150,8 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
       sortDir !== DEFAULT_SORT_DIR,
   );
 
-  const baseParams: Record<string, string | number | undefined> = {
+  // The same query names as before; the defaults are written as no parameter.
+  const filterParams: QueryParams = {
     q,
     isActive: isActive || undefined,
     hasPassword: hasPassword || undefined,
@@ -152,27 +164,40 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
     pageSize: pageSize !== DEFAULT_PAGE_SIZE ? pageSize : undefined,
   };
 
-  const startIndex = response.total === 0 ? 0 : (response.page - 1) * response.pageSize + 1;
-  const endIndex = Math.min(response.page * response.pageSize, response.total);
+  const summary =
+    response.total === 0
+      ? hasFilters
+        ? 'Filtreye uyan hesap yok'
+        : 'Henüz yönetici hesabı yok'
+      : hasFilters
+        ? `${formatCount(response.total)} hesap filtreye uyuyor`
+        : `${formatCount(response.total)} yönetici hesabı`;
 
   return (
     <main className="users-page">
       <PageHeader
-        title="Admin Kullanıcıları"
-        subtitle="Admin panel kullanıcılarını görüntüleyin; durum ve şifre bilgilerine göre filtreleyin."
+        title="Yönetici hesapları"
+        subtitle={summary}
+        info={SCREEN_INFO}
         actions={
           // Creating a staff account is root-only (`POST /users`).
           isSuperAdmin ? (
             <Link className="btn btn-primary btn-sm" href="/users/new">
-              Yeni Admin Kullanıcısı
+              Yeni yönetici hesabı
             </Link>
           ) : undefined
         }
       />
 
-      <form className="admin-toolbar" method="get" action="/users">
-        <div className="admin-toolbar-field admin-toolbar-search">
-          <label htmlFor="user-search">Ara</label>
+      <FilterBar
+        key={buildHref(PATH, filterParams)}
+        action={PATH}
+        clearHref={hasFilters ? PATH : null}
+        label="Hesap filtreleri"
+        preserve={{ pageSize: filterParams.pageSize }}
+        testId="user-filters"
+      >
+        <FilterField label="Ara" htmlFor="user-search" wide>
           <input
             id="user-search"
             name="q"
@@ -181,61 +206,34 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
             defaultValue={q}
             autoComplete="off"
           />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-active">Durum</label>
+        </FilterField>
+        <FilterField label="Durum" htmlFor="user-active">
           <select id="user-active" name="isActive" defaultValue={isActive}>
             <option value="">Tümü</option>
             <option value="true">Aktif</option>
             <option value="false">Pasif</option>
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-has-password">Şifre</label>
+        </FilterField>
+        <FilterField label="Şifre" htmlFor="user-has-password">
           <select id="user-has-password" name="hasPassword" defaultValue={hasPassword}>
             <option value="">Tümü</option>
             <option value="true">Şifre var</option>
             <option value="false">Şifre yok</option>
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-created-from">Kayıt (başlangıç)</label>
-          <input
-            id="user-created-from"
-            name="createdFrom"
-            type="date"
-            defaultValue={createdFrom}
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-created-to">Kayıt (bitiş)</label>
-          <input
-            id="user-created-to"
-            name="createdTo"
-            type="date"
-            defaultValue={createdTo}
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-login-from">Son giriş (başlangıç)</label>
-          <input
-            id="user-login-from"
-            name="lastLoginFrom"
-            type="date"
-            defaultValue={lastLoginFrom}
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-login-to">Son giriş (bitiş)</label>
-          <input
-            id="user-login-to"
-            name="lastLoginTo"
-            type="date"
-            defaultValue={lastLoginTo}
-          />
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-sort">Sıralama</label>
+        </FilterField>
+        <FilterField label="Kayıt (başlangıç)" htmlFor="user-created-from">
+          <input id="user-created-from" name="createdFrom" type="date" defaultValue={createdFrom} />
+        </FilterField>
+        <FilterField label="Kayıt (bitiş)" htmlFor="user-created-to">
+          <input id="user-created-to" name="createdTo" type="date" defaultValue={createdTo} />
+        </FilterField>
+        <FilterField label="Son giriş (başlangıç)" htmlFor="user-login-from">
+          <input id="user-login-from" name="lastLoginFrom" type="date" defaultValue={lastLoginFrom} />
+        </FilterField>
+        <FilterField label="Son giriş (bitiş)" htmlFor="user-login-to">
+          <input id="user-login-to" name="lastLoginTo" type="date" defaultValue={lastLoginTo} />
+        </FilterField>
+        <FilterField label="Sıralama" htmlFor="user-sort">
           <select id="user-sort" name="sortBy" defaultValue={sortBy}>
             {USER_SORT_FIELDS.map((field) => (
               <option key={field} value={field}>
@@ -243,108 +241,58 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
               </option>
             ))}
           </select>
-        </div>
-        <div className="admin-toolbar-field">
-          <label htmlFor="user-dir">Yön</label>
+        </FilterField>
+        <FilterField label="Yön" htmlFor="user-dir">
           <select id="user-dir" name="sortDir" defaultValue={sortDir}>
             <option value="desc">Azalan</option>
             <option value="asc">Artan</option>
           </select>
-        </div>
-        <div className="admin-toolbar-actions">
-          <span className="admin-toolbar-summary">
-            {response.total === 0
-              ? '0 kullanıcı'
-              : `${startIndex}-${endIndex} / ${response.total} kullanıcı`}
-          </span>
-          <button className="btn btn-secondary btn-sm" type="submit">
-            Uygula
-          </button>
-          {hasFilters ? (
-            <Link className="btn btn-ghost btn-sm" href="/users">
-              Temizle
-            </Link>
-          ) : null}
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
 
-      <SectionCard
-        title="Admin kullanıcıları"
-        subtitle={`Sayfa ${response.page} · ${response.pageSize} kullanıcı/sayfa`}
-        padded={false}
-      >
+      <div className="data-list-card">
         {response.items.length === 0 ? (
           <EmptyState
-            title="Admin kullanıcısı bulunamadı"
+            title={
+              hasFilters
+                ? 'Filtreye uygun hesap bulunamadı.'
+                : response.total > 0
+                  ? 'Bu sayfada hesap yok.'
+                  : 'Henüz yönetici hesabı yok.'
+            }
             description={
               hasFilters
                 ? 'Aramayı daraltabilir veya filtreleri temizleyebilirsiniz.'
-                : 'Kayıtlı admin kullanıcıları eklendikçe burada listelenecek.'
+                : 'Bir yönetici hesabı oluşturulduğunda burada listelenir.'
             }
             action={
-              hasFilters ? (
-                <Link className="btn btn-secondary btn-sm" href="/users">
-                  Filtreleri temizle
+              hasFilters || response.total > 0 ? (
+                <Link className="btn btn-secondary btn-sm" href={PATH}>
+                  {hasFilters ? 'Filtreleri temizle' : 'İlk sayfaya dön'}
                 </Link>
               ) : null
             }
           />
         ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Kullanıcı</th>
-                  <th>E-posta</th>
-                  <th>Telefon</th>
-                  <th>Durum</th>
-                  <th>Şifre</th>
-                  <th className="col-num">Aktif Oturum</th>
-                  <th>Son Giriş</th>
-                  <th>Kayıt Tarihi</th>
-                  <th className="col-actions">İşlem</th>
-                </tr>
-              </thead>
-              <tbody>
-                {response.items.map((user) => (
-                  <UserRow key={user.id} user={user} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable caption="Yönetici hesapları" columns={COLUMNS} minWidth={1000} testId="user-table">
+            {response.items.map((user) => (
+              <UserRow key={user.id} user={user} />
+            ))}
+          </DataTable>
         )}
-      </SectionCard>
-
-      {response.total > response.pageSize ? (
-        <nav
-          className="inline-actions"
-          style={{ marginTop: 16, justifyContent: 'space-between' }}
-        >
-          {response.page > 1 ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page - 1)}
-            >
-              ← Önceki
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span className="muted" style={{ fontSize: 13 }}>
-            Sayfa {response.page}
-          </span>
-          {response.hasNextPage ? (
-            <Link
-              className="btn btn-secondary btn-sm"
-              href={buildPageHref(baseParams, response.page + 1)}
-            >
-              Sonraki →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="hesap"
+            summaryTestId="user-count"
+          />
+        ) : null}
+      </div>
     </main>
   );
 }
@@ -353,7 +301,7 @@ function UserRow({ user }: { user: AdminUserSummary }) {
   const displayName = user.name ?? user.email ?? user.phone ?? '—';
 
   return (
-    <tr>
+    <tr data-testid="user-row" data-user-id={user.id}>
       <td>
         <div className="cell-stack">
           <Link href={`/users/${user.id}`}>
@@ -363,20 +311,20 @@ function UserRow({ user }: { user: AdminUserSummary }) {
       </td>
       <td>
         {user.email ? (
-          <a className="cell-link" href={`mailto:${user.email}`}>
+          <a className="cell-link cell-muted cell-break" href={`mailto:${user.email}`}>
             {user.email}
           </a>
         ) : (
-          <span className="cell-muted">-</span>
+          <span className="cell-muted">—</span>
         )}
       </td>
-      <td>
+      <td className="cell-nowrap">
         {user.phone ? (
           <a className="cell-link" href={`tel:${user.phone}`}>
             {user.phone}
           </a>
         ) : (
-          <span className="cell-muted">-</span>
+          <span className="cell-muted">—</span>
         )}
       </td>
       <td>
@@ -393,7 +341,7 @@ function UserRow({ user }: { user: AdminUserSummary }) {
           <span className="badge badge-warn">Şifre yok</span>
         )}
       </td>
-      <td className="col-num">
+      <td className="is-num">
         {user.activeSessionCount === 0 ? (
           <span className="cell-muted">0</span>
         ) : (
@@ -409,11 +357,9 @@ function UserRow({ user }: { user: AdminUserSummary }) {
       </td>
       <td>{formatDate(user.createdAt)}</td>
       <td className="col-actions">
-        <div className="inline-actions">
-          <Link className="btn btn-secondary btn-sm" href={`/users/${user.id}`}>
-            Detay
-          </Link>
-        </div>
+        <Link className="btn btn-secondary btn-sm" href={`/users/${user.id}`} aria-label={`Aç: ${displayName}`}>
+          Aç
+        </Link>
       </td>
     </tr>
   );

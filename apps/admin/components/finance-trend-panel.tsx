@@ -168,7 +168,14 @@ function FinanceTrendChart({
         ) : null}
       </div>
 
-      <div className="finance-trend-chart-axis">
+      {/* The picture's numbers, for a screen reader (the svg only names itself). */}
+      <ul className="sr-only">
+        {data.map((d) => (
+          <li key={d.key}>{`${d.longLabel ?? d.label}: ${d.displayValue ?? String(d.value)}`}</li>
+        ))}
+      </ul>
+
+      <div className="finance-trend-chart-axis" aria-hidden="true">
         {axisLabelIndexes.map((i) => {
           const p = points[i]!;
           const leftPct = (p.x / VIEW_WIDTH) * 100;

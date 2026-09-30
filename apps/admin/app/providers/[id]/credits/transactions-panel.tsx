@@ -3,6 +3,7 @@
 import { formatDateTime } from '@taktic/shared';
 import { formatLedgerReason } from '../../../../lib/finance-format';
 import { useMemo, useState } from 'react';
+import { handleTablistKeyDown } from '../../../../lib/tablist-keys';
 
 type CreditTransactionType =
   | 'ADMIN_GRANT'
@@ -158,7 +159,17 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
   return (
     <div className="transactions-panel">
       <div className="transaction-toolbar">
-        <div className="transaction-toolbar-filters" role="tablist" aria-label="İşlem filtresi">
+        <div
+          className="transaction-toolbar-filters"
+          role="tablist"
+          aria-label="İşlem filtresi"
+          onKeyDown={(event) =>
+            handleTablistKeyDown(event, (index) => {
+              const entry = FILTERS[index];
+              if (entry) setFilter(entry.value);
+            })
+          }
+        >
           {FILTERS.map((entry) => {
             const count = transactions.filter(entry.matches).length;
             const active = entry.value === filter;
@@ -168,6 +179,7 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
                 type="button"
                 role="tab"
                 aria-selected={active}
+                tabIndex={active ? 0 : -1}
                 className={`transaction-filter-chip${active ? ' is-active' : ''}`}
                 onClick={() => setFilter(entry.value)}
               >
@@ -195,17 +207,18 @@ export function TransactionsPanel({ transactions }: TransactionsPanelProps) {
             : 'Filtreyle eşleşen işlem bulunamadı.'}
         </div>
       ) : (
-        <div className="table-scroll">
+        <div className="table-scroll" role="region" aria-label="Kredi işlemleri" tabIndex={0}>
           <table className="data-table transaction-table">
+            <caption className="sr-only">Kredi işlemleri</caption>
             <thead>
               <tr>
-                <th>Tarih</th>
-                <th>Ne oldu</th>
-                <th>İlgili kayıt</th>
-                <th>Yapan</th>
-                <th className="col-num">Mevcut</th>
-                <th className="col-num">Değişim</th>
-                <th className="col-num">Kalan</th>
+                <th scope="col">Tarih</th>
+                <th scope="col">Ne oldu</th>
+                <th scope="col">İlgili kayıt</th>
+                <th scope="col">Yapan</th>
+                <th scope="col" className="col-num">Mevcut</th>
+                <th scope="col" className="col-num">Değişim</th>
+                <th scope="col" className="col-num">Kalan</th>
               </tr>
             </thead>
             <tbody>
