@@ -39,6 +39,12 @@ describe('creditReasonLabel', () => {
     expect(creditReasonLabel('MANUAL_ADMIN_REFUND:INVALID_REQUEST')).toBe('Platform tarafından iade edildi');
   });
 
+  it('labels the charge an acceptance takes back for a refunded offer', () => {
+    expect(creditReasonLabel('OFFER_ACCEPTED_AFTER_REFUND')).toBe(
+      'İade edilen teklif kabul edildi; kredi yeniden düşüldü',
+    );
+  });
+
   it('leaves an unknown reason as it is, and an empty one as a dash', () => {
     expect(creditReasonLabel('Bir not')).toBe('Bir not');
     expect(creditReasonLabel(null)).toBe('-');

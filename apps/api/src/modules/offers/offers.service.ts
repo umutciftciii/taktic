@@ -22,7 +22,11 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
-import { restorePromoConsumptionsForRefund } from '../credits/promo-credit-ledger';
+import {
+  consumePromoCreditsForSpend,
+  readUnsweptExpiredPromoCredits,
+  restorePromoConsumptionsForRefund,
+} from '../credits/promo-credit-ledger';
 import { summarizeOfferRefundSettlement, type SettledShareForSettlement } from '../credits/offer-refund-settlement';
 import {
   contactDisclosureRequiredException,
@@ -38,6 +42,7 @@ import {
   CUSTOMER_ACTIONABLE_OFFER_STATUSES,
   CUSTOMER_UNACTIONABLE_OFFER_STATUSES,
   isAdminSettableOfferStatus,
+  offerAcceptInsufficientCreditException,
   offerActionNotAllowedException,
   offerStatusNotSettableException,
 } from './offer-transitions';
@@ -617,6 +622,10 @@ export class OffersService {
    * All of it therefore succeeds together or not at all — there is no matched
    * request whose contact details are open without a record of why, and no
    * recorded consent for a match that did not happen.
+   *
+   * An offer whose credit was refunded is charged again in the same
+   * transaction ({@link chargeRefundedOfferOnAcceptInTransaction}); a provider
+   * who cannot pay turns the whole acceptance into a 409 with nothing written.
    */
   private acceptRequestOffer(
     requestId: string,
@@ -723,6 +732,13 @@ export class OffersService {
           }
           throw new ConflictException('This offer can no longer be accepted');
         }
+
+        // BUG-OFFER-REFUND-ACCEPT-001: an offer whose credit came back is
+        // charged again before the match can commit. After the conditional
+        // UPDATE above on purpose — that UPDATE is what makes this the one
+        // transaction that accepts the offer — and a refusal here rolls the
+        // whole acceptance back, consent and request transition included.
+        await chargeRefundedOfferOnAcceptInTransaction(tx, offerId, now);
 
         // Only offers still in play are closed. WITHDRAWN, CANCELLED, EXPIRED
         // and any already REJECTED offer are terminal and left untouched.
@@ -1130,6 +1146,104 @@ async function createRefundLedgerRow(
 
     throw error;
   }
+}
+
+/**
+ * The ledger reason of the OFFER_SPEND an acceptance writes for an offer whose
+ * credit had been refunded. A code, like the refund reasons, so the provider's
+ * history can label it and a report can count it apart from submit-time spends.
+ */
+export const OFFER_ACCEPT_RECHARGE_REASON = 'OFFER_ACCEPTED_AFTER_REFUND';
+
+/**
+ * Charges a refunded offer's `creditCost` again, inside the accept transaction
+ * (BUG-OFFER-REFUND-ACCEPT-001).
+ *
+ * The 48-hour rule pays an unviewed offer back; nothing stops the customer
+ * from accepting it afterwards, and an acceptance is exactly the outcome the
+ * credit buys. So an accepted offer is always a paid one: if its credit came
+ * back, the acceptance takes it again, or the acceptance does not happen.
+ *
+ * What stays untouched is the history. The OFFER_SPEND the offer was
+ * submitted with, the OFFER_REFUND that paid it back, the promo shares that
+ * refund settled and the offer's own refund columns all remain as written —
+ * they are true facts about what happened before. The charge is a new
+ * OFFER_SPEND row referencing the offer, with {@link OFFER_ACCEPT_RECHARGE_REASON}.
+ *
+ * Paid exactly as a submit-time spend is paid: the one-time balance, less any
+ * promo credit whose lot has expired but has not been swept (a dead lot never
+ * buys anything), and the earliest-expiring valid promo lot is drawn first
+ * through {@link consumePromoCreditsForSpend}. Not enough of it and the caller
+ * gets a 409 with nothing written; the throw rolls back the request
+ * transition, the consent, the competing rejections and the reveal with it.
+ *
+ * Charged at most once per offer. The acceptance is one-shot — the caller's
+ * conditional UPDATE moves the offer out of the actionable states, ACCEPTED is
+ * terminal, and the whole thing runs Serializable — so a retry, a double
+ * submit or a concurrent accept reaches that 409 rather than this function
+ * twice. The lookup for an earlier recharge is the belt to those braces: a
+ * second charge of one offer is refused rather than written.
+ *
+ * Offers that were never refunded, and offers no one-time credit paid for
+ * (period packages, the vitrin owner's own lead), have nothing to take back
+ * and are left alone.
+ */
+async function chargeRefundedOfferOnAcceptInTransaction(tx: Prisma.TransactionClient, offerId: string, now: Date) {
+  const offer = await tx.offer.findUniqueOrThrow({
+    where: { id: offerId },
+    select: {
+      id: true,
+      providerId: true,
+      creditCost: true,
+      creditRefundedTransactionId: true,
+      creditRefundedAt: true,
+    },
+  });
+
+  const refunded = offer.creditRefundedTransactionId !== null || offer.creditRefundedAt !== null;
+  if (!refunded || offer.creditCost <= 0) {
+    return null;
+  }
+
+  const earlierCharge = await tx.providerCreditTransaction.findFirst({
+    where: {
+      type: CreditTransactionType.OFFER_SPEND,
+      referenceType: 'Offer',
+      referenceId: offer.id,
+      reason: OFFER_ACCEPT_RECHARGE_REASON,
+    },
+    select: { id: true },
+  });
+  if (earlierCharge) {
+    throw new ConflictException('Offer credit was already charged on acceptance');
+  }
+
+  const balance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
+  const unsweptExpired = await readUnsweptExpiredPromoCredits(tx, offer.providerId, now);
+  if (balance - unsweptExpired < offer.creditCost) {
+    throw offerAcceptInsufficientCreditException();
+  }
+
+  const spend = await tx.providerCreditTransaction.create({
+    data: {
+      providerId: offer.providerId,
+      type: CreditTransactionType.OFFER_SPEND,
+      amount: -offer.creditCost,
+      balanceAfter: balance - offer.creditCost,
+      reason: OFFER_ACCEPT_RECHARGE_REASON,
+      referenceType: 'Offer',
+      referenceId: offer.id,
+    },
+  });
+
+  await consumePromoCreditsForSpend(tx, {
+    providerId: offer.providerId,
+    spendTransactionId: spend.id,
+    creditCost: offer.creditCost,
+    now,
+  });
+
+  return spend;
 }
 
 /**

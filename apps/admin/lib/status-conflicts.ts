@@ -12,6 +12,9 @@
  * Codes come from the API:
  * - OFFER_ACTION_NOT_ALLOWED (API-GUARD-OFFER-001, PR #119): the offer is
  *   already ACCEPTED or REJECTED.
+ * - OFFER_ACCEPT_INSUFFICIENT_CREDIT (BUG-OFFER-REFUND-ACCEPT-001): the
+ *   offer's credit was refunded, an acceptance charges it again, and the
+ *   provider's balance cannot cover it.
  * - CONTACT_DISCLOSURE_REQUIRED: contact sharing is on and the customer's
  *   consent to the current wording is not on file, so an acceptance cannot
  *   open the details.
@@ -30,13 +33,15 @@
  * Kept free of Next and of `lib/api` so it can be unit-tested on its own.
  */
 
-export type OfferStatusErrorKey = 'decided' | 'disclosureRequired' | 'stale';
+export type OfferStatusErrorKey = 'decided' | 'disclosureRequired' | 'insufficientCredit' | 'stale';
 
 export const OFFER_STATUS_ERROR_MESSAGES: Record<OfferStatusErrorKey, string> = {
   decided:
     'Teklif durumu değiştirilmedi. Bu teklif için karar zaten verilmiş: kabul edilmiş teklif reddedilemez ya da kısa listeye alınamaz, reddedilmiş teklif yeniden açılamaz veya kabul edilemez. Aşağıda teklifin güncel durumu görünüyor.',
   disclosureRequired:
     'Teklif kabul edilmedi. İletişim paylaşımı açık ve müşterinin güncel bilgilendirme metnine onayı kayıtlı değil; kabul iletişim bilgilerini açacağı için bu onay olmadan yapılamaz. Müşteri teklifi kendi panelinden, bilgilendirmeyi onaylayarak kabul edebilir. Talep ve teklifler değişmedi.',
+  insufficientCredit:
+    'Teklif kabul edilmedi. Bu teklifin kredisi daha önce firmaya iade edilmişti; kabul krediyi yeniden düşer ve firmanın bakiyesi yetmiyor. Firma bakiye yükledikten sonra tekrar deneyin. Talep, teklifler ve krediler değişmedi.',
   stale:
     'Teklif durumu değiştirilmedi. Teklif ya da talep bu sayfa açıldıktan sonra değişti (örneğin talep başka bir teklifle eşleşti, teklif geri çekildi ya da talep yayından çıktı). Aşağıda güncel durum görünüyor; işlemi buna göre yeniden değerlendirin.',
 };
@@ -45,6 +50,7 @@ export const OFFER_STATUS_ERROR_MESSAGES: Record<OfferStatusErrorKey, string> = 
 export function offerStatusErrorKey(code: string | null): OfferStatusErrorKey {
   if (code === 'OFFER_ACTION_NOT_ALLOWED') return 'decided';
   if (code === 'CONTACT_DISCLOSURE_REQUIRED') return 'disclosureRequired';
+  if (code === 'OFFER_ACCEPT_INSUFFICIENT_CREDIT') return 'insufficientCredit';
   return 'stale';
 }
 
