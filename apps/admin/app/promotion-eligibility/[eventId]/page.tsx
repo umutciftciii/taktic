@@ -1,5 +1,11 @@
 import Link from 'next/link';
-import { apiFetch, fetchOrNotFound, formatDateTime, requireAdmin } from '../../../lib/api';
+import {
+  apiFetch,
+  campaignEventStatusLabel,
+  fetchOrNotFound,
+  formatDateTime,
+  requireAdmin,
+} from '../../../lib/api';
 import {
   ELIGIBILITY_DECISION_LABELS,
   ELIGIBILITY_TRIGGER_LABELS,
@@ -7,19 +13,33 @@ import {
   eligibilitySignalLabel,
   type PromotionEligibilityHoldView,
 } from '../../../lib/business-registration';
-import { PageHeader } from '../../../components/page-header';
+import { formatCount } from '../../../lib/pagination';
+import { DetailHeader } from '../../../components/detail-header';
+import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
+import type { SummaryItem } from '../../../components/summary-strip';
 import { decideEligibilityAction } from '../actions';
+import { EligibilityDecisionForm } from './decision-form';
 
 type PageProps = {
   params: Promise<{ eventId: string }>;
   searchParams: Promise<{ done?: string; error?: string }>;
 };
 
+/** The one status the queue itself adds to the engine's event states. */
+function eventStatusLabel(status: string): string {
+  return status === 'HELD_FOR_REVIEW' ? 'İncelemede' : campaignEventStatusLabel(status);
+}
+
 /**
  * One held event (CMP-006 PR-C): the snapshot the gate froze when it held it —
  * closed codes, counts, other account ids and keyed fingerprints; no number,
  * address or phone is stored — and the one decision it may receive.
+ *
+ * ADMIN-DESIGN-001 Faz 3E: the shared detail template — the summary card with
+ * the decision as its badge, then the event, the frozen reasons and the
+ * decision. The decision is still final and single: the form now asks first
+ * (`EligibilityDecisionForm`), and the API still refuses a second one.
  */
 export default async function PromotionEligibilityDetailPage({ params, searchParams }: PageProps) {
   // The decision form needs no extra gate: its route asks for the same
@@ -32,125 +52,146 @@ export default async function PromotionEligibilityDetailPage({ params, searchPar
     apiFetch<PromotionEligibilityHoldView>(`/admin/promotion-eligibility/holds/${encodeURIComponent(eventId)}`),
   );
   const decidable = !hold.review && hold.eventStatus === 'HELD_FOR_REVIEW';
+  const candidates = hold.candidateCampaigns ?? [];
+
+  const facts: SummaryItem[] = [
+    { label: 'Tetikleyici', value: ELIGIBILITY_TRIGGER_LABELS[hold.trigger] ?? hold.trigger },
+    { label: 'İncelemeye alınma', value: formatDateTime(hold.heldAt) },
+    { label: 'Gerekçe', value: `${formatCount(hold.snapshot.signals.length)} sinyal` },
+    { label: 'Aday kampanya', value: formatCount(candidates.length) },
+  ];
+
+  const providerName = canOpenProvider ? (
+    <Link className="cell-link" href={`/providers/${hold.provider.id}`}>
+      {hold.provider.businessName}
+    </Link>
+  ) : (
+    hold.provider.businessName
+  );
 
   return (
-    <main>
-      <PageHeader title={`Uygunluk incelemesi · ${hold.provider.businessName}`} subtitle={hold.triggerEventKey} />
-      <p style={{ marginBottom: 12 }}>
-        <Link className="cell-link" href="/promotion-eligibility">
-          ← Kuyruğa dön
-        </Link>
-      </p>
+    <main className="eligibility-detail-page">
+      <DetailHeader
+        back={{ href: '/promotion-eligibility', label: 'Uygunluk incelemesi' }}
+        badges={
+          hold.review ? (
+            <span
+              className={hold.review.decision === 'ELIGIBLE' ? 'badge badge-good' : 'badge badge-bad'}
+              data-testid="eligibility-badge"
+              data-decision={hold.review.decision}
+            >
+              {hold.review.decision === 'ELIGIBLE' ? 'Uygun' : 'Uygun değil'}
+            </span>
+          ) : decidable ? (
+            <span className="badge badge-warn" data-testid="eligibility-badge" data-decision="">
+              Karar bekliyor
+            </span>
+          ) : (
+            <span className="badge badge-muted" data-testid="eligibility-badge" data-decision="">
+              İncelemede değil
+            </span>
+          )
+        }
+        meta={<code className="cell-break">{hold.triggerEventKey}</code>}
+        title={`Uygunluk incelemesi · ${hold.provider.businessName}`}
+        subtitle="Giriş promosyonu için incelemeye alınan olay. Karar gerekçeyle bir kez verilir."
+        facts={facts}
+        factsLabel="İnceleme özeti"
+        testId="eligibility-header"
+      />
 
       {query.error ? (
-        <div className="notice notice-error" role="alert" style={{ marginBottom: 12 }} data-testid="eligibility-error">
+        <div className="notice notice-error detail-notice" role="alert" data-testid="eligibility-error">
           {query.error}
         </div>
       ) : null}
       {query.done ? (
-        <div className="notice notice-success" role="status" style={{ marginBottom: 12 }} data-testid="eligibility-done">
+        <div className="notice notice-success detail-notice" role="status" data-testid="eligibility-done">
           Karar kaydedildi.
         </div>
       ) : null}
 
-      <div className="detail-grid">
+      <div className="detail-panel detail-panel-grid">
         <SectionCard title="Olay">
-          <dl className="meta-row">
-            <dt>Hizmet veren</dt>
-            <dd>
-              {canOpenProvider ? (
-                <Link className="cell-link" href={`/providers/${hold.provider.id}`}>
-                  {hold.provider.businessName}
-                </Link>
-              ) : (
-                hold.provider.businessName
-              )}
-            </dd>
-            <dt>Tetikleyici</dt>
-            <dd>{ELIGIBILITY_TRIGGER_LABELS[hold.trigger] ?? hold.trigger}</dd>
-            <dt>İncelemeye alınma</dt>
-            <dd>{formatDateTime(hold.heldAt)}</dd>
-            <dt>Olay durumu</dt>
-            <dd data-testid="eligibility-event-status">{hold.eventStatus}</dd>
-            <dt>Aday kampanyalar</dt>
-            <dd>
-              {(hold.candidateCampaigns ?? []).length === 0
-                ? '—'
-                : (hold.candidateCampaigns ?? []).map((campaign) =>
-                    canOpenCampaign ? (
-                      <Link key={campaign.id} className="cell-link" href={`/campaigns/${campaign.id}`} style={{ marginRight: 8 }}>
-                        {campaign.name}
-                      </Link>
-                    ) : (
-                      <span key={campaign.id} style={{ marginRight: 8 }}>
-                        {campaign.name}
-                      </span>
-                    ),
-                  )}
-            </dd>
-          </dl>
+          <KeyValueList
+            items={[
+              { label: 'Hizmet veren', value: providerName },
+              { label: 'Tetikleyici', value: ELIGIBILITY_TRIGGER_LABELS[hold.trigger] ?? hold.trigger },
+              { label: 'İncelemeye alınma', value: formatDateTime(hold.heldAt) },
+              {
+                label: 'Olay durumu',
+                value: (
+                  <span data-testid="eligibility-event-status" data-status={hold.eventStatus}>
+                    {eventStatusLabel(hold.eventStatus)} <code className="cell-muted">{hold.eventStatus}</code>
+                  </span>
+                ),
+              },
+              {
+                label: 'Aday kampanyalar',
+                value:
+                  candidates.length === 0 ? null : (
+                    <span className="cell-stack">
+                      {candidates.map((campaign) =>
+                        canOpenCampaign ? (
+                          <Link key={campaign.id} className="cell-link" href={`/campaigns/${campaign.id}`}>
+                            {campaign.name}
+                          </Link>
+                        ) : (
+                          <span key={campaign.id}>{campaign.name}</span>
+                        ),
+                      )}
+                    </span>
+                  ),
+              },
+            ]}
+          />
         </SectionCard>
 
-        <SectionCard title="İnceleme anındaki gerekçeler (değişmez)">
-          <ul className="plain-list" data-testid="eligibility-signals">
+        <SectionCard title="İnceleme anındaki gerekçeler" subtitle="Kapı olayı incelemeye aldığı anda dondurulan kayıt; değişmez.">
+          <ul className="eligibility-signal-list" data-testid="eligibility-signals">
             {hold.snapshot.signals.map((signal) => (
               <li key={signal.code} data-code={signal.code}>
                 <strong>{eligibilitySignalLabel(signal.code)}</strong>
                 {eligibilitySignalDetails(signal).map((detail) => (
-                  <div key={detail} className="cell-muted" style={{ fontSize: 12 }}>
+                  <span key={detail} className="detail-muted-note">
                     {detail}
-                  </div>
+                  </span>
                 ))}
               </li>
             ))}
           </ul>
         </SectionCard>
 
-        <SectionCard title="Karar">
-          {hold.review ? (
-            <dl className="meta-row" data-testid="eligibility-review">
-              <dt>Karar</dt>
-              <dd data-testid="eligibility-decision">{ELIGIBILITY_DECISION_LABELS[hold.review.decision]}</dd>
-              <dt>Gerekçe</dt>
-              <dd>{hold.review.reason}</dd>
-              <dt>Karar veren</dt>
-              <dd>{hold.review.decidedBy.name ?? hold.review.decidedBy.email ?? hold.review.decidedBy.id}</dd>
-              <dt>Zaman</dt>
-              <dd>{formatDateTime(hold.review.decidedAt)}</dd>
-            </dl>
-          ) : decidable ? (
-            <form action={decideEligibilityAction} data-testid="eligibility-form">
-              <input type="hidden" name="eventId" value={hold.eventId} />
-              <label className="form-row" htmlFor="eligibility-decision">
-                <span>Karar</span>
-                <select id="eligibility-decision" name="decision" required defaultValue="" data-testid="eligibility-decision-select">
-                  <option value="" disabled>
-                    Seçin
-                  </option>
-                  {(['ELIGIBLE', 'INELIGIBLE'] as const).map((decision) => (
-                    <option key={decision} value={decision}>
-                      {ELIGIBILITY_DECISION_LABELS[decision]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-row" htmlFor="eligibility-reason">
-                <span>Gerekçe (10–1000 karakter, denetim kaydına yazılır)</span>
-                <textarea id="eligibility-reason" name="reason" rows={4} required minLength={10} maxLength={1000} data-testid="eligibility-reason" />
-              </label>
-              <p className="muted" style={{ fontSize: 12 }}>
-                Gerekçeye kimlik, vergi veya sicil numarası, telefon ya da IP adresi yazmayın. Karar bir kez verilir ve
-                değiştirilemez; “Uygun” kararı olayı bir kez yeniden değerlendirmeye alır ve kampanya limitleri yine
-                uygulanır.
-              </p>
-              <button className="btn btn-primary btn-sm" type="submit" data-testid="eligibility-submit">
-                Kararı kaydet
-              </button>
-            </form>
-          ) : (
-            <p className="muted">Bu olay artık incelemede değil.</p>
-          )}
-        </SectionCard>
+        <section className="is-wide" id="karar">
+          <SectionCard title="Karar" subtitle={hold.review ? undefined : 'Tek seferlik ve kesin; aynı IP tek başına hiçbir zaman ret gerekçesi değildir.'}>
+            {hold.review ? (
+              <div data-testid="eligibility-review">
+                <KeyValueList
+                  items={[
+                    {
+                      label: 'Karar',
+                      value: <span data-testid="eligibility-decision">{ELIGIBILITY_DECISION_LABELS[hold.review.decision]}</span>,
+                    },
+                    { label: 'Gerekçe', value: <span className="detail-prose">{hold.review.reason}</span> },
+                    {
+                      label: 'Karar veren',
+                      value: hold.review.decidedBy.name ?? hold.review.decidedBy.email ?? hold.review.decidedBy.id,
+                    },
+                    { label: 'Zaman', value: formatDateTime(hold.review.decidedAt) },
+                  ]}
+                />
+              </div>
+            ) : decidable ? (
+              <EligibilityDecisionForm
+                eventId={hold.eventId}
+                providerName={hold.provider.businessName}
+                action={decideEligibilityAction}
+              />
+            ) : (
+              <p className="detail-muted-note">Bu olay artık incelemede değil.</p>
+            )}
+          </SectionCard>
+        </section>
       </div>
     </main>
   );

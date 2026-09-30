@@ -10,6 +10,10 @@ import { formatDateTime, type CampaignEvaluationQueue } from '../../lib/api';
  * settings screen (CMP-004 S4), behind an explicit confirmation; while it is
  * off, activation and resumption are refused by the API and the screen says
  * so before the operator tries.
+ *
+ * ADMIN-DESIGN-001 Faz 3E: drawn as the design's callout — a red rule while
+ * the engine is off, a neutral one while it is on — with "Ayarlara git" only
+ * for a session that may open that screen. The sentences are unchanged.
  */
 export function CampaignEngineNotice({
   engineEnabled,
@@ -26,23 +30,44 @@ export function CampaignEngineNotice({
   ) : (
     'Operasyon Ayarları'
   );
+  const action = canOpenOperationsSettings ? (
+    <Link
+      className="btn btn-secondary btn-sm engine-callout-action"
+      href="/operations-settings#kampanya-motoru"
+      data-testid="campaign-engine-settings-link"
+    >
+      Ayarlara git
+    </Link>
+  ) : null;
+
   if (engineEnabled) {
     return (
-      <div className="notice notice-info" role="status" data-testid="campaign-engine-state" data-engine="on">
-        <strong>Kampanya motoru açık.</strong> Gerçek olaylar (onay, kanıt, ödeme) bekleyen olay olarak kaydedilir ve
-        değerlendirme işçisi tarafından ayrı bir işlemde değerlendirilir; hak ediş promosyon kredisi olarak yazılır. Motor{' '}
-        {settingsLink} ekranından kapatılır.
-        {queue ? <QueueLine queue={queue} /> : null}
+      <div className="engine-callout is-on" role="status" data-testid="campaign-engine-state" data-engine="on">
+        <div className="engine-callout-text">
+          <p className="engine-callout-title">Kampanya motoru açık.</p>
+          <p>
+            Gerçek olaylar (onay, kanıt, ödeme) bekleyen olay olarak kaydedilir ve değerlendirme işçisi tarafından ayrı
+            bir işlemde değerlendirilir; hak ediş promosyon kredisi olarak yazılır. Motor {settingsLink} ekranından
+            kapatılır.
+          </p>
+          {queue ? <QueueLine queue={queue} /> : null}
+        </div>
+        {action}
       </div>
     );
   }
   return (
-    <div className="notice notice-warning" role="status" data-testid="campaign-engine-state" data-engine="off">
-      <strong>Kampanya motoru kapalı — etkinleştirme yapılamaz.</strong> Kampanyalar tanımlanır ve saklanır; hiçbir olay
-      kaydedilmez ya da değerlendirilmez, hiçbir hizmet verene kredi verilmez. Etkinleştir ve devam ettir motor açılana kadar
-      reddedilir; motor yalnız {settingsLink} ekranından, açık
-      onayla açılır.
-      {queue && queue.pending + queue.processing + queue.retryWait > 0 ? <QueueLine queue={queue} /> : null}
+    <div className="engine-callout is-off" role="status" data-testid="campaign-engine-state" data-engine="off">
+      <div className="engine-callout-text">
+        <p className="engine-callout-title">Kampanya motoru kapalı — etkinleştirme yapılamaz.</p>
+        <p>
+          Kampanyalar tanımlanır ve saklanır; hiçbir olay kaydedilmez ya da değerlendirilmez, hiçbir hizmet verene kredi
+          verilmez. Etkinleştir ve devam ettir motor açılana kadar reddedilir; motor yalnız {settingsLink} ekranından, açık
+          onayla açılır.
+        </p>
+        {queue && queue.pending + queue.processing + queue.retryWait > 0 ? <QueueLine queue={queue} /> : null}
+      </div>
+      {action}
     </div>
   );
 }
@@ -50,7 +75,7 @@ export function CampaignEngineNotice({
 /** Read-only: how many raised events wait for the worker, and the last closed error code. */
 function QueueLine({ queue }: { queue: CampaignEvaluationQueue }) {
   return (
-    <div style={{ marginTop: 6, fontSize: 12.5 }} data-testid="campaign-evaluation-queue">
+    <p className="engine-callout-queue" data-testid="campaign-evaluation-queue">
       Değerlendirme kuyruğu: bekleyen {queue.pending} · işlenen {queue.processing} · yeniden deneme {queue.retryWait}
       {queue.lastErrorCode ? (
         <>
@@ -59,6 +84,6 @@ function QueueLine({ queue }: { queue: CampaignEvaluationQueue }) {
           {queue.lastErrorAt ? ` (${formatDateTime(queue.lastErrorAt)})` : ''}
         </>
       ) : null}
-    </div>
+    </p>
   );
 }

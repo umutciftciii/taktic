@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import type { Campaign, CampaignChannelReadiness, CampaignVersionSummary } from '../../lib/api';
 import { channelLabel, ruleErrorMessage } from '../../lib/campaign-rules';
+import { ConfirmDialog } from '../../components/confirm-dialog';
 import { campaignLifecycleAction } from './actions';
 import { IDLE_CAMPAIGN_LIFECYCLE_STATE } from './lifecycle-state';
 
@@ -39,6 +40,13 @@ type CampaignLifecyclePanelProps = {
  * the panel says so and disables activation; the API's
  * CHANNEL_SOURCE_UNAVAILABLE is the authority, and a forced submission shows
  * its refusal.
+ *
+ * ADMIN-DESIGN-001 Faz 3E: the two moves that cannot be undone — "Sonlandır"
+ * and "Taslağı kapat" — ask first (ConfirmDialog), with what the API will do
+ * written in the dialog. They stay in the same forms, post the same `intent`
+ * and `reason`, and need the same CAMPAIGNS_LIFECYCLE; activation, pause and
+ * resume are reversible and stay one click. The forms carry `campaignId`,
+ * never a field named "id", so the dialog's `intent` cannot be shadowed away.
  */
 export function CampaignLifecyclePanel({
   campaign,
@@ -60,8 +68,8 @@ export function CampaignLifecyclePanel({
   const channelBlocked = canActivate && currentVersionChannel !== null && !currentVersionChannel.available;
 
   return (
-    <div className="admin-action-panel" data-testid="campaign-lifecycle-panel" data-status={status}>
-      <h3>Yaşam döngüsü</h3>
+    <section className="admin-action-panel campaign-lifecycle-panel" data-testid="campaign-lifecycle-panel" data-status={status}>
+      <h2 className="section-card-title">Yaşam döngüsü</h2>
       <p>
         {status === 'DRAFT' && 'Taslak: motor açıkken bir sürüm etkinleştirilerek ACTIVE olur. Kullanılmayacaksa kapatılabilir.'}
         {status === 'ACTIVE' && `Etkin — motor sürüm ${activeVersion?.versionNumber ?? '?'} kuralını değerlendiriyor. Kural yerinde değiştirilemez; yeni revizyon kaydedip etkinleştirin.`}
@@ -139,9 +147,25 @@ export function CampaignLifecyclePanel({
             <textarea name="reason" minLength={3} maxLength={500} required placeholder="Taslak neden kapatılıyor?" data-testid="campaign-close-draft-reason" />
           </label>
           <div className="panel-row">
-            <button className="btn btn-danger btn-sm" type="submit" name="intent" value="close" disabled={pending} data-testid="campaign-close-draft">
-              Taslağı kapat
-            </button>
+            <ConfirmDialog
+              triggerLabel="Taslağı kapat"
+              triggerClassName="btn btn-destructive btn-sm"
+              title="Taslak kapatılsın mı?"
+              consequence={
+                <>
+                  <p>
+                    <strong>{campaign.name}</strong> hiç etkinleşmeden kalıcı olarak <strong>Sona erdi</strong> durumuna
+                    geçer ve bir daha açılamaz. Hiçbir sürümü çalıştırılmaz; hak ediş, promosyon kredisi veya olay oluşmaz.
+                  </p>
+                  <p>Gerekçe adınızla kampanyanın “Neler oldu” kaydına yazılır. Aynı kural için yeni bir kampanya yazmanız gerekir.</p>
+                </>
+              }
+              confirmLabel="Evet, taslağı kapat"
+              name="intent"
+              value="close"
+              disabled={pending}
+              testId="campaign-close-draft"
+            />
           </div>
         </form>
       ) : null}
@@ -171,12 +195,31 @@ export function CampaignLifecyclePanel({
                 Devam ettir
               </button>
             )}
-            <button className="btn btn-danger btn-sm" type="submit" name="intent" value="end" disabled={pending} data-testid="campaign-end">
-              Sonlandır
-            </button>
+            <ConfirmDialog
+              triggerLabel="Sonlandır"
+              triggerClassName="btn btn-destructive btn-sm"
+              title="Kampanya sonlandırılsın mı?"
+              consequence={
+                <>
+                  <p>
+                    <strong>{campaign.name}</strong> kalıcı olarak <strong>Sona erdi</strong> olur ve bir daha açılamaz,
+                    devam ettirilemez ya da yeni sürümle etkinleştirilemez. Bundan sonraki olaylarda hak ediş üretilmez.
+                  </p>
+                  <p>
+                    Verilmiş promosyon lotları etkilenmez: hizmet verenler kalan kredilerini son kullanma tarihine kadar
+                    kullanabilir. Gerekçe adınızla kampanyanın “Neler oldu” kaydına yazılır.
+                  </p>
+                </>
+              }
+              confirmLabel="Evet, sonlandır"
+              name="intent"
+              value="end"
+              disabled={pending}
+              testId="campaign-end"
+            />
           </div>
         </form>
       ) : null}
-    </div>
+    </section>
   );
 }
