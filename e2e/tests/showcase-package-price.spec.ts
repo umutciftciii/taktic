@@ -77,15 +77,14 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       const row = admin.page.locator('tr').filter({ hasText: name });
       await expect(row.getByTestId('showcase-package-price-cell')).toHaveText('₺10,50');
 
-      // The edit form, in the package's own window: the stored 1050 reads
-      // back as 10,50 — never as 1050. The slug is shown, and not sent.
+      // The edit form, on the package's own screen (Faz 3F.1): the stored
+      // 1050 reads back as 10,50 — never as 1050. The slug is shown, and not sent.
+      const screen = `/showcase/packages/${created.id}`;
       await row.getByTestId('showcase-package-open').click();
-      await expect(admin.page).toHaveURL(new RegExp(`paket=${created.id}`));
+      await expect(admin.page).toHaveURL(new RegExp(`${screen}$`));
       await expect(admin.page.getByTestId('showcase-package-slug')).toContainText(slug);
       await expect(admin.page.locator('input[name="slug"]')).toHaveCount(0);
-      const editForm = admin.page.locator('form').filter({
-        has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`),
-      });
+      const editForm = admin.page.getByTestId('showcase-package-edit-form');
       await expect(editForm.getByTestId('showcase-package-price')).toHaveValue('10,50');
 
       // ── 1.250,75 through the edit form ─────────────────────────────────
@@ -96,49 +95,38 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
 
       const repriced = await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } });
       expect(repriced.priceAmount).toBe(125075);
+      await expect(admin.page.getByTestId('showcase-package-fact-price')).toContainText('₺1.250,75');
+      await expect(editForm.getByTestId('showcase-package-price')).toHaveValue('1.250,75');
+      await admin.gotoAdmin('/showcase/packages');
       await expect(
         admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-price-cell'),
       ).toHaveText('₺1.250,75');
-      await admin.gotoAdmin(`/showcase/packages?paket=${created.id}`);
-      await expect(
-        admin.page
-          .locator('form')
-          .filter({ has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`) })
-          .getByTestId('showcase-package-price'),
-      ).toHaveValue('1.250,75');
 
       // ── A whole number is lira, not kuruş ──────────────────────────────
-      // From the package's window URL, so the `?saved=1` the action redirects
-      // to is a new URL this time and the wait for it is a real wait.
-      await admin.gotoAdmin(`/showcase/packages?paket=${created.id}`);
-      const editAgain = admin.page.locator('form').filter({
-        has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`),
-      });
-      await editAgain.getByTestId('showcase-package-price').fill('10');
-      await editAgain.getByRole('button', { name: 'Kaydet' }).click();
+      // From the plain screen URL, so the `?saved=1` the action redirects to
+      // is a new URL this time and the wait for it is a real wait.
+      await admin.gotoAdmin(screen);
+      await editForm.getByTestId('showcase-package-price').fill('10');
+      await editForm.getByRole('button', { name: 'Kaydet' }).click();
       await expect(admin.page).toHaveURL(/saved=1/);
       await assertNoErrorScreen(admin.page);
       expect(
         (await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } })).priceAmount,
       ).toBe(1000);
+      await admin.gotoAdmin('/showcase/packages');
       await expect(
         admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-price-cell'),
       ).toHaveText('₺10,00');
 
       // ── Zero is refused by the server action, with a sentence ──────────
-      await admin.gotoAdmin(`/showcase/packages?paket=${created.id}`);
-      const editZero = admin.page.locator('form').filter({
-        has: admin.page.locator(`input[name="packageId"][value="${created.id}"]`),
-      });
+      await admin.gotoAdmin(screen);
       // "0" passes the browser's pattern (it is digits) and fails the rule.
-      await editZero.getByTestId('showcase-package-price').fill('0');
-      await editZero.getByRole('button', { name: 'Kaydet' }).click();
+      await editForm.getByTestId('showcase-package-price').fill('0');
+      await editForm.getByRole('button', { name: 'Kaydet' }).click();
       await expect(admin.page).toHaveURL(/error=SHOWCASE_PACKAGE_PRICE_INVALID/);
-      // The refusal comes back inside the package's window, not behind it.
-      await expect(admin.page).toHaveURL(new RegExp(`paket=${created.id}`));
-      await expect(admin.page.getByTestId('showcase-package-dialog').locator('.notice-error')).toContainText(
-        'Türk lirası olarak girilmeli',
-      );
+      // The refusal comes back to the package's screen, not to the list.
+      await expect(admin.page).toHaveURL(new RegExp(`${screen}\\?error=`));
+      await expect(admin.page.locator('.notice-error')).toContainText('Türk lirası olarak girilmeli');
       expect(
         (await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } })).priceAmount,
       ).toBe(1000);

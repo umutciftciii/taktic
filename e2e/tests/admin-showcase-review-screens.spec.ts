@@ -489,12 +489,24 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await reader.gotoAdmin('/showcase/packages');
       await expectOpen(page, /\/showcase\/packages$/);
       await expect(page.getByTestId('showcase-package-new')).toHaveCount(0);
-      // The package window opens for reading: the values, and no form.
+      // The package window moved to its own screen (Faz 3F.1). The old link
+      // lands there, for reading: the values, and no form and no switch.
       await reader.gotoAdmin(`/showcase/packages?paket=${pkg.id}`);
-      await expect(page.getByTestId('showcase-package-dialog')).toBeVisible();
+      await expectOpen(page, new RegExp(`/showcase/packages/${pkg.id}$`));
+      await expect(page.getByTestId('showcase-package-read-only')).toBeVisible();
       await expect(page.getByTestId('showcase-package-slug')).toContainText(pkg.slug);
       await expect(page.getByTestId('showcase-package-edit-form')).toHaveCount(0);
       await expect(page.locator('input[name="packageId"]')).toHaveCount(0);
+      await expect(page.getByTestId('showcase-package-status-toggle')).toHaveCount(0);
+      await expect(page.getByTestId('showcase-package-header').getByRole('link', { name: 'Metin onayları' })).toBeVisible();
+      // Sales are PACKAGE_PURCHASES_READ: no tab, and asking for it by URL
+      // lands on the first tab.
+      await expect(page.getByTestId('showcase-package-tab-satislar')).toHaveCount(0);
+      await reader.gotoAdmin(`/showcase/packages/${pkg.id}?tab=satislar`);
+      await expect(page.getByTestId('showcase-package-panel-bilgiler')).toBeVisible();
+      await expect(page.getByTestId('showcase-package-sales')).toHaveCount(0);
+      await reader.gotoAdmin(`/showcase/packages/${pkg.id}?tab=gecmis`);
+      await expect(page.getByTestId('showcase-package-activity')).toContainText('Paket oluşturuldu');
       // The new-package window is not a way in either.
       await reader.gotoAdmin('/showcase/packages?paket=yeni');
       await expect(page.getByTestId('showcase-package-dialog')).toHaveCount(0);
@@ -527,6 +539,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
         '/showcase/cards',
         '/showcase/leads',
         '/showcase/packages',
+        `/showcase/packages/${pkg.id}`,
         '/showcase/price-terms',
         '/showcase/placements',
         `/showcase/placements/${run.placement.id}`,
@@ -543,7 +556,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
     }
   });
 
-  test('the package window is a URL: direct link, Back, Forward and Esc; the slug is shown and never sent', async ({
+  test('the package has its own screen: the list opens it, an old window link lands on it, the slug is shown and never sent', async ({
     browser,
   }) => {
     const { actor: staff } = await openAs(browser, ['SHOWCASE_PACKAGES_READ', 'SHOWCASE_PACKAGES_WRITE']);
@@ -552,6 +565,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
     const pkg = await prisma().showcasePackage.create({
       data: { name: `E2E Faz3C Paket ${uniqueSuffix()}`, slug, priceAmount: 240_000, currency: 'TRY', durationDays: 30 },
     });
+    const screen = new RegExp(`/showcase/packages/${pkg.id}$`);
 
     try {
       await staff.gotoAdmin('/showcase/packages');
@@ -560,50 +574,65 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await capture(page, 'vitrin-paketleri');
 
       await row.getByTestId('showcase-package-open').click();
-      await expect(page).toHaveURL(new RegExp(`paket=${pkg.id}`));
-      const windowed = page.getByTestId('showcase-package-dialog');
-      await expect(windowed).toBeVisible();
+      await expectOpen(page, screen);
       await expect(page.getByTestId('showcase-package-slug')).toContainText(slug);
-      await expect(windowed.locator('input[name="slug"]')).toHaveCount(0);
-      await capture(page, 'vitrin-paketi-penceresi');
+      const form = page.getByTestId('showcase-package-edit-form');
+      await expect(form).toBeVisible();
+      await expect(form.locator('[name="slug"]')).toHaveCount(0);
+      // Without PACKAGE_PURCHASES_READ there is no sales tab.
+      await expect(page.getByTestId('showcase-package-tab-satislar')).toHaveCount(0);
+      await capture(page, 'vitrin-paketi-detayi');
 
-      // Back closes it, Forward brings it back.
+      // Back returns to the list, Forward to the package.
       await page.goBack();
       await expect(page).toHaveURL(/\/showcase\/packages$/);
-      await expect(windowed).toHaveCount(0);
       await page.goForward();
-      await expect(windowed).toBeVisible();
+      await expect(page).toHaveURL(screen);
 
-      // Esc and × close it without a write, even with a changed field.
+      // Vazgeç puts the fields back and writes nothing.
       const before = (await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).updatedAt;
-      await windowed.locator('input[name="name"]').fill('Kaydedilmeyecek ad');
-      await page.keyboard.press('Escape');
-      await expect(page).toHaveURL(/\/showcase\/packages$/);
-      await expect(windowed).toHaveCount(0);
-      await staff.gotoAdmin(`/showcase/packages?paket=${pkg.id}`);
-      await windowed.locator('input[name="name"]').fill('Kaydedilmeyecek ad');
-      await windowed.getByRole('button', { name: 'Kapat' }).click();
-      await expect(page).toHaveURL(/\/showcase\/packages$/);
-      await staff.gotoAdmin(`/showcase/packages?paket=${pkg.id}`);
-      await windowed.getByRole('link', { name: 'Vazgeç' }).click();
-      await expect(page).toHaveURL(/\/showcase\/packages$/);
+      await form.locator('input[name="name"]').fill('Kaydedilmeyecek ad');
+      await form.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(form.locator('input[name="name"]')).toHaveValue(pkg.name);
       const untouched = await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } });
       expect(untouched.updatedAt).toEqual(before);
       expect(untouched.name).toBe(pkg.name);
 
-      // Saving writes every field it shows and keeps the slug.
-      await staff.gotoAdmin(`/showcase/packages?paket=${pkg.id}`);
-      await windowed.locator('input[name="name"]').fill('E2E Faz3C Paket (yeni ad)');
-      await windowed.locator('input[name="durationDays"]').fill('14');
-      await windowed.getByRole('button', { name: 'Kaydet' }).click();
-      await expect(page).toHaveURL(/saved=1/);
+      // Saving writes every field it shows, keeps the slug, and stays here.
+      await form.locator('input[name="name"]').fill('E2E Faz3C Paket (yeni ad)');
+      await form.locator('input[name="durationDays"]').fill('14');
+      await form.getByRole('button', { name: 'Kaydet' }).click();
+      await expect(page).toHaveURL(new RegExp(`/showcase/packages/${pkg.id}\\?saved=1$`));
       const saved = await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } });
-      expect(saved).toMatchObject({ name: 'E2E Faz3C Paket (yeni ad)', durationDays: 14, slug });
+      expect(saved).toMatchObject({ name: 'E2E Faz3C Paket (yeni ad)', durationDays: 14, slug, isActive: true });
 
-      // A direct link to a package that does not exist says so on the page.
+      // The form's Durum select is the window's checkbox: "Kapalı" sends false.
+      await form.getByTestId('showcase-package-active').selectOption('off');
+      await form.getByRole('button', { name: 'Kaydet' }).click();
+      await expect(page).toHaveURL(/saved=1/);
+      await expect.poll(async () => (await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive).toBe(false);
+
+      // The header's switch is the same PATCH with isActive alone.
+      await page.getByTestId('showcase-package-status-toggle').click();
+      await expect(page).toHaveURL(/activated=1/);
+      const reopened = await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } });
+      expect(reopened).toMatchObject({ isActive: true, name: 'E2E Faz3C Paket (yeni ad)', durationDays: 14 });
+      await page.getByTestId('showcase-package-status-toggle').click();
+      await expect(page).toHaveURL(/deactivated=1/);
+      await expect.poll(async () => (await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive).toBe(false);
+
+      // "Neler oldu" is the row's own instants, and says no history is kept.
+      await staff.gotoAdmin(`/showcase/packages/${pkg.id}?tab=gecmis`);
+      await expect(page.getByTestId('showcase-package-activity')).toContainText('Paket son güncellendi');
+      await expect(page.getByTestId('showcase-package-activity-footnote')).toContainText('geçmişi tutulmuyor');
+
+      // An old window link lands on the screen; one to a package that does
+      // not exist says so on the list.
+      await staff.gotoAdmin(`/showcase/packages?paket=${pkg.id}`);
+      await expect(page).toHaveURL(screen);
       await staff.gotoAdmin('/showcase/packages?paket=yok-boyle-paket');
       await expect(page.getByTestId('showcase-package-missing')).toBeVisible();
-      await expect(windowed).toHaveCount(0);
+      await expect(page.getByTestId('showcase-package-dialog')).toHaveCount(0);
     } finally {
       await prisma().showcasePackage.update({ where: { id: pkg.id }, data: { isActive: false } });
       await staff.close();
@@ -626,22 +655,35 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       [`/showcase/cards?cardId=${revision.card.id}`, 'vitrin-karti-tek'],
       ['/showcase/leads', 'vitrinden-gelen-talepler'],
       ['/showcase/packages', 'vitrin-paketleri'],
-      [`/showcase/packages?paket=${run.placement.showcasePackageId}`, 'vitrin-paketi-penceresi'],
+      [`/showcase/packages/${run.placement.showcasePackageId}`, 'vitrin-paketi-detayi'],
+      [`/showcase/packages/${run.placement.showcasePackageId}?tab=satislar`, 'vitrin-paketi-satislar'],
+      [`/showcase/packages/${run.placement.showcasePackageId}?tab=gecmis`, 'vitrin-paketi-gecmis'],
       ['/showcase/price-terms', 'vitrin-metin-onaylari'],
       ['/showcase/placements', 'yayinda-olan-kartlar'],
       [`/showcase/placements/${run.placement.id}`, 'yerlesim-detayi'],
     ];
 
     try {
-      for (const width of [1440, 390, 320]) {
+      for (const width of [1440, 768, 390, 320]) {
         await page.setViewportSize({ width, height: width === 1440 ? 1617 : 900 });
         for (const [path, name] of routes) {
           await admin.gotoAdmin(path);
           await assertNoErrorScreen(page);
           await expectNoPageOverflow(page, `${path} @${width}`);
-          if (width !== 390) await capture(page, `super-${name}`);
+          if (width === 1440 || width === 320) await capture(page, `super-${name}`);
         }
       }
+
+      // The package's sales tab lists the run the seeded purchase became.
+      await page.setViewportSize({ width: 1440, height: 1617 });
+      await admin.gotoAdmin(`/showcase/packages/${run.placement.showcasePackageId}?tab=satislar`);
+      await expect(page.getByTestId('showcase-sales-total')).toContainText('1');
+      await expect(page.getByTestId('showcase-sales-live')).toContainText('1');
+      const sale = page.getByTestId('showcase-sale-row');
+      await expect(sale).toHaveCount(1);
+      await expect(sale).toContainText('Ödendi');
+      await expect(sale).toContainText('Yayında');
+      await expect(sale.getByRole('link', { name: 'Yayında' })).toHaveAttribute('href', `/showcase/placements/${run.placement.id}`);
 
       // The single-card link from the consent ledger now shows that card.
       await admin.gotoAdmin(`/showcase/cards?cardId=${revision.card.id}`);

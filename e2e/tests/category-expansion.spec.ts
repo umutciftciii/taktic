@@ -375,7 +375,8 @@ test.describe('admin category management', () => {
         'hizmet verene doğrudan atanamaz',
       );
 
-      // 2. The routing question.
+      // 2. The routing question, on the screen's Sorular tab (Faz 3F.1).
+      await admin.gotoAdmin(`/categories/${routerSlug}?tab=sorular`);
       await admin.page.locator('details.question-create-panel > summary').click();
       const questionForm = admin.page.locator('.question-create-panel form');
       await questionForm.locator('input[name="key"]').fill('cihaz');
@@ -456,7 +457,7 @@ test.describe('admin category management', () => {
 
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
-      await admin.gotoAdmin(`/categories/${category.slug}`);
+      await admin.gotoAdmin(`/categories/${category.slug}?tab=sorular`);
 
       // Open the target question's editor. Every question row carries a
       // condition form of its own, so the locator has to be scoped to this
@@ -541,7 +542,7 @@ test.describe('admin category management', () => {
 
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
-      await admin.gotoAdmin(`/categories/${category.slug}`);
+      await admin.gotoAdmin(`/categories/${category.slug}?tab=sorular`);
 
       const targetRow = admin.page
         .locator('details.question-row')
@@ -752,6 +753,8 @@ test.describe('the operator view of the taxonomy', () => {
       await admin.gotoAdmin(`/categories/${draft.slug}`);
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByTestId('draft-explainer')).toBeVisible();
+      await admin.gotoAdmin(`/categories/${draft.slug}?tab=sorular`);
+      await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByText('Hazırlık sorusu')).toBeVisible();
     } finally {
       await admin.close();

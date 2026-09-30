@@ -20,7 +20,7 @@ import { primaryRuntime, repoRoot } from '../src/runtime';
  * ADMIN-DESIGN-001 / Faz 1: every signed-in screen still renders inside the new
  * shell.
  *
- * The redesign changed the stylesheet every one of the 52 screens reads and
+ * The redesign changed the stylesheet every one of the 53 screens reads and
  * the frame every one of them sits in, while converting none of their content.
  * So each one is opened once, as a super admin, at 1440px and at 390px — and
  * every screen a Faz 2/3 slice converted (CONVERTED_ROUTES) at 320px as well —
@@ -141,6 +141,8 @@ const CONVERTED_ROUTES = [
   '/credit-packages',
   '/credit-packages/new',
   '/credit-packages/[id]',
+  // Faz 3F.1: the vitrin package's own screen (was a window over the list).
+  '/showcase/packages/[id]',
 ];
 
 const STATIC_ROUTES = [
@@ -197,6 +199,18 @@ async function detailTargets(): Promise<Target[]> {
   // inactive package just the same, and a live one would sit in every later
   // spec's package list (lemon-checkout expects exactly its own).
   await db.offerCreditPackage.update({ where: { id: creditPackage.id }, data: { isActive: false } });
+  // Off sale from the start, for the same reason as the credit package: the
+  // admin screen opens it just the same, and no provider's shop lists it.
+  const showcasePackage = await db.showcasePackage.create({
+    data: {
+      name: 'E2E Tarama Vitrin Paketi',
+      slug: `vitrin-e2e-tarama-${Date.now()}`,
+      priceAmount: 49_900,
+      currency: 'TRY',
+      durationDays: 30,
+      isActive: false,
+    },
+  });
   const staff = await createStaffAdmin(['DASHBOARD_READ']);
   const assignment = await db.adminRoleAssignment.findFirst({ where: { userId: staff.id }, select: { roleId: true } });
 
@@ -227,6 +241,7 @@ async function detailTargets(): Promise<Target[]> {
     { route: '/support/[id]', path: `/support/${ticket.id}` },
     { route: '/categories/[slug]', path: `/categories/${category.slug}` },
     { route: '/credit-packages/[id]', path: `/credit-packages/${creditPackage.id}` },
+    { route: '/showcase/packages/[id]', path: `/showcase/packages/${showcasePackage.id}` },
     { route: '/users/[id]', path: `/users/${staff.id}` },
     existing('/roles/[id]', assignment?.roleId),
     existing('/offers/[id]', offer?.id),
@@ -242,11 +257,11 @@ async function detailTargets(): Promise<Target[]> {
 }
 
 test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
-  test('all 52 signed-in screens render inside the shell at 1440px and 390px (and the converted screens at 320px)', async ({ browser }, testInfo) => {
+  test('all 53 signed-in screens render inside the shell at 1440px and 390px (and the converted screens at 320px)', async ({ browser }, testInfo) => {
     test.setTimeout(600_000);
     const account = await createAdmin();
     const targets: Target[] = [...STATIC_ROUTES.map((route) => ({ route, path: route })), ...(await detailTargets())];
-    expect(targets).toHaveLength(52);
+    expect(targets).toHaveLength(53);
     // A new screen fails here until it has a target — and so is scanned.
     const onDisk = routesOnDisk().filter((route) => !OUTSIDE_THE_SHELL.includes(route)).sort();
     expect(onDisk, 'signed-in routes on disk vs. routes this scan opens').toEqual(
@@ -254,7 +269,7 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
     );
 
     const skipped = targets.filter((target) => !target.path);
-    console.log(`[admin-route-scan] opening ${targets.length - skipped.length}/52; skipped: ${skipped.map((target) => target.route).join(', ') || 'none'}`);
+    console.log(`[admin-route-scan] opening ${targets.length - skipped.length}/53; skipped: ${skipped.map((target) => target.route).join(', ') || 'none'}`);
     if (skipped.length > 0) {
       testInfo.annotations.push({
         type: 'skipped-routes',

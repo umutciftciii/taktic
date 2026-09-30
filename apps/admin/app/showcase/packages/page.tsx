@@ -1,5 +1,6 @@
-import { formatMinorAsTurkishLira, formatMinorAsTurkishLiraInput } from '@taktic/shared';
+import { formatMinorAsTurkishLira } from '@taktic/shared';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import {
   apiFetch,
   formatDateTime,
@@ -9,72 +10,19 @@ import {
 } from '../../../lib/api';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
-import { KeyValueList } from '../../../components/key-value-list';
 import { PageHeader } from '../../../components/page-header';
 import { WholeListFooter } from '../../../components/pagination';
 import { RouteDialog } from '../../../components/route-dialog';
-import { createShowcasePackageAction, updateShowcasePackageAction } from './actions';
+import { createShowcasePackageAction } from './actions';
+import { PriceField, showcasePackageErrorText, SORT_ORDER_HELP } from './showcase-package-fields';
 
 type PackagesPageProps = {
-  searchParams: Promise<{ paket?: string; error?: string; created?: string; saved?: string }>;
-};
-
-const PATH = '/showcase/packages';
-
-/** `?paket=yeni` opens the new-package window; any other value names a package. */
-const NEW_PACKAGE_KEY = 'yeni';
-
-const ERRORS: Record<string, string> = {
-  SHOWCASE_PACKAGE_SLUG_INVALID:
-    'Kısa ad "vitrin-" ile başlamak zorunda. Bu ön ek, ödeme sağlayıcısındaki ürün eşlemesinin teklif paketleriyle çakışmasını engeller.',
-  SHOWCASE_PACKAGE_SLUG_TAKEN: 'Bu kısa ad başka bir vitrin paketinde kullanılıyor.',
-  SHOWCASE_PACKAGE_NOT_FOUND: 'Vitrin paketi bulunamadı.',
-  SHOWCASE_PACKAGE_PRICE_INVALID:
-    'Yayın bedeli Türk lirası olarak girilmeli: örn. 10, 10,50 veya 1.250,75. Sıfır, eksi ve ikiden fazla ondalık kabul edilmez.',
-  SHOWCASE_PACKAGE_SAVE_FAILED: 'Paket kaydedilemedi. Alanları kontrol edip tekrar deneyin.',
+  searchParams: Promise<{ paket?: string; error?: string; created?: string }>;
 };
 
 /**
- * The price field, as the operator sees it: lira, with a comma for kuruş.
- *
- * Kuruş are the storage unit and never the form's language. The field is a
- * text input rather than `type="number"` because a number input cannot hold
- * `1.250,75` — it reads the dot as a decimal point and the comma as a typo —
- * and `inputMode="decimal"` keeps the numeric keyboard on a phone. The server
- * action parses it with the shared helper; the pattern here only spares the
- * operator a round trip for the obvious cases.
- */
-const PRICE_HELP = 'Türk lirası. Kuruş için virgül kullanın: 10, 10,50 veya 1.250,75.';
-const PRICE_PATTERN = '([0-9]{1,3}(\\.[0-9]{3})*|[0-9]+)(,[0-9]{1,2})?';
-
-function PriceField({ defaultValue }: { defaultValue?: number }) {
-  return (
-    <label>
-      <span>Yayın bedeli (₺) *</span>
-      <input
-        name="priceAmount"
-        type="text"
-        inputMode="decimal"
-        required
-        pattern={PRICE_PATTERN}
-        placeholder="499,90"
-        defaultValue={defaultValue === undefined ? '' : formatMinorAsTurkishLiraInput(defaultValue)}
-        data-testid="showcase-package-price"
-      />
-      <small>{PRICE_HELP}</small>
-    </label>
-  );
-}
-
-/**
- * The catalogue's own listing order, and nothing else.
- *
- * Under "Gelişmiş ayarlar" because it is not a fact about the package: it says
- * where this package sits in the shop's list, and it says nothing about where
- * any card sits on the home page. The vitrin shelf is ordered by the feed —
- * one round of every provider's best card, then a round of second cards —
- * and no package, price or setting moves a card up it. Stating that here is
- * what keeps an operator from selling a boost that does not exist.
+ * The catalogue's own listing order, under "Gelişmiş ayarlar" in the
+ * new-package window because it is not a fact about the package.
  */
 function AdvancedSettings({ sortOrder }: { sortOrder: number }) {
   return (
@@ -83,15 +31,16 @@ function AdvancedSettings({ sortOrder }: { sortOrder: number }) {
       <label>
         <span>Listeleme sırası</span>
         <input name="sortOrder" type="number" min={0} defaultValue={sortOrder} />
-        <small>
-          Yalnız paket listesindeki görünüm sırası (küçük sayı önce). Kartların ana sayfa veya
-          vitrin sayfalarındaki sırasını etkilemez; hiçbir paket bir karta öncelik ya da
-          sıralama avantajı vermez.
-        </small>
+        <small>{SORT_ORDER_HELP}</small>
       </label>
     </details>
   );
 }
+
+const PATH = '/showcase/packages';
+
+/** `?paket=yeni` opens the new-package window; any other value names a package. */
+const NEW_PACKAGE_KEY = 'yeni';
 
 /**
  * Vitrin paketleri (#21), design `list:showcasePackages` (paket 2
@@ -113,16 +62,16 @@ function AdvancedSettings({ sortOrder }: { sortOrder: number }) {
  * anywhere in this product, and the sentence on this page is where an operator
  * setting the number is told which one they are setting.
  *
- * ## List, then a window per package
+ * ## List, the new-package window, and a screen per package
  *
- * The inline edit card per package became the design's list with "Aç" and
- * "Yeni paket ekle", each opening a window at a URL (`?paket=<id>` /
- * `?paket=yeni`). The window holds the same fields, the same server actions
- * and the same rules: the slug is written once, at creation, and shown — never
- * sent — afterwards. Without SHOWCASE_PACKAGES_WRITE the window is the
- * package's details and nothing to submit. Not drawn from the design: its Ara,
- * Durum and Tarih filters (the API takes none; the catalogue is a handful of
- * rows).
+ * The design's list with "Aç" and "Yeni paket ekle". "Yeni paket ekle" opens a
+ * window at `?paket=yeni`; "Aç" opens the package's own detail screen
+ * (`/showcase/packages/<id>`, ADMIN-DESIGN-001 Faz 3F.1), which holds what the
+ * old `?paket=<id>` window held — the same fields, server action and rules —
+ * plus the package's sales and runs. An old `?paket=<id>` link is sent there.
+ * The slug is written once, at creation, and shown — never sent — afterwards.
+ * Not drawn from the design: its Ara, Durum and Tarih filters (the API takes
+ * none; the catalogue is a handful of rows).
  */
 
 /** The design's ⓘ; each sentence checked against showcase-packages.service.ts. */
@@ -143,17 +92,20 @@ const COLUMNS: DataColumn[] = [
 
 export default async function ShowcasePackagesPage({ searchParams }: PackagesPageProps) {
   const { can } = await requireAdmin('SHOWCASE_PACKAGES_READ');
-  // Create and edit are both SHOWCASE_PACKAGES_WRITE. Without it the window
-  // shows every value the forms would have carried, and no form.
+  // Creating is SHOWCASE_PACKAGES_WRITE; without it there is no window.
   const canWrite = can('SHOWCASE_PACKAGES_WRITE');
 
-  const { paket, error, created, saved } = await searchParams;
+  const { paket, error, created } = await searchParams;
   const { packages } = await apiFetch<{ packages: ShowcasePackage[] }>('/admin/showcase/packages');
 
   const openKey = (paket ?? '').trim();
   const isNew = openKey === NEW_PACKAGE_KEY && canWrite;
-  const opened = openKey && !isNew ? (packages.find((pkg) => pkg.id === openKey) ?? null) : null;
-  const errorText = error ? (ERRORS[error] ?? ERRORS.SHOWCASE_PACKAGE_SAVE_FAILED) : null;
+  const opened = openKey && openKey !== NEW_PACKAGE_KEY ? (packages.find((pkg) => pkg.id === openKey) ?? null) : null;
+  // The package window moved to its own screen: an old link still arrives.
+  if (opened) {
+    redirect(`${PATH}/${encodeURIComponent(opened.id)}${error ? `?${new URLSearchParams({ error })}` : ''}`);
+  }
+  const errorText = showcasePackageErrorText(error);
   const onSale = packages.filter((pkg) => pkg.isActive).length;
 
   return (
@@ -192,7 +144,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
       />
 
       {/* An error that belongs to no window (e.g. an unknown package) stays on the page. */}
-      {errorText && !isNew && !opened ? (
+      {errorText && !isNew ? (
         <div className="notice notice-error detail-notice" role="alert">
           {errorText}
         </div>
@@ -202,12 +154,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
           Paket oluşturuldu.
         </div>
       ) : null}
-      {saved ? (
-        <div className="notice detail-notice" role="status">
-          Paket güncellendi. Değişiklik yalnız bundan sonraki satın almaları etkiler.
-        </div>
-      ) : null}
-      {openKey && !isNew && !opened ? (
+      {openKey && !isNew ? (
         <div className="notice notice-error detail-notice" role="alert" data-testid="showcase-package-missing">
           Bu bağlantının gösterdiği vitrin paketi bulunamadı.
         </div>
@@ -254,8 +201,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                 <td className="col-actions">
                   <Link
                     className="btn btn-secondary btn-sm"
-                    href={`${PATH}?paket=${encodeURIComponent(pkg.id)}`}
-                    scroll={false}
+                    href={`${PATH}/${encodeURIComponent(pkg.id)}`}
                     aria-describedby={`showcase-package-name-${pkg.id}`}
                     data-testid="showcase-package-open"
                   >
@@ -366,125 +312,6 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
         </RouteDialog>
       ) : null}
 
-      {opened ? (
-        <RouteDialog title={opened.name} closeHref={PATH} testId="showcase-package-dialog">
-          {errorText ? (
-            <div className="notice notice-error" role="alert">
-              {errorText}
-            </div>
-          ) : null}
-          <KeyValueList
-            items={[
-              {
-                label: 'Kısa ad',
-                value: (
-                  <span className="readonly-value" data-testid="showcase-package-slug">
-                    <code>{opened.slug}</code>
-                    <small className="cell-muted">
-                      Değiştirilemez: ödeme sağlayıcısındaki ürün eşlemesinin anahtarıdır.
-                    </small>
-                  </span>
-                ),
-              },
-              { label: 'Durum', value: opened.isActive ? 'Satışta' : 'Kapalı' },
-              { label: 'Yayın bedeli', value: formatMinorAsTurkishLira(opened.priceAmount, opened.currency) },
-              { label: 'Süre', value: `${opened.durationDays} gün` },
-              { label: 'Geçerlilik', value: `${opened.activationWindowDays} gün` },
-              {
-                label: 'Kart tipi',
-                value: opened.allowedCardKind ? SHOWCASE_CARD_KIND_LABELS[opened.allowedCardKind] : 'Her ikisi',
-              },
-              { label: 'Bölge', value: opened.maxAreas === null ? 'Tümü' : `En fazla ${opened.maxAreas}` },
-              { label: 'Listeleme sırası', value: String(opened.sortOrder) },
-              { label: 'Oluşturma', value: formatDateTime(opened.createdAt) },
-              { label: 'Son değişiklik', value: formatDateTime(opened.updatedAt) },
-              ...(canWrite ? [] : [{ label: 'Açıklama', value: opened.description }]),
-            ]}
-          />
-
-          {canWrite ? (
-            <form action={updateShowcasePackageAction} className="form-grid" data-testid="showcase-package-edit-form">
-              <input type="hidden" name="packageId" value={opened.id} />
-              <p className="detail-muted-note form-grid-wide">
-                Yapılan değişiklikler yalnız bundan sonraki satın almaları etkiler.
-              </p>
-              <label>
-                <span>Ad *</span>
-                <input name="name" defaultValue={opened.name} required minLength={3} maxLength={120} />
-              </label>
-              <PriceField defaultValue={opened.priceAmount} />
-              <label>
-                <span>Süre (gün) *</span>
-                <input
-                  name="durationDays"
-                  type="number"
-                  min={1}
-                  max={365}
-                  defaultValue={opened.durationDays}
-                  required
-                />
-              </label>
-              <label>
-                <span>Kullanılmamış hakkın geçerliliği (gün) *</span>
-                <input
-                  name="activationWindowDays"
-                  type="number"
-                  min={1}
-                  max={365}
-                  step={1}
-                  defaultValue={opened.activationWindowDays ?? 90}
-                  required
-                />
-                <small>
-                  Ödemeden itibaren kartın onaylanıp yayına girmesi için tanınan süre. İnceleme
-                  süresi sayılmaz.
-                </small>
-              </label>
-              <label>
-                <span>Kart tipi</span>
-                <select name="allowedCardKind" defaultValue={opened.allowedCardKind ?? ''}>
-                  <option value="">Her ikisi</option>
-                  <option value="SERVICE">Hizmet vitrini</option>
-                  <option value="PROMOTION">Genel tanıtım</option>
-                </select>
-              </label>
-              <label>
-                <span>Azami bölge sayısı</span>
-                <input
-                  name="maxAreas"
-                  type="number"
-                  min={1}
-                  max={25}
-                  defaultValue={opened.maxAreas ?? ''}
-                  placeholder="Boş: tümü"
-                />
-              </label>
-              <label className="form-grid-wide">
-                <span>Açıklama</span>
-                <textarea name="description" maxLength={600} defaultValue={opened.description ?? ''} />
-                <small>
-                  Yalnız paketin sağladığını yazın: yayın süresi ve karttan doğrudan talep. Öncelik
-                  veya sıralama vaadi vermeyin; böyle bir mekanizma yoktur.
-                </small>
-              </label>
-              <label className="checkbox-row form-grid-wide">
-                <input type="checkbox" name="isActive" defaultChecked={opened.isActive} />
-                <span>Satışta</span>
-              </label>
-              <AdvancedSettings sortOrder={opened.sortOrder} />
-
-              <div className="form-actions form-grid-wide">
-                <Link className="btn btn-secondary" href={PATH} scroll={false}>
-                  Vazgeç
-                </Link>
-                <button className="btn btn-primary" type="submit">
-                  Kaydet
-                </button>
-              </div>
-            </form>
-          ) : null}
-        </RouteDialog>
-      ) : null}
     </main>
   );
 }

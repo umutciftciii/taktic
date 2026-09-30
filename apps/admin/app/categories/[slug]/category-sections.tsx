@@ -1,13 +1,17 @@
+import type { ReactNode } from 'react';
 import { CategoryImageUploader } from '../category-image-uploader';
 import {
   CATEGORY_ICON_KEYS,
+  formatDateTime,
   type Category,
   type Question,
   type QuestionOption,
   type QuestionSystemField,
   type QuestionType,
 } from '../../../lib/api';
+import { DetailFormFooter } from '../../../components/detail-form-footer';
 import { EmptyState } from '../../../components/empty-state';
+import { InfoPopover } from '../../../components/info-popover';
 import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
 import {
@@ -92,20 +96,40 @@ export function CategoryInfoSection({
   return (
     <SectionCard
       title="Kategori bilgileri"
-      subtitle="Müşteri akışında görünen temel alanlar ve ağaçtaki yeri."
+      actions={
+        <span className="section-card-meta">
+          {category.updatedAt
+            ? `Son değişiklik: ${formatDateTime(category.updatedAt)}`
+            : 'Müşteri akışında görünen alanlar ve ağaçtaki yeri'}
+        </span>
+      }
+      className="detail-tab-card"
       testId="category-info-card"
     >
       {canWrite ? (
         <form action={updateAction} className="compact-form compact-form-wide">
           <input type="hidden" name="id" value={category.id} />
           <div className="compact-field-grid">
-            <label className="field field-6">
+            <label className="field field-4">
               <span>Kategori adı *</span>
               <input name="name" required defaultValue={category.name} />
             </label>
-            <label className="field field-6">
+            <label className="field field-4">
               <span>Kısa ad (slug) *</span>
               <input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" defaultValue={category.slug} />
+              <span className="help-text">Kısa ad değişirse mevcut bağlantılar kırılır.</span>
+            </label>
+            <label className="field field-4">
+              <span>Üst kategori</span>
+              <select name="parentId" defaultValue={category.parentId ?? ''}>
+                <option value="">— (üst seviye)</option>
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+              <span className="help-text">Yalnızca grup tipindeki kategoriler üst kategori olabilir.</span>
             </label>
             <label className="field field-4">
               <span>Tip *</span>
@@ -117,6 +141,28 @@ export function CategoryInfoSection({
                 ))}
               </select>
               <span className="help-text">{KIND_HINTS[category.kind]}</span>
+            </label>
+            <label className="field field-4">
+              <span>Teklif kredisi{category.kind === 'LEAF' ? ' *' : ''}</span>
+              <input
+                name="offerCreditCost"
+                type="number"
+                min="1"
+                step="1"
+                required={category.kind === 'LEAF'}
+                disabled={category.kind !== 'LEAF'}
+                defaultValue={category.offerCreditCost ?? ''}
+              />
+              <span className="help-text">
+                {category.kind === 'LEAF'
+                  ? 'Hizmet verenin bu kategoride bir teklif vermesi kaç krediye mal olur. Yalnız bundan sonraki teklifleri etkiler; geçmiş teklif ve iadeleri değiştirmez.'
+                  : 'Bu tipte teklif verilemediği için kredi maliyeti kullanılmaz.'}
+              </span>
+            </label>
+            <label className="field field-4">
+              <span>Sıralama</span>
+              <input name="sortOrder" type="number" min="0" defaultValue={category.sortOrder} />
+              <span className="help-text">Küçük sayı katalogda önce görünür.</span>
             </label>
             <label className="field field-4">
               <span>Durum *</span>
@@ -148,22 +194,6 @@ export function CategoryInfoSection({
               </select>
               <span className="help-text">{STATUS_HINTS[category.status]}</span>
             </label>
-            <label className="field field-4">
-              <span>Üst kategori</span>
-              <select name="parentId" defaultValue={category.parentId ?? ''}>
-                <option value="">— (üst seviye)</option>
-                {groups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.name}
-                  </option>
-                ))}
-              </select>
-              <span className="help-text">Yalnızca grup tipindeki kategoriler üst kategori olabilir.</span>
-            </label>
-            <label className="field field-3">
-              <span>Sıralama</span>
-              <input name="sortOrder" type="number" min="0" defaultValue={category.sortOrder} />
-            </label>
             {/*
               Editable on a draft service and nowhere else. A live service is
               always open to applications — closing one would refuse every
@@ -171,7 +201,7 @@ export function CategoryInfoSection({
               disabled rather than hidden, because "why can I not change this"
               is a question the screen should answer where it is asked.
             */}
-            <label className="field field-6">
+            <label className="field field-4">
               <span>Hizmet veren başvurusu</span>
               <input
                 name="providerEnrollmentOpen"
@@ -198,7 +228,7 @@ export function CategoryInfoSection({
               on, which is how regulated and high-value services stay out of
               unlimited packages without anybody maintaining a list.
             */}
-            <label className="field field-6">
+            <label className="field field-4">
               <span>Limitsiz paket uygunluğu</span>
               <input
                 name="unlimitedPackageEligible"
@@ -211,23 +241,6 @@ export function CategoryInfoSection({
                 {category.status === 'INACTIVE'
                   ? 'Kapalı kategoriler limitsiz paket kapsamına alınamaz.'
                   : 'Açıkken bu kategori (ve grup seçilirse alt kategorileri) kategori limitsiz paketlerin kapsamına eklenebilir. Regüle veya yüksek değerli kategorilerde kapalı bırakın.'}
-              </span>
-            </label>
-            <label className="field field-3">
-              <span>Teklif kredisi{category.kind === 'LEAF' ? ' *' : ''}</span>
-              <input
-                name="offerCreditCost"
-                type="number"
-                min="1"
-                step="1"
-                required={category.kind === 'LEAF'}
-                disabled={category.kind !== 'LEAF'}
-                defaultValue={category.offerCreditCost ?? ''}
-              />
-              <span className="help-text">
-                {category.kind === 'LEAF'
-                  ? 'Yalnız bundan sonraki teklifleri etkiler; geçmiş teklif ve iadeleri değiştirmez.'
-                  : 'Bu tipte teklif verilemediği için kredi maliyeti kullanılmaz.'}
               </span>
             </label>
             <label className="field field-12">
@@ -266,14 +279,11 @@ export function CategoryInfoSection({
               </span>
             </label>
           </div>
-          <div className="compact-actions">
-            <button className="btn btn-primary btn-sm" type="submit">
+          <DetailFormFooter note="Teklif kredisi değişikliği yalnız bundan sonra verilecek tekliflerde geçerlidir. Kısa ad değişirse mevcut bağlantılar kırılır.">
+            <button className="btn btn-primary" type="submit">
               Kategoriyi kaydet
             </button>
-            <span className="muted" style={{ fontSize: 12 }}>
-              Kısa ad değişirse mevcut bağlantılar kırılır.
-            </span>
-          </div>
+          </DetailFormFooter>
         </form>
       ) : (
         <CategoryReadOnlyDetails category={category} />
@@ -354,7 +364,8 @@ export function RouterTargetsSection({
   return (
     <SectionCard
       title="Yönlendirme hedefleri"
-      subtitle="Yönlendirme sorusunun her seçeneği hangi hizmete gider."
+      actions={<span className="section-card-meta">Yönlendirme sorusunun her seçeneği hangi hizmete gider</span>}
+      className="detail-tab-card"
       testId="router-targets-card"
     >
       {routerQuestion && !canWriteQuestions ? (
@@ -387,21 +398,18 @@ export function RouterTargetsSection({
               );
             })}
           </div>
-          <div className="compact-actions">
-            <button className="btn btn-primary btn-sm" type="submit">
+          <DetailFormFooter note="Hedef yayında bir hizmet değilse müşteri talebi tamamlayamaz.">
+            <button className="btn btn-primary" type="submit">
               Yönlendirmeyi kaydet
             </button>
-            <span className="muted" style={{ fontSize: 12 }}>
-              Hedef yayında bir hizmet değilse müşteri talebi tamamlayamaz.
-            </span>
-          </div>
+          </DetailFormFooter>
         </form>
       ) : (
         <EmptyState
           title="Yönlendirme sorusu yok."
           description={
             canWriteQuestions
-              ? 'Aşağıdan SELECT tipinde bir soru ekleyip “Yönlendirme sorusu” alanını Evet yapın.'
+              ? 'Soru listesinin altından SELECT tipinde bir soru ekleyip “Yönlendirme sorusu” alanını Evet yapın.'
               : undefined
           }
         />
@@ -461,27 +469,41 @@ export function QuestionSetSection({
   canWriteQuestions: boolean;
   actions: QuestionActions;
 }) {
+  const activeCount = questions.filter((question) => question.isActive).length;
+
   return (
     <SectionCard
-      title="Soru seti"
-      subtitle="Bu kategori için müşteriye sorulacak dinamik sorular. Satırı açarak düzenleyin; yeni soruyu en alttan ekleyin."
+      title={
+        <>
+          Talep formundaki sorular
+          <InfoPopover label="Sorular nasıl çalışır?" size="sm">
+            <QuestionHints />
+          </InfoPopover>
+        </>
+      }
+      actions={
+        <span className="section-card-meta" data-testid="question-set-count">
+          {questions.length} soru · {activeCount} aktif
+        </span>
+      }
       padded={false}
+      className="detail-tab-card"
       testId="question-set-card"
     >
       <div className="question-manager">
         {questions.length === 0 ? (
           <EmptyState
             title="Bu kategoride soru yok."
-            description={canWriteQuestions ? 'Aşağıdaki “+ Yeni Soru Ekle” ile başlayabilirsiniz.' : undefined}
+            description={canWriteQuestions ? 'Aşağıdaki “Yeni soru ekle” ile başlayabilirsiniz.' : undefined}
           />
         ) : (
           <div className="question-table">
-            <div className="question-table-head">
+            <div className="question-table-head" aria-hidden="true">
               <span>Sıra</span>
               <span>Soru</span>
-              <span>Key</span>
-              <span>Tip</span>
+              <span>Cevap tipi</span>
               <span>Zorunlu</span>
+              <span>Ne zaman sorulur</span>
               <span>Durum</span>
               <span>İşlem</span>
             </div>
@@ -490,38 +512,26 @@ export function QuestionSetSection({
                 <summary>
                   <span className="q-order">{question.sortOrder}</span>
                   <span className="q-label">
-                    {question.label}
-                    {question.systemField ? (
-                      <span
-                        className="meta-pill"
-                        style={{ marginLeft: 8 }}
-                        title="Bu soru talebin kendi alanına bağlı; cevap olarak ikinci kez saklanmaz."
-                      >
-                        {SYSTEM_FIELD_LABELS[question.systemField]} alanı
-                      </span>
-                    ) : null}
-                    {question.isRouter ? (
-                      <span className="meta-pill" style={{ marginLeft: 8 }}>
-                        yönlendirme
-                      </span>
-                    ) : null}
-                    {(question.conditions ?? []).length > 0 ? (
-                      <span className="meta-pill" style={{ marginLeft: 8 }}>
-                        koşullu · {question.conditions?.[0]?.matchMode === 'ALL' ? 'tamamı' : 'herhangi biri'}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="q-key">
-                    <code>{question.key}</code>
-                  </span>
-                  <span>
-                    <span className="q-type-badge">{question.type}</span>
-                  </span>
-                  <span>
-                    <span className={question.isRequired ? 'q-req-badge is-on' : 'q-req-badge'}>
-                      {question.isRequired ? 'Evet' : 'Hayır'}
+                    <span className="q-label-text">{question.label}</span>
+                    <span className="q-sub q-key">
+                      <code>{question.key}</code>
+                      {question.systemField ? (
+                        <span
+                          className="meta-pill"
+                          title="Bu soru talebin kendi alanına bağlı; cevap olarak ikinci kez saklanmaz."
+                        >
+                          {SYSTEM_FIELD_LABELS[question.systemField]} alanı
+                        </span>
+                      ) : null}
+                      {question.isRouter ? <span className="meta-pill">yönlendirme</span> : null}
                     </span>
                   </span>
+                  <span className="q-type">
+                    <span>{QUESTION_TYPE_LABELS[question.type] ?? question.type}</span>
+                    {optionCountNote(question) ? <span className="q-sub">{optionCountNote(question)}</span> : null}
+                  </span>
+                  <span className="q-required">{question.isRequired ? 'Evet' : 'Hayır'}</span>
+                  <QuestionWhen question={question} siblings={questions} />
                   <span className="q-status">
                     <span className={question.isActive ? 'badge badge-good' : 'badge badge-muted'}>
                       {question.isActive ? 'Aktif' : 'Pasif'}
@@ -582,7 +592,7 @@ export function QuestionSetSection({
 
         {canWriteQuestions ? (
           <details className="question-create-panel">
-            <summary>Yeni Soru Ekle</summary>
+            <summary>Yeni soru ekle</summary>
             <div className="question-create-panel-body">
               <form action={actions.create} className="compact-form compact-form-wide">
                 <input type="hidden" name="categoryId" value={category.id} />
@@ -603,6 +613,69 @@ export function QuestionSetSection({
         ) : null}
       </div>
     </SectionCard>
+  );
+}
+
+/** The design's "Cevap tipi" column, in words; the edit form keeps the type codes. */
+export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  TEXT: 'Kısa metin',
+  TEXTAREA: 'Serbest metin',
+  SELECT: 'Tek seçim',
+  MULTI_SELECT: 'Çoklu seçim',
+  NUMBER: 'Sayı',
+  BOOLEAN: 'Evet / Hayır',
+  DATE: 'Tarih',
+  IMAGE: 'Fotoğraf',
+};
+
+function optionCountNote(question: Question): string | null {
+  if (question.type !== 'SELECT' && question.type !== 'MULTI_SELECT') return null;
+  const count = (question.options ?? []).length;
+  return `${count} seçenek`;
+}
+
+/**
+ * "Ne zaman sorulur": always, or when the source question is answered with one
+ * (or, for a "tamamı" rule, all) of the expected options — named by their
+ * labels, read from the source question on this same screen. A source or an
+ * option that is no longer there falls back to its key rather than vanishing.
+ */
+export function describeQuestionCondition(
+  question: Question,
+  siblings: Question[],
+): { when: string; source: string | null } {
+  const condition = (question.conditions ?? [])[0];
+  if (!condition || condition.expectedValues.length === 0) return { when: 'Her zaman', source: null };
+
+  const source = siblings.find((candidate) => candidate.key === condition.sourceQuestionKey);
+  const labels = condition.expectedValues.map((value) => {
+    const option = (source?.options ?? []).find((candidate) => candidate.key === value);
+    return `"${option?.label ?? value}"`;
+  });
+  const joiner = condition.matchMode === 'ALL' ? ' ve ' : ' veya ';
+
+  return {
+    when: `${labels.join(joiner)} seçilirse`,
+    source: source?.label ?? condition.sourceQuestionLabel ?? condition.sourceQuestionKey,
+  };
+}
+
+function QuestionWhen({ question, siblings }: { question: Question; siblings: Question[] }) {
+  const { when, source } = describeQuestionCondition(question, siblings);
+  const condition = (question.conditions ?? [])[0];
+
+  return (
+    <span className="q-when">
+      <span>{when}</span>
+      {source ? (
+        <span className="q-sub">
+          <span className="meta-pill">
+            koşullu · {condition?.matchMode === 'ALL' ? 'tamamı' : 'herhangi biri'}
+          </span>
+          <span>Kaynak: {source}</span>
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -849,42 +922,55 @@ function formatOptions(options: QuestionOption[] | null | undefined) {
   return options ? JSON.stringify(options, null, 2) : '';
 }
 
-// ---- Yan sütun ----------------------------------------------------------------------
+// ---- Kategori bilgileri sekmesinin alt kartları -----------------------------------
 
-/** The status switch, with CATEGORIES_STATUS only. */
+/**
+ * The status switch, with CATEGORIES_STATUS only: the current status and what
+ * it means, then the select and its button in the card's footer band.
+ */
 export function CategoryStatusSection({ category, action }: { category: Category; action: FormAction }) {
   return (
     <SectionCard
       title="Kategori durumu"
-      subtitle={STATUS_HINTS[category.status]}
-      className={category.status === 'ACTIVE' ? 'catalog-side-card is-warning' : 'catalog-side-card'}
+      padded={false}
+      className={category.status === 'ACTIVE' ? 'detail-tab-card is-warning' : 'detail-tab-card'}
       testId="category-status-panel"
     >
-      <form action={action} className="catalog-side-form">
-        <input type="hidden" name="id" value={category.id} />
-        <input type="hidden" name="slug" value={category.slug} />
-        <label className="detail-form-field">
-          <span>Yeni durum</span>
-          <select name="status" defaultValue={category.status}>
-            {CATEGORY_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {STATUS_LABELS[status]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="btn btn-primary btn-sm" type="submit">
-          Durumu güncelle
-        </button>
-      </form>
+      <div className="readiness-intro">
+        <p>
+          Şu anki durum: <strong>{STATUS_LABELS[category.status]}</strong>
+        </p>
+        <p className="catalog-side-note">{STATUS_HINTS[category.status]}</p>
+      </div>
+      <div className="detail-card-footer">
+        <form action={action} className="detail-status-form">
+          <input type="hidden" name="id" value={category.id} />
+          <input type="hidden" name="slug" value={category.slug} />
+          <label className="detail-form-field">
+            <span>Yeni durum</span>
+            <select name="status" defaultValue={category.status}>
+              {CATEGORY_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="btn btn-secondary" type="submit">
+            Durumu güncelle
+          </button>
+        </form>
+      </div>
     </SectionCard>
   );
 }
 
 /**
  * Why a draft is not on the catalogue, and the release checklist — the same
- * three rules the list's "Yayına hazır mı?" reads. Only on a draft; the
- * checklist itself only on a service.
+ * rules the list's "Yayına hazır mı?" reads. Only on a draft; the checklist
+ * itself only on a service. Drawn as the design's ticked rows: a tick where
+ * the rule is met, a warning where it blocks, a plain mark where the row is
+ * information and not a rule (questions, invitations, enrollment).
  */
 export function ReleaseChecklistSection({
   category,
@@ -899,14 +985,16 @@ export function ReleaseChecklistSection({
   const approvedProviders = category._count?.providers ?? 0;
   const activeInvites = category._count?.providerInvites ?? 0;
   const enrollment = enrollmentSentence(category);
+  const isLeaf = category.kind === 'LEAF';
 
   return (
     <SectionCard
-      title="Bu kategori neden yayında değil?"
-      className="catalog-side-card"
+      title={isLeaf ? 'Yayına hazır mı?' : 'Bu kategori neden yayında değil?'}
+      padded={false}
+      className="detail-tab-card readiness-card"
       testId="draft-explainer"
     >
-      <div className="catalog-side-body">
+      <div className="readiness-intro">
         <p>
           Taslak kategoriler yalnızca bu panelde görünür. Müşteri kataloğunda listelenmez, hizmet verenlerin keşif
           ekranına düşmez ve seçilebilir hizmet listesine eklenemez.
@@ -915,110 +1003,136 @@ export function ReleaseChecklistSection({
           Yayına almadan önce şunları kontrol edin: soru seti tamam mı, zorunlu alanlar doğru mu, hizmet tipindeyse
           teklif kredisi tanımlı mı? Hazır olduğunda durumu <strong>{STATUS_LABELS.ACTIVE}</strong> yapmanız yeterli.
         </p>
+      </div>
 
-        {category.kind === 'LEAF' ? (
-          <dl className="release-checklist" data-testid="release-checklist">
-            <div>
-              <dt>Teklif kredisi</dt>
-              <dd>
-                {category.offerCreditCost === null ? (
-                  <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_PRICE}>
-                    {RELEASE_BLOCKER_LABELS.NO_PRICE}
-                  </span>
-                ) : (
-                  <strong>{category.offerCreditCost}</strong>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Onaylı hizmet veren</dt>
-              <dd>
-                {approvedProviders === 0 ? (
-                  <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}>
-                    0
-                  </span>
-                ) : (
-                  <strong>{approvedProviders}</strong>
-                )}
-              </dd>
-            </div>
-            {questionCount !== null ? (
-              <div>
-                <dt>Soru sayısı</dt>
-                <dd>
-                  <strong>{questionCount}</strong>
-                </dd>
-              </div>
-            ) : null}
-            <div>
-              <dt>Geçerli davet</dt>
-              <dd data-testid="release-active-invites">
-                {/*
-                  Shown next to the blockers and deliberately not one of them.
-                  A live invitation means a business has been approached, which
-                  is progress towards supply and not supply: until one of them
-                  applies and is approved, the approved-provider figure above is
-                  still zero and this service is still not ready.
-                */}
+      {isLeaf ? (
+        <ul className="readiness-list" data-testid="release-checklist">
+          <ReadinessRow
+            tone={category.offerCreditCost === null ? 'warn' : 'ok'}
+            label="Teklif kredisi"
+            value={
+              category.offerCreditCost === null ? (
+                <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_PRICE}>
+                  {RELEASE_BLOCKER_LABELS.NO_PRICE}
+                </span>
+              ) : (
+                <strong>{category.offerCreditCost}</strong>
+              )
+            }
+          />
+          <ReadinessRow
+            tone={approvedProviders === 0 ? 'warn' : 'ok'}
+            label="Onaylı hizmet veren"
+            value={
+              approvedProviders === 0 ? (
+                <span className="badge badge-bad" title={RELEASE_BLOCKER_HINTS.NO_APPROVED_PROVIDER}>
+                  0
+                </span>
+              ) : (
+                <strong>{approvedProviders}</strong>
+              )
+            }
+          />
+          {questionCount !== null ? (
+            <ReadinessRow tone="info" label="Soru sayısı" value={<strong>{questionCount}</strong>} />
+          ) : null}
+          <ReadinessRow
+            tone="info"
+            label="Geçerli davet"
+            /*
+              Shown next to the blockers and deliberately not one of them. A
+              live invitation means a business has been approached, which is
+              progress towards supply and not supply: until one of them applies
+              and is approved, the approved-provider figure above is still zero
+              and this service is still not ready.
+            */
+            value={
+              <span data-testid="release-active-invites">
                 <strong>{activeInvites}</strong>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {' '}
                   · hazır sayılmaz
                 </span>
-              </dd>
-            </div>
-            <div>
-              <dt>Hizmet veren başvurusu</dt>
-              <dd data-testid="enrollment-note">
-                {/*
-                  "Nobody has applied" and "nobody may apply" look identical in
-                  the count above and are entirely different problems. This row
-                  is the one that tells them apart.
-                */}
+              </span>
+            }
+          />
+          <ReadinessRow
+            tone="info"
+            label="Hizmet veren başvurusu"
+            /*
+              "Nobody has applied" and "nobody may apply" look identical in the
+              count above and are entirely different problems. This row is the
+              one that tells them apart.
+            */
+            note={enrollment ?? undefined}
+            value={
+              <span data-testid="enrollment-note">
                 {category.providerEnrollmentOpen ? (
                   <span className="badge badge-good">Başvuruya açık</span>
                 ) : (
                   <span className="badge badge-muted">Yeni hizmet veren başvurusu kapalı</span>
                 )}
-                {enrollment ? (
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    {' '}
-                    · {enrollment}
-                  </span>
-                ) : null}
-              </dd>
-            </div>
-            <div>
-              <dt>Yayına hazır mı?</dt>
-              <dd>
-                {blockers.length === 0 ? (
-                  <span className="badge badge-good">Hazır</span>
-                ) : (
-                  <span className="badge badge-warn">Hazır değil</span>
-                )}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
+              </span>
+            }
+          />
+          <ReadinessRow
+            tone={blockers.length === 0 ? 'ok' : 'warn'}
+            label="Yayına hazır mı?"
+            value={
+              blockers.length === 0 ? (
+                <span className="badge badge-good">Hazır</span>
+              ) : (
+                <span className="badge badge-warn">Hazır değil</span>
+              )
+            }
+          />
+        </ul>
+      ) : null}
 
-        {blockers.length > 0 ? (
-          <ul className="release-blocker-reasons" data-testid="release-blockers">
-            {blockers.map((blocker) => (
-              <li data-testid={`release-blocker-${blocker}`} key={blocker}>
-                <strong>{RELEASE_BLOCKER_LABELS[blocker]}.</strong> {RELEASE_BLOCKER_HINTS[blocker]}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
+      {blockers.length > 0 ? (
+        <ul className="release-blocker-reasons" data-testid="release-blockers">
+          {blockers.map((blocker) => (
+            <li data-testid={`release-blocker-${blocker}`} key={blocker}>
+              <strong>{RELEASE_BLOCKER_LABELS[blocker]}.</strong> {RELEASE_BLOCKER_HINTS[blocker]}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </SectionCard>
+  );
+}
+
+const READINESS_MARKS = { ok: '✓', warn: '!', info: 'i' } as const;
+
+function ReadinessRow({
+  tone,
+  label,
+  note,
+  value,
+}: {
+  tone: keyof typeof READINESS_MARKS;
+  label: string;
+  note?: string;
+  value: ReactNode;
+}) {
+  return (
+    <li>
+      <span className={tone === 'ok' ? 'readiness-mark' : `readiness-mark is-${tone}`} aria-hidden="true">
+        {READINESS_MARKS[tone]}
+      </span>
+      <span className="readiness-label">
+        {label}
+        {note ? <small>{note}</small> : null}
+      </span>
+      <span className="readiness-value">{value}</span>
+    </li>
   );
 }
 
 /** What a router is and is not, on a router. */
 export function RouterExplainerSection() {
   return (
-    <SectionCard title="Yönlendirici kategori" className="catalog-side-card is-warning" testId="router-explainer">
+    <SectionCard title="Yönlendirici kategori" className="detail-tab-card is-warning" testId="router-explainer">
       <div className="catalog-side-body">
         <p>
           Bu kategori <strong>hizmet verene doğrudan atanamaz</strong>. Hizmet veren kayıt ve düzenleme ekranlarında
@@ -1033,20 +1147,14 @@ export function RouterExplainerSection() {
   );
 }
 
-/** The question set's rules of thumb (the old "Hızlı bilgi" panel). */
-export function QuestionHintsSection() {
+/** The question set's rules of thumb (the old "Hızlı bilgi" panel), now the ⓘ beside the question card's title. */
+export function QuestionHints() {
   return (
-    <SectionCard title="Hızlı bilgi" className="catalog-side-card">
-      <div className="catalog-side-body">
-        <p>
-          Soru sırası müşteri formundaki gösterim sırasını belirler. SELECT ve MULTI_SELECT tiplerinde{' '}
-          <code>options</code> JSON alanı zorunludur.
-        </p>
-        <p className="catalog-side-note">
-          Koşullu bir soru, kaynak sorudan <strong>sonra</strong> sıralanmalıdır. Sistem alanına bağlı sorular ayrı bir
-          alan açmaz; talebin adres, bütçe, açıklama veya tarih alanını adlandırır ve gerektiğinde zorunlu kılar.
-        </p>
-      </div>
-    </SectionCard>
+    <>
+      Soru sırası müşteri formundaki gösterim sırasını belirler. SELECT ve MULTI_SELECT tiplerinde{' '}
+      <code>options</code> JSON alanı zorunludur. Koşullu bir soru, kaynak sorudan <strong>sonra</strong>{' '}
+      sıralanmalıdır. Sistem alanına bağlı sorular ayrı bir alan açmaz; talebin adres, bütçe, açıklama veya tarih
+      alanını adlandırır ve gerektiğinde zorunlu kılar.
+    </>
   );
 }

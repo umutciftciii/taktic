@@ -28,6 +28,53 @@ export function packageTypeLabel(type: string): string {
 export const CREDIT_PACKAGES_SCREEN_INFO =
   'Hizmet verenlerin teklif verebilmek için satın aldığı paketler. Üç tür vardır: "Tek seferlik kredi" (belirli sayıda kredi yüklenir, süresi dolmaz), "Aylık kota" (satın alma anından itibaren 30 gün geçerli kredi hakkı; kullanılmayan kota devretmez) ve "Kategori limitsiz" (seçili kategorilerde 30 gün boyunca kredi harcamadan teklif; isteğe bağlı günlük sınırla). Tür paket oluşturulurken seçilir, sonradan değiştirilemez. Pasifleştirdiğiniz paket yeni satışa kapanır; satılmış paketleri ve yüklenmiş kredileri etkilemez. Satın almalar paketin o anki adını, kredisini ve fiyatını kopyalar, sonraki düzenlemeler eski kayıtları değiştirmez. Sıra, paketlerin hizmet verene listelenme düzenidir (küçük sayı önce).';
 
+/**
+ * One sentence per type for the detail screen's "Paketin diğer türleri" card —
+ * the ⓘ above, split by type, so the two can never say different things.
+ */
+export const PACKAGE_TYPE_DESCRIPTION: Record<OfferPackageType, string> = {
+  ONE_TIME_CREDITS: 'Belirli sayıda kredi bir kez yüklenir, süresi dolmaz.',
+  MONTHLY_QUOTA: 'Satın alma anından itibaren 30 gün geçerli kredi hakkı. Kullanılmayan kota devretmez.',
+  CATEGORY_UNLIMITED: 'Seçili kategorilerde 30 gün boyunca kredi harcamadan teklif; isteğe bağlı günlük sınırla.',
+};
+
+/**
+ * The line under the package's name: what this one package does, in the
+ * words of its type and its own figures.
+ */
+export function packageSummarySentence(
+  pkg: Pick<
+    AdminOfferPackage,
+    'type' | 'creditAmount' | 'quotaCredits' | 'periodDays' | 'dailyOfferLimit' | 'scopeCategories'
+  >,
+): string {
+  if (pkg.type === 'MONTHLY_QUOTA') {
+    return `Satın alma anından itibaren ${pkg.periodDays ?? 30} gün geçerli ${pkg.quotaCredits ?? 0} kredi hakkı verir; kullanılmayan kota devretmez.`;
+  }
+  if (pkg.type === 'CATEGORY_UNLIMITED') {
+    const scope =
+      pkg.scopeCategories.length > 0
+        ? `Kapsam: ${pkg.scopeCategories.map((entry) => entry.category.name).join(', ')}`
+        : 'Kapsam tanımsız';
+    const limit = pkg.dailyOfferLimit ? `günlük en fazla ${pkg.dailyOfferLimit} teklif` : 'günlük sınır yok';
+    return `${scope} · kredi harcamadan teklif, ${limit}.`;
+  }
+  return `Hizmet verenin hesabına tek seferde ${pkg.creditAmount} kredi yükler. Kredilerin son kullanma tarihi yoktur.`;
+}
+
+/**
+ * What one credit costs in this package, in the package's minor unit, or
+ * `null` where the question has no answer (an unlimited package, or none sold).
+ */
+export function perCreditMinor(
+  pkg: Pick<AdminOfferPackage, 'type' | 'creditAmount' | 'quotaCredits' | 'priceAmount'>,
+): number | null {
+  const credits =
+    pkg.type === 'ONE_TIME_CREDITS' ? pkg.creditAmount : pkg.type === 'MONTHLY_QUOTA' ? pkg.quotaCredits : null;
+  if (!credits || credits <= 0) return null;
+  return Math.round(pkg.priceAmount / credits);
+}
+
 /** What a package sells, in the "Kredi / kota" cell. */
 export function packageAllowance(pkg: Pick<AdminOfferPackage, 'type' | 'creditAmount' | 'quotaCredits'>): string {
   if (pkg.type === 'MONTHLY_QUOTA') return pkg.quotaCredits === null ? '—' : String(pkg.quotaCredits);
@@ -111,7 +158,7 @@ export function PackageStatusForm({
   pkg: Pick<AdminOfferPackage, 'id' | 'isActive'>;
   redirectTo: string;
   action: FormAction;
-  /** `row` in the list, `panel` on the detail screen's status card. */
+  /** `row` in the list, `panel` in the detail screen's summary card. */
   variant?: 'row' | 'panel';
 }) {
   const label =
@@ -125,8 +172,8 @@ export function PackageStatusForm({
   const className =
     variant === 'panel'
       ? pkg.isActive
-        ? 'btn btn-destructive btn-sm'
-        : 'btn btn-primary btn-sm'
+        ? 'btn btn-destructive'
+        : 'btn btn-primary'
       : 'btn btn-secondary btn-sm';
 
   return (

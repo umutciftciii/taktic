@@ -171,7 +171,7 @@ test.describe('wave 2 drafts in the admin release panel', () => {
 
     try {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
-      await admin.gotoAdmin(`/categories/${REGULATED[1]!.slug}`);
+      await admin.gotoAdmin(`/categories/${REGULATED[1]!.slug}?tab=davetler`);
       await assertNoErrorScreen(admin.page);
 
       await expect(admin.page.getByTestId('provider-invite-panel')).toBeVisible();
