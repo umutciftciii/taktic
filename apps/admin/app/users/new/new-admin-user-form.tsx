@@ -20,23 +20,22 @@ export function NewAdminUserForm() {
 
   if (state.kind === 'issued') {
     return (
-      <SectionCard title="Davet bağlantısı hazır" className="card-wide">
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Admin kullanıcısı oluşturuldu. Aşağıdaki bağlantıyı kopyalayıp WhatsApp / SMS / e-posta
-          ile manuel olarak paylaşın. Bağlantı 72 saat geçerlidir.
+      <SectionCard title="Davet bağlantısı hazır" className="detail-tab-card" testId="admin-user-issued">
+        <p className="detail-muted-note">
+          Admin kullanıcısı oluşturuldu. Aşağıdaki bağlantıyı kopyalayıp WhatsApp / SMS / e-posta ile manuel olarak
+          paylaşın. Bağlantı 72 saat geçerlidir ve bu ekrandan ayrıldığınızda bir daha gösterilmez.
         </p>
-        <InviteLinkPanel
-          inviteUrl={state.inviteUrl}
-          expiresAt={state.expiresAt}
-          intro="Şifre belirleme bağlantısı:"
-        />
-        <div className="inline-actions" style={{ marginTop: 16 }}>
-          <Link className="btn btn-secondary btn-sm" href={`/users/${state.userId}`}>
-            Kullanıcı detayına git
-          </Link>
-          <Link className="btn btn-ghost btn-sm" href="/users">
-            Listeye dön
-          </Link>
+        <InviteLinkPanel inviteUrl={state.inviteUrl} expiresAt={state.expiresAt} intro="Şifre belirleme bağlantısı:" />
+        <div className="detail-form-footer">
+          <p className="detail-form-footer-note">Sıradaki adım: kullanıcı detayında bu hesaba bir rol atayın.</p>
+          <div className="detail-form-footer-actions">
+            <Link className="btn btn-secondary" href="/users">
+              Listeye dön
+            </Link>
+            <Link className="btn btn-primary" href={`/users/${state.userId}`}>
+              Kullanıcı detayına git
+            </Link>
+          </div>
         </div>
       </SectionCard>
     );
@@ -45,55 +44,57 @@ export function NewAdminUserForm() {
   const values = state.kind === 'error' ? state.values : undefined;
 
   return (
-    <SectionCard title="Yeni admin bilgileri" className="card-wide">
-      <p className="muted" style={{ marginTop: 0, marginBottom: 12, lineHeight: 1.5 }}>
-        Oluşturulan kullanıcı bir personel hesabıdır ve rol atanana kadar hiçbir yetkisi yoktur.
-        Şifre belirleme bağlantısı üretilir ve oluşturulduktan sonra ekranda bir kez görüntülenir.
-      </p>
-
+    <SectionCard
+      title="Yeni admin bilgileri"
+      actions={<span className="section-card-meta">Rol atanana kadar bu hesabın hiçbir yetkisi yoktur</span>}
+      className="detail-tab-card"
+      testId="admin-user-create-card"
+    >
       {state.kind === 'error' ? <InviteLinkError message={state.message} /> : null}
 
-      <form action={submit} style={{ display: 'grid', gap: 12, marginTop: 12 }}>
-        <label className="form-row">
-          <span>Ad Soyad</span>
-          <input
-            name="name"
-            type="text"
-            required
-            minLength={2}
-            maxLength={120}
-            defaultValue={values?.name ?? ''}
-            autoComplete="name"
-          />
-        </label>
-        <label className="form-row">
-          <span>E-posta</span>
-          <input
-            name="email"
-            type="email"
-            required
-            maxLength={254}
-            defaultValue={values?.email ?? ''}
-            autoComplete="email"
-          />
-        </label>
-        <label className="form-row">
-          <span>Telefon (opsiyonel)</span>
-          <input
-            name="phone"
-            type="tel"
-            maxLength={32}
-            defaultValue={values?.phone ?? ''}
-            autoComplete="tel"
-          />
-        </label>
-        <div className="inline-actions" style={{ marginTop: 4 }}>
-          <button className="btn btn-primary" type="submit" disabled={pending}>
-            Admin Kullanıcısı Oluştur
-          </button>
-          <Link className="btn btn-ghost btn-sm" href="/users">
-            Vazgeç
-          </Link>
+      <form action={submit} className="compact-form" data-testid="admin-user-create-form">
+        <div className="compact-field-grid">
+          <label className="field field-4">
+            <span>Ad Soyad *</span>
+            <input
+              name="name"
+              type="text"
+              required
+              minLength={2}
+              maxLength={120}
+              defaultValue={values?.name ?? ''}
+              autoComplete="name"
+            />
+          </label>
+          <label className="field field-4">
+            <span>E-posta *</span>
+            <input
+              name="email"
+              type="email"
+              required
+              maxLength={254}
+              defaultValue={values?.email ?? ''}
+              autoComplete="email"
+            />
+            <span className="help-text">Personel bu adresle giriş yapar.</span>
+          </label>
+          <label className="field field-4">
+            <span>Telefon (opsiyonel)</span>
+            <input name="phone" type="tel" maxLength={32} defaultValue={values?.phone ?? ''} autoComplete="tel" />
+          </label>
+        </div>
+        <div className="detail-form-footer">
+          <p className="detail-form-footer-note">
+            Şifre belirleme bağlantısı oluşturulduktan sonra bu ekranda bir kez görüntülenir.
+          </p>
+          <div className="detail-form-footer-actions">
+            <Link className="btn btn-secondary" href="/users">
+              Vazgeç
+            </Link>
+            <button className="btn btn-primary" type="submit" disabled={pending}>
+              Admin Kullanıcısı Oluştur
+            </button>
+          </div>
         </div>
       </form>
     </SectionCard>

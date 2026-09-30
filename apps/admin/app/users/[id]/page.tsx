@@ -1,8 +1,8 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
   AdminUserDetailResponse,
   apiFetch,
+  formatDate,
   formatDateTime,
   listAdminRoles,
   listAdminUserRoles,
@@ -10,9 +10,12 @@ import {
   userRoleBadgeClass,
   userRoleLabel,
 } from '../../../lib/api';
-import { PageHeader } from '../../../components/page-header';
+import { effectivePermissions } from '../../../lib/permission-model';
+import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { DetailHeader } from '../../../components/detail-header';
+import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
-import { StatCard } from '../../../components/stat-card';
+import type { SummaryItem } from '../../../components/summary-strip';
 import { updateUserStatusAction } from '../actions';
 import { AdminInviteLinkForm } from './admin-invite-link-form';
 import { AdminRoleAssignmentCard } from './role-assignment-card';
@@ -44,15 +47,24 @@ function isBackendNotFound(error: unknown): boolean {
   }
 }
 
-export default async function AdminUserDetailPage({
-  params,
-  searchParams,
-}: AdminUserDetailPageProps) {
-  const {
-    user: actor,
-    isSuperAdmin: isSuperAdminViewer,
-    can,
-  } = await requireAdmin('ADMIN_USERS_READ');
+/**
+ * One staff account (#50, ADMIN-DESIGN-001 Faz 3G). The design has no screen
+ * for it; it is built on the detail template: a way back to the list, the
+ * summary card (account kind and status, name, contact, a strip with the
+ * account's state) with the status switch, then the profile, the account's
+ * status, the invite link and the roles.
+ *
+ * Every gate is where it was:
+ * - The page is ADMIN_USERS_READ.
+ * - Pasifleştir / Aktifleştir is ADMIN_USERS_STATUS, and never on one's own
+ *   active account. Pasifleştir now asks first; the form and its fields
+ *   (`userId`, `isActive`) are unchanged.
+ * - The invite link and the roles are root capabilities (RG-7 §12.1): the
+ *   role lists are read, and the controls drawn, for a super admin viewer
+ *   only. Anyone else gets the roles card's explanation and no invite card.
+ */
+export default async function AdminUserDetailPage({ params, searchParams }: AdminUserDetailPageProps) {
+  const { user: actor, isSuperAdmin: isSuperAdminViewer, can } = await requireAdmin('ADMIN_USERS_READ');
   const canChangeStatus = can('ADMIN_USERS_STATUS');
   const { id } = await params;
   const search = (await searchParams) ?? {};
@@ -69,6 +81,7 @@ export default async function AdminUserDetailPage({
 
   const { user, metrics } = response;
   const isSelf = actor.id === user.id;
+  const showStatusControl = canChangeStatus && !(isSelf && user.isActive);
 
   /*
    * Roles are a super admin's to hand out, so this block is fetched only for
@@ -77,207 +90,242 @@ export default async function AdminUserDetailPage({
    * every button, and better than a silent gap.
    */
   const roleState = isSuperAdminViewer
-    ? await Promise.all([listAdminUserRoles(user.id), listAdminRoles()]).then(
-        ([assigned, catalogue]) => ({ assigned, catalogue }),
-      )
+    ? await Promise.all([listAdminUserRoles(user.id), listAdminRoles()]).then(([assigned, catalogue]) => ({
+        assigned,
+        catalogue,
+      }))
     : null;
 
   const displayName = user.name ?? user.email ?? user.phone ?? '—';
-  const subtitleParts: string[] = [];
-  if (user.phone) subtitleParts.push(user.phone);
-  if (user.email) subtitleParts.push(user.email);
+  const contact = [user.phone, user.email].filter(Boolean).join(' · ');
+
+  const facts: SummaryItem[] = [
+    {
+      label: 'Hesap',
+      value: user.isActive ? 'Aktif' : 'Pasif',
+      note: user.hasPassword ? 'Şifre belirlenmiş' : 'Şifre belirlenmemiş',
+      tone: user.isActive ? (user.hasPassword ? 'success' : 'warning') : 'danger',
+      testId: 'user-fact-account',
+    },
+    {
+      label: 'Aktif oturum',
+      value: metrics.activeSessionCount,
+      testId: 'user-fact-sessions',
+    },
+    {
+      label: 'Son giriş',
+      value: user.lastLoginAt ? formatDateTime(user.lastLoginAt) : 'Hiç girmedi',
+    },
+  ];
+  if (roleState) {
+    if (roleState.assigned.isSuperAdmin) {
+      facts.push({ label: 'Yetki', value: 'Tüm izinler', note: 'süper yönetici; rol atanmaz' });
+    } else {
+      const live = roleState.assigned.assignments.filter((assignment) => assignment.revokedAt === null);
+      facts.push({
+        label: 'Aktif rol',
+        value: live.filter((assignment) => assignment.role.isActive).length,
+        note: `${effectivePermissions(roleState.assigned.assignments).length} izin`,
+        testId: 'user-fact-roles',
+      });
+    }
+  }
 
   return (
-    <main className="user-detail-page">
-      <PageHeader
-        breadcrumbs={[
-          { label: 'Dashboard', href: '/' },
-          { label: 'Admin Kullanıcıları', href: '/users' },
-          { label: displayName },
-        ]}
-        title={displayName}
-        subtitle={
+    <main className="system-page user-detail-page">
+      <DetailHeader
+        back={{ href: '/users', label: 'Admin kullanıcıları' }}
+        badges={
           <>
             <span className={userRoleBadgeClass(user.role)}>{userRoleLabel(user.role)}</span>
-            {' '}
             {user.isActive ? (
-              <span className="badge badge-good">Aktif</span>
+              <span className="badge badge-good" data-testid="user-status">
+                Aktif
+              </span>
             ) : (
-              <span className="badge badge-bad">Pasif</span>
+              <span className="badge badge-bad" data-testid="user-status">
+                Pasif
+              </span>
             )}
-            {subtitleParts.length > 0 ? (
-              <span className="muted"> · {subtitleParts.join(' · ')}</span>
-            ) : null}
           </>
         }
+        meta={<>{formatDate(user.createdAt)} tarihinden beri kayıtlı</>}
+        title={displayName}
+        subtitle={contact || undefined}
         actions={
-          <Link className="btn btn-ghost btn-sm" href="/users">
-            ← Listeye dön
-          </Link>
+          showStatusControl ? (
+            <UserStatusForm
+              userId={user.id}
+              isActive={user.isActive}
+              activeSessionCount={metrics.activeSessionCount}
+              isSuperAdminTarget={user.role === 'SUPER_ADMIN'}
+            />
+          ) : undefined
         }
+        facts={facts}
+        factsLabel="Hesap özeti"
+        testId="user-header"
       />
 
-      <section className="stat-grid">
-        <StatCard label="Aktif oturum" value={metrics.activeSessionCount} />
-      </section>
+      {search.statusError ? (
+        <div className="notice notice-error detail-notice" role="alert" data-testid="user-status-error">
+          {search.statusError}
+        </div>
+      ) : null}
+      {search.ok && ROLE_OK_MESSAGES[search.ok] ? (
+        <div className="notice notice-success detail-notice" role="status" data-testid="role-assignment-ok">
+          {ROLE_OK_MESSAGES[search.ok]}
+        </div>
+      ) : null}
+      {search.error ? (
+        <div className="notice notice-error detail-notice" data-testid="role-assignment-error">
+          {search.error}
+        </div>
+      ) : null}
 
-      <div className="provider-detail-card-grid">
-        <SectionCard title="Profil & İletişim" className="card-wide">
-          <dl className="meta-row">
-            <dt>Ad</dt>
-            <dd>{user.name ?? '-'}</dd>
-            <dt>E-posta</dt>
-            <dd>
-              {user.email ? (
-                <a className="cell-link" href={`mailto:${user.email}`}>
-                  {user.email}
-                </a>
-              ) : (
-                '-'
-              )}
-            </dd>
-            <dt>Telefon</dt>
-            <dd>
-              {user.phone ? (
-                <a className="cell-link" href={`tel:${user.phone}`}>
-                  {user.phone}
-                </a>
-              ) : (
-                '-'
-              )}
-            </dd>
-            <dt>Rol</dt>
-            <dd>
-              <span className={userRoleBadgeClass(user.role)}>{userRoleLabel(user.role)}</span>
-            </dd>
-            <dt>Durum</dt>
-            <dd>
-              {user.isActive ? (
-                <span className="badge badge-good">Aktif</span>
-              ) : (
-                <span className="badge badge-bad">Pasif</span>
-              )}
-            </dd>
-            <dt>Şifre</dt>
-            <dd>
-              {user.hasPassword ? (
-                <span className="badge badge-good">Şifre var</span>
-              ) : (
-                <span className="badge badge-warn">Şifre yok</span>
-              )}
-            </dd>
-            <dt>Kayıt tarihi</dt>
-            <dd>{formatDateTime(user.createdAt)}</dd>
-            <dt>Son giriş</dt>
-            <dd>{user.lastLoginAt ? formatDateTime(user.lastLoginAt) : '-'}</dd>
-            <dt>Güncellenme</dt>
-            <dd>{formatDateTime(user.updatedAt)}</dd>
-          </dl>
-          <details style={{ marginTop: 12 }}>
-            <summary className="cell-muted" style={{ cursor: 'pointer', fontSize: 12 }}>
-              Teknik bilgi
-            </summary>
-            <dl className="meta-row" style={{ marginTop: 8 }}>
-              <dt>Kullanıcı ID</dt>
-              <dd>
-                <code style={{ fontSize: 12 }}>{user.id}</code>
-              </dd>
-            </dl>
-          </details>
-        </SectionCard>
+      <div className="detail-panel">
+        <div className="detail-panel-grid">
+          <SectionCard title="Profil ve iletişim" testId="user-profile-card">
+            <KeyValueList
+              items={[
+                { label: 'Ad soyad', value: user.name },
+                {
+                  label: 'E-posta',
+                  value: user.email ? (
+                    <a className="cell-link cell-break" href={`mailto:${user.email}`}>
+                      {user.email}
+                    </a>
+                  ) : null,
+                },
+                {
+                  label: 'Telefon',
+                  value: user.phone ? (
+                    <a className="cell-link" href={`tel:${user.phone}`}>
+                      {user.phone}
+                    </a>
+                  ) : null,
+                },
+                {
+                  label: 'Hesap türü',
+                  value: <span className={userRoleBadgeClass(user.role)}>{userRoleLabel(user.role)}</span>,
+                },
+                { label: 'Kayıt tarihi', value: formatDateTime(user.createdAt) },
+                { label: 'Güncellenme', value: formatDateTime(user.updatedAt) },
+                {
+                  label: 'Kullanıcı ID',
+                  value: (
+                    <details className="muted technical-id">
+                      <summary>Teknik bilgi</summary>
+                      <code>{user.id}</code>
+                    </details>
+                  ),
+                },
+              ]}
+            />
+          </SectionCard>
 
-        {/*
-          Minting an invite link is root-only (`POST /users/:id/invite-link`,
-          RG-7 §12.1). The card is rendered for a super admin viewer only.
-        */}
-        {isSuperAdminViewer ? <AdminInviteSection user={user} /> : null}
+          <SectionCard title="Güvenlik ve erişim" testId="user-access-card">
+            <KeyValueList
+              items={[
+                {
+                  label: 'Durum',
+                  value: (
+                    <>
+                      {user.isActive ? (
+                        <span className="badge badge-good">Aktif</span>
+                      ) : (
+                        <span className="badge badge-bad">Pasif</span>
+                      )}
+                      <div className="cell-muted" data-testid="user-status-note">
+                        {isSelf
+                          ? 'Kendi hesabınızı pasifleştiremezsiniz.'
+                          : user.isActive
+                            ? 'Pasif kullanıcılar giriş yapamaz.'
+                            : 'Aktifleştirilen kullanıcı yeniden giriş yapabilir.'}
+                      </div>
+                    </>
+                  ),
+                },
+                {
+                  label: 'Şifre',
+                  value: user.hasPassword ? (
+                    <span className="badge badge-good">Şifre var</span>
+                  ) : (
+                    <span className="badge badge-warn">Şifre yok</span>
+                  ),
+                },
+                { label: 'Aktif oturum', value: String(metrics.activeSessionCount) },
+                { label: 'Son giriş', value: user.lastLoginAt ? formatDateTime(user.lastLoginAt) : 'Hiç girmedi' },
+              ]}
+            />
+            <p className="detail-muted-note">
+              Hesabın rol türü değiştirilemez: personel hesabı personel, hizmet veren hesabı hizmet veren olarak kalır.
+              Yetki, atanan rollerden gelir.
+            </p>
+          </SectionCard>
 
-        <SectionCard title="Güvenlik & Yönetim" className="card-wide">
-          <dl className="meta-row">
-            <dt>Durum</dt>
-            <dd>
-              <div
-                style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-              >
-                {user.isActive ? (
-                  <span className="badge badge-good">Aktif</span>
-                ) : (
-                  <span className="badge badge-bad">Pasif</span>
-                )}
-                {!canChangeStatus || (isSelf && user.isActive) ? null : (
-                  <form action={updateUserStatusAction}>
-                    <input type="hidden" name="userId" value={user.id} />
-                    <input
-                      type="hidden"
-                      name="isActive"
-                      value={user.isActive ? 'false' : 'true'}
-                    />
-                    <button
-                      type="submit"
-                      className={
-                        user.isActive
-                          ? 'btn btn-secondary btn-sm'
-                          : 'btn btn-primary btn-sm'
-                      }
-                    >
-                      {user.isActive ? 'Pasifleştir' : 'Aktifleştir'}
-                    </button>
-                  </form>
-                )}
-              </div>
-              <div
-                className="muted"
-                style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4 }}
-              >
-                {isSelf
-                  ? 'Kendi hesabınızı pasifleştiremezsiniz.'
-                  : user.isActive
-                    ? 'Pasif kullanıcılar giriş yapamaz.'
-                    : 'Aktifleştirilen kullanıcı yeniden giriş yapabilir.'}
-              </div>
-              {search.statusError ? (
-                <div
-                  role="alert"
-                  style={{
-                    marginTop: 8,
-                    padding: 10,
-                    borderRadius: 8,
-                    background: 'rgba(220, 38, 38, 0.08)',
-                    border: '1px solid rgba(220, 38, 38, 0.25)',
-                    color: 'rgb(153, 27, 27)',
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {search.statusError}
-                </div>
-              ) : null}
-            </dd>
-          </dl>
-          <p className="muted" style={{ marginTop: 12, lineHeight: 1.5 }}>
-            Hesabın rol türü değiştirilemez: personel hesabı personel, hizmet veren hesabı hizmet veren olarak
-            kalır. Yetki, aşağıdan atanan rollerden gelir.
-          </p>
-        </SectionCard>
+          {/*
+            Minting an invite link is root-only (`POST /users/:id/invite-link`,
+            RG-7 §12.1). The card is rendered for a super admin viewer only.
+          */}
+          {isSuperAdminViewer ? <AdminInviteSection user={user} /> : null}
 
-        {search.ok && ROLE_OK_MESSAGES[search.ok] ? (
-          <div className="notice notice-success card-wide" role="status" data-testid="role-assignment-ok">
-            {ROLE_OK_MESSAGES[search.ok]}
-          </div>
-        ) : null}
-        {search.error ? (
-          <div className="notice notice-error card-wide" data-testid="role-assignment-error">
-            {search.error}
-          </div>
-        ) : null}
-
-        <AdminRoleAssignmentCard
-          isSuperAdminViewer={isSuperAdminViewer}
-          roles={roleState}
-          userId={user.id}
-        />
+          <AdminRoleAssignmentCard isSuperAdminViewer={isSuperAdminViewer} roles={roleState} userId={user.id} />
+        </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * Pasifleştir asks first; Aktifleştir is undone by the same button and does
+ * not. The consequence is what `PATCH /users/:id/status` and the session read
+ * do (users.service `updateStatus`, auth.service): the sign-in and every open
+ * session are refused from the next request, nothing is deleted.
+ */
+function UserStatusForm({
+  userId,
+  isActive,
+  activeSessionCount,
+  isSuperAdminTarget,
+}: {
+  userId: string;
+  isActive: boolean;
+  activeSessionCount: number;
+  isSuperAdminTarget: boolean;
+}) {
+  return (
+    <form action={updateUserStatusAction} className="inline-form" data-testid="user-status-form">
+      <input type="hidden" name="userId" value={userId} />
+      <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
+      {isActive ? (
+        <ConfirmDialog
+          triggerLabel="Hesabı pasifleştir"
+          title="Hesap pasifleştirilsin mi?"
+          consequence={
+            <>
+              <p data-testid="user-deactivate-impact">
+                Kullanıcı bir daha giriş yapamaz.{' '}
+                {activeSessionCount > 0
+                  ? `${activeSessionCount} açık oturumu bir sonraki isteğinde reddedilir.`
+                  : 'Şu an açık oturumu yok.'}
+              </p>
+              <p>
+                Rol atamaları, şifresi ve kayıtları silinmez; hesap buradan yeniden aktifleştirildiğinde aynı yetkilerle
+                döner.
+                {isSuperAdminTarget ? ' Son aktif süper yönetici pasifleştirilemez; API bu durumda isteği reddeder.' : ''}
+              </p>
+            </>
+          }
+          confirmLabel="Evet, pasifleştir"
+          testId="user-deactivate"
+        />
+      ) : (
+        <button type="submit" className="btn btn-primary" data-testid="user-activate">
+          Hesabı aktifleştir
+        </button>
+      )}
+    </form>
   );
 }
 
@@ -290,38 +338,25 @@ function AdminInviteSection({ user }: { user: AdminUserDetailResponse['user'] })
     return null;
   }
 
-  if (user.hasPassword) {
-    return (
-      <SectionCard title="Admin daveti" className="card-wide">
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Bu admin kullanıcısı şifresini belirlemiş; yeni davet bağlantısı oluşturulmasına gerek
-          yok.
-        </p>
-      </SectionCard>
-    );
-  }
-
-  if (!user.isActive) {
-    return (
-      <SectionCard title="Admin daveti" className="card-wide">
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Pasif admin kullanıcısı için davet bağlantısı oluşturulamaz. Önce kullanıcıyı
-          aktifleştirin.
-        </p>
-      </SectionCard>
-    );
-  }
-
   return (
-    <SectionCard title="Admin daveti" className="card-wide">
-      <div style={{ marginBottom: 12 }}>
-        <p className="muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Bu admin kullanıcısı henüz şifre belirlememiş. Şifre belirleme bağlantısı oluşturabilir
-          ve manuel olarak paylaşabilirsiniz. Yeni bir bağlantı oluşturulduğunda önceki kullanılmamış
-          bağlantılar geçersiz olur.
+    <SectionCard title="Admin daveti" testId="user-invite-card">
+      {user.hasPassword ? (
+        <p className="detail-muted-note">
+          Bu admin kullanıcısı şifresini belirlemiş; yeni davet bağlantısı oluşturulmasına gerek yok.
         </p>
-        <AdminInviteLinkForm userId={user.id} />
-      </div>
+      ) : !user.isActive ? (
+        <p className="detail-muted-note">
+          Pasif admin kullanıcısı için davet bağlantısı oluşturulamaz. Önce kullanıcıyı aktifleştirin.
+        </p>
+      ) : (
+        <>
+          <p className="detail-muted-note">
+            Bu admin kullanıcısı henüz şifre belirlememiş. Şifre belirleme bağlantısı oluşturabilir ve manuel olarak
+            paylaşabilirsiniz. Yeni bir bağlantı oluşturulduğunda önceki kullanılmamış bağlantılar geçersiz olur.
+          </p>
+          <AdminInviteLinkForm userId={user.id} />
+        </>
+      )}
     </SectionCard>
   );
 }

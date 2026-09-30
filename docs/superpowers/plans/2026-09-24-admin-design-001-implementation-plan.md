@@ -621,6 +621,31 @@ Görüntüler `e2e/.artifacts/faz-3f-screens/` altında (1440×1617 ve 320). Ger
 - **Test:** `admin-rbac-permissions` (rol oluşturma ve atama), `admin-session`, `notification-history`.
 - **Geri dönüş riski:** Yüksek (yetki tanımlama yüzeyi).
 
+#### Faz 3G gerçekleşen (2026-09-30)
+
+- **Kapsam:** `/company-settings`, `/notifications/[id]`, `/users/new`, `/users/[id]`, `/roles`, `/roles/[id]`. Taban `main@f294ffd8`, DB 83 migration. API, Prisma, migration, `.env`, compose değişmedi. Server action'lar (`company-settings/actions.ts`, `notifications/actions.ts`, `users/actions.ts`, `roles/actions.ts`) ve gönderdikleri alanlar aynı; `/users` listesi bu dilimde değişmedi.
+- **Kapılar (hiçbiri değişmedi; birim testi kaynaktan sabitler):**
+
+  | Route | Route kapısı | Bölüm / aksiyon |
+  | --- | --- | --- |
+  | `/company-settings` | `COMPANY_SETTINGS_READ` | Form `COMPANY_SETTINGS_WRITE`, yoksa salt okunur `KeyValueList` |
+  | `/notifications/[id]` | `NOTIFICATION_LOGS_READ` | "Yeniden gönder" `retryable` ∧ `NOTIFICATION_RETRY`; talep bağlantısı `REQUESTS_READ` |
+  | `/users/new` | `requireSuperAdmin()` | Oluştur (root) |
+  | `/users/[id]` | `ADMIN_USERS_READ` | Durum `ADMIN_USERS_STATUS` (kendi aktif hesabında yok); davet kartı ve rol okumaları/kontrolleri yalnız `isSuperAdmin` |
+  | `/roles`, `/roles/[id]` | `requireSuperAdmin()` | Tüm yazmalar root |
+
+- **Onay diyalogları (ortak `ConfirmDialog`):**
+  - Hesabı pasifleştir (`/users/[id]`): giriş ve açık oturumların bir sonraki istekte reddi, açık oturum sayısı (`metrics.activeSessionCount`), hiçbir şeyin silinmediği; süper admin hedefinde "son aktif süper yönetici" kuralı. Aktifleştir doğrudan.
+  - Rol geri al (`/users/[id]` Roller kartı): hesabın **gerçekten** kaybedeceği izinler = rolün izinlerinden hesabın diğer canlı ∧ aktif rollerinde olmayanlar (`permissionsLostOnRevoke`, kartın zaten okuduğu `GET /admin/users/:id/roles`'tan). Pasif rolde "yetki değişmez".
+  - İzin matrisi kaydı (`/roles/[id]`): eklenecek/kaldırılacak izinler (etiket + `<code>`), kayıttan sonraki toplam, **etkilenen hesap sayısı** = `GET /admin/roles/:id` → `assignments` (API `revokedAt: null` ile yalnız canlı atamaları döndürür) uzunluğu ve bunların `user.isActive` sayısı. Rol pasifse "şu an kimseyi etkilemez", atama yoksa sayı yazılmaz. Değişiklik yokken tetik kapalı.
+  - Rolü pasifleştir (`/roles/[id]`): aynı taşıyan sayısı ve kaybedilecek izin sayısı. Eski onay kutusu kalktı; action'ın `confirm=on` kuralı aynen duruyor — alan yalnız hydration sonrası eklenir (Faz 3E motor anahtarı deseni), JS öncesi tıklama reddedilir. Aktifleştir doğrudan.
+- **Rol matrisi:** `groupPermissions` tüm kataloğu (`GET /admin/permissions`, 84 izin, 29 alan) `adminPermissionLabel` alanına göre gruplar; Türkçe etiket + ikincil satırda `<code>` korunur. Alan başlığında canlı "seçili/toplam", üstte genel sayaç. Kutular kontrolsüz ve adları aynı (`permissions`), form JS'siz de aynı veriyi gönderir. `adminPermissionLabel`'a yalnız eksik `CATALOG: 'Katalog'` alanı eklendi (önceden ham `CATALOG` başlığı altında görünüyordu).
+- **Tuzak (bulundu, çözüldü):** form `reset` sonrası React'ın değer izleyicisi eski kalıyor; reset öncesi değiştirilmiş bir kutuyu yeniden işaretlemek `onChange`'e ulaşmıyor. Matris sayaçları yerel `change` dinleyicisiyle okunur.
+- **StickyActionBar kullanılmadı:** şirket formu reddedilen kayıtta değerleri URL'ye taşıyarak yönlendirir; çubuğun "kaydedilmemiş" durumu yönlendirme sonrası doğruyu söyleyemez. Formun kendi bandı (`DetailFormFooter`: Vazgeç = reset, "Değişiklikleri kaydet"). Faz 2 entegrasyon kabul kriteri bu PR'a düşmedi.
+- **Uygulanmayan (gerekçe):** `company` tasarımındaki "faturalarda ve yasal metinlerde" (değerler yalnız e-posta altbilgisi) ve "— destek e-postası güncellendi" (hangi alanın değiştiğini tutan günlük yok, D); rol/kullanıcı ekranlarında "Neler oldu" (D, aşağıda).
+- **Backend açıkları (ayrı iş, bu PR'a genişletilmedi):** (1) `AdminRoleAudit` satırları yazılıyor ama okuma ucu yok — rol ve atama geçmişi panelde gösterilemiyor; (2) personel durum değişikliği (`PATCH /users/:id/status`) için yapan/zaman kaydı okunamıyor; (3) şirket ayarlarında alan bazlı değişiklik günlüğü yok (yalnız son `updatedAt/updatedBy`).
+- **Test:** yeni `apps/admin/test/system-screens.spec.tsx` (16) ve `e2e/tests/admin-system-screens.spec.ts` (6; Chromium + WebKit, iptal = yazma yok, onay = tek yazma, DB'den gerçek sayılar, 320/390/768/1440 taşma, 320'de diyalog); `admin-rbac-permissions` (+ /roles'ta rol oluştur → kullanıcıya ata → personel bölümü görür → onaylı geri al → /yetkisiz); `admin-route-scan` (`CONVERTED_ROUTES` + 6); `playwright.config` WebKit eşleşmesi.
+
 ### 3H — Genel görünüm (#1)
 
 En sona bırakıldı, çünkü K2 ve K12 kararlarına bağlı.

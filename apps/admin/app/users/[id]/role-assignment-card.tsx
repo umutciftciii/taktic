@@ -1,7 +1,15 @@
 import Link from 'next/link';
-import { SectionCard } from '../../../components/section-card';
+import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { DataTable, type DataColumn } from '../../../components/data-table';
 import { EmptyState } from '../../../components/empty-state';
-import { formatDateTime, type AdminRoleSummary, type AdminUserRoles } from '../../../lib/api';
+import { SectionCard } from '../../../components/section-card';
+import {
+  adminPermissionLabel,
+  formatDateTime,
+  type AdminRoleSummary,
+  type AdminUserRoles,
+} from '../../../lib/api';
+import { permissionsLostOnRevoke } from '../../../lib/permission-model';
 import { assignAdminRoleAction, revokeAdminRoleAction } from '../../roles/actions';
 
 type RoleAssignmentCardProps = {
@@ -9,6 +17,14 @@ type RoleAssignmentCardProps = {
   isSuperAdminViewer: boolean;
   roles: { assigned: AdminUserRoles; catalogue: AdminRoleSummary[] } | null;
 };
+
+const COLUMNS: DataColumn[] = [
+  { key: 'role', label: 'Rol' },
+  { key: 'permissions', label: 'İzin', align: 'end' },
+  { key: 'status', label: 'Durum' },
+  { key: 'assigned', label: 'Atanma' },
+  { key: 'actions', label: 'İşlem', srOnly: true },
+];
 
 /**
  * The roles this staff account holds, and the way to change them.
@@ -18,6 +34,11 @@ type RoleAssignmentCardProps = {
  * (RG-7 §12.1). A staff account with ADMIN_USERS_READ still sees the page it
  * came from; it just gets a sentence here instead of buttons that would 403.
  *
+ * "Geri al" asks first (ADMIN-DESIGN-001 Faz 3G). The dialog names the
+ * permissions the account really loses: the role's permissions that no other
+ * live, active role of the account also grants, computed from the assignment
+ * list this card already read. The form and its fields are unchanged.
+ *
  * Revoked assignments stay on screen, greyed. "This account used to be able to
  * do that" is the question an audit asks, and a list that quietly forgets
  * cannot answer it.
@@ -25,10 +46,10 @@ type RoleAssignmentCardProps = {
 export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: RoleAssignmentCardProps) {
   if (!isSuperAdminViewer || !roles) {
     return (
-      <SectionCard title="Roller" className="card-wide">
-        <p className="muted">
-          Rol atama ve geri alma yalnız süper adminlerde. Bu, izin kataloğunda karşılığı olmayan bir kök
-          yetkidir: rolleri düzenleyebilen bir rol, kendisine her izni verebilirdi.
+      <SectionCard title="Roller" className="is-wide" testId="user-roles-card">
+        <p className="detail-muted-note">
+          Rol atama ve geri alma yalnız süper adminlerde. Bu, izin kataloğunda karşılığı olmayan bir kök yetkidir:
+          rolleri düzenleyebilen bir rol, kendisine her izni verebilirdi.
         </p>
       </SectionCard>
     );
@@ -38,10 +59,10 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
 
   if (assigned.isSuperAdmin) {
     return (
-      <SectionCard title="Roller" className="card-wide">
-        <p className="muted">
-          Süper admin hesapları tüm izinlere zaten sahiptir; rol atanmaz. Bu hesaba yetki sınırı koymak
-          istiyorsanız, onun yerine rol atanmış bir yönetici hesabı açın.
+      <SectionCard title="Roller" className="is-wide" testId="user-roles-card">
+        <p className="detail-muted-note">
+          Süper admin hesapları tüm izinlere zaten sahiptir; rol atanmaz. Bu hesaba yetki sınırı koymak istiyorsanız, onun
+          yerine rol atanmış bir yönetici hesabı açın.
         </p>
       </SectionCard>
     );
@@ -56,7 +77,8 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
     <SectionCard
       title="Roller"
       subtitle="Bu hesabın yapabildiği her şey aşağıdaki aktif rollerin izinlerinin birleşimidir."
-      className="card-wide"
+      className="is-wide"
+      testId="user-roles-card"
     >
       {live.length === 0 ? (
         <EmptyState
@@ -64,52 +86,51 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
           description="Rolü olmayan bir yönetici hesabı giriş yapabilir ama panele giremez."
         />
       ) : (
-        // The table scrolls in its own box on a phone rather than widening the page.
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Rol</th>
-                <th>İzin</th>
-                <th>Durum</th>
-                <th>Atanma</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {live.map((assignment) => (
-                <tr key={assignment.id}>
-                  <td>
-                    <Link href={`/roles/${assignment.role.id}`}>{assignment.role.name}</Link>
-                  </td>
-                  <td>{assignment.role.permissions.length}</td>
-                  <td>
-                    <span className={assignment.role.isActive ? 'badge badge-good' : 'badge badge-muted'}>
-                      {assignment.role.isActive ? 'Aktif' : 'Rol pasif'}
-                    </span>
-                  </td>
-                  <td>{formatDateTime(assignment.assignedAt)}</td>
-                  <td>
-                    <form action={revokeAdminRoleAction}>
-                      <input type="hidden" name="userId" value={userId} />
-                      <input type="hidden" name="roleId" value={assignment.role.id} />
-                      <button className="btn btn-danger btn-sm" type="submit">
-                        Geri al
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable caption="Atanmış roller" columns={COLUMNS} minWidth={620} testId="user-role-table">
+          {live.map((assignment) => (
+            <tr key={assignment.id} data-testid="user-role-row" data-role-id={assignment.role.id}>
+              <td>
+                <Link className="cell-link cell-break" href={`/roles/${assignment.role.id}`} id={`user-role-${assignment.role.id}`}>
+                  {assignment.role.name}
+                </Link>
+              </td>
+              <td className="is-num">{assignment.role.permissions.length}</td>
+              <td>
+                <span className={assignment.role.isActive ? 'badge badge-good' : 'badge badge-muted'}>
+                  {assignment.role.isActive ? 'Aktif' : 'Rol pasif'}
+                </span>
+              </td>
+              <td className="cell-nowrap">{formatDateTime(assignment.assignedAt)}</td>
+              <td className="col-actions">
+                <form action={revokeAdminRoleAction} className="inline-form">
+                  <input type="hidden" name="userId" value={userId} />
+                  <input type="hidden" name="roleId" value={assignment.role.id} />
+                  <ConfirmDialog
+                    triggerLabel="Geri al"
+                    triggerClassName="btn btn-danger btn-sm"
+                    title={`"${assignment.role.name}" bu hesaptan geri alınsın mı?`}
+                    consequence={
+                      <RevokeConsequence
+                        lost={permissionsLostOnRevoke(assigned.assignments, assignment.role.id)}
+                        roleActive={assignment.role.isActive}
+                        roleSize={assignment.role.permissions.length}
+                      />
+                    }
+                    confirmLabel="Evet, geri al"
+                    testId="user-role-revoke"
+                  />
+                </form>
+              </td>
+            </tr>
+          ))}
+        </DataTable>
       )}
 
       {assignable.length > 0 ? (
-        <form action={assignAdminRoleAction} className="compact-form" style={{ marginTop: 16 }}>
+        <form action={assignAdminRoleAction} className="compact-form role-assign-form" data-testid="user-role-assign">
           <input type="hidden" name="userId" value={userId} />
           <div className="compact-field-grid">
-            <label className="field field-12">
+            <label className="field field-8">
               <span>Rol ata</span>
               <select name="roleId" required>
                 {assignable.map((role) => (
@@ -127,16 +148,16 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
           </div>
         </form>
       ) : (
-        <p className="muted" style={{ marginTop: 16 }}>
+        <p className="detail-muted-note role-assign-empty">
           Atanabilecek başka aktif rol yok. <Link href="/roles">Roller ve İzinler</Link> ekranından yeni bir rol
           tanımlayabilirsiniz.
         </p>
       )}
 
       {revoked.length > 0 ? (
-        <details style={{ marginTop: 16 }}>
+        <details className="role-revoked-list">
           <summary>Geri alınmış roller ({revoked.length})</summary>
-          <ul className="muted" style={{ marginTop: 8 }}>
+          <ul className="muted">
             {revoked.map((assignment) => (
               <li key={assignment.id}>
                 {assignment.role.name} · {formatDateTime(assignment.assignedAt)} →{' '}
@@ -147,5 +168,44 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
         </details>
       ) : null}
     </SectionCard>
+  );
+}
+
+/** What taking one role back does to this account, from its own assignment list. */
+export function RevokeConsequence({
+  lost,
+  roleActive,
+  roleSize,
+}: {
+  lost: string[];
+  roleActive: boolean;
+  roleSize: number;
+}) {
+  return (
+    <>
+      <p data-testid="user-role-revoke-impact">
+        {!roleActive
+          ? 'Rol pasif olduğu için bu hesaba şu an izin vermiyor; geri almak hesabın yetkisini değiştirmez.'
+          : lost.length === 0
+            ? `Rolün ${roleSize} izninin tamamı bu hesabın başka aktif bir rolünde de var; hesabın yetkisi değişmez.`
+            : `Bu hesap ${lost.length} izni hemen kaybeder; açık oturumu bir sonraki isteğinde yeni yetkiyle çalışır.`}
+      </p>
+      {lost.length > 0 ? (
+        <div className="confirm-change-list">
+          <p className="confirm-change-title">Kaybedilecek izinler</p>
+          <ul>
+            {lost.map((permission) => {
+              const { area, action } = adminPermissionLabel(permission);
+              return (
+                <li key={permission}>
+                  {area} · {action} <code>{permission}</code>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+      <p>Atama silinmez, "Geri alınmış roller" listesinde kalır; rol yeniden atanabilir. Değişiklik adınızla kayda geçer.</p>
+    </>
   );
 }

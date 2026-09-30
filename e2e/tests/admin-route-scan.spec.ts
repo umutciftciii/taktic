@@ -143,6 +143,13 @@ const CONVERTED_ROUTES = [
   '/credit-packages/[id]',
   // Faz 3F.1: the vitrin package's own screen (was a window over the list).
   '/showcase/packages/[id]',
+  // Faz 3G: sistem ve yönetim.
+  '/company-settings',
+  '/notifications/[id]',
+  '/users/new',
+  '/users/[id]',
+  '/roles',
+  '/roles/[id]',
 ];
 
 const STATIC_ROUTES = [

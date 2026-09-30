@@ -1,7 +1,10 @@
 import Link from 'next/link';
-import { PageHeader } from '../../../components/page-header';
-import { SectionCard } from '../../../components/section-card';
+import { DataTable, type DataColumn } from '../../../components/data-table';
+import { DetailFormFooter, LockedField } from '../../../components/detail-form-footer';
+import { DetailHeader } from '../../../components/detail-header';
 import { EmptyState } from '../../../components/empty-state';
+import { SectionCard } from '../../../components/section-card';
+import type { SummaryItem } from '../../../components/summary-strip';
 import {
   fetchOrNotFound,
   formatDateTime,
@@ -11,12 +14,14 @@ import {
   userRoleBadgeClass,
   userRoleLabel,
 } from '../../../lib/api';
+import { groupPermissions } from '../../../lib/permission-groups';
+import { roleReach } from '../../../lib/permission-model';
 import {
   replaceAdminRolePermissionsAction,
   setAdminRoleActiveAction,
   updateAdminRoleAction,
 } from '../actions';
-import { PermissionMatrix } from '../permission-matrix';
+import { RolePermissionsForm, RoleStatusForm } from '../role-forms';
 
 type RoleDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -31,6 +36,31 @@ const OK_MESSAGES: Record<string, string> = {
   deactivated: 'Rol pasifleştirildi; bu rolü taşıyan hesaplar izinlerini kaybetti.',
 };
 
+const HOLDER_COLUMNS: DataColumn[] = [
+  { key: 'account', label: 'Hesap' },
+  { key: 'kind', label: 'Hesap türü' },
+  { key: 'status', label: 'Durum' },
+  { key: 'assigned', label: 'Atanma' },
+];
+
+/**
+ * One role (#52, ADMIN-DESIGN-001 Faz 3G), for the super admin alone. The
+ * design has no screen for it; it is built on the detail template: a way back
+ * to the roles, the summary card (status, key, name, description, a strip with
+ * how many permissions it grants and how many accounts hold it) with
+ * Pasifleştir / Aktifleştir, then the permission matrix, the name form and the
+ * accounts holding it.
+ *
+ * Three writes ask first, with the figures this page read:
+ * - İzinleri kaydet: what is added and removed, and the role's live holders
+ *   (`GET /admin/roles/:id` → `assignments`, `revokedAt: null`) with how many
+ *   of them are active.
+ * - Rolü pasifleştir: the same holders, and the permissions they lose.
+ * Reactivating and renaming are undone by the same controls and do not.
+ *
+ * Unchanged: the three server actions and every field they read; the
+ * deactivation still needs `confirm=on`, now sent by the dialog.
+ */
 export default async function AdminRoleDetailPage({ params, searchParams }: RoleDetailPageProps) {
   await requireSuperAdmin();
   const [{ id }, { error, ok }] = await Promise.all([params, searchParams]);
@@ -38,141 +68,155 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
     fetchOrNotFound(() => getAdminRole(id)),
     listAdminPermissionCatalogue(),
   ]);
+  const groups = groupPermissions(catalogue.permissions);
+  const reach = roleReach(role.assignments);
+  const areaCount = groups.filter((group) => group.items.some((item) => role.permissions.includes(item.permission))).length;
+
+  const facts: SummaryItem[] = [
+    {
+      label: 'İzin',
+      value: `${role.permissions.length} / ${catalogue.permissions.length}`,
+      note: `${areaCount} alanda`,
+      testId: 'role-fact-permissions',
+    },
+    {
+      label: 'Taşıyan hesap',
+      value: reach.holders,
+      note: `${reach.activeHolders} tanesi aktif`,
+      testId: 'role-fact-holders',
+    },
+    {
+      label: 'Durum',
+      value: role.isActive ? 'Aktif' : 'Pasif',
+      note: role.isActive ? 'izinleri geçerli' : 'kimseye izin vermez',
+      tone: role.isActive ? 'success' : 'warning',
+    },
+    { label: 'Oluşturulma', value: formatDateTime(role.createdAt) },
+    { label: 'Güncellenme', value: formatDateTime(role.updatedAt) },
+  ];
 
   return (
-    <>
-      <PageHeader
+    <main className="system-page role-detail-page">
+      <DetailHeader
+        back={{ href: '/roles', label: 'Roller ve izinler' }}
+        badges={
+          <span className={role.isActive ? 'badge badge-good' : 'badge badge-muted'} data-testid="role-status">
+            {role.isActive ? 'Aktif' : 'Pasif'}
+          </span>
+        }
+        meta={
+          <>
+            anahtar <code className="cell-break">{role.key}</code>
+          </>
+        }
         title={role.name}
         subtitle={role.description ?? 'Açıklama girilmemiş.'}
-        breadcrumbs={[
-          { href: '/roles', label: 'Roller' },
-          { href: `/roles/${role.id}`, label: role.name },
-        ]}
+        actions={
+          <RoleStatusForm
+            roleId={role.id}
+            roleName={role.name}
+            isActive={role.isActive}
+            permissionCount={role.permissions.length}
+            reach={reach}
+            action={setAdminRoleActiveAction}
+          />
+        }
+        facts={facts}
+        factsLabel="Rol özeti"
+        testId="role-header"
       />
 
       {error ? (
-        <div className="notice notice-error" role="alert">
+        <div className="notice notice-error detail-notice" role="alert" data-testid="role-error">
           {error}
         </div>
       ) : null}
       {ok ? (
-        <div className="notice notice-success" role="status">
+        <div className="notice notice-success detail-notice" role="status" data-testid="role-ok">
           {OK_MESSAGES[ok] ?? 'Kaydedildi.'}
         </div>
       ) : null}
 
-      <div className="admin-meta-pills">
-        <span className="meta-pill">
-          anahtar <code>{role.key}</code>
-        </span>
-        <span className={role.isActive ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}>
-          {role.isActive ? 'Aktif' : 'Pasif'}
-        </span>
-        <span className="meta-pill">{role.permissions.length} izin</span>
-        <span className="meta-pill">güncellenme {formatDateTime(role.updatedAt)}</span>
-      </div>
+      <div className="detail-panel">
+        <SectionCard
+          title="İzinler"
+          actions={<span className="section-card-meta">İşaretli kutular rolün tamamıdır; kayıt eski kümenin yerine geçer.</span>}
+          className="detail-tab-card"
+          testId="role-permissions-card"
+        >
+          {/* Keyed by the stored set, so a landed save starts the form from it. */}
+          <RolePermissionsForm
+            key={role.permissions.join(',')}
+            roleId={role.id}
+            groups={groups}
+            selected={role.permissions}
+            reach={reach}
+            roleActive={role.isActive}
+            action={replaceAdminRolePermissionsAction}
+          />
+        </SectionCard>
 
-      <SectionCard title="Ad ve açıklama" subtitle="Anahtar değiştirilemez: audit kayıtları ona bakar.">
-        <form action={updateAdminRoleAction} className="compact-form">
-          <input type="hidden" name="roleId" value={role.id} />
-          <div className="compact-field-grid">
-            <label className="field field-12">
-              <span>Ad *</span>
-              <input name="name" defaultValue={role.name} required minLength={2} maxLength={120} />
-            </label>
-            <label className="field field-12">
-              <span>Açıklama</span>
-              <textarea name="description" rows={2} maxLength={500} defaultValue={role.description ?? ''} />
-            </label>
-          </div>
-          <div className="form-actions">
-            <button className="btn btn-primary btn-sm" type="submit">
-              Kaydet
-            </button>
-          </div>
-        </form>
-      </SectionCard>
+        <div className="detail-panel-grid">
+          <SectionCard title="Ad ve açıklama" className="detail-tab-card" testId="role-info-card">
+            <form action={updateAdminRoleAction} className="compact-form">
+              <input type="hidden" name="roleId" value={role.id} />
+              <div className="compact-field-grid">
+                <LockedField
+                  label="Anahtar"
+                  value={<code>{role.key}</code>}
+                  help="Denetim kayıtları rolü anahtarıyla anar."
+                  className="field field-12"
+                />
+                <label className="field field-12">
+                  <span>Ad *</span>
+                  <input name="name" defaultValue={role.name} required minLength={2} maxLength={120} />
+                </label>
+                <label className="field field-12">
+                  <span>Açıklama</span>
+                  <textarea name="description" rows={3} maxLength={500} defaultValue={role.description ?? ''} />
+                </label>
+              </div>
+              <DetailFormFooter note="Ad ve açıklamayı değiştirmek rolün izinlerini ve atamalarını değiştirmez.">
+                <button className="btn btn-primary" type="submit">
+                  Kaydet
+                </button>
+              </DetailFormFooter>
+            </form>
+          </SectionCard>
 
-      <SectionCard
-        title="İzinler"
-        subtitle="İşaretli kutular rolün tamamıdır; kaydettiğinizde eski küme bunun yerine geçer."
-      >
-        <form action={replaceAdminRolePermissionsAction} className="compact-form">
-          <input type="hidden" name="roleId" value={role.id} />
-          <PermissionMatrix catalogue={catalogue.permissions} selected={role.permissions} />
-          <div className="form-actions">
-            <button className="btn btn-primary btn-sm" type="submit">
-              İzinleri kaydet
-            </button>
-          </div>
-        </form>
-      </SectionCard>
-
-      <SectionCard
-        title={role.isActive ? 'Rolü pasifleştir' : 'Rolü yeniden aktifleştir'}
-        subtitle={
-          role.isActive
-            ? 'Pasif bir rol kimseye izin vermez ve yeni atama kabul etmez. Atamalar silinmez; rol yeniden aktifleştirilirse geri gelirler.'
-            : 'Aktifleştirdiğinizde bu rolü hâlâ taşıyan hesaplar izinlerini yeniden kazanır.'
-        }
-      >
-        <form action={setAdminRoleActiveAction} className="compact-form">
-          <input type="hidden" name="roleId" value={role.id} />
-          <input type="hidden" name="isActive" value={role.isActive ? 'false' : 'true'} />
-          {role.isActive ? (
-            <label className="admin-confirm">
-              <input type="checkbox" name="confirm" />
-              <span>
-                Bu rolü taşıyan {role.assignments.length} hesabın izinlerini kaybedeceğini anlıyorum.
-              </span>
-            </label>
-          ) : null}
-          <button className={role.isActive ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm'} type="submit">
-            {role.isActive ? 'Pasifleştir' : 'Aktifleştir'}
-          </button>
-        </form>
-      </SectionCard>
-
-      <SectionCard title="Bu rolü taşıyan hesaplar" subtitle="Atama ve geri alma kullanıcı detayından yapılır.">
-        {role.assignments.length === 0 ? (
-          <EmptyState title="Bu rol henüz kimseye atanmamış" />
-        ) : (
-          <div className="admin-table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Hesap</th>
-                  <th>Rol türü</th>
-                  <th>Durum</th>
-                  <th>Atanma</th>
-                </tr>
-              </thead>
-              <tbody>
+          <SectionCard
+            title="Bu rolü taşıyan hesaplar"
+            actions={<span className="section-card-meta">Atama ve geri alma kullanıcı detayından yapılır.</span>}
+            className="detail-tab-card"
+            testId="role-holders-card"
+          >
+            {role.assignments.length === 0 ? (
+              <EmptyState title="Bu rol henüz kimseye atanmamış" />
+            ) : (
+              <DataTable caption="Bu rolü taşıyan hesaplar" columns={HOLDER_COLUMNS} minWidth={560} testId="role-holders">
                 {role.assignments.map((assignment) => (
                   <tr key={assignment.id}>
                     <td>
-                      <Link href={`/users/${assignment.user.id}`}>
+                      <Link className="cell-link cell-break" href={`/users/${assignment.user.id}`}>
                         {assignment.user.name ?? assignment.user.email ?? assignment.user.id}
                       </Link>
                     </td>
                     <td>
-                      <span className={userRoleBadgeClass(assignment.user.role)}>
-                        {userRoleLabel(assignment.user.role)}
-                      </span>
+                      <span className={userRoleBadgeClass(assignment.user.role)}>{userRoleLabel(assignment.user.role)}</span>
                     </td>
                     <td>
                       <span className={assignment.user.isActive ? 'badge badge-good' : 'badge badge-muted'}>
                         {assignment.user.isActive ? 'Aktif' : 'Pasif'}
                       </span>
                     </td>
-                    <td>{formatDateTime(assignment.assignedAt)}</td>
+                    <td className="cell-nowrap">{formatDateTime(assignment.assignedAt)}</td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
-    </>
+              </DataTable>
+            )}
+          </SectionCard>
+        </div>
+      </div>
+    </main>
   );
 }

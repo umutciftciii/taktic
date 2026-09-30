@@ -3,26 +3,33 @@ import { requireSuperAdmin } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { NewAdminUserForm } from './new-admin-user-form';
 
+/**
+ * A new staff account (#49, ADMIN-DESIGN-001 Faz 3G). The design has no screen
+ * for it; it is built on the form template: a way back to the list, the title
+ * with its ⓘ, and the form, whose three fields and action are unchanged.
+ */
 export default async function NewAdminUserPage() {
   // Creating a staff account is a root capability: `POST /users` is
   // SUPER_ADMIN-only and no permission delegates it (RG-7 §12.1). The page
   // says so itself rather than offering a form that the API refuses.
-  const { can } = await requireSuperAdmin();
+  await requireSuperAdmin();
 
   return (
-    <main className="user-detail-page">
+    <main className="system-page system-form-page user-new-page">
+      <Link className="detail-back" href="/users">
+        <span aria-hidden="true">‹</span> Admin kullanıcıları
+      </Link>
       <PageHeader
-        breadcrumbs={[
-          { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
-          { label: 'Admin Kullanıcıları', href: '/users' },
-          { label: 'Yeni' },
-        ]}
-        title="Yeni Admin Kullanıcısı"
-        subtitle="Bir admin kullanıcısı oluşturun ve şifre belirleme bağlantısını manuel paylaşın."
-        actions={
-          <Link className="btn btn-ghost btn-sm" href="/users">
-            ← Listeye dön
-          </Link>
+        title="Yeni admin kullanıcısı"
+        subtitle="Bir personel hesabı oluşturun ve şifre belirleme bağlantısını kendiniz paylaşın."
+        infoLabel="Yeni hesap nasıl açılır?"
+        info={
+          <span className="popover-list">
+            <span>Hesap bir personel hesabıdır ve rol atanana kadar hiçbir yetkisi yoktur; giriş yapsa da panele giremez.</span>
+            <span>Rol, hesap oluşturulduktan sonra kullanıcı detayındaki Roller kartından atanır.</span>
+            <span>Şifre belirleme bağlantısı 72 saat geçerlidir ve yalnız oluşturulduğu anda bir kez gösterilir.</span>
+            <span>Bağlantı e-postayla gönderilmez; WhatsApp, SMS veya e-postayla siz paylaşırsınız.</span>
+          </span>
         }
       />
       <NewAdminUserForm />
