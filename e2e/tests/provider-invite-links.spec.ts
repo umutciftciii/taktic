@@ -63,7 +63,8 @@ async function draftServiceWithSecrets(namePrefix: string) {
  * the product does not have.
  */
 async function issueInviteUrl(admin: Actor, categorySlug: string): Promise<string> {
-  await admin.gotoAdmin(`/categories/${categorySlug}`);
+  // The desk is the category screen's "Hizmet veren davetleri" tab (Faz 3F.1).
+  await admin.gotoAdmin(`/categories/${categorySlug}?tab=davetler`);
   await assertNoErrorScreen(admin.page);
 
   await admin.page.getByTestId('provider-invite-create').click();
@@ -187,9 +188,10 @@ test.describe('provider application invitations', () => {
       // unmoved: somebody applied, nobody is approved, and the service is still
       // not ready. A count that had gone green here would be the whole release
       // decision made on a form submission.
-      await admin.gotoAdmin(`/categories/${service.slug}`);
+      await admin.gotoAdmin(`/categories/${service.slug}?tab=davetler`);
       await expect(admin.page.getByTestId('provider-invite-list')).toContainText('Kullanıldı');
       await expect(admin.page.getByTestId('provider-invite-count')).toContainText('0 geçerli');
+      await admin.gotoAdmin(`/categories/${service.slug}`);
       await expect(admin.page.getByTestId('release-blockers')).toContainText(
         'Onaylı hizmet veren yok',
       );
@@ -230,7 +232,7 @@ test.describe('provider application invitations', () => {
       await visitor.page.goto(url, { waitUntil: 'domcontentloaded' });
       await expect(visitor.page.getByTestId('invite-category')).toHaveText(service.name);
 
-      const inviteRow = admin.page.getByTestId('provider-invite-list').locator('li').first();
+      const inviteRow = admin.page.getByTestId('provider-invite-list').locator('tbody tr').first();
       await expect(inviteRow).toContainText('Geçerli');
       await inviteRow.getByRole('button', { name: 'İptal et' }).click();
 

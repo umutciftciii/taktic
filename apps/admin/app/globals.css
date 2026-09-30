@@ -2195,34 +2195,6 @@ button:disabled {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
-.question-row .q-type-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--color-accent-200);
-  color: var(--color-accent-800);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-}
-
-.question-row .q-req-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--color-neutral-200);
-  color: var(--color-neutral-700);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.question-row .q-req-badge.is-on {
-  background: var(--color-warning-bg);
-  color: var(--color-warning);
-}
-
 .question-row .q-action {
   justify-self: end;
   display: inline-flex;

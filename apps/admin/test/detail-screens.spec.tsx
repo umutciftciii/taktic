@@ -73,7 +73,7 @@ function question(overrides: Partial<Question> = {}): Question {
     conditions: [],
     routerRules: [],
     createdAt: '2026-08-28T06:41:00.000Z',
-    updatedAt: '2026-08-28T06:41:00.400Z',
+    updatedAt: '2026-08-28T06:41:00.000Z',
     ...overrides,
   } as Question;
 }
@@ -95,7 +95,7 @@ describe('Neler oldu: only the instants the records carry', () => {
   it('draws "Oluşturuldu", and "Son güncellendi" only when the row was saved later', () => {
     const same = recordLifecycleEntries({
       createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.500Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
       created: 'Paket oluşturuldu',
       updated: 'Paket son güncellendi',
     });
@@ -126,7 +126,7 @@ describe('Neler oldu: only the instants the records carry', () => {
     expect(titles).toContain('Kategori oluşturuldu');
     expect(titles).toContain('Kategori son güncellendi');
     expect(titles).toContain('"Ne tür bir hizmet?" sorusu eklendi');
-    // Saved in the same statement as its creation: not an edit.
+    // Stamped with its creation's instant: not an edit.
     expect(titles).not.toContain('"Ne tür bir hizmet?" sorusu son güncellendi');
     expect(titles.filter((title) => title === 'Davet bağlantısı oluşturuldu')).toHaveLength(4);
     expect(titles).toContain('Davet bağlantısı kullanıldı');

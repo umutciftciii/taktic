@@ -169,6 +169,17 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await expect(page.getByTestId('release-checklist')).not.toContainText('Soru sayısı');
       await expect(page.locator('.catalog-detail-page form')).toHaveCount(0);
       await expect(page.locator('.catalog-detail-page').getByRole('button', { name: /sil/i })).toHaveCount(0);
+      // Faz 3F.1: a tab the session may not read is not drawn, and asking for
+      // it by URL lands on the first tab.
+      await expect(page.getByTestId('category-tab-sorular')).toHaveCount(0);
+      await expect(page.getByTestId('category-tab-davetler')).toHaveCount(0);
+      await reader.gotoAdmin(`${servicePath}?tab=sorular`);
+      await expect(page.getByTestId('category-panel-bilgiler')).toBeVisible();
+      await expect(page.getByTestId('question-set-card')).toHaveCount(0);
+      await reader.gotoAdmin(`${servicePath}?tab=gecmis`);
+      await expect(page.getByTestId('category-activity')).toContainText('Kategori oluşturuldu');
+      await expect(page.getByTestId('category-activity')).not.toContainText('sorusu eklendi');
+      await expect(page.getByTestId('category-activity-footnote')).toContainText('geçmişi tutulmuyor');
 
       await reader.gotoAdmin(`/categories/${router.slug}`);
       await expect(page.getByTestId('router-explainer')).toBeVisible();
@@ -178,15 +189,21 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       page = questionReader.page;
       await questionReader.gotoAdmin(servicePath);
       await expectOpen(page, new RegExp(`${servicePath}$`));
+      await expect(page.getByTestId('category-fact-questions')).toContainText('2');
+      await expect(page.getByTestId('release-checklist')).toContainText('Soru sayısı');
+      await expect(page.getByTestId('category-tab-sorular')).toContainText('2');
+      await page.getByTestId('category-tab-sorular').click();
+      await expect(page).toHaveURL(/\?tab=sorular$/);
       await expect(page.getByTestId('question-set-card').locator('details.question-row')).toHaveCount(2);
       await expect(page.getByTestId('question-set-card').locator('form')).toHaveCount(0);
       await expect(page.locator('.question-create-panel')).toHaveCount(0);
-      await expect(page.getByTestId('category-fact-questions')).toContainText('2');
-      await expect(page.getByTestId('release-checklist')).toContainText('Soru sayısı');
+      // The design's "Ne zaman sorulur" column (a rule's wording is unit-tested).
+      await expect(page.locator('details.question-row').filter({ hasText: 'hedef soru' })).toContainText('Her zaman');
+      await questionReader.gotoAdmin(`${servicePath}?tab=davetler`);
       await expect(page.getByTestId('provider-invite-panel')).toBeVisible();
       await expect(page.getByTestId('provider-invite-create')).toHaveCount(0);
 
-      await questionReader.gotoAdmin(`/categories/${router.slug}`);
+      await questionReader.gotoAdmin(`/categories/${router.slug}?tab=sorular`);
       await expect(page.getByTestId('router-rules-read-only')).toContainText(service.name);
       await expect(page.getByRole('button', { name: 'Yönlendirmeyi kaydet' })).toHaveCount(0);
 
@@ -199,6 +216,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await expect(form.locator('input[name="statusLocked"]')).toHaveCount(1);
       await expect(page.getByTestId('category-status-panel')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Dosya yükle' })).toHaveCount(0);
+      await editor.gotoAdmin(`${servicePath}?tab=sorular`);
       const target = page.locator('details.question-row').filter({ hasText: 'hedef soru' });
       await target.locator('summary').click();
       await expect(target.getByRole('button', { name: 'Soruyu kaydet' })).toBeVisible();
@@ -206,6 +224,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await expect(target.locator('select[name="expectedValues"] option[value="kaynak::evet"]')).toHaveCount(1);
       await expect(target.getByRole('button', { name: 'Pasifleştir' })).toBeVisible();
       await expect(page.locator('.question-create-panel')).toBeVisible();
+      await editor.gotoAdmin(`${servicePath}?tab=davetler`);
       await page.getByTestId('provider-invite-create').click();
       await expect(page.getByTestId('provider-invite-url')).toBeVisible();
       await expect(page.getByTestId('provider-invite-count')).toContainText('1 geçerli');
@@ -222,7 +241,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       // or the next goto is interrupted by it (WebKit on CI).
       await expect(page.getByTestId('category-header')).toContainText(`${service.name} yeni`);
 
-      await editor.gotoAdmin(`/categories/${router.slug}`);
+      await editor.gotoAdmin(`/categories/${router.slug}?tab=sorular`);
       await expect(page.getByRole('button', { name: 'Yönlendirmeyi kaydet' })).toBeVisible();
 
       // ---- STATUS + REVOKE: the status desk and the withdraw button ---------
@@ -231,6 +250,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await expectOpen(page, new RegExp(`${servicePath}$`));
       await expect(page.getByTestId('category-read-only')).toBeVisible();
       await expect(page.getByTestId('category-status-panel')).toBeVisible();
+      await switcher.gotoAdmin(`${servicePath}?tab=davetler`);
       await expect(page.getByTestId('provider-invite-create')).toHaveCount(0);
       const invite = await prisma().providerInviteToken.findFirstOrThrow({ where: { categoryId: service.id } });
       await page.getByTestId(`provider-invite-revoke-${invite.id}`).click();
@@ -244,7 +264,16 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await admin.gotoAdmin(servicePath);
       await expect(page.getByRole('button', { name: 'Dosya yükle' })).toHaveCount(2);
       await expect(page.getByTestId('category-status-panel')).toBeVisible();
+      await admin.gotoAdmin(`${servicePath}?tab=davetler`);
       await expect(page.getByTestId('provider-invite-create')).toBeVisible();
+      // The revoked link is a row with its state, and "Neler oldu" names who
+      // issued it — and only that: nobody is recorded for the withdrawal.
+      await expect(page.getByTestId(`provider-invite-${invite.id}`)).toContainText('İptal edildi');
+      await admin.gotoAdmin(`${servicePath}?tab=gecmis`);
+      const log = page.getByTestId('category-activity');
+      await expect(log).toContainText('Davet bağlantısı oluşturuldu');
+      await expect(log).toContainText('Davet bağlantısı iptal edildi');
+      await expect(log).toContainText('sorusu eklendi');
       await admin.gotoAdmin('/categories');
       await expect(page.getByTestId('category-new-link')).toHaveText('Yeni kategori ekle');
     } finally {
@@ -301,7 +330,13 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await expect(page.getByTestId('credit-package-read-only')).toContainText(scope.name);
       await expect(page.getByTestId('credit-package-fact-allowance')).toContainText('günlük en fazla 5 teklif');
       await expect(page.getByTestId('credit-package-sales')).toHaveCount(0);
+      await expect(page.getByTestId('credit-package-tab-satislar')).toHaveCount(0);
       await expect(page.getByTestId('credit-package-status-panel')).toHaveCount(0);
+      await expect(page.getByTestId('credit-package-type-locked')).toHaveCount(0);
+      await reader.gotoAdmin(`/credit-packages/${unlimited.id}?tab=satislar`);
+      await expect(page.getByTestId('credit-package-panel-bilgiler')).toBeVisible();
+      await reader.gotoAdmin(`/credit-packages/${unlimited.id}?tab=gecmis`);
+      await expect(page.getByTestId('credit-package-activity')).toContainText('Paket oluşturuldu');
 
       // ---- WRITE: ↑/↓ and the new-package form, no status switch ------------
       page = writer.page;
@@ -342,9 +377,14 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       // ---- super admin: the sales summary is its own read ------------------
       page = admin.page;
       await admin.gotoAdmin(`/credit-packages/${oneTime.id}`);
-      await expect(page.getByTestId('credit-package-sales')).toBeVisible();
       await expect(page.getByTestId('credit-package-status-panel')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Değişiklikleri kaydet' })).toBeVisible();
+      // The type is shown, locked, and rides along as the hidden field it was.
+      await expect(page.getByTestId('credit-package-type-locked')).toContainText('Tek seferlik kredi');
+      await expect(page.locator('input[type="hidden"][name="type"]')).toHaveValue('ONE_TIME_CREDITS');
+      await page.getByTestId('credit-package-tab-satislar').click();
+      await expect(page).toHaveURL(/\?tab=satislar$/);
+      await expect(page.getByTestId('credit-package-sales')).toBeVisible();
     } finally {
       // Left active, a fixture package breaks lemon-checkout's one-package view.
       await prisma().offerCreditPackage.updateMany({ where: { id: { in: ids } }, data: { isActive: false } });
@@ -359,6 +399,15 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
     // provider detail lists every category) and fail the route scan there.
     const long = `E2E Faz3F çok uzun bir kategori adı ${'uzun kelime '.repeat(8).trim()}`;
     const { service, router } = await seedCatalogue(long);
+    // One invitation row, so the Hizmet veren davetleri table is measured with
+    // content in it rather than as an empty state.
+    await prisma().providerInviteToken.create({
+      data: {
+        categoryId: service.id,
+        tokenHash: `e2e-faz3f1-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      },
+    });
     const pkg = await createOfferPackage({ type: 'CATEGORY_UNLIMITED', name: long, scopeCategoryIds: [service.id], dailyOfferLimit: 3 });
     const admin = await openAs(browser, 'super');
     const page = admin.page;
@@ -366,10 +415,16 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       ['hizmet-kategorileri', '/categories'],
       ['yeni-kategori', '/categories/new'],
       ['kategori-detayi', `/categories/${service.slug}`],
+      ['kategori-sorular', `/categories/${service.slug}?tab=sorular`],
+      ['kategori-davetler', `/categories/${service.slug}?tab=davetler`],
+      ['kategori-neler-oldu', `/categories/${service.slug}?tab=gecmis`],
       ['yonlendirici-detayi', `/categories/${router.slug}`],
+      ['yonlendirici-sorular', `/categories/${router.slug}?tab=sorular`],
       ['kredi-paketleri', '/credit-packages'],
       ['yeni-kredi-paketi', '/credit-packages/new'],
       ['kredi-paketi-detayi', `/credit-packages/${pkg.id}`],
+      ['kredi-paketi-satislar', `/credit-packages/${pkg.id}?tab=satislar`],
+      ['kredi-paketi-neler-oldu', `/credit-packages/${pkg.id}?tab=gecmis`],
     ];
 
     try {
@@ -377,7 +432,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
         await page.setViewportSize({ width, height: width === 1440 ? 1617 : 900 });
         for (const [name, path] of paths) {
           await admin.gotoAdmin(path);
-          await expectOpen(page, new RegExp(`${path}$`));
+          await expectOpen(page, new RegExp(`${path.replace('?', '\\?')}$`));
           await expectNoPageOverflow(page, `${path} @${width}`);
           if (width === 1440 || width === 320) await capture(page, name);
         }
@@ -387,7 +442,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       // longest option, which must scroll in the question table instead.
       for (const width of [1440, 320]) {
         await page.setViewportSize({ width, height: width === 1440 ? 1617 : 900 });
-        await admin.gotoAdmin(`/categories/${service.slug}`);
+        await admin.gotoAdmin(`/categories/${service.slug}?tab=sorular`);
         await page.locator('details.question-row').filter({ hasText: 'hedef soru' }).locator('summary').click();
         await expect(page.getByRole('button', { name: 'Koşulu kaydet' })).toBeVisible();
         await expectNoPageOverflow(page, `question editor @${width}`);

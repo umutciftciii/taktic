@@ -96,6 +96,11 @@ test.describe('the supply readiness column', () => {
       await admin.gotoAdmin(`/categories/${closed.slug}`);
       await admin.page.getByTestId('provider-enrollment-open').check();
       await admin.page.getByRole('button', { name: 'Kategoriyi kaydet' }).click();
+      // The save is a server action and a redirect: let it land before leaving,
+      // or the next goto cancels it in flight.
+      await expect
+        .poll(async () => (await prisma().serviceCategory.findUniqueOrThrow({ where: { id: closed.id } })).providerEnrollmentOpen)
+        .toBe(true);
 
       await admin.gotoAdmin('/categories');
       await expect(admin.page.getByTestId(`enrollment-note-${closed.slug}`)).toContainText(

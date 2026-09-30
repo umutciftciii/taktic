@@ -103,9 +103,9 @@ export function recordLifecycleEntries({
   updated: ReactNode;
 }): ActivityEntry[] {
   const entries: ActivityEntry[] = [{ key: 'created', at: createdAt, title: created, actor: null }];
-  // Prisma stamps both columns in the same statement on create; a second apart
-  // or less is the create, not an edit.
-  if (Date.parse(updatedAt) - Date.parse(createdAt) > 1000) {
+  // Prisma stamps both columns with the same instant on create, so any later
+  // `updatedAt` is a save — however soon after the create it came.
+  if (Date.parse(updatedAt) > Date.parse(createdAt)) {
     entries.push({ key: 'updated', at: updatedAt, title: updated, actor: null });
   }
   return entries;
