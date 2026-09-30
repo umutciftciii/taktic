@@ -5,6 +5,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isOfferLedgerReference } from '../credits/offer-ledger-reference';
 import {
   FinanceAnalyticsDto,
   FinanceAnalyticsGroupBy,
@@ -101,7 +102,7 @@ function resolveSourceNumber(
   lookup: SourceNumberLookup,
 ): string | null {
   if (!row.referenceId) return null;
-  if (row.referenceType === 'Offer') {
+  if (isOfferLedgerReference(row.referenceType)) {
     return lookup.offerNumberById.get(row.referenceId) ?? null;
   }
   if (row.referenceType === 'PackagePurchase') {
@@ -551,7 +552,7 @@ export class FinanceService {
     const purchaseIds = new Set<string>();
     for (const row of rows) {
       if (!row.referenceId) continue;
-      if (row.referenceType === 'Offer') offerIds.add(row.referenceId);
+      if (isOfferLedgerReference(row.referenceType)) offerIds.add(row.referenceId);
       else if (row.referenceType === 'PackagePurchase')
         purchaseIds.add(row.referenceId);
     }

@@ -34,7 +34,7 @@ import { TransactionalMailService } from '../notifications/transactional-mail.se
 import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
-import { refundOfferCreditInTransaction } from '../offers/offers.service';
+import { refundOfferCreditInTransaction, refundOfferRechargeInTransaction } from '../offers/offers.service';
 import { REQUEST_CANCELLED_REFUND_REASON, REQUEST_REMOVED_REFUND_REASON } from '../offers/refund-policy';
 import { hasPermission } from '../auth/admin-permissions';
 import {
@@ -335,6 +335,22 @@ function isRefundableOneTimeSpend(offer: {
     offer.creditSpentTransactionId !== null &&
     offer.creditCost > 0 &&
     offer.creditRefundedTransactionId === null
+  );
+}
+
+/**
+ * The charge an acceptance took for an offer whose first charge had been
+ * refunded (BUG-OFFER-REFUND-ACCEPT-001), not yet given back.
+ */
+function isRefundableAcceptanceRecharge(offer: {
+  creditCost: number;
+  creditRechargeTransactionId: string | null;
+  creditRechargeRefundedTransactionId: string | null;
+}): boolean {
+  return (
+    offer.creditRechargeTransactionId !== null &&
+    offer.creditRechargeRefundedTransactionId === null &&
+    offer.creditCost > 0
   );
 }
 
@@ -1336,6 +1352,12 @@ export class ServiceRequestsService {
    * whose conditional update and the ledger's one-refund-per-offer index refuse
    * an offer already refunded by the unviewed worker or by hand, and an offer
    * already refunded is not a candidate in the first place.
+   *
+   * A winner whose first charge was refunded and which was charged again when
+   * it was accepted (BUG-OFFER-REFUND-ACCEPT-001) gets that acceptance charge
+   * back instead, through `refundOfferRechargeInTransaction` — the first
+   * refund stays exactly as it was, and the second charge has its own
+   * one-refund guard.
    */
   async cancelServiceRequest(
     id: string,
@@ -1402,6 +1424,8 @@ export class ServiceRequestsService {
             entitlementSource: true,
             creditSpentTransactionId: true,
             creditRefundedTransactionId: true,
+            creditRechargeTransactionId: true,
+            creditRechargeRefundedTransactionId: true,
           },
         });
 
@@ -1426,8 +1450,25 @@ export class ServiceRequestsService {
             closedOfferIds.push(offer.id);
           }
 
-          const refundable = rule.refund && isRefundableOneTimeSpend(offer);
-          if (refundable) {
+          const refundsFirstCharge = rule.refund && isRefundableOneTimeSpend(offer);
+          const refundsRecharge = rule.refund && !refundsFirstCharge && isRefundableAcceptanceRecharge(offer);
+          const refundable = refundsFirstCharge || refundsRecharge;
+          if (refundsRecharge) {
+            // The acceptance charge of an offer whose first charge had
+            // already come back. Same reason and actor as the refund below.
+            await refundOfferRechargeInTransaction(
+              tx,
+              {
+                id: offer.id,
+                providerId: offer.providerId,
+                creditCost: offer.creditCost,
+                creditRechargeTransactionId: offer.creditRechargeTransactionId,
+              },
+              REQUEST_CANCELLED_REFUND_REASON,
+              { createdById: actorKind === ServiceRequestCancelActor.STAFF ? user.id : null },
+            );
+            refundedOfferIds.push(offer.id);
+          } else if (refundsFirstCharge) {
             // In full, viewed or not: the request was called off, so nobody
             // bought the outcome the credit was spent on. Throws on any guard
             // failure, which rolls the whole cancel back.

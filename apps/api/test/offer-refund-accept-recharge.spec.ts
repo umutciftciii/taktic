@@ -1,8 +1,16 @@
-import { CreditTransactionType, OfferStatus, ServiceRequestStatus, UserRole } from '@prisma/client';
+import {
+  CancelWinnerRefundDecision,
+  CreditTransactionType,
+  OfferStatus,
+  ServiceRequestStatus,
+  UserRole,
+} from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readContactSharingConfig } from '../src/modules/contact-sharing/contact-sharing.config';
+import { OFFER_RECHARGE_REFERENCE_TYPE } from '../src/modules/credits/offer-ledger-reference';
 import { OFFER_ACCEPT_RECHARGE_REASON } from '../src/modules/offers/offers.service';
+import { REQUEST_CANCELLED_REFUND_REASON } from '../src/modules/offers/refund-policy';
 import { UnviewedOfferRefundService } from '../src/modules/offers/unviewed-offer-refund.service';
 import { createPromoLotFixture, walletInvariant } from './campaign-fixtures';
 import {
@@ -133,7 +141,7 @@ function rechargeRows(offerId: string) {
   return ctx.prisma.providerCreditTransaction.findMany({
     where: {
       type: CreditTransactionType.OFFER_SPEND,
-      referenceType: 'Offer',
+      referenceType: OFFER_RECHARGE_REFERENCE_TYPE,
       referenceId: offerId,
       reason: OFFER_ACCEPT_RECHARGE_REASON,
     },
@@ -142,7 +150,7 @@ function rechargeRows(offerId: string) {
 
 function offerLedger(offerId: string) {
   return ctx.prisma.providerCreditTransaction.findMany({
-    where: { referenceType: 'Offer', referenceId: offerId },
+    where: { referenceType: { in: ['Offer', OFFER_RECHARGE_REFERENCE_TYPE] }, referenceId: offerId },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
 }
@@ -235,6 +243,9 @@ describe('accepting an offer whose credit was refunded', () => {
     expect(after.creditRefundedAt).toEqual(refunded.creditRefundedAt);
     expect(after.creditRefundReason).toBe(refunded.creditRefundReason);
     expect(after.creditSpentTransactionId).toBe(refunded.creditSpentTransactionId);
+    expect(after.creditRechargeTransactionId).toBe(recharge.id);
+    expect(after.creditRechargedAt).not.toBeNull();
+    expect(after.creditRechargeRefundedTransactionId).toBeNull();
 
     const matched = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: f.serviceRequest.id } });
     expect(matched.status).toBe(ServiceRequestStatus.MATCHED);
@@ -502,5 +513,224 @@ describe('promo credit', () => {
     const response = await customerAccept(serviceRequest.id, offerId, customerCookie).expect(409);
     expect(response.body.code).toBe('OFFER_ACCEPT_INSUFFICIENT_CREDIT');
     expect(await snapshotSideEffects(serviceRequest.id, [provider.id])).toEqual(before);
+  });
+});
+
+function staffCancel(requestId: string, cookie: string, expectedMatchedOfferId: string) {
+  return request(ctx.server)
+    .post(`/service-requests/${requestId}/cancel`)
+    .set('Cookie', cookie)
+    .send({ expectedMatchedOfferId });
+}
+
+function rechargeRefundRows(offerId: string) {
+  return ctx.prisma.providerCreditTransaction.findMany({
+    where: { type: CreditTransactionType.OFFER_REFUND, referenceType: OFFER_RECHARGE_REFERENCE_TYPE, referenceId: offerId },
+  });
+}
+
+/** Refunded by the 48-hour rule, then accepted — so charged a second time. */
+async function rechargedMatch() {
+  const f = await fixture();
+  await refundByPolicy(f.offerId);
+  await customerAccept(f.serviceRequest.id, f.offerId, f.customerCookie).expect(201);
+  expect(await currentCreditBalance(ctx.prisma, f.provider.id)).toBe(STARTING_CREDITS - CATEGORY_COST);
+  return f;
+}
+
+describe('cancelling a match whose winner was charged again on acceptance', () => {
+  it('refunds the acceptance charge once and leaves the first refund as it was', async () => {
+    const f = await rechargedMatch();
+    const before = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: f.offerId } });
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const cookie = await loginAs(ctx.prisma, admin.id);
+
+    await staffCancel(f.serviceRequest.id, cookie, f.offerId).expect(201);
+
+    expect(await currentCreditBalance(ctx.prisma, f.provider.id)).toBe(STARTING_CREDITS);
+    const [refund] = await rechargeRefundRows(f.offerId);
+    if (!refund) throw new Error('no recharge refund row');
+    expect(refund).toMatchObject({
+      amount: CATEGORY_COST,
+      reason: REQUEST_CANCELLED_REFUND_REASON,
+      createdById: admin.id,
+    });
+
+    const after = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: f.offerId } });
+    expect(after.status).toBe(OfferStatus.CANCELLED);
+    expect(after.creditRechargeRefundedTransactionId).toBe(refund.id);
+    expect(after.creditRechargeRefundedAt).not.toBeNull();
+    // The first charge's refund is untouched.
+    expect(after.creditRefundedTransactionId).toBe(before.creditRefundedTransactionId);
+    expect(after.creditRefundedAt).toEqual(before.creditRefundedAt);
+    expect(after.creditRechargeTransactionId).toBe(before.creditRechargeTransactionId);
+
+    const ledger = await offerLedger(f.offerId);
+    expect(ledger.map((row) => [row.type, row.referenceType, row.amount])).toEqual([
+      [CreditTransactionType.OFFER_SPEND, 'Offer', -CATEGORY_COST],
+      [CreditTransactionType.OFFER_REFUND, 'Offer', CATEGORY_COST],
+      [CreditTransactionType.OFFER_SPEND, OFFER_RECHARGE_REFERENCE_TYPE, -CATEGORY_COST],
+      [CreditTransactionType.OFFER_REFUND, OFFER_RECHARGE_REFERENCE_TYPE, CATEGORY_COST],
+    ]);
+
+    const cancellation = await ctx.prisma.serviceRequestCancellation.findUniqueOrThrow({
+      where: { requestId: f.serviceRequest.id },
+    });
+    expect(cancellation.winnerRefundDecision).toBe(CancelWinnerRefundDecision.REFUNDED);
+    expect(cancellation.refundedOfferIds).toContain(f.offerId);
+
+    // The provider's panel carries the net of that refund.
+    const offers = await request(ctx.server)
+      .get(`/providers/${f.provider.id}/offers`)
+      .set('Cookie', f.cookie)
+      .expect(200);
+    const row = (offers.body as Array<Record<string, unknown>>).find((offer) => offer.id === f.offerId);
+    expect(row?.creditRechargeRefundSettlement).toMatchObject({
+      refundTransactionId: refund.id,
+      grossCredits: CATEGORY_COST,
+      netCredits: CATEGORY_COST,
+    });
+
+    await expectWalletConsistent(f.provider.id);
+  });
+
+  it('keeps the acceptance charge when the winner’s refund is withheld', async () => {
+    const f = await rechargedMatch();
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+
+    await request(ctx.server)
+      .post(`/service-requests/${f.serviceRequest.id}/cancel/withhold-winner-refund`)
+      .set('Cookie', await loginAs(ctx.prisma, admin.id))
+      .send({ reason: 'Hizmet veren işi yapmadığını bildirdi.', expectedMatchedOfferId: f.offerId })
+      .expect(201);
+
+    expect(await rechargeRefundRows(f.offerId)).toHaveLength(0);
+    expect(await currentCreditBalance(ctx.prisma, f.provider.id)).toBe(STARTING_CREDITS - CATEGORY_COST);
+    const cancellation = await ctx.prisma.serviceRequestCancellation.findUniqueOrThrow({
+      where: { requestId: f.serviceRequest.id },
+    });
+    expect(cancellation.winnerRefundDecision).toBe(CancelWinnerRefundDecision.WITHHELD);
+  });
+
+  it('refunds once when two cancels race', async () => {
+    const f = await rechargedMatch();
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const cookie = await loginAs(ctx.prisma, admin.id);
+
+    const responses = await Promise.all([
+      staffCancel(f.serviceRequest.id, cookie, f.offerId),
+      staffCancel(f.serviceRequest.id, cookie, f.offerId),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(await rechargeRefundRows(f.offerId)).toHaveLength(1);
+    expect(await currentCreditBalance(ctx.prisma, f.provider.id)).toBe(STARTING_CREDITS);
+  });
+
+  it('puts a promo share of the acceptance charge back into its still-valid lot', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: CATEGORY_COST });
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const serviceRequest = await createApprovedRequest(ctx.prisma, { categoryId: category.id, customerId: customer.id });
+    const customerCookie = await loginAs(ctx.prisma, customer.id);
+    const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, { userId: ownerUser.id, categoryId: category.id });
+    const cookie = await loginAs(ctx.prisma, ownerUser.id);
+    const { lot } = await createPromoLotFixture(ctx.prisma, provider.id, { credits: CATEGORY_COST });
+
+    const created = await request(ctx.server)
+      .post(`/providers/${provider.id}/requests/${serviceRequest.id}/offers`)
+      .set('Cookie', cookie)
+      .send(offerPayload())
+      .expect(201);
+    const offerId = created.body.id as string;
+    await refundByPolicy(offerId);
+    await customerAccept(serviceRequest.id, offerId, customerCookie).expect(201);
+    expect((await ctx.prisma.promoCreditLot.findUniqueOrThrow({ where: { id: lot.id } })).remainingCredits).toBe(0);
+
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    await staffCancel(serviceRequest.id, await loginAs(ctx.prisma, admin.id), offerId).expect(201);
+
+    expect((await ctx.prisma.promoCreditLot.findUniqueOrThrow({ where: { id: lot.id } })).remainingCredits).toBe(
+      CATEGORY_COST,
+    );
+    const offer = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: offerId } });
+    const shares = await ctx.prisma.promoCreditLotConsumption.findMany({
+      where: { creditTransactionId: offer.creditRechargeTransactionId! },
+    });
+    expect(shares).toEqual([
+      expect.objectContaining({ status: 'REFUNDED', refundTransactionId: offer.creditRechargeRefundedTransactionId }),
+    ]);
+    const state = await expectWalletConsistent(provider.id);
+    expect(state.promoInWallet).toBe(CATEGORY_COST);
+    expect(state.paid).toBe(0);
+  });
+
+  it('forfeits a promo share of the acceptance charge whose lot has expired', async () => {
+    const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: CATEGORY_COST });
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const serviceRequest = await createApprovedRequest(ctx.prisma, { categoryId: category.id, customerId: customer.id });
+    const customerCookie = await loginAs(ctx.prisma, customer.id);
+    const ownerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, { userId: ownerUser.id, categoryId: category.id });
+    const cookie = await loginAs(ctx.prisma, ownerUser.id);
+    const { lot } = await createPromoLotFixture(ctx.prisma, provider.id, { credits: CATEGORY_COST });
+
+    const created = await request(ctx.server)
+      .post(`/providers/${provider.id}/requests/${serviceRequest.id}/offers`)
+      .set('Cookie', cookie)
+      .send(offerPayload())
+      .expect(201);
+    const offerId = created.body.id as string;
+    await refundByPolicy(offerId);
+    await customerAccept(serviceRequest.id, offerId, customerCookie).expect(201);
+    await ctx.prisma.promoCreditLot.update({ where: { id: lot.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    await staffCancel(serviceRequest.id, await loginAs(ctx.prisma, admin.id), offerId).expect(201);
+
+    // The refund row is the whole cost; the expired share leaves again.
+    const [refund] = await rechargeRefundRows(offerId);
+    expect(refund?.amount).toBe(CATEGORY_COST);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);
+    await expectWalletConsistent(provider.id);
+  });
+});
+
+describe('database backstops', () => {
+  it('refuses a second acceptance charge or a second refund of it for one offer', async () => {
+    const f = await rechargedMatch();
+    const base = {
+      providerId: f.provider.id,
+      referenceType: OFFER_RECHARGE_REFERENCE_TYPE,
+      referenceId: f.offerId,
+      balanceAfter: 0,
+    };
+
+    await expect(
+      ctx.prisma.providerCreditTransaction.create({
+        data: { ...base, type: CreditTransactionType.OFFER_SPEND, amount: -CATEGORY_COST, reason: OFFER_ACCEPT_RECHARGE_REASON },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+
+    await ctx.prisma.providerCreditTransaction.create({
+      data: { ...base, type: CreditTransactionType.OFFER_REFUND, amount: CATEGORY_COST, reason: 'first' },
+    });
+    await expect(
+      ctx.prisma.providerCreditTransaction.create({
+        data: { ...base, type: CreditTransactionType.OFFER_REFUND, amount: CATEGORY_COST, reason: 'second' },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+  });
+
+  it('refuses an acceptance charge recorded on an offer that was never refunded', async () => {
+    const f = await fixture();
+    const spend = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: f.offerId } });
+
+    await expect(
+      ctx.prisma.offer.update({
+        where: { id: f.offerId },
+        data: { creditRechargeTransactionId: spend.creditSpentTransactionId, creditRechargedAt: new Date() },
+      }),
+    ).rejects.toThrow(/Offer_recharge_requires_refund_check/);
   });
 });

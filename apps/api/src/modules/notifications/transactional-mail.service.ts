@@ -49,6 +49,7 @@ import {
   providerShowcaseUrl,
 } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isOfferLedgerReference } from '../credits/offer-ledger-reference';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import { readContactSharingConfig } from '../contact-sharing/contact-sharing.config';
 import {
@@ -408,7 +409,7 @@ export class TransactionalMailService {
     }
 
     const offer =
-      transaction.referenceType === 'Offer' && transaction.referenceId
+      isOfferLedgerReference(transaction.referenceType) && transaction.referenceId
         ? await loadOffer(this.prisma, transaction.referenceId)
         : null;
     const settlement = await loadRefundSettlement(this.prisma, transaction.id);
@@ -1709,7 +1710,7 @@ export class TransactionalMailService {
         }
 
         const offer =
-          transaction.referenceType === 'Offer' && transaction.referenceId
+          isOfferLedgerReference(transaction.referenceType) && transaction.referenceId
             ? await loadOffer(this.prisma, transaction.referenceId)
             : null;
         const settlement = await loadRefundSettlement(this.prisma, transaction.id);

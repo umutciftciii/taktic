@@ -516,6 +516,13 @@ export type ProviderOffer = {
   creditRefundedAt: string | null;
   /** The net of the refund (CMP-004 S4); null until the offer is refunded. */
   creditRefundSettlement: OfferRefundSettlement | null;
+  /**
+   * BUG-OFFER-REFUND-ACCEPT-001: when an acceptance charged a refunded offer
+   * again, and when (if ever) that second charge was refunded, with its net.
+   */
+  creditRechargedAt: string | null;
+  creditRechargeRefundedAt: string | null;
+  creditRechargeRefundSettlement: OfferRefundSettlement | null;
   refundEligibility: RefundEligibility;
   /** See ExistingOfferSummary.closureNotice. */
   closureNotice: string | null;

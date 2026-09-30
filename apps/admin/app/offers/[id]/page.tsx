@@ -501,6 +501,26 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                   },
                   { label: 'İade tarihi', value: offer.creditRefundedAt ? formatDateTime(offer.creditRefundedAt) : null },
                   { label: 'İade sebebi', value: offer.creditRefundReason },
+                  // BUG-OFFER-REFUND-ACCEPT-001: iade edilmiş teklif kabul edilince
+                  // düşülen ikinci kredi ve (talep iptalinde) onun iadesi.
+                  {
+                    label: 'Kabulde yeniden tahsil',
+                    value: offer.creditRechargeTransactionId ? (
+                      <>
+                        <code>{offer.creditRechargeTransactionId}</code>
+                        {offer.creditRechargedAt ? ` · ${formatDateTime(offer.creditRechargedAt)}` : null}
+                      </>
+                    ) : null,
+                  },
+                  {
+                    label: 'Yeniden tahsil iadesi',
+                    value: offer.creditRechargeRefundedTransactionId ? (
+                      <>
+                        <code>{offer.creditRechargeRefundedTransactionId}</code>
+                        {offer.creditRechargeRefundedAt ? ` · ${formatDateTime(offer.creditRechargeRefundedAt)}` : null}
+                      </>
+                    ) : null,
+                  },
                   {
                     label: 'Uygunluk',
                     value: isRefunded ? (
@@ -894,6 +914,8 @@ function OfferHistory({ offer }: { offer: Offer }) {
       at: offer.creditRefundedAt,
       note: offer.creditRefundReason,
     },
+    { key: 'recharged', label: 'Kabulde kredi yeniden düşüldü', at: offer.creditRechargedAt },
+    { key: 'recharge-refunded', label: 'Yeniden düşülen kredi iade edildi', at: offer.creditRechargeRefundedAt },
   ];
 
   const happened: TimelineItem[] = steps

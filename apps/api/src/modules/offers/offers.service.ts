@@ -27,6 +27,7 @@ import {
   readUnsweptExpiredPromoCredits,
   restorePromoConsumptionsForRefund,
 } from '../credits/promo-credit-ledger';
+import { OFFER_RECHARGE_REFERENCE_TYPE } from '../credits/offer-ledger-reference';
 import { summarizeOfferRefundSettlement, type SettledShareForSettlement } from '../credits/offer-refund-settlement';
 import {
   contactDisclosureRequiredException,
@@ -1057,13 +1058,37 @@ export async function refundOfferCreditInTransaction(
    * An offer that no lot paid for — every offer while the campaign engine is
    * off — has no share here, and this is one empty read.
    */
-  const promo = offer.creditSpentTransactionId
+  return settleRefundPromoShares(tx, {
+    providerId: offer.providerId,
+    spendTransactionId: offer.creditSpentTransactionId,
+    refundTransaction,
+    now,
+    createdById: options.createdById ?? null,
+  });
+}
+
+/**
+ * Where a refunded charge's credit lands, and the settlement that reports it —
+ * shared by the first refund and by the refund of an acceptance charge.
+ */
+async function settleRefundPromoShares<T extends { id: string; amount: number; balanceAfter: number }>(
+  tx: Prisma.TransactionClient,
+  input: {
+    providerId: string;
+    spendTransactionId: string | null;
+    refundTransaction: T;
+    now: Date;
+    createdById: string | null;
+  },
+) {
+  const { refundTransaction } = input;
+  const promo = input.spendTransactionId
     ? await restorePromoConsumptionsForRefund(tx, {
-        providerId: offer.providerId,
-        spendTransactionId: offer.creditSpentTransactionId,
+        providerId: input.providerId,
+        spendTransactionId: input.spendTransactionId,
         refundTransactionId: refundTransaction.id,
-        now,
-        createdById: options.createdById ?? null,
+        now: input.now,
+        createdById: input.createdById,
       })
     : null;
 
@@ -1155,6 +1180,7 @@ async function createRefundLedgerRow(
  */
 export const OFFER_ACCEPT_RECHARGE_REASON = 'OFFER_ACCEPTED_AFTER_REFUND';
 
+
 /**
  * Charges a refunded offer's `creditCost` again, inside the accept transaction
  * (BUG-OFFER-REFUND-ACCEPT-001).
@@ -1168,7 +1194,9 @@ export const OFFER_ACCEPT_RECHARGE_REASON = 'OFFER_ACCEPTED_AFTER_REFUND';
  * submitted with, the OFFER_REFUND that paid it back, the promo shares that
  * refund settled and the offer's own refund columns all remain as written —
  * they are true facts about what happened before. The charge is a new
- * OFFER_SPEND row referencing the offer, with {@link OFFER_ACCEPT_RECHARGE_REASON}.
+ * OFFER_SPEND row ({@link OFFER_RECHARGE_REFERENCE_TYPE}, referenceId = the
+ * offer, reason {@link OFFER_ACCEPT_RECHARGE_REASON}), recorded on the offer as
+ * `creditRechargeTransactionId`.
  *
  * Paid exactly as a submit-time spend is paid: the one-time balance, less any
  * promo credit whose lot has expired but has not been swept (a dead lot never
@@ -1181,8 +1209,9 @@ export const OFFER_ACCEPT_RECHARGE_REASON = 'OFFER_ACCEPTED_AFTER_REFUND';
  * conditional UPDATE moves the offer out of the actionable states, ACCEPTED is
  * terminal, and the whole thing runs Serializable — so a retry, a double
  * submit or a concurrent accept reaches that 409 rather than this function
- * twice. The lookup for an earlier recharge is the belt to those braces: a
- * second charge of one offer is refused rather than written.
+ * twice. Below that, `creditRechargeTransactionId` is written by a conditional
+ * UPDATE on NULL, and "ProviderCreditTransaction_one_recharge_per_offer"
+ * refuses a second charge row in the database itself.
  *
  * Offers that were never refunded, and offers no one-time credit paid for
  * (period packages, the vitrin owner's own lead), have nothing to take back
@@ -1196,25 +1225,14 @@ async function chargeRefundedOfferOnAcceptInTransaction(tx: Prisma.TransactionCl
       providerId: true,
       creditCost: true,
       creditRefundedTransactionId: true,
-      creditRefundedAt: true,
+      creditRechargeTransactionId: true,
     },
   });
 
-  const refunded = offer.creditRefundedTransactionId !== null || offer.creditRefundedAt !== null;
-  if (!refunded || offer.creditCost <= 0) {
+  if (offer.creditRefundedTransactionId === null || offer.creditCost <= 0) {
     return null;
   }
-
-  const earlierCharge = await tx.providerCreditTransaction.findFirst({
-    where: {
-      type: CreditTransactionType.OFFER_SPEND,
-      referenceType: 'Offer',
-      referenceId: offer.id,
-      reason: OFFER_ACCEPT_RECHARGE_REASON,
-    },
-    select: { id: true },
-  });
-  if (earlierCharge) {
+  if (offer.creditRechargeTransactionId !== null) {
     throw new ConflictException('Offer credit was already charged on acceptance');
   }
 
@@ -1224,17 +1242,34 @@ async function chargeRefundedOfferOnAcceptInTransaction(tx: Prisma.TransactionCl
     throw offerAcceptInsufficientCreditException();
   }
 
-  const spend = await tx.providerCreditTransaction.create({
-    data: {
-      providerId: offer.providerId,
-      type: CreditTransactionType.OFFER_SPEND,
-      amount: -offer.creditCost,
-      balanceAfter: balance - offer.creditCost,
-      reason: OFFER_ACCEPT_RECHARGE_REASON,
-      referenceType: 'Offer',
-      referenceId: offer.id,
-    },
+  let spend;
+  try {
+    spend = await tx.providerCreditTransaction.create({
+      data: {
+        providerId: offer.providerId,
+        type: CreditTransactionType.OFFER_SPEND,
+        amount: -offer.creditCost,
+        balanceAfter: balance - offer.creditCost,
+        reason: OFFER_ACCEPT_RECHARGE_REASON,
+        referenceType: OFFER_RECHARGE_REFERENCE_TYPE,
+        referenceId: offer.id,
+      },
+    });
+  } catch (error) {
+    // "ProviderCreditTransaction_one_recharge_per_offer" fired: charged already.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException('Offer credit was already charged on acceptance');
+    }
+    throw error;
+  }
+
+  const recorded = await tx.offer.updateMany({
+    where: { id: offer.id, creditRechargeTransactionId: null, creditRefundedTransactionId: { not: null } },
+    data: { creditRechargeTransactionId: spend.id, creditRechargedAt: now },
   });
+  if (recorded.count !== 1) {
+    throw new ConflictException('Offer credit was already charged on acceptance');
+  }
 
   await consumePromoCreditsForSpend(tx, {
     providerId: offer.providerId,
@@ -1244,6 +1279,80 @@ async function chargeRefundedOfferOnAcceptInTransaction(tx: Prisma.TransactionCl
   });
 
   return spend;
+}
+
+/**
+ * Gives the acceptance charge back, inside the caller's transaction — today
+ * only the cancel of a matched request with REFUND calls it.
+ *
+ * The twin of {@link refundOfferCreditInTransaction} for the second charge: the
+ * same OFFER_REFUND row type and the same promo settlement (a share of a
+ * still-valid lot goes back into the lot, an expired or revoked one is
+ * forfeited), but referenced as {@link OFFER_RECHARGE_REFERENCE_TYPE} so the
+ * first refund's partial unique index is not in its way and the ledger still
+ * says which charge each refund answers.
+ *
+ * At most once: the conditional UPDATE matches only an offer that carries an
+ * acceptance charge not yet refunded, the caller runs Serializable, and
+ * "ProviderCreditTransaction_one_recharge_refund_per_offer" refuses a second
+ * row in the database itself.
+ */
+export async function refundOfferRechargeInTransaction(
+  tx: Prisma.TransactionClient,
+  offer: { id: string; providerId: string; creditCost: number; creditRechargeTransactionId: string | null },
+  storedReason: string,
+  options: { createdById?: string | null } = {},
+) {
+  if (offer.creditRechargeTransactionId === null) {
+    throw new ConflictException('Offer has no acceptance charge to refund');
+  }
+  const now = new Date();
+  const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
+  if (!fitsCreditLedger(currentBalance, offer.creditCost)) {
+    throw creditBalanceLimitExceeded(currentBalance);
+  }
+
+  let refundTransaction;
+  try {
+    refundTransaction = await tx.providerCreditTransaction.create({
+      data: {
+        providerId: offer.providerId,
+        type: CreditTransactionType.OFFER_REFUND,
+        amount: offer.creditCost,
+        balanceAfter: currentBalance + offer.creditCost,
+        reason: storedReason,
+        referenceType: OFFER_RECHARGE_REFERENCE_TYPE,
+        referenceId: offer.id,
+        createdById: options.createdById ?? null,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException('Offer acceptance charge already refunded');
+    }
+    throw error;
+  }
+
+  const updated = await tx.offer.updateMany({
+    where: {
+      id: offer.id,
+      creditRechargeTransactionId: offer.creditRechargeTransactionId,
+      creditRechargeRefundedTransactionId: null,
+      creditCost: { gt: 0 },
+    },
+    data: { creditRechargeRefundedTransactionId: refundTransaction.id, creditRechargeRefundedAt: now },
+  });
+  if (updated.count !== 1) {
+    throw new ConflictException('Offer acceptance charge is no longer eligible for refund');
+  }
+
+  return settleRefundPromoShares(tx, {
+    providerId: offer.providerId,
+    spendTransactionId: offer.creditRechargeTransactionId,
+    refundTransaction,
+    now,
+    createdById: options.createdById ?? null,
+  });
 }
 
 /**
