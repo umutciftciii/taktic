@@ -211,6 +211,8 @@ export function creditReasonLabel(reason: string | null | undefined): string {
       return 'Teklif iade süresi içinde görüntülenmedi';
     case 'MANUAL_ADMIN_REFUND':
       return 'Platform tarafından iade edildi';
+    case 'OFFER_ACCEPTED_AFTER_REFUND':
+      return 'İade edilen teklif kabul edildi; kredi yeniden düşüldü';
     default:
       return trimmed;
   }

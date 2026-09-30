@@ -18,6 +18,7 @@ describe('offer status conflicts', () => {
   it('maps each coded refusal to its own sentence', () => {
     expect(offerStatusErrorKey('OFFER_ACTION_NOT_ALLOWED')).toBe('decided');
     expect(offerStatusErrorKey('CONTACT_DISCLOSURE_REQUIRED')).toBe('disclosureRequired');
+    expect(offerStatusErrorKey('OFFER_ACCEPT_INSUFFICIENT_CREDIT')).toBe('insufficientCredit');
   });
 
   it('treats a bare or unknown 409 as a stale screen', () => {

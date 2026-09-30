@@ -71,6 +71,28 @@ export function offerActionNotAllowedException(status: OfferStatus) {
   });
 }
 
+/** Machine-readable code the admin app maps onto a readable refusal. */
+export const OFFER_ACCEPT_INSUFFICIENT_CREDIT_CODE = 'OFFER_ACCEPT_INSUFFICIENT_CREDIT';
+
+/**
+ * The refusal for accepting an offer whose credit was refunded when the
+ * provider can no longer pay for it again (BUG-OFFER-REFUND-ACCEPT-001).
+ *
+ * A 409, not the 402 the offer flow answers with: the caller here is the
+ * customer or an operator, not the provider, and neither of them can top the
+ * balance up. The sentence is written for the customer, whose screen echoes
+ * it — it says the offer cannot be accepted right now and names no balance,
+ * because a provider's wallet is not the customer's business.
+ */
+export function offerAcceptInsufficientCreditException() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ACCEPT_INSUFFICIENT_CREDIT_CODE,
+    message: 'Bu teklif şu anda kabul edilemiyor. Lütfen daha sonra tekrar deneyin ya da başka bir teklifi değerlendirin.',
+  });
+}
+
 /** Machine-readable code the web app maps onto a readable refusal. */
 export const OFFER_NOT_WITHDRAWABLE_CODE = 'OFFER_NOT_WITHDRAWABLE';
 

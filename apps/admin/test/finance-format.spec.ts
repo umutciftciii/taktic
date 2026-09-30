@@ -84,3 +84,13 @@ describe('the ledger type list', () => {
     expect(creditTxnTypeLabel('CAMPAIGN_REVOKE')).toBe('Promosyon geri alındı');
   });
 });
+
+describe('acceptance recharge rows (BUG-OFFER-REFUND-ACCEPT-001)', () => {
+  it('labels the recharge reason and links an OfferRecharge row to its offer', () => {
+    expect(formatLedgerReason('OFFER_ACCEPTED_AFTER_REFUND')?.label).toBe(
+      'İade edilmiş teklif kabul edildi; kredi yeniden düşüldü',
+    );
+    const source = formatLedgerSource('OfferRecharge', 'offer-1', 'TKF-1');
+    expect(source).toMatchObject({ label: 'Teklif kaydı (kabulde yeniden tahsil)', href: '/offers/offer-1', displayNumber: 'TKF-1' });
+  });
+});

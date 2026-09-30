@@ -18,6 +18,9 @@ const REASON_LABELS: Record<string, string> = {
   MANUAL_ADMIN_REFUND: 'Yönetici manuel kredi iadesi',
   NOT_VIEWED_48H: 'Teklif iade süresi içinde görüntülenmedi',
   OFFER_SPEND: 'Teklif gönderimi',
+  // BUG-OFFER-REFUND-ACCEPT-001: kredisi iade edilmiş teklif kabul edilince
+  // kabul işlemi krediyi yeniden düşer.
+  OFFER_ACCEPTED_AFTER_REFUND: 'İade edilmiş teklif kabul edildi; kredi yeniden düşüldü',
   OFFER_REFUND: 'Teklif iadesi',
   PACKAGE_PURCHASE: 'Paket satın alımı',
   ADMIN_GRANT: 'Yönetici kredi ekledi',
@@ -71,6 +74,8 @@ export function formatLedgerReason(raw: string | null | undefined): LedgerReason
 
 const REFERENCE_TYPE_LABELS: Record<string, string> = {
   Offer: 'Teklif kaydı',
+  // Kabulde yeniden düşülen kredi ve onun iadesi; referenceId yine teklifin id'si.
+  OfferRecharge: 'Teklif kaydı (kabulde yeniden tahsil)',
   PackagePurchase: 'Paket satın alma',
   CampaignRedemption: 'Kampanya hak edişi',
   PromoCreditLot: 'Promosyon lotu',
@@ -129,7 +134,7 @@ export function formatLedgerSource(
 
   let href: string | null = null;
   if (referenceId) {
-    if (referenceType === 'Offer') href = `/offers/${referenceId}`;
+    if (referenceType === 'Offer' || referenceType === 'OfferRecharge') href = `/offers/${referenceId}`;
     else if (referenceType === 'PackagePurchase') href = `/package-purchases/${referenceId}`;
   }
 

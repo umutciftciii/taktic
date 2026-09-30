@@ -562,6 +562,11 @@ export type Offer = {
   creditRefundedTransactionId: string | null;
   creditRefundedAt: string | null;
   creditRefundReason: string | null;
+  /** BUG-OFFER-REFUND-ACCEPT-001: the charge an acceptance took after a refund, and its refund. */
+  creditRechargeTransactionId: string | null;
+  creditRechargedAt: string | null;
+  creditRechargeRefundedTransactionId: string | null;
+  creditRechargeRefundedAt: string | null;
   refundEligibility: RefundEligibility;
   submittedAt: string;
   viewedAt: string | null;

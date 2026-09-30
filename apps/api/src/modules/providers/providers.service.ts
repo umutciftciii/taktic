@@ -1530,16 +1530,32 @@ export class ProvidersService implements OnModuleInit {
    * The net of each refunded offer's refund (CMP-004 S4), read by exact
    * reference through `creditRefundedTransactionId` in one query for the
    * whole list — the same figure the refund response and the e-mail carry.
-   * Null for an offer that was never refunded.
+   * Null for an offer that was never refunded. The refund of an acceptance
+   * charge (BUG-OFFER-REFUND-ACCEPT-001) is read the same way, through
+   * `creditRechargeRefundedTransactionId`.
    */
-  private async withRefundSettlements<T extends { creditRefundedTransactionId: string | null }>(
+  private async withRefundSettlements<
+    T extends { creditRefundedTransactionId: string | null; creditRechargeRefundedTransactionId: string | null },
+  >(
     offers: T[],
-  ): Promise<Array<T & { creditRefundSettlement: OfferRefundSettlement | null }>> {
-    const refundIds = offers.map((offer) => offer.creditRefundedTransactionId).filter((id): id is string => id !== null);
+  ): Promise<
+    Array<
+      T & {
+        creditRefundSettlement: OfferRefundSettlement | null;
+        creditRechargeRefundSettlement: OfferRefundSettlement | null;
+      }
+    >
+  > {
+    const refundIds = offers
+      .flatMap((offer) => [offer.creditRefundedTransactionId, offer.creditRechargeRefundedTransactionId])
+      .filter((id): id is string => id !== null);
     const settlements = await readOfferRefundSettlements(this.prisma, refundIds);
     return offers.map((offer) => ({
       ...offer,
       creditRefundSettlement: offer.creditRefundedTransactionId ? (settlements.get(offer.creditRefundedTransactionId) ?? null) : null,
+      creditRechargeRefundSettlement: offer.creditRechargeRefundedTransactionId
+        ? (settlements.get(offer.creditRechargeRefundedTransactionId) ?? null)
+        : null,
     }));
   }
 

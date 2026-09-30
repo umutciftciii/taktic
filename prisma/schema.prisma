@@ -1464,6 +1464,20 @@ model Offer {
   creditRefundedTransactionId String?
   creditRefundedAt            DateTime?
   creditRefundReason          String?
+  /// BUG-OFFER-REFUND-ACCEPT-001. The OFFER_SPEND an acceptance wrote because
+  /// this offer's credit had already been refunded, and when. Written by the
+  /// accept transaction only, at most once (conditional UPDATE on NULL, plus
+  /// the ledger's "ProviderCreditTransaction_one_recharge_per_offer" partial
+  /// index). The first spend and its refund stay in the columns above: this
+  /// pair records a second, later charge, never a rewrite of the first.
+  creditRechargeTransactionId         String?   @unique
+  creditRechargedAt                   DateTime?
+  /// The OFFER_REFUND that gave the acceptance charge back (a cancel of the
+  /// matched request with REFUND), and when. At most once per offer; the
+  /// ledger's "ProviderCreditTransaction_one_recharge_refund_per_offer"
+  /// partial index is the database-level backstop.
+  creditRechargeRefundedTransactionId String?   @unique
+  creditRechargeRefundedAt            DateTime?
   /// Whether this offer is governed by the 48-hour unviewed-offer refund rule.
   ///
   /// The column IS the opt-in. Only the offer-creation path that shipped with
@@ -2288,6 +2302,12 @@ model ProviderCreditTransaction {
   // partial indexes here, so it lives in raw SQL; it is what makes a second
   // refund of one offer unrepresentable, whatever a retried worker, a parallel
   // run or a future code path attempts.
+  //
+  // BUG-OFFER-REFUND-ACCEPT-001 adds two more, keyed on referenceType
+  // 'OfferRecharge' (referenceId = the offer): "..._one_recharge_per_offer"
+  // (OFFER_SPEND) and "..._one_recharge_refund_per_offer" (OFFER_REFUND). An
+  // offer is therefore charged at most twice (submit + acceptance after a
+  // refund) and refunded at most twice (one refund per charge).
   @@index([providerId])
   @@index([type])
   @@index([referenceType, referenceId])

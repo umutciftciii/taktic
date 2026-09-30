@@ -72,6 +72,7 @@ export default async function ProviderOfferDetailPage({
    * still a 48-hour offer after an administrator moves the setting to 72.
    */
   const refundSummary = refundSettlementSummary(offer.creditRefundSettlement, offer.creditCost);
+  const rechargeRefundSummary = refundSettlementSummary(offer.creditRechargeRefundSettlement, offer.creditCost);
   const refundNotice =
     offer.refundEligibility.windowHours === null
       ? null
@@ -288,6 +289,30 @@ export default async function ProviderOfferDetailPage({
                     {refundSummary.headline}
                     {refundSummary.detail ? (
                       <div style={{ color: 'var(--muted)', fontSize: 13 }}>{refundSummary.detail}</div>
+                    ) : null}
+                  </dd>
+                </div>
+              ) : null}
+              {/*
+                BUG-OFFER-REFUND-ACCEPT-001: the customer accepted this offer
+                after its credit had come back, so the acceptance took it again
+                — and a cancel of the match may have given that back too.
+              */}
+              {offer.creditRechargedAt ? (
+                <div className="pdash-info-row" data-testid="offer-recharge">
+                  <dt>Kabulde yeniden düşülen kredi</dt>
+                  <dd>
+                    {offer.creditCost} · {formatDateTime(offer.creditRechargedAt)}
+                  </dd>
+                </div>
+              ) : null}
+              {offer.creditRechargeRefundedAt ? (
+                <div className="pdash-info-row" data-testid="offer-recharge-refund">
+                  <dt>Yeniden düşülen kredinin iadesi</dt>
+                  <dd>
+                    {rechargeRefundSummary.headline} · {formatDateTime(offer.creditRechargeRefundedAt)}
+                    {rechargeRefundSummary.detail ? (
+                      <div style={{ color: 'var(--muted)', fontSize: 13 }}>{rechargeRefundSummary.detail}</div>
                     ) : null}
                   </dd>
                 </div>

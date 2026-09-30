@@ -1013,8 +1013,14 @@ function cancelOfferCounts(request: ServiceRequest, offers: Offer[] | null): Can
     live: others.filter((offer) => LIVE_OFFER_STATUSES.has(offer.status)).length,
     competitorRejected,
     otherRejected: others.filter((offer) => offer.status === 'REJECTED').length - competitorRejected,
+    // The first charge not yet refunded, or — when it was refunded and the
+    // acceptance charged again (BUG-OFFER-REFUND-ACCEPT-001) — that second
+    // charge not yet refunded. The same rule the API's cancel applies.
     winnerRefundable: Boolean(
-      winner && winner.creditSpentTransactionId && !winner.creditRefundedAt && winner.creditCost > 0,
+      winner &&
+        winner.creditCost > 0 &&
+        ((winner.creditSpentTransactionId && !winner.creditRefundedAt) ||
+          (winner.creditRechargeTransactionId && !winner.creditRechargeRefundedAt)),
     ),
     winnerCreditCost: winner?.creditCost ?? 0,
   };
