@@ -12,15 +12,29 @@ import {
   requireAdmin,
 } from '../../../lib/api';
 import { NotificationRetryButton } from '../../../components/notification-retry-button';
-import { PageHeader } from '../../../components/page-header';
+import { DetailHeader } from '../../../components/detail-header';
+import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
-import { StatCard } from '../../../components/stat-card';
+import type { SummaryItem } from '../../../components/summary-strip';
 
 type NotificationDetailPageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ retry?: string; message?: string }>;
 };
 
+/**
+ * One notification row (#47, ADMIN-DESIGN-001 Faz 3G). The design has no
+ * screen for it; it is built on the detail template: a way back to the list,
+ * the summary card (status and channel, when it was made, the template, the
+ * masked recipient, a strip with the four facts the old stat cards held and
+ * the attempt count), the retry action, then "Gönderim" and "İlişkili
+ * kayıtlar".
+ *
+ * Unchanged: the page is NOTIFICATION_LOGS_READ; "Yeniden gönder" is drawn
+ * only for a row the API calls retryable and a session holding
+ * NOTIFICATION_RETRY, and posts the same form; the request link needs
+ * REQUESTS_READ; the recipient is only ever the masked value.
+ */
 export default async function NotificationDetailPage({
   params,
   searchParams,
@@ -34,23 +48,45 @@ export default async function NotificationDetailPage({
     apiFetch<NotificationLogEntry>(`/notification-logs/${encodeURIComponent(id)}`),
   );
 
+  const statusTone = entry.status === 'SENT' ? 'success' : entry.status === 'FAILED' ? 'danger' : 'warning';
+  const facts: SummaryItem[] = [
+    { label: 'Kanal', value: notificationChannelLabel(entry.channel) },
+    {
+      label: 'Durum',
+      value: notificationStatusLabel(entry.status),
+      tone: statusTone,
+      testId: 'notification-fact-status',
+    },
+    { label: 'Alıcı (maskeli)', value: <span className="cell-break">{entry.maskedRecipient}</span> },
+    {
+      label: 'Hata sınıfı',
+      value: entry.errorLabel ?? '—',
+      tone: entry.errorLabel ? 'danger' : 'neutral',
+    },
+    {
+      label: 'Deneme',
+      value: entry.attemptCount,
+      note: entry.lastAttemptAt ? `son ${formatDateTime(entry.lastAttemptAt)}` : undefined,
+    },
+  ];
+
   return (
-    <main>
-      <PageHeader
-        breadcrumbs={[
-          { label: 'Dashboard', href: can('DASHBOARD_READ') ? '/' : undefined },
-          { label: 'Gönderilen bildirimler', href: '/notifications' },
-          { label: 'Detay' },
-        ]}
+    <main className="system-page notification-detail-page">
+      <DetailHeader
+        back={{ href: '/notifications', label: 'Gönderilen bildirimler' }}
+        badges={
+          <>
+            <span className={notificationStatusBadgeClass(entry.status)} data-testid="notification-status">
+              {notificationStatusLabel(entry.status)}
+            </span>
+            <span className="badge badge-muted">{notificationChannelLabel(entry.channel)}</span>
+          </>
+        }
+        meta={<>{formatDateTime(entry.createdAt)} tarihinde oluşturuldu</>}
         title={notificationTemplateLabel(entry.template)}
         subtitle={
           <>
-            <span className={notificationStatusBadgeClass(entry.status)}>
-              {notificationStatusLabel(entry.status)}
-            </span>{' '}
-            <span className="muted">
-              · {notificationChannelLabel(entry.channel)} · {formatDateTime(entry.createdAt)}
-            </span>
+            Şablon <code className="cell-break">{entry.template}</code>
           </>
         }
         actions={
@@ -65,100 +101,98 @@ export default async function NotificationDetailPage({
               <NotificationRetryButton id={entry.id} returnTo={`/notifications/${entry.id}`} />
             ) : null}
             <Link
-              className="btn btn-ghost btn-sm"
+              className="btn btn-secondary btn-sm"
               href={`/notifications?template=${encodeURIComponent(entry.template)}`}
             >
               Aynı şablonun kayıtları
             </Link>
           </>
         }
+        facts={facts}
+        factsLabel="Bildirim özeti"
+        testId="notification-header"
       />
 
       <RetryOutcome retry={retry} message={message} />
 
-      <section className="stat-grid">
-        <StatCard label="Kanal" value={notificationChannelLabel(entry.channel)} />
-        <StatCard
-          label="Durum"
-          value={notificationStatusLabel(entry.status)}
-          tone={entry.status === 'SENT' ? 'success' : entry.status === 'FAILED' ? 'error' : 'warning'}
-        />
-        <StatCard label="Alıcı (maskeli)" value={entry.maskedRecipient} />
-        <StatCard
-          label="Hata sınıfı"
-          value={entry.errorLabel ?? '-'}
-          tone={entry.errorLabel ? 'error' : 'neutral'}
-        />
-      </section>
+      <div className="detail-panel">
+        <div className="detail-panel-grid">
+          <SectionCard title="Gönderim" testId="notification-delivery-card">
+            <KeyValueList
+              items={[
+                {
+                  label: 'Şablon',
+                  value: (
+                    <>
+                      {notificationTemplateLabel(entry.template)}
+                      <div>
+                        <code className="cell-muted cell-break">{entry.template}</code>
+                      </div>
+                    </>
+                  ),
+                },
+                {
+                  label: 'Alıcı',
+                  /*
+                    The masked form is the only recipient value that exists: the
+                    dispatcher masks before writing, so the raw address was never
+                    stored and cannot be reconstructed from this screen.
+                  */
+                  value: (
+                    <code className="cell-break" data-testid="notification-masked-recipient">
+                      {entry.maskedRecipient}
+                    </code>
+                  ),
+                },
+                { label: 'Oluşturulma', value: formatDateTime(entry.createdAt) },
+                { label: 'Gönderilme', value: entry.sentAt ? formatDateTime(entry.sentAt) : null },
+                { label: 'Başarısızlık', value: entry.failedAt ? formatDateTime(entry.failedAt) : null },
+                {
+                  label: 'Durum',
+                  value: (
+                    <>
+                      <span className={notificationStatusBadgeClass(entry.status)}>
+                        {notificationStatusLabel(entry.status)}
+                      </span>
+                      {notificationStatusMeaning(entry.status) ? (
+                        <p className="detail-muted-note notification-status-meaning" data-testid="notification-status-meaning">
+                          {notificationStatusMeaning(entry.status)}
+                        </p>
+                      ) : null}
+                    </>
+                  ),
+                },
+                {
+                  label: 'Deneme sayısı',
+                  value: (
+                    <>
+                      <span data-testid="notification-attempt-count">{entry.attemptCount}</span>
+                      {entry.lastAttemptAt ? (
+                        <span className="cell-muted"> · son deneme {formatDateTime(entry.lastAttemptAt)}</span>
+                      ) : null}
+                    </>
+                  ),
+                },
+                {
+                  label: 'Hata sınıfı',
+                  value: entry.errorLabel ? (
+                    <span data-testid="notification-error-label">
+                      {entry.errorLabel} <code className="cell-muted">{entry.errorCode}</code>
+                    </span>
+                  ) : null,
+                },
+                {
+                  label: 'Sağlayıcı mesaj kimliği',
+                  value: entry.providerMessageId ? (
+                    <code className="cell-break">{entry.providerMessageId}</code>
+                  ) : entry.providerMessageIdRedacted ? (
+                    <span className="cell-muted">Güvenlik nedeniyle gizlendi</span>
+                  ) : null,
+                },
+              ]}
+            />
 
-      <div className="detail-grid">
-        <div className="stack">
-          <SectionCard title="Gönderim">
-            <dl className="meta-row">
-              <dt>Şablon</dt>
-              <dd>
-                {notificationTemplateLabel(entry.template)}{' '}
-                <code style={{ fontSize: 11 }}>{entry.template}</code>
-              </dd>
-              <dt>Alıcı</dt>
-              <dd>
-                {/*
-                  The masked form is the only recipient value that exists: the
-                  dispatcher masks before writing, so the raw address was never
-                  stored and cannot be reconstructed from this screen.
-                */}
-                <code data-testid="notification-masked-recipient">{entry.maskedRecipient}</code>
-              </dd>
-              <dt>Oluşturulma</dt>
-              <dd>{formatDateTime(entry.createdAt)}</dd>
-              <dt>Gönderilme</dt>
-              <dd>{entry.sentAt ? formatDateTime(entry.sentAt) : <span className="muted">-</span>}</dd>
-              <dt>Başarısızlık</dt>
-              <dd>
-                {entry.failedAt ? formatDateTime(entry.failedAt) : <span className="muted">-</span>}
-              </dd>
-              <dt>Durum</dt>
-              <dd>
-                <span className={notificationStatusBadgeClass(entry.status)}>
-                  {notificationStatusLabel(entry.status)}
-                </span>
-                {notificationStatusMeaning(entry.status) ? (
-                  <p className="muted" style={{ marginTop: 6 }} data-testid="notification-status-meaning">
-                    {notificationStatusMeaning(entry.status)}
-                  </p>
-                ) : null}
-              </dd>
-              <dt>Deneme sayısı</dt>
-              <dd>
-                <span data-testid="notification-attempt-count">{entry.attemptCount}</span>
-                {entry.lastAttemptAt ? (
-                  <span className="muted"> · son deneme {formatDateTime(entry.lastAttemptAt)}</span>
-                ) : null}
-              </dd>
-              <dt>Hata sınıfı</dt>
-              <dd>
-                {entry.errorLabel ? (
-                  <span data-testid="notification-error-label">
-                    {entry.errorLabel}{' '}
-                    <code style={{ fontSize: 11 }}>{entry.errorCode}</code>
-                  </span>
-                ) : (
-                  <span className="muted">-</span>
-                )}
-              </dd>
-              <dt>Sağlayıcı mesaj kimliği</dt>
-              <dd>
-                {entry.providerMessageId ? (
-                  <code style={{ fontSize: 12 }}>{entry.providerMessageId}</code>
-                ) : entry.providerMessageIdRedacted ? (
-                  <span className="muted">Güvenlik nedeniyle gizlendi</span>
-                ) : (
-                  <span className="muted">-</span>
-                )}
-              </dd>
-            </dl>
-
-            <div className="notice" style={{ marginTop: 12 }}>
+            <div className="notice notification-audit-note">
               Bu kayıt denetim amaçlıdır. Mesaj içeriği, doğrulama kodu, bağlantı adresi ve ham
               alıcı bilgisi hiçbir zaman saklanmaz.
               {entry.retryable ? (
@@ -172,48 +206,41 @@ export default async function NotificationDetailPage({
               ) : null}
             </div>
           </SectionCard>
-        </div>
 
-        <div className="stack">
-          <SectionCard title="İlişkili kayıtlar">
-            <dl className="meta-row">
-              <dt>Talep</dt>
-              <dd>
-                {entry.requestId ? (
-                  can('REQUESTS_READ') ? (
-                    <Link className="cell-link" href={`/requests/${entry.requestId}`}>
-                      <code style={{ fontSize: 12 }}>{entry.requestId}</code>
-                    </Link>
-                  ) : (
-                    <code style={{ fontSize: 12 }}>{entry.requestId}</code>
-                  )
-                ) : (
-                  <span className="muted">-</span>
-                )}
-              </dd>
-              <dt>Kullanıcı</dt>
-              <dd>
-                {/*
-                  Read-only on purpose. The admin user screens cover admin
-                  accounts only, so a customer or provider id has no destination
-                  here that is guaranteed to exist — and resolving it to find one
-                  would mean reading personal data this screen has no need for.
-                */}
-                {entry.userId ? (
-                  <code style={{ fontSize: 12 }} data-testid="notification-user-id">
-                    {entry.userId}
-                  </code>
-                ) : (
-                  <span className="muted">-</span>
-                )}
-              </dd>
-              <dt>Kayıt kimliği</dt>
-              <dd>
-                <code style={{ fontSize: 12 }}>{entry.id}</code>
-              </dd>
-            </dl>
+          <SectionCard title="İlişkili kayıtlar" testId="notification-related-card">
+            <KeyValueList
+              items={[
+                {
+                  label: 'Talep',
+                  value: entry.requestId ? (
+                    can('REQUESTS_READ') ? (
+                      <Link className="cell-link" href={`/requests/${entry.requestId}`}>
+                        <code className="cell-break">{entry.requestId}</code>
+                      </Link>
+                    ) : (
+                      <code className="cell-break">{entry.requestId}</code>
+                    )
+                  ) : null,
+                },
+                {
+                  label: 'Kullanıcı',
+                  /*
+                    Read-only on purpose. The admin user screens cover admin
+                    accounts only, so a customer or provider id has no destination
+                    here that is guaranteed to exist — and resolving it to find one
+                    would mean reading personal data this screen has no need for.
+                  */
+                  value: entry.userId ? (
+                    <code className="cell-break" data-testid="notification-user-id">
+                      {entry.userId}
+                    </code>
+                  ) : null,
+                },
+                { label: 'Kayıt kimliği', value: <code className="cell-break">{entry.id}</code> },
+              ]}
+            />
 
-            <div className="inline-actions" style={{ marginTop: 12 }}>
+            <div className="inline-actions notification-related-actions">
               {entry.requestId ? (
                 <Link
                   className="btn btn-ghost btn-sm"
@@ -243,7 +270,7 @@ export default async function NotificationDetailPage({
 function RetryOutcome({ retry, message }: { retry?: string; message?: string }) {
   if (retry === 'sent') {
     return (
-      <div className="notice notice-success" role="status" style={{ marginBottom: 12 }} data-testid="notification-retry-result">
+      <div className="notice notice-success detail-notice" role="status" data-testid="notification-retry-result">
         Bildirim yeniden gönderildi.
       </div>
     );
@@ -251,7 +278,7 @@ function RetryOutcome({ retry, message }: { retry?: string; message?: string }) 
 
   if (retry === 'failed') {
     return (
-      <div className="notice notice-error" role="alert" style={{ marginBottom: 12 }} data-testid="notification-retry-result">
+      <div className="notice notice-error detail-notice" role="alert" data-testid="notification-retry-result">
         Yeniden gönderim denendi ancak başarısız oldu. Aşağıdaki hata sınıfına bakın.
       </div>
     );
@@ -259,7 +286,7 @@ function RetryOutcome({ retry, message }: { retry?: string; message?: string }) 
 
   if (retry === 'error') {
     return (
-      <div className="notice notice-error" role="alert" style={{ marginBottom: 12 }} data-testid="notification-retry-result">
+      <div className="notice notice-error detail-notice" role="alert" data-testid="notification-retry-result">
         {message || 'Yeniden gönderim başlatılamadı.'}
       </div>
     );

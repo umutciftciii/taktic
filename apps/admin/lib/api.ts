@@ -3857,6 +3857,9 @@ export function adminPermissionLabel(permission: AdminPermission): {
     DASHBOARD: 'Panel',
     CAMPAIGNS: 'Kampanya',
     CAMPAIGN: 'Kampanya',
+    // PR-0: the catalogue read (categories and packages, published or not)
+    // had no area name and was grouped under its raw prefix.
+    CATALOG: 'Katalog',
     CATEGORIES: 'Kategori',
     QUESTIONS: 'Form soruları',
     COMPANY: 'Şirket ayarları',

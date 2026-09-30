@@ -5,12 +5,15 @@ import {
   formatDateTime,
   requireAdmin,
 } from '../../lib/api';
+import { DetailFormFooter } from '../../components/detail-form-footer';
+import { KeyValueList } from '../../components/key-value-list';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
 import { saveCompanySettingsAction } from './actions';
 
 /**
- * The company's public details, and nothing technical.
+ * The company's public details, and nothing technical (#44, design `company`,
+ * paket 2 `48-sirket-ve-eposta-bilgileri`, ADMIN-DESIGN-001 Faz 3G).
  *
  * These three values are the footer of every transactional e-mail the platform
  * sends. They used to live in the environment, which meant correcting a typo
@@ -24,6 +27,16 @@ import { saveCompanySettingsAction } from './actions';
  * that could display them would turn an admin session into a way to read them.
  * The panel below says which transport is in play only in the sense that it
  * warns when the footer is unpublishable — it cannot see or change it.
+ *
+ * The design's layout: the footer card with the completeness notice at its
+ * top, the "Teknik ayarlar burada değil" card beside it with the last save and
+ * who made it, and the save band under the fields. The band is the form's own
+ * (Vazgeç resets, the save posts `saveCompanySettingsAction` unchanged), not
+ * the sticky bar: a rejected save redirects with the typed values in the URL,
+ * so the bar's "unsaved changes" state could not tell the truth after it.
+ * Not drawn: the design's "faturalarda ve yasal metinlerde" (these values are
+ * the e-mail footer only) and its "— destek e-postası güncellendi" (no change
+ * log records which field changed).
  */
 
 export const dynamic = 'force-dynamic';
@@ -59,154 +72,147 @@ export default async function CompanySettingsPage({ searchParams }: CompanySetti
   const legalName = params.legalName ?? settings.legalName ?? '';
   const supportEmail = params.supportEmail ?? settings.supportEmail ?? '';
   const postalAddress = params.postalAddress ?? settings.postalAddress ?? '';
+  const lastSaveNote = settings.updatedAt
+    ? `Son kayıt: ${formatDateTime(settings.updatedAt)}${settings.updatedBy?.name ? `, ${settings.updatedBy.name}` : ''}. Kayıt bundan sonra gönderilen e-postaları etkiler.`
+    : 'Henüz kaydedilmedi. Kayıttan sonra gönderilen e-postalar bu bilgileri kullanır.';
 
   return (
-    <main>
+    <main className="system-page company-settings-page">
       <PageHeader
-        breadcrumbs={[{ label: 'Yönetim' }, { label: 'Şirket ve E-posta' }]}
-        title="Şirket ve E-posta Ayarları"
-        subtitle="Gönderilen tüm e-postaların altbilgisinde görünen şirket bilgileri."
+        title="Şirket ve e-posta bilgileri"
+        subtitle="Buradaki bilgiler müşterilere ve hizmet verenlere gönderilen e-postaların altbilgisinde görünür. Kaydettiğiniz andan sonra gönderilen tüm e-postalar yeni bilgiyle çıkar."
       />
 
       {errorMessage ? (
-        <div
-          className="notice notice-error"
-          role="alert"
-          data-testid="company-settings-error"
-          style={{ marginBottom: 12 }}
-        >
+        <div className="notice notice-error detail-notice" role="alert" data-testid="company-settings-error">
           {errorMessage}
         </div>
       ) : null}
       {okMessage ? (
-        <div className="notice notice-success" role="status" style={{ marginBottom: 12 }}>
+        <div className="notice notice-success detail-notice" role="status">
           {okMessage}
         </div>
       ) : null}
 
-      {settings.issues.length > 0 ? (
-        <div
-          className="notice notice-warning"
-          role="status"
-          data-testid="company-settings-issues"
-          style={{ marginBottom: 12 }}
-        >
-          <strong>Bu bilgilerle e-posta gönderilemez.</strong>
-          <ul style={{ margin: '8px 0 0 18px' }}>
-            {settings.issues.map((issue) => (
-              <li key={issue}>{COMPANY_SETTINGS_ISSUE_LABELS[issue]}</li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <div
-          className="notice notice-success"
-          role="status"
-          data-testid="company-settings-complete"
-          style={{ marginBottom: 12 }}
-        >
-          Şirket bilgileri eksiksiz. E-posta altbilgisi bu bilgilerle gönderilir.
-        </div>
-      )}
-
-      <div className="admin-meta-pills">
-        <span
-          className={settings.configured ? 'meta-pill meta-pill-good' : 'meta-pill meta-pill-muted'}
-        >
-          {settings.configured ? 'Kayıtlı' : 'Henüz kaydedilmedi'}
-        </span>
-        {settings.updatedAt ? (
-          <span className="meta-pill">güncellenme {formatDateTime(settings.updatedAt)}</span>
-        ) : null}
-        {settings.updatedBy?.name ? (
-          <span className="meta-pill">son düzenleyen {settings.updatedBy.name}</span>
-        ) : null}
-      </div>
-
-      <div className="admin-module-layout">
+      <div className="admin-module-layout system-two-column">
         <div className="admin-main-column">
           <SectionCard
-            title="Şirket bilgileri"
-            subtitle="Yasal unvan ve destek adresi zorunludur; posta adresi isteğe bağlıdır ve boş bırakılırsa altbilgide o satır hiç görünmez."
+            title="E-posta altbilgisinde görünen bilgiler"
+            className="detail-tab-card"
+            testId="company-settings-card"
           >
-            {canWrite ? (
-            <form
-              action={saveCompanySettingsAction}
-              className="compact-form"
-              data-testid="company-settings-form"
-            >
-              <div className="compact-field-grid">
-                <label className="field field-12">
-                  <span>Yasal unvan *</span>
-                  <input
-                    name="legalName"
-                    required
-                    minLength={2}
-                    maxLength={200}
-                    defaultValue={legalName}
-                    placeholder="Örn. Örnek Teknoloji Anonim Şirketi"
-                  />
-                </label>
-                <label className="field field-12">
-                  <span>Destek e-postası *</span>
-                  <input
-                    name="supportEmail"
-                    type="email"
-                    required
-                    maxLength={254}
-                    defaultValue={supportEmail}
-                    placeholder="destek@sirketiniz.com.tr"
-                  />
-                  <small className="muted">
-                    Müşterilerin yanıtlarını okuduğunuz adres. Gönderici adresinden bağımsızdır ve
-                    bu ekran adresin size ait olduğunu doğrulamaz.
-                  </small>
-                </label>
-                <label className="field field-12">
-                  <span>Posta adresi</span>
-                  <textarea
-                    name="postalAddress"
-                    maxLength={500}
-                    rows={3}
-                    defaultValue={postalAddress}
-                    placeholder="İsteğe bağlı"
-                  />
-                </label>
+            {settings.issues.length > 0 ? (
+              <div className="notice notice-warning company-settings-status" role="status" data-testid="company-settings-issues">
+                <strong>Bu bilgilerle e-posta gönderilemez.</strong>
+                <ul>
+                  {settings.issues.map((issue) => (
+                    <li key={issue}>{COMPANY_SETTINGS_ISSUE_LABELS[issue]}</li>
+                  ))}
+                </ul>
               </div>
-              <div className="inline-actions" style={{ marginTop: 12 }}>
-                <button className="btn btn-primary" type="submit">
-                  Kaydet
-                </button>
-              </div>
-            </form>
             ) : (
-              <dl className="info-grid" data-testid="company-settings-readonly">
-                <div>
-                  <dt>Yasal unvan</dt>
-                  <dd>{settings.legalName || <span className="muted">—</span>}</dd>
+              <div className="notice notice-success company-settings-status" role="status" data-testid="company-settings-complete">
+                Şirket bilgileri eksiksiz. E-posta altbilgisi bu bilgilerle gönderilir.
+              </div>
+            )}
+
+            {canWrite ? (
+              <form action={saveCompanySettingsAction} className="compact-form" data-testid="company-settings-form">
+                <div className="compact-field-grid">
+                  <label className="field field-12">
+                    <span>
+                      Yasal unvan <span className="field-tag">Zorunlu</span>
+                    </span>
+                    <input
+                      name="legalName"
+                      required
+                      minLength={2}
+                      maxLength={200}
+                      defaultValue={legalName}
+                      placeholder="Örn. Örnek Teknoloji Anonim Şirketi"
+                    />
+                    <span className="help-text">Gönderilen her e-postanın altbilgisinde bu isim görünür.</span>
+                  </label>
+                  <label className="field field-12">
+                    <span>
+                      Destek e-postası <span className="field-tag">Zorunlu</span>
+                    </span>
+                    <input
+                      name="supportEmail"
+                      type="email"
+                      required
+                      maxLength={254}
+                      defaultValue={supportEmail}
+                      placeholder="destek@sirketiniz.com.tr"
+                    />
+                    <span className="help-text">
+                      Müşterilerin yanıtlarını okuduğunuz adres. Gönderici adresinden bağımsızdır ve bu ekran adresin
+                      size ait olduğunu doğrulamaz.
+                    </span>
+                  </label>
+                  <label className="field field-12">
+                    <span>
+                      Posta adresi <span className="field-tag">İsteğe bağlı</span>
+                    </span>
+                    <textarea
+                      name="postalAddress"
+                      maxLength={500}
+                      rows={3}
+                      defaultValue={postalAddress}
+                      placeholder="İsteğe bağlı"
+                    />
+                    <span className="help-text">Boş bırakırsanız altbilgide o satır hiç görünmez.</span>
+                  </label>
                 </div>
-                <div>
-                  <dt>Destek e-postası</dt>
-                  <dd>{settings.supportEmail || <span className="muted">—</span>}</dd>
-                </div>
-                <div>
-                  <dt>Posta adresi</dt>
-                  <dd style={{ whiteSpace: 'pre-line' }}>
-                    {settings.postalAddress || <span className="muted">—</span>}
-                  </dd>
-                </div>
-              </dl>
+                <DetailFormFooter note={lastSaveNote}>
+                  <button className="btn btn-primary" type="submit">
+                    Değişiklikleri kaydet
+                  </button>
+                </DetailFormFooter>
+              </form>
+            ) : (
+              <div data-testid="company-settings-readonly">
+                <KeyValueList
+                  items={[
+                    { label: 'Yasal unvan', value: settings.legalName || null },
+                    { label: 'Destek e-postası', value: settings.supportEmail || null },
+                    {
+                      label: 'Posta adresi',
+                      value: settings.postalAddress ? (
+                        <span className="company-settings-address">{settings.postalAddress}</span>
+                      ) : null,
+                    },
+                  ]}
+                />
+                <p className="detail-muted-note company-settings-readonly-note">
+                  Bu bilgileri değiştirme yetkiniz yok; yalnız görüntüleyebilirsiniz.
+                </p>
+              </div>
             )}
           </SectionCard>
         </div>
 
         <div className="admin-side-column">
-          <SectionCard title="Teknik ayarlar burada değildir">
-            <p className="muted" style={{ margin: 0 }}>
-              E-posta taşıyıcısı, API anahtarı, doğrulanmış gönderici adresi ve uygulamanın public
-              adresi dağıtım yapılandırmasıdır. Bunlar sunucu ortam değişkenlerinde tutulur, bu
-              ekranda görüntülenmez ve buradan değiştirilemez.
+          <SectionCard title="Teknik e-posta ayarları burada değil" className="detail-tab-card" testId="company-settings-technical">
+            <p className="detail-muted-note">
+              E-posta taşıyıcısı, API anahtarı, doğrulanmış gönderici adresi ve uygulamanın genel adresi dağıtım
+              yapılandırmasıdır. Bunlar sunucu ortam değişkenlerinde tutulur, bu ekranda görüntülenmez ve buradan
+              değiştirilemez — bir yönetici oturumu bu bilgileri okuyabilecek bir yer olmasın diye.
             </p>
+            <KeyValueList
+              items={[
+                {
+                  label: 'Durum',
+                  value: (
+                    <span className={settings.configured ? 'badge badge-good' : 'badge badge-muted'}>
+                      {settings.configured ? 'Kayıtlı' : 'Henüz kaydedilmedi'}
+                    </span>
+                  ),
+                },
+                { label: 'Son kayıt', value: settings.updatedAt ? formatDateTime(settings.updatedAt) : null },
+                { label: 'Son düzenleyen', value: settings.updatedBy?.name ?? null },
+              ]}
+            />
           </SectionCard>
         </div>
       </div>

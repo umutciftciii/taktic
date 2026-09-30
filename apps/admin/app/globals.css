@@ -8229,3 +8229,226 @@ button:disabled {
 .invite-desk-notices > p {
   margin: 0;
 }
+
+/* ==================================================================== */
+/* ---- ADMIN-DESIGN-001 Faz 3G: sistem ve yönetim ---- */
+/* ==================================================================== */
+
+/* Company settings, notification, staff-account and role screens. The same
+   field and containment rules the catalogue screens settled on (Faz 3F): a
+   field is a shrinkable track, inputs never set the page's width, and a
+   padded card body keeps whatever is inside it off the page's scroll width. */
+.system-page .compact-field-grid > .field {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+}
+
+.system-page .compact-form select,
+.system-page .compact-form input:not([type='checkbox']),
+.system-page .compact-form textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.system-page .compact-field-grid .field > span {
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+.system-page .section-card.is-padded > .section-card-body {
+  contain: paint;
+}
+
+.system-page .section-card,
+.system-page .detail-card-title,
+.system-page .detail-card-subtitle {
+  overflow-wrap: anywhere;
+}
+
+.system-page .detail-notice {
+  margin-top: 0;
+}
+
+.system-page .admin-module-layout {
+  margin-top: 0;
+}
+
+.system-page .admin-side-column {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+/* The forms fill their card, so the save band under them spans it. */
+.system-page .compact-form {
+  max-width: none;
+}
+
+/* A field's help line is a note under the input, not a second label: the
+   label rule above reaches every span child of the field. */
+.system-page .compact-field-grid .field > .help-text {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* A dialog opened from a table row (Geri al) is a child of that row's cell and
+   would otherwise take its right alignment and its no-wrap. */
+.system-page .confirm-dialog {
+  text-align: start;
+  white-space: normal;
+}
+
+.company-settings-page .kv-list .badge {
+  white-space: nowrap;
+}
+
+/* "Zorunlu" / "İsteğe bağlı" beside a field's label (design `company`). */
+.field-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-700);
+  font-size: 10.5px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.inline-form {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.form-section-title {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* ---- Şirket ve e-posta bilgileri ---- */
+
+.company-settings-status {
+  margin: 0 0 16px;
+}
+
+.company-settings-status ul {
+  margin: 8px 0 0 18px;
+  padding: 0;
+}
+
+.company-settings-address {
+  white-space: pre-line;
+}
+
+.company-settings-readonly-note {
+  margin-top: 12px;
+}
+
+.company-settings-page .admin-side-column .kv-list {
+  margin-top: 14px;
+}
+
+/* ---- Bildirim detayı ---- */
+
+.notification-status-meaning {
+  margin-top: 6px;
+}
+
+.notification-audit-note {
+  margin-top: 14px;
+}
+
+.notification-related-actions {
+  margin-top: 12px;
+}
+
+/* ---- Personel hesabı ---- */
+
+.user-detail-page .detail-muted-note + .detail-muted-note,
+.user-detail-page .kv-list + .detail-muted-note {
+  margin-top: 12px;
+}
+
+.role-assign-form {
+  margin-top: 16px;
+  max-width: none;
+}
+
+.role-assign-empty,
+.role-revoked-list {
+  margin-top: 16px;
+}
+
+.role-revoked-list ul {
+  margin: 8px 0 0 18px;
+  padding: 0;
+}
+
+/* ---- Rol izin matrisi ---- */
+
+.admin-permission-summary {
+  margin: 4px 0 0;
+  color: var(--color-neutral-700);
+  font-size: 13px;
+}
+
+.admin-permission-summary strong {
+  color: var(--text);
+}
+
+.admin-permission-group > legend {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.admin-permission-count {
+  color: var(--color-neutral-700);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* One narrow track on a phone: 260px columns do not fit 320px minus the card. */
+@media (max-width: 480px) {
+  .admin-permission-matrix {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* What a confirmation will add or take away, inside the dialog. */
+.confirm-change-list {
+  margin: 0 0 12px;
+}
+
+.confirm-change-title {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-neutral-700);
+}
+
+.confirm-change-list ul {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px 12px 8px 28px;
+  overflow: auto;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--color-neutral-100);
+  font-size: 13px;
+}
+
+.confirm-change-list code {
+  color: var(--color-neutral-700);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
