@@ -658,6 +658,28 @@ En sona bırakıldı, çünkü K2 ve K12 kararlarına bağlı.
 - **Test:** `admin-dashboard-metrics`, `dashboard-metrics.spec.ts`.
 - **Geri dönüş riski:** Orta.
 
+#### Faz 3H gerçekleşen (2026-09-30)
+
+- **Kapsam:** yalnız `/`. Taban `main@7ab05d66`, DB 83 migration. API, Prisma, migration, `.env`, compose değişmedi. Referans `01-genel-gorunum` (paket 2–4 aynı dosya).
+- **Veri kaynakları (hepsi mevcut uçlar):** `GET /dashboard/admin-summary` (`DASHBOARD_READ`, `buildAdminDashboardMetrics` üzerinden); `GET /auth/me` (`name`); `GET /admin/me/permissions`; `OPERATIONS_SETTINGS_READ` varsa operasyon ekranının okuduğu beş uç (`/operations-settings`, `/schedulers`, `/marketplace-publish`, `/provider-reviews`, `/campaign-engine`). Tarih/saat sunucu saatinden, `Europe/Istanbul`.
+- **Karşılama:** "{Günaydın|İyi günler|İyi akşamlar|İyi geceler}, {ad}" (hesabın `name` alanının ilk kelimesi; ad yoksa yalnız selam, e-posta kullanılmaz) + "30 Eylül, Çarşamba". Eylemler: "Talepleri incele" (`REQUESTS_READ`), "Operasyon ayarları" (`OPERATIONS_SETTINGS_READ`). Bekleyen iş toplamı yazılmaz (bildirim + başvuru + destek farklı birimler; hiçbir liste bu toplamı göstermez).
+- **Önce bunlara bak (K2):** hücre yalnız hedef listeyi açma izni varsa; hiç hücre yoksa kart yok.
+
+  | Hücre | Özet alanı | Hedef (aynı sözleşme) | İzin |
+  | --- | --- | --- | --- |
+  | Başvuru · Onay bekleyen işletme | `pendingProviders` (PENDING_REVIEW) | `/providers?status=PENDING_REVIEW` (tam liste, aynı eşitlik) | `PROVIDERS_READ` |
+  | Şikayet · Karar bekleyen talep bildirimi | `openRequestReports` (bildirim başına, `resolvedAt: null`) | `/requests/reports?state=open` — satır talep başınadır; "Bildirim" sütunu toplamı = sayı | `REQUEST_REPORTS_READ` |
+  | Destek · Açık destek talebi | `openSupportTickets` (OPEN + IN_PROGRESS) | `/support?status=OPEN,IN_PROGRESS` | `SUPPORT_READ` |
+
+  Vitrin hücresi yok (özette sayaç yok). Renk yalnız `dashboard-metrics` tonu `warning` iken (sayı > 0); 0 düz mürekkep, "dikkat" yok.
+- **4 KPI:** Toplam talep (`/requests`), Toplam teklif (`/offers`), Onaylı hizmet veren (`/providers?status=APPROVED`), Paket satın alma (`/package-purchases`); etiket bağlantısı hedef izni varsa. Kalan eylem sayıları KPI alt notunda, tam durum görünümüne bağlı ve aynı ton kuralıyla: "N onay bekliyor" (`/requests?status=SUBMITTED`), "N incelemede" (`?status=IN_REVIEW`), "N iade adayı" (`/refund-scan`). `dashboard-metrics.ts` bağlantıları bu görünümlere çekildi (bekleyen/incelemedeki talep, bekleyen hizmet veren).
+- **Sistem şu anda ne yapıyor:** otomatik yayın, kampanya motoru, değerlendirmeler (Açık/Kapalı), görüntülenmeyen teklif iade süresi (nötr rozet "N saat", kaydedilmemişse "Varsayılan değer"), API'nin listelediği her zamanlanmış iş (Açık/Kapalı; son çalışma kaydı varsa zaman + sonuç, FAILED ise hata tonu). "Kapalı" operasyon ekranındaki gibi sönük (tasarımdaki kırmızı değil).
+- **Render edilmeyen (K12):** KPI değişim yüzdeleri ve sparkline, "Son 7 gün" grafiği, "N dakika önce güncellendi", "Panelde son yapılanlar", vitrin hücresi, "E-posta ve bildirim gönderimi — son 24 saatte N bildirim" satırı, bekleyen iş toplamı, "Hızlı işlemler" yığını (tasarımda yok; menü aynı yerlere gider).
+- **Backend açıkları (ayrı iş):** (1) özet ucunda onay bekleyen vitrin kartı sayacı yok; (2) talep/teklif/eşleşme/kredi satışı için zaman serisi yok (değişim %, sparkline, 7 gün); (3) global denetim akışı yok ("Panelde son yapılanlar"); (4) özette bildirilen *talep* sayısı yok (yalnız bildirim sayısı) — liste satır sayısı ile kutu sayısı birebir değil, sütun toplamıyla eşit; (5) zamanlanmış iş son çalışması süreç belleğinde (yeniden başlatmada kaybolur); (6) `/refund-scan` `limit` ile keser — "iade adayı" sayısı 100'ü aşarsa ekran aynı kümeyi tek sayfada göstermez.
+- **Tuzak (bulundu, çözüldü):** ilk tam Chromium koşusunda `provider-claim` girişten sonra `/`'de hata ekranı gördü; API logu `P2037 too many clients already`. 10 çekirdekte Prisma havuzu süreç başına 21, E2E ~6 API süreci → 126 > yerel `max_connections` 100; özet (10 paralel sayım) ile beş ayar okumasını aynı anda başlatmak tepeyi aştırdı. Okumalar sıralı yapıldı (önce özet, sonra ayarlar). Ortam sınırı ayrıca not: paylaşılan Postgres'te E2E havuz toplamı zaten sınırda.
+- **Ekranlar:** `docs/superpowers/plans/2026-09-30-admin-design-001-faz-3h-screens/` (Chromium + WebKit, 320/390/768/1440).
+- **Test:** yeni `apps/admin/test/dashboard-overview.spec.tsx`; `dashboard-metrics.spec.ts` (+ bağlantı sözleşmesi); E2E `admin-dashboard-metrics` yeniden yazıldı (0/pozitif ton kuralı, destek/başvuru/şikayet/bekleyen talep → filtreli liste DB ile, K2 üç personel rolü, 320/390/768/1440 + ⓘ), WebKit `testMatch`'e eklendi; `admin-route-scan` `CONVERTED_ROUTES` + `/`.
+
 ---
 
 ## Dilim 4 — Çapraz E2E, responsive ve erişilebilirlik denetimi

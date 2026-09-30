@@ -1,8 +1,22 @@
 import type { AdminSummary } from './api';
 import { OPEN_SUPPORT_TICKETS_HREF } from './support-ticket-filter';
 
-/** The report queue's open tab — the list whose length the card shows. */
+/**
+ * The report queue's open tab. Its rows are *requests* and each row carries its
+ * own "Bildirim" count; the card counts reports, so the number on the card is
+ * the sum of that column across the tab, not the number of rows in it.
+ */
 export const OPEN_REQUEST_REPORTS_HREF = '/requests/reports?state=open';
+
+/**
+ * The status views the action cards open. Each is the list's own `?status=`
+ * value, read by that page's `normalizeStatus` and applied to the complete
+ * list (neither list is paged by the API), so the view's size is the count the
+ * API took with the same equality — `DashboardService.adminSummary`.
+ */
+export const PENDING_PROVIDERS_HREF = '/providers?status=PENDING_REVIEW';
+export const PENDING_REQUESTS_HREF = '/requests?status=SUBMITTED';
+export const IN_REVIEW_REQUESTS_HREF = '/requests?status=IN_REVIEW';
 
 /**
  * The dashboard's metric cards, decided in one place.
@@ -57,14 +71,14 @@ const ADMIN_DASHBOARD_METRICS: readonly AdminMetricDefinition[] = [
   {
     key: 'pendingRequests',
     label: 'Bekleyen talepler',
-    href: '/requests',
+    href: PENDING_REQUESTS_HREF,
     read: (s) => s.pendingRequests,
     actionTone: 'warning',
   },
   {
     key: 'inReviewRequests',
     label: 'İncelemedeki talepler',
-    href: '/requests',
+    href: IN_REVIEW_REQUESTS_HREF,
     read: (s) => s.inReviewRequests,
     actionTone: 'warning',
   },
@@ -77,7 +91,7 @@ const ADMIN_DASHBOARD_METRICS: readonly AdminMetricDefinition[] = [
   {
     key: 'pendingProviders',
     label: 'Bekleyen hizmet verenler',
-    href: '/providers',
+    href: PENDING_PROVIDERS_HREF,
     read: (s) => s.pendingProviders,
     actionTone: 'warning',
   },

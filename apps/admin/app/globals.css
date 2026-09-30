@@ -8452,3 +8452,261 @@ button:disabled {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
+
+/* ---- Genel görünüm (ADMIN-DESIGN-001 Faz 3H, design `dashboard`) ---- */
+
+.dashboard-page .page-title {
+  font-size: clamp(24px, 3.6vw, 30px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.dashboard-card {
+  margin-top: 0;
+  margin-bottom: 18px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.dashboard-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-neutral-300);
+}
+
+/* "Önce bunlara bak": the design's 2px ink rule under the heading. */
+.dashboard-card.is-emphasis > .dashboard-card-header {
+  border-bottom: 2px solid var(--color-text);
+}
+
+.dashboard-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dashboard-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.dashboard-card-meta {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* Queue cells: auto-fit, so three sit in a row at 1440 and stack on a phone. */
+.dashboard-queue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-queue-item {
+  min-width: 0;
+  border-right: 1px solid var(--color-neutral-200);
+  border-bottom: 1px solid var(--color-neutral-200);
+  margin-right: -1px;
+  margin-bottom: -1px;
+}
+
+.dashboard-queue-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 18px 20px 20px;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.dashboard-queue-cell:hover {
+  background: var(--color-accent-100);
+}
+
+.dashboard-queue-cell:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset) - 2px);
+}
+
+.dashboard-queue-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.dashboard-queue-value {
+  font-family: var(--font-heading);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-queue-kicker {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Colour only while there is work: the tone is `neutral` at zero. */
+.dashboard-queue-cell[data-tone='warning'] .dashboard-queue-value,
+.dashboard-queue-cell[data-tone='warning'] .dashboard-queue-kicker {
+  color: var(--color-accent-700);
+}
+
+.dashboard-queue-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dashboard-queue-description {
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* Four headline figures. */
+.dashboard-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 16px;
+  margin: 0 0 18px;
+}
+
+.dashboard-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.dashboard-kpi dd {
+  margin: 0;
+}
+
+.dashboard-kpi-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dashboard-kpi-label a {
+  color: var(--color-text);
+}
+
+.dashboard-kpi-value {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-kpi-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.dashboard-kpi-note {
+  color: var(--color-neutral-700);
+}
+
+a.dashboard-kpi-note {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dashboard-kpi-note[data-tone='warning'] {
+  color: var(--color-accent-700);
+}
+
+/* Sistem şu anda ne yapıyor: two columns of rows on a wide screen. */
+.dashboard-activity-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-activity {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.dashboard-activity-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  background: var(--color-neutral-500);
+}
+
+.dashboard-activity[data-tone='on'] .dashboard-activity-dot {
+  background: var(--color-success);
+}
+
+.dashboard-activity[data-tone='failed'] .dashboard-activity-dot {
+  background: var(--color-danger);
+}
+
+.dashboard-activity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dashboard-activity-name {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.dashboard-activity-description,
+.dashboard-activity-detail {
+  color: var(--color-neutral-700);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.dashboard-activity-detail {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 420px) {
+  .dashboard-activity {
+    grid-template-columns: 9px minmax(0, 1fr);
+  }
+
+  .dashboard-activity > .badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
