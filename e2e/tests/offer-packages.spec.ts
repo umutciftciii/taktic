@@ -351,7 +351,10 @@ test.describe('what other people may see', () => {
 
       await admin.gotoAdmin('/credit-packages');
       await expect(admin.page.getByText(pkg.name)).toBeVisible();
-      await expect(admin.page.getByText('Aylık kota').first()).toBeVisible();
+      // Scoped to the package's row: the screen's ⓘ names the three types too.
+      await expect(
+        admin.page.getByTestId('credit-package-row').filter({ hasText: pkg.name }),
+      ).toContainText('Aylık kota');
 
       await admin.gotoAdmin(`/providers/${providerAccount.id}/credits`);
       await expect(admin.page.getByRole('heading', { name: 'Dönemsel paketler' })).toBeVisible();
