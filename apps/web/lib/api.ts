@@ -1574,7 +1574,9 @@ export type ShowcaseCardReviewRecord = {
   /** Present on a rejection and null on an approval. Written for the provider. */
   note: string | null;
   createdAt: string;
-  reviewedBy: { id: string; name: string | null; email: string } | null;
+  // No reviewer: which operator decided is the platform's audit, not the
+  // provider's (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002); the verdict speaks
+  // for "TakTick inceleme ekibi".
 };
 
 export type ShowcaseCardVersion = {

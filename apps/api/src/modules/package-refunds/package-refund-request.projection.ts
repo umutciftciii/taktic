@@ -197,10 +197,18 @@ type AdminRefundDetailRow = Prisma.PackageRefundRequestGetPayload<{ select: type
 
 const iso = (value: Date | null) => (value ? value.toISOString() : null);
 
+/**
+ * `supportTicketContent`: whether the linked ticket's subject, status and topic
+ * travel. They are the support desk's (SUPPORT_READ); without it the response
+ * keeps `supportTicketId` — which request belongs to which ticket is the
+ * refund's own fact — and leaves the `supportTicket` key out
+ * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+ */
 export function toAdminRefundDetail(
   request: AdminRefundDetailRow,
   events: RefundEventRow[],
   evidence: { documentVersion: string; acceptedAt: Date } | null,
+  options: { supportTicketContent: boolean },
 ) {
   return {
     ...toAdminRefundListItem(request),
@@ -210,7 +218,7 @@ export function toAdminRefundDetail(
       status: request.purchase.status,
       refundedAt: iso(request.purchase.refundedAt),
     },
-    supportTicket: request.supportTicket,
+    ...(options.supportTicketContent ? { supportTicket: request.supportTicket } : {}),
     createdBy: request.createdBy,
     reviewStartedBy: request.reviewStartedBy,
     approvedBy: request.approvedBy,

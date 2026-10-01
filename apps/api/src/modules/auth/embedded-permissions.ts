@@ -1,4 +1,4 @@
-import type { AdminPermission } from '@prisma/client';
+import { AdminPermission } from '@prisma/client';
 import { hasPermission } from './admin-permissions';
 import type { AuthUser } from './auth.types';
 
@@ -30,4 +30,24 @@ export function mayEmbed(
 ): boolean {
   if (!user) return false;
   return hasPermission({ role: user.role, permissions: user.permissions ?? [] }, required);
+}
+
+/**
+ * Whether a staff member's e-mail may travel with the record they acted on
+ * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+ *
+ * Who wrote a note, granted a credit, decided a review or cancelled a request
+ * is part of that record, and its route's permission shows it: the actor's id
+ * and name. The actor's address is the staff directory's — the one place that
+ * lists staff accounts, read with ADMIN_USERS_READ — and an audit row is not a
+ * second way into it. Without that permission the `email` key is absent; the
+ * id and the name, which carry the audit, stay.
+ */
+export function mayEmbedStaffEmail(user: Pick<AuthUser, 'role' | 'permissions'> | null | undefined): boolean {
+  return mayEmbed(user, AdminPermission.ADMIN_USERS_READ);
+}
+
+/** The Prisma select of a staff actor: id and name always, the e-mail per {@link mayEmbedStaffEmail}. */
+export function staffActorSelect(user: Pick<AuthUser, 'role' | 'permissions'> | null | undefined) {
+  return { select: { id: true, name: true, email: mayEmbedStaffEmail(user) } } as const;
 }

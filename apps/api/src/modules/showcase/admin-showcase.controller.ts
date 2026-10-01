@@ -75,14 +75,14 @@ export class AdminShowcaseController {
   /** The queue. Defaults to PENDING — what is actually waiting on somebody. */
   @Get('versions')
   @RequiresPermission(AdminPermission.SHOWCASE_REVIEW_READ)
-  listVersions(@Query() query: ListShowcaseVersionsDto) {
-    return this.showcase.listVersions(query);
+  listVersions(@Query() query: ListShowcaseVersionsDto, @CurrentUser() user: AuthUser) {
+    return this.showcase.listVersions(query, user);
   }
 
   @Get('versions/:versionId')
   @RequiresPermission(AdminPermission.SHOWCASE_REVIEW_READ)
-  getVersion(@Param('versionId') versionId: string) {
-    return this.showcase.getVersion(versionId);
+  getVersion(@Param('versionId') versionId: string, @CurrentUser() user: AuthUser) {
+    return this.showcase.getVersion(versionId, user);
   }
 
   /**
@@ -110,14 +110,14 @@ export class AdminShowcaseController {
 
   @Get('cards')
   @RequiresPermission(AdminPermission.SHOWCASE_CARDS_READ)
-  listCards(@Query() query: ListShowcaseCardsDto) {
-    return this.showcase.listCards(query);
+  listCards(@Query() query: ListShowcaseCardsDto, @CurrentUser() user: AuthUser) {
+    return this.showcase.listCards(query, user);
   }
 
   @Get('cards/:cardId')
   @RequiresPermission(AdminPermission.SHOWCASE_CARDS_READ)
-  getCard(@Param('cardId') cardId: string) {
-    return this.showcase.getCard(cardId);
+  getCard(@Param('cardId') cardId: string, @CurrentUser() user: AuthUser) {
+    return this.showcase.getCard(cardId, user);
   }
 
   /**
@@ -146,7 +146,7 @@ export class AdminShowcaseController {
   @Post('cards/:cardId/unsuspend')
   @RequiresPermission(AdminPermission.SHOWCASE_CARDS_MODERATE)
   @HttpCode(HttpStatus.OK)
-  unsuspendCard(@Param('cardId') cardId: string) {
-    return this.showcase.unsuspendCard(cardId);
+  unsuspendCard(@Param('cardId') cardId: string, @CurrentUser() user: AuthUser) {
+    return this.showcase.unsuspendCard(cardId, user);
   }
 }

@@ -5,12 +5,11 @@ import { describeArea } from '../../common/provider-service-area-scope';
  * What a card, a version and an area look like on the way out — one shape, read
  * by the provider's panel and the operator's queue alike.
  *
- * The two audiences see the same card content on purpose. There is nothing on a
- * version an operator may read and its owner may not: the rejection note is
+ * The two audiences see the same card content on purpose: the rejection note is
  * written *for* the provider, and the review row records a decision the provider
- * is entitled to see. What differs between the two surfaces is which cards they
- * can address at all, and that is settled by the guards, not by hiding fields
- * here.
+ * is entitled to see. What differs is which cards they can address at all —
+ * settled by the guards — and one field: who on the staff decided, which is the
+ * operator's audit and never the provider's (see {@link ShowcaseProjectionOptions}).
  */
 
 export const showcaseAreaSelect = {
@@ -83,7 +82,43 @@ export function toShowcaseArea(area: AreaRow) {
   };
 }
 
-export function toShowcaseVersion(version: VersionRow) {
+/**
+ * Whose eyes a projection is for (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+ *
+ * The review row records which operator decided. That is the platform's
+ * internal audit, not part of the verdict: the provider is told the decision,
+ * its note and when — never who on the staff made it, neither name nor
+ * address, so `reviewedBy` is absent from the provider's projection (its
+ * screen speaks for "TakTick inceleme ekibi" instead). An operator sees the
+ * reviewer by id and name; the e-mail is the staff directory's
+ * (ADMIN_USERS_READ, `mayEmbedStaffEmail`). The default is the provider's.
+ */
+export type ShowcaseProjectionOptions =
+  | { audience: 'PROVIDER' }
+  | { audience: 'OPERATOR'; reviewerEmail: boolean };
+
+const PROVIDER_VIEW: ShowcaseProjectionOptions = { audience: 'PROVIDER' };
+
+function toReview(review: NonNullable<VersionRow['review']>, options: ShowcaseProjectionOptions) {
+  const verdict = {
+    id: review.id,
+    decision: review.decision,
+    note: review.note,
+    createdAt: review.createdAt,
+  };
+  if (options.audience === 'PROVIDER') {
+    return verdict;
+  }
+  const reviewer = review.reviewedBy;
+  return {
+    ...verdict,
+    reviewedBy: reviewer
+      ? { id: reviewer.id, name: reviewer.name, ...(options.reviewerEmail ? { email: reviewer.email } : {}) }
+      : null,
+  };
+}
+
+export function toShowcaseVersion(version: VersionRow, options: ShowcaseProjectionOptions = PROVIDER_VIEW) {
   return {
     id: version.id,
     versionNumber: version.versionNumber,
@@ -105,27 +140,19 @@ export function toShowcaseVersion(version: VersionRow) {
     createdAt: version.createdAt,
     updatedAt: version.updatedAt,
     areas: version.areas.map(toShowcaseArea),
-    review: version.review
-      ? {
-          id: version.review.id,
-          decision: version.review.decision,
-          note: version.review.note,
-          createdAt: version.review.createdAt,
-          reviewedBy: version.review.reviewedBy,
-        }
-      : null,
+    review: version.review ? toReview(version.review, options) : null,
   };
 }
 
-export function toShowcaseCard(card: CardRow) {
+export function toShowcaseCard(card: CardRow, options: ShowcaseProjectionOptions = PROVIDER_VIEW) {
   return {
     id: card.id,
     kind: card.kind,
     status: card.status,
     category: card.category,
-    liveVersion: card.liveVersion ? toShowcaseVersion(card.liveVersion) : null,
-    draftVersion: card.draftVersion ? toShowcaseVersion(card.draftVersion) : null,
-    rejectedVersion: rejectedVersion(card),
+    liveVersion: card.liveVersion ? toShowcaseVersion(card.liveVersion, options) : null,
+    draftVersion: card.draftVersion ? toShowcaseVersion(card.draftVersion, options) : null,
+    rejectedVersion: rejectedVersion(card, options),
     suspendedAt: card.suspendedAt,
     suspendReason: card.suspendReason,
     archivedAt: card.archivedAt,
@@ -152,7 +179,7 @@ export function toShowcaseCard(card: CardRow) {
  * as the card's whole history newest first — so the status is checked here
  * rather than assumed from the include.
  */
-function rejectedVersion(card: CardRow) {
+function rejectedVersion(card: CardRow, options: ShowcaseProjectionOptions) {
   if (card.draftVersion) {
     return null;
   }
@@ -165,7 +192,7 @@ function rejectedVersion(card: CardRow) {
   if (card.liveVersion && card.liveVersion.versionNumber > refused.versionNumber) {
     return null;
   }
-  return toShowcaseVersion(refused);
+  return toShowcaseVersion(refused, options);
 }
 
 export type ShowcaseCardProjection = ReturnType<typeof toShowcaseCard>;

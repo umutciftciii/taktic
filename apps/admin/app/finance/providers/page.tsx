@@ -12,6 +12,7 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
+import { gateColumns } from '../../../lib/cross-domain-projection';
 import { buildHref, parsePage, type QueryParams } from '../../../lib/list-query';
 import { formatCount } from '../../../lib/pagination';
 import { formatSignedCount } from '../../../lib/finance-format';
@@ -39,7 +40,9 @@ import { Pagination } from '../../../components/pagination';
 
 const PATH = '/finance/providers';
 const DEFAULT_PAGE_SIZE = 25;
-const DEFAULT_SORT_BY: ProviderFinanceSortField = 'lastTransactionAt';
+/** The API's own defaults: the last credit movement with the ledger, the last payment without it. */
+const LEDGER_DEFAULT_SORT_BY: ProviderFinanceSortField = 'lastTransactionAt';
+const AGGREGATE_DEFAULT_SORT_BY: ProviderFinanceSortField = 'lastPaymentAt';
 const DEFAULT_SORT_DIR: ProviderFinanceSortDirection = 'desc';
 
 /** The design's ⓘ, kept to what the balance is. */
@@ -83,11 +86,37 @@ type AdminProviderFinancePageProps = {
   searchParams: Promise<RawSearchParams>;
 };
 
-function normalizeSortBy(value: string | undefined): ProviderFinanceSortField {
-  if (value && (PROVIDER_FINANCE_SORT_FIELDS as readonly string[]).includes(value)) {
+/**
+ * Everything a row reads from one provider's credit ledger — the balance, the
+ * per-type credit totals, the manual net and the last credit movement — is the
+ * ledger's (FINANCE_LEDGER_READ). Without it the API leaves those keys out and
+ * refuses them as sort keys (403), so the screen neither draws, offers nor
+ * sends them; a hand-written one falls back to the default
+ * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+ */
+const LEDGER_SORT_FIELDS: ReadonlySet<ProviderFinanceSortField> = new Set([
+  'currentBalance',
+  'totalCreditsPurchased',
+  'totalCreditsSpent',
+  'totalCreditsRefunded',
+  'manualNetCredits',
+  'lastTransactionAt',
+]);
+const LEDGER_COLUMN_KEYS = ['balance', 'purchased', 'spent', 'refunded', 'manual', 'lastTransaction'] as const;
+
+function sortFields(ledger: boolean): ProviderFinanceSortField[] {
+  return PROVIDER_FINANCE_SORT_FIELDS.filter((field) => ledger || !LEDGER_SORT_FIELDS.has(field));
+}
+
+function normalizeSortBy(
+  value: string | undefined,
+  allowed: readonly ProviderFinanceSortField[],
+  fallback: ProviderFinanceSortField,
+): ProviderFinanceSortField {
+  if (value && (allowed as readonly string[]).includes(value)) {
     return value as ProviderFinanceSortField;
   }
-  return DEFAULT_SORT_BY;
+  return fallback;
 }
 
 function normalizeSortDir(value: string | undefined): ProviderFinanceSortDirection {
@@ -108,10 +137,16 @@ export default async function AdminProviderFinancePage({
   // all sit behind FINANCE_LEDGER_READ — a FINANCE_READ-only role sees the
   // balances without links that would land on /yetkisiz.
   const canOpenLedger = can('FINANCE_LEDGER_READ');
+  const allowedSorts = sortFields(canOpenLedger);
+  const defaultSortBy = canOpenLedger ? LEDGER_DEFAULT_SORT_BY : AGGREGATE_DEFAULT_SORT_BY;
+  const columns = gateColumns(
+    COLUMNS,
+    Object.fromEntries(LEDGER_COLUMN_KEYS.map((key) => [key, canOpenLedger])),
+  );
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
-  const sortBy = normalizeSortBy(params.sortBy);
+  const sortBy = normalizeSortBy(params.sortBy, allowedSorts, defaultSortBy);
   const sortDir = normalizeSortDir(params.sortDir);
   const page = parsePage(params.page);
 
@@ -124,12 +159,12 @@ export default async function AdminProviderFinancePage({
 
   const response = await apiFetch<ProviderFinanceResponse>(`/finance/providers?${apiQuery.toString()}`);
 
-  const hasFilters = Boolean(q || sortBy !== DEFAULT_SORT_BY || sortDir !== DEFAULT_SORT_DIR);
+  const hasFilters = Boolean(q || sortBy !== defaultSortBy || sortDir !== DEFAULT_SORT_DIR);
   // The defaults are written as no parameter, so the plain address and the
   // default order are one URL.
   const filterParams: QueryParams = {
     q,
-    sortBy: sortBy === DEFAULT_SORT_BY ? '' : sortBy,
+    sortBy: sortBy === defaultSortBy ? '' : sortBy,
     sortDir: sortDir === DEFAULT_SORT_DIR ? '' : sortDir,
   };
 
@@ -179,7 +214,7 @@ export default async function AdminProviderFinancePage({
         </FilterField>
         <FilterField label="Sıralama" htmlFor="provider-finance-sort">
           <select id="provider-finance-sort" name="sortBy" defaultValue={sortBy}>
-            {PROVIDER_FINANCE_SORT_FIELDS.map((field) => (
+            {allowedSorts.map((field) => (
               <option key={field} value={field}>
                 {SORT_LABEL[field]}
               </option>
@@ -218,7 +253,7 @@ export default async function AdminProviderFinancePage({
             }
           />
         ) : (
-          <DataTable caption="İşletme bakiyeleri" columns={COLUMNS} minWidth={1320} testId="provider-finance-table">
+          <DataTable caption="İşletme bakiyeleri" columns={columns} minWidth={canOpenLedger ? 1320 : 720} testId="provider-finance-table">
             {response.items.map((item) => (
               <ProviderFinanceRow key={item.provider.id} item={item} canOpenLedger={canOpenLedger} />
             ))}
@@ -243,14 +278,10 @@ export default async function AdminProviderFinancePage({
 
 function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem; canOpenLedger: boolean }) {
   const { provider } = item;
-  const balanceClass =
-    item.currentBalance > 0 ? 'badge badge-good' : item.currentBalance < 0 ? 'badge badge-bad' : 'badge badge-muted';
-  const manualNetClass =
-    item.manualNetCredits > 0
-      ? 'badge badge-good'
-      : item.manualNetCredits < 0
-        ? 'badge badge-bad'
-        : 'badge badge-muted';
+  const signClass = (value: number) =>
+    value > 0 ? 'badge badge-good' : value < 0 ? 'badge badge-bad' : 'badge badge-muted';
+  // The ledger figures arrive together or not at all (FINANCE_LEDGER_READ).
+  const ledger = item.currentBalance !== undefined ? item : null;
   const creditsHref = `/providers/${provider.id}/credits`;
 
   return (
@@ -281,26 +312,33 @@ function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem
       <td>
         <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>
       </td>
-      <td className="is-num">
-        <span className={balanceClass} data-testid="provider-finance-balance">
-          {formatCount(item.currentBalance)}
-        </span>
-      </td>
+      {/* Drawn only when the API sent them (FINANCE_LEDGER_READ), matching the gated columns. */}
+      {ledger ? (
+        <td className="is-num">
+          <span className={signClass(ledger.currentBalance ?? 0)} data-testid="provider-finance-balance">
+            {formatCount(ledger.currentBalance ?? 0)}
+          </span>
+        </td>
+      ) : null}
       <td className="is-num cell-nowrap">{formatPrice(item.totalPaidAmount)}</td>
-      <td className="is-num">{formatCount(item.totalCreditsPurchased)}</td>
-      <td className="is-num">{formatCount(item.totalCreditsSpent)}</td>
-      <td className="is-num">
-        {item.totalCreditsRefunded === 0 ? (
-          <span className="cell-muted">0</span>
-        ) : (
-          formatCount(item.totalCreditsRefunded)
-        )}
-      </td>
-      <td className="is-num">
-        <span className={manualNetClass}>{formatSignedCount(item.manualNetCredits)}</span>
-      </td>
+      {ledger ? (
+        <>
+          <td className="is-num">{formatCount(ledger.totalCreditsPurchased ?? 0)}</td>
+          <td className="is-num">{formatCount(ledger.totalCreditsSpent ?? 0)}</td>
+          <td className="is-num">
+            {!ledger.totalCreditsRefunded ? (
+              <span className="cell-muted">0</span>
+            ) : (
+              formatCount(ledger.totalCreditsRefunded)
+            )}
+          </td>
+          <td className="is-num">
+            <span className={signClass(ledger.manualNetCredits ?? 0)}>{formatSignedCount(ledger.manualNetCredits ?? 0)}</span>
+          </td>
+        </>
+      ) : null}
       <td className="cell-nowrap">{formatDateOrDash(item.lastPaymentAt)}</td>
-      <td className="cell-nowrap">{formatDateOrDash(item.lastTransactionAt)}</td>
+      {ledger ? <td className="cell-nowrap">{formatDateOrDash(ledger.lastTransactionAt)}</td> : null}
       <td className="col-actions">
         {canOpenLedger ? (
           <div className="inline-actions">

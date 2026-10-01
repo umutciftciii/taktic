@@ -55,11 +55,15 @@ export function LedgerSourceCell({ source }: { source: LedgerSource }) {
   return source.href ? <Link href={source.href}>{body}</Link> : body;
 }
 
-/** Who wrote the row: a named person, an address, or the system itself. */
+/**
+ * Who wrote the row: a named person, an address, or the system itself. The
+ * address comes only with ADMIN_USERS_READ (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002);
+ * without it the cell is the name, or the id.
+ */
 export function LedgerActorCell({
   actor,
 }: {
-  actor: { id: string; name: string | null; email: string | null } | null | undefined;
+  actor: { id: string; name: string | null; email?: string | null } | null | undefined;
 }) {
   if (!actor) return <span className="cell-muted">Sistem</span>;
   return (

@@ -18,8 +18,8 @@ export class FinanceController {
   @Get('summary')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.FINANCE_READ)
-  summary() {
-    return this.financeService.summary();
+  summary(@CurrentUser() user: AuthUser) {
+    return this.financeService.summary(user);
   }
 
   @Get('analytics')

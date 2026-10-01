@@ -123,8 +123,8 @@ export class AdminCampaignsController {
 
   @Get(':id/redemptions')
   @RequiresPermission(AdminPermission.CAMPAIGNS_READ)
-  redemptions(@Param('id') id: string, @Query() query: ListCampaignsDto) {
-    return this.campaigns.listRedemptions(id, query);
+  redemptions(@Param('id') id: string, @Query() query: ListCampaignsDto, @CurrentUser() user: AuthUser) {
+    return this.campaigns.listRedemptions(id, query, user);
   }
 
   @Get(':id/evaluation-events')

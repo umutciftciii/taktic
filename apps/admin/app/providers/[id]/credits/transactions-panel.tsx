@@ -29,7 +29,7 @@ type CreditTransaction = {
   createdBy?: {
     id: string;
     name: string | null;
-    email: string | null;
+    email?: string | null;
   } | null;
 };
 

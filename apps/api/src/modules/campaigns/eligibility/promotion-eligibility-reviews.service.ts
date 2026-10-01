@@ -2,11 +2,18 @@ import { ConflictException, HttpStatus, Inject, Injectable, NotFoundException } 
 import { CampaignTriggerEventStatus, type Prisma, PromotionEligibilityDecision } from '@prisma/client';
 import { runSerializable } from '../../../common/serializable-transaction';
 import { PrismaService } from '../../../prisma/prisma.service';
+import type { AuthUser } from '../../auth/auth.types';
+import { staffActorSelect } from '../../auth/embedded-permissions';
 import { isUniqueViolation } from '../engine/campaign-engine.repository';
 
 export const ELIGIBILITY_HOLD_NOT_FOUND = 'ELIGIBILITY_HOLD_NOT_FOUND';
 export const ELIGIBILITY_DECISION_ALREADY_RECORDED = 'ELIGIBILITY_DECISION_ALREADY_RECORDED';
 
+/**
+ * The hold as the queue reads it. `decidedBy` names the operator by id and
+ * name; the operator's e-mail travels only for a viewer who may read the staff
+ * directory (`mayEmbedStaffEmail`, ADMIN_USERS_READ) — see {@link holdSelectFor}.
+ */
 const holdSelect = {
   id: true,
   triggerEventId: true,
@@ -23,12 +30,19 @@ const holdSelect = {
       decision: true,
       reason: true,
       decidedAt: true,
-      decidedBy: { select: { id: true, name: true, email: true } },
+      decidedBy: { select: { id: true, name: true } },
     },
   },
 } satisfies Prisma.PromotionEligibilityHoldSelect;
 
 type HoldRow = Prisma.PromotionEligibilityHoldGetPayload<{ select: typeof holdSelect }>;
+
+function holdSelectFor(viewer: AuthUser | null) {
+  return {
+    ...holdSelect,
+    review: { select: { ...holdSelect.review.select, decidedBy: staffActorSelect(viewer) } },
+  } satisfies Prisma.PromotionEligibilityHoldSelect;
+}
 
 /**
  * The promotion eligibility queue (CMP-006 PR-C): events the gate held for a
@@ -48,7 +62,7 @@ export class PromotionEligibilityReviewsService {
    * The queue, or — with `providerId` — one provider's holds, which is the
    * eligibility context the operator's provider page shows (PR-C.1).
    */
-  async list(filter: 'open' | 'decided' | 'all', providerId: string | null = null) {
+  async list(filter: 'open' | 'decided' | 'all', providerId: string | null = null, viewer: AuthUser | null = null) {
     const rows = await this.prisma.promotionEligibilityHold.findMany({
       where: {
         ...(filter === 'open' ? { review: { is: null } } : filter === 'decided' ? { review: { isNot: null } } : {}),
@@ -56,13 +70,16 @@ export class PromotionEligibilityReviewsService {
       },
       orderBy: [{ heldAt: filter === 'open' ? 'asc' : 'desc' }, { id: 'asc' }],
       take: 100,
-      select: holdSelect,
+      select: holdSelectFor(viewer),
     });
     return { items: rows.map(holdView) };
   }
 
-  async get(triggerEventId: string) {
-    const row = await this.prisma.promotionEligibilityHold.findUnique({ where: { triggerEventId }, select: holdSelect });
+  async get(triggerEventId: string, viewer: AuthUser | null = null) {
+    const row = await this.prisma.promotionEligibilityHold.findUnique({
+      where: { triggerEventId },
+      select: holdSelectFor(viewer),
+    });
     if (!row) {
       throw holdNotFound();
     }
@@ -81,6 +98,7 @@ export class PromotionEligibilityReviewsService {
     triggerEventId: string,
     input: { decision: PromotionEligibilityDecision; reason: string },
     actorId: string,
+    viewer: AuthUser | null = null,
   ) {
     const reason = input.reason.trim();
     try {
@@ -141,7 +159,7 @@ export class PromotionEligibilityReviewsService {
       }
       throw error;
     }
-    return this.get(triggerEventId);
+    return this.get(triggerEventId, viewer);
   }
 }
 

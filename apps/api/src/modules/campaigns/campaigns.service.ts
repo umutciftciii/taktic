@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AdminPermission,
   CampaignAuditAction,
   type CampaignRedemptionStatus,
   type CampaignRevokeReason,
@@ -24,6 +25,8 @@ import {
 } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
 import { OPERATIONS_SETTINGS_ID } from '../operations-settings/operations-settings.service';
 import { CampaignEngineSettingsService } from './campaign-engine-settings.service';
 import { CAMPAIGN_LIST_DEFAULT_LIMIT } from './dto/list-campaigns.dto';
@@ -222,7 +225,13 @@ export type CampaignRedemptionView = {
   grantedCredits: number;
   grantedAt: Date;
   grantTransactionId: string | null;
-  lot: { id: string; status: PromoCreditLotStatus; remainingCredits: number; expiresAt: Date } | null;
+  /**
+   * The promotion lot this grant opened. Its unspent balance is the ledger's
+   * (FINANCE_LEDGER_READ) and the key is absent without it
+   * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002); the lot's id, state and
+   * expiry are the campaign's own.
+   */
+  lot: { id: string; status: PromoCreditLotStatus; remainingCredits?: number; expiresAt: Date } | null;
   revokedAt: Date | null;
   revokeReason: CampaignRevokeReason | null;
   spentAtRevoke: number | null;
@@ -905,19 +914,27 @@ export class CampaignsService {
 
   // ───────────────────── operations desk (CMP-003 S3) ─────────────────────
 
-  async listRedemptions(campaignId: string, query: { limit?: number; cursor?: string }) {
+  async listRedemptions(
+    campaignId: string,
+    query: { limit?: number; cursor?: string },
+    viewer: AuthUser | null = null,
+  ) {
     await this.requireCampaign(campaignId);
+    const lotBalance = mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ);
     const take = query.limit ?? CAMPAIGN_LIST_DEFAULT_LIMIT;
     const rows = await this.prisma.campaignRedemption.findMany({
       where: { campaignId },
       orderBy: [{ grantedAt: 'desc' }, { id: 'desc' }],
       take: take + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-      select: redemptionSelect,
+      select: {
+        ...redemptionSelect,
+        promoLot: { select: { id: true, status: true, remainingCredits: lotBalance, expiresAt: true } },
+      },
     });
     const page = rows.slice(0, take);
     return {
-      items: page.map(redemptionView),
+      items: page.map((row) => redemptionView(row, lotBalance)),
       nextCursor: rows.length > take ? page[page.length - 1]!.id : null,
     };
   }
@@ -1163,7 +1180,7 @@ const redemptionSelect = {
 
 type RedemptionRow = Prisma.CampaignRedemptionGetPayload<{ select: typeof redemptionSelect }>;
 
-function redemptionView(row: RedemptionRow): CampaignRedemptionView {
+function redemptionView(row: RedemptionRow, lotBalance: boolean): CampaignRedemptionView {
   return {
     id: row.id,
     status: row.status,
@@ -1175,7 +1192,14 @@ function redemptionView(row: RedemptionRow): CampaignRedemptionView {
     grantedCredits: row.grantedCredits,
     grantedAt: row.grantedAt,
     grantTransactionId: row.grantTransactionId,
-    lot: row.promoLot,
+    lot: row.promoLot
+      ? {
+          id: row.promoLot.id,
+          status: row.promoLot.status,
+          ...(lotBalance ? { remainingCredits: row.promoLot.remainingCredits } : {}),
+          expiresAt: row.promoLot.expiresAt,
+        }
+      : null,
     revokedAt: row.revokedAt,
     revokeReason: row.revokeReason,
     spentAtRevoke: row.spentAtRevoke,

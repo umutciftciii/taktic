@@ -240,7 +240,7 @@ export default async function ShowcaseReviewPage({
                 { label: 'Karar', value: SHOWCASE_VERSION_REVIEW_LABELS[version.review.decision] },
                 {
                   label: 'Karar veren',
-                  value: version.review.reviewedBy?.name ?? version.review.reviewedBy?.email ?? '-',
+                  value: version.review.reviewedBy?.name ?? version.review.reviewedBy?.email ?? version.review.reviewedBy?.id ?? '-',
                 },
                 { label: 'Tarih', value: formatDateTime(version.review.createdAt) },
                 ...(version.review.note ? [{ label: 'Gerekçe', value: version.review.note }] : []),
