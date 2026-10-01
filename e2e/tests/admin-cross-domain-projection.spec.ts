@@ -375,6 +375,13 @@ test.describe('RBAC-002 — lot balance, refund ticket, staff e-mail', () => {
       }
     } finally {
       await Promise.all([reader.close(), support.close(), admin.close()]);
+      // Leave no open ticket behind: the dashboard spec counts open support
+      // tickets across the whole database and expects to start from zero.
+      const now = new Date();
+      await prisma().supportTicket.update({
+        where: { id: ticket.id },
+        data: { status: 'CLOSED', resolvedAt: now, closedAt: now },
+      });
     }
   });
 
