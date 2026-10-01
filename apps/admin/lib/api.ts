@@ -1724,18 +1724,22 @@ export type ProviderFinanceItem = {
     email?: string | null;
     status: ProviderStatus;
   };
-  /** FINANCE_LEDGER_READ only; absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
-  currentBalance?: number;
+  /** Package payments: FINANCE_READ's. */
   totalPaidAmount: number;
-  totalCreditsPurchased: number;
-  totalCreditsSpent: number;
-  totalCreditsRefunded: number;
-  totalCreditsAdminGranted: number;
-  totalCreditsAdminDeducted: number;
-  manualNetCredits: number;
-  totalCreditsAdjusted: number;
   lastPaymentAt: string | null;
-  lastTransactionAt: string | null;
+  /*
+   * Everything read from the provider's credit ledger: FINANCE_LEDGER_READ
+   * only, all present or all absent (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+   */
+  currentBalance?: number;
+  totalCreditsPurchased?: number;
+  totalCreditsSpent?: number;
+  totalCreditsRefunded?: number;
+  totalCreditsAdminGranted?: number;
+  totalCreditsAdminDeducted?: number;
+  manualNetCredits?: number;
+  totalCreditsAdjusted?: number;
+  lastTransactionAt?: string | null;
 };
 
 export type ProviderFinanceResponse = {

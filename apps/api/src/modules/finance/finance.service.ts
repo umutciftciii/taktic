@@ -427,19 +427,25 @@ export class FinanceService {
   /**
    * Per-provider finance (FINANCE_READ). The provider's phone and e-mail as in
    * {@link listCreditLedger}: PROVIDERS_READ's, absent and unsearchable without it.
+   *
+   * FINANCE_READ is the aggregate view: per provider it carries the package
+   * payments (`totalPaidAmount`, `lastPaymentAt`). Everything read from one
+   * provider's credit ledger — the balance, every per-type credit total, the
+   * manual net and the time of the last credit movement — is the ledger's
+   * (FINANCE_LEDGER_READ), as on `/admin/providers/:id/credits`. Without it
+   * those keys are absent, their queries are not run, and they are refused as
+   * sort keys (403): the row order would answer what the missing columns do
+   * not. The default order then falls back to the last payment
+   * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
    */
   async listProviderFinance(filters: ListProviderFinanceDto, viewer: AuthUser | null = null) {
     const page = filters.page ?? 1;
     const pageSize = clampProviderFinancePageSize(filters.pageSize);
-    const sortBy: ProviderFinanceSortField = filters.sortBy ?? 'lastTransactionAt';
-    const sortDir: 'asc' | 'desc' = filters.sortDir ?? 'desc';
     const providerContact = mayEmbed(viewer, AdminPermission.PROVIDERS_READ);
-    // One provider's balance is the ledger's (FINANCE_LEDGER_READ), as on
-    // `/admin/providers/:id/credits`: absent without it, and not a sort key
-    // either — the row order would answer what the missing column does not
-    // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
-    const providerBalance = mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ);
-    if (sortBy === 'currentBalance' && !providerBalance) {
+    const ledger = mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ);
+    const sortBy: ProviderFinanceSortField = filters.sortBy ?? (ledger ? 'lastTransactionAt' : 'lastPaymentAt');
+    const sortDir: 'asc' | 'desc' = filters.sortDir ?? 'desc';
+    if (!ledger && PROVIDER_FINANCE_LEDGER_SORT_FIELDS.has(sortBy)) {
       throw new ForbiddenException({ code: INSUFFICIENT_PERMISSION, message: 'Insufficient permission' });
     }
 
@@ -458,52 +464,24 @@ export class FinanceService {
 
     const total = providers.length;
     const providerIds = providers.map((row) => row.id);
+    const any = providerIds.length > 0;
 
-    const [creditByType, packagePaid, lastTxn, balances] =
-      providerIds.length === 0
-        ? ([[], [], [], []] as const)
-        : await Promise.all([
-            this.prisma.providerCreditTransaction.groupBy({
-              by: ['providerId', 'type'],
-              _sum: { amount: true },
-              where: { providerId: { in: providerIds } },
-            }),
-            this.prisma.packagePurchase.groupBy({
-              by: ['providerId'],
-              _sum: { priceAmountSnapshot: true },
-              _max: { paidAt: true },
-              where: {
-                providerId: { in: providerIds },
-                status: PackagePurchaseStatus.PAID,
-              },
-            }),
-            this.prisma.providerCreditTransaction.groupBy({
-              by: ['providerId'],
-              _max: { createdAt: true },
-              where: { providerId: { in: providerIds } },
-            }),
-            providerBalance
-              ? this.prisma.$queryRaw<{ providerId: string; balanceAfter: number | bigint }[]>(Prisma.sql`
-              SELECT DISTINCT ON ("providerId") "providerId", "balanceAfter"
-              FROM "ProviderCreditTransaction"
-              WHERE "providerId" IN (${Prisma.join(providerIds)})
-              ORDER BY "providerId", "createdAt" DESC, "id" DESC
-            `)
-              : Promise.resolve([] as { providerId: string; balanceAfter: number | bigint }[]),
-          ]);
+    const [packagePaid, ledgerFigures] = await Promise.all([
+      any
+        ? this.prisma.packagePurchase.groupBy({
+            by: ['providerId'],
+            _sum: { priceAmountSnapshot: true },
+            _max: { paidAt: true },
+            where: {
+              providerId: { in: providerIds },
+              status: PackagePurchaseStatus.PAID,
+            },
+          })
+        : Promise.resolve([]),
+      any && ledger ? this.readProviderLedgerFigures(providerIds) : Promise.resolve(null),
+    ]);
 
-    const creditSumByProvider = new Map<string, Record<CreditTransactionType, number>>();
-    for (const row of creditByType) {
-      const totals =
-        creditSumByProvider.get(row.providerId) ?? createEmptyCreditTotals();
-      totals[row.type] = row._sum.amount ?? 0;
-      creditSumByProvider.set(row.providerId, totals);
-    }
-
-    const paidByProvider = new Map<
-      string,
-      { totalPaid: number; lastPaidAt: Date | null }
-    >();
+    const paidByProvider = new Map<string, { totalPaid: number; lastPaidAt: Date | null }>();
     for (const row of packagePaid) {
       paidByProvider.set(row.providerId, {
         totalPaid: row._sum.priceAmountSnapshot ?? 0,
@@ -511,33 +489,8 @@ export class FinanceService {
       });
     }
 
-    const lastTxnByProvider = new Map<string, Date | null>();
-    for (const row of lastTxn) {
-      lastTxnByProvider.set(row.providerId, row._max.createdAt ?? null);
-    }
-
-    const balanceByProvider = new Map<string, number>();
-    for (const row of balances) {
-      balanceByProvider.set(row.providerId, Number(row.balanceAfter));
-    }
-
-    const items = providers.map((provider) => {
-      const totals =
-        creditSumByProvider.get(provider.id) ?? createEmptyCreditTotals();
+    const items: ProviderFinanceItem[] = providers.map((provider) => {
       const paid = paidByProvider.get(provider.id);
-
-      const totalCreditsPurchased = totals[CreditTransactionType.PACKAGE_PURCHASE];
-      const totalCreditsSpent = Math.abs(totals[CreditTransactionType.OFFER_SPEND]);
-      const totalCreditsRefunded = totals[CreditTransactionType.OFFER_REFUND];
-      const totalCreditsAdminGranted = totals[CreditTransactionType.ADMIN_GRANT];
-      const totalCreditsAdminDeducted = Math.abs(
-        totals[CreditTransactionType.ADMIN_DEDUCT],
-      );
-      const totalCreditsAdjusted = totals[CreditTransactionType.ADJUSTMENT];
-      const manualNetCredits =
-        totals[CreditTransactionType.ADMIN_GRANT] +
-        totals[CreditTransactionType.ADMIN_DEDUCT];
-
       return {
         provider: {
           id: provider.id,
@@ -545,17 +498,9 @@ export class FinanceService {
           ...(providerContact ? { phone: provider.phone, email: provider.email } : {}),
           status: provider.status,
         },
-        ...(providerBalance ? { currentBalance: balanceByProvider.get(provider.id) ?? 0 } : {}),
         totalPaidAmount: paid?.totalPaid ?? 0,
-        totalCreditsPurchased,
-        totalCreditsSpent,
-        totalCreditsRefunded,
-        totalCreditsAdminGranted,
-        totalCreditsAdminDeducted,
-        manualNetCredits,
-        totalCreditsAdjusted,
         lastPaymentAt: paid?.lastPaidAt ?? null,
-        lastTransactionAt: lastTxnByProvider.get(provider.id) ?? null,
+        ...(ledger ? providerLedgerFigures(provider.id, ledgerFigures) : {}),
       };
     });
 
@@ -573,6 +518,44 @@ export class FinanceService {
       pageSize,
       hasNextPage,
     };
+  }
+
+  /** The three ledger reads behind {@link listProviderFinance}'s FINANCE_LEDGER_READ figures. */
+  private async readProviderLedgerFigures(providerIds: string[]): Promise<ProviderLedgerFigureRows> {
+    const [creditByType, lastTxn, balances] = await Promise.all([
+      this.prisma.providerCreditTransaction.groupBy({
+        by: ['providerId', 'type'],
+        _sum: { amount: true },
+        where: { providerId: { in: providerIds } },
+      }),
+      this.prisma.providerCreditTransaction.groupBy({
+        by: ['providerId'],
+        _max: { createdAt: true },
+        where: { providerId: { in: providerIds } },
+      }),
+      this.prisma.$queryRaw<{ providerId: string; balanceAfter: number | bigint }[]>(Prisma.sql`
+        SELECT DISTINCT ON ("providerId") "providerId", "balanceAfter"
+        FROM "ProviderCreditTransaction"
+        WHERE "providerId" IN (${Prisma.join(providerIds)})
+        ORDER BY "providerId", "createdAt" DESC, "id" DESC
+      `),
+    ]);
+
+    const totalsByProvider = new Map<string, Record<CreditTransactionType, number>>();
+    for (const row of creditByType) {
+      const totals = totalsByProvider.get(row.providerId) ?? createEmptyCreditTotals();
+      totals[row.type] = row._sum.amount ?? 0;
+      totalsByProvider.set(row.providerId, totals);
+    }
+    const lastTransactionByProvider = new Map<string, Date | null>();
+    for (const row of lastTxn) {
+      lastTransactionByProvider.set(row.providerId, row._max.createdAt ?? null);
+    }
+    const balanceByProvider = new Map<string, number>();
+    for (const row of balances) {
+      balanceByProvider.set(row.providerId, Number(row.balanceAfter));
+    }
+    return { totalsByProvider, lastTransactionByProvider, balanceByProvider };
   }
 
   private async lookupSourceNumbers(
@@ -750,9 +733,14 @@ type ProviderFinanceItem = {
     email?: string | null;
     status: string;
   };
-  /** FINANCE_LEDGER_READ's: absent for a caller without it. */
-  currentBalance?: number;
+  /** Package payments: FINANCE_READ's. */
   totalPaidAmount: number;
+  lastPaymentAt: Date | null;
+} & Partial<ProviderLedgerFigures>;
+
+/** Everything read from one provider's credit ledger: FINANCE_LEDGER_READ's, absent without it. */
+type ProviderLedgerFigures = {
+  currentBalance: number;
   totalCreditsPurchased: number;
   totalCreditsSpent: number;
   totalCreditsRefunded: number;
@@ -760,9 +748,39 @@ type ProviderFinanceItem = {
   totalCreditsAdminDeducted: number;
   manualNetCredits: number;
   totalCreditsAdjusted: number;
-  lastPaymentAt: Date | null;
   lastTransactionAt: Date | null;
 };
+
+type ProviderLedgerFigureRows = {
+  totalsByProvider: Map<string, Record<CreditTransactionType, number>>;
+  lastTransactionByProvider: Map<string, Date | null>;
+  balanceByProvider: Map<string, number>;
+};
+
+/** The sort keys that read a ledger figure: refused without FINANCE_LEDGER_READ. */
+const PROVIDER_FINANCE_LEDGER_SORT_FIELDS: ReadonlySet<ProviderFinanceSortField> = new Set([
+  'currentBalance',
+  'totalCreditsPurchased',
+  'totalCreditsSpent',
+  'totalCreditsRefunded',
+  'manualNetCredits',
+  'lastTransactionAt',
+]);
+
+function providerLedgerFigures(providerId: string, rows: ProviderLedgerFigureRows | null): ProviderLedgerFigures {
+  const totals = rows?.totalsByProvider.get(providerId) ?? createEmptyCreditTotals();
+  return {
+    currentBalance: rows?.balanceByProvider.get(providerId) ?? 0,
+    totalCreditsPurchased: totals[CreditTransactionType.PACKAGE_PURCHASE],
+    totalCreditsSpent: Math.abs(totals[CreditTransactionType.OFFER_SPEND]),
+    totalCreditsRefunded: totals[CreditTransactionType.OFFER_REFUND],
+    totalCreditsAdminGranted: totals[CreditTransactionType.ADMIN_GRANT],
+    totalCreditsAdminDeducted: Math.abs(totals[CreditTransactionType.ADMIN_DEDUCT]),
+    manualNetCredits: totals[CreditTransactionType.ADMIN_GRANT] + totals[CreditTransactionType.ADMIN_DEDUCT],
+    totalCreditsAdjusted: totals[CreditTransactionType.ADJUSTMENT],
+    lastTransactionAt: rows?.lastTransactionByProvider.get(providerId) ?? null,
+  };
+}
 
 function buildProviderFinanceComparator(
   sortBy: ProviderFinanceSortField,
@@ -790,17 +808,17 @@ function compareProviderFinance(
     case 'totalPaidAmount':
       return a.totalPaidAmount - b.totalPaidAmount;
     case 'totalCreditsPurchased':
-      return a.totalCreditsPurchased - b.totalCreditsPurchased;
+      return (a.totalCreditsPurchased ?? 0) - (b.totalCreditsPurchased ?? 0);
     case 'totalCreditsSpent':
-      return a.totalCreditsSpent - b.totalCreditsSpent;
+      return (a.totalCreditsSpent ?? 0) - (b.totalCreditsSpent ?? 0);
     case 'totalCreditsRefunded':
-      return a.totalCreditsRefunded - b.totalCreditsRefunded;
+      return (a.totalCreditsRefunded ?? 0) - (b.totalCreditsRefunded ?? 0);
     case 'manualNetCredits':
-      return a.manualNetCredits - b.manualNetCredits;
+      return (a.manualNetCredits ?? 0) - (b.manualNetCredits ?? 0);
     case 'lastPaymentAt':
       return compareNullableDates(a.lastPaymentAt, b.lastPaymentAt);
     case 'lastTransactionAt':
-      return compareNullableDates(a.lastTransactionAt, b.lastTransactionAt);
+      return compareNullableDates(a.lastTransactionAt ?? null, b.lastTransactionAt ?? null);
     default:
       return 0;
   }

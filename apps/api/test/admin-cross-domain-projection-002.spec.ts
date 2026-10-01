@@ -14,6 +14,7 @@ import {
   createApprovedRequest,
   createApprovedShowcaseCard,
   createCategory,
+  createOfferPackage,
   createProviderProfile,
   createTestApp,
   createUser,
@@ -547,61 +548,133 @@ describe('staff actor e-mail — ADMIN_USERS_READ', () => {
 // ───────────────────────── 4. finance: aggregate vs ledger ─────────────────────────
 
 describe('finance — FINANCE_READ is the aggregate view, FINANCE_LEDGER_READ the per-provider ledger', () => {
+  /** One provider with a paid package and one row of every per-type figure, so no ledger key is legitimately zero. */
   async function financeWorld() {
     const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
     const provider = await createProviderProfile(ctx.prisma, { userId: owner.id });
-    await ctx.prisma.providerCreditTransaction.create({
-      data: { providerId: provider.id, type: CreditTransactionType.ADMIN_GRANT, amount: 29, balanceAfter: 29, reason: 'Kurulum' },
+    const rows: Array<[CreditTransactionType, number]> = [
+      [CreditTransactionType.PACKAGE_PURCHASE, 40],
+      [CreditTransactionType.OFFER_SPEND, -7],
+      [CreditTransactionType.OFFER_REFUND, 3],
+      [CreditTransactionType.ADMIN_GRANT, 11],
+      [CreditTransactionType.ADMIN_DEDUCT, -2],
+      [CreditTransactionType.ADJUSTMENT, 4],
+    ];
+    let balance = 0;
+    for (const [type, amount] of rows) {
+      balance += amount;
+      await ctx.prisma.providerCreditTransaction.create({
+        data: { providerId: provider.id, type, amount, balanceAfter: balance, reason: 'Kurulum' },
+      });
+    }
+    const pkg = await createOfferPackage(ctx.prisma, { creditAmount: 40 });
+    const purchase = await ctx.prisma.packagePurchase.create({
+      data: {
+        providerId: provider.id,
+        packageId: pkg.id,
+        status: 'PAID',
+        creditAmountSnapshot: 40,
+        priceAmountSnapshot: 77_700,
+        packageNameSnapshot: 'Paket',
+        paidAt: new Date(),
+      },
     });
-    return { provider };
+    return { provider, balance, purchase };
   }
 
   const AGGREGATE_KEYS = ['revenue', 'packagePurchases', 'credits', 'recentPurchases'];
+  const LEDGER_KEYS = [
+    'currentBalance',
+    'totalCreditsPurchased',
+    'totalCreditsSpent',
+    'totalCreditsRefunded',
+    'totalCreditsAdminGranted',
+    'totalCreditsAdminDeducted',
+    'manualNetCredits',
+    'totalCreditsAdjusted',
+    'lastTransactionAt',
+  ];
+  const LEDGER_SORTS = [
+    'currentBalance',
+    'totalCreditsPurchased',
+    'totalCreditsSpent',
+    'totalCreditsRefunded',
+    'manualNetCredits',
+    'lastTransactionAt',
+  ];
+  const rowOf = (body: { items: Array<{ provider: { id: string } }> }, id: string) =>
+    body.items.find((item) => item.provider.id === id) as Record<string, unknown>;
 
-  it('FINANCE_READ alone: summary KPIs without recentTransactions, provider rows without currentBalance', async () => {
-    const { provider } = await financeWorld();
+  it('FINANCE_READ alone: summary KPIs without recentTransactions; provider rows carry payments and no ledger figure at all', async () => {
+    const { provider, balance } = await financeWorld();
     const cookie = await sessionWith([AdminPermission.FINANCE_READ]);
 
     const summary = await get('/finance/summary', cookie);
     expect(summary.status).toBe(200);
     for (const key of AGGREGATE_KEYS) expect(summary.body).toHaveProperty(key);
     expect(summary.body).not.toHaveProperty('recentTransactions');
-    expect(summary.body.credits.totalActiveProviderCreditBalance).toBe(29);
-    expect(summary.body.credits.totalCreditsAdminGranted).toBe(29);
+    // The system-wide KPIs stay FINANCE_READ's.
+    expect(summary.body.credits.totalActiveProviderCreditBalance).toBe(balance);
+    expect(summary.body.credits.totalCreditsAdminGranted).toBe(11);
 
     const providers = await get('/finance/providers', cookie);
     expect(providers.status).toBe(200);
-    const row = providers.body.items.find((item: { provider: { id: string } }) => item.provider.id === provider.id);
-    expect(row).not.toHaveProperty('currentBalance');
-    expect(JSON.stringify(providers.body)).not.toContain('currentBalance');
-    expect(row.totalCreditsAdminGranted).toBe(29);
+    const row = rowOf(providers.body, provider.id);
+    expect(Object.keys(row).sort()).toEqual(['lastPaymentAt', 'provider', 'totalPaidAmount']);
+    expect(row.totalPaidAmount).toBe(77_700);
+    const json = JSON.stringify(providers.body);
+    for (const key of LEDGER_KEYS) expect(json).not.toContain(`"${key}"`);
   });
 
-  it('FINANCE_READ alone may not sort the provider rows by balance (403) — the order would answer for the missing column', async () => {
+  it.each(LEDGER_SORTS)('FINANCE_READ alone may not sort by %s (403) — the order would answer for the missing column', async (field) => {
     await financeWorld();
     const cookie = await sessionWith([AdminPermission.FINANCE_READ]);
-    const refused = await get('/finance/providers?sortBy=currentBalance', cookie);
+    const refused = await get(`/finance/providers?sortBy=${field}`, cookie);
     expect(refused.status).toBe(403);
     expect(refused.body.code).toBe('INSUFFICIENT_PERMISSION');
-    expect((await get('/finance/providers?sortBy=totalPaidAmount', cookie)).status).toBe(200);
+  });
+
+  it('FINANCE_READ alone may sort by name and by payments, and the default order is the last payment', async () => {
+    const first = await financeWorld();
+    const second = await financeWorld();
+    await ctx.prisma.packagePurchase.update({ where: { id: first.purchase.id }, data: { paidAt: new Date(Date.now() - 86_400_000) } });
+    const cookie = await sessionWith([AdminPermission.FINANCE_READ]);
+    for (const field of ['businessName', 'totalPaidAmount', 'lastPaymentAt']) {
+      expect((await get(`/finance/providers?sortBy=${field}`, cookie)).status).toBe(200);
+    }
+    const ordered = await get('/finance/providers', cookie);
+    const ids = ordered.body.items.map((item: { provider: { id: string } }) => item.provider.id);
+    expect(ids.indexOf(second.provider.id)).toBeLessThan(ids.indexOf(first.provider.id));
   });
 
   it.each([
     ['FINANCE_READ + FINANCE_LEDGER_READ', () => sessionWith([AdminPermission.FINANCE_READ, AdminPermission.FINANCE_LEDGER_READ])],
     ['SUPER_ADMIN', () => superAdminSession()],
-  ])('%s: the full view, balance sort included', async (_label, session) => {
-    const { provider } = await financeWorld();
+  ])('%s: the full view, every ledger sort included', async (_label, session) => {
+    const { provider, balance } = await financeWorld();
     const cookie = await session();
 
     const summary = await get('/finance/summary', cookie);
     for (const key of AGGREGATE_KEYS) expect(summary.body).toHaveProperty(key);
-    expect(summary.body.recentTransactions).toHaveLength(1);
-    expect(summary.body.recentTransactions[0].amount).toBe(29);
+    expect(summary.body.recentTransactions.length).toBeGreaterThan(0);
 
-    const providers = await get('/finance/providers?sortBy=currentBalance', cookie);
+    const providers = await get('/finance/providers', cookie);
     expect(providers.status).toBe(200);
-    const row = providers.body.items.find((item: { provider: { id: string } }) => item.provider.id === provider.id);
-    expect(row.currentBalance).toBe(29);
+    expect(rowOf(providers.body, provider.id)).toMatchObject({
+      currentBalance: balance,
+      totalCreditsPurchased: 40,
+      totalCreditsSpent: 7,
+      totalCreditsRefunded: 3,
+      totalCreditsAdminGranted: 11,
+      totalCreditsAdminDeducted: 2,
+      manualNetCredits: 9,
+      totalCreditsAdjusted: 4,
+      totalPaidAmount: 77_700,
+    });
+    expect(rowOf(providers.body, provider.id).lastTransactionAt).toEqual(expect.any(String));
+    for (const field of LEDGER_SORTS) {
+      expect((await get(`/finance/providers?sortBy=${field}`, cookie)).status).toBe(200);
+    }
   });
 
   it('FINANCE_LEDGER_READ alone still cannot open the FINANCE_READ routes', async () => {

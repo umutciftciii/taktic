@@ -254,6 +254,9 @@ test.describe('offer and request screens', () => {
  * subject and no address — and no error screen; with it, or as SUPER_ADMIN,
  * it draws them as before.
  */
+const LEDGER_HEADERS = ['Bakiye', 'Satın alınan kredi', 'Harcanan kredi', 'İade edilen kredi', 'Manuel net', 'Son hareket'];
+const LEDGER_SORTS = ['currentBalance', 'totalCreditsPurchased', 'totalCreditsSpent', 'totalCreditsRefunded', 'manualNetCredits', 'lastTransactionAt'];
+
 test.describe('RBAC-002 — lot balance, refund ticket, staff e-mail', () => {
   test('a redemption row shows the lot balance only to a session that may read the ledger', async ({ browser }) => {
     const root = await createAdmin();
@@ -426,7 +429,7 @@ test.describe('RBAC-002 — lot balance, refund ticket, staff e-mail', () => {
     }
   });
 
-  test('FINANCE_READ is the aggregate view: no provider balance, no latest ledger rows; with the ledger the screens are whole', async ({
+  test('FINANCE_READ is the aggregate view: no per-provider credit figure, no latest ledger rows; with the ledger the screens are whole', async ({
     browser,
   }) => {
     const location = uniqueLocation();
@@ -448,13 +451,18 @@ test.describe('RBAC-002 — lot balance, refund ticket, staff e-mail', () => {
       await reader.gotoAdmin(search);
       await expectOpen(reader.page);
       await expect(reader.page.getByTestId('provider-finance-row')).toHaveCount(1);
-      await expect(header(reader.page, 'Bakiye')).toHaveCount(0);
+      // Payments stay; every figure read from the provider's credit ledger goes.
+      for (const name of ['Toplam ödeme', 'Son ödeme']) await expect(header(reader.page, name)).toBeVisible();
+      for (const name of LEDGER_HEADERS) await expect(header(reader.page, name)).toHaveCount(0);
       await expect(reader.page.getByTestId('provider-finance-balance')).toHaveCount(0);
-      await expect(reader.page.locator('#provider-finance-sort option[value="currentBalance"]')).toHaveCount(0);
-      // A hand-written balance sort falls back to the default instead of a 403 screen.
-      await reader.gotoAdmin(`${search}&sortBy=currentBalance`);
-      await expectOpen(reader.page);
-      await expect(reader.page.getByTestId('provider-finance-row')).toHaveCount(1);
+      await expect(reader.page.locator('#provider-finance-sort option')).toHaveText(['İşletme adı', 'Toplam ödeme', 'Son ödeme']);
+      // A hand-written ledger sort falls back to the default instead of a 403 screen.
+      for (const field of LEDGER_SORTS) {
+        await reader.gotoAdmin(`${search}&sortBy=${field}`);
+        await expectOpen(reader.page);
+        await expect(reader.page.getByTestId('provider-finance-row')).toHaveCount(1);
+        await expect(reader.page.locator('#provider-finance-sort')).toHaveValue('lastPaymentAt');
+      }
 
       for (const actor of [ledger, admin]) {
         await actor.gotoAdmin('/finance');
@@ -463,8 +471,9 @@ test.describe('RBAC-002 — lot balance, refund ticket, staff e-mail', () => {
 
         await actor.gotoAdmin(`${search}&sortBy=currentBalance`);
         await expectOpen(actor.page);
-        await expect(header(actor.page, 'Bakiye')).toBeVisible();
+        for (const name of LEDGER_HEADERS) await expect(header(actor.page, name)).toBeVisible();
         await expect(actor.page.getByTestId('provider-finance-balance')).toHaveText('23');
+        await expect(actor.page.locator('#provider-finance-sort option')).toHaveCount(9);
       }
     } finally {
       await Promise.all([reader.close(), ledger.close(), admin.close()]);

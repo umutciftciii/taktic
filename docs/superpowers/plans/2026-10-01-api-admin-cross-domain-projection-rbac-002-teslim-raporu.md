@@ -22,7 +22,7 @@
 | `GET /admin/showcase/versions(/:id)`, `GET /admin/showcase/cards(/:id)` + approve/reject/suspend/unsuspend yanıtları | `review.reviewedBy.email` (sürüm, kartın canlı/taslak/reddedilen sürümü, kart geçmişi) | `ADMIN_USERS_READ` | `email` yok |
 | `GET /providers/:id/showcase/cards(/:cardId)` ve sağlayıcı kart yazma yanıtları | `review.reviewedBy` (id, ad, e-posta) | — | **sağlayıcıya hiç gitmez** (ürün kararı); `review {id, decision, note, createdAt}` kalır |
 | `GET /finance/summary` (`FINANCE_READ`) | `recentTransactions` | `FINANCE_LEDGER_READ` | anahtar yok, sorgu yapılmaz; `revenue`, `packagePurchases`, `credits` (toplam aktif bakiye dahil), `recentPurchases` kalır |
-| `GET /finance/providers` (`FINANCE_READ`) | `items[].currentBalance` | `FINANCE_LEDGER_READ` | anahtar yok, bakiye sorgusu yapılmaz; `sortBy=currentBalance` **403 `INSUFFICIENT_PERMISSION`** (sıralama eksik sütunu cevaplardı) |
+| `GET /finance/providers` (`FINANCE_READ`) | sağlayıcının kredi defterinden okunan her alan: `currentBalance`, `totalCreditsPurchased`, `totalCreditsSpent`, `totalCreditsRefunded`, `totalCreditsAdminGranted`, `totalCreditsAdminDeducted`, `manualNetCredits`, `totalCreditsAdjusted`, `lastTransactionAt` | `FINANCE_LEDGER_READ` | anahtarların hepsi yok; üç ledger sorgusu (tür toplamları, son hareket, bakiye) hiç çalışmaz. Bu alanlara `sortBy` **403 `INSUFFICIENT_PERMISSION`**; varsayılan sıralama izinsizde `lastPaymentAt` (izinliyken `lastTransactionAt`). Paket ödemeleri `totalPaidAmount`, `lastPaymentAt` `FINANCE_READ` ile kalır. `q` yalnız işletme adı (+ `PROVIDERS_READ` ile iletişim) arar, kredi filtresi yok |
 | `GET /service-requests/:id` (`REQUESTS_READ`) | `cancellation.actor.email` | personel aktör → `ADMIN_USERS_READ`; müşteri aktör → `CUSTOMERS_READ` (RBAC-001 hesap bloğu kuralı) | `email` yok; `id/name/role` kalır |
 
 Değişmeyenler (zaten e-postasız): kampanya `createdBy/actor/revokedBy`, iade `createdBy/reviewStartedBy/approvedBy/…` ve olay aktörleri, vitrin yerleşim iptal aktörü, şirket ayarları `updatedBy`. `admin-roles` üye listesi SUPER_ADMIN'e özel (`requireSuperAdmin`), `users` modülü `ADMIN_USERS_READ`'in kendisi.
@@ -42,7 +42,7 @@ Değişmeyenler (zaten e-postasız): kampanya `createdBy/actor/revokedBy`, iade 
 - Defter/aktör hücreleri (`LedgerActorCell`, kredi paneli, müşteri notu, uygunluk, vitrin inceleme, talep iptali) zaten `name ?? email ?? id` kalıbında; e-posta yoksa ad (yoksa id) gösterilir. Vitrin inceleme yedeğine `id` eklendi.
 - Web: `ShowcaseCardReviewRecord.reviewedBy` tipten kaldırıldı (sağlayıcıya gelmiyor; web inceleyeni hiç çizmiyordu, bu yüzden "TakTick inceleme ekibi" metnine gerek olmadı, sahte aktör üretilmedi).
 - Finans özeti: "Son kredi hareketleri" kartı yalnız `recentTransactions` geldiyse çizilir; KPI'lar değişmedi.
-- İşletme bakiyeleri: "Bakiye" sütunu ve "Mevcut kredi" sıralama seçeneği yalnız `FINANCE_LEDGER_READ` ile; elle yazılmış `sortBy=currentBalance` izinsizde varsayılana düşer (403 ekranı yok).
+- İşletme bakiyeleri: kredi defteri sütunları (Bakiye, Satın alınan/Harcanan/İade edilen kredi, Manuel net, Son hareket) ve bunların sıralama seçenekleri yalnız `FINANCE_LEDGER_READ` ile; izinsizde tablo İşletme/Durum/Toplam ödeme/Son ödeme'dir. Elle yazılmış ledger `sortBy` izinsizde varsayılana (`lastPaymentAt`) düşer, API'ye gönderilmez (403 ekranı yok).
 
 ## Test
 
@@ -55,4 +55,4 @@ Değişmeyenler (zaten e-postasız): kampanya `createdBy/actor/revokedBy`, iade 
 
 - **Kapatıldı (kapsam içi, beklenmedik):** vitrin projeksiyonu inceleyen personelin e-postasını sağlayıcı paneline de gönderiyordu.
 - **Karar (değişmedi):** redemption `lot.status`, `spentAtRevoke`, `revokedCredits` kampanya yaşam döngüsü/audit verisi olarak kalır.
-- **Not:** `/finance/providers` satırlarındaki tür bazlı toplamlar (`totalCreditsPurchased/Spent/Refunded/AdminGranted/AdminDeducted/Adjusted`) `FINANCE_READ` ile kalır (karar yalnız `currentBalance`'ı kapsar); kampanya türleri bu toplamlarda yok, yine de bakiyeye yaklaşık bir türetim mümkündür. Gerekirse ayrı ürün kararı.
+- **Karar (3. tur):** `FINANCE_READ` yalnız genel/aggregate görünüm; sağlayıcı bazlı tüm kredi/bakiye ayrıntıları `FINANCE_LEDGER_READ`. Sistem geneli KPI'lar (`/finance/summary` `credits.*`, `/finance/analytics`) `FINANCE_READ` ile kalır. `lastTransactionAt` sağlayıcının son kredi hareketi zamanı olduğu için ledger tarafına alındı.
