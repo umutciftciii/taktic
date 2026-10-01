@@ -2,6 +2,8 @@
 
 import { ApiError, apiFetch, type RefundScanExecuteResponse, type RefundScanResponse } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 /**
  * The refund scan's two calls, made from this server rather than the browser.
@@ -32,7 +34,14 @@ export async function refreshRefundScanAction(limit: number): Promise<RefundScan
 
 export async function executeRefundScanAction(
   limit: number,
+  confirmationProof: string | null,
 ): Promise<RefundScanActionResult<RefundScanExecuteResponse>> {
+  // The bulk refund is confirmed in a dialog, whose proof the client hands
+  // over with the call; without it nothing is refunded
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!(await hasConfirmationProof(confirmationProof, 'refund-scan.execute'))) {
+    return { ok: false, error: CONFIRMATION_PROOF_REFUSAL_MESSAGE };
+  }
   try {
     return {
       ok: true,

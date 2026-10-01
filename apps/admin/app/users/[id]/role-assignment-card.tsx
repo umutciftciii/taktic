@@ -9,11 +9,19 @@ import {
   type AdminRoleSummary,
   type AdminUserRoles,
 } from '../../../lib/api';
-import { permissionsLostOnRevoke } from '../../../lib/permission-model';
+import {
+  criticalPermissionsIn,
+  permissionsGainedOnAssign,
+  permissionsLostOnRevoke,
+} from '../../../lib/permission-model';
 import { assignAdminRoleAction, revokeAdminRoleAction } from '../../roles/actions';
+import { RoleAssignForm } from './role-assign-form';
+import type { LabelledPermission } from './user-activate-consequence';
 
 type RoleAssignmentCardProps = {
   userId: string;
+  /** How the confirmations name the account. */
+  accountName: string;
   isSuperAdminViewer: boolean;
   roles: { assigned: AdminUserRoles; catalogue: AdminRoleSummary[] } | null;
 };
@@ -39,11 +47,14 @@ const COLUMNS: DataColumn[] = [
  * live, active role of the account also grants, computed from the assignment
  * list this card already read. The form and its fields are unchanged.
  *
+ * "Ata" asks first too (ADMIN-DESTRUCTIVE-CONFIRMATION-001): see
+ * `RoleAssignForm`, which also stops the select from starting on a role.
+ *
  * Revoked assignments stay on screen, greyed. "This account used to be able to
  * do that" is the question an audit asks, and a list that quietly forgets
  * cannot answer it.
  */
-export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: RoleAssignmentCardProps) {
+export function AdminRoleAssignmentCard({ userId, accountName, isSuperAdminViewer, roles }: RoleAssignmentCardProps) {
   if (!isSuperAdminViewer || !roles) {
     return (
       <SectionCard title="Roller" className="is-wide" testId="user-roles-card">
@@ -106,6 +117,7 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
                   <input type="hidden" name="userId" value={userId} />
                   <input type="hidden" name="roleId" value={assignment.role.id} />
                   <ConfirmDialog
+                    proof="role.revoke"
                     triggerLabel="Geri al"
                     triggerClassName="btn btn-destructive btn-sm"
                     title={`"${assignment.role.name}" bu hesaptan geri alınsın mı?`}
@@ -127,26 +139,24 @@ export function AdminRoleAssignmentCard({ userId, isSuperAdminViewer, roles }: R
       )}
 
       {assignable.length > 0 ? (
-        <form action={assignAdminRoleAction} className="compact-form role-assign-form" data-testid="user-role-assign">
-          <input type="hidden" name="userId" value={userId} />
-          <div className="compact-field-grid">
-            <label className="field field-8">
-              <span>Rol ata</span>
-              <select name="roleId" required>
-                {assignable.map((role) => (
-                  <option key={role.id} value={role.id}>
-                    {role.name} ({role.permissions.length} izin)
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="form-actions">
-            <button className="btn btn-primary btn-sm" type="submit">
-              Ata
-            </button>
-          </div>
-        </form>
+        // Keyed by what can still be assigned, so a landed assignment starts
+        // the form again from "Rol seçin" rather than from a role now held.
+        <RoleAssignForm
+          key={assignable.map((role) => role.id).join(',')}
+          userId={userId}
+          accountName={accountName}
+          roles={assignable.map((role) => {
+            const gained = permissionsGainedOnAssign(assigned.assignments, role.permissions);
+            return {
+              id: role.id,
+              name: role.name,
+              permissionCount: role.permissions.length,
+              gainedCount: gained.length,
+              criticalGained: labelPermissions(criticalPermissionsIn(gained)),
+            };
+          })}
+          action={assignAdminRoleAction}
+        />
       ) : (
         <p className="detail-muted-note role-assign-empty">
           Atanabilecek başka aktif rol yok. <Link href="/roles">Roller ve İzinler</Link> ekranından yeni bir rol
@@ -208,4 +218,12 @@ export function RevokeConsequence({
       <p>Atama silinmez, "Geri alınmış roller" listesinde kalır; rol yeniden atanabilir. Değişiklik adınızla kayda geçer.</p>
     </>
   );
+}
+
+/** Raw permission values with the panel's "Alan · işlem" line, for the confirmations. */
+export function labelPermissions(permissions: readonly string[]): LabelledPermission[] {
+  return permissions.map((permission) => {
+    const { area, action } = adminPermissionLabel(permission);
+    return { permission, label: `${area} · ${action}` };
+  });
 }

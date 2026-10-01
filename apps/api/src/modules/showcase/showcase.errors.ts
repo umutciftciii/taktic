@@ -265,6 +265,7 @@ export const SHOWCASE_PLACEMENT_NOT_FOUND_CODE = 'SHOWCASE_PLACEMENT_NOT_FOUND';
 export const SHOWCASE_PLACEMENT_NOT_SUSPENDABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_SUSPENDABLE';
 export const SHOWCASE_PLACEMENT_NOT_RESUMABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_RESUMABLE';
 export const SHOWCASE_PLACEMENT_NOT_CANCELLABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_CANCELLABLE';
+export const SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED_CODE = 'SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED';
 export const SHOWCASE_LEAD_AREA_NOT_SERVED_CODE = 'SHOWCASE_LEAD_AREA_NOT_SERVED';
 export const SHOWCASE_LEAD_NOT_FOUND_CODE = 'SHOWCASE_LEAD_NOT_FOUND';
 export const SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED_CODE =
@@ -417,6 +418,22 @@ export function showcasePlacementNotCancellable() {
     error: 'Conflict',
     code: SHOWCASE_PLACEMENT_NOT_CANCELLABLE_CODE,
     message: 'Yalnız süresi devam eden bir yerleşim iptal edilebilir.',
+  });
+}
+
+/**
+ * A cancellation with no reason, or one too short to be a reason.
+ *
+ * Cancelling is final and moves no money, so the person who later decides what
+ * the purchase's money should do reads this note to learn why
+ * (ADMIN-DESTRUCTIVE-CONFIRMATION-001). Judged after trimming.
+ */
+export function showcasePlacementCancelNoteRequired(minLength: number) {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED_CODE,
+    message: `İptal gerekçesi zorunludur (en az ${minLength} karakter).`,
   });
 }
 

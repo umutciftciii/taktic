@@ -51,6 +51,7 @@ import { TransactionsPanel } from './credits/transactions-panel';
 import { providerStatusConsequence } from './provider-status-consequence';
 import { ProviderStatusForm } from './provider-status-form';
 import { RawRegistrationReveal } from './raw-registration-reveal';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 
 /**
  * Hizmet veren detayı (#13), design `providerDetail` (ADMIN-DESIGN-001 Faz 3B,
@@ -97,6 +98,7 @@ type TabKey = '' | 'kredi' | 'degerlendirmeler' | 'teklifler';
 const STATUS_ERRORS: Record<string, string> = {
   invalid: 'Durum kaydedilemedi: istek geçersiz. Ret için gerekçe zorunludur.',
   error: 'Durum kaydedilemedi. Lütfen tekrar deneyin.',
+  confirmation: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
 };
 
 /** The design's ⓘ on the credit tab, fitted to what the rows are. */
@@ -148,6 +150,7 @@ const CATEGORY_NOTICES: Record<string, { tone: 'good' | 'warn'; text: string }> 
   added: { tone: 'good', text: 'Kategori bu hizmet verene bağlandı.' },
   already: { tone: 'good', text: 'Bu kategori zaten bağlıydı; ikinci bir kayıt oluşmadı.' },
   removed: { tone: 'good', text: 'Kategori bağı kaldırıldı.' },
+  confirmation: { tone: 'warn', text: CONFIRMATION_PROOF_REFUSAL_MESSAGE },
   'not-assignable': {
     tone: 'warn',
     text:
@@ -640,6 +643,7 @@ export default async function ProviderDetailPage({
                               <input type="hidden" name="categoryId" value={binding.categoryId} />
                               <input type="hidden" name="categoryQuery" value={categoryQuery} />
                               <ConfirmDialog
+                                proof="provider.category-remove"
                                 triggerLabel="Kaldır"
                                 triggerClassName="btn btn-ghost btn-sm"
                                 title={`“${binding.category.name}” bağı kaldırılsın mı?`}
@@ -1119,6 +1123,7 @@ function ProviderQuickStatus({ provider }: { provider: ProviderProfile }): React
         {hidden}
         <input type="hidden" name="status" value="SUSPENDED" />
         <ConfirmDialog
+          proof="provider.status"
           triggerLabel="İş almasını durdur"
           triggerClassName="btn btn-destructive btn-sm"
           title="Hizmet veren askıya alınsın mı?"

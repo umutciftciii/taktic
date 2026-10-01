@@ -4,10 +4,18 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, Offer, OfferStatus, readConflict } from '../../lib/api';
 import { isCreditBalanceLimitError, offerStatusErrorKey } from '../../lib/status-conflicts';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
 
 export async function updateOfferStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const status = readFormString(formData, 'status') as OfferStatus;
+
+  // Accepting and rejecting on the customer's behalf are confirmed in a
+  // dialog; shortlisting is not (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  const proofKey = status === 'ACCEPTED' ? 'offer.accept' : status === 'REJECTED' ? 'offer.reject' : null;
+  if (proofKey && !(await hasConfirmationProof(formData, proofKey))) {
+    redirect(`/offers/${id}?statusError=confirmationRequired`);
+  }
 
   try {
     await apiFetch<Offer>(`/offers/${id}/status`, {
@@ -42,6 +50,10 @@ export async function refundOfferCreditAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const reasonCode = readFormString(formData, 'reasonCode');
   const note = readOptionalFormString(formData, 'note');
+
+  if (!(await hasConfirmationProof(formData, 'offer.refund'))) {
+    redirect(`/offers/${id}?tab=kredi&refundError=confirmationRequired`);
+  }
 
   try {
     await apiFetch<{ offer: Offer; balance: number }>(`/offers/${id}/refund-credit`, {

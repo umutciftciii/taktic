@@ -1,7 +1,9 @@
 'use client';
 
-import { useId, useRef, type MouseEvent, type ReactNode } from 'react';
+import { useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
+import { mintConfirmationProof } from '../lib/confirmation-proof-actions';
+import { CONFIRMATION_PROOF_FIELD, type ConfirmationProofKey } from '../lib/confirmation-proof-keys';
 
 type ConfirmDialogProps = {
   /** The submit button's own label, e.g. "Hesabı pasife al". */
@@ -34,6 +36,14 @@ type ConfirmDialogProps = {
    */
   switchChecked?: boolean;
   testId?: string;
+  /**
+   * Which confirmation this is (`CONFIRMATION_PROOF_KEYS`). Required: on
+   * confirm the dialog asks the server for a short-lived, single-use proof
+   * bound to this key and the session, and submits it with the form; the
+   * form's server action refuses a submission without it. That is what makes a
+   * click that beat hydration — or a post with JavaScript off — write nothing.
+   */
+  proof: ConfirmationProofKey;
 };
 
 /**
@@ -50,6 +60,13 @@ type ConfirmDialogProps = {
  * button's name/value — a field named "id" in the same form — is detected and
  * the value carried by hand (`shadowedFormId`), so the action never receives
  * a submission without it.
+ *
+ * Confirming is also what proves it happened: the confirm handler asks the
+ * server for a single-use proof (`lib/confirmation-proof.ts`) and submits it
+ * with the form in a temporary hidden field, removed again straight after.
+ * The guarded server action refuses a submission without a good proof, so a
+ * click before hydration — which React 19 queues and replays as a plain
+ * submission — or a post with JavaScript off writes nothing.
  *
  * The dialog is a native `<dialog>` opened with `showModal()`: the rest of the
  * page is inert while it is open (the focus trap), Esc is the browser's own
@@ -70,6 +87,7 @@ export function ConfirmDialog({
   disabled = false,
   switchChecked,
   testId,
+  proof,
 }: ConfirmDialogProps) {
   const id = useId();
   const titleId = `${id}-title`;
@@ -78,6 +96,11 @@ export function ConfirmDialog({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const { pending } = useFormStatus();
+  const [confirming, setConfirming] = useState(false);
+  // The guard itself is a ref: a double press lands before React re-renders,
+  // when `confirming` in the handler's closure is still false.
+  const confirmingRef = useRef(false);
+  const [proofError, setProofError] = useState<string | null>(null);
 
   function open(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -88,6 +111,7 @@ export function ConfirmDialog({
       form.reportValidity();
       return;
     }
+    setProofError(null);
     dialogRef.current?.showModal();
     // Explicitly, not through `autoFocus`: React writes that attribute only in
     // server-rendered markup, so a dialog rendered on the client would open
@@ -99,16 +123,39 @@ export function ConfirmDialog({
     dialogRef.current?.close();
   }
 
-  function confirm() {
-    const trigger = triggerRef.current;
-    close();
-    const form = trigger?.form;
-    if (!trigger || !form) return;
-    const carrier = shadowedFormId(form) && name ? carryValue(form, trigger, name, value ?? '') : null;
+  async function confirm() {
+    // One proof per press: a second click while the first is being minted
+    // would otherwise submit the form twice.
+    if (confirmingRef.current) return;
+    confirmingRef.current = true;
+    setConfirming(true);
+    setProofError(null);
     try {
-      form.requestSubmit(trigger);
+      let token: string | null = null;
+      try {
+        token = await mintConfirmationProof(proof);
+      } catch {
+        token = null;
+      }
+      if (!token) {
+        setProofError('Onay doğrulanamadı; işlem gönderilmedi. Sayfayı yenileyip yeniden deneyin.');
+        return;
+      }
+
+      const trigger = triggerRef.current;
+      close();
+      const form = trigger?.form;
+      if (!trigger || !form) return;
+      const carriers = [carryValue(form, trigger, CONFIRMATION_PROOF_FIELD, token)];
+      if (shadowedFormId(form) && name) carriers.push(carryValue(form, trigger, name, value ?? ''));
+      try {
+        form.requestSubmit(trigger);
+      } finally {
+        for (const carrier of carriers) carrier.remove();
+      }
     } finally {
-      carrier?.remove();
+      confirmingRef.current = false;
+      setConfirming(false);
     }
   }
 
@@ -172,6 +219,11 @@ export function ConfirmDialog({
         </div>
         <div className="confirm-dialog-body" id={bodyId}>
           {consequence}
+          {proofError ? (
+            <p className="notice notice-error" role="alert" data-testid={testId ? `${testId}-proof-error` : undefined}>
+              {proofError}
+            </p>
+          ) : null}
         </div>
         <div className="confirm-dialog-actions">
           <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={close}>
@@ -181,6 +233,8 @@ export function ConfirmDialog({
             type="button"
             className={tone === 'danger' ? 'btn btn-danger' : 'btn btn-primary'}
             onClick={confirm}
+            disabled={confirming}
+            aria-busy={confirming || undefined}
           >
             {confirmLabel}
           </button>
@@ -205,9 +259,11 @@ export function shadowedFormId(form: HTMLFormElement): boolean {
 }
 
 /**
- * Puts the trigger's name/value into the form for the one synchronous
- * submission `requestSubmit` makes — React builds its FormData inside that
- * call — so that a shadowed `form.id` cannot drop it. Removed straight after.
+ * Puts a name/value into the form for the one synchronous submission
+ * `requestSubmit` makes — React builds its FormData inside that call, and an
+ * `onSubmit` handler reads it there too — then it is removed straight after.
+ * Used for the confirmation proof, and for the trigger's own name/value when a
+ * shadowed `form.id` would drop it.
  */
 function carryValue(form: HTMLFormElement, trigger: HTMLButtonElement, name: string, value: string): HTMLInputElement {
   const carrier = form.ownerDocument.createElement('input');

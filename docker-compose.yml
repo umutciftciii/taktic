@@ -219,6 +219,11 @@ services:
       API_INTERNAL_URL: http://api:3001
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
+      # Optional. Signs the ConfirmDialog confirmation proofs
+      # (ADMIN-DESTRUCTIVE-CONFIRMATION-001). Empty: each admin process draws
+      # its own random secret, which is all a single instance needs. Set the
+      # same value on every instance when the panel runs on more than one.
+      ADMIN_CONFIRMATION_PROOF_SECRET: ${ADMIN_CONFIRMATION_PROOF_SECRET:-}
     ports:
       - "${ADMIN_PORT:-3002}:3002"
     volumes:

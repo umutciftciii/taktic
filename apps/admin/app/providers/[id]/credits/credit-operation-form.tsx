@@ -5,6 +5,7 @@ import { ConfirmDialog } from '../../../../components/confirm-dialog';
 import { CREDIT_AMOUNT_MAX, creditAmountProblemMessage, parseCreditAmount } from '../../../../lib/credit-amount';
 import { formatCount } from '../../../../lib/pagination';
 import { submitCreditOperationAction } from './actions';
+import { CreditGrantConsequence } from './credit-grant-consequence';
 import { handleTablistKeyDown } from '../../../../lib/tablist-keys';
 import {
   CREDIT_OPERATION_IDLE,
@@ -30,8 +31,11 @@ const REASON_MIN_LENGTH = 3;
 /**
  * The manual credit form (ADMIN-DESIGN-001 Faz 3B).
  *
- * Adding credit goes straight through. Deducting asks first, and the
- * confirmation says the balance before and after and that the row is
+ * Both directions ask first. Deducting always did; adding does since
+ * ADMIN-DESTRUCTIVE-CONFIRMATION-001, because a grant is the more dangerous
+ * mistake — an extra zero is spendable at once and can only be taken back by a
+ * separate deduction, if it has not been spent. Each confirmation says the
+ * business, the amount, the balance before and after and that the row is
  * permanent; cancelling it sends nothing. The server's answer comes back in
  * the action state: a refusal (say, a balance that moved below the amount in
  * the meantime) is shown above the button with everything typed kept, a
@@ -200,6 +204,7 @@ export function CreditOperationForm({
 
       {isDeduct ? (
         <ConfirmDialog
+          proof="credits.deduct"
           triggerLabel="Kredi düş"
           triggerClassName="btn btn-danger btn-block"
           title="Kredi düşülsün mü?"
@@ -220,14 +225,25 @@ export function CreditOperationForm({
           testId="credit-operation-deduct"
         />
       ) : (
-        <button
-          type="submit"
-          className="btn btn-primary btn-block"
+        <ConfirmDialog
+          proof="credits.grant"
+          triggerLabel="Kredi ekle"
+          triggerClassName="btn btn-primary btn-block"
+          tone="primary"
+          title="Kredi eklensin mi?"
+          consequence={
+            <CreditGrantConsequence
+              businessName={businessName}
+              amount={parsedAmount}
+              balanceBefore={currentBalance}
+              balanceAfter={previewBalance}
+              reason={reason}
+            />
+          }
+          confirmLabel="Evet, kredi ekle"
           disabled={submitDisabled}
-          data-testid="credit-operation-grant"
-        >
-          Kredi ekle
-        </button>
+          testId="credit-operation-grant"
+        />
       )}
 
       <p className="audit-note">

@@ -227,6 +227,7 @@ export default async function AdminSupportTicketPage({
                       <input type="hidden" name="status" value={next} />
                       {next === 'CLOSED' ? (
                         <ConfirmDialog
+                          proof="support.status"
                           triggerLabel={supportTicketTransitionLabel(next)}
                           triggerClassName="btn btn-destructive btn-sm"
                           title="Destek talebi kapatılsın mı?"

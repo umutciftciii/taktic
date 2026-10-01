@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, type AdminReviewDetail } from '../../../lib/api';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
+import { hasConfirmationProof } from '../../../lib/confirmation-proof-server';
 
 /**
  * The operator's decision on one review: take the comment down, take the
@@ -32,6 +33,12 @@ export async function moderateReviewAction(formData: FormData) {
   // first; this is the guard for a submission that bypassed it.
   if (action !== 'RESTORE' && !reason) {
     redirect(`${target}?error=reason`);
+  }
+
+  // Removals are confirmed in a dialog; a restore is not
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (action !== 'RESTORE' && !(await hasConfirmationProof(formData, 'provider-review.moderate'))) {
+    redirect(`${target}?error=confirmation`);
   }
 
   let detail: AdminReviewDetail;

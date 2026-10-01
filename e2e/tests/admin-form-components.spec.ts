@@ -25,7 +25,14 @@ type Entries = Array<[string, string]>;
 /** The harness's window.__harness (apps/admin/test/browser-harness/app.tsx). */
 declare global {
   interface Window {
-    __harness: { submissions: Entries[]; saves: Entries[]; saveMode: 'ok' | 'reject'; navigations: number };
+    __harness: {
+      submissions: Entries[];
+      saves: Entries[];
+      saveMode: 'ok' | 'reject';
+      navigations: number;
+      minted: string[];
+      mintMode: 'ok' | 'refuse';
+    };
   }
 }
 
@@ -90,6 +97,48 @@ test.describe('ConfirmDialog', () => {
     await page.waitForTimeout(300);
     expect(await submissions(page)).toHaveLength(1);
     expect(entries!.filter(([name]) => name === 'intent')).toHaveLength(1);
+  });
+
+  // ADMIN-DESTRUCTIVE-CONFIRMATION-001: confirming asks the server for a
+  // proof bound to the dialog's key and sends it with the form, once.
+  test('confirming fetches one proof for the dialog\'s key and submits it for that one submission', async ({ page }) => {
+    await openHarness(page, '/confirm');
+    await page.getByRole('button', { name: 'Hesabı pasife al' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Pasife al' }).click();
+
+    await expect.poll(() => submissions(page)).toHaveLength(1);
+    const [entries] = await submissions(page);
+    expect(entries).toContainEqual(['__confirmationProof', 'harness-proof-1']);
+    expect(await page.evaluate(() => window.__harness.minted)).toEqual(['customer.status']);
+    // The proof field is not left in the form for a later submission.
+    expect(await page.locator('form input[name="__confirmationProof"]').count()).toBe(0);
+  });
+
+  test('a double press on confirm mints once and submits once', async ({ page }) => {
+    await openHarness(page, '/confirm');
+    await page.getByRole('button', { name: 'Hesabı pasife al' }).click();
+    const confirm = page.getByRole('dialog').getByRole('button', { name: 'Pasife al' });
+    await confirm.dblclick();
+
+    await expect.poll(() => submissions(page)).toHaveLength(1);
+    await page.waitForTimeout(300);
+    expect(await submissions(page)).toHaveLength(1);
+    expect(await page.evaluate(() => window.__harness.minted)).toHaveLength(1);
+  });
+
+  test('when no proof can be had the dialog stays open, says so, and submits nothing', async ({ page }) => {
+    await openHarness(page, '/confirm');
+    await page.evaluate(() => {
+      window.__harness.mintMode = 'refuse';
+    });
+    await page.getByRole('button', { name: 'Hesabı pasife al' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Pasife al' }).click();
+
+    await expect(page.getByTestId('confirm-proof-error')).toContainText('Onay doğrulanamadı');
+    await expect(dialog).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await submissions(page)).toEqual([]);
   });
 
   // Faz 3D regression: a hidden field named "id" shadows `form.id`, and React

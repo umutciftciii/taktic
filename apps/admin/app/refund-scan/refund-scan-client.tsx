@@ -12,6 +12,7 @@ import { SummaryStrip } from '../../components/summary-strip';
 import type { RefundScanExecuteResponse, RefundScanExecuteResult, RefundScanResponse } from '../../lib/api';
 import { formatCount } from '../../lib/pagination';
 import { executeRefundScanAction, refreshRefundScanAction } from './actions';
+import { CONFIRMATION_PROOF_FIELD } from '../../lib/confirmation-proof-keys';
 
 type RefundScanClientProps = {
   initialScan: RefundScanResponse;
@@ -105,9 +106,12 @@ export function RefundScanClient({
     event.preventDefault();
     if (limitChanged || eligible === 0) return;
     const runLimit = scannedLimit;
+    // The dialog's proof rides in the form for this one submission; it is read
+    // here, synchronously, and handed to the action.
+    const proof = new FormData(event.currentTarget).get(CONFIRMATION_PROOF_FIELD);
     startTransition(async () => {
       setError(null);
-      const run = await executeRefundScanAction(runLimit);
+      const run = await executeRefundScanAction(runLimit, typeof proof === 'string' ? proof : null);
       if (!run.ok) {
         setError(run.error);
         return;
@@ -177,6 +181,7 @@ export function RefundScanClient({
           {canExecute ? (
             <form onSubmit={executeScan} data-testid="refund-scan-execute-form">
               <ConfirmDialog
+                proof="refund-scan.execute"
                 triggerLabel={`${formatCount(eligible)} teklifin iadesini onayla`}
                 triggerClassName="btn btn-primary btn-sm"
                 disabled={isPending || eligible === 0 || limitChanged}

@@ -22,6 +22,8 @@ import {
   resumeShowcasePlacementAction,
   suspendShowcasePlacementAction,
 } from '../actions';
+import { PLACEMENT_CANCEL_NOTE_MIN_LENGTH } from '../placement-cancel';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../../lib/confirmation-proof-keys';
 
 type PlacementPageProps = {
   params: Promise<{ placementId: string }>;
@@ -39,6 +41,8 @@ const ERRORS: Record<string, string> = {
   SHOWCASE_PLACEMENT_NOT_RESUMABLE:
     'Bu yerleşim operatör kararıyla durdurulmuş bir yerleşim değil. Diğer durdurma sebepleri, sebep ortadan kalktığında kendiliğinden kalkar.',
   SHOWCASE_PLACEMENT_NOT_CANCELLABLE: 'Yalnız süresi devam eden bir yerleşim iptal edilebilir.',
+  SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED: `İptal gerekçesi zorunludur (en az ${PLACEMENT_CANCEL_NOTE_MIN_LENGTH} karakter). Yerleşim iptal edilmedi.`,
+  CONFIRMATION_REQUIRED: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
   SHOWCASE_PLACEMENT_ACTION_FAILED: 'İşlem tamamlanamadı.',
 };
 
@@ -364,11 +368,26 @@ export default async function ShowcasePlacementPage({
             <form action={cancelShowcasePlacementAction} className="form-grid" data-testid="placement-cancel-form">
               <input type="hidden" name="placementId" value={placementId} />
               <label className="form-grid-wide">
-                <span>Not</span>
-                <textarea name="note" maxLength={500} placeholder="İptal gerekçesi" />
+                <span>İptal gerekçesi *</span>
+                {/*
+                  Required (ADMIN-DESTRUCTIVE-CONFIRMATION-001): the cancellation
+                  is final and refunds nothing, and whoever later decides about
+                  the purchase's money reads this. The dialog does not open
+                  until the browser accepts it; the action and the API refuse
+                  it short or blank as well.
+                */}
+                <textarea
+                  name="note"
+                  required
+                  minLength={PLACEMENT_CANCEL_NOTE_MIN_LENGTH}
+                  maxLength={500}
+                  placeholder={`Neden iptal edildiğini yazın (en az ${PLACEMENT_CANCEL_NOTE_MIN_LENGTH} karakter).`}
+                  data-testid="placement-cancel-note"
+                />
               </label>
               <div className="form-actions form-grid-wide">
                 <ConfirmDialog
+                  proof="showcase.placement-cancel"
                   triggerLabel="Yerleşimi iptal et"
                   triggerClassName="btn btn-destructive"
                   title="Yerleşim iptal edilsin mi?"
@@ -414,10 +433,13 @@ const CANCEL_CONSEQUENCE = (
       <strong>Geri alınamaz:</strong> iptal edilen yerleşim yeniden yayına alınamaz, kalan günler geri verilmez.
     </li>
     <li>
-      <strong>Para iadesi yapılmaz.</strong> İlgili paket satın alması manuel inceleme için işaretlenir ve notunuz
+      <strong>Para iadesi yapılmaz.</strong> İlgili paket satın alması manuel inceleme için işaretlenir ve gerekçeniz
       satın almanın yönetici notuna yazılır (satın alma daha önce işaretlenmişse not eklenmez).
     </li>
     <li>Hizmet verene e-posta gitmez. Kart, onaylı sürümü ve bu yerleşimden gelmiş talepler değişmez.</li>
-    <li>İptal zamanı, iptal eden kişi ve notunuz yerleşimin kalıcı kaydına yazılır; bu kayıt sonradan değiştirilemez.</li>
+    <li>
+      İptal zamanı, iptal eden kişi ve yazdığınız gerekçe yerleşimin kalıcı kaydına yazılır; bu kayıt sonradan
+      değiştirilemez.
+    </li>
   </ul>
 );

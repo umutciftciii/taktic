@@ -10,6 +10,8 @@ import {
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 import type { InviteLinkState } from './invite-link-state';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 export async function updateUserStatusAction(formData: FormData) {
   const userId = readFormString(formData, 'userId');
@@ -17,6 +19,11 @@ export async function updateUserStatusAction(formData: FormData) {
 
   if (!userId) {
     return;
+  }
+
+  // Both directions are confirmed in a dialog (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!(await hasConfirmationProof(formData, 'user.status'))) {
+    redirect(`/users/${userId}?statusError=${encodeURIComponent(CONFIRMATION_PROOF_REFUSAL_MESSAGE)}`);
   }
 
   try {

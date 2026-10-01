@@ -3,6 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
+import type { ConfirmationProofKey } from '../../lib/confirmation-proof-keys';
 
 /**
  * Creating, editing and handing out roles.
@@ -65,16 +68,17 @@ export async function updateAdminRoleAction(formData: FormData) {
 /**
  * Deactivating a role takes its permissions from everyone holding it, at once
  * and without touching a single assignment row — the session's permission read
- * filters on `role.isActive`. The confirmation checkbox on the form is there
- * because that consequence is invisible on this screen.
+ * filters on `role.isActive` — and reactivating gives them all back the same
+ * way. Both directions are confirmed in a dialog, and the dialog's single-use
+ * proof is checked here before anything is sent
+ * (ADMIN-DESTRUCTIVE-CONFIRMATION-001). It replaced the hydrated
+ * `confirm=on` field, a fixed value any hand-built request could carry.
  */
 export async function setAdminRoleActiveAction(formData: FormData) {
   const id = readString(formData, 'roleId');
   const isActive = readString(formData, 'isActive') === 'true';
 
-  if (!isActive && readString(formData, 'confirm') !== 'on') {
-    redirect(`/roles/${id}?error=` + encodeURIComponent('Rolü pasifleştirmek için onay kutusunu işaretleyin.'));
-  }
+  await refuseWithoutProof(formData, 'role.status', `/roles/${id}`);
 
   let errorMessage: string | null = null;
   try {
@@ -90,6 +94,8 @@ export async function setAdminRoleActiveAction(formData: FormData) {
 export async function replaceAdminRolePermissionsAction(formData: FormData) {
   const id = readString(formData, 'roleId');
   const permissions = formData.getAll('permissions').map(String).filter(Boolean);
+
+  await refuseWithoutProof(formData, 'role.permissions', `/roles/${id}`);
 
   let errorMessage: string | null = null;
   try {
@@ -109,6 +115,8 @@ export async function assignAdminRoleAction(formData: FormData) {
   const userId = readString(formData, 'userId');
   const roleId = readString(formData, 'roleId');
 
+  await refuseWithoutProof(formData, 'role.assign', `/users/${userId}`);
+
   let errorMessage: string | null = null;
   try {
     await apiFetch(`/admin/users/${userId}/roles`, {
@@ -127,6 +135,8 @@ export async function revokeAdminRoleAction(formData: FormData) {
   const userId = readString(formData, 'userId');
   const roleId = readString(formData, 'roleId');
 
+  await refuseWithoutProof(formData, 'role.revoke', `/users/${userId}`);
+
   let errorMessage: string | null = null;
   try {
     await apiFetch(`/admin/users/${userId}/roles/${roleId}`, { method: 'DELETE' });
@@ -136,6 +146,16 @@ export async function revokeAdminRoleAction(formData: FormData) {
   }
 
   finish(`/users/${userId}`, errorMessage, 'role-revoked');
+}
+
+/**
+ * Every write here is confirmed in a dialog; a submission without the
+ * dialog's proof goes back with the reason and sends nothing.
+ */
+async function refuseWithoutProof(formData: FormData, key: ConfirmationProofKey, path: string) {
+  if (!(await hasConfirmationProof(formData, key))) {
+    redirect(`${path}?error=${encodeURIComponent(CONFIRMATION_PROOF_REFUSAL_MESSAGE)}`);
+  }
 }
 
 function finish(path: string, errorMessage: string | null, ok: string): never {

@@ -15,7 +15,7 @@ import {
   userRoleLabel,
 } from '../../../lib/api';
 import { groupPermissions } from '../../../lib/permission-groups';
-import { roleReach } from '../../../lib/permission-model';
+import { criticalPermissionsIn, permissionLines, roleReach } from '../../../lib/permission-model';
 import {
   replaceAdminRolePermissionsAction,
   setAdminRoleActiveAction,
@@ -51,15 +51,17 @@ const HOLDER_COLUMNS: DataColumn[] = [
  * Pasifleştir / Aktifleştir, then the permission matrix, the name form and the
  * accounts holding it.
  *
- * Three writes ask first, with the figures this page read:
+ * Four writes ask first, with the figures this page read:
  * - İzinleri kaydet: what is added and removed, and the role's live holders
  *   (`GET /admin/roles/:id` → `assignments`, `revokedAt: null`) with how many
  *   of them are active.
  * - Rolü pasifleştir: the same holders, and the permissions they lose.
- * Reactivating and renaming are undone by the same controls and do not.
+ * - Rolü aktifleştir: the same holders, who get the permissions back
+ *   (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+ * Renaming is undone by the same control and does not.
  *
- * Unchanged: the three server actions and every field they read; the
- * deactivation still needs `confirm=on`, now sent by the dialog.
+ * Every one of those writes is refused by its action without the dialog's
+ * single-use confirmation proof (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
  */
 export default async function AdminRoleDetailPage({ params, searchParams }: RoleDetailPageProps) {
   await requireSuperAdmin();
@@ -70,6 +72,7 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
   ]);
   const groups = groupPermissions(catalogue.permissions);
   const reach = roleReach(role.assignments);
+  const lines = permissionLines(groups);
   const areaCount = groups.filter((group) => group.items.some((item) => role.permissions.includes(item.permission))).length;
 
   const facts: SummaryItem[] = [
@@ -118,6 +121,10 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
             isActive={role.isActive}
             permissionCount={role.permissions.length}
             reach={reach}
+            criticalPermissions={criticalPermissionsIn(role.permissions).map((permission) => ({
+              permission,
+              label: lines.get(permission) ?? permission,
+            }))}
             action={setAdminRoleActiveAction}
           />
         }

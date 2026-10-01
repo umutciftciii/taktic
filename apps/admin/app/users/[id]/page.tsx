@@ -10,7 +10,7 @@ import {
   userRoleBadgeClass,
   userRoleLabel,
 } from '../../../lib/api';
-import { effectivePermissions } from '../../../lib/permission-model';
+import { criticalPermissionsIn, effectivePermissions } from '../../../lib/permission-model';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { DetailHeader } from '../../../components/detail-header';
 import { KeyValueList } from '../../../components/key-value-list';
@@ -18,7 +18,8 @@ import { SectionCard } from '../../../components/section-card';
 import type { SummaryItem } from '../../../components/summary-strip';
 import { updateUserStatusAction } from '../actions';
 import { AdminInviteLinkForm } from './admin-invite-link-form';
-import { AdminRoleAssignmentCard } from './role-assignment-card';
+import { AdminRoleAssignmentCard, labelPermissions } from './role-assignment-card';
+import { UserActivateConsequence, type ActivationScope } from './user-activate-consequence';
 
 type SearchParams = {
   statusError?: string;
@@ -64,7 +65,11 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
 
   const { user, metrics } = response;
   const isSelf = actor.id === user.id;
-  const showStatusControl = canChangeStatus && !(isSelf && user.isActive);
+  const isSuperAdminTarget = user.role === 'SUPER_ADMIN';
+  // A super admin's status is a super admin's to change (users.service, which
+  // refuses anyone else with 403); the control is not drawn for anyone else.
+  const superAdminTargetLocked = isSuperAdminTarget && !isSuperAdminViewer;
+  const showStatusControl = canChangeStatus && !(isSelf && user.isActive) && !superAdminTargetLocked;
 
   /*
    * Roles are a super admin's to hand out, so this block is fetched only for
@@ -80,6 +85,24 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
     : null;
 
   const displayName = user.name ?? user.email ?? user.phone ?? '—';
+
+  // What "Hesabı aktifleştir" gives back, from the role lists a super admin
+  // viewer has already read; nobody else may read them, and the dialog says so.
+  const activationScope: ActivationScope =
+    roleState && !roleState.assigned.isSuperAdmin
+      ? (() => {
+          const live = roleState.assigned.assignments.filter((assignment) => assignment.revokedAt === null);
+          const effective = effectivePermissions(roleState.assigned.assignments);
+          return {
+            activeRoles: live
+              .filter((assignment) => assignment.role.isActive)
+              .map((assignment) => ({ name: assignment.role.name, permissionCount: assignment.role.permissions.length })),
+            inactiveRoleCount: live.filter((assignment) => !assignment.role.isActive).length,
+            permissionCount: effective.length,
+            critical: labelPermissions(criticalPermissionsIn(effective)),
+          };
+        })()
+      : null;
   const contact = [user.phone, user.email].filter(Boolean).join(' · ');
 
   const facts: SummaryItem[] = [
@@ -141,7 +164,9 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
               userId={user.id}
               isActive={user.isActive}
               activeSessionCount={metrics.activeSessionCount}
-              isSuperAdminTarget={user.role === 'SUPER_ADMIN'}
+              isSuperAdminTarget={isSuperAdminTarget}
+              displayName={displayName}
+              activationScope={activationScope}
             />
           ) : undefined
         }
@@ -220,7 +245,9 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
                         <span className="badge badge-bad">Pasif</span>
                       )}
                       <div className="cell-muted" data-testid="user-status-note">
-                        {isSelf
+                        {superAdminTargetLocked && canChangeStatus
+                          ? 'Süper yönetici hesabının durumunu yalnız bir süper yönetici değiştirebilir.'
+                          : isSelf
                           ? 'Kendi hesabınızı pasifleştiremezsiniz.'
                           : user.isActive
                             ? 'Pasif kullanıcılar giriş yapamaz.'
@@ -253,7 +280,12 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
           */}
           {isSuperAdminViewer ? <AdminInviteSection user={user} /> : null}
 
-          <AdminRoleAssignmentCard isSuperAdminViewer={isSuperAdminViewer} roles={roleState} userId={user.id} />
+          <AdminRoleAssignmentCard
+            isSuperAdminViewer={isSuperAdminViewer}
+            roles={roleState}
+            userId={user.id}
+            accountName={displayName}
+          />
         </div>
       </div>
     </main>
@@ -261,21 +293,27 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
 }
 
 /**
- * Pasifleştir asks first; Aktifleştir is undone by the same button and does
- * not. The consequence is what `PATCH /users/:id/status` and the session read
- * do (users.service `updateStatus`, auth.service): the sign-in and every open
- * session are refused from the next request, nothing is deleted.
+ * Both directions ask first. Pasifleştir says what `PATCH /users/:id/status`
+ * and the session read do (users.service `updateStatus`, auth.service): the
+ * sign-in and every open session are refused from the next request, nothing is
+ * deleted. Aktifleştir says the other half of that — nothing was deleted, so
+ * the account comes back with all of it, a super admin with everything
+ * (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
  */
 function UserStatusForm({
   userId,
   isActive,
   activeSessionCount,
   isSuperAdminTarget,
+  displayName,
+  activationScope,
 }: {
   userId: string;
   isActive: boolean;
   activeSessionCount: number;
   isSuperAdminTarget: boolean;
+  displayName: string;
+  activationScope: ActivationScope;
 }) {
   return (
     <form action={updateUserStatusAction} className="inline-form" data-testid="user-status-form">
@@ -283,6 +321,7 @@ function UserStatusForm({
       <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
       {isActive ? (
         <ConfirmDialog
+          proof="user.status"
           triggerLabel="Hesabı pasifleştir"
           title="Hesap pasifleştirilsin mi?"
           consequence={
@@ -304,9 +343,22 @@ function UserStatusForm({
           testId="user-deactivate"
         />
       ) : (
-        <button type="submit" className="btn btn-primary" data-testid="user-activate">
-          Hesabı aktifleştir
-        </button>
+        <ConfirmDialog
+          proof="user.status"
+          triggerLabel="Hesabı aktifleştir"
+          triggerClassName="btn btn-primary"
+          tone="primary"
+          title={isSuperAdminTarget ? 'Süper yönetici hesabı aktifleştirilsin mi?' : 'Hesap aktifleştirilsin mi?'}
+          consequence={
+            <UserActivateConsequence
+              displayName={displayName}
+              isSuperAdminTarget={isSuperAdminTarget}
+              scope={activationScope}
+            />
+          }
+          confirmLabel="Evet, aktifleştir"
+          testId="user-activate"
+        />
       )}
     </form>
   );

@@ -121,8 +121,10 @@ export class CategoriesController {
   @Post()
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CATEGORIES_WRITE)
-  createCategory(@Body() dto: CreateCategoryDto) {
-    return this.categoriesService.createCategory(dto);
+  // ADMIN-DESTRUCTIVE-CONFIRMATION-001: WRITE opens the route; a category
+  // created in any status but DRAFT also needs CATEGORIES_STATUS (service).
+  createCategory(@Body() dto: CreateCategoryDto, @CurrentUser() user: AuthUser) {
+    return this.categoriesService.createCategory(dto, user);
   }
 
   /**

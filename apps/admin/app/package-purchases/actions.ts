@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, PackagePurchase, PackagePurchaseStatus, readConflict } from '../../lib/api';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 export async function updatePackagePurchaseStatusAction(formData: FormData) {
   // `purchaseId`, not `id`: a control named "id" shadows `form.id`, and React
@@ -12,6 +14,12 @@ export async function updatePackagePurchaseStatusAction(formData: FormData) {
   const id = readFormString(formData, 'purchaseId');
   const status = readFormString(formData, 'status') as PackagePurchaseStatus;
   const adminNote = readOptionalFormString(formData, 'adminNote');
+
+  // Both corrections (İptal, Süresi doldu) are confirmed in a dialog
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!(await hasConfirmationProof(formData, 'package-purchase.status'))) {
+    redirect(`/package-purchases/${id}?statusError=${encodeURIComponent(CONFIRMATION_PROOF_REFUSAL_MESSAGE)}`);
+  }
 
   try {
     await apiFetch<PackagePurchase>(`/package-purchases/${id}/status`, {

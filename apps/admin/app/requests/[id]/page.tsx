@@ -59,6 +59,7 @@ import {
   resolveReportsAction,
   updateRequestStatusAction,
 } from '../actions';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 
 /**
  * Talep detayı (#3), design `requestDetail` (ADMIN-DESIGN-001 Faz 3A).
@@ -94,6 +95,7 @@ type RequestDetailPageProps = {
 type TabKey = '' | 'teklifler' | 'sikayet' | 'gecmis';
 
 const REPORT_ERROR_MESSAGES: Record<string, string> = {
+  confirmation: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
   // Followed on the page by the current status's reason (removalUnavailableReason).
   notRemovable:
     'Talep kaldırılmadı. Kaldırma yalnız açık (yeni, incelemede, yayında) ve bir teklifle eşleşmemiş talebe uygulanır; talep bu sayfa açıldıktan sonra değişmiş olabilir.',
@@ -958,6 +960,7 @@ function StatusCard({
             </label>
             {canRemove ? (
               <ConfirmDialog
+                proof="request.reject"
                 triggerLabel="Talebi reddet"
                 triggerClassName="btn btn-destructive btn-sm"
                 title="Talep reddedilsin mi?"
@@ -1464,6 +1467,7 @@ function ReportDecisions({
               seçilen gerekçe gösterilir.
             </p>
             <ConfirmDialog
+              proof="request.report-remove"
               triggerLabel="Talebi kaldır"
               triggerClassName="btn btn-destructive btn-sm"
               title="Talep kaldırılsın mı?"

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { diffPermissions, permissionLines, type PermissionGroup } from '../../lib/permission-model';
 import { PermissionMatrix } from './permission-matrix';
@@ -127,6 +127,7 @@ export function RolePermissionsForm({
             Vazgeç
           </button>
           <ConfirmDialog
+            proof="role.permissions"
             triggerLabel="İzinleri kaydet"
             triggerClassName="btn btn-primary"
             tone="primary"
@@ -156,15 +157,11 @@ export function RolePermissionsForm({
  * through `setAdminRoleActiveAction`, unchanged).
  *
  * Deactivating takes the role's permissions from everyone holding it at once,
- * so it asks first; the dialog replaces the old "I understand" checkbox and
- * says how many accounts hold the role. The action's own rule stays: a
- * deactivation without `confirm=on` is refused before any request. That field
- * is rendered only once this component has hydrated, and a hydrated trigger
- * submits only through the dialog, so a click that lands before JavaScript
- * runs is refused exactly as an unticked checkbox was.
- *
- * Reactivating gives the permissions back to the same accounts and is undone
- * by the same button, so it is a plain submit.
+ * and reactivating gives them back the same way, so both ask first and the
+ * dialog says how many accounts hold the role. The action refuses either
+ * direction without the dialog's single-use confirmation proof
+ * (ADMIN-DESTRUCTIVE-CONFIRMATION-001), which replaced the hydrated
+ * `confirm=on` field: a fixed value is not proof that anybody confirmed.
  */
 export function RoleStatusForm({
   roleId,
@@ -172,6 +169,7 @@ export function RoleStatusForm({
   isActive,
   permissionCount,
   reach,
+  criticalPermissions = [],
   action,
 }: {
   roleId: string;
@@ -179,19 +177,18 @@ export function RoleStatusForm({
   isActive: boolean;
   permissionCount: number;
   reach: RoleReach;
+  /** The role's critical permissions with their panel lines, for the reactivation dialog. */
+  criticalPermissions?: { permission: string; label: string }[];
   action: FormAction;
 }) {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-
   return (
     <form action={action} className="inline-form" data-testid="role-status-form">
       <input type="hidden" name="roleId" value={roleId} />
       <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
       {isActive ? (
         <>
-          {hydrated ? <input type="hidden" name="confirm" value="on" /> : null}
           <ConfirmDialog
+            proof="role.status"
             triggerLabel="Rolü pasifleştir"
             triggerClassName="btn btn-destructive"
             title={`"${roleName}" pasifleştirilsin mi?`}
@@ -213,10 +210,67 @@ export function RoleStatusForm({
           />
         </>
       ) : (
-        <button className="btn btn-primary" type="submit" data-testid="role-activate">
-          Rolü aktifleştir
-        </button>
+        <ConfirmDialog
+          proof="role.status"
+          triggerLabel="Rolü aktifleştir"
+          triggerClassName="btn btn-primary"
+          tone="primary"
+          title={`"${roleName}" aktifleştirilsin mi?`}
+          consequence={
+            <RoleActivateConsequence
+              permissionCount={permissionCount}
+              reach={reach}
+              criticalPermissions={criticalPermissions}
+            />
+          }
+          confirmLabel="Evet, aktifleştir"
+          testId="role-activate"
+        />
       )}
     </form>
+  );
+}
+
+/**
+ * What reactivating a role does (ADMIN-DESTRUCTIVE-CONFIRMATION-001): the
+ * reverse of deactivation, and just as wide. Deactivating touched no
+ * assignment row — the session read filters on `role.isActive` — so every
+ * account still holding the role gets its permissions back at once, with the
+ * permission set the role has *today* (it may have been edited while off).
+ * Exported for the unit test.
+ */
+export function RoleActivateConsequence({
+  permissionCount,
+  reach,
+  criticalPermissions,
+}: {
+  permissionCount: number;
+  reach: RoleReach;
+  criticalPermissions: { permission: string; label: string }[];
+}) {
+  return (
+    <>
+      <p data-testid="role-activate-impact">
+        {reach.holders === 0
+          ? `${describeReach(reach)}; aktifleştirmek bugün kimsenin yetkisini değiştirmez. Rol ${permissionCount} izin taşır ve yeniden atanabilir hale gelir.`
+          : `${describeReach(reach)} bu rolün ${permissionCount} iznini hemen geri kazanır; açık oturumlar bir sonraki isteklerinde yeni yetkiyi okur. Pasif hesaplar da yeniden aktifleştirildiklerinde bu izinlerle döner.`}
+      </p>
+      {criticalPermissions.length > 0 ? (
+        <div className="confirm-change-list" data-testid="role-activate-critical">
+          <p className="confirm-change-title">Rolün kritik izinleri</p>
+          <ul>
+            {criticalPermissions.map((item) => (
+              <li key={item.permission}>
+                {item.label} <code>{item.permission}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <p>
+        Geri dönen izinler rolün pasifken değiştirilmiş olabilecek bugünkü izin kümesidir. Rol yeniden yeni atama kabul
+        eder. Değişiklik adınızla kayda geçer; rol buradan yeniden pasifleştirilebilir.
+      </p>
+    </>
   );
 }

@@ -55,7 +55,7 @@ import { ActivationLinkForm } from './activation-link-form';
 
 type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; statusError?: string }>;
 };
 
 type TabKey = '' | 'talepler' | 'teklifler' | 'notlar';
@@ -263,6 +263,11 @@ export default async function AdminCustomerDetailPage({
         factsLabel="Müşteri özeti"
         testId="customer-header"
       />
+      {search.statusError ? (
+        <div className="notice notice-error detail-notice" role="alert" data-testid="customer-status-error">
+          {search.statusError}
+        </div>
+      ) : null}
 
       <Tabs label="Müşteri sekmeleri" items={tabs} active={activeTab} path={path} testId="customer-tabs" />
 
@@ -513,6 +518,7 @@ function CustomerStatusAction({ customerId, isActive }: { customerId: string; is
       <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
       {isActive ? (
         <ConfirmDialog
+          proof="customer.status"
           triggerLabel="Hesabı pasife al"
           triggerClassName="btn btn-destructive btn-sm"
           title="Hesap pasife alınsın mı?"

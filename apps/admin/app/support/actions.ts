@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, type SupportTicketDetail } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 /**
  * The two things an operator may do to a ticket: answer it, and move it.
@@ -55,6 +57,12 @@ export async function changeSupportTicketStatusAction(formData: FormData) {
 
   if (!id || !status) {
     redirect('/support');
+  }
+
+  // Closing is confirmed in a dialog; the other transitions are not
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (status === 'CLOSED' && !(await hasConfirmationProof(formData, 'support.status'))) {
+    redirect(withParams(`/support/${id}`, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
   const failure = await run(() =>

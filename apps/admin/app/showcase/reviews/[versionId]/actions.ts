@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../../../lib/api';
 import { rethrowNextControlFlow } from '../../../../lib/next-control-flow';
+import { hasConfirmationProof } from '../../../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../../lib/confirmation-proof-keys';
 
 /**
  * The two things an operator may do to a version: approve it, or refuse it with
@@ -30,6 +32,7 @@ export async function approveShowcaseVersionAction(formData: FormData) {
   // approve call, not after: approving is exactly what sets `card.liveVersion`,
   // so the same read afterwards would always say "revision".
   let isFirstPublication = false;
+  let readFailed = false;
   try {
     const before = await apiFetch<{ card: { liveVersion: unknown } }>(
       `/admin/showcase/versions/${encodeURIComponent(versionId)}`,
@@ -39,6 +42,15 @@ export async function approveShowcaseVersionAction(formData: FormData) {
     rethrowNextControlFlow(error);
     // Falls through with isFirstPublication left false; the approve call below
     // fails the same way and its own error is what reaches the operator.
+    readFailed = true;
+  }
+
+  // The first approval is the publication and is confirmed in a dialog; a
+  // revision approval is not (Faz 4). A version that could not be read is
+  // treated as a first one: refusing is the safe answer
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if ((isFirstPublication || readFailed) && !(await hasConfirmationProof(formData, 'showcase.approve-first'))) {
+    redirect(withParams(`/showcase/reviews/${versionId}`, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
   const failure = await run(() =>
@@ -79,6 +91,10 @@ export async function rejectShowcaseVersionAction(formData: FormData) {
         error: 'Ret gerekçesi zorunludur ve en az 10 karakter olmalıdır.',
       }),
     );
+  }
+
+  if (!(await hasConfirmationProof(formData, 'showcase.reject'))) {
+    redirect(withParams(`/showcase/reviews/${versionId}`, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
   const failure = await run(() =>

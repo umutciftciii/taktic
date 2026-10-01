@@ -35,6 +35,18 @@ async function harnessPage(): Promise<string> {
     jsx: 'automatic',
     nodePaths: [resolve(admin, 'node_modules')],
     define: { 'process.env.NODE_ENV': '"development"' },
+    // ConfirmDialog asks a server action for its confirmation proof; there is
+    // no server here, so the action module is swapped for the harness stub.
+    plugins: [
+      {
+        name: 'confirmation-proof-stub',
+        setup(build: { onResolve(options: { filter: RegExp }, callback: () => { path: string }): void }) {
+          build.onResolve({ filter: /confirmation-proof-actions$/ }, () => ({
+            path: resolve(admin, 'test/browser-harness/confirmation-proof-stub.ts'),
+          }));
+        },
+      },
+    ],
     logLevel: 'silent',
   });
   const css = readFileSync(resolve(admin, 'app/globals.css'), 'utf8');

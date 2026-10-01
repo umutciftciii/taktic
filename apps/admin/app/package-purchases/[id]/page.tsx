@@ -22,6 +22,7 @@ import { PurchaseStatusConsequence } from './purchase-status-consequence';
 
 type AdminPackagePurchaseDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ statusError?: string }>;
 };
 
 /**
@@ -45,12 +46,13 @@ type AdminPackagePurchaseDetailPageProps = {
  *   The two outcomes are now two buttons, each asking first; the note and the
  *   `status` field sent are the same as before.
  */
-export default async function AdminPackagePurchaseDetailPage({ params }: AdminPackagePurchaseDetailPageProps) {
+export default async function AdminPackagePurchaseDetailPage({ params, searchParams }: AdminPackagePurchaseDetailPageProps) {
   const { can } = await requireAdmin('PACKAGE_PURCHASES_READ');
   const canFixStatus = can('PACKAGE_PURCHASE_STATUS_WRITE');
   const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const canOpenCredits = can('FINANCE_LEDGER_READ');
   const { id } = await params;
+  const { statusError } = (await searchParams) ?? {};
   const purchase = await fetchOrNotFound(() =>
     apiFetch<PackagePurchase>(`/package-purchases/${encodeURIComponent(id)}`),
   );
@@ -124,6 +126,11 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
         factsLabel="Satın alma özeti"
         testId="purchase-header"
       />
+      {statusError ? (
+        <div className="notice notice-error detail-notice" role="alert" data-testid="purchase-status-error">
+          {statusError}
+        </div>
+      ) : null}
 
       <div className="detail-panel detail-panel-grid">
         {hold ? (
@@ -347,6 +354,7 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
                 </label>
                 <div className="detail-form-actions">
                   <ConfirmDialog
+                    proof="package-purchase.status"
                     triggerLabel="İptal olarak işaretle"
                     triggerClassName="btn btn-destructive"
                     name="status"
@@ -357,6 +365,7 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
                     testId="purchase-mark-cancelled"
                   />
                   <ConfirmDialog
+                    proof="package-purchase.status"
                     triggerLabel="Süresi doldu olarak işaretle"
                     triggerClassName="btn btn-secondary"
                     name="status"

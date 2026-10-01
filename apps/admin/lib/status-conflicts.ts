@@ -33,7 +33,9 @@
  * Kept free of Next and of `lib/api` so it can be unit-tested on its own.
  */
 
-export type OfferStatusErrorKey = 'decided' | 'disclosureRequired' | 'insufficientCredit' | 'stale';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from './confirmation-proof-keys';
+
+export type OfferStatusErrorKey = 'decided' | 'disclosureRequired' | 'insufficientCredit' | 'stale' | 'confirmationRequired';
 
 export const OFFER_STATUS_ERROR_MESSAGES: Record<OfferStatusErrorKey, string> = {
   decided:
@@ -42,6 +44,9 @@ export const OFFER_STATUS_ERROR_MESSAGES: Record<OfferStatusErrorKey, string> = 
     'Teklif kabul edilmedi. İletişim paylaşımı açık ve müşterinin güncel bilgilendirme metnine onayı kayıtlı değil; kabul iletişim bilgilerini açacağı için bu onay olmadan yapılamaz. Müşteri teklifi kendi panelinden, bilgilendirmeyi onaylayarak kabul edebilir. Talep ve teklifler değişmedi.',
   insufficientCredit:
     'Teklif kabul edilmedi. Bu teklifin kredisi daha önce firmaya iade edilmişti; kabul krediyi yeniden düşer ve firmanın bakiyesi yetmiyor. Firma bakiye yükledikten sonra tekrar deneyin. Talep, teklifler ve krediler değişmedi.',
+  // ADMIN-DESTRUCTIVE-CONFIRMATION-001: the dialog's proof was missing or
+  // spent; nothing was sent to the API.
+  confirmationRequired: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
   stale:
     'Teklif durumu değiştirilmedi. Teklif ya da talep bu sayfa açıldıktan sonra değişti (örneğin talep başka bir teklifle eşleşti, teklif geri çekildi ya da talep yayından çıktı). Aşağıda güncel durum görünüyor; işlemi buna göre yeniden değerlendirin.',
 };
@@ -69,7 +74,8 @@ export type RequestStatusErrorKey =
   | 'cancelStateChanged'
   | 'withholdReasonRequired'
   | 'notCompletable'
-  | 'creditBalanceLimit';
+  | 'creditBalanceLimit'
+  | 'confirmationRequired';
 
 export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string> = {
   phoneNotVerified:
@@ -94,6 +100,7 @@ export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string
   // passed the ledger's integer bound, so the whole operation was refused.
   creditBalanceLimit:
     'İşlem yapılmadı. Bir teklifin kredisini iade etmek hizmet verenin bakiyesini üst sınırın üzerine çıkaracaktı; talep, teklifler ve krediler değişmedi. Hizmet verenin bakiyesi düştükten sonra yeniden deneyin.',
+  confirmationRequired: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
 };
 
 /** API-HARDENING-001: the ledger bound refused a refund inside the operation. */

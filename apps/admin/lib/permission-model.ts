@@ -51,7 +51,7 @@ export function roleReach(assignments: readonly { user: { isActive: boolean } }[
   };
 }
 
-type HeldAssignment = {
+export type HeldAssignment = {
   revokedAt: string | null;
   role: { id: string; isActive: boolean; permissions: readonly string[] };
 };
@@ -81,4 +81,56 @@ export function permissionsLostOnRevoke(assignments: readonly HeldAssignment[], 
     effectivePermissions(assignments.filter((assignment) => assignment.role.id !== roleId)),
   );
   return [...new Set(target.role.permissions)].filter((permission) => !kept.has(permission)).sort();
+}
+
+/**
+ * The permissions a confirmation names out loud when an account is about to
+ * gain them (ADMIN-DESTRUCTIVE-CONFIRMATION-001): the ones that move money or
+ * credit, mint a link that signs somebody in or takes over a profile, open
+ * sensitive identity data, switch the promotion engine, end something for good,
+ * or change who else may act. Every other permission is still counted; these
+ * are the ones a reader should not have to find in a list of sixty.
+ *
+ * Plain strings rather than `AdminPermission` so the client forms can import
+ * this file without `lib/api`; `permission-model.spec` holds every entry to a
+ * real enum value.
+ */
+export const CRITICAL_PERMISSIONS: readonly string[] = [
+  'CREDITS_GRANT',
+  'CREDITS_DEDUCT',
+  'OFFER_REFUND_EXECUTE',
+  'OFFER_REFUND_MANUAL',
+  'PACKAGE_REFUND_APPROVE',
+  'PACKAGE_PURCHASE_STATUS_WRITE',
+  'REQUESTS_CANCEL_WITHOUT_REFUND',
+  'CAMPAIGN_ENGINE_TOGGLE',
+  'CAMPAIGNS_LIFECYCLE',
+  'CAMPAIGN_REDEMPTION_REVOKE',
+  'CUSTOMER_ACTIVATION_LINK_ISSUE',
+  'PROVIDER_CLAIM_INVITE_ISSUE',
+  'PROVIDER_INVITES_ISSUE',
+  'PROVIDER_REGISTRATION_READ_SENSITIVE',
+  'SHOWCASE_PLACEMENT_CANCEL',
+  'CATEGORIES_DELETE',
+  'QUESTIONS_DELETE',
+  'ADMIN_USERS_STATUS',
+];
+
+/** The critical permissions in `permissions`, in catalogue order of the list above. */
+export function criticalPermissionsIn(permissions: readonly string[]): string[] {
+  const held = new Set(permissions);
+  return CRITICAL_PERMISSIONS.filter((permission) => held.has(permission));
+}
+
+/**
+ * What assigning `rolePermissions` to an account would really add: the role's
+ * permissions its live, active roles do not already grant. An inactive role
+ * cannot be assigned (the API refuses), so the role is taken as granting.
+ */
+export function permissionsGainedOnAssign(
+  assignments: readonly HeldAssignment[],
+  rolePermissions: readonly string[],
+): string[] {
+  const held = new Set(effectivePermissions(assignments));
+  return [...new Set(rolePermissions)].filter((permission) => !held.has(permission)).sort();
 }

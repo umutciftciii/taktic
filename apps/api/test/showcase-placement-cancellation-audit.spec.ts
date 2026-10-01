@@ -98,16 +98,16 @@ describe('cancelling a run records the operator', () => {
     expect(detail.body.cancellation.actor.id).toBe(admin.id);
   });
 
-  it('stores no note when none was given', async () => {
+  it('refuses a cancellation with no note and records nothing (ADMIN-DESTRUCTIVE-CONFIRMATION-001)', async () => {
     const placement = await livePlacement();
     const { cookie } = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
 
-    expect((await cancel(placement.id, cookie)).status).toBe(200);
+    expect((await cancel(placement.id, cookie)).status).toBe(400);
 
-    const row = await ctx.prisma.showcasePlacementCancellation.findUniqueOrThrow({
-      where: { placementId: placement.id },
-    });
-    expect(row.note).toBeNull();
+    expect(await ctx.prisma.showcasePlacementCancellation.count()).toBe(0);
+    expect((await ctx.prisma.showcasePlacement.findUniqueOrThrow({ where: { id: placement.id } })).status).toBe(
+      ShowcasePlacementStatus.ACTIVE,
+    );
   });
 
   it('refuses a repeated cancel and keeps the first operator as the record', async () => {
@@ -115,14 +115,14 @@ describe('cancelling a run records the operator', () => {
     const first = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
     const second = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
 
-    expect((await cancel(placement.id, first.cookie, 'ilk')).status).toBe(200);
-    const again = await cancel(placement.id, second.cookie, 'ikinci');
+    expect((await cancel(placement.id, first.cookie, 'İlk operatörün iptali')).status).toBe(200);
+    const again = await cancel(placement.id, second.cookie, 'İkinci operatörün iptali');
 
     expect(again.status).toBe(409);
     expect(again.body.code).toBe('SHOWCASE_PLACEMENT_NOT_CANCELLABLE');
     const rows = await ctx.prisma.showcasePlacementCancellation.findMany();
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ actorUserId: first.admin.id, note: 'ilk' });
+    expect(rows[0]).toMatchObject({ actorUserId: first.admin.id, note: 'İlk operatörün iptali' });
   });
 
   it('lets exactly one of two concurrent cancels win, with one audit row', async () => {
@@ -130,7 +130,7 @@ describe('cancelling a run records the operator', () => {
     const a = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
     const b = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
 
-    const results = await Promise.all([cancel(placement.id, a.cookie, 'a'), cancel(placement.id, b.cookie, 'b')]);
+    const results = await Promise.all([cancel(placement.id, a.cookie, 'Eşzamanlı iptal A'), cancel(placement.id, b.cookie, 'Eşzamanlı iptal B')]);
     const statuses = results.map((result) => result.status).sort();
 
     expect(statuses[0]).toBe(200);
@@ -149,7 +149,7 @@ describe('cancelling a run records the operator', () => {
     });
     const { cookie } = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
 
-    expect((await cancel(placement.id, cookie, 'geç')).status).toBe(409);
+    expect((await cancel(placement.id, cookie, 'Süresi geçmiş yerleşim')).status).toBe(409);
     expect(await ctx.prisma.showcasePlacementCancellation.count()).toBe(0);
   });
 
@@ -157,7 +157,7 @@ describe('cancelling a run records the operator', () => {
     const placement = await livePlacement();
     const { cookie } = await staff([AdminPermission.SHOWCASE_PLACEMENTS_MODERATE]);
 
-    expect((await cancel(placement.id, cookie, 'x')).status).toBe(403);
+    expect((await cancel(placement.id, cookie, 'Yetkisiz iptal denemesi')).status).toBe(403);
     expect(await ctx.prisma.showcasePlacementCancellation.count()).toBe(0);
     expect((await ctx.prisma.showcasePlacement.findUniqueOrThrow({ where: { id: placement.id } })).status).toBe(
       ShowcasePlacementStatus.ACTIVE,
@@ -200,7 +200,7 @@ describe('the database keeps the record honest', () => {
   it('refuses to edit or delete a recorded cancellation', async () => {
     const placement = await livePlacement();
     const { cookie } = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
-    await cancel(placement.id, cookie, 'kalıcı');
+    await cancel(placement.id, cookie, 'Kalıcı iptal kaydı');
     const other = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
 
     await expect(
@@ -217,7 +217,7 @@ describe('the database keeps the record honest', () => {
   it('keeps the actor: the account cannot be deleted from under the record', async () => {
     const placement = await livePlacement();
     const { admin, cookie } = await staff([AdminPermission.SHOWCASE_PLACEMENT_CANCEL]);
-    await cancel(placement.id, cookie, 'x');
+    await cancel(placement.id, cookie, 'Hesap silme denemesi');
 
     await ctx.prisma.session.deleteMany({ where: { userId: admin.id } });
     await ctx.prisma.adminRoleAssignment.deleteMany({ where: { userId: admin.id } });

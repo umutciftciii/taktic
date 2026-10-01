@@ -4,10 +4,17 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, readConflict, ServiceRequest, ServiceRequestStatus } from '../../lib/api';
 import { isCreditBalanceLimitError, requestModerationErrorKey, type RequestStatusErrorKey } from '../../lib/status-conflicts';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
 
 export async function updateRequestStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const status = readFormString(formData, 'status') as ServiceRequestStatus;
+
+  // Rejecting is confirmed in a dialog; approving and taking into review are
+  // not (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (status === 'REJECTED' && !(await hasConfirmationProof(formData, 'request.reject'))) {
+    redirect(statusErrorHref(id, 'confirmationRequired'));
+  }
 
   try {
     await apiFetch<ServiceRequest>(`/service-requests/${id}/status`, {
@@ -92,6 +99,10 @@ export async function cancelRequestAction(formData: FormData) {
   if (withhold && (!withholdReason || withholdReason.length < 10)) {
     redirect(statusErrorHref(id, 'withholdReasonRequired'));
   }
+  // Both cancels are confirmed in a dialog (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!(await hasConfirmationProof(formData, 'request.cancel'))) {
+    redirect(statusErrorHref(id, 'confirmationRequired'));
+  }
 
   try {
     if (withhold) {
@@ -158,6 +169,11 @@ export async function resolveReportsAction(formData: FormData) {
   // first; this is the guard for a submission that bypassed it.
   if (resolution === 'REQUEST_REMOVED' && !removalReason) {
     redirect(reportErrorHref(id, 'reasonRequired'));
+  }
+  // Taking the request down is confirmed in a dialog; dismissing the reports
+  // is not (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (resolution === 'REQUEST_REMOVED' && !(await hasConfirmationProof(formData, 'request.report-remove'))) {
+    redirect(reportErrorHref(id, 'confirmation'));
   }
 
   try {

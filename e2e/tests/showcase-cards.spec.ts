@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { confirmThrough, waitForHydration } from '../src/confirm-dialog';
 
 /**
  * A vitrin card from the business's keyboard to the operator's decision, and
@@ -287,7 +288,30 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
       // And the right the approval will spend, by the name the provider bought it under.
       await expect(admin.page.getByTestId('review-entitlement')).toContainText(pkg.name);
 
-      await admin.page.getByRole('button', { name: 'Onayla' }).click();
+      // The first approval spends the right and asks first
+      // (ADMIN-DESTRUCTIVE-CONFIRMATION-001). The dialog says the right is
+      // spent, the card goes live, the provider is mailed and nothing undoes
+      // it; Vazgeç writes nothing.
+      const approve = admin.page.getByTestId('showcase-approve');
+      await waitForHydration(approve);
+      await approve.click();
+      const approveDialog = admin.page.getByTestId('showcase-approve-dialog');
+      await expect(approveDialog.getByRole('button', { name: 'Vazgeç' })).toBeFocused();
+      const impact = approveDialog.getByTestId('showcase-approve-impact');
+      await expect(impact).toContainText('Yayın hakkı tüketilir');
+      await expect(impact).toContainText(pkg.name);
+      await expect(impact).toContainText('Kart yayına girer');
+      await expect(impact).toContainText('e-posta gider');
+      await expect(impact).toContainText('Karar geri alınamaz');
+      await approveDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(approveDialog).toBeHidden();
+      await admin.page.waitForTimeout(300);
+      const reviewedVersionId = new URL(admin.page.url()).pathname.split('/').pop()!;
+      expect(
+        (await prisma().showcaseCardVersion.findUniqueOrThrow({ where: { id: reviewedVersionId } })).reviewStatus,
+      ).toBe('PENDING');
+
+      await confirmThrough(approve, 'Evet, onayla ve yayına al');
       await assertNoErrorScreen(admin.page);
       await expect(
         admin.page.getByText('Sürüm onaylandı', { exact: false }),
@@ -611,7 +635,8 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
       await admin.gotoAdmin('/showcase/reviews');
       await admin.page.getByRole('link', { name: 'E2E Iki bolgeli kart' }).click();
-      await admin.page.getByRole('button', { name: 'Onayla' }).click();
+      // The first approval spends the right and asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      await confirmThrough(admin.page.getByTestId('showcase-approve'), 'Evet, onayla ve yayına al');
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByText('vitrinde yayına girdi', { exact: false })).toBeVisible();
 

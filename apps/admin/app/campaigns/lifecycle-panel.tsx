@@ -148,6 +148,7 @@ export function CampaignLifecyclePanel({
           </label>
           <div className="panel-row">
             <ConfirmDialog
+              proof="campaign.close-draft"
               triggerLabel="Taslağı kapat"
               triggerClassName="btn btn-destructive btn-sm"
               title="Taslak kapatılsın mı?"
@@ -196,6 +197,7 @@ export function CampaignLifecyclePanel({
               </button>
             )}
             <ConfirmDialog
+              proof="campaign.end"
               triggerLabel="Sonlandır"
               triggerClassName="btn btn-destructive btn-sm"
               title="Kampanya sonlandırılsın mı?"

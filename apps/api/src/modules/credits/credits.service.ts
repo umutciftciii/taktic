@@ -112,7 +112,27 @@ export class CreditsService {
     });
   }
 
-  async createCreditPackage(dto: CreateCreditPackageDto) {
+  /**
+   * Creates a credit package.
+   *
+   * An active package is on sale the moment it exists, which is the same fact
+   * `PATCH …/status` guards with CREDIT_PACKAGES_STATUS. So creating one active
+   * needs that permission as well as the route's CREDIT_PACKAGES_WRITE
+   * (ADMIN-DESTRUCTIVE-CONFIRMATION-001); before, WRITE alone could put a
+   * package on sale and the status split held only for edits. An inactive
+   * package needs WRITE alone. An absent `isActive` still means active — the
+   * contract every existing client was written against — and so needs both.
+   */
+  async createCreditPackage(dto: CreateCreditPackageDto, actor: Pick<AuthUser, 'role' | 'permissions'>) {
+    assertDeltaPermissions(
+      actor,
+      { business: true, status: resolveCreatedPackageIsActive(dto) },
+      {
+        write: AdminPermission.CREDIT_PACKAGES_WRITE,
+        status: AdminPermission.CREDIT_PACKAGES_STATUS,
+      },
+    );
+
     const type = dto.type ?? OfferPackageType.ONE_TIME_CREDITS;
     const scopeCategoryIds = await this.readScopeSelection(type, dto.scopeCategoryIds);
 
@@ -587,6 +607,11 @@ const adminPackageInclude = {
   },
 } satisfies Prisma.OfferCreditPackageInclude;
 
+/** Whether a create request makes an active package: absent means active. */
+function resolveCreatedPackageIsActive(dto: Pick<CreateCreditPackageDto, 'isActive'>): boolean {
+  return dto.isActive ?? true;
+}
+
 /**
  * The per-type field rules, in the shape the database CHECK also states.
  *
@@ -602,7 +627,7 @@ function creditPackageCreatePayload(dto: CreateCreditPackageDto, type: OfferPack
     priceAmount: normalizePriceMinor(dto.priceAmount, 'priceAmount'),
     currency: normalizeNullableString(dto.currency) ?? 'TRY',
     description: normalizeNullableString(dto.description),
-    isActive: dto.isActive ?? true,
+    isActive: resolveCreatedPackageIsActive(dto),
     sortOrder: dto.sortOrder ?? 0,
     ...typeSpecificPayload(type, dto),
   };
